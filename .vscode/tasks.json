@@ -5,6 +5,9 @@
 			"type": "npm",
 			"script": "compile",
 			"group": "build",
+			"options": {
+				"cwd": "${workspaceFolder}/client"
+			},
 			"presentation": {
 				"panel": "dedicated",
 				"reveal": "never"
@@ -16,6 +19,9 @@
 		{
 			"type": "npm",
 			"script": "watch",
+			"options": {
+				"cwd": "${workspaceFolder}/client"
+			},
 			"isBackground": true,
 			"group": {
 				"kind": "build",

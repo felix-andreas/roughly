@@ -1,22 +1,94 @@
 {
 	"name": "roughly",
-	"description": "A roughly good enough language server for R",
+	"displayName": "Roughly",
+	"description": "The R(oughly good enough) Language Server",
 	"author": "Felix Andreas",
 	"version": "0.0.1",
 	"publisher": "felix-andreas",
+	"icon": "images/icon.png",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/felix-andreas/roughly"
 	},
+	"license": "GPL-3.0",
+	"categories": [
+		"Programming Languages"
+	],
+	"keywords": [
+		"r"
+	],
 	"engines": {
 		"vscode": "^1.75.0"
 	},
+	"activationEvents": [
+		"onLanguage:r",
+		"workspaceContains:R"
+	],
+	"main": "./out/extension",
+	"contributes": {
+		"commands": [
+			{
+				"title": "Roughly: Restart Language Server",
+				"command": "roughly.restartLanguageServer"
+			},
+			{
+				"title": "Roughly: Start Language Server",
+				"command": "roughly.startLanguageServer"
+			},
+			{
+				"title": "Roughly: Stop Language Server",
+				"command": "roughly.stopLanguageServer"
+			}
+		],
+		"configuration": {
+			"type": "object",
+			"title": "Roughly",
+			"properties": {
+				"roughly.path": {
+					"scope": "machine-overridable",
+					"type": "string",
+					"default": "roughly",
+					"description": "Location of the language server command.",
+					"format": "path"
+				},
+				"roughly.maxNumberOfProblems": {
+					"scope": "resource",
+					"type": "number",
+					"default": 100,
+					"description": "Controls the maximum number of problems produced by the server."
+				},
+				"roughly.trace.server": {
+					"scope": "window",
+					"type": "string",
+					"enum": [
+						"off",
+						"messages",
+						"verbose"
+					],
+					"default": "off",
+					"description": "Traces the communication between VS Code and the language server."
+				}
+			}
+		}
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -b",
+		"watch": "tsc -b -w",
+		"lint": "eslint",
+		"package": "cp ../README.md . && cp ../LICENSE . && vsce package"
+	},
 	"dependencies": {
-		"glob": "^11.0.0",
 		"vscode-languageclient": "^9.0.1"
 	},
 	"devDependencies": {
+		"@eslint/js": "^9.13.0",
+		"@stylistic/eslint-plugin": "^2.9.0",
+		"@types/node": "^20",
 		"@types/vscode": "^1.75.1",
-		"@vscode/test-electron": "^2.3.9"
+		"@vscode/vsce": "^3.2.2",
+		"eslint": "^9.13.0",
+		"typescript": "^5.7.2",
+		"typescript-eslint": "^8.16.0"
 	}
 }

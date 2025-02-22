@@ -12,7 +12,6 @@
 			],
 			"outFiles": [
 				"${workspaceRoot}/client/out/**/*.js",
-				"${workspaceRoot}/server/out/**/*.js"
 			],
 			"preLaunchTask": {
 				"type": "npm",
@@ -21,20 +20,6 @@
 			"env": {
 				"SERVER_PATH": "${workspaceRoot}/target/debug/roughly"
 			}
-		},
-		{
-			"name": "Language Server E2E Test",
-			"type": "extensionHost",
-			"request": "launch",
-			"runtimeExecutable": "${execPath}",
-			"args": [
-				"--extensionDevelopmentPath=${workspaceRoot}",
-				"--extensionTestsPath=${workspaceRoot}/client/out/test/index",
-				"${workspaceRoot}/client/testFixture"
-			],
-			"outFiles": [
-				"${workspaceRoot}/client/out/test/**/*.js"
-			]
 		}
 	]
 }
