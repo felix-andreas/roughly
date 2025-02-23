@@ -1,16 +1,21 @@
 <div align="center">
 
-# Roughly 🔥
+<img height="128px" src="client/images/icon.svg" />
+
+# Roughly
 
 ### The R(oughly good enough) Language Server
 
 </div>
 
-Welcome to Roughly, the language server where we skip the fancy AST parsing and go straight to the syntax (just regex), because who has time for that when your R project is already making your computer cry?
+Roughly is an R language server, linter, and code formatter, written in Rust.
+
+> [!WARNING]  
+> This project is a work in progress. Contributions and feedback are welcome!
 
 ## Installation
 
-### Client
+### VS Code extension
 
 Bundle the client (or [download from here](https://github.com/felix-andreas/roughly/releases)):
 
@@ -77,8 +82,11 @@ spaces = 2
 
 * Completion
   * Globals
-  * (TODO) Locals
+  * (WIP) Locals
 * Formatting
+* Diagnostics
+  * Syntax
+  * Trailing commas, assignments
 * Indexing
   * Globals
   * S4

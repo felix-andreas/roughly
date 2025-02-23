@@ -26,7 +26,7 @@
 		"compile": "tsc -b",
 		"watch": "tsc -b -w",
 		"lint": "eslint",
-		"package": "cp ../README.md . && cp ../LICENSE . && vsce package"
+		"package": "cp ../LICENSE . && vsce package"
 	},
 	"dependencies": {
 		"vscode-languageclient": "^9.0.1"
