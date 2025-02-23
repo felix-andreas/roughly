@@ -52,7 +52,7 @@ build-release $version="":
 	rm -rf release
 	mkdir release
 	# build client
-	just bundle --out release/roughly-$version.vsix
+	just bundle --out ../release/roughly-$version.vsix
 	# build server
 	just linux
 	just windows
