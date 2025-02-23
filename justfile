@@ -14,7 +14,7 @@ snapshot *args:
 	cargo insta test --review -- --nocapture {{args}}
 
 bundle *args:
-	cd client && npm run package -- {{args}}
+	bun --cwd=client run package -- {{args}}
 
 install:
 	code --install-extension client/roughly-*.vsix --force

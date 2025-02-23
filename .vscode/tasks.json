@@ -2,8 +2,9 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"type": "npm",
-			"script": "compile",
+			"label": "Compile",
+			"type": "shell",
+			"command": "bun run compile",
 			"group": "build",
 			"options": {
 				"cwd": "${workspaceFolder}/client"
@@ -17,8 +18,9 @@
 			]
 		},
 		{
-			"type": "npm",
-			"script": "watch",
+			"label": "Watch",
+			"type": "shell",
+			"command": "bun run watch",
 			"options": {
 				"cwd": "${workspaceFolder}/client"
 			},

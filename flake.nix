@@ -70,6 +70,8 @@
                 }
               ))
               cargo-insta
+              nodejs
+              bun
               # libs
               # pkg-config
             ];

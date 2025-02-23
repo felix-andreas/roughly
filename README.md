@@ -15,7 +15,7 @@ Welcome to Roughly, the language server where we skip the fancy AST parsing and 
 Bundle the client (or [download from here](https://github.com/felix-andreas/roughly/releases)):
 
 ```
-npm run package
+bun run package
 ```
 
 Install the VS code extension:
@@ -105,7 +105,7 @@ Currenlty this extension assume that your `R` code has the following folder stru
 
 ## Development
 
-- Run `npm install` in this folder. This installs all necessary npm modules in the client
+- Run `bun install` in this folder. This installs all necessary npm modules in the client
 - Open VS Code on this folder.
 - Press Ctrl+Shift+B to start compiling the client in [watch mode](https://code.visualstudio.com/docs/editor/tasks#:~:text=The%20first%20entry%20executes,the%20HelloWorld.js%20file.).
 - Switch to the Run and Debug View in the Sidebar (Ctrl+Shift+D).
