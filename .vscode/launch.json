@@ -13,10 +13,7 @@
 			"outFiles": [
 				"${workspaceRoot}/client/out/**/*.js",
 			],
-			"preLaunchTask": {
-				"type": "npm",
-				"script": "watch"
-			},
+			"preLaunchTask": "Watch",
 			"env": {
 				"SERVER_PATH": "${workspaceRoot}/target/debug/roughly"
 			}
