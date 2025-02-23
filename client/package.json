@@ -59,6 +59,10 @@
 			{
 				"title": "Roughly: Stop Language Server",
 				"command": "roughly.stopLanguageServer"
+			},
+			{
+				"title": "Roughly: Open Logs",
+				"command": "roughly.openLogs"
 			}
 		],
 		"configuration": {

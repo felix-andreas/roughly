@@ -24,7 +24,7 @@ async fn main() -> ExitCode {
                     Err(()) => ExitCode::FAILURE,
                 }
             }
-            Command::Lsp => {
+            Command::Lsp { stdio: _stdio } => {
                 lsp::run().await;
                 ExitCode::SUCCESS
             }
@@ -72,7 +72,11 @@ enum Command {
         diff: bool,
     },
     /// Run the language server
-    Lsp,
+    Lsp {
+        /// Ignored ... here only to please VS Code
+        #[clap(long, default_value_t = true)]
+        stdio: bool,
+    },
     /// Collection of useful commands
     #[command(subcommand)]
     Dev(Dev),
