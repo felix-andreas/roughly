@@ -73,20 +73,32 @@ pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), ()> {
                 &format!("{}", diagnostic.message),
             );
             let range = diagnostic.range;
+            let padding_arrow = range.end.line.to_string().len();
             eprintln!(
-                "{} {}:{}:{}",
-                style("  -->").bold().blue(),
+                "{}{} {}:{}:{}",
+                " ".repeat(padding_arrow),
+                style("-->").bold().blue(),
                 path.display(),
                 range.start.line,
                 range.start.character
             );
 
+            let line_start = usize::max(1, range.start.line as usize) - 1;
             let lines = {
-                let start = rope.line_to_char(usize::max(1, range.start.line as usize) - 1);
+                let start = rope.line_to_char(line_start);
                 let end = rope.line_to_char(range.end.line as usize) + range.end.character as usize;
                 rope.slice(start..end)
             };
-            let width = range.end.line.to_string().len() + 1;
+            let width = padding_arrow + 1;
+            for (i, line) in lines.lines().enumerate() {
+                eprint!(
+                    "{} {}",
+                    style(format!("{:<width$}|", line_start + i)).blue().bold(),
+                    line
+                );
+            }
+            eprintln!();
+
             let width_message = u32::max(
                 1,
                 if range.end.character > range.start.character {
@@ -95,10 +107,6 @@ pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), ()> {
                     range.start.character - range.end.character
                 },
             );
-            for (i, line) in lines.lines().enumerate() {
-                eprint!("{} {}", style(format!("{i:<width$}|")).blue().bold(), line);
-            }
-            eprintln!();
             eprintln!(
                 "{}{}  {}",
                 " ".repeat(width),
