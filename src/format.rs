@@ -1,6 +1,6 @@
 use {
     crate::{
-        cli, tree,
+        cli, config, tree,
         utils::{self},
     },
     console::style,
@@ -12,9 +12,22 @@ use {
     tree_sitter::Node,
 };
 
+#[derive(Debug, Clone, Copy)]
+pub struct Config {
+    pub spaces: usize,
+}
+
 pub fn run(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(), ()> {
     let root: Vec<PathBuf> = vec![".".into()];
     let files = maybe_files.unwrap_or(&root);
+
+    let config = match config::Config::from_path(&files.first().unwrap()) {
+        Ok(config) => config,
+        Err(err) => {
+            cli::error(&err.to_string());
+            return Err(());
+        }
+    };
 
     let mut n_files = 0;
     let mut n_unformatted = 0;
@@ -42,7 +55,9 @@ pub fn run(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(
         };
         let tree = tree::parse(&old, None);
         let rope = Rope::from_str(&old);
-        let new = match format(tree.root_node(), &rope) {
+        let new = match format(tree.root_node(), &rope, Config {
+            spaces: config.spaces,
+        }) {
             Ok(new) => new,
             Err(err) => {
                 n_errors += 1;
@@ -66,7 +81,7 @@ pub fn run(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(
 
     if n_files == 0 {
         cli::warning("No R files found under the given path(s)");
-        return Ok(());
+        return Err(());
     }
 
     let (first, second) = if check {
@@ -148,10 +163,18 @@ pub fn print_diff(old: &str, new: &str) {
 
 #[derive(Error, Debug)]
 pub enum FormatError {
-    #[error("Failed to parse node {raw} with parent of kind {kind}")]
-    SyntaxError { kind: &'static str, raw: String },
-    #[error("The node of type {kind} has missing children {raw}")]
-    Missing { kind: &'static str, raw: String },
+    #[error("Unexpected {kind} at line {line} col {col}")]
+    SyntaxError {
+        kind: &'static str,
+        line: usize,
+        col: usize,
+    },
+    #[error("Missing {kind} at line {line} col {col}")]
+    Missing {
+        kind: &'static str,
+        line: usize,
+        col: usize,
+    },
     #[error("The node has unknown type {kind}: {raw}")]
     Unknown { kind: &'static str, raw: String },
     #[error("Missing filed {field} for node of kind {kind}")]
@@ -167,7 +190,7 @@ enum LineEnding {
     Crlf,
 }
 
-pub fn format(node: Node, rope: &Rope) -> Result<String, FormatError> {
+pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatError> {
     let line_ending = rope
         .chars()
         .tuple_windows()
@@ -180,26 +203,27 @@ pub fn format(node: Node, rope: &Rope) -> Result<String, FormatError> {
         })
         .unwrap_or(LineEnding::Lf);
 
-    Ok(utils::remove_indent_prefix(&format_rec(
+    Ok(utils::remove_indent_prefix(&traverse(
         node,
         rope,
-        false,
         line_ending,
+        false,
+        config,
     )?))
 }
 
-fn format_rec(
+fn traverse(
     node: Node,
     rope: &Rope,
-    make_multiline: bool,
     line_ending: LineEnding,
+    make_multiline: bool,
+    config: Config,
 ) -> Result<String, FormatError> {
-    const INDENT_BY: usize = 2;
-
     let kind = node.kind();
-    let fmt = |node: Node| format_rec(node, rope, false, line_ending);
-    let fmt_multiline =
-        |node: Node, make_multiline: bool| format_rec(node, rope, make_multiline, line_ending);
+    let fmt = |node: Node| traverse(node, rope, line_ending, false, config);
+    let fmt_multiline = |node: Node, make_multiline: bool| {
+        traverse(node, rope, line_ending, make_multiline, config)
+    };
     let fmt_with_ident_prefix =
         |node: Node| utils::add_indent_prefix(&rope.byte_slice(node.byte_range()).to_string());
     let field = |field: &'static str| {
@@ -215,7 +239,7 @@ fn format_rec(
     let wrap_with_braces = |node: Node| -> Result<String, FormatError> {
         Ok(format!(
             "{{{}}}",
-            utils::indent_by_with_newlines(INDENT_BY, fmt(node)?, line_ending)
+            utils::indent_by_with_newlines(config.spaces, fmt(node)?, line_ending)
         ))
     };
     let is_fmt_skip_comment = |node: &Node| {
@@ -225,20 +249,33 @@ fn format_rec(
                 .to_string()
                 .contains("fmt: skip")
     };
+    let missing = |node: Node| FormatError::Missing {
+        kind: node.kind(),
+        line: node.start_position().row,
+        col: node.start_position().column,
+    };
+    let error = |node: Node| FormatError::SyntaxError {
+        kind: node.kind(),
+        line: node.start_position().row,
+        col: node.start_position().column,
+    };
+    let check = |node: Node| -> Result<(), FormatError> {
+        if node.is_missing() {
+            Err(missing(node))
+        } else if node.is_error() {
+            Err(error(node))
+        } else {
+            Ok(())
+        }
+    };
 
     // note: currently we don't traverse open&close -> they never reach these conditions
     if node.is_error() {
-        return Err(FormatError::SyntaxError {
-            kind: node.parent().map(|node| node.kind()).unwrap_or("no parent"),
-            raw: get_raw(),
-        });
+        return Err(error(node));
     }
 
     if node.is_missing() {
-        return Err(FormatError::Missing {
-            kind: node.parent().map(|node| node.kind()).unwrap_or("no parent"),
-            raw: get_raw(),
-        });
+        return Err(missing(node));
     }
 
     if node.kind() == "comment" {
@@ -297,6 +334,8 @@ fn format_rec(
             }
         }
         "arguments" => {
+            check(field("open")?)?;
+            check(field("close")?)?;
             handles_comments = true;
             let is_multiline = node.start_position().row != node.end_position().row;
 
@@ -398,7 +437,7 @@ fn format_rec(
                 .filter(|node| node.kind() == "comment")
                 .map(fmt)
                 .collect::<Result<Vec<String>, FormatError>>()?
-                .join(&format!("{line_ending}{}", " ".repeat(INDENT_BY)));
+                .join(&format!("{line_ending}{}", " ".repeat(config.spaces)));
 
             let lhs = field("lhs")?;
             let operator = field("operator")?;
@@ -420,13 +459,15 @@ fn format_rec(
                     " "
                 },
                 if is_multiline {
-                    utils::indent_by(INDENT_BY, fmt(rhs)?, line_ending)
+                    utils::indent_by(config.spaces, fmt(rhs)?, line_ending)
                 } else {
                     fmt(rhs)?
                 }
             )
         }
         "braced_expression" => {
+            check(field("open")?)?;
+            check(field("close")?)?;
             handles_comments = true;
             let mut cursor = node.walk();
             let is_multiline = node.start_position().row != node.end_position().row;
@@ -495,7 +536,7 @@ fn format_rec(
             } else if is_multiline || make_multiline {
                 format!(
                     "{{{}}}",
-                    utils::indent_by_with_newlines(INDENT_BY, lines, line_ending)
+                    utils::indent_by_with_newlines(config.spaces, lines, line_ending)
                 )
             } else {
                 format!("{{ {} }}", lines)
@@ -519,7 +560,7 @@ fn format_rec(
                             && argument.child(0).unwrap().kind() == "braced_expression"
                     })
                 {
-                    utils::indent_by_with_newlines(INDENT_BY, arguments_fmt, line_ending)
+                    utils::indent_by_with_newlines(config.spaces, arguments_fmt, line_ending)
                 } else {
                     arguments_fmt
                 }
@@ -564,7 +605,7 @@ fn format_rec(
                 {
                     parameters_fmt
                 } else {
-                    utils::indent_by_with_newlines(INDENT_BY, parameters_fmt, line_ending)
+                    utils::indent_by_with_newlines(config.spaces, parameters_fmt, line_ending)
                 },
                 if is_multiline && body.kind() != "braced_expression" {
                     wrap_with_braces(body)?
@@ -585,7 +626,7 @@ fn format_rec(
             format!(
                 "if ({}) {}{}{}",
                 if is_multiline_condition && condition.kind() != "braced_expression" {
-                    utils::indent_by_with_newlines(INDENT_BY, fmt(condition)?, line_ending)
+                    utils::indent_by_with_newlines(config.spaces, fmt(condition)?, line_ending)
                 } else {
                     fmt(condition)?
                 },
@@ -760,7 +801,7 @@ fn format_rec(
                     if node.start_position().row == node.end_position().row {
                         lines.join("")
                     } else {
-                        utils::indent_by_with_newlines(INDENT_BY, lines.join(""), line_ending)
+                        utils::indent_by_with_newlines(config.spaces, lines.join(""), line_ending)
                     }
                 )
             }
@@ -859,7 +900,7 @@ fn format_rec(
                 if arguments.start_position().row == arguments.end_position().row {
                     arguments_fmt
                 } else {
-                    utils::indent_by_with_newlines(INDENT_BY, arguments_fmt, line_ending)
+                    utils::indent_by_with_newlines(config.spaces, arguments_fmt, line_ending)
                 }
             )
         }
@@ -874,7 +915,7 @@ fn format_rec(
                 if arguments.start_position().row == arguments.end_position().row {
                     arguments_fmt
                 } else {
-                    utils::indent_by_with_newlines(INDENT_BY, arguments_fmt, line_ending)
+                    utils::indent_by_with_newlines(config.spaces, arguments_fmt, line_ending)
                 }
             )
         }
@@ -892,7 +933,7 @@ fn format_rec(
             format!(
                 "while ({}) {}",
                 if is_multiline_condition && condition.kind() != "braced_expression" {
-                    utils::indent_by_with_newlines(INDENT_BY, fmt(condition)?, line_ending)
+                    utils::indent_by_with_newlines(config.spaces, fmt(condition)?, line_ending)
                 } else {
                     fmt(condition)?
                 },
@@ -956,7 +997,9 @@ mod test {
         // DEBUG
         // dbg!(tree.root_node().to_sexp());
         // eprintln!("{}", utils::format_node(&tree.root_node()));
-        format(tree.root_node(), &Rope::from_str(text))
+        format(tree.root_node(), &Rope::from_str(text), Config {
+            spaces: 2,
+        })
     }
 
     #[test]
@@ -979,6 +1022,7 @@ mod test {
         assert_fmt! {r#"
             x<-1;y<-2
         "#};
+        // pipeline operator
         assert_fmt! {r#"
             foo |>
                 bar
@@ -1601,25 +1645,44 @@ mod test {
             function
         "#});
 
-        let Err(FormatError::SyntaxError { kind, raw }) = result else {
+        let Err(FormatError::SyntaxError { kind, line, col }) = result else {
             panic!()
         };
-        assert_eq!(kind, "program");
-        assert_eq!(raw, "function");
+        assert_eq!(kind, "ERROR");
+        assert_eq!(line, 0);
+        assert_eq!(col, 0);
     }
 
     #[test]
     fn missing() {
-        assert_fmt! {r#"
+        let result = format_str(indoc! {r#"
             x <- 1
             function() { # missing function body
                 x <- 2
                 x <- 3
             x <- 3
-        "#};
+        "#});
 
-        // uncomment in case we want to throw an error instead
-        // assert!(matches!(result, FormatError::Missing { "fuc",  }) )
+        assert!(matches!(
+            result,
+            Err(FormatError::Missing {
+                kind: "}",
+                line: 5,
+                col: 0
+            })
+        ));
+
+        let result = format_str(indoc! {r#"
+            foo(
+        "#});
+        assert!(matches!(
+            result,
+            Err(FormatError::Missing {
+                kind: ")",
+                line: 0,
+                col: 4
+            })
+        ));
     }
 
     // DIRECTIVES

@@ -13,5 +13,5 @@ pub fn warning(message: &str) {
 }
 
 pub fn error(message: &str) {
-    eprintln!("{} {}", style("error").red().bold(), style(message).bold(),);
+    eprintln!("{} {}", style("error:").red().bold(), style(message).bold(),);
 }

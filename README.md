@@ -1,21 +1,26 @@
 <div align="center">
 
-# Roughly 🔥
+<img height="128px" src="client/images/icon.svg" />
+
+# Roughly
 
 ### The R(oughly good enough) Language Server
 
 </div>
 
-Welcome to Roughly, the language server where we skip the fancy AST parsing and go straight to the syntax (just regex), because who has time for that when your R project is already making your computer cry?
+Roughly is an R language server, linter, and code formatter, written in Rust.
+
+> [!WARNING]  
+> This project is a work in progress. Contributions and feedback are welcome!
 
 ## Installation
 
-### Client
+### VS Code extension
 
 Bundle the client (or [download from here](https://github.com/felix-andreas/roughly/releases)):
 
 ```
-npm run package
+bun run package
 ```
 
 Install the VS code extension:
@@ -60,16 +65,28 @@ roughly fmt --diff         # Only show diff if files would be formatted
 Or, to run Roughly as a linter:
 
 ```
-roughly lint               # Lint all files in the current directory
-roughly lint <path>        # Lint all files in `<path>`
+roughly check               # Check all files in the current directory
+roughly check <path>        # Check all files in `<path>`
+```
+
+## Configuration
+
+You can configure roughly via a project-specific `roughly.toml` file:
+
+```toml
+case = "snake_case" # or camelCase
+spaces = 2
 ```
 
 ## Features
 
 * Completion
   * Globals
-  * (TODO) Locals
+  * (WIP) Locals
 * Formatting
+* Diagnostics
+  * Syntax
+  * Trailing commas, assignments
 * Indexing
   * Globals
   * S4
@@ -96,7 +113,7 @@ Currenlty this extension assume that your `R` code has the following folder stru
 
 ## Development
 
-- Run `npm install` in this folder. This installs all necessary npm modules in the client
+- Run `bun install` in this folder. This installs all necessary npm modules in the client
 - Open VS Code on this folder.
 - Press Ctrl+Shift+B to start compiling the client in [watch mode](https://code.visualstudio.com/docs/editor/tasks#:~:text=The%20first%20entry%20executes,the%20HelloWorld.js%20file.).
 - Switch to the Run and Debug View in the Sidebar (Ctrl+Shift+D).

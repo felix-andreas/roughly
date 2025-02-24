@@ -1,6 +1,6 @@
 use {
     clap::{Parser, Subcommand},
-    roughly::{cli, dev, format, lsp},
+    roughly::{cli, dev, diagnostics, format, lsp},
     std::{path::PathBuf, process::ExitCode},
 };
 
@@ -14,14 +14,17 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some(command) => match command {
+            Command::Check { files } => match diagnostics::run(files.as_deref()) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(()) => ExitCode::FAILURE,
+            },
             Command::Fmt { files, check, diff } => {
                 match format::run(files.as_deref(), check, diff) {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(()) => ExitCode::FAILURE,
                 }
             }
-            Command::Lint => todo!(),
-            Command::Lsp => {
+            Command::Lsp { stdio: _stdio } => {
                 lsp::run().await;
                 ExitCode::SUCCESS
             }
@@ -52,9 +55,14 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Lint the given files or directories
+    Check {
+        /// R files to check
+        files: Option<Vec<PathBuf>>,
+    },
     /// Run the formatter on the given files or directories
     Fmt {
-        /// R files to format.
+        /// R files to format
         files: Option<Vec<PathBuf>>,
         /// Avoid writing any formatted files back; instead, exit with a non-zero status code if any files would have been modified, and zero otherwise
         #[clap(long, default_value_t = false)]
@@ -63,10 +71,12 @@ enum Command {
         #[clap(long, default_value_t = false)]
         diff: bool,
     },
-    /// Lint the given files or directories
-    Lint,
     /// Run the language server
-    Lsp,
+    Lsp {
+        /// Ignored ... here only to please VS Code
+        #[clap(long, default_value_t = true)]
+        stdio: bool,
+    },
     /// Collection of useful commands
     #[command(subcommand)]
     Dev(Dev),

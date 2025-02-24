@@ -42,8 +42,10 @@
             pkgs = self.lib.makePkgs system nixpkgs;
           in
           # pkgs.devshell.mkShell {
+          # required for depsBuildBuild
           pkgs.mkShell {
             motd = "";
+            buildInputs = [ pkgs.bashInteractive ];
             depsBuildBuild = with pkgs; [
               pkgsCross.mingwW64.stdenv.cc
               pkgsCross.mingwW64.windows.pthreads
@@ -70,6 +72,8 @@
                 }
               ))
               cargo-insta
+              nodejs
+              bun
               # libs
               # pkg-config
             ];

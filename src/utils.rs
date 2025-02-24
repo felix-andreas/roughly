@@ -126,14 +126,20 @@ pub fn remove_indent_prefix(input: &str) -> String {
     output
 }
 
-pub fn format_node(node: &Node) -> String {
-    fn format_node_recursive(cursor: &mut TreeCursor, output: &mut String) {
+pub fn format_node(node: Node) -> String {
+    fn traverse(cursor: &mut TreeCursor, output: &mut String) {
         let indent = "  ".repeat(cursor.depth() as usize);
-
-        if cursor.node().child_count() > 0 {
+        let node = cursor.node();
+        if node.child_count() > 0 {
             output.push('(');
         }
-        output.push_str(cursor.node().kind());
+
+        output.push_str(node.kind());
+        if node.is_missing() {
+            output.push_str(" MISSING");
+        } else if node.is_error() && node.kind() != "ERROR" {
+            output.push_str(" ERROR");
+        }
 
         if cursor.goto_first_child() {
             loop {
@@ -146,7 +152,7 @@ pub fn format_node(node: &Node) -> String {
                     output.push_str(": ");
                 }
 
-                format_node_recursive(cursor, output);
+                traverse(cursor, output);
 
                 if !cursor.goto_next_sibling() {
                     break;
@@ -163,7 +169,7 @@ pub fn format_node(node: &Node) -> String {
 
     let mut result = String::new();
     let mut cursor = node.walk();
-    format_node_recursive(&mut cursor, &mut result);
+    traverse(&mut cursor, &mut result);
     result
 }
 

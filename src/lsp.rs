@@ -1,7 +1,8 @@
 use {
-    crate::{format, index, tree},
+    crate::{cli, config::Config, diagnostics, format, index, tree},
     dashmap::DashMap,
     ropey::Rope,
+    std::path::Path,
     tower_lsp::{
         Client, LanguageServer, LspService, Server,
         jsonrpc::{Error, Result},
@@ -14,7 +15,16 @@ pub async fn run() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
+    let config = match Config::from_path(Path::new(".")) {
+        Ok(config) => config,
+        Err(err) => {
+            cli::error(&err.to_string());
+            return;
+        }
+    };
+
     let (service, socket) = LspService::new(|client| Backend {
+        config,
         client,
         symbols_map: DashMap::new(),
         document_map: DashMap::new(),
@@ -27,6 +37,7 @@ pub async fn run() {
 
 #[derive(Debug)]
 struct Backend {
+    config: Config,
     client: Client,
     symbols_map: DashMap<Url, Vec<DocumentSymbol>>,
     document_map: DashMap<Url, Document>,
@@ -58,7 +69,6 @@ impl LanguageServer for Backend {
                     trigger_characters: Some(vec!["$".into(), "@".into()]),
                     ..Default::default()
                 }),
-                // definition_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -94,17 +104,30 @@ impl LanguageServer for Backend {
     //
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        log::debug!("did open {}", params.text_document.uri);
+        log::debug!("did open {}", params.text_document.uri.path());
         let rope = Rope::from_str(&params.text_document.text);
         let tree = tree::parse(&params.text_document.text, None);
-        index::compute_diagnostics(params.text_document.uri.clone(), &rope).await;
+
+        let diagnostics = diagnostics::diagnostics(
+            tree.root_node(),
+            &rope,
+            diagnostics::Config::from_config(self.config),
+        );
 
         self.document_map
-            .insert(params.text_document.uri, Document { rope, tree });
+            .insert(params.text_document.uri.clone(), Document { rope, tree });
+
+        self.client
+            .publish_diagnostics(
+                params.text_document.uri.clone(),
+                diagnostics,
+                Some(params.text_document.version),
+            )
+            .await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        log::debug!("did change {}", params.text_document.uri);
+        log::debug!("did change {}", params.text_document.uri.path());
         self.document_map
             .alter(&params.text_document.uri, |_, mut document| {
                 for change in params.content_changes {
@@ -112,6 +135,15 @@ impl LanguageServer for Backend {
                         log::warn!("unexpected case #2141 - check");
                         continue;
                     };
+                    // DEBUG
+                    // eprintln!(
+                    //     "{}:{}, {}:{} - {}",
+                    //     range.start.line,
+                    //     range.start.character,
+                    //     range.end.line,
+                    //     range.end.character,
+                    //     change.text
+                    // );
 
                     let (rope, tree) = (&mut document.rope, &mut document.tree);
 
@@ -121,17 +153,18 @@ impl LanguageServer for Backend {
                     let end =
                         rope.line_to_char(range.end.line as usize) + range.end.character as usize;
 
-                    let old_end_byte = rope.char_to_byte(end);
-                    let new_end_char = start + change.text.len();
-                    let new_end_byte = rope.char_to_byte(new_end_char);
+                    let old_end_byte = rope.try_char_to_byte(end).unwrap();
 
                     rope.remove(start..end);
                     rope.insert(start, &change.text);
 
+                    let new_end_char = start + change.text.len();
+                    let new_end_byte = rope.try_char_to_byte(new_end_char).unwrap();
+
                     let new_end_line = rope.char_to_line(start + change.text.len());
 
                     tree.edit(&InputEdit {
-                        start_byte: rope.char_to_byte(start),
+                        start_byte: rope.try_char_to_byte(start).unwrap(),
                         old_end_byte,
                         new_end_byte,
                         start_position: Point {
@@ -153,11 +186,29 @@ impl LanguageServer for Backend {
                             tree::parse(&format!("{}", document.rope), Some(&document.tree));
                 }
 
+                // DEBUG
+                // eprintln!("<--DOCUMENT-->\n{}<--END-->", document.rope.to_string());
+                // eprintln!("{}", utils::format_node(document.tree.root_node()));
+                // if let Ok(code) = format::format(document.tree.root_node(), &document.rope) {
+                //     eprintln!("<--DOCUMENT-->\n{}<--END-->", code);
+                // }
                 document
             });
 
         if let Some(document) = self.document_map.get(&params.text_document.uri) {
-            index::compute_diagnostics(params.text_document.uri, &document.rope).await;
+            let diagnostics = diagnostics::diagnostics(
+                document.tree.root_node(),
+                &document.rope,
+                diagnostics::Config::from_config(self.config),
+            );
+
+            self.client
+                .publish_diagnostics(
+                    params.text_document.uri.clone(),
+                    diagnostics,
+                    Some(params.text_document.version),
+                )
+                .await;
         };
     }
 
@@ -166,11 +217,19 @@ impl LanguageServer for Backend {
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
-        log::debug!("did save {}", params.text_document.uri);
+        log::debug!("did save {}", params.text_document.uri.path());
 
         index::index_update(&self.symbols_map, &params.text_document.uri);
         if let Some(document) = self.document_map.get(&params.text_document.uri) {
-            index::compute_diagnostics(params.text_document.uri, &document.rope).await;
+            let diagnostics = diagnostics::diagnostics(
+                document.tree.root_node(),
+                &document.rope,
+                diagnostics::Config::from_config(self.config),
+            );
+
+            self.client
+                .publish_diagnostics(params.text_document.uri.clone(), diagnostics, None)
+                .await;
         };
     }
 
@@ -304,11 +363,13 @@ impl LanguageServer for Backend {
             return Err(Error::internal_error());
         };
         let (rope, tree) = (&document.rope, &document.tree);
-        let new = match format::format(tree.root_node(), rope) {
+        let new = match format::format(tree.root_node(), rope, format::Config {
+            spaces: self.config.spaces,
+        }) {
             Ok(new) => new,
             Err(error) => {
                 log::error!("formatting: {}", error);
-                return Err(Error::internal_error());
+                return Ok(None);
             }
         };
 
@@ -316,7 +377,10 @@ impl LanguageServer for Backend {
         Ok(Some(vec![TextEdit {
             range: Range::new(
                 Position::new(0, 0),
-                Position::new(rope.len_lines() as u32, 0),
+                Position::new(
+                    (rope.len_lines() - 1) as u32,
+                    (rope.len_chars() - rope.line_to_char(rope.len_lines() - 1)) as u32,
+                ),
             ),
             new_text: new,
         }]))
@@ -353,12 +417,4 @@ impl LanguageServer for Backend {
             None,
         )))
     }
-
-    // async fn goto_definition(
-    //     &self,
-    //     params: GotoDefinitionParams,
-    // ) -> Result<Option<GotoDefinitionResponse>> {
-    //     // dbg!(params);
-    //     Ok(None)
-    // }
 }

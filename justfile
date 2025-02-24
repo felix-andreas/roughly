@@ -14,10 +14,10 @@ snapshot *args:
 	cargo insta test --review -- --nocapture {{args}}
 
 bundle *args:
-	npm run package -- {{args}}
+	bun --cwd=client run package -- {{args}}
 
 install:
-	code --install-extension roughly-*.vsix --force
+	code --install-extension client/roughly-*.vsix --force
 
 linux:
 	cargo build --release
@@ -52,7 +52,7 @@ build-release $version="":
 	rm -rf release
 	mkdir release
 	# build client
-	just bundle --out release/roughly-$version.vsix
+	just bundle --out ../release/roughly-$version.vsix
 	# build server
 	just linux
 	just windows
