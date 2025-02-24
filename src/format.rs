@@ -359,7 +359,7 @@ fn traverse(
                     {
                         fmt_skip = true;
                     }
-                    let tmp = if fmt_skip {
+                    let formatted = if fmt_skip {
                         fmt_skip = false;
                         fmt_with_ident_prefix(child)
                     } else {
@@ -379,17 +379,24 @@ fn traverse(
                             Some(prev_node)
                                 if prev_node.end_position().row == child.start_position().row =>
                             {
-                                format!(" {tmp}")
+                                format!(" {formatted}")
                             }
-                            Some(_) => format!("{line_ending}{tmp}"),
-                            None => tmp.to_string(),
+                            Some(prev_node) => format!(
+                                "{}{formatted}",
+                                line_ending.repeat(usize::clamp(
+                                    child.start_position().row - prev_node.end_position().row,
+                                    1,
+                                    2,
+                                ))
+                            ),
+                            None => formatted.to_string(),
                         });
                     }
                     if child.kind() == "comma" {
                         is_first_arg = false;
                         return Ok(
                             if prev_node_local
-                                .map(|node| node.kind() == "comment")
+                                .map(|prev_node| prev_node.kind() == "comment")
                                 .unwrap_or(false)
                             {
                                 format!("{line_ending},")
@@ -402,19 +409,27 @@ fn traverse(
                         "{}{}",
                         if is_first_arg {
                             if prev_node_local
-                                .map(|node| node.kind() == "comment")
+                                .map(|prev_node| prev_node.kind() == "comment")
                                 .unwrap_or(false)
                             {
-                                line_ending
+                                line_ending.into()
                             } else {
-                                ""
+                                "".into()
                             }
                         } else if is_multiline {
-                            line_ending
+                            line_ending.repeat(usize::clamp(
+                                prev_node_local
+                                    .map(|prev_node| {
+                                        child.start_position().row - prev_node.end_position().row
+                                    })
+                                    .unwrap_or(1),
+                                1,
+                                2,
+                            ))
                         } else {
-                            " "
+                            " ".into()
                         },
-                        tmp
+                        formatted
                     );
                     is_first_arg = false;
                     Ok(result)
@@ -1569,6 +1584,32 @@ mod test {
             "foo\r\nbar\r\nbaz\r\n",
             format_str("foo\r\nbar\nbaz\n").unwrap()
         );
+    }
+
+    #[test]
+    fn r6_allow_newlines() {
+        assert_fmt! {r#"
+            Person <- R6Class(
+                "Person",
+                public = list(
+                    initialize = function(name, age = NA) {
+                        private$name <- name
+                        private$age <- age
+                    },
+
+                    print = function(...) {
+                        cat("Person: \n")
+                        cat("  Name: ", private$name, "\n", sep = "")
+                        cat("  Age:  ", private$age, "\n", sep = "")
+                    }
+                ),
+
+                private = list(
+                    age = NA,
+                    name = NULL
+                )
+            )
+        "#};
     }
 
     #[test]
