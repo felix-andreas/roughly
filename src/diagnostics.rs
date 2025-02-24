@@ -2,11 +2,10 @@ use {
     crate::{
         cli,
         config::{self, Case},
-        tree,
+        tree, utils,
     },
     console::style,
     ignore::Walk,
-    inflections::case,
     ropey::Rope,
     std::path::PathBuf,
     tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range},
@@ -294,13 +293,16 @@ pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Dia
                 }
             }
             "binary_operator" => {
-                if let Some(lhs) = node.child_by_field_name("lhs") {
-                    if lhs.kind() == "identifier" {
+                if let (Some(lhs), Some(operator)) = (
+                    node.child_by_field_name("lhs"),
+                    node.child_by_field_name("operator"),
+                ) {
+                    if lhs.kind() == "identifier" && operator.kind() == "<-" {
                         let name = rope.byte_slice(lhs.byte_range()).to_string();
                         if state.check_case {
                             let correct_case = match config.case {
-                                Case::Camel => case::to_camel_case(&name),
-                                Case::Snake => case::to_snake_case(&name),
+                                Case::Camel => utils::to_camel_case(&name),
+                                Case::Snake => utils::to_snake_case(&name),
                             };
                             if name != correct_case {
                                 diagnostics.push(diag(
@@ -319,6 +321,7 @@ pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Dia
                         }
                     }
                 }
+
                 if let Some(operator) = node.child_by_field_name("operator") {
                     if operator.kind() == "=" {
                         diagnostics.push(diag(node, format!("Use <-, not =, for assignment")));

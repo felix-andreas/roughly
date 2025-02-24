@@ -194,3 +194,62 @@ mod test {
         );
     }
 }
+
+// Adapted from  https://doc.rust-lang.org/stable/nightly-rustc/src/clippy_utils/str_utils.rs.html
+
+/// Returns a `camelCase` version of the input
+/// ```
+/// use roughly::utils::to_camel_case;
+/// assert_eq!(to_camel_case("foo_bar"), "fooBar");
+/// assert_eq!(to_camel_case("fooXY"), "fooXY");
+/// assert_eq!(to_camel_case("foo_x_y"), "fooXY");
+/// assert_eq!(to_camel_case("foo_X_Y"), "fooXY");
+/// assert_eq!(to_camel_case("foo_x_Y"), "fooXY");
+/// ```
+pub fn to_camel_case(name: &str) -> String {
+    let mut camel = String::new();
+    let mut chars = name.chars();
+    chars.next().inspect(|&c| camel.push(c));
+
+    let mut up = false;
+    for char in chars {
+        if char == '_' {
+            up = true;
+            continue;
+        }
+        if up {
+            up = false;
+            camel.extend(char.to_uppercase());
+        } else {
+            camel.push(char);
+        }
+    }
+    camel
+}
+
+/// Returns a `snake_case` version of the input
+/// ```
+/// use roughly::utils::to_snake_case;
+/// assert_eq!(to_snake_case("fooBar"), "foo_bar");
+/// assert_eq!(to_snake_case("fooXY"), "foo_x_y");
+/// assert_eq!(to_snake_case("foo_bar"), "foo_bar");
+/// assert_eq!(to_snake_case("Foo_Bar"), "foo_bar");
+/// assert_eq!(to_snake_case("Foo__Bar"), "foo__bar");
+/// ```
+pub fn to_snake_case(name: &str) -> String {
+    let mut snake = String::new();
+    let mut prev = '_';
+    for (i, char) in name.chars().enumerate() {
+        if char.is_uppercase() {
+            // characters without capitalization are considered lowercase
+            if i != 0 && prev != '_' {
+                snake.push('_');
+            }
+            snake.extend(char.to_lowercase());
+        } else {
+            snake.push(char);
+        }
+        prev = char
+    }
+    snake
+}
