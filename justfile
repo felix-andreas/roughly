@@ -42,13 +42,19 @@ bump-version $version:
 	git add package.json client/package.json Cargo.toml Cargo.lock
 	git commit -m "chore: Release v{{version}}"
 
-build-release $version="":
+git-release $version="":
 	#!/usr/bin/env bash
 	set -euo pipefail
 	if [ -z "{{version}}" ]; then
 		version=$(git rev-parse --short=6 HEAD)
 		echo "info: using git revision $version as version"
 	fi
+	just build-release $version
+	just publish-release $version
+
+build-release $version:
+	#!/usr/bin/env bash
+	set -euo pipefail
 	rm -rf release
 	mkdir release
 	# build client
