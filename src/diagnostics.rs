@@ -240,29 +240,15 @@ pub fn diagnostics_syntax(node: Node, rope: &Rope) -> Vec<Diagnostic> {
 }
 
 pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
-    fn diag(node: Node, message: String) -> Diagnostic {
-        Diagnostic {
-            message: message,
-            severity: Some(DiagnosticSeverity::WARNING),
-            range: node_range(node),
-            code: None,
-            code_description: None,
-            source: None,
-            related_information: None,
-            tags: None,
-            data: None,
-        }
-    }
-
     #[derive(Debug, Clone, Copy, Default)]
     struct State {
-        check_traing_commas: bool,
+        check_trailing_commas: bool,
         check_case: bool,
     }
 
     impl State {
-        fn check_traing_commas(&mut self, check: bool) {
-            self.check_traing_commas = check;
+        fn check_trailing_commas(&mut self, check: bool) {
+            self.check_trailing_commas = check;
         }
         fn check_case(&mut self, check: bool) {
             self.check_case = check;
@@ -280,41 +266,46 @@ pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Dia
 
         match node.kind() {
             "arguments" => {
-                if state.check_traing_commas {
-                    state.check_traing_commas(false);
-                    if cursor.goto_last_child() {
-                        while cursor.goto_previous_sibling() && cursor.node().kind() == "comment" {}
-                        if cursor.node().kind() == "comma" {
-                            diagnostics
-                                .push(diag(cursor.node(), "trailing comma in arguments".into()));
+                let mut last_comma = None;
+                if cursor.goto_first_child() {
+                    let mut last_argument = None;
+                    loop {
+                        let child = cursor.node();
+                        match child.kind() {
+                            "argument" => {
+                                if let Some(last_argment) = last_argument
+                                    && !last_comma.is_some()
+                                {
+                                    diagnostics.push(error(
+                                        last_argment,
+                                        "expected comma after argument".into(),
+                                    ));
+                                }
+                                last_argument = Some(child);
+                                last_comma = None;
+                            }
+                            "comma" => {
+                                last_comma = Some(child);
+                            }
+                            _ => {}
                         }
-                        cursor.goto_parent();
-                    }
-                }
-            }
-            "parameter" => {
-                if let Some(name) = node.child_by_field_name("name") {
-                    if name.kind() == "identifier" {
-                        let raw = rope.byte_slice(name.byte_range()).to_string();
-                        let correct_case = match config.case {
-                            Case::Camel => utils::to_camel_case(&raw),
-                            Case::Snake => utils::to_snake_case(&raw),
-                        };
-                        if raw != correct_case {
-                            diagnostics.push(diag(
-                                name,
-                                format!(
-                                    "Parameter '{}' should have {} name, e.g. {}",
-                                    name,
-                                    match config.case {
-                                        Case::Camel => "camelCase",
-                                        Case::Snake => "snake_case",
-                                    },
-                                    correct_case
-                                ),
-                            ));
+
+                        if !cursor.goto_next_sibling() {
+                            break;
                         }
                     }
+                    // note: we only check trailing commas for call not subset
+                    if let Some(last_comma) = last_comma
+                        && state.check_trailing_commas
+                    {
+                        state.check_trailing_commas(false);
+                        diagnostics.push(error(
+                            last_comma,
+                            "unexpected comma after last argument".into(),
+                        ));
+                    }
+
+                    cursor.goto_parent();
                 }
             }
             "binary_operator" => {
@@ -330,7 +321,7 @@ pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Dia
                                 Case::Snake => utils::to_snake_case(&name),
                             };
                             if name != correct_case {
-                                diagnostics.push(diag(
+                                diagnostics.push(warning(
                                     node,
                                     format!(
                                         "Variable '{}' should have {} name, e.g. {}",
@@ -349,12 +340,37 @@ pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Dia
 
                 if let Some(operator) = node.child_by_field_name("operator") {
                     if operator.kind() == "=" {
-                        diagnostics.push(diag(node, format!("Use <-, not =, for assignment")));
+                        diagnostics.push(warning(node, format!("Use <-, not =, for assignment")));
                     }
                 }
             }
-            "call" => state.check_traing_commas(true),
+            "call" => state.check_trailing_commas(true),
             "function_definition" => state.check_case(true),
+            "parameter" => {
+                if let Some(name) = node.child_by_field_name("name") {
+                    if name.kind() == "identifier" {
+                        let raw = rope.byte_slice(name.byte_range()).to_string();
+                        let correct_case = match config.case {
+                            Case::Camel => utils::to_camel_case(&raw),
+                            Case::Snake => utils::to_snake_case(&raw),
+                        };
+                        if raw != correct_case {
+                            diagnostics.push(warning(
+                                name,
+                                format!(
+                                    "Parameter '{}' should have {} name, e.g. {}",
+                                    name,
+                                    match config.case {
+                                        Case::Camel => "camelCase",
+                                        Case::Snake => "snake_case",
+                                    },
+                                    correct_case
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
             _ => {}
         }
 
@@ -385,6 +401,10 @@ pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Dia
 
 fn error(node: Node, message: String) -> Diagnostic {
     diag(node, message, DiagnosticSeverity::ERROR)
+}
+
+fn warning(node: Node, message: String) -> Diagnostic {
+    diag(node, message, DiagnosticSeverity::WARNING)
 }
 
 fn diag(node: Node, message: String, severity: DiagnosticSeverity) -> Diagnostic {
