@@ -1,0 +1,24 @@
+---
+source: src/format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n            Person <- R6Class(\n                \"Person\",\n                public = list(\n                    initialize = function(name, age = NA) {\n                        private$name <- name\n                        private$age <- age\n                    },\n\n                    print = function(...) {\n                        cat(\"Person: \\n\")\n                        cat(\"  Name: \", private$name, \"\\n\", sep = \"\")\n                        cat(\"  Age:  \", private$age, \"\\n\", sep = \"\")\n                    }\n                ),\n\n                private = list(\n                    age = NA,\n                    name = NULL\n                )\n            )\n        \"#\n}).unwrap()"
+---
+Person <- R6Class(
+  "Person",
+  public = list(
+    initialize = function(name, age = NA) {
+      private$name <- name
+      private$age <- age
+    },
+
+    print = function(...) {
+      cat("Person: \n")
+      cat("  Name: ", private$name, "\n", sep = "")
+      cat("  Age:  ", private$age, "\n", sep = "")
+    }
+  ),
+
+  private = list(
+    age = NA,
+    name = NULL
+  )
+)

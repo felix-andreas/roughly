@@ -357,6 +357,7 @@ impl LanguageServer for Backend {
     //
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        log::debug!("format file {}", params.text_document.uri.path());
         let Some(document) = self.document_map.get(&params.text_document.uri) else {
             log::info!("formatting: failed to acquire symbols map");
             // todo: understand when this happens

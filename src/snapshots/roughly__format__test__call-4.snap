@@ -10,6 +10,7 @@ foo(
   #   foo bar
   #   foo bar
   a = 1, # bar
+
   b = 2L
 ) # baz
 
