@@ -1,6 +1,6 @@
 use {
     crate::{
-        cli,
+        cli::{self, LogLevel},
         config::{self, Case},
         tree, utils,
     },
@@ -53,7 +53,7 @@ pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), ()> {
             Ok(old) => old,
             Err(err) => {
                 n_errors += 1;
-                cli::error(&format!("failed to format: {}", path.display()));
+                cli::error(&format!("failed to read: {}", path.display()));
                 eprintln!("{err}");
                 continue;
             }
@@ -63,7 +63,15 @@ pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), ()> {
 
         for diagnostic in diagnostics(tree.root_node(), &rope, Config { case: config.case }) {
             n_errors += 1;
-            cli::error(&format!("{}", diagnostic.message));
+            cli::log(
+                match diagnostic.severity {
+                    Some(DiagnosticSeverity::INFORMATION) => LogLevel::Info,
+                    Some(DiagnosticSeverity::WARNING) => LogLevel::Warning,
+                    Some(DiagnosticSeverity::ERROR) => LogLevel::Error,
+                    _ => LogLevel::Info,
+                },
+                &format!("{}", diagnostic.message),
+            );
             let range = diagnostic.range;
             eprintln!(
                 "{} {}:{}:{}",
@@ -73,20 +81,13 @@ pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), ()> {
                 range.start.character
             );
 
-            let start_byte = rope.line_to_char(if range.start.line == 0 {
-                0
-            } else {
-                range.start.line - 1
-            } as usize);
-            let end_byte = rope
-                .try_char_to_byte(
-                    rope.line_to_char(range.end.line as usize) + range.end.character as usize,
-                )
-                .unwrap();
-
-            let lines = rope.slice(start_byte..end_byte);
+            let lines = {
+                let start = rope.line_to_char(usize::max(1, range.start.line as usize) - 1);
+                let end = rope.line_to_char(range.end.line as usize) + range.end.character as usize;
+                rope.slice(start..end)
+            };
             let width = range.end.line.to_string().len() + 1;
-            let width_error = u32::max(
+            let width_message = u32::max(
                 1,
                 if range.end.character > range.start.character {
                     range.end.character - range.start.character
@@ -105,7 +106,15 @@ pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), ()> {
                     range.start.character as usize,
                     range.end.character as usize
                 )),
-                style("^".repeat(width_error as usize)).red().bold()
+                {
+                    let arrow = style("^".repeat(width_message as usize)).bold();
+                    match diagnostic.severity {
+                        Some(DiagnosticSeverity::INFORMATION) => arrow.blue(),
+                        Some(DiagnosticSeverity::WARNING) => arrow.yellow(),
+                        Some(DiagnosticSeverity::ERROR) => arrow.red(),
+                        _ => arrow,
+                    }
+                }
             );
             eprintln!(
                 "{}{}  {}",
@@ -114,7 +123,15 @@ pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), ()> {
                     range.start.character as usize,
                     range.end.character as usize
                 )),
-                style(&diagnostic.message).red().bold()
+                {
+                    let message = style(&diagnostic.message).bold();
+                    match diagnostic.severity {
+                        Some(DiagnosticSeverity::INFORMATION) => message.blue(),
+                        Some(DiagnosticSeverity::WARNING) => message.yellow(),
+                        Some(DiagnosticSeverity::ERROR) => message.red(),
+                        _ => message,
+                    }
+                }
             );
 
             eprintln!("\n")
@@ -278,7 +295,7 @@ pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Dia
                                 {
                                     diagnostics.push(error(
                                         last_argment,
-                                        "expected comma after argument".into(),
+                                        "Expected comma after argument".into(),
                                     ));
                                 }
                                 last_argument = Some(child);
@@ -301,7 +318,7 @@ pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Dia
                         state.check_trailing_commas(false);
                         diagnostics.push(error(
                             last_comma,
-                            "unexpected comma after last argument".into(),
+                            "Unexpected comma after last argument".into(),
                         ));
                     }
 
