@@ -292,6 +292,31 @@ pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Dia
                     }
                 }
             }
+            "parameter" => {
+                if let Some(name) = node.child_by_field_name("name") {
+                    if name.kind() == "identifier" {
+                        let raw = rope.byte_slice(name.byte_range()).to_string();
+                        let correct_case = match config.case {
+                            Case::Camel => utils::to_camel_case(&raw),
+                            Case::Snake => utils::to_snake_case(&raw),
+                        };
+                        if raw != correct_case {
+                            diagnostics.push(diag(
+                                name,
+                                format!(
+                                    "Parameter '{}' should have {} name, e.g. {}",
+                                    name,
+                                    match config.case {
+                                        Case::Camel => "camelCase",
+                                        Case::Snake => "snake_case",
+                                    },
+                                    correct_case
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
             "binary_operator" => {
                 if let (Some(lhs), Some(operator)) = (
                     node.child_by_field_name("lhs"),
@@ -309,7 +334,7 @@ pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Dia
                                     node,
                                     format!(
                                         "Variable '{}' should have {} name, e.g. {}",
-                                        name,
+                                        lhs,
                                         match config.case {
                                             Case::Camel => "camelCase",
                                             Case::Snake => "snake_case",
