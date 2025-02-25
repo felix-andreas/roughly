@@ -155,11 +155,10 @@ pub fn format_node(node: Node) -> String {
                 traverse(cursor, output);
 
                 if !cursor.goto_next_sibling() {
+                    cursor.goto_parent();
                     break;
                 }
             }
-
-            cursor.goto_parent();
 
             output.push('\n');
             output.push_str(&indent);

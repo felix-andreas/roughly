@@ -234,11 +234,10 @@ pub fn diagnostics_syntax(node: Node, rope: &Rope) -> Vec<Diagnostic> {
                 handled_error |= traverse(cursor, diagnostics, rope);
 
                 if !cursor.goto_next_sibling() {
+                    cursor.goto_parent();
                     break;
                 }
             }
-
-            cursor.goto_parent();
         }
 
         if !handled_error && node.is_error() {
@@ -316,22 +315,23 @@ pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Dia
                         }
 
                         if !cursor.goto_next_sibling() {
+                            cursor.goto_parent();
                             break;
                         }
                     }
+
                     // note: we only check trailing commas for call not subset
                     if let Some(last_comma) = last_comma
                         && state.check_trailing_commas
                     {
-                        state.check_trailing_commas(false);
                         diagnostics.push(error(
                             last_comma,
                             "Unexpected comma after last argument".into(),
                         ));
                     }
-
-                    cursor.goto_parent();
                 }
+
+                state.check_trailing_commas(false);
             }
             "binary_operator" => {
                 if let (Some(lhs), Some(operator)) = (
@@ -404,11 +404,10 @@ pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Dia
                 traverse(cursor, diagnostics, rope, config, state);
 
                 if !cursor.goto_next_sibling() {
+                    cursor.goto_parent();
                     break;
                 }
             }
-
-            cursor.goto_parent();
         }
     }
 
