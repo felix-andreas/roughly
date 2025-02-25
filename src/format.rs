@@ -438,17 +438,32 @@ fn traverse(
         }
         "binary_operator" => {
             handles_comments = true;
+            let lhs = field("lhs")?;
+            let operator = field("operator")?;
+            let rhs = field("rhs")?;
+
             let mut cursor = node.walk();
             let comments = node
                 .children(&mut cursor)
                 .filter(|node| node.kind() == "comment")
+                .collect::<Vec<Node>>();
+            let indent = format!("{line_ending}{}", " ".repeat(config.spaces));
+            let first_comment_sep = comments
+                .first()
+                .map(|comment| {
+                    if operator.end_position().row == comment.start_position().row {
+                        " "
+                    } else {
+                        indent.as_str()
+                    }
+                })
+                .unwrap_or(" ");
+            let comments_fmt = comments
+                .into_iter()
                 .map(fmt)
                 .collect::<Result<Vec<String>, FormatError>>()?
-                .join(&format!("{line_ending}{}", " ".repeat(config.spaces)));
+                .join(&indent);
 
-            let lhs = field("lhs")?;
-            let operator = field("operator")?;
-            let rhs = field("rhs")?;
             let is_multiline = lhs.end_position().row != rhs.start_position().row;
             let has_spacing = operator.kind() == ":";
             format!(
@@ -456,8 +471,12 @@ fn traverse(
                 fmt(lhs)?,
                 if has_spacing { "" } else { " " },
                 fmt(operator)?,
-                if comments.is_empty() { "" } else { " " },
-                comments,
+                if comments_fmt.is_empty() {
+                    ""
+                } else {
+                    first_comment_sep
+                },
+                comments_fmt,
                 if is_multiline {
                     line_ending
                 } else if has_spacing {
@@ -1044,6 +1063,20 @@ mod test {
             bar |>#bar
             baz |>
                 qux
+        "#};
+        assert_fmt! {r#"
+            foo |>
+                # something about bar
+                bar |>
+                # something about baz
+                baz
+            foo |># 1
+                # 2
+                    bar |> # 3
+                # 4
+                # 5
+                # 6
+                    baz
         "#};
     }
 
