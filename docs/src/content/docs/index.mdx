@@ -1,0 +1,92 @@
+---
+title: Roughly
+description: The R(oughly good enough) Language Server
+head:
+  - tag: title
+    content: Roughly
+template: splash
+editUrl: false
+hero:
+  title: |
+    Roughly
+  tagline: Roughly is an R language server, linter, and code formatter, written in Rust.
+  actions:
+    - text: Get started
+      icon: right-arrow
+      link: /getting-started/
+    - text: View on GitHub
+      icon: external
+      variant: minimal
+      link: https://github.com/felix-andreas/roughly
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components'
+
+import { ContainerSection } from 'starlight-theme-black/components'
+import { Aside } from '@astrojs/starlight/components';
+
+<ContainerSection>
+
+## Features
+
+<CardGrid>
+
+<Card title="Linting" icon="magnifier">
+
+Use `roughly check` to [identify potential issues](/language-server) in your code.
+
+```bash
+roughly check
+```
+```
+error: Syntax Error: unexpected "{"
+ --> R/main.R:0:23
+0 | x_option <- function(x {
+                           ^
+                           Syntax Error: unexpected "{"
+```
+
+</Card>
+
+<Card title="Formatter" icon="pencil">
+
+Run `roughly fmt` to format your R code with [consistent styling](/formatter/).
+
+```sh
+roughly fmt --diff
+```
+
+```diff
+Diff in R/main.R:
+-x_option <- function( x ) {
++x_option <- function(x) {
+   if (x == "a") {
+     "option 1"
+-  } else if (x=="b") {
++  } else if (x == "b") {
+     "option 2"
+   } else {
+-  stop('Invalid `x` value')
++    stop("Invalid `x` value")
+   }
+ }
+
+1 file would be reformatted, 3 files already formatted
+```
+
+</Card>
+
+<Card title="Language Server" icon="translate">
+  Experience [rich IDE features](/language-server) like completions, go-to-definition, and more.
+</Card>
+
+<Card title="Read the docs" icon="open-book">
+  Learn more about Roughly's features in [the documentation](/getting-started).
+</Card>
+
+</CardGrid>
+
+<div class="h-16"></div>
+
+</ContainerSection>
+

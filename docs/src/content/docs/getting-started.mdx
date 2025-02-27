@@ -1,0 +1,89 @@
+---
+title: Getting Started
+description: Installation and basic setup for Roughly
+---
+
+This guide will help you install and set up Roughly for your R projects.
+
+## Installation
+
+### VS Code Extension (Recommended)
+
+1. Download the latest `roughly.vsix` from [GitHub Releases](https://github.com/felix-andreas/roughly/releases)
+2. Install in VS Code:
+   ```bash
+   code --install-extension roughly.vsix
+   ```
+3. Configure in VS Code settings:
+   ```json
+   {
+     "roughly.path": "/path/to/roughly"
+   }
+   ```
+
+### Binary Installation
+
+1. Download the pre-built binary for your platform from [GitHub Releases](https://github.com/felix-andreas/roughly/releases)
+2. Extract the archive and place the binary in your PATH
+
+### Building from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/felix-andreas/roughly.git
+cd roughly
+
+# Build the server
+cargo build --release
+
+# Optional: Build the VS Code extension
+bun run package
+```
+
+## Quick Start
+
+### Command Line Usage
+
+```bash
+# Format R files
+roughly fmt                # Format current directory
+roughly fmt path/to/files  # Format specific path
+
+# Check for issues
+roughly check              # Lint current directory
+
+# Run the language server
+roughly lsp                # Start the LSP server
+```
+
+### Project Configuration
+
+Create a `roughly.toml` in your project root:
+
+```toml
+case = "snake_case"  # or "camelCase"
+spaces = 2
+```
+
+### VS Code Commands
+
+With the extension installed, you can use:
+
+- **Roughly: Start Server** - Start the language server
+- **Roughly: Stop Server** - Stop the language server
+- **Roughly: Restart Server** - Restart the language server
+
+## Project Layout
+
+Roughly works best with projects organized like:
+
+import { FileTree } from '@astrojs/starlight/components';
+
+<FileTree>
+
+- R
+  - code.R
+- NAMESPACE
+- DESCRIPTION
+
+</FileTree>

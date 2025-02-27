@@ -1,0 +1,100 @@
+---
+title: Language Server
+description: Documentation for Roughly's R language server
+---
+
+Roughly provides a full Language Server Protocol (LSP) implementation for R that integrates with modern code editors.
+
+## VS Code Extension
+
+The easiest way to use Roughly is through its VS Code extension.
+
+### Installation
+
+1. Download the latest `roughly.vsix` from [GitHub Releases](https://github.com/felix-andreas/roughly/releases)
+2. Install the extension in VS Code:
+   ```sh
+   code --install-extension roughly.vsix
+   ```
+3. Configure the extension by setting the path to the Roughly binary in `settings.json`:
+   ```json
+   {
+     "roughly.path": "/path/to/roughly"
+   }
+   ```
+
+### Building from Source
+
+If you prefer to build the extension yourself:
+
+```sh
+# From the repository root
+bun run package
+code --install-extension roughly.vsix
+```
+
+## Features
+
+Based on the LSP implementation in `lsp.rs`, Roughly's language server provides:
+
+### Document Features
+
+- **Diagnostics**: Real-time error and warning detection as you type
+- **Formatting**: Code formatting through the editor's format command
+- **Document Symbols**: Navigate to functions, classes, and variables in the current file
+
+### Navigation
+
+- **Workspace Symbols**: Search for symbols across all R files in your project
+- **Hover Information**: Coming soon
+
+### Code Intelligence
+
+- **Completion**: 
+  - Code completion for workspace symbols
+  - Keywords and reserved words (`if`, `else`, `function`, etc.)
+  - Special values (`TRUE`, `FALSE`, `NULL`, `NA`, etc.)
+  - Trigger characters: `$`, `@` (for accessing object fields)
+
+### Editor Integration
+
+- **Incremental Document Syncing**: Efficiently updates as you type
+- **Save Actions**: Automatically reindexes files on save
+- **Commands**: Start/Stop/Restart the language server
+
+## Usage
+
+Start the language server directly from the command line:
+
+```sh
+roughly lsp
+```
+
+In supported editors like VS Code with the Roughly extension installed, the language server will start automatically when you open an R file.
+
+## Configuration
+
+The language server uses the same configuration as the formatter and linter via `roughly.toml`:
+
+```toml
+case = "snake_case" # or camelCase
+spaces = 2
+```
+
+## Roadmap
+
+Future language server improvements will include:
+
+- **Go to Definition**: Navigate to function and variable definitions
+- **Find References**: Find all references to a symbol
+- **Rename Symbol**: Safely rename variables and functions
+- **Type Information**: Show type information in tooltips
+- **Semantic Highlighting**: Enhanced syntax highlighting
+- **Code Actions**: Quick fixes for common issues
+
+## Supported Editors
+
+While Roughly is designed as a standard LSP implementation that should work with any editor supporting LSP:
+
+- **VS Code**: Full support via dedicated extension
+- **Other Editors**: May be configured to use Roughly's LSP implementation directly
