@@ -84,7 +84,7 @@ pub fn run(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(
         return Err(());
     }
 
-    let (first, second) = if check {
+    let (first, second) = if check || diff {
         ("would be reformatted", "already formatted")
     } else {
         ("reformatted", "left unchanged")
