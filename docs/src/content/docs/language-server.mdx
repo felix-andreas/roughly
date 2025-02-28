@@ -3,13 +3,27 @@ title: Language Server
 description: Documentation for Roughly's R language server
 ---
 
+import { Steps } from '@astrojs/starlight/components';
+
 Roughly provides a full Language Server Protocol (LSP) implementation for R that integrates with modern code editors.
 
-## VS Code Extension
+## Usage
 
 The easiest way to use Roughly is through its VS Code extension.
 
+Alternatively, start the language server directly from the command line:
+
+```sh
+roughly lsp
+```
+
+In supported editors like VS Code with the Roughly extension installed, the language server will start automatically when you open an R file.
+
+## VS Code Extension
+
 ### Installation
+
+<Steps>
 
 1. Download the latest `roughly.vsix` from [GitHub Releases](https://github.com/felix-andreas/roughly/releases)
 2. Install the extension in VS Code:
@@ -23,6 +37,8 @@ The easiest way to use Roughly is through its VS Code extension.
    }
    ```
 
+</Steps>
+
 ### Building from Source
 
 If you prefer to build the extension yourself:
@@ -32,6 +48,16 @@ If you prefer to build the extension yourself:
 bun run package
 code --install-extension roughly.vsix
 ```
+
+### VS Code specific commands
+
+Roughly's VS Code extension provides several commands to manage the language server:
+
+- **Start Language Server**: Manually start the language server if it's not running
+- **Stop Language Server**: Manually stop the language server
+- **Restart Language Server**: Restart the language server (useful after configuration changes)
+- **Open Logs**: View the language server logs for troubleshooting
+- **Status Bar Integration**: Shows the current status of the language server and allows quick access to commands by clicking on the status indicator
 
 ## Features
 
@@ -60,17 +86,7 @@ Based on the LSP implementation in `lsp.rs`, Roughly's language server provides:
 
 - **Incremental Document Syncing**: Efficiently updates as you type
 - **Save Actions**: Automatically reindexes files on save
-- **Commands**: Start/Stop/Restart the language server
 
-## Usage
-
-Start the language server directly from the command line:
-
-```sh
-roughly lsp
-```
-
-In supported editors like VS Code with the Roughly extension installed, the language server will start automatically when you open an R file.
 
 ## Configuration
 

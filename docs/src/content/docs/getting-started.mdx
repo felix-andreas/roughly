@@ -3,11 +3,25 @@ title: Getting Started
 description: Installation and basic setup for Roughly
 ---
 
+import { Steps } from '@astrojs/starlight/components';
+
+
 This guide will help you install and set up Roughly for your R projects.
 
 ## Installation
 
+### Roughly CLI
+
+<Steps>
+
+1. Download the pre-built binary for your platform from [GitHub Releases](https://github.com/felix-andreas/roughly/releases)
+2. Extract the archive and place the binary in your PATH
+
+</Steps>
+
 ### VS Code Extension (Recommended)
+
+<Steps>
 
 1. Download the latest `roughly.vsix` from [GitHub Releases](https://github.com/felix-andreas/roughly/releases)
 2. Install in VS Code:
@@ -21,28 +35,9 @@ This guide will help you install and set up Roughly for your R projects.
    }
    ```
 
-### Binary Installation
+</Steps>
 
-1. Download the pre-built binary for your platform from [GitHub Releases](https://github.com/felix-andreas/roughly/releases)
-2. Extract the archive and place the binary in your PATH
-
-### Building from Source
-
-```bash
-# Clone the repository
-git clone https://github.com/felix-andreas/roughly.git
-cd roughly
-
-# Build the server
-cargo build --release
-
-# Optional: Build the VS Code extension
-bun run package
-```
-
-## Quick Start
-
-### Command Line Usage
+## Command Line Usage
 
 ```bash
 # Format R files
@@ -56,7 +51,7 @@ roughly check              # Lint current directory
 roughly lsp                # Start the LSP server
 ```
 
-### Project Configuration
+## Project Configuration
 
 Create a `roughly.toml` in your project root:
 
@@ -65,25 +60,4 @@ case = "snake_case"  # or "camelCase"
 spaces = 2
 ```
 
-### VS Code Commands
-
-With the extension installed, you can use:
-
-- **Roughly: Start Server** - Start the language server
-- **Roughly: Stop Server** - Stop the language server
-- **Roughly: Restart Server** - Restart the language server
-
-## Project Layout
-
-Roughly works best with projects organized like:
-
-import { FileTree } from '@astrojs/starlight/components';
-
-<FileTree>
-
-- R
-  - code.R
-- NAMESPACE
-- DESCRIPTION
-
-</FileTree>
+For more information see [here](/configuration).
