@@ -25,43 +25,26 @@ The formatter follows these key principles:
 
 ## Formatting Rules
 
-Roughly's formatter applies specific rules to each type of R code construct. Here are the detailed rules with examples:
+Roughly applies specific formatting rules to different R code constructs. Here are the detailed rules with before/after examples:
 
-### Arguments
-
-Arguments are formatted with spaces around equals signs in assignments. Single-line argument lists remain on one line, but when any argument spans multiple lines, all arguments are placed on their own lines with proper indentation:
-
-```r
-# Before formatting
-foo(a=1,b=2)
-bar(a=1,
-    b=2)
-
-# After formatting
-foo(a = 1, b = 2)
-bar(
-  a = 1,
-  b = 2
-)
-```
 
 ### Binary Operators
 
-Spaces are added around binary operators, except for `:` which creates a range:
+Spaces are added around binary operators, except for the range operator (`:`):
 
 ```r
 # Before formatting
 x<-1
-y=2
+1+2
 1:10
 
 # After formatting
 x <- 1
-y = 2
+1 + 2
 1:10
 ```
 
-Multiline expressions with binary operators are indented to maintain readability:
+Multi-line expressions with binary operators maintain indentation for readability:
 
 ```r
 # Before formatting
@@ -77,7 +60,7 @@ foo() %>%
 
 ### Blocks
 
-Contents of a block are always indented. Single line blocks remain on one line (even with semicolons), but multiline blocks have each expression on its own line:
+Code blocks are consistently indented. Single-line blocks remain compact (even with semicolons), while multi-line blocks format each expression on its own line:
 
 ```r
 # Before formatting
@@ -92,30 +75,6 @@ foo; bar
   foo
   bar
 }
-```
-
-### Calls
-
-Function calls follow similar formatting rules as arguments:
-
-```r
-# Before formatting
-foo(a=1, b=2)
-bar(a=1,
-  b=2)
-baz({
-  a
-})
-
-# After formatting
-foo(a = 1, b = 2)
-bar(
-  a = 1,
-  b = 2
-)
-baz({
-  a
-})
 ```
 
 ### Comments
@@ -157,9 +116,27 @@ function() {
 }
 ```
 
+### Function Calls
+
+Arguments are formatted with consistent spacing around equals signs. Single-line argument lists remain on one line, while multi-line arguments receive proper indentation:
+
+```r
+# Before formatting
+foo(a=1,b=2)
+bar(a=1,
+    b=2)
+
+# After formatting
+foo(a = 1, b = 2)
+bar(
+  a = 1,
+  b = 2
+)
+```
+
 ### Function Definitions
 
-Function definitions follow similar rules as calls:
+Function definitions follow consistent formatting rules for parameters and body:
 
 ```r
 # Before formatting
@@ -175,26 +152,9 @@ bar <- function(
 ) {}
 ```
 
-### Parenthesized Expressions
-
-Parenthesized expressions follow similar rules to calls and blocks:
-
-```r
-# Before formatting
-(a+b)
-(a +
- b)
-
-# After formatting
-(a + b)
-(
-  a + b
-)
-```
-
 ### If Statements
 
-One-line if statements are preserved, but if the condition or any body is multiline, all bodies become multiline:
+One-line conditional statements are preserved, but multi-line bodies trigger consistent formatting for all parts:
 
 ```r
 # Before formatting
@@ -202,9 +162,6 @@ if (x) {y} else {z}
 if (x) {
   y
 } else {z}
-if (
-  x
-) { y }
 
 # After formatting
 if (x) { y } else { z }
@@ -213,10 +170,22 @@ if (x) {
 } else {
   z
 }
+```
+
+For if-statements with multi-line conditions, the formatter enforces a multiline block structure for the body:
+
+```r
+# Before formatting
 if (
-  x
+  x && y
+) z
+
+
+# After formatting
+if (
+  x && y
 ) {
-  y
+  z
 }
 ```
 
@@ -242,16 +211,35 @@ repeat {
 }
 ```
 
-### Strings
+### Parenthesized Expressions
 
-String literals are consistently formatted using double quotes (`"`) instead of single quotes (`'`):
+Parenthesized expressions maintain their layout, with consistent formatting for multi-line expressions:
 
 ```r
 # Before formatting
-x <- 'hello'
+(a+b)
+(a +
+ b)
+
+# After formatting
+(a + b)
+(
+  a + b
+)
+```
+
+### Strings
+
+String literals are consistently formatted, preserving escape sequences and multi-line content:
+
+```r
+# Before formatting
+x <- "hello"
+y <- 'world'
 
 # After formatting
 x <- "hello"
+y <- "world"
 ```
 
 ### Subset Operations
@@ -272,7 +260,6 @@ x[
 ]
 ```
 
-
 ## Format Suppression
 
 You can disable formatting for specific code sections using the `# fmt: skip` comment directive:
@@ -288,29 +275,29 @@ matrix(
 ) # This code won't be reformatted
 
 matrix(c(1, 2,
-     3, 4), nrow = 2)  # This code will be formatted
+         3, 4), nrow = 2)  # This code will be formatted
 
-matrix(c(1,2,
-3, 4), nrow=2) # fmt: skip
+matrix(c(1, 2,
+         3, 4), nrow=2) # fmt: skip
 # The line above won't be reformatted
 ```
 
 The `fmt: skip` directive can be placed:
-
 - Before a specific line to skip formatting that line
 - At the end of a line to skip formatting that line
 
-## Handling Special Cases
+## Special Cases
 
-The formatter intelligently handles various R code idioms and special patterns:
+The formatter intelligently handles various R idioms and special patterns:
 
-- **Switch statements**: Properly formats switch statements with fallthrough cases (`case = ,`)
-- **Multi-line strings**: Preserves indentation and structure in multi-line string literals
-- **Special comments**: Respects shebangs, roxygen documentation, and other special comment types
-- **Emtpy lines in R6 ddefintions**: One empty line is allowed in R6 class definitions for better readability.
-- **Empty blocks**: Formats empty blocks (`{}`) consistently
-- **Matrix indexing**: Properly handles complex subsetting operations with multiple empty dimensions (`[,,]`)
-- **Expression sequences**: Maintains readability in expression sequences (e.g., `{ expr1; expr2 }`)
+- **Blocks in calls or parenthesized expressions**: When a single code block is inside parentheses, it doesn't receive an additional level of indentation (e.g. `foo({ expr })`)
+- **Empty blocks**: Consistently formats empty blocks (`{}`)
+- **Empty lines in R6 definitions**: Allows one empty line in R6 class definitions
+- **Expression sequences**: Maintains readability in sequences with semicolons (e.g., `{ expr1; expr2 }`)
+- **Matrix indexing**: Handles complex subsetting with empty dimensions (`[,,]`)
+- **Multi-line strings**: Preserves structure in multi-line string literals
+- **Special comments**: Respects shebangs, roxygen documentation, and other comment types
+- **Switch statements**: Properly formats fallthrough cases (`case = ,`)
 
 ## Line Endings
 

@@ -6,24 +6,43 @@ description: Installation and basic setup for Roughly
 import { Steps } from '@astrojs/starlight/components';
 
 
-This guide will help you install and set up Roughly for your R projects.
+This guide will walk you through installing and configuring Roughly for your R projects.
 
-## Installation
+## Roughly CLI
 
-### Roughly CLI
+### Installation
 
 <Steps>
 
-1. Download the pre-built binary for your platform from [GitHub Releases](https://github.com/felix-andreas/roughly/releases)
-2. Extract the archive and place the binary in your PATH
+1. Download the pre-built binary for your platform from the [GitHub Releases](https://github.com/felix-andreas/roughly/releases) page
+2. Extract the archive and add the binary to your system PATH
 
 </Steps>
 
+### Usage
+
+Roughly provides several commands to format code, check for issues, and run a language server:
+
+```bash
+# Format R files
+roughly fmt                # Format files in current directory
+roughly fmt path/to/files  # Format files at the specific path
+
+# Check for issues
+roughly check              # Lint files in current directory
+
+# Run the language server
+roughly lsp                # Start the LSP server
+```
+
+
 ### VS Code Extension (Recommended)
+
+For the optimal R development experience, install the Roughly VS Code extension.
 
 <Steps>
 
-1. Download the latest `roughly.vsix` from [GitHub Releases](https://github.com/felix-andreas/roughly/releases)
+1. Download the latest `roughly.vsix` from the [GitHub Releases](https://github.com/felix-andreas/roughly/releases) page
 2. Install in VS Code:
    ```bash
    code --install-extension roughly.vsix
@@ -37,27 +56,13 @@ This guide will help you install and set up Roughly for your R projects.
 
 </Steps>
 
-## Command Line Usage
-
-```bash
-# Format R files
-roughly fmt                # Format current directory
-roughly fmt path/to/files  # Format specific path
-
-# Check for issues
-roughly check              # Lint current directory
-
-# Run the language server
-roughly lsp                # Start the LSP server
-```
-
 ## Project Configuration
 
-Create a `roughly.toml` in your project root:
+Create a `roughly.toml` file in your project root to customize Roughly's behavior:
 
 ```toml
 case = "snake_case"  # or "camelCase"
 spaces = 2
 ```
 
-For more information see [here](/configuration).
+For detailed configuration options, see the [Configuration](/configuration) documentation.

@@ -46,7 +46,7 @@ export default defineConfig({
 							link: '/configuration',
 						},
 					],
-					footerText: `<div class="py-8 flex items-center justify-between"><div class="flex items-center gap-2"><img src="logo.svg" width="12" /> Roughly © ${new Date().getFullYear()}</div><a href="https://felixandreas.me/legal-notice/" target="_blank" rel="noopener" class="no-underline text-gray-500">Legal Notice</a></div>`
+					footerText: `<div class="py-8 flex items-center justify-between"><div class="flex items-center gap-2"><img src="/logo.svg" width="12" /> Roughly © ${new Date().getFullYear()}</div><a href="https://felixandreas.me/legal-notice/" target="_blank" rel="noopener" class="no-underline text-gray-500">Legal Notice</a></div>`
 				})
 			],
 		}),
