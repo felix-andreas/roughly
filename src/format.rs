@@ -609,10 +609,10 @@ fn traverse(
                 "for ({} in {}) {}",
                 fmt(field("variable")?)?,
                 fmt(field("sequence")?)?,
-                if body.kind() != "braced_expression" {
-                    wrap_with_braces(body)?
-                } else {
+                if body.kind() == "braced_expression" {
                     fmt_multiline(body, true)?
+                } else {
+                    wrap_with_braces(body)?
                 },
             )
         }
@@ -889,7 +889,15 @@ fn traverse(
                 .collect::<Result<String, FormatError>>()?
         }
         "repeat_statement" => {
-            format!("repeat {}", fmt_multiline(field("body")?, true)?)
+            let body = field("body")?;
+            format!(
+                "repeat {}",
+                if body.kind() == "braced_expression" {
+                    fmt_multiline(body, true)?
+                } else {
+                    wrap_with_braces(body)?
+                }
+            )
         }
         "string" => {
             let maybe_string_content = field_optional("content");

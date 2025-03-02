@@ -7,7 +7,7 @@ Start the local dev server:
 bun dev
 ```
 
-Build production side to `dist`:
+Bundle the production site into the `dist` folder:
 
 ```sh
 bun run build
