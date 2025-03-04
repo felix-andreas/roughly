@@ -207,23 +207,55 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
         node,
         rope,
         line_ending,
-        false,
+        State::default(),
         config,
     )?))
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct State {
+    make_multiline: bool,
+    matrix: MatrixFormat,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+enum MatrixFormat {
+    #[default]
+    None,
+    GetDims,
+    Format {
+        cols: usize,
+        rows: usize,
+    },
+}
+
+impl State {
+    fn make_multiline(self, make_multiline: bool) -> Self {
+        State {
+            make_multiline,
+            ..self
+        }
+    }
+    fn matrix(self, matrix: MatrixFormat) -> Self {
+        State { matrix, ..self }
+    }
 }
 
 fn traverse(
     node: Node,
     rope: &Rope,
     line_ending: LineEnding,
-    make_multiline: bool,
+    state: State,
     config: Config,
 ) -> Result<String, FormatError> {
     let kind = node.kind();
-    let fmt = |node: Node| traverse(node, rope, line_ending, false, config);
+    let fmt_state = |node: Node, state: State| traverse(node, rope, line_ending, state, config);
+    let fmt = |node: Node| fmt_state(node, State::default());
     let fmt_multiline = |node: Node, make_multiline: bool| {
-        traverse(node, rope, line_ending, make_multiline, config)
+        fmt_state(node, State::default().make_multiline(make_multiline))
     };
+    let fmt_matrix =
+        |node: Node, matrix: MatrixFormat| fmt_state(node, State::default().matrix(matrix));
     let fmt_with_ident_prefix =
         |node: Node| utils::add_indent_prefix(&rope.byte_slice(node.byte_range()).to_string());
     let field = |field: &'static str| {
@@ -343,6 +375,8 @@ fn traverse(
             let mut is_first_arg = true;
             let mut fmt_skip = false;
             let mut cursor = node.walk();
+            let cols = 2;
+            let mut i = 0;
             node.children(&mut cursor)
                 .skip(1)
                 .take(node.child_count() - 2)
@@ -416,7 +450,7 @@ fn traverse(
                             } else {
                                 "".into()
                             }
-                        } else if is_multiline {
+                        } else if is_multiline && i % 2 == 0 {
                             line_ending.repeat(usize::clamp(
                                 prev_node_local
                                     .map(|prev_node| {
@@ -432,6 +466,7 @@ fn traverse(
                         formatted
                     );
                     is_first_arg = false;
+                    i += 1;
                     Ok(result)
                 })
                 .collect::<Result<String, FormatError>>()?
@@ -538,7 +573,7 @@ fn traverse(
                         Some(prev_end) => {
                             format!(
                                 "{}{}",
-                                if is_multiline || make_multiline {
+                                if is_multiline || state.make_multiline {
                                     line_ending.repeat(usize::clamp(
                                         child.start_position().row - prev_end,
                                         1,
@@ -559,7 +594,7 @@ fn traverse(
 
             if lines.is_empty() {
                 "{}".to_string()
-            } else if is_multiline || make_multiline {
+            } else if is_multiline || state.make_multiline {
                 format!(
                     "{{{}}}",
                     utils::indent_by_with_newlines(config.spaces, lines, line_ending)
@@ -574,7 +609,14 @@ fn traverse(
             let arguments = field("arguments")?;
 
             let function_fmt = fmt(function)?;
-            let arguments_fmt = fmt(arguments)?;
+            let arguments_fmt = fmt_matrix(
+                arguments,
+                if function_fmt == "matrix" {
+                    MatrixFormat::GetDims
+                } else {
+                    MatrixFormat::None
+                },
+            )?;
             format!(
                 "{function_fmt}({})",
                 if is_multiline
@@ -645,7 +687,7 @@ fn traverse(
             let consequence = field("consequence")?;
             let maybe_alternative = field_optional("alternative");
             let is_multiline =
-                make_multiline || node.start_position().row != node.end_position().row;
+                state.make_multiline || node.start_position().row != node.end_position().row;
             let is_multiline_condition =
                 condition.start_position().row != condition.end_position().row;
 
@@ -1158,7 +1200,9 @@ mod test {
             list  (
                 # foo
                 a = 1, #bar
-                b= 2L) #baz
+                b= 2L
+                # baz
+                ) #qux
         "#};
         assert_fmt! {r#"
             foo  ( #foo

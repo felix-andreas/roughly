@@ -1,9 +1,10 @@
 ---
 source: src/format.rs
-expression: "fmt(indoc!\n{\n    r#\"\n            list  (\n                # foo\n                a = 1, #bar\n                b= 2L) #baz\n        \"#\n})"
+expression: "format_str(indoc!\n{\n    r#\"\n            list  (\n                # foo\n                a = 1, #bar\n                b= 2L\n                # baz\n                ) #qux\n        \"#\n}).unwrap()"
 ---
 list(
   # foo
   a = 1, # bar
   b = 2L
-) # baz
+  # baz
+) # qux
