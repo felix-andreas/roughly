@@ -28,11 +28,21 @@ export default defineConfig({
 						{ slug: 'configuration' },
 					],
 				},
+				{
+					label: 'Contributing',
+					items: [
+						{ slug: 'development' },
+					],
+				},
 			],
 			customCss: ['./src/tailwind.css'],
 			plugins: [
 				starlightThemeBlack({
 					navLinks: [
+						{
+							label: 'Docs',
+							link: '/getting-started',
+						},
 						{
 							label: 'Formatter',
 							link: '/formatter',
@@ -42,7 +52,7 @@ export default defineConfig({
 							link: '/linter',
 						},
 						{
-							label: 'Configuration',
+							label: 'Config',
 							link: '/configuration',
 						},
 					],

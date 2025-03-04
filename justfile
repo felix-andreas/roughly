@@ -10,6 +10,9 @@ lint *args:
 test *args:
 	cargo test -- --nocapture {{args}}
 
+docs:
+	cd docs && bun dev
+
 snapshot *args:
 	cargo insta test --review -- --nocapture {{args}}
 
