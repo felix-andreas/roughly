@@ -1,0 +1,17 @@
+---
+source: src/format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n            if (\n            # foo\n            {\n                TRUE\n            }) {}\n\n            if ({\n                TRUE\n            }\n            # foo\n            ) {}\n            \"#\n}).unwrap()"
+---
+if (
+  # foo
+  {
+    TRUE
+  }
+) {}
+
+if (
+  {
+    TRUE
+  }
+  # foo
+) {}

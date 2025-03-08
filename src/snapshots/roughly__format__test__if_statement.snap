@@ -8,8 +8,8 @@ if (a > b) {
   "foo"
 }
 x <- if (T) 4
-# foo
-if (TRUE) {
+if (TRUE) # foo
+{
   10
 }
 

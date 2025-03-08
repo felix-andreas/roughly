@@ -5,10 +5,14 @@ expression: "format_str(indoc!\n{\n    r#\"\n            if (foo) {bar}\n       
 if (foo) { bar }
 if (foo) { bar } else { baz }
 if (foo) bar else { baz }
-if (foo) {
+if (
+  foo
+) {
   bar
 }
-if (foo) {
+if (
+  foo
+) {
   bar
 }
 if (foo) {

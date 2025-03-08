@@ -7,7 +7,7 @@ use {
     ignore::Walk,
     itertools::Itertools,
     ropey::Rope,
-    std::path::PathBuf,
+    std::{borrow::Cow, path::PathBuf},
     thiserror::Error,
     tree_sitter::Node,
 };
@@ -177,7 +177,7 @@ pub enum FormatError {
     },
     #[error("The node has unknown type {kind}: {raw}")]
     Unknown { kind: &'static str, raw: String },
-    #[error("Missing filed {field} for node of kind {kind}")]
+    #[error("Missing field {field} for node of kind {kind}")]
     MissingField {
         kind: &'static str,
         field: &'static str,
@@ -236,6 +236,7 @@ fn traverse(
         LineEnding::Lf => "\n",
         LineEnding::Crlf => "\r\n",
     };
+    let same_line = |a: Node, b: Node| a.end_position().row == b.start_position().row;
     let wrap_with_braces = |node: Node| -> Result<String, FormatError> {
         Ok(format!(
             "{{{}}}",
@@ -254,7 +255,7 @@ fn traverse(
         line: node.start_position().row,
         col: node.start_position().column,
     };
-    let error = |node: Node| FormatError::SyntaxError {
+    let syntax_error = |node: Node| FormatError::SyntaxError {
         kind: node.kind(),
         line: node.start_position().row,
         col: node.start_position().column,
@@ -263,7 +264,7 @@ fn traverse(
         if node.is_missing() {
             Err(missing(node))
         } else if node.is_error() {
-            Err(error(node))
+            Err(syntax_error(node))
         } else {
             Ok(())
         }
@@ -271,7 +272,7 @@ fn traverse(
 
     // note: currently we don't traverse open&close -> they never reach these conditions
     if node.is_error() {
-        return Err(error(node));
+        return Err(syntax_error(node));
     }
 
     if node.is_missing() {
@@ -558,7 +559,7 @@ fn traverse(
                 .collect::<Result<String, FormatError>>()?;
 
             if lines.is_empty() {
-                "{}".to_string()
+                "{}".into()
             } else if is_multiline || make_multiline {
                 format!(
                     "{{{}}}",
@@ -641,43 +642,101 @@ fn traverse(
             )
         }
         "if_statement" => {
-            let condition = field("condition")?;
-            let consequence = field("consequence")?;
-            let maybe_alternative = field_optional("alternative");
-            let is_multiline =
-                make_multiline || node.start_position().row != node.end_position().row;
-            let is_multiline_condition =
-                condition.start_position().row != condition.end_position().row;
+            handles_comments = true;
+            let is_multiline = make_multiline || !same_line(node, node);
+            let is_multiline_condition = !same_line(field("open")?, field("close")?);
 
-            format!(
-                "if ({}) {}{}{}",
-                if is_multiline_condition && condition.kind() != "braced_expression" {
-                    utils::indent_by_with_newlines(config.spaces, fmt(condition)?, line_ending)
-                } else {
-                    fmt(condition)?
-                },
-                if is_multiline && consequence.kind() != "braced_expression" {
-                    wrap_with_braces(consequence)?
-                } else {
-                    fmt_multiline(consequence, is_multiline)?
-                },
-                match maybe_alternative {
-                    Some(_) => " else ",
-                    None => "",
-                },
-                match maybe_alternative {
-                    Some(alternative) =>
-                        if is_multiline
-                            && alternative.kind() != "braced_expression"
-                            && alternative.kind() != "if_statement"
-                        {
-                            wrap_with_braces(alternative)?
-                        } else {
-                            fmt_multiline(alternative, is_multiline)?
-                        },
-                    None => "".into(),
-                }
-            )
+            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
+            let mut indent_comments = false;
+            tree::for_each_child(&mut node.walk(), |child, field_name| {
+                let prev_node = child.prev_sibling();
+
+                let prev_is_comment = prev_node
+                    .map(|node| node.kind() == "comment")
+                    .unwrap_or(false);
+
+                match field_name {
+                    None => match child.kind() {
+                        "if" => out.push_str("if"),
+                        "else" => {
+                            if !prev_is_comment {
+                                out.push(' ');
+                            }
+                            out.push_str("else")
+                        }
+                        "comment" => {
+                            if let Some(prev_node) = prev_node
+                                && same_line(prev_node, child)
+                            {
+                                out.push(' ');
+                            } else {
+                                if !prev_is_comment {
+                                    out.push('\n');
+                                }
+                                if indent_comments {
+                                    out.push_str(&" ".repeat(config.spaces));
+                                }
+                            }
+                            out.push_str(&fmt(child)?);
+                            out.push('\n')
+                        }
+                        _ => unreachable!(),
+                    },
+                    Some(field_name) => match field_name {
+                        "open" => {
+                            indent_comments = true;
+                            if !prev_is_comment {
+                                out.push(' ');
+                            }
+                            out.push('(');
+                        }
+                        "condition" => {
+                            let next_is_comment = child
+                                .next_sibling()
+                                .map(|next| next.kind() == "comment")
+                                .unwrap_or(false);
+                            if is_multiline_condition
+                                && !(child.kind() == "braced_expression"
+                                    && !(prev_is_comment || next_is_comment))
+                            {
+                                if !prev_is_comment {
+                                    out.push('\n');
+                                }
+                                out.push_str(&utils::indent_by(
+                                    config.spaces,
+                                    fmt(child)?,
+                                    line_ending,
+                                ));
+                                if !next_is_comment {
+                                    out.push('\n');
+                                }
+                            } else {
+                                out.push_str(&fmt(child)?);
+                            }
+                        }
+                        "close" => {
+                            indent_comments = false;
+                            out.push(')')
+                        }
+                        "consequence" | "alternative" => {
+                            if !prev_is_comment {
+                                out.push(' ');
+                            }
+                            out.push_str(&if is_multiline
+                                && child.kind() != "braced_expression"
+                                && (field_name != "alternative" || child.kind() != "if_statement")
+                            {
+                                wrap_with_braces(child)?
+                            } else {
+                                fmt_multiline(child, is_multiline)?
+                            })
+                        }
+                        _ => unreachable!(),
+                    },
+                };
+                Ok::<_, FormatError>(())
+            })?;
+            out
         }
         "integer" => get_raw(),
         "na" => get_raw(),
@@ -1324,7 +1383,7 @@ mod test {
                 {bar}
         "#};
 
-        // make
+        // make nested alternatives multiline
         assert_fmt! {r#"
             if (foo) {
                 bar
@@ -1355,6 +1414,56 @@ mod test {
         	if ({ foo;
              bar }) { baz }
         "#};
+    }
+
+    #[test]
+    fn if_statement_comments() {
+        assert_fmt! {r#"
+            # for some weird reason this is only parsed correctly if in a parentheses
+            (
+                # before
+                if
+                # 1
+                ( # open
+                    # 2
+                    a && b # condition
+                    # 3
+                ) # close
+                # 4
+                {
+                    y
+                }
+                # 5
+                else
+                # 6
+                {
+                    4
+                }
+                # after
+            )
+        "#};
+
+        // also wrap braced expression in multiline if condition contains comments
+        assert_fmt! {r#"
+            if (
+            # foo
+            {
+                TRUE
+            }) {}
+
+            if ({
+                TRUE
+            }
+            # foo
+            ) {}
+            "#
+        };
+
+        assert_fmt! {r#"
+            if (foo) #foo
+                foo
+            "#
+        };
     }
 
     #[test]

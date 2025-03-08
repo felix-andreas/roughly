@@ -1,0 +1,8 @@
+---
+source: src/format.rs
+expression: "format_str(indoc!\n{ r#\"\n            if (foo) #foo\n                foo\n            \"# }).unwrap()"
+---
+if (foo) # foo
+{
+  foo
+}

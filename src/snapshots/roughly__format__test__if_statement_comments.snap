@@ -1,0 +1,26 @@
+---
+source: src/format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n            # for some weird reason this is only parsed correctly if in a parentheses\n            (\n                # before\n                if\n                # 1\n                ( # open\n                    # 2\n                    a && b # condition\n                    # 3\n                ) # close\n                # 4\n                {\n                    y\n                }\n                # 5\n                else\n                # 6\n                {\n                    4\n                }\n                # after\n            )\n        \"#\n}).unwrap()"
+---
+# for some weird reason this is only parsed correctly if in a parentheses
+(
+  # before
+  if
+  # 1
+  ( # open
+    # 2
+    a && b # condition
+    # 3
+  ) # close
+  # 4
+  {
+    y
+  }
+  # 5
+  else
+  # 6
+  {
+    4
+  }
+  # after
+)

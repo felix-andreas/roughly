@@ -2,7 +2,9 @@
 source: src/format.rs
 expression: "format_str(indoc!\n{\n    r#\"\n            if (\n                TRUE\n            ) {foo\n             } else if (TRUE) {bar\n            } else baz\n        \"#\n}).unwrap()"
 ---
-if (TRUE) {
+if (
+  TRUE
+) {
   foo
 } else if (TRUE) {
   bar
