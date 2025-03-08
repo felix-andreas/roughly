@@ -366,6 +366,7 @@ impl LanguageServer for Backend {
         let (rope, tree) = (&document.rope, &document.tree);
         let new = match format::format(tree.root_node(), rope, format::Config {
             spaces: self.config.spaces,
+            stop_on_unhandled_comment: false,
         }) {
             Ok(new) => new,
             Err(error) => {

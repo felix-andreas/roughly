@@ -7,7 +7,7 @@ use {
     ignore::Walk,
     itertools::Itertools,
     ropey::Rope,
-    std::{borrow::Cow, path::PathBuf},
+    std::path::PathBuf,
     thiserror::Error,
     tree_sitter::Node,
 };
@@ -15,9 +15,15 @@ use {
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
     pub spaces: usize,
+    pub stop_on_unhandled_comment: bool,
 }
 
-pub fn run(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(), ()> {
+pub fn run(
+    maybe_files: Option<&[PathBuf]>,
+    check: bool,
+    diff: bool,
+    stop_on_unhandled_comment: bool,
+) -> Result<(), ()> {
     let root: Vec<PathBuf> = vec![".".into()];
     let files = maybe_files.unwrap_or(&root);
 
@@ -57,6 +63,7 @@ pub fn run(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(
         let rope = Rope::from_str(&old);
         let new = match format(tree.root_node(), &rope, Config {
             spaces: config.spaces,
+            stop_on_unhandled_comment,
         }) {
             Ok(new) => new,
             Err(err) => {
@@ -177,6 +184,12 @@ pub enum FormatError {
     },
     #[error("The node has unknown type {kind}: {raw}")]
     Unknown { kind: &'static str, raw: String },
+    #[error("Unhandled comment in line {line}:{col}: \"{comment}\"")]
+    UnhandledComment {
+        comment: String,
+        line: usize,
+        col: usize,
+    },
     #[error("Missing field {field} for node of kind {kind}")]
     MissingField {
         kind: &'static str,
@@ -1053,7 +1066,7 @@ fn traverse(
         "return" => "return".into(),
         "true" => "TRUE".into(),
         unknown => {
-            log::error!("UNKNOWN NODE KIND: {unknown}");
+            log::error!("unknown node kind: {unknown}");
             return Err(FormatError::Unknown {
                 kind,
                 raw: get_raw(),
@@ -1064,9 +1077,23 @@ fn traverse(
     Ok(if handles_comments {
         result
     } else {
-        let mut cursor = node.walk();
-        node.children(&mut cursor)
+        let comments = node
+            .children(&mut node.walk())
             .filter(|node| node.kind() == "comment")
+            .collect::<Vec<_>>();
+        if let Some(&comment) = comments.first()
+            && config.stop_on_unhandled_comment
+        {
+            let start = comment.start_position();
+            return Err(FormatError::UnhandledComment {
+                comment: fmt(comment)?,
+                line: start.row,
+                col: start.column,
+            });
+        }
+
+        comments
+            .into_iter()
             .map(fmt)
             .chain(std::iter::once(Ok(result)))
             .collect::<Result<Vec<String>, FormatError>>()?
@@ -1091,6 +1118,7 @@ mod test {
         // dbg!(tree.root_node().to_sexp());
         // eprintln!("{}", utils::format_node(&tree.root_node()));
         format(tree.root_node(), &Rope::from_str(text), Config {
+            stop_on_unhandled_comment: true,
             spaces: 2,
         })
     }

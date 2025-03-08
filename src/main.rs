@@ -18,12 +18,15 @@ async fn main() -> ExitCode {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(()) => ExitCode::FAILURE,
             },
-            Command::Fmt { files, check, diff } => {
-                match format::run(files.as_deref(), check, diff) {
-                    Ok(()) => ExitCode::SUCCESS,
-                    Err(()) => ExitCode::FAILURE,
-                }
-            }
+            Command::Fmt {
+                files,
+                check,
+                diff,
+                stop_on_unhandled_comment,
+            } => match format::run(files.as_deref(), check, diff, stop_on_unhandled_comment) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(()) => ExitCode::FAILURE,
+            },
             Command::Lsp { stdio: _stdio } => {
                 lsp::run().await;
                 ExitCode::SUCCESS
@@ -70,6 +73,9 @@ enum Command {
         /// Avoid writing any formatted files back; instead, exit with a non-zero status code and the difference between the current file and how the formatted file would look like
         #[clap(long, default_value_t = false)]
         diff: bool,
+        /// Stop if a comment can't be properly placed (exits with error if a comment would be moved to different location)
+        #[clap(long, default_value_t = false)]
+        stop_on_unhandled_comment: bool,
     },
     /// Run the language server
     Lsp {
