@@ -15,7 +15,7 @@ pub fn for_each_child<'a, E>(
     cursor: &mut TreeCursor<'a>,
     mut func: impl FnMut(Node<'a>, Option<&'static str>) -> Result<(), E>,
 ) -> Result<(), E> {
-    Ok(if cursor.goto_first_child() {
+    if cursor.goto_first_child() {
         loop {
             func(cursor.node(), cursor.field_name())?;
             if !cursor.goto_next_sibling() {
@@ -23,7 +23,8 @@ pub fn for_each_child<'a, E>(
                 break;
             }
         }
-    })
+    };
+    Ok(())
 }
 
 // #[macro_export]

@@ -1,5 +1,11 @@
 use {
-    crate::{cli, config::Config, diagnostics, format, index, tree},
+    crate::{
+        cli,
+        config::Config,
+        diagnostics, format,
+        index::{self, IndexError},
+        tree,
+    },
     dashmap::DashMap,
     ropey::Rope,
     std::path::Path,
@@ -57,7 +63,7 @@ impl LanguageServer for Backend {
 
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
         log::info!("server :: initialize");
-        if let Err(()) = index::index_full(&self.symbols_map) {
+        if let Err(IndexError) = index::index_full(&self.symbols_map) {
             self.client
                 .show_message(MessageType::ERROR, "failed to index files")
                 .await;

@@ -18,108 +18,136 @@ pub struct Config {
     pub stop_on_unhandled_comment: bool,
 }
 
+#[derive(Debug)]
+pub struct FormatRunError;
+
 pub fn run(
     maybe_files: Option<&[PathBuf]>,
     check: bool,
     diff: bool,
     stop_on_unhandled_comment: bool,
-) -> Result<(), ()> {
+) -> Result<(), FormatRunError> {
     let root: Vec<PathBuf> = vec![".".into()];
     let files = maybe_files.unwrap_or(&root);
 
-    let config = match config::Config::from_path(&files.first().unwrap()) {
-        Ok(config) => config,
-        Err(err) => {
-            cli::error(&err.to_string());
-            return Err(());
-        }
-    };
+    let file_config_pairs = files
+        .iter()
+        .map(|file| {
+            let config = match config::Config::from_path(file) {
+                Ok(config) => config,
+                Err(error) => {
+                    cli::error(&error.to_string());
+                    return Err(FormatRunError);
+                }
+            };
+
+            let paths = Walk::new(file)
+                .filter_map(|entry_result| match entry_result {
+                    Ok(entry) => {
+                        let path = entry.into_path();
+                        if path
+                            .extension()
+                            .map(|ext| ext == "R" || ext == "r")
+                            .unwrap_or(false)
+                        {
+                            Some(Ok(path))
+                        } else {
+                            None
+                        }
+                    }
+                    Err(error) => {
+                        cli::error(&error.to_string());
+                        Some(Err(FormatRunError))
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok((paths, config))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     let mut n_files = 0;
     let mut n_unformatted = 0;
     let mut n_errors = 0;
-    for path in files
-        .iter()
-        .flat_map(Walk::new)
-        .filter_map(|e| e.ok())
-        .map(|entry| entry.into_path())
-        .filter(|path| {
-            path.extension()
-                .map(|ext| ext == "R" || ext == "r")
-                .unwrap_or(false)
-        })
-    {
-        n_files += 1;
-        let old = match std::fs::read_to_string(&path) {
-            Ok(old) => old,
-            Err(err) => {
-                n_errors += 1;
-                cli::error(&format!("failed to format: {}", path.display()));
-                eprintln!("{err}");
-                continue;
-            }
-        };
-        let tree = tree::parse(&old, None);
-        let rope = Rope::from_str(&old);
-        let new = match format(tree.root_node(), &rope, Config {
-            spaces: config.spaces,
-            stop_on_unhandled_comment,
-        }) {
-            Ok(new) => new,
-            Err(err) => {
-                n_errors += 1;
-                cli::error(&format!("failed to format: {}", path.display()));
-                eprintln!("{err}");
-                continue;
-            }
-        };
-        if old != new {
-            n_unformatted += 1;
-            if diff {
-                eprintln!("Diff in {}:", path.display());
-                print_diff(&old, &new);
-            } else if check {
-                eprintln!("Would reformat: {}", style(path.display()).bold());
-            } else if std::fs::write(&path, new).is_err() {
-                cli::error(&format!("failed to write to file: {}", path.display()));
+    for (paths, config) in file_config_pairs.into_iter() {
+        for path in paths {
+            n_files += 1;
+            let old = match std::fs::read_to_string(&path) {
+                Ok(old) => old,
+                Err(err) => {
+                    n_errors += 1;
+                    cli::error(&format!("failed to format: {}", path.display()));
+                    eprintln!("{err}");
+                    continue;
+                }
+            };
+            let tree = tree::parse(&old, None);
+            let rope = Rope::from_str(&old);
+            let new = match format(tree.root_node(), &rope, Config {
+                spaces: config.spaces,
+                stop_on_unhandled_comment,
+            }) {
+                Ok(new) => new,
+                Err(err) => {
+                    n_errors += 1;
+                    cli::error(&format!("failed to format: {}", path.display()));
+                    eprintln!("{err}");
+                    continue;
+                }
+            };
+            if old != new {
+                n_unformatted += 1;
+                if diff {
+                    eprintln!("Diff in {}:", path.display());
+                    print_diff(&old, &new);
+                } else if check {
+                    eprintln!("Would reformat: {}", style(path.display()).bold());
+                } else if std::fs::write(&path, &new).is_err() {
+                    cli::error(&format!("failed to write to file: {}", path.display()));
+                }
             }
         }
     }
 
     if n_files == 0 {
         cli::warning("No R files found under the given path(s)");
-        return Err(());
+        return Err(FormatRunError);
     }
 
-    let (first, second) = if check || diff {
+    let (action_format, action_skip) = if check || diff {
         ("would be reformatted", "already formatted")
     } else {
         ("reformatted", "left unchanged")
     };
 
+    let n_unchanged = n_files - n_unformatted;
     cli::info(&format!(
-        "{} file{} {first}, {} file{} {second}",
+        "{} file{} {}, {} file{} {}",
         n_unformatted,
-        if n_unformatted == 1 { "" } else { "s" },
-        n_files - n_unformatted,
-        if n_files - n_unformatted == 1 {
-            ""
-        } else {
-            "s"
-        }
+        match n_unformatted {
+            1 => "",
+            _ => "s",
+        },
+        action_format,
+        n_unchanged,
+        match n_unchanged {
+            1 => "",
+            _ => "s",
+        },
+        action_skip
     ));
 
     if n_unformatted == 0 && n_errors == 0 {
         Ok(())
     } else {
-        Err(())
+        Err(FormatRunError)
     }
 }
 
 // from: https://github.com/mitsuhiko/similar/blob/main/examples/terminal-inline.rs
 pub fn print_diff(old: &str, new: &str) {
     use {
-        console::{Style, style},
+        console::Style,
         similar::{ChangeTag, TextDiff},
     };
 
@@ -142,22 +170,22 @@ pub fn print_diff(old: &str, new: &str) {
         }
         for op in group {
             for change in diff.iter_inline_changes(op) {
-                let (sign, s) = match change.tag() {
+                let (sign, style) = match change.tag() {
                     ChangeTag::Delete => ("-", Style::new().red()),
                     ChangeTag::Insert => ("+", Style::new().green()),
                     ChangeTag::Equal => (" ", Style::new().dim()),
                 };
                 eprint!(
                     "{}{} |{}",
-                    style(Line(change.old_index())).dim(),
-                    style(Line(change.new_index())).dim(),
-                    s.apply_to(sign).bold(),
+                    console::style(Line(change.old_index())).dim(),
+                    console::style(Line(change.new_index())).dim(),
+                    style.apply_to(sign).bold(),
                 );
                 for (emphasized, value) in change.iter_strings_lossy() {
                     if emphasized {
-                        eprint!("{}", s.apply_to(value).underlined().on_black());
+                        eprint!("{}", style.apply_to(value).underlined().on_black());
                     } else {
-                        eprint!("{}", s.apply_to(value));
+                        eprint!("{}", style.apply_to(value));
                     }
                 }
                 if change.missing_newline() {
@@ -237,14 +265,21 @@ fn traverse(
     let fmt_multiline = |node: Node, make_multiline: bool| {
         traverse(node, rope, line_ending, make_multiline, config)
     };
-    let fmt_with_ident_prefix =
+    let fmt_with_indent_prefix =
         |node: Node| utils::add_indent_prefix(&rope.byte_slice(node.byte_range()).to_string());
-    let field = |field: &'static str| {
-        node.child_by_field_name(field)
-            .ok_or(FormatError::MissingField { kind, field })
-    };
-    let field_optional = |field: &'static str| node.child_by_field_name(field);
-    let get_raw = || rope.byte_slice(node.byte_range()).to_string();
+    fn field<'a>(node: Node<'a>, field_name: &'static str) -> Result<Node<'a>, FormatError> {
+        let kind = node.kind();
+        node.child_by_field_name(field_name)
+            .ok_or(FormatError::MissingField {
+                kind,
+                field: field_name,
+            })
+    }
+
+    fn field_optional<'a>(node: Node<'a>, field_name: &'static str) -> Option<Node<'a>> {
+        node.child_by_field_name(field_name)
+    }
+    let get_raw = |node: Node| rope.byte_slice(node.byte_range()).to_string();
     let line_ending = match line_ending {
         LineEnding::Lf => "\n",
         LineEnding::Crlf => "\r\n",
@@ -293,7 +328,7 @@ fn traverse(
     }
 
     if node.kind() == "comment" {
-        let raw = get_raw();
+        let raw = get_raw(node);
         let raw = raw.trim_end();
 
         let mut chars = raw.chars();
@@ -325,15 +360,15 @@ fn traverse(
     }
 
     if !node.is_named() {
-        return Ok(get_raw());
+        return Ok(get_raw(node));
     }
 
     let mut handles_comments = false;
 
     let result = match kind {
         "argument" => {
-            let maybe_name = field_optional("name");
-            let maybe_value = field_optional("value");
+            let maybe_name = field_optional(node, "name");
+            let maybe_value = field_optional(node, "value");
 
             // support the switch fallthrough
             let mut cursor = node.walk();
@@ -341,15 +376,15 @@ fn traverse(
 
             match (maybe_name, maybe_value) {
                 (Some(name), Some(value)) => format!("{} = {}", fmt(name)?, fmt(value)?),
-                (None, Some(value)) => (fmt(value)?).to_string(),
+                (None, Some(value)) => fmt(value)?.to_string(),
                 (Some(name), None) if has_equal => format!("{} = ", fmt(name)?),
-                (Some(name), None) => (fmt(name)?).to_string(),
+                (Some(name), None) => fmt(name)?.to_string(),
                 (None, None) => String::new(),
             }
         }
         "arguments" => {
-            check(field("open")?)?;
-            check(field("close")?)?;
+            check(field(node, "open")?)?;
+            check(field(node, "close")?)?;
             handles_comments = true;
             let is_multiline = !same_line(node, node);
 
@@ -374,7 +409,7 @@ fn traverse(
                     }
                     let formatted = if fmt_skip {
                         fmt_skip = false;
-                        fmt_with_ident_prefix(child)
+                        fmt_with_indent_prefix(child)
                     } else {
                         fmt(child)?
                     };
@@ -447,9 +482,9 @@ fn traverse(
         }
         "binary_operator" => {
             handles_comments = true;
-            let lhs = field("lhs")?;
-            let operator = field("operator")?;
-            let rhs = field("rhs")?;
+            let lhs = field(node, "lhs")?;
+            let operator = field(node, "operator")?;
+            let rhs = field(node, "rhs")?;
 
             let comments = node
                 .children(&mut node.walk())
@@ -500,8 +535,8 @@ fn traverse(
             )
         }
         "braced_expression" => {
-            check(field("open")?)?;
-            check(field("close")?)?;
+            check(field(node, "open")?)?;
+            check(field(node, "close")?)?;
             handles_comments = true;
             let mut cursor = node.walk();
             let is_multiline = !same_line(node, node);
@@ -522,7 +557,7 @@ fn traverse(
                     }
                     let line = if fmt_skip {
                         fmt_skip = false;
-                        fmt_with_ident_prefix(child)
+                        fmt_with_indent_prefix(child)
                     } else {
                         fmt(child)?
                     };
@@ -574,8 +609,8 @@ fn traverse(
             }
         }
         "call" => {
-            let function = field("function")?;
-            let arguments = field("arguments")?;
+            let function = field(node, "function")?;
+            let arguments = field(node, "arguments")?;
             let is_multiline = !same_line(arguments, arguments);
 
             let function_fmt = fmt(function)?;
@@ -597,23 +632,23 @@ fn traverse(
                 }
             )
         }
-        "complex" => get_raw(),
+        "complex" => get_raw(node),
         "extract_operator" => {
-            let lhs = field("lhs")?;
-            let op = field("operator")?;
-            let maybe_rhs = field_optional("rhs");
+            let lhs = field(node, "lhs")?;
+            let op = field(node, "operator")?;
+            let maybe_rhs = field_optional(node, "rhs");
             format!("{}{}{}", fmt(lhs)?, op.kind(), match maybe_rhs {
                 Some(rhs) => fmt(rhs)?,
                 None => "".into(),
             })
         }
-        "float" => get_raw(),
+        "float" => get_raw(node),
         "for_statement" => {
-            let body = field("body")?;
+            let body = field(node, "body")?;
             format!(
                 "for ({} in {}) {}",
-                fmt(field("variable")?)?,
-                fmt(field("sequence")?)?,
+                fmt(field(node, "variable")?)?,
+                fmt(field(node, "sequence")?)?,
                 if body.kind() == "braced_expression" {
                     fmt_multiline(body, true)?
                 } else {
@@ -622,9 +657,9 @@ fn traverse(
             )
         }
         "function_definition" => {
-            let name = field("name")?;
-            let parameters = field("parameters")?;
-            let body = field("body")?;
+            let name = field(node, "name")?;
+            let parameters = field(node, "parameters")?;
+            let body = field(node, "body")?;
             let is_multiline = !same_line(node, node);
 
             let parameters_fmt = fmt(parameters)?;
@@ -646,7 +681,7 @@ fn traverse(
         "if_statement" => {
             handles_comments = true;
             let is_multiline = make_multiline || !same_line(node, node);
-            let is_multiline_condition = !same_line(field("open")?, field("close")?);
+            let is_multiline_condition = !same_line(field(node, "open")?, field(node, "close")?);
 
             let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             let mut indent_comments = false;
@@ -740,20 +775,20 @@ fn traverse(
             })?;
             out
         }
-        "integer" => get_raw(),
-        "na" => get_raw(),
+        "integer" => get_raw(node),
+        "na" => get_raw(node),
         "namespace_operator" => {
-            let lhs = field("lhs")?;
-            let op = field("operator")?;
-            let maybe_rhs = field_optional("rhs");
+            let lhs = field(node, "lhs")?;
+            let op = field(node, "operator")?;
+            let maybe_rhs = field_optional(node, "rhs");
             format!("{}{}{}", fmt(lhs)?, op.kind(), match maybe_rhs {
                 Some(rhs) => fmt(rhs)?,
                 None => "".into(),
             })
         }
         "parameter" => {
-            let name = field("name")?;
-            let maybe_default = field_optional("default");
+            let name = field(node, "name")?;
+            let maybe_default = field_optional(node, "default");
 
             let name = fmt(name)?;
             match maybe_default {
@@ -787,7 +822,7 @@ fn traverse(
                     }
                     let tmp = if fmt_skip {
                         fmt_skip = false;
-                        fmt_with_ident_prefix(child)
+                        fmt_with_indent_prefix(child)
                     } else {
                         fmt(child)?
                     };
@@ -907,7 +942,7 @@ fn traverse(
                     }
                     let line = if fmt_skip {
                         fmt_skip = false;
-                        fmt_with_ident_prefix(child)
+                        fmt_with_indent_prefix(child)
                     } else {
                         fmt(child)?
                     };
@@ -945,7 +980,7 @@ fn traverse(
                 .collect::<Result<String, FormatError>>()?
         }
         "repeat_statement" => {
-            let body = field("body")?;
+            let body = field(node, "body")?;
             format!(
                 "repeat {}",
                 if body.kind() == "braced_expression" {
@@ -956,7 +991,7 @@ fn traverse(
             )
         }
         "string" => {
-            let maybe_string_content = field_optional("content");
+            let maybe_string_content = field_optional(node, "content");
             match maybe_string_content {
                 Some(string_content) => {
                     let content = fmt(string_content)?;
@@ -978,10 +1013,10 @@ fn traverse(
                 None => "\"\"".to_string(),
             }
         }
-        "string_content" => fmt_with_ident_prefix(node),
+        "string_content" => fmt_with_indent_prefix(node),
         "subset" => {
-            let function = field("function")?;
-            let arguments = field("arguments")?;
+            let function = field(node, "function")?;
+            let arguments = field(node, "arguments")?;
 
             let function_fmt = fmt(function)?;
             let arguments_fmt = fmt(arguments)?;
@@ -995,8 +1030,8 @@ fn traverse(
             )
         }
         "subset2" => {
-            let function = field("function")?;
-            let arguments = field("arguments")?;
+            let function = field(node, "function")?;
+            let arguments = field(node, "arguments")?;
 
             let function_fmt = fmt(function)?;
             let arguments_fmt = fmt(arguments)?;
@@ -1010,13 +1045,13 @@ fn traverse(
             )
         }
         "unary_operator" => {
-            let operator = field("operator")?;
+            let operator = field(node, "operator")?;
             let spacing = if operator.kind() == "~" { " " } else { "" };
-            format!("{}{spacing}{}", fmt(operator)?, fmt(field("rhs")?)?)
+            format!("{}{spacing}{}", fmt(operator)?, fmt(field(node, "rhs")?)?)
         }
         "while_statement" => {
-            let condition = field("condition")?;
-            let body = field("body")?;
+            let condition = field(node, "condition")?;
+            let body = field(node, "body")?;
             let is_multiline_condition = !same_line(condition, condition);
 
             format!(
@@ -1036,12 +1071,12 @@ fn traverse(
         // SIMPLE
         "break" => "break".into(),
         "comma" => ",".into(),
-        "comment" => get_raw(),
-        "dot_dot_i" => get_raw(),
+        "comment" => get_raw(node),
+        "dot_dot_i" => get_raw(node),
         "dots" => "...".into(),
-        "escape_sequence" => get_raw(),
+        "escape_sequence" => get_raw(node),
         "false" => "FALSE".into(),
-        "identifier" => get_raw(),
+        "identifier" => get_raw(node),
         "inf" => "Inf".into(),
         "nan" => "NaN".into(),
         "next" => "next".into(),
@@ -1052,7 +1087,7 @@ fn traverse(
             log::error!("unknown node kind: {unknown}");
             return Err(FormatError::Unknown {
                 kind,
-                raw: get_raw(),
+                raw: get_raw(node),
             });
         }
     };

@@ -172,28 +172,6 @@ pub fn format_node(node: Node) -> String {
     result
 }
 
-#[cfg(test)]
-mod test {
-    use crate::utils::{add_indent_prefix, remove_indent_prefix};
-
-    #[test]
-    fn test_add_indent_prefix() {
-        assert_eq!(add_indent_prefix("foo\nbar\nbaz"), "foo\n\x02bar\n\x02baz");
-        assert_eq!(
-            add_indent_prefix("foo\nbar\nbaz\n"),
-            "foo\n\x02bar\n\x02baz\n\x02"
-        );
-    }
-
-    #[test]
-    fn test_removeindent_prefix() {
-        assert_eq!(
-            remove_indent_prefix("foo\n  \x02  bar\n  \x02  baz\n\x02"),
-            "foo\n  bar\n  baz\n"
-        );
-    }
-}
-
 // Adapted from  https://doc.rust-lang.org/stable/nightly-rustc/src/clippy_utils/str_utils.rs.html
 
 /// Returns a `camelCase` version of the input
@@ -251,4 +229,26 @@ pub fn to_snake_case(name: &str) -> String {
         prev = char
     }
     snake
+}
+
+#[cfg(test)]
+mod test {
+    use crate::utils::{add_indent_prefix, remove_indent_prefix};
+
+    #[test]
+    fn test_add_indent_prefix() {
+        assert_eq!(add_indent_prefix("foo\nbar\nbaz"), "foo\n\x02bar\n\x02baz");
+        assert_eq!(
+            add_indent_prefix("foo\nbar\nbaz\n"),
+            "foo\n\x02bar\n\x02baz\n\x02"
+        );
+    }
+
+    #[test]
+    fn test_removeindent_prefix() {
+        assert_eq!(
+            remove_indent_prefix("foo\n  \x02  bar\n  \x02  baz\n\x02"),
+            "foo\n  bar\n  baz\n"
+        );
+    }
 }

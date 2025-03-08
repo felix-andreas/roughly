@@ -23,15 +23,15 @@ impl Config {
     }
 }
 
-pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), ()> {
+pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), DiagnosticsError> {
     let root: Vec<PathBuf> = vec![".".into()];
     let files = maybe_files.unwrap_or(&root);
 
-    let config = match config::Config::from_path(&files.first().unwrap()) {
+    let config = match config::Config::from_path(files.first().unwrap()) {
         Ok(config) => config,
         Err(err) => {
             cli::error(&err.to_string());
-            return Err(());
+            return Err(DiagnosticsError);
         }
     };
 
@@ -70,7 +70,7 @@ pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), ()> {
                     Some(DiagnosticSeverity::ERROR) => LogLevel::Error,
                     _ => LogLevel::Info,
                 },
-                &format!("{}", diagnostic.message),
+                &diagnostic.message,
             );
             let range = diagnostic.range;
             let padding_arrow = range.end.line.to_string().len();
@@ -148,15 +148,22 @@ pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), ()> {
 
     if n_files == 0 {
         cli::warning("No R files found under the given path(s)");
-        return Err(());
+        return Err(DiagnosticsError);
     }
 
-    if n_errors == 0 { Ok(()) } else { Err(()) }
+    if n_errors == 0 {
+        Ok(())
+    } else {
+        Err(DiagnosticsError)
+    }
 }
 
+#[derive(Debug)]
+pub struct DiagnosticsError;
+
 pub fn diagnostics(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
-    let mut diagnostics = diagnostics_syntax(node, &rope);
-    diagnostics.extend(diagnostics_semantics(node, &rope, config));
+    let mut diagnostics = diagnostics_syntax(node, rope);
+    diagnostics.extend(diagnostics_semantics(node, rope, config));
     diagnostics
 }
 
@@ -209,7 +216,7 @@ pub fn diagnostics_syntax(node: Node, rope: &Rope) -> Vec<Diagnostic> {
             "function_definition" => {
                 if let Some(body) = node.child_by_field_name("body") {
                     if body.is_missing() {
-                        diagnostics.push(error(node, format!("missing function body")));
+                        diagnostics.push(error(node, "missing function body".into()));
                     }
                 }
             }
@@ -298,7 +305,7 @@ pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Dia
                         match child.kind() {
                             "argument" => {
                                 if let Some(last_argment) = last_argument
-                                    && !last_comma.is_some()
+                                    && last_comma.is_none()
                                 {
                                     diagnostics.push(error(
                                         last_argment,
@@ -365,7 +372,7 @@ pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Dia
 
                 if let Some(operator) = node.child_by_field_name("operator") {
                     if operator.kind() == "=" {
-                        diagnostics.push(warning(node, format!("Use <-, not =, for assignment")));
+                        diagnostics.push(warning(node, "Use <-, not =, for assignment".into()));
                     }
                 }
             }
@@ -433,7 +440,7 @@ fn warning(node: Node, message: String) -> Diagnostic {
 
 fn diag(node: Node, message: String, severity: DiagnosticSeverity) -> Diagnostic {
     Diagnostic {
-        message: message,
+        message,
         severity: Some(severity),
         range: node_range(node),
         code: None,

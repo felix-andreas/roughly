@@ -16,7 +16,7 @@ async fn main() -> ExitCode {
         Some(command) => match command {
             Command::Check { files } => match diagnostics::run(files.as_deref()) {
                 Ok(()) => ExitCode::SUCCESS,
-                Err(()) => ExitCode::FAILURE,
+                Err(_) => ExitCode::FAILURE,
             },
             Command::Fmt {
                 files,
@@ -25,7 +25,7 @@ async fn main() -> ExitCode {
                 stop_on_unhandled_comment,
             } => match format::run(files.as_deref(), check, diff, stop_on_unhandled_comment) {
                 Ok(()) => ExitCode::SUCCESS,
-                Err(()) => ExitCode::FAILURE,
+                Err(_) => ExitCode::FAILURE,
             },
             Command::Lsp { stdio: _stdio } => {
                 lsp::run().await;
