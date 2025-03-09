@@ -7,7 +7,7 @@ use {
     ignore::Walk,
     itertools::Itertools,
     ropey::Rope,
-    std::path::PathBuf,
+    std::{path::PathBuf, time::Instant},
     thiserror::Error,
     tree_sitter::Node,
 };
@@ -232,6 +232,7 @@ enum LineEnding {
 }
 
 pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatError> {
+    let start = Instant::now();
     let line_ending = rope
         .chars()
         .tuple_windows()
@@ -244,13 +245,20 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
         })
         .unwrap_or(LineEnding::Lf);
 
-    Ok(utils::remove_indent_prefix(&traverse(
+    let formatted = utils::remove_indent_prefix(&traverse(
         node,
         rope,
         line_ending,
         config,
         State::default(),
-    )?))
+    )?);
+
+    log::debug!(
+        "formatted {} lines in {} ms",
+        rope.len_lines(),
+        start.elapsed().as_millis()
+    );
+    Ok(formatted)
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -417,12 +425,13 @@ fn traverse(
             }
         }
         "arguments" => {
+            handles_comments = true;
+
             check(field(node, "open")?)?;
             check(field(node, "close")?)?;
-            handles_comments = true;
             let is_multiline = !same_line(node, node);
 
-            let mut prev_sibling = None;
+            let mut maybe_prev = None;
             let mut is_first_arg = true;
             let mut fmt_skip = false;
             node.children(&mut node.walk())
@@ -430,8 +439,8 @@ fn traverse(
                 .take(node.child_count() - 2)
                 .map(|child| {
                     let maybe_prev = {
-                        let tmp = prev_sibling;
-                        prev_sibling = Some(child);
+                        let tmp = maybe_prev;
+                        maybe_prev = Some(child);
                         tmp
                     };
                     if child
@@ -514,6 +523,7 @@ fn traverse(
         }
         "binary_operator" => {
             handles_comments = true;
+
             let lhs = field(node, "lhs")?;
             let operator = field(node, "operator")?;
             let rhs = field(node, "rhs")?;
@@ -563,13 +573,14 @@ fn traverse(
             )
         }
         "braced_expression" => {
+            handles_comments = true;
+
             check(field(node, "open")?)?;
             check(field(node, "close")?)?;
-            handles_comments = true;
             let mut cursor = node.walk();
             let is_multiline = !same_line(node, node);
 
-            let mut prev_end = None;
+            let mut maybe_prev_end = None;
             let mut fmt_skip = false;
             let lines = node
                 .children(&mut cursor)
@@ -590,13 +601,13 @@ fn traverse(
                         fmt(child)?
                     };
                     if is_fmt_skip_comment(&child)
-                        && prev_end
+                        && maybe_prev_end
                             .map(|prev_end| child.start_position().row > prev_end)
                             .unwrap_or(true)
                     {
                         fmt_skip = true;
                     }
-                    let result = match prev_end {
+                    let result = match maybe_prev_end {
                         Some(prev_end)
                             if child.kind() == "comment"
                                 && prev_end == child.start_position().row =>
@@ -620,7 +631,7 @@ fn traverse(
                         }
                         None => line,
                     };
-                    prev_end = Some(end_position(child).row);
+                    maybe_prev_end = Some(end_position(child).row);
                     Ok(result)
                 })
                 .collect::<Result<String, FormatError>>()?;
@@ -683,6 +694,7 @@ fn traverse(
         "complex" => fmt_raw(node),
         "extract_operator" => {
             handles_comments = true;
+
             let lhs = field(node, "lhs")?;
             let operator = field(node, "operator")?;
             let maybe_rhs = field_optional(node, "rhs");
@@ -728,6 +740,7 @@ fn traverse(
         "float" => fmt_raw(node),
         "for_statement" => {
             handles_comments = true;
+
             let condition_is_multiline = !same_line(field(node, "open")?, field(node, "close")?);
             let loop_header_is_multiline =
                 !same_line(field(node, "variable")?, field(node, "sequence")?);
@@ -863,6 +876,7 @@ fn traverse(
         }
         "if_statement" => {
             handles_comments = true;
+
             let is_multiline = state.make_multiline || !same_line(node, node);
             let condition_is_multiline = !same_line(field(node, "open")?, field(node, "close")?);
 
@@ -981,9 +995,10 @@ fn traverse(
         }
         "parameters" => {
             handles_comments = true;
+
             let is_multiline = !same_line(node, node);
 
-            let mut prev_sibling = None;
+            let mut maybe_prev = None;
             let mut is_first_param = true;
             let mut fmt_skip = false;
             let mut cursor = node.walk();
@@ -991,9 +1006,9 @@ fn traverse(
                 .skip(1)
                 .take(node.child_count() - 2)
                 .map(|child| {
-                    let prev_sibling = {
-                        let tmp = prev_sibling;
-                        prev_sibling = Some(child);
+                    let maybe_prev = {
+                        let tmp = maybe_prev;
+                        maybe_prev = Some(child);
                         tmp
                     };
                     if child
@@ -1010,14 +1025,14 @@ fn traverse(
                         fmt(child)?
                     };
                     if is_fmt_skip_comment(&child)
-                        && prev_sibling
+                        && maybe_prev
                             .map(|sibling| end_position(sibling).row < child.start_position().row)
                             .unwrap_or(true)
                     {
                         fmt_skip = true;
                     }
                     if child.kind() == "comment" {
-                        return Ok(match prev_sibling {
+                        return Ok(match maybe_prev {
                             Some(prev) if same_line(prev, child) => {
                                 format!(" {tmp}")
                             }
@@ -1028,7 +1043,7 @@ fn traverse(
                     if child.kind() == "comma" {
                         is_first_param = false;
                         return Ok(
-                            if prev_sibling
+                            if maybe_prev
                                 .map(|node| node.kind() == "comment")
                                 .unwrap_or(false)
                             {
@@ -1041,7 +1056,7 @@ fn traverse(
                     let result = format!(
                         "{}{}",
                         if is_first_param {
-                            if prev_sibling
+                            if maybe_prev
                                 .map(|node| node.kind() == "comment")
                                 .unwrap_or(false)
                             {
@@ -1063,11 +1078,10 @@ fn traverse(
         }
         "parenthesized_expression" => {
             handles_comments = true;
-            let mut cursor = node.walk();
 
             let mut prev_end = None;
             let lines = node
-                .children(&mut cursor)
+                .children(&mut node.walk())
                 .skip(1)
                 .take(node.child_count() - 2)
                 .map(|child| {
@@ -1109,10 +1123,10 @@ fn traverse(
         }
         "program" => {
             handles_comments = true;
-            let mut cursor = node.walk();
-            let mut prev_end = None;
+
+            let mut maybe_prev_end = None;
             let mut fmt_skip = false;
-            node.children(&mut cursor)
+            node.children(&mut node.walk())
                 .map(|child| {
                     if child
                         .next_sibling()
@@ -1128,13 +1142,13 @@ fn traverse(
                         fmt(child)?
                     };
                     if is_fmt_skip_comment(&child)
-                        && prev_end
+                        && maybe_prev_end
                             .map(|prev_end| child.start_position().row > prev_end)
                             .unwrap_or(true)
                     {
                         fmt_skip = true;
                     }
-                    let result = match prev_end {
+                    let result = match maybe_prev_end {
                         Some(prev_end)
                             if child.kind() == "comment" && prev_end == end_position(child).row =>
                         {
@@ -1153,7 +1167,7 @@ fn traverse(
                         }
                         None => line,
                     };
-                    prev_end = Some(end_position(child).row);
+                    maybe_prev_end = Some(end_position(child).row);
                     Ok(result)
                 })
                 .chain(std::iter::once(Ok(line_ending.into())))
@@ -1265,6 +1279,7 @@ fn traverse(
         }
         "while_statement" => {
             handles_comments = true;
+
             let condition_is_multiline = !same_line(field(node, "open")?, field(node, "close")?);
 
             let mut out = String::with_capacity(node.end_byte() - node.start_byte());
