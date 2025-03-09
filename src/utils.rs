@@ -134,7 +134,17 @@ pub fn format_node(node: Node) -> String {
             output.push('(');
         }
 
-        output.push_str(node.kind());
+        let start = node.start_position();
+        let end = node.end_position();
+        output.push_str(&format!(
+            "{} {}:{}..{}:{}",
+            node.kind(),
+            start.row,
+            start.column,
+            end.row,
+            end.column
+        ));
+
         if node.is_missing() {
             output.push_str(" MISSING");
         } else if node.is_error() && node.kind() != "ERROR" {
