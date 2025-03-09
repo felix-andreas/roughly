@@ -333,7 +333,7 @@ fn traverse(
             utils::indent_by_with_newlines(config.spaces, fmt(node)?, line_ending)
         ))
     };
-    let is_fmt_skip_comment = |node: &Node| {
+    let is_fmt_skip_comment = |node: Node| {
         node.kind() == "comment"
             && rope
                 .byte_slice(node.byte_range())
@@ -360,13 +360,36 @@ fn traverse(
         }
     };
 
-    // note: currently we don't traverse open&close -> they never reach these conditions
+    // note: currently we don't traverse open & close -> they never reach these conditions
     if node.is_error() {
         return Err(syntax_error(node));
     }
 
     if node.is_missing() {
         return Err(missing(node));
+    }
+
+    // check if prev or next node is fmt-skip directive
+    {
+        let prev_is_fmt_skip = node
+            .prev_sibling()
+            .map(|prev| {
+                is_fmt_skip_comment(prev)
+                    && prev
+                        .prev_sibling()
+                        .map(|before_prev| !same_line(before_prev, prev))
+                        .unwrap_or(true)
+            })
+            .unwrap_or(false);
+        let next_is_fmt_skip = node
+            .next_sibling()
+            .map(|next| is_fmt_skip_comment(next) && same_line(node, next))
+            .unwrap_or(false);
+
+        if prev_is_fmt_skip || next_is_fmt_skip {
+            dbg!(fmt_raw(node));
+            return Ok(fmt_with_indent_prefix(node));
+        }
     }
 
     if node.kind() == "comment" {
@@ -433,7 +456,6 @@ fn traverse(
 
             let mut maybe_prev = None;
             let mut is_first_arg = true;
-            let mut fmt_skip = false;
             node.children(&mut node.walk())
                 .skip(1)
                 .take(node.child_count() - 2)
@@ -443,26 +465,7 @@ fn traverse(
                         maybe_prev = Some(child);
                         tmp
                     };
-                    if child
-                        .next_sibling()
-                        .map(|sibling| same_line(child, sibling) && is_fmt_skip_comment(&sibling))
-                        .unwrap_or(false)
-                    {
-                        fmt_skip = true;
-                    }
-                    let formatted = if fmt_skip {
-                        fmt_skip = false;
-                        fmt_with_indent_prefix(child)
-                    } else {
-                        fmt(child)?
-                    };
-                    if is_fmt_skip_comment(&child)
-                        && maybe_prev
-                            .map(|prev| end_position(prev).row < child.start_position().row)
-                            .unwrap_or(true)
-                    {
-                        fmt_skip = true;
-                    }
+                    let formatted = fmt(child)?;
                     if child.kind() == "comment" {
                         return Ok(match maybe_prev {
                             Some(prev) if same_line(prev, child) => {
@@ -581,32 +584,12 @@ fn traverse(
             let is_multiline = !same_line(node, node);
 
             let mut maybe_prev_end = None;
-            let mut fmt_skip = false;
             let lines = node
                 .children(&mut cursor)
                 .skip(1)
                 .take(node.child_count() - 2)
                 .map(|child| {
-                    if child
-                        .next_sibling()
-                        .map(|sibling| same_line(child, sibling) && is_fmt_skip_comment(&sibling))
-                        .unwrap_or(false)
-                    {
-                        fmt_skip = true;
-                    }
-                    let line = if fmt_skip {
-                        fmt_skip = false;
-                        fmt_with_indent_prefix(child)
-                    } else {
-                        fmt(child)?
-                    };
-                    if is_fmt_skip_comment(&child)
-                        && maybe_prev_end
-                            .map(|prev_end| child.start_position().row > prev_end)
-                            .unwrap_or(true)
-                    {
-                        fmt_skip = true;
-                    }
+                    let line = fmt(child)?;
                     let result = match maybe_prev_end {
                         Some(prev_end)
                             if child.kind() == "comment"
@@ -1000,7 +983,6 @@ fn traverse(
 
             let mut maybe_prev = None;
             let mut is_first_param = true;
-            let mut fmt_skip = false;
             let mut cursor = node.walk();
             node.children(&mut cursor)
                 .skip(1)
@@ -1011,26 +993,7 @@ fn traverse(
                         maybe_prev = Some(child);
                         tmp
                     };
-                    if child
-                        .next_sibling()
-                        .map(|next| same_line(next, child) && is_fmt_skip_comment(&next))
-                        .unwrap_or(false)
-                    {
-                        fmt_skip = true;
-                    }
-                    let tmp = if fmt_skip {
-                        fmt_skip = false;
-                        fmt_with_indent_prefix(child)
-                    } else {
-                        fmt(child)?
-                    };
-                    if is_fmt_skip_comment(&child)
-                        && maybe_prev
-                            .map(|sibling| end_position(sibling).row < child.start_position().row)
-                            .unwrap_or(true)
-                    {
-                        fmt_skip = true;
-                    }
+                    let tmp = fmt(child)?;
                     if child.kind() == "comment" {
                         return Ok(match maybe_prev {
                             Some(prev) if same_line(prev, child) => {
@@ -1125,29 +1088,9 @@ fn traverse(
             handles_comments = true;
 
             let mut maybe_prev_end = None;
-            let mut fmt_skip = false;
             node.children(&mut node.walk())
                 .map(|child| {
-                    if child
-                        .next_sibling()
-                        .map(|sibling| same_line(child, sibling) && is_fmt_skip_comment(&sibling))
-                        .unwrap_or(false)
-                    {
-                        fmt_skip = true;
-                    }
-                    let line = if fmt_skip {
-                        fmt_skip = false;
-                        fmt_with_indent_prefix(child)
-                    } else {
-                        fmt(child)?
-                    };
-                    if is_fmt_skip_comment(&child)
-                        && maybe_prev_end
-                            .map(|prev_end| child.start_position().row > prev_end)
-                            .unwrap_or(true)
-                    {
-                        fmt_skip = true;
-                    }
+                    let line = fmt(child)?;
                     let result = match maybe_prev_end {
                         Some(prev_end)
                             if child.kind() == "comment" && prev_end == end_position(child).row =>

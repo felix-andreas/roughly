@@ -1006,6 +1006,47 @@ fn fmt_skip() {
           3, 4
         ) # fmt: skip
     "#};
+
+    // check if it works for different expressions
+    assert_fmt! {r#"
+        # fmt: skip
+        1+2
+        (
+            # fmt: skip
+            1+2
+        )
+        {
+            # fmt: skip
+            1+2
+        }
+        if (
+            # fmt: skip
+            1+2
+        ) {}
+        for (
+            variable
+            in
+            # fmt: skip
+            1+2
+        ) {}
+        while (
+            condition &&
+                # fmt: skip
+                1+2
+        ) {}
+        function(
+            # fmt: skip
+            a=1+2
+        ) {}
+        fn(
+            # fmt: skip
+            1+2
+        )
+        fn[
+            # fmt: skip
+            1+2
+        ]
+    "#};
 }
 
 // FROM
