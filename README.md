@@ -31,6 +31,10 @@ Install the VS code extension:
 code --install-extension roughly.vsix
 ```
 
+### RStudio (formatter only)
+
+You can configure Roughly as an [external formatter in RStudio](https://roughly.felixandreas.me/getting-started/#rstudio-formatter-only)
+
 ### Server
 
 Build the server (or [download from here](https://github.com/felix-andreas/roughly/releases)):

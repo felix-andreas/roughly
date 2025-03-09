@@ -35,10 +35,11 @@ roughly check              # Lint files in current directory
 roughly lsp                # Start the LSP server
 ```
 
+## Editor Integrations
 
-### VS Code Extension (Recommended)
+### VS Code Extension
 
-For the optimal R development experience, install the Roughly VS Code extension.
+Roughly is available as a VS Code extension:
 
 <Steps>
 
@@ -53,6 +54,28 @@ For the optimal R development experience, install the Roughly VS Code extension.
      "roughly.path": "/path/to/roughly"
    }
    ```
+
+</Steps>
+
+### RStudio (formatter only)
+
+You can configure Roughly as an external formatter in RStudio:
+
+<Steps>
+
+1. Open RStudio and navigate to:
+   ```
+   Options > Code > Formatting > Format with an External Tool
+   ```
+
+   Set the reformat command to: `path/to/roughly fmt`
+
+2. To enable **format-on-save**, go to:
+   ```
+   Options > Code > Saving > Format with an External Tool
+   ```
+
+   Check the `Reformat documents on save` option
 
 </Steps>
 
