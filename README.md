@@ -17,6 +17,14 @@ Roughly is an R language server, linter, and code formatter, written in Rust.
 
 ## Installation
 
+### Roughly CLI
+
+Build the CLI (or [download from here](https://github.com/felix-andreas/roughly/releases)):
+
+```
+cargo build --release
+```
+
 ### VS Code extension
 
 Bundle the client (or [download from here](https://github.com/felix-andreas/roughly/releases)):
@@ -31,25 +39,17 @@ Install the VS code extension:
 code --install-extension roughly.vsix
 ```
 
-### RStudio (formatter only)
-
-You can configure Roughly as an [external formatter in RStudio](https://roughly.felixandreas.me/getting-started/#rstudio-formatter-only)
-
-### Server
-
-Build the server (or [download from here](https://github.com/felix-andreas/roughly/releases)):
-
-```
-cargo build --release
-```
-
-Configure the client via the `settings.json` to use the server binary:
+Configure the VS Code extension via the `settings.json` to use the roughly binary:
 
 ```json
 {
   "roughly.path": "<path>"
 }
 ```
+
+### RStudio (formatter only)
+
+You can configure Roughly as an [external formatter in RStudio](https://roughly.felixandreas.me/getting-started/#rstudio-formatter-only)
 
 ## Usage
 
