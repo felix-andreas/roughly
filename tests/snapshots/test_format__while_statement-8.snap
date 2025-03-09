@@ -1,0 +1,8 @@
+---
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{ r#\"\n        while (condition) # 1\n            body\n        \"# }).unwrap()"
+---
+while (condition) # 1
+{
+  body
+}

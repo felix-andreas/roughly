@@ -1,6 +1,6 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n            while(x < 10)\n            { print(x)\n                x <- x + 1\n            }\n            while (x < 10) { #foo\n                print(x) }\n            while (x < 10)\n            #foo\n            {\n                print(x)\n            }\n        \"#\n})"
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n        while(x < 10)\n        { print(x)\n            x <- x + 1\n        }\n        while (x < 10) { #foo\n            print(x) }\n        while (x < 10)\n        #foo\n        {\n            print(x)\n        }\n    \"#\n}).unwrap()"
 ---
 while (x < 10) {
   print(x)
@@ -10,7 +10,8 @@ while (x < 10) {
   # foo
   print(x)
 }
+while (x < 10)
 # foo
-while (x < 10) {
+{
   print(x)
 }

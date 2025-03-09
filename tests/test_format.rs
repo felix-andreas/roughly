@@ -396,25 +396,26 @@ fn if_statement_comments() {
         )
     "#};
 
-    // also wrap braced expression in multiline if condition contains comments
+    // special case: wrap braced expression with newlines if condition contains comments
     assert_fmt! {r#"
         if (
-        # foo
+        # 1
         {
-            TRUE
+            condition
         }) {}
 
         if ({
-            TRUE
+            condition
         }
-        # foo
+        # 1
         ) {}
         "#
     };
 
+    // comment after condition but no block
     assert_fmt! {r#"
-        if (foo) #foo
-            foo
+        if (condition) # 1
+            body
         "#
     };
 }
@@ -641,6 +642,53 @@ fn while_statement() {
         while ({ foo;
         bar }) { baz }
     "#};
+
+    // comments in multi-line condition
+    assert_fmt! {r#"
+        while(
+        	# 1
+            foo && # foo
+                bar # bar
+            # 2
+        )
+        {}
+    "#};
+
+    // check all possible comment positions
+    assert_fmt! {r#"
+        while # while
+        # 1
+        ( # (
+            # 2
+            condition # condition
+            # 3
+        ) # )
+        # 4
+        {}
+    "#};
+
+    // special case: wrap braced expression with newlines if condition contains comments
+    assert_fmt! {r#"
+        while (
+        # 1
+        {
+            condition
+        }) {}
+
+        while ({
+            condition
+        }
+        # 1
+        ) {}
+        "#
+    };
+
+    // comment after condition but no block
+    assert_fmt! {r#"
+        while (condition) # 1
+            body
+        "#
+    };
 }
 
 // EDGE CASES

@@ -33,6 +33,68 @@ For me this led to the issue that the language server wasn't spawned because I h
 * variable renaming
 * inlay hints
 
+## Formatting
+
+The main challenge in formatting code is handling comments that can appear at any position:
+
+```R
+if
+# 1
+( # open
+  # 2
+  a && b # condition
+  # 3
+) # close
+# 4
+{
+  y
+}
+# 5
+else
+# 6
+{
+  4
+}
+```
+
+With a structured AST, we might typically use a concise functional approach:
+
+```rs
+let condition = fmt(field("condition")?);
+let consequence = fmt(field("consequence")?);
+let alternative = fmt(field("alternative")?);
+format!("if({condition}) {{ {consequence} }} else {{ {alternative} }}");
+```
+
+However, due to the arbitrary placement of comments, we must adopt a more imperative style. This approach preserves comments but somewhat harder to comprehend:
+
+```rs
+let mut out = String::new();
+tree::for_each_child(&mut node.walk(), |child, field_name| {
+  match field_name {
+    None => match child.kind() {
+      "if" => out.push_str("if"),
+      "else" => out.push_str(" else"),
+      "comment" => out.push_str(&format!(" {}", child.text())),
+      _ => unreachable!(),
+    },
+    Some(field_name) => match field_name {
+      "open" => out.push_str("("),
+      "condition" => out.push_str(&fmt(child)?),
+      "close" => out.push_str(")"),
+      "consequence" | "alternative" => {
+        out.push_str(" { ");
+        out.push_str(&fmt(child)?);
+        out.push_str(" }");
+      },
+      _ => unreachable!(),
+    },
+  };
+  Ok::<_, FormatError>(())
+})?;
+out
+```
+
 ## References
 
 * https://github.com/microsoft/vscode-extension-samples/tree/main/lsp-sample

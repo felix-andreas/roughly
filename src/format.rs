@@ -754,17 +754,17 @@ fn traverse(
                 } else {
                     utils::indent_by_with_newlines(config.spaces, parameters_fmt, line_ending)
                 },
-                if is_multiline && body.kind() != "braced_expression" {
-                    wrap_with_braces(body)?
-                } else {
+                if is_multiline && body.kind() == "braced_expression" {
                     fmt_multiline(body, is_multiline)?
+                } else {
+                    wrap_with_braces(body)?
                 },
             )
         }
         "if_statement" => {
             handles_comments = true;
             let is_multiline = state.make_multiline || !same_line(node, node);
-            let is_multiline_condition = !same_line(field(node, "open")?, field(node, "close")?);
+            let condition_is_multiline = !same_line(field(node, "open")?, field(node, "close")?);
 
             let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             let mut indent_comments = false;
@@ -815,7 +815,7 @@ fn traverse(
                                 .next_sibling()
                                 .map(|next| next.kind() == "comment")
                                 .unwrap_or(false);
-                            if is_multiline_condition
+                            if condition_is_multiline
                                 && !(child.kind() == "braced_expression"
                                     && !(prev_is_comment || next_is_comment))
                             {
@@ -1130,23 +1130,91 @@ fn traverse(
             format!("{}{spacing}{}", fmt(operator)?, fmt(field(node, "rhs")?)?)
         }
         "while_statement" => {
-            let condition = field(node, "condition")?;
-            let body = field(node, "body")?;
-            let is_multiline_condition = !same_line(condition, condition);
+            handles_comments = true;
+            let condition_is_multiline = !same_line(field(node, "open")?, field(node, "close")?);
 
-            format!(
-                "while ({}) {}",
-                if is_multiline_condition && condition.kind() != "braced_expression" {
-                    utils::indent_by_with_newlines(config.spaces, fmt(condition)?, line_ending)
-                } else {
-                    fmt(condition)?
-                },
-                if body.kind() == "braced_expression" {
-                    fmt_multiline(body, true)?
-                } else {
-                    wrap_with_braces(body)?
-                },
-            )
+            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
+            let mut indent_comments = false;
+            tree::for_each_child(&mut node.walk(), |child, field_name| {
+                let prev_node = child.prev_sibling();
+
+                let prev_is_comment = prev_node
+                    .map(|node| node.kind() == "comment")
+                    .unwrap_or(false);
+
+                match field_name {
+                    None => match child.kind() {
+                        "while" => out.push_str("while"),
+                        "comment" => {
+                            if let Some(prev_node) = prev_node
+                                && same_line(prev_node, child)
+                            {
+                                out.push(' ');
+                            } else {
+                                if !prev_is_comment {
+                                    out.push('\n');
+                                }
+                                if indent_comments {
+                                    out.push_str(&" ".repeat(config.spaces));
+                                }
+                            }
+                            out.push_str(&fmt(child)?);
+                            out.push('\n')
+                        }
+                        _ => unreachable!(),
+                    },
+                    Some(field_name) => match field_name {
+                        "open" => {
+                            indent_comments = true;
+                            if !prev_is_comment {
+                                out.push(' ');
+                            }
+                            out.push('(');
+                        }
+                        "condition" => {
+                            let next_is_comment = child
+                                .next_sibling()
+                                .map(|next| next.kind() == "comment")
+                                .unwrap_or(false);
+                            if condition_is_multiline
+                                && !(child.kind() == "braced_expression"
+                                    && !(prev_is_comment || next_is_comment))
+                            {
+                                if !prev_is_comment {
+                                    out.push('\n');
+                                }
+                                out.push_str(&utils::indent_by(
+                                    config.spaces,
+                                    fmt(child)?,
+                                    line_ending,
+                                ));
+                                if !next_is_comment {
+                                    out.push('\n');
+                                }
+                            } else {
+                                out.push_str(&fmt(child)?);
+                            }
+                        }
+                        "close" => {
+                            indent_comments = false;
+                            out.push(')')
+                        }
+                        "body" => {
+                            if !prev_is_comment {
+                                out.push(' ');
+                            }
+                            out.push_str(&if child.kind() == "braced_expression" {
+                                fmt_multiline(child, true)?
+                            } else {
+                                wrap_with_braces(child)?
+                            })
+                        }
+                        _ => unreachable!(),
+                    },
+                };
+                Ok::<_, FormatError>(())
+            })?;
+            out
         }
         // SIMPLE
         "break" => "break".into(),
