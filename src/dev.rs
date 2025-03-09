@@ -19,7 +19,14 @@ pub fn format_tree(node: Node) -> String {
         let start = node.start_position();
         let end = node.end_position();
 
-        output.push_str(&console::style(node.kind()).bold().to_string());
+        output.push_str(
+            &if node.kind() == "comment" {
+                console::style(node.kind())
+            } else {
+                console::style(node.kind()).bold()
+            }
+            .to_string(),
+        );
         output.push_str(
             &console::style(format!(
                 " {}:{}..{}:{}",
