@@ -204,6 +204,14 @@ fn extract_operator() {
         list(foo = 1, bar =
         2)@baz
     "#};
+
+    // note: this is not parsed correctly
+    // see: https://github.com/users/felix-andreas/projects/5/views/1?pane=issue&itemId=100962575
+    // assert_fmt! {r#"
+    //     foo$
+    //
+    //     bar
+    // "#};
 }
 
 #[test]

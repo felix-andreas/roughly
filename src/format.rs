@@ -248,25 +248,43 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
         node,
         rope,
         line_ending,
-        false,
         config,
+        State::default(),
     )?))
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct State {
+    make_multiline: bool,
+}
+
+impl State {
+    fn make_multiline(make_multiline: bool) -> Self {
+        State { make_multiline }
+    }
 }
 
 fn traverse(
     node: Node,
     rope: &Rope,
     line_ending: LineEnding,
-    make_multiline: bool,
     config: Config,
+    state: State,
 ) -> Result<String, FormatError> {
     let kind = node.kind();
-    let fmt = |node: Node| traverse(node, rope, line_ending, false, config);
+    let fmt_raw = |node: Node| rope.byte_slice(node.byte_range()).to_string();
+    let fmt = |node: Node| traverse(node, rope, line_ending, config, State::default());
     let fmt_multiline = |node: Node, make_multiline: bool| {
-        traverse(node, rope, line_ending, make_multiline, config)
+        traverse(
+            node,
+            rope,
+            line_ending,
+            config,
+            State::make_multiline(make_multiline),
+        )
     };
-    let fmt_with_indent_prefix =
-        |node: Node| utils::add_indent_prefix(&rope.byte_slice(node.byte_range()).to_string());
+    let fmt_with_indent_prefix = |node: Node| utils::add_indent_prefix(&fmt_raw(node));
+
     fn field<'a>(node: Node<'a>, field_name: &'static str) -> Result<Node<'a>, FormatError> {
         let kind = node.kind();
         node.child_by_field_name(field_name)
@@ -275,11 +293,10 @@ fn traverse(
                 field: field_name,
             })
     }
-
     fn field_optional<'a>(node: Node<'a>, field_name: &'static str) -> Option<Node<'a>> {
         node.child_by_field_name(field_name)
     }
-    let get_raw = |node: Node| rope.byte_slice(node.byte_range()).to_string();
+
     let line_ending = match line_ending {
         LineEnding::Lf => "\n",
         LineEnding::Crlf => "\r\n",
@@ -328,7 +345,7 @@ fn traverse(
     }
 
     if node.kind() == "comment" {
-        let raw = get_raw(node);
+        let raw = fmt_raw(node);
         let raw = raw.trim_end();
 
         let mut chars = raw.chars();
@@ -360,7 +377,7 @@ fn traverse(
     }
 
     if !node.is_named() {
-        return Ok(get_raw(node));
+        return Ok(fmt_raw(node));
     }
 
     let mut handles_comments = false;
@@ -500,7 +517,7 @@ fn traverse(
                         indent.as_str()
                     }
                 })
-                .unwrap_or(" ");
+                .unwrap_or("");
             let comments_fmt = comments
                 .into_iter()
                 .map(fmt)
@@ -514,11 +531,7 @@ fn traverse(
                 fmt(lhs)?,
                 if has_spacing { "" } else { " " },
                 fmt(operator)?,
-                if comments_fmt.is_empty() {
-                    ""
-                } else {
-                    first_comment_sep
-                },
+                first_comment_sep,
                 comments_fmt,
                 if is_multiline {
                     line_ending
@@ -578,7 +591,7 @@ fn traverse(
                         Some(prev_end) => {
                             format!(
                                 "{}{}",
-                                if is_multiline || make_multiline {
+                                if is_multiline || state.make_multiline {
                                     line_ending.repeat(usize::clamp(
                                         child.start_position().row - prev_end,
                                         1,
@@ -599,7 +612,7 @@ fn traverse(
 
             if lines.is_empty() {
                 "{}".into()
-            } else if is_multiline || make_multiline {
+            } else if is_multiline || state.make_multiline {
                 format!(
                     "{{{}}}",
                     utils::indent_by_with_newlines(config.spaces, lines, line_ending)
@@ -615,8 +628,19 @@ fn traverse(
 
             let function_fmt = fmt(function)?;
             let arguments_fmt = fmt(arguments)?;
+            // note: `extract_operator` has higher precedence than calls, so we must add special indentation
+            // `namespace_operator` doesn't allow newlines, so there shouldn't be a problem
+            let additional_indent = match function.kind() {
+                "extract_operator" => {
+                    let lhs = field(function, "lhs")?;
+                    let maybe_rhs = field_optional(function, "rhs");
+                    maybe_rhs.map(|rhs| !same_line(lhs, rhs)).unwrap_or(false)
+                }
+                _ => false,
+            };
             format!(
-                "{function_fmt}({})",
+                "{}{}",
+                function_fmt,
                 if is_multiline
                     // don't wrap calls like foo({ bar })
                     && !(arguments.named_child_count() == 1 && {
@@ -626,23 +650,67 @@ fn traverse(
                             && argument.child(0).unwrap().kind() == "braced_expression"
                     })
                 {
-                    utils::indent_by_with_newlines(config.spaces, arguments_fmt, line_ending)
+                    let out = format!(
+                        "({})",
+                        utils::indent_by_with_newlines(config.spaces, arguments_fmt, line_ending)
+                    );
+                    // we need additional indent if we are lhs of multiline extract operator
+                    if additional_indent {
+                        utils::indent_by_skip_first(config.spaces, out, line_ending)
+                    } else {
+                        out
+                    }
                 } else {
-                    arguments_fmt
+                    format!("({arguments_fmt})")
                 }
             )
         }
-        "complex" => get_raw(node),
+        "complex" => fmt_raw(node),
         "extract_operator" => {
+            handles_comments = true;
             let lhs = field(node, "lhs")?;
-            let op = field(node, "operator")?;
+            let operator = field(node, "operator")?;
             let maybe_rhs = field_optional(node, "rhs");
-            format!("{}{}{}", fmt(lhs)?, op.kind(), match maybe_rhs {
-                Some(rhs) => fmt(rhs)?,
-                None => "".into(),
-            })
+
+            let comments = node
+                .children(&mut node.walk())
+                .filter(|node| node.kind() == "comment")
+                .collect::<Vec<Node>>();
+            let indent = format!("{line_ending}{}", " ".repeat(config.spaces));
+            let first_comment_sep = comments
+                .first()
+                .map(|&comment| {
+                    if same_line(operator, comment) {
+                        " "
+                    } else {
+                        indent.as_str()
+                    }
+                })
+                .unwrap_or("");
+            let comments_fmt = comments
+                .into_iter()
+                .map(fmt)
+                .collect::<Result<Vec<String>, FormatError>>()?
+                .join(&indent);
+
+            let (is_multiline, rhs_fmt) = maybe_rhs
+                .map(|rhs| (!same_line(lhs, rhs), fmt(rhs)))
+                .unwrap_or_else(|| (false, Ok("".into())));
+            format!(
+                "{}{}{}{}{}{}",
+                fmt(lhs)?,
+                fmt(operator)?,
+                first_comment_sep,
+                comments_fmt,
+                if is_multiline { line_ending } else { "" },
+                if is_multiline {
+                    utils::indent_by(config.spaces, rhs_fmt?, line_ending)
+                } else {
+                    rhs_fmt?
+                }
+            )
         }
-        "float" => get_raw(node),
+        "float" => fmt_raw(node),
         "for_statement" => {
             let body = field(node, "body")?;
             format!(
@@ -680,7 +748,7 @@ fn traverse(
         }
         "if_statement" => {
             handles_comments = true;
-            let is_multiline = make_multiline || !same_line(node, node);
+            let is_multiline = state.make_multiline || !same_line(node, node);
             let is_multiline_condition = !same_line(field(node, "open")?, field(node, "close")?);
 
             let mut out = String::with_capacity(node.end_byte() - node.start_byte());
@@ -775,8 +843,8 @@ fn traverse(
             })?;
             out
         }
-        "integer" => get_raw(node),
-        "na" => get_raw(node),
+        "integer" => fmt_raw(node),
+        "na" => fmt_raw(node),
         "namespace_operator" => {
             let lhs = field(node, "lhs")?;
             let op = field(node, "operator")?;
@@ -1071,12 +1139,12 @@ fn traverse(
         // SIMPLE
         "break" => "break".into(),
         "comma" => ",".into(),
-        "comment" => get_raw(node),
-        "dot_dot_i" => get_raw(node),
+        "comment" => fmt_raw(node),
+        "dot_dot_i" => fmt_raw(node),
         "dots" => "...".into(),
-        "escape_sequence" => get_raw(node),
+        "escape_sequence" => fmt_raw(node),
         "false" => "FALSE".into(),
-        "identifier" => get_raw(node),
+        "identifier" => fmt_raw(node),
         "inf" => "Inf".into(),
         "nan" => "NaN".into(),
         "next" => "next".into(),
@@ -1087,7 +1155,7 @@ fn traverse(
             log::error!("unknown node kind: {unknown}");
             return Err(FormatError::Unknown {
                 kind,
-                raw: get_raw(node),
+                raw: fmt_raw(node),
             });
         }
     };

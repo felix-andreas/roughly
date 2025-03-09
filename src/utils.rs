@@ -43,7 +43,13 @@ pub fn indent_by<'a, S>(number_of_spaces: usize, input: S, line_ending: &str) ->
 where
     S: Into<Cow<'a, str>>,
 {
-    indent(" ".repeat(number_of_spaces), input, false, line_ending)
+    indent(
+        " ".repeat(number_of_spaces),
+        input,
+        line_ending,
+        false,
+        true,
+    )
 }
 
 pub fn indent_by_with_newlines<'a, S>(
@@ -54,10 +60,29 @@ pub fn indent_by_with_newlines<'a, S>(
 where
     S: Into<Cow<'a, str>>,
 {
-    indent(" ".repeat(number_of_spaces), input, true, line_ending)
+    indent(" ".repeat(number_of_spaces), input, line_ending, true, true)
 }
 
-fn indent<'a, S, T>(prefix: S, input: T, newlines: bool, line_ending: &str) -> String
+pub fn indent_by_skip_first<'a, S>(number_of_spaces: usize, input: S, line_ending: &str) -> String
+where
+    S: Into<Cow<'a, str>>,
+{
+    indent(
+        " ".repeat(number_of_spaces),
+        input,
+        line_ending,
+        false,
+        false,
+    )
+}
+
+fn indent<'a, S, T>(
+    prefix: S,
+    input: T,
+    line_ending: &str,
+    newlines: bool,
+    indent_all: bool,
+) -> String
 where
     S: Into<Cow<'a, str>>,
     T: Into<Cow<'a, str>>,
@@ -70,16 +95,18 @@ where
     for (i, line) in input.lines().enumerate() {
         if i > 0 || newlines {
             output.push_str(line_ending);
-        }
-
-        if !line.is_empty() {
+            if !line.is_empty() {
+                output.push_str(&prefix);
+            }
+        } else if indent_all && !line.is_empty() {
             output.push_str(&prefix);
         }
 
         output.push_str(line);
     }
 
-    if input.ends_with(line_ending) || newlines {
+    // checking for \n works for \n and \r\n (in case file doesn't have target line ending yet)
+    if input.ends_with('\n') || newlines {
         output.push_str(line_ending);
     }
 

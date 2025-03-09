@@ -1,7 +1,7 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n        \t# fmt: skip\n            foo <- c(1,2,\n            3)\n        \"#\n}).unwrap()"
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n        # fmt: skip\n        foo <- c(1,2,\n            3)\n    \"#\n}).unwrap()"
 ---
 # fmt: skip
 foo <- c(1,2,
-   3)
+    3)

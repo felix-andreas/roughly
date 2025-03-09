@@ -1,0 +1,15 @@
+---
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n        foo$\n            bar(a)$\n            baz(a,b)\n\n        (foo\n        )$\n            bar(a\n            )$\n            baz(a,b)$\n    \"#\n}).unwrap()"
+---
+foo$
+  bar(a)$
+  baz(a, b)
+
+(
+  foo
+)$
+  bar(
+    a
+  )$
+  baz(a, b)$
