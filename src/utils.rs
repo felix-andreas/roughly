@@ -2,7 +2,6 @@ use {
     ropey::Rope,
     std::borrow::Cow,
     tower_lsp::lsp_types::{Position, Range},
-    tree_sitter::{Node, TreeCursor},
 };
 
 pub fn position_to_index(position: Position, rope: &Rope) -> Result<usize, ropey::Error> {
@@ -151,62 +150,6 @@ pub fn remove_indent_prefix(input: &str) -> String {
     output.push_str(&tmp);
 
     output
-}
-
-pub fn format_node(node: Node) -> String {
-    fn traverse(cursor: &mut TreeCursor, output: &mut String) {
-        let indent = "  ".repeat(cursor.depth() as usize);
-        let node = cursor.node();
-        if node.child_count() > 0 {
-            output.push('(');
-        }
-
-        let start = node.start_position();
-        let end = node.end_position();
-        output.push_str(&format!(
-            "{} {}:{}..{}:{}",
-            node.kind(),
-            start.row,
-            start.column,
-            end.row,
-            end.column
-        ));
-
-        if node.is_missing() {
-            output.push_str(" MISSING");
-        } else if node.is_error() && node.kind() != "ERROR" {
-            output.push_str(" ERROR");
-        }
-
-        if cursor.goto_first_child() {
-            loop {
-                output.push('\n');
-                output.push_str(&indent);
-                output.push_str("  ");
-
-                if let Some(field_name) = cursor.field_name() {
-                    output.push_str(field_name);
-                    output.push_str(": ");
-                }
-
-                traverse(cursor, output);
-
-                if !cursor.goto_next_sibling() {
-                    cursor.goto_parent();
-                    break;
-                }
-            }
-
-            output.push('\n');
-            output.push_str(&indent);
-            output.push(')');
-        }
-    }
-
-    let mut result = String::new();
-    let mut cursor = node.walk();
-    traverse(&mut cursor, &mut result);
-    result
 }
 
 // Adapted from  https://doc.rust-lang.org/stable/nightly-rustc/src/clippy_utils/str_utils.rs.html

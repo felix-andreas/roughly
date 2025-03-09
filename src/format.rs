@@ -301,7 +301,8 @@ fn traverse(
         LineEnding::Lf => "\n",
         LineEnding::Crlf => "\r\n",
     };
-    // HACK: tree-sitter-r has wrong ending_position for extract without rhs (includes newline)
+    // HACK: tree-sitter-r has wrong ending_position for extract with newlines before ths rhs:
+    // it only includes the newline but not the rhs. this hack uses at least the correct end_position
     // see: https://github.com/users/felix-andreas/projects/5?pane=issue&itemId=100962575
     let end_position = |node: Node| {
         if node.kind() != "extract_operator" {

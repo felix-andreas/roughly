@@ -31,8 +31,8 @@ async fn main() -> ExitCode {
                 lsp::run().await;
                 ExitCode::SUCCESS
             }
-            Command::Dev(dev) => match dev {
-                Dev::Sexp { path } => match dev::sexp(&path) {
+            Command::Debug(dev) => match dev {
+                Debug::PrintTree { path } => match dev::tree(&path) {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(err) => {
                         cli::error(&err.to_string());
@@ -83,13 +83,13 @@ enum Command {
         #[clap(long, default_value_t = true)]
         stdio: bool,
     },
-    /// Collection of useful commands
+    /// Debugging and development commands
     #[command(subcommand)]
-    Dev(Dev),
+    Debug(Debug),
 }
 
 #[derive(Debug, Subcommand)]
-enum Dev {
-    /// Print the Sexp for the given file
-    Sexp { path: PathBuf },
+enum Debug {
+    /// Print the syntax tree for the given file
+    PrintTree { path: PathBuf },
 }
