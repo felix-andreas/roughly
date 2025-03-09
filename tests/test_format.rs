@@ -245,6 +245,65 @@ fn for_statement() {
         for (x in
         foo( bar)) { baz }
     "#};
+
+    // check allowed multiline combinations
+    assert_fmt! {r#"
+        for (variable in sequence) {}
+
+        for (
+            variable in sequence
+        ) {}
+
+        for (
+            variable
+            in sequence
+        ) {}
+    "#};
+
+    // check all possible comment positions
+    assert_fmt! {r#"
+        for
+        # 1
+        ( # (
+            # 2
+            variable # variable
+            # 3
+            in
+            # 4
+            sequence # sequence
+            # 5
+        ) # )
+        # 6
+        {
+            body
+        }
+    "#};
+
+    // check multiline sequences in combination with comments
+    assert_fmt! {r#"
+        for (
+        variable
+        # 1
+        in {
+            sequence
+        }) {}
+
+        for (
+        variable
+        in
+        # 2
+        {
+            sequence
+        }) {}
+        "#
+    };
+
+    // comment after condition but no block
+    assert_fmt! {r#"
+        for (variable in sequence) # 1
+            body
+        "#
+    };
 }
 
 #[test]
@@ -375,7 +434,7 @@ fn if_statement_comments() {
         # for some weird reason this is only parsed correctly if in a parentheses
         (
             # before
-            if
+            if # if
             # 1
             ( # open
                 # 2
@@ -387,7 +446,7 @@ fn if_statement_comments() {
                 y
             }
             # 5
-            else
+            else # else
             # 6
             {
                 4

@@ -1,0 +1,14 @@
+---
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n        for (variable in sequence) {}\n\n        for (\n            variable in sequence\n        ) {}\n\n        for (\n            variable\n            in sequence\n        ) {}\n    \"#\n}).unwrap()"
+---
+for (variable in sequence) {}
+
+for (
+  variable in sequence
+) {}
+
+for (
+  variable
+  in sequence
+) {}

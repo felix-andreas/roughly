@@ -1,8 +1,8 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{ r#\"\n            if (foo) #foo\n                foo\n            \"# }).unwrap()"
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{ r#\"\n        if (condition) # 1\n            body\n        \"# }).unwrap()"
 ---
-if (foo) # foo
+if (condition) # 1
 {
-  foo
+  body
 }

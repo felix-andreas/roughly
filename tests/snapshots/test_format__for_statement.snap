@@ -1,21 +1,24 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n        \tfor (x in 1:2) {\n                print(x)\n            }\n        \tfor (x in c(1, # foo\n            2)) {\n                print(x)\n            }\n            for (x in 1:3) #foo\n            {\n                x\n            }\n            for (x in 1:3)\n            #foo\n            {\n                x\n            }\n        \"#\n})"
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n        for (x in 1:2) {\n            print(x)\n        }\n        for (x in c(1, # foo\n        2)) {\n            print(x)\n        }\n        for (x in 1:3) #foo\n        {\n            x\n        }\n        for (x in 1:3)\n        #foo\n        {\n            x\n        }\n    \"#\n}).unwrap()"
 ---
 for (x in 1:2) {
   print(x)
 }
-for (x in c(
-  1, # foo
-  2
-)) {
+for (
+  x in c(
+    1, # foo
+    2
+  )
+) {
   print(x)
 }
-# foo
-for (x in 1:3) {
+for (x in 1:3) # foo
+{
   x
 }
+for (x in 1:3)
 # foo
-for (x in 1:3) {
+{
   x
 }

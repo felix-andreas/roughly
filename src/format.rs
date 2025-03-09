@@ -727,17 +727,117 @@ fn traverse(
         }
         "float" => fmt_raw(node),
         "for_statement" => {
-            let body = field(node, "body")?;
-            format!(
-                "for ({} in {}) {}",
-                fmt(field(node, "variable")?)?,
-                fmt(field(node, "sequence")?)?,
-                if body.kind() == "braced_expression" {
-                    fmt_multiline(body, true)?
-                } else {
-                    wrap_with_braces(body)?
-                },
-            )
+            handles_comments = true;
+            let condition_is_multiline = !same_line(field(node, "open")?, field(node, "close")?);
+            let loop_header_is_multiline =
+                !same_line(field(node, "variable")?, field(node, "sequence")?);
+
+            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
+            let mut indent_comments = false;
+            tree::for_each_child(&mut node.walk(), |child, field_name| {
+                let prev_node = child.prev_sibling();
+
+                let prev_is_comment = prev_node
+                    .map(|node| node.kind() == "comment")
+                    .unwrap_or(false);
+                let next_is_comment = child
+                    .next_sibling()
+                    .map(|next| next.kind() == "comment")
+                    .unwrap_or(false);
+
+                match field_name {
+                    None => match child.kind() {
+                        "for" => out.push_str("for"),
+                        "in" => {
+                            if prev_is_comment {
+                                out.push_str(&" ".repeat(config.spaces));
+                            } else if loop_header_is_multiline {
+                                out.push('\n');
+                                out.push_str(&" ".repeat(config.spaces));
+                            } else {
+                                out.push(' ');
+                            }
+                            out.push_str("in");
+                            if !next_is_comment {
+                                out.push(' ');
+                            }
+                        }
+                        "comment" => {
+                            if let Some(prev_node) = prev_node
+                                && same_line(prev_node, child)
+                            {
+                                out.push(' ');
+                            } else {
+                                if !prev_is_comment {
+                                    out.push('\n');
+                                }
+                                if indent_comments {
+                                    out.push_str(&" ".repeat(config.spaces));
+                                }
+                            }
+                            out.push_str(&fmt(child)?);
+                            out.push('\n')
+                        }
+                        _ => unreachable!(),
+                    },
+                    Some(field_name) => match field_name {
+                        "open" => {
+                            indent_comments = true;
+                            if !prev_is_comment {
+                                out.push(' ');
+                            }
+                            out.push('(');
+                            if !next_is_comment
+                                && (loop_header_is_multiline || condition_is_multiline)
+                            {
+                                out.push('\n');
+                            }
+                        }
+                        "variable" | "sequence" => {
+                            if prev_is_comment
+                                || (field_name == "variable"
+                                    && (loop_header_is_multiline || condition_is_multiline))
+                            {
+                                out.push_str(&utils::indent_by(
+                                    config.spaces,
+                                    &fmt(child)?,
+                                    line_ending,
+                                ));
+                            } else if next_is_comment || condition_is_multiline {
+                                out.push_str(&utils::indent_by_skip_first(
+                                    config.spaces,
+                                    &fmt(child)?,
+                                    line_ending,
+                                ));
+                            } else {
+                                out.push_str(&fmt(child)?);
+                            }
+                        }
+                        "close" => {
+                            indent_comments = false;
+                            if !prev_is_comment
+                                && (loop_header_is_multiline || condition_is_multiline)
+                            {
+                                out.push('\n');
+                            }
+                            out.push(')')
+                        }
+                        "body" => {
+                            if !prev_is_comment {
+                                out.push(' ');
+                            }
+                            out.push_str(&if child.kind() == "braced_expression" {
+                                fmt_multiline(child, true)?
+                            } else {
+                                wrap_with_braces(child)?
+                            })
+                        }
+                        _ => unreachable!(),
+                    },
+                };
+                Ok::<_, FormatError>(())
+            })?;
+            out
         }
         "function_definition" => {
             let name = field(node, "name")?;
@@ -754,10 +854,10 @@ fn traverse(
                 } else {
                     utils::indent_by_with_newlines(config.spaces, parameters_fmt, line_ending)
                 },
-                if is_multiline && body.kind() == "braced_expression" {
-                    fmt_multiline(body, is_multiline)?
-                } else {
+                if is_multiline && body.kind() != "braced_expression" {
                     wrap_with_braces(body)?
+                } else {
+                    fmt_multiline(body, is_multiline)?
                 },
             )
         }

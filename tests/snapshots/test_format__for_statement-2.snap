@@ -1,9 +1,11 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{ r#\"\n            for (x in foo(\n            bar)) baz\n        \"# }).unwrap()"
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{ r#\"\n        for (x in foo(\n        bar)) baz\n    \"# }).unwrap()"
 ---
-for (x in foo(
-  bar
-)) {
+for (
+  x in foo(
+    bar
+  )
+) {
   baz
 }

@@ -26,19 +26,3 @@ pub fn for_each_child<'a, E>(
     };
     Ok(())
 }
-
-// #[macro_export]
-// macro_rules! for_each_child {
-//     ($cursor:expr, $body:block) => {{
-//         $cursor.goto_first_child() {
-//             loop {
-//                 let
-//                 result = $func($cursor.node(), $cursor.field_name());
-//                 if !$cursor.goto_next_sibling() {
-//                     $cursor.goto_parent();
-//                     break;
-//                 }
-//             }
-//         }
-//     }};
-// }

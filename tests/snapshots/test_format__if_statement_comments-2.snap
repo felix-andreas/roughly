@@ -1,17 +1,17 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n            if (\n            # foo\n            {\n                TRUE\n            }) {}\n\n            if ({\n                TRUE\n            }\n            # foo\n            ) {}\n            \"#\n}).unwrap()"
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n        if (\n        # 1\n        {\n            condition\n        }) {}\n\n        if ({\n            condition\n        }\n        # 1\n        ) {}\n        \"#\n}).unwrap()"
 ---
 if (
-  # foo
+  # 1
   {
-    TRUE
+    condition
   }
 ) {}
 
 if (
   {
-    TRUE
+    condition
   }
-  # foo
+  # 1
 ) {}

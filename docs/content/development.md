@@ -35,9 +35,22 @@ For me this led to the issue that the language server wasn't spawned because I h
 
 ## Formatting
 
-The main challenge in formatting code is handling comments that can appear at any position:
+### Comments in expressions
 
-```R
+The main challenge in formatting code is handling comments because they can appear at any location. This is particualar hard to handle these expressions:
+
+* if expression
+* for expression
+* repeat statment
+* while expression
+* binary operator
+* extract operator
+
+#### Example of if expressions
+
+For example, in an if expression comments can appear at any location (numerated):
+
+```r
 if
 # 1
 ( # open
@@ -57,7 +70,7 @@ else
 }
 ```
 
-With a structured AST, we might typically use a concise functional approach:
+With a structured AST, we might typically could write our code in a concise functional style:
 
 ```rs
 let condition = fmt(field("condition")?);
@@ -70,30 +83,34 @@ However, due to the arbitrary placement of comments, we must adopt a more impera
 
 ```rs
 let mut out = String::new();
-tree::for_each_child(&mut node.walk(), |child, field_name| {
-  match field_name {
-    None => match child.kind() {
-      "if" => out.push_str("if"),
-      "else" => out.push_str(" else"),
-      "comment" => out.push_str(&format!(" {}", child.text())),
-      _ => unreachable!(),
-    },
-    Some(field_name) => match field_name {
-      "open" => out.push_str("("),
-      "condition" => out.push_str(&fmt(child)?),
-      "close" => out.push_str(")"),
-      "consequence" | "alternative" => {
-        out.push_str(" { ");
-        out.push_str(&fmt(child)?);
-        out.push_str(" }");
+let mut cursor = node.walk();
+if cursor.goto_first_child() {
+  loop {
+    match cursor.field_name() {
+      None => match child.kind() {
+        "if" => out.push_str("if"),
+        "else" => ...,
+        "comment" => ...,
+        _ => unreachable!(),
       },
-      _ => unreachable!(),
-    },
-  };
-  Ok::<_, FormatError>(())
-})?;
+      Some(field_name) => match field_name {
+        "open" => ...,
+        "condition" => ...,
+        "close" => ...,
+        "consequence" | "alternative" => ...,
+        _ => unreachable!(),
+      },
+    };
+
+    if !cursor.goto_next_sibling() {
+        cursor.goto_parent();
+        break;
+    }
+  }
+};
 out
 ```
+
 
 ## References
 
