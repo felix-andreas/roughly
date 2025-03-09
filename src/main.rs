@@ -67,13 +67,13 @@ enum Command {
     Fmt {
         /// R files to format
         files: Option<Vec<PathBuf>>,
-        /// Avoid writing any formatted files back; instead, exit with a non-zero status code if any files would have been modified, and zero otherwise
+        /// Exit with error if files would be modified without making changes
         #[clap(long, default_value_t = false)]
         check: bool,
-        /// Avoid writing any formatted files back; instead, exit with a non-zero status code and the difference between the current file and how the formatted file would look like
+        /// Show diff instead of modifying files; exit with error if changes needed
         #[clap(long, default_value_t = false)]
         diff: bool,
-        /// Stop if a comment can't be properly placed (exits with error if a comment would be moved to different location)
+        /// Stop if a comment can't be properly placed (exits with error if any comment would be moved to different location)
         #[clap(long, default_value_t = false)]
         stop_on_unhandled_comment: bool,
     },

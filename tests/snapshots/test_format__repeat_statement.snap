@@ -1,13 +1,16 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n            repeat {\n                print(\"Hello, world!\")\n            }\n            repeat {\n            }\n            repeat { #foo\n            }\n            repeat #foo\n            { }\n        \"#\n})"
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n        repeat { body }\n        repeat {\n            body\n        }\n        repeat body\n        repeat\n            body\n    \"#\n}).unwrap()"
 ---
 repeat {
-  print("Hello, world!")
+  body
 }
-repeat {}
 repeat {
-  # foo
+  body
 }
-# foo
-repeat {}
+repeat {
+  body
+}
+repeat {
+  body
+}

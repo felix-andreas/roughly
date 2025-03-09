@@ -559,16 +559,31 @@ fn program() {
 #[test]
 fn repeat_statement() {
     assert_fmt! {r#"
+        repeat { body }
         repeat {
-            print("Hello, world!")
+            body
         }
-        repeat {
-        }
-        repeat { #foo
-        }
-        repeat #foo
-        { }
+        repeat body
+        repeat
+            body
     "#};
+
+    // check all possible comment positions
+    assert_fmt! {r#"
+        repeat # repeat
+        # 1
+        {
+        }
+    "#};
+
+    // comment after condition but no block
+    assert_fmt! {r#"
+        repeat # 1
+            body
+        repeat # 1
+        { body }
+        "#
+    };
 }
 
 #[test]

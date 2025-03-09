@@ -429,7 +429,7 @@ fn traverse(
                 .skip(1)
                 .take(node.child_count() - 2)
                 .map(|child| {
-                    let prev_sibling = {
+                    let maybe_prev = {
                         let tmp = prev_sibling;
                         prev_sibling = Some(child);
                         tmp
@@ -448,21 +448,21 @@ fn traverse(
                         fmt(child)?
                     };
                     if is_fmt_skip_comment(&child)
-                        && prev_sibling
+                        && maybe_prev
                             .map(|prev| end_position(prev).row < child.start_position().row)
                             .unwrap_or(true)
                     {
                         fmt_skip = true;
                     }
                     if child.kind() == "comment" {
-                        return Ok(match prev_sibling {
+                        return Ok(match maybe_prev {
                             Some(prev) if same_line(prev, child) => {
                                 format!(" {formatted}")
                             }
-                            Some(prev_node) => format!(
+                            Some(prev) => format!(
                                 "{}{formatted}",
                                 line_ending.repeat(usize::clamp(
-                                    child.start_position().row - end_position(prev_node).row,
+                                    child.start_position().row - end_position(prev).row,
                                     1,
                                     2,
                                 ))
@@ -473,7 +473,7 @@ fn traverse(
                     if child.kind() == "comma" {
                         is_first_arg = false;
                         return Ok(
-                            if prev_sibling
+                            if maybe_prev
                                 .map(|prev| prev.kind() == "comment")
                                 .unwrap_or(false)
                             {
@@ -486,7 +486,7 @@ fn traverse(
                     let result = format!(
                         "{}{}",
                         if is_first_arg {
-                            if prev_sibling
+                            if maybe_prev
                                 .map(|prev| prev.kind() == "comment")
                                 .unwrap_or(false)
                             {
@@ -496,7 +496,7 @@ fn traverse(
                             }
                         } else if is_multiline {
                             line_ending.repeat(usize::clamp(
-                                prev_sibling
+                                maybe_prev
                                     .map(|prev| child.start_position().row - end_position(prev).row)
                                     .unwrap_or(1),
                                 1,
@@ -735,9 +735,9 @@ fn traverse(
             let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             let mut indent_comments = false;
             tree::for_each_child(&mut node.walk(), |child, field_name| {
-                let prev_node = child.prev_sibling();
+                let maybe_prev = child.prev_sibling();
 
-                let prev_is_comment = prev_node
+                let prev_is_comment = maybe_prev
                     .map(|node| node.kind() == "comment")
                     .unwrap_or(false);
                 let next_is_comment = child
@@ -763,8 +763,8 @@ fn traverse(
                             }
                         }
                         "comment" => {
-                            if let Some(prev_node) = prev_node
-                                && same_line(prev_node, child)
+                            if let Some(prev) = maybe_prev
+                                && same_line(prev, child)
                             {
                                 out.push(' ');
                             } else {
@@ -869,9 +869,9 @@ fn traverse(
             let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             let mut indent_comments = false;
             tree::for_each_child(&mut node.walk(), |child, field_name| {
-                let prev_node = child.prev_sibling();
+                let maybe_prev = child.prev_sibling();
 
-                let prev_is_comment = prev_node
+                let prev_is_comment = maybe_prev
                     .map(|node| node.kind() == "comment")
                     .unwrap_or(false);
 
@@ -885,8 +885,8 @@ fn traverse(
                             out.push_str("else")
                         }
                         "comment" => {
-                            if let Some(prev_node) = prev_node
-                                && same_line(prev_node, child)
+                            if let Some(prev) = maybe_prev
+                                && same_line(prev, child)
                             {
                                 out.push(' ');
                             } else {
@@ -1160,15 +1160,49 @@ fn traverse(
                 .collect::<Result<String, FormatError>>()?
         }
         "repeat_statement" => {
-            let body = field(node, "body")?;
-            format!(
-                "repeat {}",
-                if body.kind() == "braced_expression" {
-                    fmt_multiline(body, true)?
-                } else {
-                    wrap_with_braces(body)?
-                }
-            )
+            handles_comments = true;
+
+            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
+            tree::for_each_child(&mut node.walk(), |child, field_name| {
+                let maybe_prev = child.prev_sibling();
+
+                let prev_is_comment = maybe_prev
+                    .map(|node| node.kind() == "comment")
+                    .unwrap_or(false);
+
+                match field_name {
+                    None => match child.kind() {
+                        "repeat" => out.push_str("repeat"),
+                        "comment" => {
+                            if let Some(prev) = maybe_prev
+                                && same_line(prev, child)
+                            {
+                                out.push(' ');
+                            } else if !prev_is_comment {
+                                out.push('\n');
+                            }
+                            out.push_str(&fmt(child)?);
+                            out.push('\n')
+                        }
+                        _ => unreachable!(),
+                    },
+                    Some(field_name) => {
+                        if !prev_is_comment {
+                            out.push(' ');
+                        }
+                        match field_name {
+                            "body" => out.push_str(&if child.kind() == "braced_expression" {
+                                fmt_multiline(child, true)?
+                            } else {
+                                wrap_with_braces(child)?
+                            }),
+                            _ => unreachable!(),
+                        }
+                    }
+                };
+                Ok::<_, FormatError>(())
+            })?;
+            out
         }
         "string" => {
             let maybe_string_content = field_optional(node, "content");
@@ -1236,9 +1270,9 @@ fn traverse(
             let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             let mut indent_comments = false;
             tree::for_each_child(&mut node.walk(), |child, field_name| {
-                let prev_node = child.prev_sibling();
+                let maybe_prev = child.prev_sibling();
 
-                let prev_is_comment = prev_node
+                let prev_is_comment = maybe_prev
                     .map(|node| node.kind() == "comment")
                     .unwrap_or(false);
 
@@ -1246,8 +1280,8 @@ fn traverse(
                     None => match child.kind() {
                         "while" => out.push_str("while"),
                         "comment" => {
-                            if let Some(prev_node) = prev_node
-                                && same_line(prev_node, child)
+                            if let Some(prev) = maybe_prev
+                                && same_line(prev, child)
                             {
                                 out.push(' ');
                             } else {
