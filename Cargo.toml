@@ -22,6 +22,7 @@ toml = "0.8.20"
 tower-lsp = "0.20"
 tree-sitter = "0.25.1"
 tree-sitter-r = "1.1.0"
+# tree-sitter-r = { path = "../tree-sitter-r/" }
 
 [dev-dependencies]
 insta = "1"

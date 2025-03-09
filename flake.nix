@@ -74,6 +74,7 @@
               cargo-insta
               nodejs
               bun
+              tree-sitter
               # libs
               # pkg-config
             ];

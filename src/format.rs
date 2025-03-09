@@ -301,7 +301,23 @@ fn traverse(
         LineEnding::Lf => "\n",
         LineEnding::Crlf => "\r\n",
     };
-    let same_line = |a: Node, b: Node| a.end_position().row == b.start_position().row;
+    // HACK: tree-sitter-r has wrong ending_position for extract without rhs (includes newline)
+    // see: https://github.com/users/felix-andreas/projects/5?pane=issue&itemId=100962575
+    let end_position = |node: Node| {
+        if node.kind() != "extract_operator" {
+            return node.end_position();
+        }
+
+        node.child_by_field_name("rhs")
+            .map(|rhs| rhs.end_position())
+            .or_else(|| {
+                node.child_by_field_name("operator")
+                    .map(|operator| operator.end_position())
+            })
+            // note: this case is unexpected
+            .unwrap_or_else(|| node.end_position())
+    };
+    let same_line = |a: Node, b: Node| end_position(a).row == b.start_position().row;
     let wrap_with_braces = |node: Node| -> Result<String, FormatError> {
         Ok(format!(
             "{{{}}}",
@@ -432,7 +448,7 @@ fn traverse(
                     };
                     if is_fmt_skip_comment(&child)
                         && prev_sibling
-                            .map(|prev| prev.end_position().row < child.start_position().row)
+                            .map(|prev| end_position(prev).row < child.start_position().row)
                             .unwrap_or(true)
                     {
                         fmt_skip = true;
@@ -445,7 +461,7 @@ fn traverse(
                             Some(prev_node) => format!(
                                 "{}{formatted}",
                                 line_ending.repeat(usize::clamp(
-                                    child.start_position().row - prev_node.end_position().row,
+                                    child.start_position().row - end_position(prev_node).row,
                                     1,
                                     2,
                                 ))
@@ -480,9 +496,7 @@ fn traverse(
                         } else if is_multiline {
                             line_ending.repeat(usize::clamp(
                                 prev_sibling
-                                    .map(|prev| {
-                                        child.start_position().row - prev.end_position().row
-                                    })
+                                    .map(|prev| child.start_position().row - end_position(prev).row)
                                     .unwrap_or(1),
                                 1,
                                 2,
@@ -584,7 +598,7 @@ fn traverse(
                     let result = match prev_end {
                         Some(prev_end)
                             if child.kind() == "comment"
-                                && prev_end == child.end_position().row =>
+                                && prev_end == child.start_position().row =>
                         {
                             format!(" {}", line)
                         }
@@ -605,7 +619,7 @@ fn traverse(
                         }
                         None => line,
                     };
-                    prev_end = Some(child.end_position().row);
+                    prev_end = Some(end_position(child).row);
                     Ok(result)
                 })
                 .collect::<Result<String, FormatError>>()?;
@@ -896,9 +910,7 @@ fn traverse(
                     };
                     if is_fmt_skip_comment(&child)
                         && prev_sibling
-                            .map(|prev_end| {
-                                prev_end.end_position().row < child.start_position().row
-                            })
+                            .map(|sibling| end_position(sibling).row < child.start_position().row)
                             .unwrap_or(true)
                     {
                         fmt_skip = true;
@@ -962,7 +974,7 @@ fn traverse(
                     let result = match prev_end {
                         Some(prev_end)
                             if child.kind() == "comment"
-                                && prev_end == child.end_position().row =>
+                                && prev_end == child.start_position().row =>
                         {
                             format!(" {}", line)
                         }
@@ -976,7 +988,7 @@ fn traverse(
                         }
                         None => line,
                     };
-                    prev_end = Some(child.end_position().row);
+                    prev_end = Some(end_position(child).row);
                     Ok(result)
                 })
                 .collect::<Result<Vec<String>, FormatError>>()?;
@@ -1023,8 +1035,7 @@ fn traverse(
                     }
                     let result = match prev_end {
                         Some(prev_end)
-                            if child.kind() == "comment"
-                                && prev_end == child.end_position().row =>
+                            if child.kind() == "comment" && prev_end == end_position(child).row =>
                         {
                             format!(" {}", line)
                         }
@@ -1041,7 +1052,7 @@ fn traverse(
                         }
                         None => line,
                     };
-                    prev_end = Some(child.end_position().row);
+                    prev_end = Some(end_position(child).row);
                     Ok(result)
                 })
                 .chain(std::iter::once(Ok(line_ending.into())))
