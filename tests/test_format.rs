@@ -60,7 +60,6 @@ fn binary_operator() {
         foo %>% bar %>%
                 baz
     "#};
-
     assert_fmt! {r#"
         foo |> # foo
         #bar
@@ -82,7 +81,8 @@ fn binary_operator() {
             # 6
                 baz
     "#};
-    // binary expression where one side is multilien
+
+    // only lhs or rhs is multiline
     assert_fmt! {r#"
         foo(
             1
@@ -96,6 +96,12 @@ fn binary_operator() {
         1 +
         foo(
         2)
+    "#};
+
+    // all comment positions
+    assert_fmt! {r#"
+        lhs + # 1
+            rhs # 2
     "#};
 }
 
@@ -154,6 +160,15 @@ fn braced_expression() {
     assert_fmt! {r#"
         { foo; bar }
     "#};
+
+    // all comment positions
+    assert_fmt! {r#"
+        { # {
+            # 1
+            body # body
+            # 2
+        } # }
+    "#};
 }
 
 #[test]
@@ -194,6 +209,15 @@ fn call() {
         foo(qux = { bar;
         baz }, qux)
     "#};
+
+    // all comment positions
+    assert_fmt! {r#"
+    	fn( # (
+        	# 1
+            argument # argument
+            # 2
+        ) # )
+    "#};
 }
 
 #[test]
@@ -210,6 +234,12 @@ fn extract_operator() {
     assert_fmt! {r#"
         list(foo = 1, bar =
         2)@baz
+    "#};
+
+    // all comment positions
+    assert_fmt! {r#"
+    	lhs$ # 1
+            rhs # 2
     "#};
 
     // note: this is not parsed correctly
@@ -267,7 +297,7 @@ fn for_statement() {
         ) {}
     "#};
 
-    // check all possible comment positions
+    // all comment positions
     assert_fmt! {r#"
         for
         # 1
@@ -349,6 +379,22 @@ fn function_definition() {
     assert_fmt! {r#"
         function (a,
         b) {baz}
+    "#};
+
+    // all comment positions
+    assert_fmt! {r#"
+        # hack: only parses correctly with surrounding parentheses
+    	(
+            function # function
+            # 1
+            ( # (
+                # 2
+                parameter # parameter
+                # 3
+            ) # )
+            # 4
+            {}
+        )
     "#};
 }
 
@@ -437,6 +483,7 @@ fn if_statement() {
 
 #[test]
 fn if_statement_comments() {
+    // all comment positions
     assert_fmt! {r#"
         # for some weird reason this is only parsed correctly if in a parentheses
         (
@@ -489,10 +536,16 @@ fn if_statement_comments() {
 #[test]
 fn namespace_operator() {
     assert_fmt! {r#"
-        foo::
-        foo::bar
-        foo::bar(1)
+        lhs::
+        lhs::rhs
+        lhs::rhs(1)
     "#}
+
+    // all comment positions
+    assert_fmt! {r#"
+        lhs:: # 1
+        lhs::rhs # 2
+    "#};
 }
 
 #[test]
@@ -519,6 +572,15 @@ fn parenthesized_expression() {
         )
         ( a #foo
         )
+    "#};
+
+    // all comment positions
+    assert_fmt! {r#"
+        ( # open
+            # 1
+            body # body
+            # 2
+        ) # close
     "#};
 }
 
@@ -561,6 +623,13 @@ fn program() {
         xyzzy <- Inf
         thud <- NaN
     "#};
+
+    // all comment positions
+    assert_fmt! {r#"
+        # 1
+        program # program
+        # 2
+    "#};
 }
 
 #[test]
@@ -575,7 +644,7 @@ fn repeat_statement() {
             body
     "#};
 
-    // check all possible comment positions
+    // all comment positions
     assert_fmt! {r#"
         repeat # repeat
         # 1
@@ -638,6 +707,15 @@ fn subset() {
         ,,a
         ]
     "#};
+
+    // all comment positions
+    assert_fmt! {r#"
+    	fn[ # [
+        	# 1
+            argument # argument
+            # 2
+        ] # ]
+    "#};
 }
 
 #[test]
@@ -668,6 +746,15 @@ fn subset2() {
         ,,a
         ]]
     "#};
+
+    // all comment positions
+    assert_fmt! {r#"
+    	fn[[ # [[
+        	# 1
+            argument # argument
+            # 2
+        ]] # ]]
+    "#};
 }
 
 #[test]
@@ -689,6 +776,12 @@ fn unary_operator() {
         -  (foo + bar)
         ! foo && bar
         ~  foo | bar
+    "#};
+
+    // all comment positions
+    assert_fmt! {r#"
+    	- # 1
+        rhs
     "#};
 }
 
@@ -724,18 +817,7 @@ fn while_statement() {
         bar }) { baz }
     "#};
 
-    // comments in multi-line condition
-    assert_fmt! {r#"
-        while(
-        	# 1
-            foo && # foo
-                bar # bar
-            # 2
-        )
-        {}
-    "#};
-
-    // check all possible comment positions
+    // all comment positions
     assert_fmt! {r#"
         while # while
         # 1
@@ -745,6 +827,17 @@ fn while_statement() {
             # 3
         ) # )
         # 4
+        {}
+    "#};
+
+    // comments in multi-line condition
+    assert_fmt! {r#"
+        while(
+        	# 1
+            foo && # foo
+                bar # bar
+            # 2
+        )
         {}
     "#};
 

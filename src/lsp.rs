@@ -187,9 +187,8 @@ impl LanguageServer for Backend {
                         },
                     });
 
-                    document.tree =
-                        	// todo: use Parser::parse_with_options
-                            tree::parse(&format!("{}", document.rope), Some(&document.tree));
+                    // todo: use Parser::parse_with_options
+                    document.tree = tree::parse(document.rope.to_string(), Some(&document.tree));
                 }
 
                 // DEBUG

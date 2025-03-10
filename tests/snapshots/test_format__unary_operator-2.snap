@@ -1,0 +1,6 @@
+---
+source: tests/test_format.rs
+expression: "format_str(indoc! { r#\"\n    \t- # 1\n        rhs\n    \"# }).unwrap()"
+---
+# 1
+-rhs

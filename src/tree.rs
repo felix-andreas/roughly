@@ -1,7 +1,7 @@
 use tree_sitter::{Node, Tree, TreeCursor};
 
 // todo: consider resusing global parser (maybe behind Mutex??)
-pub fn parse(text: &str, maybe_tree: Option<&Tree>) -> Tree {
+pub fn parse(text: impl AsRef<[u8]>, maybe_tree: Option<&Tree>) -> Tree {
     let mut parser = tree_sitter::Parser::new();
     let language = tree_sitter_r::LANGUAGE;
     parser

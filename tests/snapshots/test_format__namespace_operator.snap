@@ -1,7 +1,7 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n            foo::\n            foo::bar\n            foo::bar(1)\n        \"#\n})"
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{ r#\"\n        lhs::\n        lhs::rhs\n        lhs::rhs(1)\n    \"# }).unwrap()"
 ---
-foo::
-foo::bar
-foo::bar(1)
+lhs::
+lhs::rhs
+lhs::rhs(1)

@@ -1,0 +1,6 @@
+---
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{ r#\"\n        lhs:: # 1\n        lhs::rhs # 2\n    \"# }).unwrap()"
+---
+lhs:: # 1
+lhs::rhs # 2
