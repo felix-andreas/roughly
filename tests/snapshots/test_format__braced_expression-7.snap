@@ -1,8 +1,8 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n            {\n                    # single line\n                a # next\n\n\n                # multi\n                # line\n                # comment\n                b\n            }\n        \"#\n})"
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n        { #foo\n            # single line\n            a # next\n\n\n            # multi\n            # line\n            # comment\n            b\n        }\n    \"#\n}).unwrap()"
 ---
-{
+{ # foo
   # single line
   a # next
 

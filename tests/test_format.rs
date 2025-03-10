@@ -26,6 +26,12 @@ fn format_str(text: &str) -> Result<String, FormatError> {
 }
 
 #[test]
+fn dev() {
+    assert_fmt! {r#"
+    "#};
+}
+
+#[test]
 fn binary_operator() {
     assert_fmt! {r#"
         4 + 2
@@ -54,6 +60,7 @@ fn binary_operator() {
         foo %>% bar %>%
                 baz
     "#};
+
     assert_fmt! {r#"
         foo |> # foo
         #bar
@@ -126,7 +133,7 @@ fn braced_expression() {
         }
     "#};
     assert_fmt! {r#"
-        {
+        { #foo
             # single line
             a # next
 
@@ -268,7 +275,7 @@ fn for_statement() {
             # 2
             variable # variable
             # 3
-            in
+            in # in
             # 4
             sequence # sequence
             # 5

@@ -6,8 +6,7 @@ while (x < 10) {
   print(x)
   x <- x + 1
 }
-while (x < 10) {
-  # foo
+while (x < 10) { # foo
   print(x)
 }
 while (x < 10)

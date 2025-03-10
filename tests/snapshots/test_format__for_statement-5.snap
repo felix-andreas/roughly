@@ -1,6 +1,6 @@
 ---
 source: tests/test_format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n        for\n        # 1\n        ( # (\n            # 2\n            variable # variable\n            # 3\n            in\n            # 4\n            sequence # sequence\n            # 5\n        ) # )\n        # 6\n        {\n            body\n        }\n    \"#\n}).unwrap()"
+expression: "format_str(indoc!\n{\n    r#\"\n        for\n        # 1\n        ( # (\n            # 2\n            variable # variable\n            # 3\n            in # in\n            # 4\n            sequence # sequence\n            # 5\n        ) # )\n        # 6\n        {\n            body\n        }\n    \"#\n}).unwrap()"
 ---
 for
 # 1
@@ -8,7 +8,7 @@ for
   # 2
   variable # variable
   # 3
-  in
+  in # in
   # 4
   sequence # sequence
   # 5

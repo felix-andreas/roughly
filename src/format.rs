@@ -309,6 +309,15 @@ fn traverse(
         LineEnding::Lf => "\n",
         LineEnding::Crlf => "\r\n",
     };
+    let collapse_newlines = |node: Node, maybe_prev: Option<Node>| {
+        line_ending.repeat(usize::clamp(
+            maybe_prev
+                .map(|prev| node.start_position().row - prev.end_position().row)
+                .unwrap_or(1),
+            1,
+            2,
+        ))
+    };
     // HACK: tree-sitter-r has wrong ending_position for extract with newlines before ths rhs:
     // it only includes the newline but not the rhs. this hack uses at least the correct end_position
     // see: https://github.com/users/felix-andreas/projects/5?pane=issue&itemId=100962575
@@ -578,57 +587,64 @@ fn traverse(
         "braced_expression" => {
             handles_comments = true;
 
-            check(field(node, "open")?)?;
-            check(field(node, "close")?)?;
-            let mut cursor = node.walk();
-            let is_multiline = !same_line(node, node);
+            let is_multiline = !same_line(node, node) || state.make_multiline;
+            let is_empty = node.child_count() == 2;
 
-            let mut maybe_prev_end = None;
-            let lines = node
-                .children(&mut cursor)
-                .skip(1)
-                .take(node.child_count() - 2)
-                .map(|child| {
-                    let line = fmt(child)?;
-                    let result = match maybe_prev_end {
-                        Some(prev_end)
-                            if child.kind() == "comment"
-                                && prev_end == child.start_position().row =>
-                        {
-                            format!(" {}", line)
+            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
+            tree::for_each_child(&mut node.walk(), |i, child, field_name| {
+                let maybe_prev = child.prev_sibling();
+
+                match field_name {
+                    None => match child.kind() {
+                        "comment" => {
+                            let formatted = fmt(child)?;
+                            if let Some(prev) = maybe_prev
+                                && same_line(prev, child)
+                            {
+                                out.push(' ');
+                            } else {
+                                out.push_str(&collapse_newlines(child, maybe_prev));
+                                out.push_str(&" ".repeat(config.spaces));
+                            }
+                            out.push_str(&formatted);
                         }
-                        Some(prev_end) => {
-                            format!(
-                                "{}{}",
-                                if is_multiline || state.make_multiline {
-                                    line_ending.repeat(usize::clamp(
-                                        child.start_position().row - prev_end,
-                                        1,
-                                        2,
-                                    ))
+                        _ => unreachable!(),
+                    },
+                    Some(field_name) => match field_name {
+                        "body" => {
+                            if i == 1 {
+                                if !is_empty {
+                                    out.push(if is_multiline { '\n' } else { ' ' });
+                                }
+                            } else {
+                                out.push_str(&if is_multiline {
+                                    collapse_newlines(child, maybe_prev)
                                 } else {
                                     "; ".into()
-                                },
-                                line
-                            )
-                        }
-                        None => line,
-                    };
-                    maybe_prev_end = Some(end_position(child).row);
-                    Ok(result)
-                })
-                .collect::<Result<String, FormatError>>()?;
+                                })
+                            }
 
-            if lines.is_empty() {
-                "{}".into()
-            } else if is_multiline || state.make_multiline {
-                format!(
-                    "{{{}}}",
-                    utils::indent_by_with_newlines(config.spaces, lines, line_ending)
-                )
-            } else {
-                format!("{{ {} }}", lines)
-            }
+                            out.push_str(&if is_multiline {
+                                utils::indent_by(config.spaces, &fmt(child)?, line_ending)
+                            } else {
+                                fmt(child)?
+                            });
+                        }
+                        "open" => {
+                            out.push_str(&fmt(child)?);
+                        }
+                        "close" => {
+                            if !is_empty {
+                                out.push(if is_multiline { '\n' } else { ' ' });
+                            }
+                            out.push_str(&fmt(child)?);
+                        }
+                        _ => unreachable!(),
+                    },
+                }
+                Ok::<_, FormatError>(())
+            })?;
+            out
         }
         "call" => {
             let function = field(node, "function")?;
@@ -730,7 +746,7 @@ fn traverse(
 
             let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             let mut indent_comments = false;
-            tree::for_each_child(&mut node.walk(), |child, field_name| {
+            tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 let maybe_prev = child.prev_sibling();
 
                 let prev_is_comment = maybe_prev
@@ -865,7 +881,7 @@ fn traverse(
 
             let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             let mut indent_comments = false;
-            tree::for_each_child(&mut node.walk(), |child, field_name| {
+            tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 let maybe_prev = child.prev_sibling();
 
                 let prev_is_comment = maybe_prev
@@ -1120,7 +1136,7 @@ fn traverse(
             handles_comments = true;
 
             let mut out = String::with_capacity(node.end_byte() - node.start_byte());
-            tree::for_each_child(&mut node.walk(), |child, field_name| {
+            tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 let maybe_prev = child.prev_sibling();
 
                 let prev_is_comment = maybe_prev
@@ -1227,7 +1243,7 @@ fn traverse(
 
             let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             let mut indent_comments = false;
-            tree::for_each_child(&mut node.walk(), |child, field_name| {
+            tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 let maybe_prev = child.prev_sibling();
 
                 let prev_is_comment = maybe_prev

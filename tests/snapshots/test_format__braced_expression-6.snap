@@ -1,10 +1,9 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n        \t# foo\n            { # bar\n            #baz\n            a\n            # qux\n            }\n        \"#\n})"
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n        # foo\n        { # bar\n        #baz\n        a\n        # qux\n        }\n    \"#\n}).unwrap()"
 ---
 # foo
-{
-  # bar
+{ # bar
   # baz
   a
   # qux

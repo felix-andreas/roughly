@@ -13,15 +13,19 @@ pub fn parse(text: &str, maybe_tree: Option<&Tree>) -> Tree {
 #[inline]
 pub fn for_each_child<'a, E>(
     cursor: &mut TreeCursor<'a>,
-    mut func: impl FnMut(Node<'a>, Option<&'static str>) -> Result<(), E>,
+    mut func: impl FnMut(usize, Node<'a>, Option<&'static str>) -> Result<(), E>,
 ) -> Result<(), E> {
+    // foo
+
+    let mut i = 0;
     if cursor.goto_first_child() {
         loop {
-            func(cursor.node(), cursor.field_name())?;
+            func(i, cursor.node(), cursor.field_name())?;
             if !cursor.goto_next_sibling() {
                 cursor.goto_parent();
                 break;
             }
+            i += 1;
         }
     };
     Ok(())
