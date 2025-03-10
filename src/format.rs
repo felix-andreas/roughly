@@ -310,13 +310,11 @@ fn traverse(
         LineEnding::Crlf => "\r\n",
     };
     let collapse_newlines = |node: Node, maybe_prev: Option<Node>| {
-        line_ending.repeat(usize::clamp(
+        line_ending.repeat(
             maybe_prev
-                .map(|prev| node.start_position().row - prev.end_position().row)
-                .unwrap_or(1),
-            1,
-            2,
-        ))
+                .map(|prev| usize::clamp(node.start_position().row - prev.end_position().row, 1, 2))
+                .unwrap_or(0),
+        )
     };
     // HACK: tree-sitter-r has wrong ending_position for extract with newlines before ths rhs:
     // it only includes the newline but not the rhs. this hack uses at least the correct end_position
@@ -1103,34 +1101,28 @@ fn traverse(
         "program" => {
             handles_comments = true;
 
-            let mut maybe_prev_end = None;
-            node.children(&mut node.walk())
-                .map(|child| {
-                    let line = fmt(child)?;
-                    let result = match maybe_prev_end {
-                        Some(prev_end)
-                            if child.kind() == "comment" && prev_end == end_position(child).row =>
-                        {
-                            format!(" {}", line)
-                        }
-                        Some(prev_end) => {
-                            format!(
-                                "{}{}",
-                                line_ending.repeat(usize::clamp(
-                                    child.start_position().row - prev_end,
-                                    1,
-                                    2
-                                )),
-                                line
-                            )
-                        }
-                        None => line,
-                    };
-                    maybe_prev_end = Some(end_position(child).row);
-                    Ok(result)
-                })
-                .chain(std::iter::once(Ok(line_ending.into())))
-                .collect::<Result<String, FormatError>>()?
+            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
+            tree::for_each_child(&mut node.walk(), |_, child, _| {
+                let maybe_prev = child.prev_sibling();
+
+                match child.kind() {
+                    "comment"
+                        if maybe_prev
+                            .map(|prev| same_line(prev, child))
+                            .unwrap_or(false) =>
+                    {
+                        out.push(' ');
+                    }
+                    _ => {
+                        out.push_str(&collapse_newlines(child, maybe_prev));
+                    }
+                }
+                out.push_str(&fmt(child)?);
+
+                Ok::<_, FormatError>(())
+            })?;
+            out.push_str(line_ending);
+            out
         }
         "repeat_statement" => {
             handles_comments = true;
