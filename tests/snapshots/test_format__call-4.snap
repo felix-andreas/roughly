@@ -1,9 +1,8 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n            foo  ( #foo\n                # foo\n                f\n                # foo bar\n                #   foo bar\n                #   foo bar\n                a = 1, #bar\n\n\n                b= 2L) #baz\n\n                # foo\n        \"#\n}).unwrap()"
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n        foo  ( #foo\n            # foo\n            f\n            # foo bar\n            #   foo bar\n            #   foo bar\n            a = 1, #bar\n\n\n            b= 2L) #baz\n\n            # foo\n    \"#\n}).unwrap()"
 ---
-foo(
-  # foo
+foo( # foo
   # foo
   f
   # foo bar

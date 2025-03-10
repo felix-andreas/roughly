@@ -324,10 +324,9 @@ fn traverse(
     // };
 
     fn field<'a>(node: Node<'a>, field_name: &'static str) -> Result<Node<'a>, FormatError> {
-        let kind = node.kind();
         node.child_by_field_name(field_name)
             .ok_or(FormatError::MissingField {
-                kind,
+                kind: node.kind(),
                 field: field_name,
             })
     }
@@ -482,82 +481,86 @@ fn traverse(
                 (None, None) => String::new(),
             }
         }
-        "arguments" => {
+        "arguments" | "parameters" => {
             handles_comments = true;
 
-            check(field(node, "open")?)?;
-            check(field(node, "close")?)?;
             let is_multiline = !same_line(node, node);
+            let is_empty = node.child_count() == 2;
+            let hug = node.child_count() == 3
+                && node
+                    .child_by_field_name("argument")
+                    .map(|argument| {
+                        argument.child_count() == 1
+                            && argument.child(0).unwrap().kind() == "braced_expression"
+                    })
+                    .unwrap_or(false);
 
-            let mut maybe_prev = None;
-            let mut is_first_arg = true;
-            node.children(&mut node.walk())
-                .skip(1)
-                .take(node.child_count() - 2)
-                .map(|child| {
-                    let maybe_prev = {
-                        let tmp = maybe_prev;
-                        maybe_prev = Some(child);
-                        tmp
-                    };
-                    let formatted = fmt(child)?;
-                    if child.kind() == "comment" {
-                        return Ok(match maybe_prev {
-                            Some(prev) if same_line(prev, child) => {
-                                format!(" {formatted}")
-                            }
-                            Some(prev) => format!(
-                                "{}{formatted}",
-                                line_ending.repeat(usize::clamp(
-                                    child.start_position().row - end_position(prev).row,
-                                    1,
-                                    2,
-                                ))
-                            ),
-                            None => formatted.to_string(),
-                        });
-                    }
-                    if child.kind() == "comma" {
-                        is_first_arg = false;
-                        return Ok(
-                            if maybe_prev
-                                .map(|prev| prev.kind() == "comment")
-                                .unwrap_or(false)
+            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
+            tree::for_each_child(&mut node.walk(), |i, child, field_name| {
+                let maybe_prev = child.prev_sibling();
+
+                match field_name {
+                    None => match child.kind() {
+                        "comment" => {
+                            if let Some(prev) = maybe_prev
+                                && same_line(prev, child)
                             {
-                                format!("{line_ending},")
+                                out.push(' ');
                             } else {
-                                ",".to_string()
-                            },
-                        );
-                    }
-                    let result = format!(
-                        "{}{}",
-                        if is_first_arg {
-                            if maybe_prev
-                                .map(|prev| prev.kind() == "comment")
-                                .unwrap_or(false)
-                            {
-                                line_ending.into()
-                            } else {
-                                "".into()
+                                out.push_str(&collapse_newlines(child, maybe_prev));
+                                out.push_str(&" ".repeat(config.spaces));
                             }
-                        } else if is_multiline {
-                            line_ending.repeat(usize::clamp(
-                                maybe_prev
-                                    .map(|prev| child.start_position().row - end_position(prev).row)
-                                    .unwrap_or(1),
-                                1,
-                                2,
-                            ))
-                        } else {
-                            " ".into()
-                        },
-                        formatted
-                    );
-                    is_first_arg = false;
-                    Ok(result)
-                })
-                .collect::<Result<String, FormatError>>()?
+                            out.push_str(&fmt(child)?);
+                        }
+                        "comma" => {
+                            if is_multiline
+                                && (maybe_prev
+                                    .map(|node| ["comment", "comma"].contains(&node.kind()))
+                                    .unwrap_or(true)
+                                    || i == 1)
+                            {
+                                out.push_str(line_ending);
+                                out.push_str(&" ".repeat(config.spaces));
+                            }
+                            out.push_str(&fmt(child)?);
+                        }
+                        _ => unreachable!(),
+                    },
+                    Some(field_name) => match field_name {
+                        "open" => {
+                            out.push_str(&fmt(child)?);
+                        }
+                        "argument" | "parameter" => {
+                            if i == 1 {
+                                if is_multiline && !hug {
+                                    out.push_str(line_ending)
+                                }
+                            } else {
+                                out.push_str(&if is_multiline {
+                                    collapse_newlines(child, maybe_prev)
+                                } else {
+                                    " ".into()
+                                })
+                            }
+
+                            out.push_str(&if is_multiline && !hug {
+                                utils::indent_by(config.spaces, &fmt(child)?, line_ending)
+                            } else {
+                                fmt(child)?
+                            });
+                        }
+                        "close" => {
+                            if is_multiline && !hug && !is_empty {
+                                out.push_str(line_ending)
+                            }
+                            out.push_str(&fmt(child)?);
+                        }
+                        _ => unreachable!(),
+                    },
+                }
+                Ok::<_, FormatError>(())
+            })?;
+            out
         }
         "binary_operator" => {
             handles_comments = true;
@@ -671,7 +674,7 @@ fn traverse(
             })?;
             out
         }
-        "call" => {
+        "call" | "subset" | "subset2" => {
             let function = field(node, "function")?;
             let arguments = field(node, "arguments")?;
             let is_multiline = !same_line(arguments, arguments);
@@ -700,18 +703,14 @@ fn traverse(
                             && argument.child(0).unwrap().kind() == "braced_expression"
                     })
                 {
-                    let out = format!(
-                        "({})",
-                        utils::indent_by_with_newlines(config.spaces, arguments_fmt, line_ending)
-                    );
                     // we need additional indent if we are lhs of multiline extract operator
                     if additional_indent {
-                        utils::indent_by_skip_first(config.spaces, out, line_ending)
+                        utils::indent_by_skip_first(config.spaces, arguments_fmt, line_ending)
                     } else {
-                        out
+                        arguments_fmt
                     }
                 } else {
-                    format!("({arguments_fmt})")
+                    arguments_fmt
                 }
             )
         }
@@ -884,13 +883,9 @@ fn traverse(
 
             let parameters_fmt = fmt(parameters)?;
             format!(
-                "{}({}) {}",
+                "{}{} {}",
                 fmt(name)?,
-                if parameters_fmt.is_empty() || same_line(parameters, parameters) {
-                    parameters_fmt
-                } else {
-                    utils::indent_by_with_newlines(config.spaces, parameters_fmt, line_ending)
-                },
+                parameters_fmt,
                 if is_multiline && body.kind() != "braced_expression" {
                     fmt_wrap_with_braces(body)?
                 } else {
@@ -1016,69 +1011,6 @@ fn traverse(
                 Some(default) => format!("{name} = {}", fmt(default)?),
                 None => name,
             }
-        }
-        "parameters" => {
-            handles_comments = true;
-
-            let is_multiline = !same_line(node, node);
-
-            let mut maybe_prev = None;
-            let mut is_first_param = true;
-            let mut cursor = node.walk();
-            node.children(&mut cursor)
-                .skip(1)
-                .take(node.child_count() - 2)
-                .map(|child| {
-                    let maybe_prev = {
-                        let tmp = maybe_prev;
-                        maybe_prev = Some(child);
-                        tmp
-                    };
-                    let tmp = fmt(child)?;
-                    if child.kind() == "comment" {
-                        return Ok(match maybe_prev {
-                            Some(prev) if same_line(prev, child) => {
-                                format!(" {tmp}")
-                            }
-                            Some(_) => format!("{line_ending}{tmp}"),
-                            None => tmp.to_string(),
-                        });
-                    }
-                    if child.kind() == "comma" {
-                        is_first_param = false;
-                        return Ok(
-                            if maybe_prev
-                                .map(|node| node.kind() == "comment")
-                                .unwrap_or(false)
-                            {
-                                format!("{line_ending},")
-                            } else {
-                                ",".to_string()
-                            },
-                        );
-                    }
-                    let result = format!(
-                        "{}{}",
-                        if is_first_param {
-                            if maybe_prev
-                                .map(|node| node.kind() == "comment")
-                                .unwrap_or(false)
-                            {
-                                line_ending
-                            } else {
-                                ""
-                            }
-                        } else if is_multiline {
-                            line_ending
-                        } else {
-                            " "
-                        },
-                        tmp
-                    );
-                    is_first_param = false;
-                    Ok(result)
-                })
-                .collect::<Result<String, FormatError>>()?
         }
         "parenthesized_expression" => {
             handles_comments = true;
@@ -1234,36 +1166,6 @@ fn traverse(
             }
         }
         "string_content" => fmt_with_indent_prefix(node),
-        "subset" => {
-            let function = field(node, "function")?;
-            let arguments = field(node, "arguments")?;
-
-            let function_fmt = fmt(function)?;
-            let arguments_fmt = fmt(arguments)?;
-            format!(
-                "{function_fmt}[{}]",
-                if same_line(arguments, arguments) {
-                    arguments_fmt
-                } else {
-                    utils::indent_by_with_newlines(config.spaces, arguments_fmt, line_ending)
-                }
-            )
-        }
-        "subset2" => {
-            let function = field(node, "function")?;
-            let arguments = field(node, "arguments")?;
-
-            let function_fmt = fmt(function)?;
-            let arguments_fmt = fmt(arguments)?;
-            format!(
-                "{function_fmt}[[{}]]",
-                if same_line(arguments, arguments) {
-                    arguments_fmt
-                } else {
-                    utils::indent_by_with_newlines(config.spaces, arguments_fmt, line_ending)
-                }
-            )
-        }
         "unary_operator" => {
             let operator = field(node, "operator")?;
             let spacing = if operator.kind() == "~" { " " } else { "" };
