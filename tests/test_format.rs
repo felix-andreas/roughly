@@ -2,7 +2,7 @@ use {
     indoc::indoc,
     ropey::Rope,
     roughly::{
-        format::{Config, FormatError, format},
+        format::{Config, FormatError, LineEnding, format},
         tree,
     },
 };
@@ -22,6 +22,7 @@ fn format_str(text: &str) -> Result<String, FormatError> {
     format(tree.root_node(), &Rope::from_str(text), Config {
         stop_on_unhandled_comment: false,
         spaces: 2,
+        line_ending: LineEnding::Auto,
     })
 }
 

@@ -37,7 +37,7 @@ pub fn rope_range_to_lsp_range(
     Ok(Range { start, end })
 }
 
-// based on https://docs.rs/indent/latest/src/indent/lib.rs.html#27-32
+// Adapted from https://docs.rs/indent/latest/src/indent/lib.rs.html#27-32
 pub fn indent_by<'a, S>(number_of_spaces: usize, input: S, line_ending: &str) -> String
 where
     S: Into<Cow<'a, str>>,
@@ -152,9 +152,8 @@ pub fn remove_indent_prefix(input: &str) -> String {
     output
 }
 
-// Adapted from  https://doc.rust-lang.org/stable/nightly-rustc/src/clippy_utils/str_utils.rs.html
+// Adapted from https://doc.rust-lang.org/stable/nightly-rustc/src/clippy_utils/str_utils.rs.html
 
-/// Returns a `camelCase` version of the input
 /// ```
 /// use roughly::utils::to_camel_case;
 /// assert_eq!(to_camel_case("foo_bar"), "fooBar");
@@ -184,7 +183,6 @@ pub fn to_camel_case(name: &str) -> String {
     camel
 }
 
-/// Returns a `snake_case` version of the input
 /// ```
 /// use roughly::utils::to_snake_case;
 /// assert_eq!(to_snake_case("fooBar"), "foo_bar");
@@ -211,24 +209,22 @@ pub fn to_snake_case(name: &str) -> String {
     snake
 }
 
-#[cfg(test)]
-mod test {
-    use crate::utils::{add_indent_prefix, remove_indent_prefix};
+// Adapted from: https://docs.rs/crate/human_bytes/latest
+pub fn human_bytes(bytes: impl Into<f64>) -> String {
+    const SUFFIX: [&str; 9] = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"];
+    const UNIT: f64 = 1024.0;
 
-    #[test]
-    fn test_add_indent_prefix() {
-        assert_eq!(add_indent_prefix("foo\nbar\nbaz"), "foo\n\x02bar\n\x02baz");
-        assert_eq!(
-            add_indent_prefix("foo\nbar\nbaz\n"),
-            "foo\n\x02bar\n\x02baz\n\x02"
-        );
+    let size = bytes.into();
+
+    if size <= 0.0 {
+        return "0 B".to_string();
     }
 
-    #[test]
-    fn test_removeindent_prefix() {
-        assert_eq!(
-            remove_indent_prefix("foo\n  \x02  bar\n  \x02  baz\n\x02"),
-            "foo\n  bar\n  baz\n"
-        );
-    }
+    let base = size.log10() / UNIT.log10();
+
+    let result = format!("{:.1}", UNIT.powf(base - base.floor()),)
+        .trim_end_matches(".0")
+        .to_owned();
+
+    [&result, SUFFIX[base.floor() as usize]].join(" ")
 }

@@ -2,7 +2,8 @@ use {
     crate::{
         cli,
         config::Config,
-        diagnostics, format,
+        diagnostics,
+        format::{self, LineEnding},
         index::{self, IndexError},
         tree,
     },
@@ -372,6 +373,7 @@ impl LanguageServer for Backend {
         let new = match format::format(tree.root_node(), rope, format::Config {
             spaces: self.config.spaces,
             stop_on_unhandled_comment: false,
+            line_ending: LineEnding::Auto,
         }) {
             Ok(new) => new,
             Err(error) => {

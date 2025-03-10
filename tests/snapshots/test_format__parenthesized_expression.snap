@@ -1,14 +1,13 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n            (1 +2 )\n            (\n            #foo\n            1 +2 )\n            x <- ( # com\n            5\n            )\n            (\n                a #foo\n            )\n            (\n            \t#foo\n                a #bar\n                #baz\n            )\n            ( #foo\n                a #bar\n            #baz\n            )\n            ( a #foo\n            )\n        \"#\n})"
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n        (1 +2 )\n        (\n        #foo\n        1 +2 )\n        x <- ( # com\n        5\n        )\n        (\n            a #foo\n        )\n        (\n            #foo\n            a #bar\n            #baz\n        )\n        ( #foo\n            a #bar\n        #baz\n        )\n        ( a #foo\n        )\n    \"#\n}).unwrap()"
 ---
 (1 + 2)
 (
   # foo
   1 + 2
 )
-x <- (
-  # com
+x <- ( # com
   5
 )
 (
@@ -19,8 +18,7 @@ x <- (
   a # bar
   # baz
 )
-(
-  # foo
+( # foo
   a # bar
   # baz
 )

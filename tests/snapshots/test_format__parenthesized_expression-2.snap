@@ -1,0 +1,9 @@
+---
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n        ( # open\n            # 1\n            body # body\n            # 2\n        ) # close\n    \"#\n}).unwrap()"
+---
+( # open
+  # 1
+  body # body
+  # 2
+) # close
