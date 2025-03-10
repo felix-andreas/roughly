@@ -316,6 +316,12 @@ fn traverse(
                 .unwrap_or(0),
         )
     };
+    let is_comment = |maybe_node: Option<Node>| {
+        maybe_node
+            .map(|next| next.kind() == "comment")
+            .unwrap_or(false)
+    };
+
     // HACK: tree-sitter-r has wrong ending_position for extract with newlines before ths rhs:
     // it only includes the newline but not the rhs. this hack uses at least the correct end_position
     // see: https://github.com/users/felix-andreas/projects/5?pane=issue&itemId=100962575
@@ -595,7 +601,6 @@ fn traverse(
                 match field_name {
                     None => match child.kind() {
                         "comment" => {
-                            let formatted = fmt(child)?;
                             if let Some(prev) = maybe_prev
                                 && same_line(prev, child)
                             {
@@ -604,15 +609,18 @@ fn traverse(
                                 out.push_str(&collapse_newlines(child, maybe_prev));
                                 out.push_str(&" ".repeat(config.spaces));
                             }
-                            out.push_str(&formatted);
+                            out.push_str(&fmt(child)?);
                         }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
+                        "open" => {
+                            out.push_str(&fmt(child)?);
+                        }
                         "body" => {
                             if i == 1 {
                                 if !is_empty {
-                                    out.push(if is_multiline { '\n' } else { ' ' });
+                                    out.push_str(if is_multiline { line_ending } else { " " });
                                 }
                             } else {
                                 out.push_str(&if is_multiline {
@@ -628,12 +636,9 @@ fn traverse(
                                 fmt(child)?
                             });
                         }
-                        "open" => {
-                            out.push_str(&fmt(child)?);
-                        }
                         "close" => {
                             if !is_empty {
-                                out.push(if is_multiline { '\n' } else { ' ' });
+                                out.push_str(if is_multiline { line_ending } else { " " });
                             }
                             out.push_str(&fmt(child)?);
                         }
@@ -762,7 +767,7 @@ fn traverse(
                             if prev_is_comment {
                                 out.push_str(&" ".repeat(config.spaces));
                             } else if loop_header_is_multiline {
-                                out.push('\n');
+                                out.push_str(line_ending);
                                 out.push_str(&" ".repeat(config.spaces));
                             } else {
                                 out.push(' ');
@@ -779,14 +784,14 @@ fn traverse(
                                 out.push(' ');
                             } else {
                                 if !prev_is_comment {
-                                    out.push('\n');
+                                    out.push_str(line_ending);
                                 }
                                 if indent_comments {
                                     out.push_str(&" ".repeat(config.spaces));
                                 }
                             }
                             out.push_str(&fmt(child)?);
-                            out.push('\n')
+                            out.push_str(line_ending)
                         }
                         _ => unreachable!(),
                     },
@@ -800,7 +805,7 @@ fn traverse(
                             if !next_is_comment
                                 && (loop_header_is_multiline || condition_is_multiline)
                             {
-                                out.push('\n');
+                                out.push_str(line_ending);
                             }
                         }
                         "variable" | "sequence" => {
@@ -828,7 +833,7 @@ fn traverse(
                             if !prev_is_comment
                                 && (loop_header_is_multiline || condition_is_multiline)
                             {
-                                out.push('\n');
+                                out.push_str(line_ending);
                             }
                             out.push(')')
                         }
@@ -902,14 +907,14 @@ fn traverse(
                                 out.push(' ');
                             } else {
                                 if !prev_is_comment {
-                                    out.push('\n');
+                                    out.push_str(line_ending);
                                 }
                                 if indent_comments {
                                     out.push_str(&" ".repeat(config.spaces));
                                 }
                             }
                             out.push_str(&fmt(child)?);
-                            out.push('\n')
+                            out.push_str(line_ending)
                         }
                         _ => unreachable!(),
                     },
@@ -931,7 +936,7 @@ fn traverse(
                                     && !(prev_is_comment || next_is_comment))
                             {
                                 if !prev_is_comment {
-                                    out.push('\n');
+                                    out.push_str(line_ending);
                                 }
                                 out.push_str(&utils::indent_by(
                                     config.spaces,
@@ -939,7 +944,7 @@ fn traverse(
                                     line_ending,
                                 ));
                                 if !next_is_comment {
-                                    out.push('\n');
+                                    out.push_str(line_ending);
                                 }
                             } else {
                                 out.push_str(&fmt(child)?);
@@ -1144,10 +1149,10 @@ fn traverse(
                             {
                                 out.push(' ');
                             } else if !prev_is_comment {
-                                out.push('\n');
+                                out.push_str(line_ending);
                             }
                             out.push_str(&fmt(child)?);
-                            out.push('\n')
+                            out.push_str(line_ending)
                         }
                         _ => unreachable!(),
                     },
@@ -1231,7 +1236,15 @@ fn traverse(
         "while_statement" => {
             handles_comments = true;
 
-            let condition_is_multiline = !same_line(field(node, "open")?, field(node, "close")?);
+            let hug = {
+                let condition = field(node, "condition")?;
+                let is_braced_without_comments = condition.kind() == "braced_expression"
+                    && !is_comment(condition.prev_sibling())
+                    && !is_comment(condition.next_sibling());
+                let condition_is_multiline =
+                    !same_line(field(node, "open")?, field(node, "close")?);
+                !condition_is_multiline || is_braced_without_comments
+            };
 
             let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             let mut indent_comments = false;
@@ -1251,58 +1264,42 @@ fn traverse(
                             {
                                 out.push(' ');
                             } else {
-                                if !prev_is_comment {
-                                    out.push('\n');
-                                }
+                                out.push_str(&collapse_newlines(child, maybe_prev));
                                 if indent_comments {
                                     out.push_str(&" ".repeat(config.spaces));
                                 }
                             }
                             out.push_str(&fmt(child)?);
-                            out.push('\n')
                         }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
                         "open" => {
                             indent_comments = true;
-                            if !prev_is_comment {
-                                out.push(' ');
-                            }
-                            out.push('(');
+                            out.push_str(if prev_is_comment { line_ending } else { " " });
+                            out.push_str(&fmt(child)?);
                         }
                         "condition" => {
-                            let next_is_comment = child
-                                .next_sibling()
-                                .map(|next| next.kind() == "comment")
-                                .unwrap_or(false);
-                            if condition_is_multiline
-                                && !(child.kind() == "braced_expression"
-                                    && !(prev_is_comment || next_is_comment))
-                            {
-                                if !prev_is_comment {
-                                    out.push('\n');
-                                }
+                            if !hug {
+                                out.push_str(line_ending);
                                 out.push_str(&utils::indent_by(
                                     config.spaces,
                                     fmt(child)?,
                                     line_ending,
                                 ));
-                                if !next_is_comment {
-                                    out.push('\n');
-                                }
                             } else {
                                 out.push_str(&fmt(child)?);
                             }
                         }
                         "close" => {
                             indent_comments = false;
-                            out.push(')')
+                            if !hug {
+                                out.push_str(line_ending);
+                            }
+                            out.push_str(&fmt(child)?);
                         }
                         "body" => {
-                            if !prev_is_comment {
-                                out.push(' ');
-                            }
+                            out.push_str(if prev_is_comment { line_ending } else { " " });
                             out.push_str(&if child.kind() == "braced_expression" {
                                 fmt_multiline(child, true)?
                             } else {
