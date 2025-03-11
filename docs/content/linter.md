@@ -47,6 +47,7 @@ Semantics checks enforce coding conventions and best practices that won't necess
 - **Parameter naming convention**: Ensures function parameters follow the same naming convention
 - **Assignment operator**: Recommends using `<-` rather than `=` for variable assignment
 - **Trailing commas**: Flags unnecessary trailing commas in function calls
+- **Booleans values**: Use `TRUE` and `FALSE` over `T` and `F`
 
 Example:
 ```r

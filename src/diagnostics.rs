@@ -419,6 +419,17 @@ pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Dia
                     }
                 }
             }
+            "identifier" => {
+                let name = rope.byte_slice(node.byte_range()).to_string();
+                let maybe_message = match name.as_str() {
+                    "T" => Some("Use TRUE, not T, for Boolean values".into()),
+                    "F" => Some("Use FALSE, not F, for Boolean values".into()),
+                    _ => None,
+                };
+                if let Some(message) = maybe_message {
+                    diagnostics.push(warning(node, message));
+                }
+            }
             _ => {}
         }
 
