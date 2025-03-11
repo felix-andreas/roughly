@@ -1,0 +1,16 @@
+---
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n        # hack: only parses correctly with surrounding parentheses\n    \t(\n            function # function\n            # 1\n            ( # (\n                # 2\n                parameter # parameter\n                # 3\n            ) # )\n            # 4\n            {}\n        )\n    \"#\n}).unwrap()"
+---
+# hack: only parses correctly with surrounding parentheses
+(
+  function # function
+  # 1
+  ( # (
+    # 2
+    parameter # parameter
+    # 3
+  ) # )
+  # 4
+  {}
+)
