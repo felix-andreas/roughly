@@ -27,122 +27,137 @@ pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), DiagnosticsError> {
     let root: Vec<PathBuf> = vec![".".into()];
     let files = maybe_files.unwrap_or(&root);
 
-    let config = match config::Config::from_path(files.first().unwrap()) {
-        Ok(config) => config,
-        Err(err) => {
-            cli::error(&err.to_string());
-            return Err(DiagnosticsError);
-        }
-    };
+    let file_config_pairs = files
+        .iter()
+        .map(|file| {
+            let config = match config::Config::from_path(file) {
+                Ok(config) => config,
+                Err(error) => {
+                    cli::error(&error.to_string());
+                    return Err(DiagnosticsError);
+                }
+            };
+
+            let paths = Walk::new(file)
+                .filter_map(|entry| match entry {
+                    Ok(entry) => {
+                        let path = entry.into_path();
+                        path.extension()
+                            .is_some_and(|ext| ext == "R" || ext == "r")
+                            .then_some(Ok(path))
+                    }
+                    Err(error) => {
+                        cli::error(&error.to_string());
+                        Some(Err(DiagnosticsError))
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok((paths, config))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     let mut n_files = 0;
     let mut n_errors = 0;
-    for path in files
-        .iter()
-        .flat_map(Walk::new)
-        .filter_map(|e| e.ok())
-        .map(|entry| entry.into_path())
-        .filter(|path| {
-            path.extension()
-                .map(|ext| ext == "R" || ext == "r")
-                .unwrap_or(false)
-        })
-    {
-        n_files += 1;
-        let old = match std::fs::read_to_string(&path) {
-            Ok(old) => old,
-            Err(err) => {
-                n_errors += 1;
-                cli::error(&format!("failed to read: {}", path.display()));
-                eprintln!("{err}");
-                continue;
-            }
-        };
-        let tree = tree::parse(&old, None);
-        let rope = Rope::from_str(&old);
-
-        for diagnostic in diagnostics(tree.root_node(), &rope, Config { case: config.case }) {
-            n_errors += 1;
-            cli::log(
-                match diagnostic.severity {
-                    Some(DiagnosticSeverity::INFORMATION) => LogLevel::Info,
-                    Some(DiagnosticSeverity::WARNING) => LogLevel::Warning,
-                    Some(DiagnosticSeverity::ERROR) => LogLevel::Error,
-                    _ => LogLevel::Info,
-                },
-                &diagnostic.message,
-            );
-            let range = diagnostic.range;
-            let padding_arrow = range.end.line.to_string().len();
-            eprintln!(
-                "{}{} {}:{}:{}",
-                " ".repeat(padding_arrow),
-                style("-->").bold().blue(),
-                path.display(),
-                range.start.line,
-                range.start.character
-            );
-
-            let line_start = usize::max(1, range.start.line as usize) - 1;
-            let lines = {
-                let start = rope.line_to_char(line_start);
-                let end = rope.line_to_char(range.end.line as usize) + range.end.character as usize;
-                rope.slice(start..end)
+    for (paths, config) in file_config_pairs {
+        for path in paths {
+            n_files += 1;
+            let old = match std::fs::read_to_string(&path) {
+                Ok(old) => old,
+                Err(err) => {
+                    n_errors += 1;
+                    cli::error(&format!("failed to read: {}", path.display()));
+                    eprintln!("{err}");
+                    continue;
+                }
             };
-            let width = padding_arrow + 1;
-            for (i, line) in lines.lines().enumerate() {
-                eprint!(
-                    "{} {}",
-                    style(format!("{:<width$}|", line_start + i)).blue().bold(),
-                    line
+            let tree = tree::parse(&old, None);
+            let rope = Rope::from_str(&old);
+
+            for diagnostic in diagnostics(tree.root_node(), &rope, Config { case: config.case }) {
+                n_errors += 1;
+                cli::log(
+                    match diagnostic.severity {
+                        Some(DiagnosticSeverity::INFORMATION) => LogLevel::Info,
+                        Some(DiagnosticSeverity::WARNING) => LogLevel::Warning,
+                        Some(DiagnosticSeverity::ERROR) => LogLevel::Error,
+                        _ => LogLevel::Info,
+                    },
+                    &diagnostic.message,
                 );
+                let range = diagnostic.range;
+                let padding_arrow = range.end.line.to_string().len();
+                eprintln!(
+                    "{}{} {}:{}:{}",
+                    " ".repeat(padding_arrow),
+                    style("-->").bold().blue(),
+                    path.display(),
+                    range.start.line,
+                    range.start.character
+                );
+
+                let line_start = usize::max(1, range.start.line as usize) - 1;
+                let lines = {
+                    let start = rope.line_to_char(line_start);
+                    let end =
+                        rope.line_to_char(range.end.line as usize) + range.end.character as usize;
+                    rope.slice(start..end)
+                };
+                let width = padding_arrow + 1;
+                for (i, line) in lines.lines().enumerate() {
+                    eprint!(
+                        "{} {}",
+                        style(format!("{:<width$}|", line_start + i)).blue().bold(),
+                        line
+                    );
+                }
+                eprintln!();
+
+                let width_message = u32::max(
+                    1,
+                    if range.end.character > range.start.character {
+                        range.end.character - range.start.character
+                    } else {
+                        range.start.character - range.end.character
+                    },
+                );
+                eprintln!(
+                    "{}{}  {}",
+                    " ".repeat(width),
+                    " ".repeat(usize::min(
+                        range.start.character as usize,
+                        range.end.character as usize
+                    )),
+                    {
+                        let arrow = style("^".repeat(width_message as usize)).bold();
+                        match diagnostic.severity {
+                            Some(DiagnosticSeverity::INFORMATION) => arrow.blue(),
+                            Some(DiagnosticSeverity::WARNING) => arrow.yellow(),
+                            Some(DiagnosticSeverity::ERROR) => arrow.red(),
+                            _ => arrow,
+                        }
+                    }
+                );
+                eprintln!(
+                    "{}{}  {}",
+                    " ".repeat(width),
+                    " ".repeat(usize::min(
+                        range.start.character as usize,
+                        range.end.character as usize
+                    )),
+                    {
+                        let message = style(&diagnostic.message).bold();
+                        match diagnostic.severity {
+                            Some(DiagnosticSeverity::INFORMATION) => message.blue(),
+                            Some(DiagnosticSeverity::WARNING) => message.yellow(),
+                            Some(DiagnosticSeverity::ERROR) => message.red(),
+                            _ => message,
+                        }
+                    }
+                );
+
+                eprintln!("\n")
             }
-            eprintln!();
-
-            let width_message = u32::max(
-                1,
-                if range.end.character > range.start.character {
-                    range.end.character - range.start.character
-                } else {
-                    range.start.character - range.end.character
-                },
-            );
-            eprintln!(
-                "{}{}  {}",
-                " ".repeat(width),
-                " ".repeat(usize::min(
-                    range.start.character as usize,
-                    range.end.character as usize
-                )),
-                {
-                    let arrow = style("^".repeat(width_message as usize)).bold();
-                    match diagnostic.severity {
-                        Some(DiagnosticSeverity::INFORMATION) => arrow.blue(),
-                        Some(DiagnosticSeverity::WARNING) => arrow.yellow(),
-                        Some(DiagnosticSeverity::ERROR) => arrow.red(),
-                        _ => arrow,
-                    }
-                }
-            );
-            eprintln!(
-                "{}{}  {}",
-                " ".repeat(width),
-                " ".repeat(usize::min(
-                    range.start.character as usize,
-                    range.end.character as usize
-                )),
-                {
-                    let message = style(&diagnostic.message).bold();
-                    match diagnostic.severity {
-                        Some(DiagnosticSeverity::INFORMATION) => message.blue(),
-                        Some(DiagnosticSeverity::WARNING) => message.yellow(),
-                        Some(DiagnosticSeverity::ERROR) => message.red(),
-                        _ => message,
-                    }
-                }
-            );
-
-            eprintln!("\n")
         }
     }
 

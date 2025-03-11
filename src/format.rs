@@ -1,8 +1,5 @@
 use {
-    crate::{
-        cli, config, tree,
-        utils::{self},
-    },
+    crate::{cli, config, tree, utils},
     console::style,
     ignore::Walk,
     itertools::Itertools,
@@ -50,18 +47,12 @@ pub fn run(
             };
 
             let paths = Walk::new(file)
-                .filter_map(|entry_result| match entry_result {
+                .filter_map(|entry| match entry {
                     Ok(entry) => {
                         let path = entry.into_path();
-                        if path
-                            .extension()
-                            .map(|ext| ext == "R" || ext == "r")
-                            .unwrap_or(false)
-                        {
-                            Some(Ok(path))
-                        } else {
-                            None
-                        }
+                        path.extension()
+                            .is_some_and(|ext| ext == "R" || ext == "r")
+                            .then_some(Ok(path))
                     }
                     Err(error) => {
                         cli::error(&error.to_string());
@@ -77,7 +68,7 @@ pub fn run(
     let mut n_files = 0;
     let mut n_unformatted = 0;
     let mut n_errors = 0;
-    for (paths, config) in file_config_pairs.into_iter() {
+    for (paths, config) in file_config_pairs {
         for path in paths {
             n_files += 1;
             let old = match std::fs::read_to_string(&path) {
@@ -335,17 +326,12 @@ fn traverse(
     }
 
     let collapse_newlines = |node: Node, maybe_prev: Option<Node>| {
-        line_ending.repeat(
-            maybe_prev
-                .map(|prev| usize::clamp(node.start_position().row - prev.end_position().row, 1, 2))
-                .unwrap_or(0),
-        )
+        line_ending.repeat(maybe_prev.map_or(0, |prev| {
+            usize::clamp(node.start_position().row - prev.end_position().row, 1, 2)
+        }))
     };
-    let is_comment = |maybe_node: Option<Node>| {
-        maybe_node
-            .map(|next| next.kind() == "comment")
-            .unwrap_or(false)
-    };
+    let is_comment =
+        |maybe_node: Option<Node>| maybe_node.is_some_and(|next| next.kind() == "comment");
 
     // HACK: tree-sitter-r has wrong ending_position for extract with newlines before ths rhs:
     // it only includes the newline but not the rhs. this hack uses at least the correct end_position
@@ -394,20 +380,15 @@ fn traverse(
 
     // check if prev or next node is fmt-skip directive
     {
-        let prev_is_fmt_skip = node
-            .prev_sibling()
-            .map(|prev| {
-                is_fmt_skip_comment(prev)
-                    && prev
-                        .prev_sibling()
-                        .map(|before_prev| !same_line(before_prev, prev))
-                        .unwrap_or(true)
-            })
-            .unwrap_or(false);
+        let prev_is_fmt_skip = node.prev_sibling().is_some_and(|prev| {
+            is_fmt_skip_comment(prev)
+                && prev
+                    .prev_sibling()
+                    .is_none_or(|before_prev| !same_line(before_prev, prev))
+        });
         let next_is_fmt_skip = node
             .next_sibling()
-            .map(|next| is_fmt_skip_comment(next) && same_line(node, next))
-            .unwrap_or(false);
+            .is_some_and(|next| is_fmt_skip_comment(next) && same_line(node, next));
 
         if prev_is_fmt_skip || next_is_fmt_skip {
             return Ok(fmt_with_indent_prefix(node));
@@ -431,7 +412,7 @@ fn traverse(
                     if rest.contains('\'') {
                         raw.into()
                     } else {
-                        format!("#' {other}{}", rest)
+                        format!("#' {other}{rest}")
                     }
                 }
                 None => "#'".into(),
@@ -479,11 +460,10 @@ fn traverse(
             let hug = node.child_count() == 3
                 && node
                     .child_by_field_name("argument")
-                    .map(|argument| {
+                    .is_some_and(|argument| {
                         argument.child_count() == 1
                             && argument.child(0).unwrap().kind() == "braced_expression"
-                    })
-                    .unwrap_or(false);
+                    });
 
             let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             tree::for_each_child(&mut node.walk(), |i, child, field_name| {
@@ -505,8 +485,7 @@ fn traverse(
                         "comma" => {
                             if is_multiline
                                 && (maybe_prev
-                                    .map(|node| ["comment", "comma"].contains(&node.kind()))
-                                    .unwrap_or(true)
+                                    .is_none_or(|node| ["comment", "comma"].contains(&node.kind()))
                                     || i == 1)
                             {
                                 out.push_str(line_ending);
@@ -523,14 +502,14 @@ fn traverse(
                         "argument" | "parameter" => {
                             if i == 1 {
                                 if is_multiline && !hug {
-                                    out.push_str(line_ending)
+                                    out.push_str(line_ending);
                                 }
                             } else {
                                 out.push_str(&if is_multiline {
                                     collapse_newlines(child, maybe_prev)
                                 } else {
                                     " ".into()
-                                })
+                                });
                             }
 
                             out.push_str(&if is_multiline && !hug {
@@ -541,7 +520,7 @@ fn traverse(
                         }
                         "close" => {
                             if is_multiline && !hug && !is_empty {
-                                out.push_str(line_ending)
+                                out.push_str(line_ending);
                             }
                             out.push_str(&fmt(child)?);
                         }
@@ -648,7 +627,7 @@ fn traverse(
                                     collapse_newlines(child, maybe_prev)
                                 } else {
                                     "; ".into()
-                                })
+                                });
                             }
 
                             out.push_str(&if is_multiline {
@@ -680,7 +659,7 @@ fn traverse(
                 "extract_operator" => {
                     let lhs = field(function, "lhs")?;
                     let maybe_rhs = field_optional(function, "rhs");
-                    maybe_rhs.map(|rhs| !same_line(lhs, rhs)).unwrap_or(false)
+                    maybe_rhs.is_some_and(|rhs| !same_line(lhs, rhs))
                 }
                 _ => false,
             };
@@ -713,7 +692,7 @@ fn traverse(
                                     config.spaces,
                                     &fmt(child)?,
                                     line_ending,
-                                ))
+                                ));
                             } else {
                                 out.push_str(&fmt(child)?);
                             }
@@ -730,9 +709,7 @@ fn traverse(
             handles_comments = true;
 
             let lhs = field(node, "lhs")?;
-            let is_multiline = field_optional(node, "rhs")
-                .map(|rhs| !same_line(lhs, rhs))
-                .unwrap_or(false);
+            let is_multiline = field_optional(node, "rhs").is_some_and(|rhs| !same_line(lhs, rhs));
 
             let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             tree::for_each_child(&mut node.walk(), |_, child, field_name| {
@@ -792,13 +769,8 @@ fn traverse(
             tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 let maybe_prev = child.prev_sibling();
 
-                let prev_is_comment = maybe_prev
-                    .map(|node| node.kind() == "comment")
-                    .unwrap_or(false);
-                let next_is_comment = child
-                    .next_sibling()
-                    .map(|next| next.kind() == "comment")
-                    .unwrap_or(false);
+                let prev_is_comment = is_comment(maybe_prev);
+                let next_is_comment = is_comment(child.next_sibling());
 
                 match field_name {
                     None => match child.kind() {
@@ -831,7 +803,7 @@ fn traverse(
                                 }
                             }
                             out.push_str(&fmt(child)?);
-                            out.push_str(line_ending)
+                            out.push_str(line_ending);
                         }
                         _ => unreachable!(),
                     },
@@ -875,7 +847,7 @@ fn traverse(
                             {
                                 out.push_str(line_ending);
                             }
-                            out.push(')')
+                            out.push(')');
                         }
                         "body" => {
                             if !prev_is_comment {
@@ -924,7 +896,7 @@ fn traverse(
                         }
                         "parameters" => {
                             if prev_is_comment {
-                                out.push_str(line_ending)
+                                out.push_str(line_ending);
                             }
                             out.push_str(&fmt(child)?);
                         }
@@ -954,9 +926,7 @@ fn traverse(
             tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 let maybe_prev = child.prev_sibling();
 
-                let prev_is_comment = maybe_prev
-                    .map(|node| node.kind() == "comment")
-                    .unwrap_or(false);
+                let prev_is_comment = is_comment(maybe_prev);
 
                 match field_name {
                     None => match child.kind() {
@@ -965,7 +935,7 @@ fn traverse(
                             if !prev_is_comment {
                                 out.push(' ');
                             }
-                            out.push_str("else")
+                            out.push_str("else");
                         }
                         "comment" => {
                             if let Some(prev) = maybe_prev
@@ -981,7 +951,7 @@ fn traverse(
                                 }
                             }
                             out.push_str(&fmt(child)?);
-                            out.push_str(line_ending)
+                            out.push_str(line_ending);
                         }
                         _ => unreachable!(),
                     },
@@ -996,8 +966,7 @@ fn traverse(
                         "condition" => {
                             let next_is_comment = child
                                 .next_sibling()
-                                .map(|next| next.kind() == "comment")
-                                .unwrap_or(false);
+                                .is_some_and(|next| next.kind() == "comment");
                             if condition_is_multiline
                                 && !(child.kind() == "braced_expression"
                                     && !(prev_is_comment || next_is_comment))
@@ -1019,7 +988,7 @@ fn traverse(
                         }
                         "close" => {
                             indent_comments = false;
-                            out.push(')')
+                            out.push(')');
                         }
                         "consequence" | "alternative" => {
                             if !prev_is_comment {
@@ -1032,7 +1001,7 @@ fn traverse(
                                 fmt_wrap_with_braces(child)?
                             } else {
                                 fmt_multiline(child, is_multiline)?
-                            })
+                            });
                         }
                         _ => unreachable!(),
                     },
@@ -1090,7 +1059,7 @@ fn traverse(
                                     collapse_newlines(child, maybe_prev)
                                 } else {
                                     "; ".into()
-                                })
+                                });
                             }
 
                             out.push_str(&if is_multiline {
@@ -1120,11 +1089,7 @@ fn traverse(
                 let maybe_prev = child.prev_sibling();
 
                 match child.kind() {
-                    "comment"
-                        if maybe_prev
-                            .map(|prev| same_line(prev, child))
-                            .unwrap_or(false) =>
-                    {
+                    "comment" if maybe_prev.is_some_and(|prev| same_line(prev, child)) => {
                         out.push(' ');
                     }
                     _ => {
@@ -1144,10 +1109,7 @@ fn traverse(
             let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 let maybe_prev = child.prev_sibling();
-
-                let prev_is_comment = maybe_prev
-                    .map(|node| node.kind() == "comment")
-                    .unwrap_or(false);
+                let prev_is_comment = is_comment(maybe_prev);
 
                 match field_name {
                     None => match child.kind() {
@@ -1161,7 +1123,7 @@ fn traverse(
                                 out.push_str(line_ending);
                             }
                             out.push_str(&fmt(child)?);
-                            out.push_str(line_ending)
+                            out.push_str(line_ending);
                         }
                         _ => unreachable!(),
                     },
@@ -1229,10 +1191,7 @@ fn traverse(
             let mut indent_comments = false;
             tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 let maybe_prev = child.prev_sibling();
-
-                let prev_is_comment = maybe_prev
-                    .map(|node| node.kind() == "comment")
-                    .unwrap_or(false);
+                let prev_is_comment = is_comment(maybe_prev);
 
                 match field_name {
                     None => match child.kind() {
@@ -1283,7 +1242,7 @@ fn traverse(
                                 fmt_multiline(child, true)?
                             } else {
                                 fmt_wrap_with_braces(child)?
-                            })
+                            });
                         }
                         _ => unreachable!(),
                     },
