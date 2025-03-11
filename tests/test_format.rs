@@ -20,9 +20,9 @@ fn format_str(text: &str) -> Result<String, FormatError> {
     // dbg!(tree.root_node().to_sexp());
     // eprintln!("{}", utils::format_node(&tree.root_node()));
     format(tree.root_node(), &Rope::from_str(text), Config {
-        stop_on_unhandled_comment: false,
-        spaces: 2,
+        indent: &" ".repeat(2),
         line_ending: LineEnding::Auto,
+        stop_on_unhandled_comment: false,
     })
 }
 

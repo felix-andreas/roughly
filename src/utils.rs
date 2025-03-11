@@ -1,6 +1,5 @@
 use {
     ropey::Rope,
-    std::borrow::Cow,
     tower_lsp::lsp_types::{Position, Range},
 };
 
@@ -37,75 +36,35 @@ pub fn rope_range_to_lsp_range(
     Ok(Range { start, end })
 }
 
-// Adapted from https://docs.rs/indent/latest/src/indent/lib.rs.html#27-32
-pub fn indent_by<'a, S>(number_of_spaces: usize, input: S, line_ending: &str) -> String
-where
-    S: Into<Cow<'a, str>>,
-{
-    indent(
-        " ".repeat(number_of_spaces),
-        input,
-        line_ending,
-        false,
-        true,
-    )
+// adapted from https://docs.rs/indent/latest/src/indent/lib.rs.html#27-32
+pub fn indent_by(prefix: &str, input: &str, line_ending: &str) -> String {
+    indent(prefix, input, line_ending, true)
 }
 
-pub fn indent_by_with_newlines<'a, S>(
-    number_of_spaces: usize,
-    input: S,
-    line_ending: &str,
-) -> String
-where
-    S: Into<Cow<'a, str>>,
-{
-    indent(" ".repeat(number_of_spaces), input, line_ending, true, true)
+pub fn indent_by_skip_first(prefix: &str, input: &str, line_ending: &str) -> String {
+    indent(prefix, input, line_ending, false)
 }
 
-pub fn indent_by_skip_first<'a, S>(number_of_spaces: usize, input: S, line_ending: &str) -> String
-where
-    S: Into<Cow<'a, str>>,
-{
-    indent(
-        " ".repeat(number_of_spaces),
-        input,
-        line_ending,
-        false,
-        false,
-    )
-}
-
-fn indent<'a, S, T>(
-    prefix: S,
-    input: T,
-    line_ending: &str,
-    newlines: bool,
-    indent_all: bool,
-) -> String
-where
-    S: Into<Cow<'a, str>>,
-    T: Into<Cow<'a, str>>,
-{
-    let prefix = prefix.into();
-    let input = input.into();
+#[inline]
+fn indent(prefix: &str, input: &str, line_ending: &str, indent_all: bool) -> String {
     let length = input.len();
     let mut output = String::with_capacity(length + length / 2);
 
     for (i, line) in input.lines().enumerate() {
-        if i > 0 || newlines {
+        if i > 0 {
             output.push_str(line_ending);
             if !line.is_empty() {
-                output.push_str(&prefix);
+                output.push_str(prefix);
             }
         } else if indent_all && !line.is_empty() {
-            output.push_str(&prefix);
+            output.push_str(prefix);
         }
 
         output.push_str(line);
     }
 
     // checking for \n works for \n and \r\n (in case file doesn't have target line ending yet)
-    if input.ends_with('\n') || newlines {
+    if input.ends_with('\n') {
         output.push_str(line_ending);
     }
 
@@ -152,7 +111,7 @@ pub fn remove_indent_prefix(input: &str) -> String {
     output
 }
 
-// Adapted from https://doc.rust-lang.org/stable/nightly-rustc/src/clippy_utils/str_utils.rs.html
+// adapted from https://doc.rust-lang.org/stable/nightly-rustc/src/clippy_utils/str_utils.rs.html
 
 /// ```
 /// use roughly::utils::to_camel_case;
@@ -209,7 +168,7 @@ pub fn to_snake_case(name: &str) -> String {
     snake
 }
 
-// Adapted from: https://docs.rs/crate/human_bytes/latest
+// adapted from https://docs.rs/crate/human_bytes/latest
 pub fn human_bytes(bytes: impl Into<f64>) -> String {
     const SUFFIX: [&str; 9] = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"];
     const UNIT: f64 = 1024.0;
@@ -227,4 +186,56 @@ pub fn human_bytes(bytes: impl Into<f64>) -> String {
         .to_owned();
 
     [&result, SUFFIX[base.floor() as usize]].join(" ")
+}
+
+// adapted from https://github.com/mitsuhiko/similar/blob/main/examples/terminal-inline.rs
+pub fn print_diff(old: &str, new: &str) {
+    use {
+        console::Style,
+        similar::{ChangeTag, TextDiff},
+    };
+
+    struct Line(Option<usize>);
+
+    impl std::fmt::Display for Line {
+        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            match self.0 {
+                None => write!(f, "    "),
+                Some(idx) => write!(f, "{:<4}", idx + 1),
+            }
+        }
+    }
+
+    let diff = TextDiff::from_lines(old, new);
+
+    for (idx, group) in diff.grouped_ops(3).iter().enumerate() {
+        if idx > 0 {
+            eprintln!("{:-^1$}", "-", 80);
+        }
+        for op in group {
+            for change in diff.iter_inline_changes(op) {
+                let (sign, style) = match change.tag() {
+                    ChangeTag::Delete => ("-", Style::new().red()),
+                    ChangeTag::Insert => ("+", Style::new().green()),
+                    ChangeTag::Equal => (" ", Style::new().dim()),
+                };
+                eprint!(
+                    "{}{} |{}",
+                    console::style(Line(change.old_index())).dim(),
+                    console::style(Line(change.new_index())).dim(),
+                    style.apply_to(sign).bold(),
+                );
+                for (emphasized, value) in change.iter_strings_lossy() {
+                    if emphasized {
+                        eprint!("{}", style.apply_to(value).underlined().on_black());
+                    } else {
+                        eprint!("{}", style.apply_to(value));
+                    }
+                }
+                if change.missing_newline() {
+                    eprintln!();
+                }
+            }
+        }
+    }
 }

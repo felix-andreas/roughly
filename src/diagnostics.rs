@@ -27,7 +27,7 @@ pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), DiagnosticsError> {
     let root: Vec<PathBuf> = vec![".".into()];
     let files = maybe_files.unwrap_or(&root);
 
-    let file_config_pairs = files
+    let paths_with_config = files
         .iter()
         .map(|file| {
             let config = match config::Config::from_path(file) {
@@ -59,7 +59,8 @@ pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), DiagnosticsError> {
 
     let mut n_files = 0;
     let mut n_errors = 0;
-    for (paths, config) in file_config_pairs {
+    for (paths, config) in paths_with_config {
+        let config = Config { case: config.case };
         for path in paths {
             n_files += 1;
             let old = match std::fs::read_to_string(&path) {
@@ -74,7 +75,7 @@ pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), DiagnosticsError> {
             let tree = tree::parse(&old, None);
             let rope = Rope::from_str(&old);
 
-            for diagnostic in diagnostics(tree.root_node(), &rope, Config { case: config.case }) {
+            for diagnostic in diagnostics(tree.root_node(), &rope, config) {
                 n_errors += 1;
                 cli::log(
                     match diagnostic.severity {
