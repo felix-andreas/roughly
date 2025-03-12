@@ -192,13 +192,18 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
         LineEnding::Crlf => "\r\n",
     };
 
-    let formatted = utils::remove_indent_prefix(&traverse(
-        node,
-        rope,
-        line_ending,
-        config,
-        State::default(),
-    )?);
+    let formatted = {
+        let mut buffer = String::with_capacity(rope.len_bytes() * 3 / 2);
+        traverse(
+            node,
+            rope,
+            line_ending,
+            config,
+            State::default(),
+            &mut buffer,
+        )?;
+        utils::remove_indent_prefix(&buffer)
+    };
 
     let elapsed = start.elapsed();
     log::debug!(
@@ -227,7 +232,8 @@ fn traverse(
     line_ending: &'static str,
     config: Config,
     state: State,
-) -> Result<String, FormatError> {
+    out: &mut String,
+) -> Result<(), FormatError> {
     // enum Fmt {
     //     Normal,
     //     Raw,
@@ -235,26 +241,6 @@ fn traverse(
     //     WithIndentPrefix,
     //     MakeMultiline,
     // }
-
-    let kind = node.kind();
-    let fmt = |node: Node| traverse(node, rope, line_ending, config, State::default());
-    let fmt_raw = |node: Node| rope.byte_slice(node.byte_range()).to_string();
-    let fmt_multiline = |node: Node, make_multiline: bool| {
-        traverse(
-            node,
-            rope,
-            line_ending,
-            config,
-            State::make_multiline(make_multiline),
-        )
-    };
-    let fmt_with_indent_prefix = |node: Node| utils::add_indent_prefix(&fmt_raw(node));
-    let fmt_wrap_with_braces = |node: Node| -> Result<String, FormatError> {
-        Ok(format!(
-            "{{{line_ending}{}{line_ending}}}",
-            utils::indent_by(config.indent, &fmt(node)?, line_ending)
-        ))
-    };
     // let fmt_with = |node: Node, action: Fmt| match action {
     //     Fmt::Normal => fmt(node),
     //     Fmt::Raw => Ok(fmt_raw(node)),
@@ -262,6 +248,43 @@ fn traverse(
     //     Fmt::WithIndentPrefix => Ok(fmt_with_indent_prefix(node)),
     //     Fmt::MakeMultiline => fmt_multiline(node, state.make_multiline),
     // };
+
+    let kind = node.kind();
+    let fmt = |node: Node, out: &mut String| -> Result<(), FormatError> {
+        traverse(node, rope, line_ending, config, State::default(), out)
+    };
+    let get_raw = |node: Node| rope.byte_slice(node.byte_range()).to_string();
+    let fmt_raw = |node: Node, out: &mut String| {
+        out.push_str(&get_raw(node));
+        Ok(())
+    };
+    let fmt_multiline =
+        |node: Node, make_multiline: bool, out: &mut String| -> Result<(), FormatError> {
+            traverse(
+                node,
+                rope,
+                line_ending,
+                config,
+                State::make_multiline(make_multiline),
+                out,
+            )
+        };
+    let fmt_with_indent_prefix = |node: Node, out: &mut String| -> Result<(), FormatError> {
+        out.push_str(&utils::add_indent_prefix(&get_raw(node)));
+        Ok(())
+    };
+    let fmt_wrap_with_braces = |node: Node, out: &mut String| -> Result<(), FormatError> {
+        out.push('{');
+        out.push_str(line_ending);
+
+        let mut inner = String::new();
+        fmt(node, &mut inner)?;
+        out.push_str(&utils::indent_by(config.indent, &inner, line_ending));
+
+        out.push_str(line_ending);
+        out.push('}');
+        Ok(())
+    };
 
     fn field<'a>(node: Node<'a>, field_name: &'static str) -> Result<Node<'a>, FormatError> {
         node.child_by_field_name(field_name)
@@ -300,13 +323,8 @@ fn traverse(
             .unwrap_or_else(|| node.end_position())
     };
     let same_line = |a: Node, b: Node| end_position(a).row == b.start_position().row;
-    let is_fmt_skip_comment = |node: Node| {
-        node.kind() == "comment"
-            && rope
-                .byte_slice(node.byte_range())
-                .to_string()
-                .contains("fmt: skip")
-    };
+    let is_fmt_skip_comment =
+        |node: Node| node.kind() == "comment" && get_raw(node).contains("fmt: skip");
     let missing = |node: Node| FormatError::Missing {
         kind: node.kind(),
         line: node.start_position().row,
@@ -316,6 +334,19 @@ fn traverse(
         kind: node.kind(),
         line: node.start_position().row,
         col: node.start_position().column,
+    };
+    let push_all_comments = |node: Node, out: &mut String| -> Result<(), _> {
+        let is_first = true;
+        tree::for_each_child::<FormatError>(&mut node.walk(), |_, child, _| {
+            if child.kind() == "comment" {
+                if is_first {
+                    out.push_str(line_ending);
+                }
+                fmt(child, out)?;
+                out.push_str(line_ending);
+            }
+            Ok(())
+        })
     };
 
     // note: currently we don't traverse open & close -> they never reach these conditions
@@ -340,36 +371,8 @@ fn traverse(
             .is_some_and(|next| is_fmt_skip_comment(next) && same_line(node, next));
 
         if prev_is_fmt_skip || next_is_fmt_skip {
-            return Ok(fmt_with_indent_prefix(node));
+            return fmt_with_indent_prefix(node, out);
         }
-    }
-
-    if node.kind() == "comment" {
-        let raw = fmt_raw(node);
-        let raw = raw.trim_end();
-
-        let mut chars = raw.chars();
-
-        let _ = chars.next();
-        // reformat comments like #foo to # foo but keep #' foo
-        return Ok(match chars.next() {
-            Some('\'') => match chars.next() {
-                Some(' ') => raw.into(),
-                Some(other) => {
-                    let rest = chars.collect::<String>();
-                    // avoid formatting #'foo'
-                    if rest.contains('\'') {
-                        raw.into()
-                    } else {
-                        format!("#' {other}{rest}")
-                    }
-                }
-                None => "#'".into(),
-            },
-            Some('#' | '!' | ' ') => raw.into(),
-            Some(other) => format!("# {other}{}", chars.collect::<String>()),
-            None => "#".into(),
-        });
     }
 
     if node.is_extra() {
@@ -377,24 +380,56 @@ fn traverse(
     }
 
     if !node.is_named() {
-        return Ok(fmt_raw(node));
+        return fmt_raw(node, out);
     }
 
     let mut handles_comments = false;
 
-    let result = match kind {
+    match kind {
+        "comment" => {
+            let raw = get_raw(node);
+            let raw = raw.trim_end();
+
+            let mut chars = raw.chars();
+
+            let _ = chars.next();
+            // reformat comments like #foo to # foo but keep #' foo
+            match chars.next() {
+                Some('\'') => match chars.next() {
+                    Some(' ') => out.push_str(raw),
+                    Some(other) => {
+                        let rest = chars.collect::<String>();
+                        // avoid formatting #'foo'
+                        if rest.contains('\'') {
+                            out.push_str(raw);
+                        } else {
+                            out.push_str("#' ");
+                            out.push(other);
+                            out.push_str(&rest);
+                        }
+                    }
+                    None => out.push_str("#'"),
+                },
+                Some('#' | '!' | ' ') => out.push_str(raw),
+                Some(other) => {
+                    out.push_str("# ");
+                    out.push(other);
+                    out.push_str(&chars.collect::<String>());
+                }
+                None => out.push('#'),
+            }
+        }
         "argument" | "parameter" => {
             handles_comments = true;
 
             let mut maybe_lhs = None;
             let mut maybe_rhs = None;
             let mut has_equal = false;
-            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 match field_name {
                     None => match child.kind() {
                         "comment" => {
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                             out.push_str(line_ending);
                         }
                         "=" => {
@@ -412,7 +447,7 @@ fn traverse(
             })?;
 
             if let Some(name) = maybe_lhs {
-                out.push_str(&fmt(name)?);
+                fmt(name, out)?;
                 if has_equal {
                     out.push(' ');
                 }
@@ -423,10 +458,8 @@ fn traverse(
             }
 
             if let Some(value) = maybe_rhs {
-                out.push_str(&fmt(value)?);
+                fmt(value, out)?;
             }
-
-            out
         }
         "arguments" | "parameters" => {
             handles_comments = true;
@@ -441,7 +474,6 @@ fn traverse(
                             && argument.child(0).unwrap().kind() == "braced_expression"
                     });
 
-            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             tree::for_each_child(&mut node.walk(), |i, child, field_name| {
                 let maybe_prev = child.prev_sibling();
 
@@ -456,7 +488,7 @@ fn traverse(
                                 out.push_str(&collapse_newlines(child, maybe_prev));
                                 out.push_str(config.indent);
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "comma" => {
                             if is_multiline
@@ -467,13 +499,13 @@ fn traverse(
                                 out.push_str(line_ending);
                                 out.push_str(config.indent);
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
                         "open" => {
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "argument" | "parameter" => {
                             if i == 1 {
@@ -488,24 +520,25 @@ fn traverse(
                                 });
                             }
 
-                            out.push_str(&if is_multiline && !hug {
-                                utils::indent_by(config.indent, &fmt(child)?, line_ending)
+                            if is_multiline && !hug {
+                                let mut temp = String::new();
+                                fmt(child, &mut temp)?;
+                                out.push_str(&utils::indent_by(config.indent, &temp, line_ending));
                             } else {
-                                fmt(child)?
-                            });
+                                fmt(child, out)?;
+                            }
                         }
                         "close" => {
                             if is_multiline && !hug && !is_empty {
                                 out.push_str(line_ending);
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         _ => unreachable!(),
                     },
                 }
                 Ok::<_, FormatError>(())
             })?;
-            out
         }
         "binary_operator" => {
             handles_comments = true;
@@ -513,7 +546,6 @@ fn traverse(
             let is_multiline = !same_line(field(node, "lhs")?, field(node, "rhs")?);
             let has_spacing = field(node, "operator")?.kind() == ":";
 
-            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 let maybe_prev = child.prev_sibling();
 
@@ -528,33 +560,32 @@ fn traverse(
                                 out.push_str(line_ending);
                                 out.push_str(config.indent);
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
                         "lhs" => {
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "operator" => {
                             if !has_spacing {
                                 out.push(' ');
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "rhs" => {
                             if is_multiline {
                                 out.push_str(line_ending);
-                                out.push_str(&utils::indent_by(
-                                    config.indent,
-                                    &fmt(child)?,
-                                    line_ending,
-                                ));
+
+                                let mut temp = String::new();
+                                fmt(child, &mut temp)?;
+                                out.push_str(&utils::indent_by(config.indent, &temp, line_ending));
                             } else {
                                 if !has_spacing {
                                     out.push(' ');
                                 }
-                                out.push_str(&fmt(child)?);
+                                fmt(child, out)?;
                             }
                         }
                         _ => unreachable!(),
@@ -562,7 +593,6 @@ fn traverse(
                 }
                 Ok::<_, FormatError>(())
             })?;
-            out
         }
         "braced_expression" => {
             handles_comments = true;
@@ -570,7 +600,6 @@ fn traverse(
             let is_multiline = !same_line(node, node) || state.make_multiline;
             let is_empty = node.child_count() == 2;
 
-            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             tree::for_each_child(&mut node.walk(), |i, child, field_name| {
                 let maybe_prev = child.prev_sibling();
 
@@ -585,13 +614,13 @@ fn traverse(
                                 out.push_str(&collapse_newlines(child, maybe_prev));
                                 out.push_str(config.indent);
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
                         "open" => {
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "body" => {
                             if i == 1 {
@@ -604,24 +633,25 @@ fn traverse(
                                 });
                             }
 
-                            out.push_str(&if is_multiline {
-                                utils::indent_by(config.indent, &fmt(child)?, line_ending)
+                            if is_multiline {
+                                let mut temp = String::new();
+                                fmt(child, &mut temp)?;
+                                out.push_str(&utils::indent_by(config.indent, &temp, line_ending));
                             } else {
-                                fmt(child)?
-                            });
+                                fmt(child, out)?;
+                            }
                         }
                         "close" => {
                             if !is_empty {
                                 out.push_str(if is_multiline { line_ending } else { " " });
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         _ => unreachable!(),
                     },
                 }
                 Ok::<_, FormatError>(())
             })?;
-            out
         }
         "call" | "subset" | "subset2" => {
             handles_comments = true;
@@ -638,7 +668,6 @@ fn traverse(
                 _ => false,
             };
 
-            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 match field_name {
                     None => match child.kind() {
@@ -652,23 +681,25 @@ fn traverse(
                                 out.push_str(line_ending);
                                 out.push_str(config.indent);
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
                         "function" => {
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "arguments" => {
                             if additional_indent {
+                                let mut temp = String::new();
+                                fmt(child, &mut temp)?;
                                 out.push_str(&utils::indent_by_skip_first(
                                     config.indent,
-                                    &fmt(child)?,
+                                    &temp,
                                     line_ending,
                                 ));
                             } else {
-                                out.push_str(&fmt(child)?);
+                                fmt(child, out)?;
                             }
                         }
                         _ => unreachable!(),
@@ -676,16 +707,14 @@ fn traverse(
                 }
                 Ok::<_, FormatError>(())
             })?;
-            out
         }
-        "complex" => fmt_raw(node),
+        "complex" => fmt_raw(node, out)?,
         "extract_operator" | "namespace_operator" => {
             handles_comments = true;
 
             let lhs = field(node, "lhs")?;
             let is_multiline = field_optional(node, "rhs").is_some_and(|rhs| !same_line(lhs, rhs));
 
-            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 let maybe_prev = child.prev_sibling();
 
@@ -700,27 +729,26 @@ fn traverse(
                                 out.push_str(line_ending);
                                 out.push_str(config.indent);
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
                         "lhs" => {
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "operator" => {
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "rhs" => {
                             if is_multiline {
                                 out.push_str(line_ending);
-                                out.push_str(&utils::indent_by(
-                                    config.indent,
-                                    &fmt(child)?,
-                                    line_ending,
-                                ));
+
+                                let mut temp = String::new();
+                                fmt(child, &mut temp)?;
+                                out.push_str(&utils::indent_by(config.indent, &temp, line_ending));
                             } else {
-                                out.push_str(&fmt(child)?);
+                                fmt(child, out)?;
                             }
                         }
                         _ => unreachable!(),
@@ -728,9 +756,8 @@ fn traverse(
                 }
                 Ok::<_, FormatError>(())
             })?;
-            out
         }
-        "float" => fmt_raw(node),
+        "float" => fmt_raw(node, out)?,
         "for_statement" => {
             handles_comments = true;
 
@@ -738,7 +765,6 @@ fn traverse(
             let loop_header_is_multiline =
                 !same_line(field(node, "variable")?, field(node, "sequence")?);
 
-            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             let mut indent_comments = false;
             tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 let maybe_prev = child.prev_sibling();
@@ -748,7 +774,7 @@ fn traverse(
 
                 match field_name {
                     None => match child.kind() {
-                        "for" => out.push_str(&fmt(child)?),
+                        "for" => fmt(child, out)?,
                         "in" => {
                             if prev_is_comment {
                                 out.push_str(config.indent);
@@ -758,7 +784,7 @@ fn traverse(
                             } else {
                                 out.push(' ');
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                             if !next_is_comment {
                                 out.push(' ');
                             }
@@ -776,7 +802,7 @@ fn traverse(
                                     out.push_str(config.indent);
                                 }
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                             out.push_str(line_ending);
                         }
                         _ => unreachable!(),
@@ -787,7 +813,7 @@ fn traverse(
                             if !prev_is_comment {
                                 out.push(' ');
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                             if !next_is_comment
                                 && (loop_header_is_multiline || condition_is_multiline)
                             {
@@ -799,19 +825,19 @@ fn traverse(
                                 || (field_name == "variable"
                                     && (loop_header_is_multiline || condition_is_multiline))
                             {
-                                out.push_str(&utils::indent_by(
-                                    config.indent,
-                                    &fmt(child)?,
-                                    line_ending,
-                                ));
+                                let mut temp = String::new();
+                                fmt(child, &mut temp)?;
+                                out.push_str(&utils::indent_by(config.indent, &temp, line_ending));
                             } else if next_is_comment || condition_is_multiline {
+                                let mut temp = String::new();
+                                fmt(child, &mut temp)?;
                                 out.push_str(&utils::indent_by_skip_first(
                                     config.indent,
-                                    &fmt(child)?,
+                                    &temp,
                                     line_ending,
                                 ));
                             } else {
-                                out.push_str(&fmt(child)?);
+                                fmt(child, out)?;
                             }
                         }
                         "close" => {
@@ -821,31 +847,29 @@ fn traverse(
                             {
                                 out.push_str(line_ending);
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "body" => {
                             if !prev_is_comment {
                                 out.push(' ');
                             }
-                            out.push_str(&if child.kind() == "braced_expression" {
-                                fmt_multiline(child, true)?
+                            if child.kind() == "braced_expression" {
+                                fmt_multiline(child, true, out)?;
                             } else {
-                                fmt_wrap_with_braces(child)?
-                            })
+                                fmt_wrap_with_braces(child, out)?;
+                            }
                         }
                         _ => unreachable!(),
                     },
                 };
                 Ok::<_, FormatError>(())
             })?;
-            out
         }
         "function_definition" => {
             handles_comments = true;
 
             let is_multiline = !same_line(node, node);
 
-            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 let maybe_prev = child.prev_sibling();
                 let prev_is_comment = is_comment(maybe_prev);
@@ -860,34 +884,33 @@ fn traverse(
                             } else {
                                 out.push_str(line_ending);
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
                         "name" => {
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "parameters" => {
                             if prev_is_comment {
                                 out.push_str(line_ending);
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "body" => {
                             out.push_str(if prev_is_comment { line_ending } else { " " });
-                            out.push_str(&if is_multiline && child.kind() != "braced_expression" {
-                                fmt_wrap_with_braces(child)?
+                            if is_multiline && child.kind() != "braced_expression" {
+                                fmt_wrap_with_braces(child, out)?;
                             } else {
-                                fmt_multiline(child, is_multiline)?
-                            });
+                                fmt_multiline(child, is_multiline, out)?;
+                            }
                         }
                         _ => unreachable!(),
                     },
                 }
                 Ok::<_, FormatError>(())
             })?;
-            out
         }
         "if_statement" => {
             handles_comments = true;
@@ -904,7 +927,6 @@ fn traverse(
                 !condition_is_multiline || is_braced_without_comments
             };
 
-            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             let mut indent_comments = false;
             tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 let maybe_prev = child.prev_sibling();
@@ -913,14 +935,14 @@ fn traverse(
 
                 match field_name {
                     None => match child.kind() {
-                        "if" => out.push_str(&fmt(child)?),
+                        "if" => fmt(child, out)?,
                         "else" => {
                             if prev_is_comment {
                                 out.push_str(line_ending);
                             } else {
                                 out.push(' ');
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "comment" => {
                             if let Some(prev) = maybe_prev
@@ -933,7 +955,7 @@ fn traverse(
                                     out.push_str(config.indent);
                                 }
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         _ => unreachable!(),
                     },
@@ -945,18 +967,17 @@ fn traverse(
                             } else {
                                 out.push(' ');
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "condition" => {
                             if !hug {
                                 out.push_str(line_ending);
-                                out.push_str(&utils::indent_by(
-                                    config.indent,
-                                    &fmt(child)?,
-                                    line_ending,
-                                ));
+
+                                let mut temp = String::new();
+                                fmt(child, &mut temp)?;
+                                out.push_str(&utils::indent_by(config.indent, &temp, line_ending));
                             } else {
-                                out.push_str(&fmt(child)?);
+                                fmt(child, out)?;
                             }
                         }
                         "close" => {
@@ -964,7 +985,7 @@ fn traverse(
                             if !hug {
                                 out.push_str(line_ending);
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "consequence" | "alternative" => {
                             if prev_is_comment {
@@ -972,31 +993,29 @@ fn traverse(
                             } else {
                                 out.push(' ');
                             }
-                            out.push_str(&if is_multiline
+                            if is_multiline
                                 && child.kind() != "braced_expression"
                                 && (field_name != "alternative" || child.kind() != "if_statement")
                             {
-                                fmt_wrap_with_braces(child)?
+                                fmt_wrap_with_braces(child, out)?;
                             } else {
-                                fmt_multiline(child, is_multiline)?
-                            });
+                                fmt_multiline(child, is_multiline, out)?;
+                            }
                         }
                         _ => unreachable!(),
                     },
                 };
                 Ok::<_, FormatError>(())
             })?;
-            out
         }
-        "integer" => fmt_raw(node),
-        "na" => fmt_raw(node),
+        "integer" => fmt_raw(node, out)?,
+        "na" => fmt_raw(node, out)?,
         "parenthesized_expression" => {
             handles_comments = true;
 
             let is_multiline = !same_line(node, node);
             let is_empty = node.child_count() == 2;
 
-            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             tree::for_each_child(&mut node.walk(), |i, child, field_name| {
                 let maybe_prev = child.prev_sibling();
 
@@ -1011,13 +1030,13 @@ fn traverse(
                                 out.push_str(line_ending);
                                 out.push_str(config.indent);
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
                         "open" => {
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "body" => {
                             out.push_str(if is_multiline {
@@ -1028,29 +1047,29 @@ fn traverse(
                                 "; "
                             });
 
-                            out.push_str(&if is_multiline {
-                                utils::indent_by(config.indent, &fmt(child)?, line_ending)
+                            if is_multiline {
+                                let mut temp = String::new();
+                                fmt(child, &mut temp)?;
+                                out.push_str(&utils::indent_by(config.indent, &temp, line_ending));
                             } else {
-                                fmt(child)?
-                            });
+                                fmt(child, out)?;
+                            }
                         }
                         "close" => {
                             if !is_empty {
                                 out.push_str(if is_multiline { line_ending } else { "" });
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         _ => unreachable!(),
                     },
                 }
                 Ok::<_, FormatError>(())
             })?;
-            out
         }
         "program" => {
             handles_comments = true;
 
-            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             tree::for_each_child(&mut node.walk(), |_, child, _| {
                 let maybe_prev = child.prev_sibling();
 
@@ -1062,24 +1081,22 @@ fn traverse(
                         out.push_str(&collapse_newlines(child, maybe_prev));
                     }
                 }
-                out.push_str(&fmt(child)?);
+                fmt(child, out)?;
 
                 Ok::<_, FormatError>(())
             })?;
             out.push_str(line_ending);
-            out
         }
         "repeat_statement" => {
             handles_comments = true;
 
-            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 let maybe_prev = child.prev_sibling();
                 let prev_is_comment = is_comment(maybe_prev);
 
                 match field_name {
                     None => match child.kind() {
-                        "repeat" => out.push_str(&fmt(child)?),
+                        "repeat" => fmt(child, out)?,
                         "comment" => {
                             if let Some(prev) = maybe_prev
                                 && same_line(prev, child)
@@ -1088,7 +1105,7 @@ fn traverse(
                             } else {
                                 out.push_str(line_ending);
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         _ => unreachable!(),
                     },
@@ -1099,24 +1116,26 @@ fn traverse(
                             out.push(' ');
                         }
                         match field_name {
-                            "body" => out.push_str(&if child.kind() == "braced_expression" {
-                                fmt_multiline(child, true)?
-                            } else {
-                                fmt_wrap_with_braces(child)?
-                            }),
+                            "body" => {
+                                if child.kind() == "braced_expression" {
+                                    fmt_multiline(child, true, out)?;
+                                } else {
+                                    fmt_wrap_with_braces(child, out)?;
+                                }
+                            }
                             _ => unreachable!(),
                         }
                     }
                 };
                 Ok::<_, FormatError>(())
             })?;
-            out
         }
         "string" => {
             let maybe_string_content = field_optional(node, "content");
             match maybe_string_content {
                 Some(string_content) => {
-                    let content = fmt(string_content)?;
+                    let mut content = String::new();
+                    fmt(string_content, &mut content)?;
                     {
                         let mut formatted = String::with_capacity(content.len() + 2);
                         formatted.push('"');
@@ -1129,17 +1148,20 @@ fn traverse(
                             last_was_escape = char == '\\' && !last_was_escape;
                         }
                         formatted.push('"');
-                        formatted
+                        out.push_str(&formatted);
                     }
                 }
-                None => "\"\"".to_string(),
+                None => out.push_str("\"\""),
             }
         }
-        "string_content" => fmt_with_indent_prefix(node),
+        "string_content" => fmt_with_indent_prefix(node, out)?,
         "unary_operator" => {
+            handles_comments = true;
+            push_all_comments(node, out)?;
             let operator = field(node, "operator")?;
-            let spacing = if operator.kind() == "~" { " " } else { "" };
-            format!("{}{spacing}{}", fmt(operator)?, fmt(field(node, "rhs")?)?)
+            fmt(operator, out)?;
+            out.push_str(if operator.kind() == "~" { " " } else { "" });
+            fmt(field(node, "rhs")?, out)?;
         }
         "while_statement" => {
             handles_comments = true;
@@ -1154,7 +1176,6 @@ fn traverse(
                 !condition_is_multiline || is_braced_without_comments
             };
 
-            let mut out = String::with_capacity(node.end_byte() - node.start_byte());
             let mut indent_comments = false;
             tree::for_each_child(&mut node.walk(), |_, child, field_name| {
                 let maybe_prev = child.prev_sibling();
@@ -1162,7 +1183,7 @@ fn traverse(
 
                 match field_name {
                     None => match child.kind() {
-                        "while" => out.push_str(&fmt(child)?),
+                        "while" => fmt(child, out)?,
                         "comment" => {
                             if let Some(prev) = maybe_prev
                                 && same_line(prev, child)
@@ -1174,7 +1195,7 @@ fn traverse(
                                     out.push_str(config.indent);
                                 }
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         _ => unreachable!(),
                     },
@@ -1182,18 +1203,17 @@ fn traverse(
                         "open" => {
                             indent_comments = true;
                             out.push_str(if prev_is_comment { line_ending } else { " " });
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "condition" => {
                             if !hug {
                                 out.push_str(line_ending);
-                                out.push_str(&utils::indent_by(
-                                    config.indent,
-                                    &fmt(child)?,
-                                    line_ending,
-                                ));
+
+                                let mut temp = String::new();
+                                fmt(child, &mut temp)?;
+                                out.push_str(&utils::indent_by(config.indent, &temp, line_ending));
                             } else {
-                                out.push_str(&fmt(child)?);
+                                fmt(child, out)?;
                             }
                         }
                         "close" => {
@@ -1201,70 +1221,63 @@ fn traverse(
                             if !hug {
                                 out.push_str(line_ending);
                             }
-                            out.push_str(&fmt(child)?);
+                            fmt(child, out)?;
                         }
                         "body" => {
                             out.push_str(if prev_is_comment { line_ending } else { " " });
-                            out.push_str(&if child.kind() == "braced_expression" {
-                                fmt_multiline(child, true)?
+                            if child.kind() == "braced_expression" {
+                                fmt_multiline(child, true, out)?;
                             } else {
-                                fmt_wrap_with_braces(child)?
-                            });
+                                fmt_wrap_with_braces(child, out)?;
+                            }
                         }
                         _ => unreachable!(),
                     },
                 };
                 Ok::<_, FormatError>(())
             })?;
-            out
         }
         // SIMPLE
-        "break" => "break".into(),
-        "comma" => ",".into(),
-        "comment" => fmt_raw(node),
-        "dot_dot_i" => fmt_raw(node),
-        "dots" => "...".into(),
-        "escape_sequence" => fmt_raw(node),
-        "false" => "FALSE".into(),
-        "identifier" => fmt_raw(node),
-        "inf" => "Inf".into(),
-        "nan" => "NaN".into(),
-        "next" => "next".into(),
-        "null" => "NULL".into(),
-        "return" => "return".into(),
-        "true" => "TRUE".into(),
+        "break" => out.push_str("break"),
+        "comma" => out.push(','),
+        "dot_dot_i" => fmt_raw(node, out)?,
+        "dots" => out.push_str("..."),
+        "escape_sequence" => fmt_raw(node, out)?,
+        "false" => out.push_str("FALSE"),
+        "identifier" => fmt_raw(node, out)?,
+        "inf" => out.push_str("Inf"),
+        "nan" => out.push_str("NaN"),
+        "next" => out.push_str("next"),
+        "null" => out.push_str("NULL"),
+        "return" => out.push_str("return"),
+        "true" => out.push_str("TRUE"),
         unknown => {
             log::error!("unknown node kind: {unknown}");
             return Err(FormatError::Unknown {
                 kind,
-                raw: fmt_raw(node),
+                raw: get_raw(node),
             });
         }
     };
 
-    Ok(if handles_comments {
-        result
-    } else {
+    if !handles_comments {
         let comments = node
             .children(&mut node.walk())
             .filter(|node| node.kind() == "comment")
             .collect::<Vec<_>>();
+
         if let Some(&comment) = comments.first()
             && config.stop_on_unhandled_comment
         {
             let start = comment.start_position();
             return Err(FormatError::UnhandledComment {
-                comment: fmt(comment)?,
+                comment: get_raw(comment),
                 line: start.row,
                 col: start.column,
             });
         }
 
-        comments
-            .into_iter()
-            .map(fmt)
-            .chain(std::iter::once(Ok(result)))
-            .collect::<Result<Vec<String>, FormatError>>()?
-            .join(line_ending)
-    })
+        push_all_comments(node, out)?;
+    }
+    Ok(())
 }
