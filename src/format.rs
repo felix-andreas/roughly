@@ -375,10 +375,6 @@ fn traverse(
         }
     }
 
-    if node.is_extra() {
-        log::warn!("node of kind {} is extra but is not a comment", node.kind());
-    }
-
     if !node.is_named() {
         return fmt_raw(node, out);
     }
@@ -1252,7 +1248,11 @@ fn traverse(
         "return" => out.push_str("return"),
         "true" => out.push_str("TRUE"),
         unknown => {
-            log::error!("unknown node kind: {unknown}");
+            log::error!(
+                "unknown node kind: {unknown}, is extra {:?}",
+                node.is_extra()
+            );
+
             return Err(FormatError::Unknown {
                 kind,
                 raw: get_raw(node),
