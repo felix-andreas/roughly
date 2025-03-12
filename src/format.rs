@@ -748,7 +748,7 @@ fn traverse(
 
                 match field_name {
                     None => match child.kind() {
-                        "for" => out.push_str("for"),
+                        "for" => out.push_str(&fmt(child)?),
                         "in" => {
                             if prev_is_comment {
                                 out.push_str(config.indent);
@@ -758,7 +758,7 @@ fn traverse(
                             } else {
                                 out.push(' ');
                             }
-                            out.push_str("in");
+                            out.push_str(&fmt(child)?);
                             if !next_is_comment {
                                 out.push(' ');
                             }
@@ -787,7 +787,7 @@ fn traverse(
                             if !prev_is_comment {
                                 out.push(' ');
                             }
-                            out.push('(');
+                            out.push_str(&fmt(child)?);
                             if !next_is_comment
                                 && (loop_header_is_multiline || condition_is_multiline)
                             {
@@ -821,7 +821,7 @@ fn traverse(
                             {
                                 out.push_str(line_ending);
                             }
-                            out.push(')');
+                            out.push_str(&fmt(child)?);
                         }
                         "body" => {
                             if !prev_is_comment {
@@ -913,7 +913,7 @@ fn traverse(
 
                 match field_name {
                     None => match child.kind() {
-                        "if" => out.push_str("if"),
+                        "if" => out.push_str(&fmt(child)?),
                         "else" => {
                             if prev_is_comment {
                                 out.push_str(line_ending);
@@ -1079,7 +1079,7 @@ fn traverse(
 
                 match field_name {
                     None => match child.kind() {
-                        "repeat" => out.push_str("repeat"),
+                        "repeat" => out.push_str(&fmt(child)?),
                         "comment" => {
                             if let Some(prev) = maybe_prev
                                 && same_line(prev, child)
@@ -1162,7 +1162,7 @@ fn traverse(
 
                 match field_name {
                     None => match child.kind() {
-                        "while" => out.push_str("while"),
+                        "while" => out.push_str(&fmt(child)?),
                         "comment" => {
                             if let Some(prev) = maybe_prev
                                 && same_line(prev, child)
