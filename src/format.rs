@@ -161,9 +161,9 @@ pub enum FormatError {
     },
     #[error("The node has unknown type {kind}: {raw}")]
     Unknown { kind: &'static str, raw: String },
-    #[error("Unhandled comment in line {line}:{col}: \"{comment}\"")]
+    #[error("Unhandled comment in node at {line}:{col}: \"{node}\"")]
     UnhandledComment {
-        comment: String,
+        node: String,
         line: usize,
         col: usize,
     },
@@ -1261,23 +1261,17 @@ fn traverse(
     };
 
     if !handles_comments {
-        let comments = node
-            .children(&mut node.walk())
-            .filter(|node| node.kind() == "comment")
-            .collect::<Vec<_>>();
+        let before = out.len();
+        push_all_comments(node, out)?;
 
-        if let Some(&comment) = comments.first()
-            && config.stop_on_unhandled_comment
-        {
-            let start = comment.start_position();
+        if config.stop_on_unhandled_comment && out.len() != before {
+            let start = node.start_position();
             return Err(FormatError::UnhandledComment {
-                comment: get_raw(comment),
+                node: get_raw(node),
                 line: start.row,
                 col: start.column,
             });
         }
-
-        push_all_comments(node, out)?;
     }
     Ok(())
 }
