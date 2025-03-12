@@ -85,3 +85,17 @@ update-release $version:
 		"release/roughly-$version#LSP server (Linux)" \
 		"release/roughly-$version.exe#LSP server (Windows)" \
 		--clobber
+
+# use rlib repos to test formatting
+rlib-clone:
+	#!/usr/bin/env bash
+	mkdir -p .local/rlib
+	for repo in devtools lintr actions httr testthat usethis styler pkgdown; do
+		if [ ! -d ".local/rlib/$repo" ]; then
+			echo "cloning $repo..."
+			git clone --depth 1 "https://github.com/r-lib/$repo.git" ".local/rlib/$repo"
+		fi
+	done
+
+rlib *args:
+	cd .local/rlib && for dir in */; do (cd "$dir" && git {{args}} .); done
