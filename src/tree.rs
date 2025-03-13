@@ -13,14 +13,12 @@ pub fn parse(text: impl AsRef<[u8]>, maybe_tree: Option<&Tree>) -> Tree {
 #[inline]
 pub fn for_each_child<'a, E>(
     cursor: &mut TreeCursor<'a>,
-    mut func: impl FnMut(usize, Node<'a>, Option<&'static str>) -> Result<(), E>,
+    mut func: impl FnMut(usize, Node<'a>, Option<&'static str>, &mut TreeCursor<'a>) -> Result<(), E>,
 ) -> Result<(), E> {
-    // foo
-
     let mut i = 0;
     if cursor.goto_first_child() {
         loop {
-            func(i, cursor.node(), cursor.field_name())?;
+            func(i, cursor.node(), cursor.field_name(), cursor)?;
             if !cursor.goto_next_sibling() {
                 cursor.goto_parent();
                 break;
@@ -30,3 +28,22 @@ pub fn for_each_child<'a, E>(
     };
     Ok(())
 }
+
+// #[macro_export]
+// macro_rules! for_each_child {
+//     ($cursor:expr, $block:block) => {{
+//         let mut i = 0;
+//         if $cursor.goto_first_child() {
+//             loop {
+//                 let child = $cursor.node();
+//                 let field_name = $cursor.field_name();
+//                 $block
+//                 if !$cursor.goto_next_sibling() {
+//                     $cursor.goto_parent();
+//                     break;
+//                 }
+//                 i += 1;
+//             }
+//         }
+//     }};
+// }
