@@ -111,6 +111,44 @@ if cursor.goto_first_child() {
 out
 ```
 
+## tree-sitter-r vs R parser
+
+### No default for parameter
+
+Accept by `tree-sitter-r` but rejected by R.
+
+```R
+function(parameter =) {}
+```
+
+See https://github.com/r-lib/tree-sitter-r/issues/161
+
+### line break after `else`
+
+This is valid R but cannot be parsed by `tree-sitter-r`
+
+```R
+if (TRUE) {
+  1
+} else
+{
+  2
+}
+```
+
+### Two line breaks after `extract_operator`
+
+
+This is valid R but cannot be parsed by `tree-sitter-r`
+
+```R
+foo$
+
+bar
+```
+
+See https://github.com/r-lib/tree-sitter-r/issues/166
+
 
 ## References
 
