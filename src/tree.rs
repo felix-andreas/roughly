@@ -29,21 +29,21 @@ pub fn for_each_child<'a, E>(
     Ok(())
 }
 
-// #[macro_export]
-// macro_rules! for_each_child {
-//     ($cursor:expr, $block:block) => {{
-//         let mut i = 0;
-//         if $cursor.goto_first_child() {
-//             loop {
-//                 let child = $cursor.node();
-//                 let field_name = $cursor.field_name();
-//                 $block
-//                 if !$cursor.goto_next_sibling() {
-//                     $cursor.goto_parent();
-//                     break;
-//                 }
-//                 i += 1;
-//             }
-//         }
-//     }};
-// }
+pub fn find_next_error(node: Node) -> Option<Node> {
+    let mut cursor = node.walk();
+
+    loop {
+        let current = cursor.node();
+        if current.is_error() || current.is_missing() {
+            return Some(current);
+        }
+        if cursor.goto_first_child() {
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return None;
+            }
+        }
+    }
+}

@@ -193,6 +193,23 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
     };
 
     let formatted = {
+        if node.has_error() {
+            let error = tree::find_next_error(node).unwrap();
+            return Err(if error.is_missing() {
+                FormatError::Missing {
+                    kind: error.kind(),
+                    line: error.start_position().row,
+                    col: error.start_position().column,
+                }
+            } else {
+                FormatError::SyntaxError {
+                    kind: error.kind(),
+                    line: error.start_position().row,
+                    col: error.start_position().column,
+                }
+            });
+        }
+
         let mut buffer = String::with_capacity(rope.len_bytes() * 3 / 2);
         traverse(
             &mut node.walk(),
@@ -521,7 +538,9 @@ fn traverse(
                                 fmt_indent(cursor, out)
                             }
                         }
-                        _ => unreachable!(),
+                        _ => {
+                            unreachable!()
+                        }
                     },
                     Some(field_name) => match field_name {
                         "lhs" => fmt(cursor, out),
