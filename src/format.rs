@@ -492,13 +492,13 @@ fn traverse(
                         "comma" => {
                             if is_multiline
                                 && (maybe_prev
-                                    .is_none_or(|node| ["comment", "comma"].contains(&node.kind()))
+                                    .is_none_or(|prev| ["comment", "comma"].contains(&prev.kind()))
                                     || i == 1)
                             {
                                 newline(out);
                                 indent(out);
                             } else if maybe_prev.is_some_and(|prev| {
-                                ["argument", "parameter"].contains(&node.kind())
+                                ["argument", "parameter"].contains(&prev.kind())
                                     && prev
                                         .child(prev.child_count() - 1)
                                         .is_some_and(|last| last.kind() == "=")
@@ -542,9 +542,9 @@ fn traverse(
         "binary_operator" => {
             handles_comments = true;
 
-            let is_multiline = !same_line(field(node, "lhs")?, field(node, "rhs")?);
             let operator = field(node, "operator")?;
             let has_spacing = !(operator.kind() == ":" || operator.kind() == "^");
+            let break_after_operator = !same_line(operator, field(node, "rhs")?);
 
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
@@ -567,13 +567,18 @@ fn traverse(
                     Some(field_name) => match field_name {
                         "lhs" => fmt(cursor, out),
                         "operator" => {
-                            if has_spacing {
-                                space(out);
+                            if is_comment(maybe_prev) {
+                                newline(out);
+                                fmt_indent(cursor, out)
+                            } else {
+                                if has_spacing {
+                                    space(out);
+                                }
+                                fmt(cursor, out)
                             }
-                            fmt(cursor, out)
                         }
                         "rhs" => {
-                            if is_multiline {
+                            if break_after_operator {
                                 newline(out);
                                 fmt_indent(cursor, out)
                             } else {

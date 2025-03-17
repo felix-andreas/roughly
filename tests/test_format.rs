@@ -103,6 +103,22 @@ fn binary_operator() {
     assert_fmt! {r#"
         lhs + # 1
             rhs # 2
+
+        (
+            lhs # lhs
+            # 1
+            + # operator
+            # 2
+            rhs # rhs
+        )
+    "#};
+
+    // allow operator and rhs on same line if there is a comment after lhs
+    assert_fmt! {r#"
+        (
+            lhs # lhs
+                + rhs
+        )
     "#};
 }
 
