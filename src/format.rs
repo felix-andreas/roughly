@@ -425,22 +425,41 @@ fn traverse(
         "argument" | "parameter" => {
             handles_comments = true;
 
-            push_all_comments(cursor, out)?;
+            tree::for_each_child(cursor, |_, child, field_name, cursor| {
+                let maybe_prev = child.prev_sibling();
 
-            tree::for_each_child(cursor, |_, child, field_name, cursor| match field_name {
-                None => match child.kind() {
-                    "comment" => Ok(()),
-                    "=" => {
-                        out.push_str(" = ");
-                        Ok(())
-                    }
-                    _ => unreachable!(),
-                },
-                Some(field_name) => match field_name {
-                    "name" => fmt(cursor, out),
-                    "value" | "default" => fmt(cursor, out),
-                    _ => unreachable!(),
-                },
+                match field_name {
+                    None => match child.kind() {
+                        "comment" => {
+                            if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
+                                space(out);
+                            } else {
+                                newline(out);
+                            }
+                            fmt(cursor, out)
+                        }
+                        "=" => {
+                            out.push_str(" =");
+                            Ok(())
+                        }
+                        _ => unreachable!(),
+                    },
+                    Some(field_name) => match field_name {
+                        "name" => fmt(cursor, out),
+                        "value" | "default" => {
+                            if is_comment(maybe_prev) {
+                                newline(out);
+                                fmt_indent(cursor, out)
+                            } else {
+                                if maybe_prev.is_some_and(|prev| prev.kind() == "=") {
+                                    space(out);
+                                }
+                                fmt(cursor, out)
+                            }
+                        }
+                        _ => unreachable!(),
+                    },
+                }
             })?;
         }
         "arguments" | "parameters" => {
@@ -462,9 +481,7 @@ fn traverse(
                 match field_name {
                     None => match child.kind() {
                         "comment" => {
-                            if let Some(prev) = maybe_prev
-                                && same_line(prev, child)
-                            {
+                            if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                                 fmt(cursor, out)
                             } else {
@@ -480,6 +497,13 @@ fn traverse(
                             {
                                 newline(out);
                                 indent(out);
+                            } else if maybe_prev.is_some_and(|prev| {
+                                ["argument", "parameter"].contains(&node.kind())
+                                    && prev
+                                        .child(prev.child_count() - 1)
+                                        .is_some_and(|last| last.kind() == "=")
+                            }) {
+                                space(out);
                             }
                             fmt(cursor, out)
                         }
@@ -528,9 +552,7 @@ fn traverse(
                 match field_name {
                     None => match child.kind() {
                         "comment" => {
-                            if let Some(prev) = maybe_prev
-                                && same_line(prev, child)
-                            {
+                            if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                                 fmt(cursor, out)
                             } else {
@@ -578,9 +600,7 @@ fn traverse(
                 match field_name {
                     None => match child.kind() {
                         "comment" => {
-                            if let Some(prev) = maybe_prev
-                                && same_line(prev, child)
-                            {
+                            if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                                 fmt(cursor, out)
                             } else {
@@ -643,9 +663,7 @@ fn traverse(
                 None => match child.kind() {
                     "comment" => {
                         let maybe_prev = child.prev_sibling();
-                        if let Some(prev) = maybe_prev
-                            && same_line(prev, child)
-                        {
+                        if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                             space(out);
                             fmt(cursor, out)
                         } else {
@@ -681,9 +699,7 @@ fn traverse(
                 match field_name {
                     None => match child.kind() {
                         "comment" => {
-                            if let Some(prev) = maybe_prev
-                                && same_line(prev, child)
-                            {
+                            if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                                 fmt(cursor, out)
                             } else {
@@ -720,7 +736,6 @@ fn traverse(
             let mut indent_comments = false;
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
-
                 let prev_is_comment = is_comment(maybe_prev);
 
                 match field_name {
@@ -736,9 +751,7 @@ fn traverse(
                             }
                         }
                         "comment" => {
-                            if let Some(prev) = maybe_prev
-                                && same_line(prev, child)
-                            {
+                            if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                             } else {
                                 newline(out);
@@ -817,9 +830,7 @@ fn traverse(
                 match field_name {
                     None => match child.kind() {
                         "comment" => {
-                            if let Some(prev) = maybe_prev
-                                && same_line(prev, child)
-                            {
+                            if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                             } else {
                                 newline(out);
@@ -890,9 +901,7 @@ fn traverse(
                             fmt(cursor, out)
                         }
                         "comment" => {
-                            if let Some(prev) = maybe_prev
-                                && same_line(prev, child)
-                            {
+                            if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                             } else {
                                 newline(out);
@@ -967,9 +976,7 @@ fn traverse(
                 match field_name {
                     None => match child.kind() {
                         "comment" => {
-                            if let Some(prev) = maybe_prev
-                                && same_line(prev, child)
-                            {
+                            if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                             } else {
                                 newline(out);
@@ -1032,9 +1039,7 @@ fn traverse(
                     None => match child.kind() {
                         "repeat" => fmt(cursor, out),
                         "comment" => {
-                            if let Some(prev) = maybe_prev
-                                && same_line(prev, child)
-                            {
+                            if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                             } else {
                                 newline(out);
@@ -1094,26 +1099,41 @@ fn traverse(
 
             let has_space = operator.kind() == "~" && rhs.kind() != "identifer";
 
-            push_all_comments(cursor, out)?;
-            tree::for_each_child(
-                &mut node.walk(),
-                |_, child, field_name, cursor| match field_name {
+            tree::for_each_child(&mut node.walk(), |_, child, field_name, cursor| {
+                let maybe_prev = child.prev_sibling();
+
+                match field_name {
                     None => match child.kind() {
-                        "comment" => Ok(()),
+                        // note: this branch should rarely be encountered
+                        // maintaining the order of node make formatter idempotence easier
+                        "comment" => {
+                            if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
+                                space(out);
+                                fmt(cursor, out)
+                            } else {
+                                newlines(out, child, maybe_prev);
+                                fmt_indent(cursor, out)
+                            }
+                        }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
                         "operator" => fmt(cursor, out),
                         "rhs" => {
-                            if has_space {
-                                space(out);
+                            if is_comment(maybe_prev) {
+                                newline(out);
+                                fmt_indent(cursor, out)
+                            } else {
+                                if has_space {
+                                    space(out);
+                                }
+                                fmt(cursor, out)
                             }
-                            fmt(cursor, out)
                         }
                         _ => unreachable!(),
                     },
-                },
-            )?;
+                }
+            })?;
         }
         "while_statement" => {
             handles_comments = true;
@@ -1137,9 +1157,7 @@ fn traverse(
                     None => match child.kind() {
                         "while" => fmt(cursor, out),
                         "comment" => {
-                            if let Some(prev) = maybe_prev
-                                && same_line(prev, child)
-                            {
+                            if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                             } else {
                                 newline(out);
