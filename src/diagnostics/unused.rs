@@ -37,59 +37,52 @@ struct VariableTracker<'a> {
 
 impl<'a> VariableTracker<'a> {
     fn new() -> Self {
-        let global_scope = Scope {
-            variables: HashMap::new(),
-            parent: None,
-        };
         Self {
-            scopes: vec![global_scope],
+            scopes: vec![Scope {
+                variables: HashMap::new(),
+                parent: None,
+            }],
             current_scope: 0,
         }
     }
 
     fn push_scope(&mut self) -> usize {
         let parent = self.current_scope;
-        let new_scope = Scope {
+        self.scopes.push(Scope {
             variables: HashMap::new(),
             parent: Some(parent),
-        };
-        self.scopes.push(new_scope);
-        let new_scope_idx = self.scopes.len() - 1;
-        self.current_scope = new_scope_idx;
-        new_scope_idx
+        });
+        self.current_scope = self.scopes.len() - 1;
+        self.current_scope
     }
 
     fn pop_scope(&mut self) {
-        if let Some(parent) = self.scopes[self.current_scope].parent {
-            self.current_scope = parent;
-        }
+        self.current_scope = self.scopes[self.current_scope].parent.unwrap_or(0);
     }
 
     fn declare_variable(&mut self, name: String, node: Node<'a>) {
-        if let Some(existing) = self.scopes[self.current_scope].variables.remove(&name) {
+        let current_scope = &mut self.scopes[self.current_scope];
+        if let Some(existing) = current_scope.variables.remove(&name) {
             let mut new_var = VarInfo::new(node);
             new_var.shadowed = Some(Box::new(existing));
-            self.scopes[self.current_scope]
-                .variables
-                .insert(name, new_var);
+            current_scope.variables.insert(name, new_var);
         } else {
-            self.scopes[self.current_scope]
-                .variables
-                .insert(name, VarInfo::new(node));
+            current_scope.variables.insert(name, VarInfo::new(node));
         }
     }
 
     fn mark_variable_used(&mut self, name: &str) {
         let mut scope_idx = self.current_scope;
-        loop {
+        if let Some(var_info) = self.scopes[scope_idx].variables.get_mut(name) {
+            var_info.is_used = true;
+            return;
+        }
+
+        while let Some(parent) = self.scopes[scope_idx].parent {
+            scope_idx = parent;
             if let Some(var_info) = self.scopes[scope_idx].variables.get_mut(name) {
                 var_info.is_used = true;
                 return;
-            }
-
-            match self.scopes[scope_idx].parent {
-                Some(parent) => scope_idx = parent,
-                None => break,
             }
         }
     }
@@ -118,10 +111,6 @@ impl<'a> VariableTracker<'a> {
 }
 
 pub fn analyze(node: Node, rope: &Rope) -> Vec<Diagnostic> {
-    // Safety: The lifetime extension is necessary because we need the node to live
-    // for the duration of our analysis but the borrow checker doesn't know that.
-    let node = unsafe { std::mem::transmute::<Node, Node<'static>>(node) };
-
     let mut tracker = VariableTracker::new();
     let mut cursor = node.walk();
 
@@ -223,26 +212,26 @@ fn traverse<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Variable
         }
 
         "identifier" => {
-            // Don't mark LHS of assignments or parameter names as used
             if let Some(parent) = node.parent() {
                 match parent.kind() {
-                    "binary_operator" => {
-                        if let Some(lhs) = parent.child_by_field_name("lhs") {
-                            if lhs.id() == node.id() {
-                                if let Some(op) = parent.child_by_field_name("operator") {
-                                    if op.kind() == "<-" || op.kind() == "=" {
-                                        return;
-                                    }
-                                }
-                            }
+                    "binary_operator"
+                        if parent
+                            .child_by_field_name("lhs")
+                            .is_some_and(|lhs| lhs.id() == node.id()) =>
+                    {
+                        if parent
+                            .child_by_field_name("operator")
+                            .is_some_and(|op| op.kind() == "<-" || op.kind() == "=")
+                        {
+                            return;
                         }
                     }
-                    "parameter" => {
-                        if let Some(name) = parent.child_by_field_name("name") {
-                            if name.id() == node.id() {
-                                return;
-                            }
-                        }
+                    "parameter"
+                        if parent
+                            .child_by_field_name("name")
+                            .is_some_and(|name| name.id() == node.id()) =>
+                    {
+                        return;
                     }
                     _ => {}
                 }
