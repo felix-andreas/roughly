@@ -11,6 +11,7 @@ node_modules
 /target
 /release
 
+.local
 .rlib
 r-examples
 R

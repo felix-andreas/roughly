@@ -1,0 +1,8 @@
+---
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n        (\n            lhs # lhs\n                + rhs\n        )\n    \"#\n}).unwrap()"
+---
+(
+  lhs # lhs
+    + rhs
+)

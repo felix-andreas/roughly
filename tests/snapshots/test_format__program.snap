@@ -1,6 +1,6 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n            # A simple comment\n            x <- 1 + 2\n            y <- x * 3\n            z <- if (y > 5) {\n            \"greater\"\n            } else {\n            \"lesser\"\n            }\n            result <- function(a, b = 2) {\n            return(a + b)\n            }\n            list <- list(a = 1, b = 2, c = 3)\n            for (i in 1:10) {\n            print(i)\n            }\n            while (x < 10) {\n            x <- x + 1\n            }\n            repeat {\n            x <- x - 1\n            if (x == 0) break\n            }\n            foo <- function(x) x^2\n            bar <- foo(3)\n            baz <- c(1, 2, 3)\n            qux <- baz[1]\n            quux <- baz[[1]]\n            corge <- list(a = 1, b = 2)\n            grault <- corge$a\n            garply <- corge[[\"b\"]]\n            waldo <- TRUE\n            fred <- FALSE\n            plugh <- NULL\n            xyzzy <- Inf\n            thud <- NaN\n        \"#\n})"
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n        # A simple comment\n        x <- 1 + 2\n        y <- x * 3\n        z <- if (y > 5) {\n        \"greater\"\n        } else {\n        \"lesser\"\n        }\n        result <- function(a, b = 2) {\n        return(a + b)\n        }\n        list <- list(a = 1, b = 2, c = 3)\n        for (i in 1:10) {\n        print(i)\n        }\n        while (x < 10) {\n        x <- x + 1\n        }\n        repeat {\n        x <- x - 1\n        if (x == 0) break\n        }\n        foo <- function(x) x^2\n        bar <- foo(3)\n        baz <- c(1, 2, 3)\n        qux <- baz[1]\n        quux <- baz[[1]]\n        corge <- list(a = 1, b = 2)\n        grault <- corge$a\n        garply <- corge[[\"b\"]]\n        waldo <- TRUE\n        fred <- FALSE\n        plugh <- NULL\n        xyzzy <- Inf\n        thud <- NaN\n    \"#\n}).unwrap()"
 ---
 # A simple comment
 x <- 1 + 2
@@ -24,7 +24,7 @@ repeat {
   x <- x - 1
   if (x == 0) break
 }
-foo <- function(x) x ^ 2
+foo <- function(x) x^2
 bar <- foo(3)
 baz <- c(1, 2, 3)
 qux <- baz[1]

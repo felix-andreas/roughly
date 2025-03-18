@@ -13,14 +13,12 @@ pub fn parse(text: impl AsRef<[u8]>, maybe_tree: Option<&Tree>) -> Tree {
 #[inline]
 pub fn for_each_child<'a, E>(
     cursor: &mut TreeCursor<'a>,
-    mut func: impl FnMut(usize, Node<'a>, Option<&'static str>) -> Result<(), E>,
+    mut func: impl FnMut(usize, Node<'a>, Option<&'static str>, &mut TreeCursor<'a>) -> Result<(), E>,
 ) -> Result<(), E> {
-    // foo
-
     let mut i = 0;
     if cursor.goto_first_child() {
         loop {
-            func(i, cursor.node(), cursor.field_name())?;
+            func(i, cursor.node(), cursor.field_name(), cursor)?;
             if !cursor.goto_next_sibling() {
                 cursor.goto_parent();
                 break;
@@ -29,4 +27,23 @@ pub fn for_each_child<'a, E>(
         }
     };
     Ok(())
+}
+
+pub fn find_next_error(node: Node) -> Option<Node> {
+    let mut cursor = node.walk();
+
+    loop {
+        let current = cursor.node();
+        if current.is_error() || current.is_missing() {
+            return Some(current);
+        }
+        if cursor.goto_first_child() {
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return None;
+            }
+        }
+    }
 }

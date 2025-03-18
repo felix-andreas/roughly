@@ -98,4 +98,4 @@ rlib-clone:
 	done
 
 rlib *args:
-	cd .local/rlib && for dir in */; do (cd "$dir" && git {{args}} .); done
+	cd .local/rlib && for dir in */; do (echo "$dir" && cd "$dir" && git {{args}}); done
