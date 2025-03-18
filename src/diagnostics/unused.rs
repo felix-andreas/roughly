@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 use {
     crate::diagnostics,
     ropey::Rope,
@@ -67,21 +65,14 @@ impl<'a> VariableTracker<'a> {
         }
     }
 
-    // Track variable declaration
     fn declare_variable(&mut self, name: String, node: Node<'a>) {
-        // When redeclaring a variable in the same scope, keep track of the shadowed version
         if let Some(existing) = self.scopes[self.current_scope].variables.remove(&name) {
-            // Create a new variable that shadows the existing one
             let mut new_var = VarInfo::new(node);
-            // Store the existing variable as shadowed
             new_var.shadowed = Some(Box::new(existing));
-
-            // Insert the new variable with shadowing information
             self.scopes[self.current_scope]
                 .variables
                 .insert(name, new_var);
         } else {
-            // First declaration of this variable in this scope
             self.scopes[self.current_scope]
                 .variables
                 .insert(name, VarInfo::new(node));
@@ -91,19 +82,14 @@ impl<'a> VariableTracker<'a> {
     fn mark_variable_used(&mut self, name: &str) {
         let mut scope_idx = self.current_scope;
         loop {
-            if self.scopes[scope_idx].variables.contains_key(name) {
-                self.scopes[scope_idx]
-                    .variables
-                    .get_mut(name)
-                    .unwrap()
-                    .is_used = true;
+            if let Some(var_info) = self.scopes[scope_idx].variables.get_mut(name) {
+                var_info.is_used = true;
                 return;
             }
 
-            if let Some(parent) = self.scopes[scope_idx].parent {
-                scope_idx = parent;
-            } else {
-                break;
+            match self.scopes[scope_idx].parent {
+                Some(parent) => scope_idx = parent,
+                None => break,
             }
         }
     }
@@ -111,15 +97,12 @@ impl<'a> VariableTracker<'a> {
     fn get_unused_variables(&self) -> Vec<(String, Node<'a>)> {
         let mut unused = Vec::new();
 
-        for scope_idx in 0..self.scopes.len() {
-            let scope = &self.scopes[scope_idx];
+        for scope in &self.scopes {
             for (name, info) in &scope.variables {
-                // Check if the current variable is unused
                 if !info.is_used {
                     unused.push((name.clone(), info.node));
                 }
 
-                // Check for shadowed variables that are unused
                 let mut shadow_info = &info.shadowed;
                 while let Some(shadowed) = shadow_info {
                     if !shadowed.is_used {
@@ -135,6 +118,8 @@ impl<'a> VariableTracker<'a> {
 }
 
 pub fn analyze(node: Node, rope: &Rope) -> Vec<Diagnostic> {
+    // Safety: The lifetime extension is necessary because we need the node to live
+    // for the duration of our analysis but the borrow checker doesn't know that.
     let node = unsafe { std::mem::transmute::<Node, Node<'static>>(node) };
 
     let mut tracker = VariableTracker::new();
@@ -142,8 +127,8 @@ pub fn analyze(node: Node, rope: &Rope) -> Vec<Diagnostic> {
 
     traverse(&mut cursor, rope, &mut tracker);
 
-    let unused_vars = tracker.get_unused_variables();
-    unused_vars
+    tracker
+        .get_unused_variables()
         .into_iter()
         .map(|(name, node)| Diagnostic {
             range: diagnostics::node_range(node),
@@ -197,15 +182,12 @@ fn traverse<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Variable
         }
 
         "call" => {
-            let mut is_local_call = false;
-            if let Some(function_node) = node.child(0) {
-                if function_node.kind() == "identifier" {
-                    let name = rope.byte_slice(function_node.byte_range()).to_string();
-                    if name == "local" {
-                        is_local_call = true;
-                    }
-                }
-            }
+            let is_local_call = node
+                .child_by_field_name("function")
+                .is_some_and(|function_node| {
+                    function_node.kind() == "identifier"
+                        && rope.byte_slice(function_node.byte_range()) == "local"
+                });
 
             if is_local_call {
                 tracker.push_scope();
@@ -220,19 +202,16 @@ fn traverse<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Variable
             }
         }
 
-        // Check for variable assignments
         "binary_operator" => {
             if let (Some(lhs), Some(operator)) = (
                 node.child_by_field_name("lhs"),
                 node.child_by_field_name("operator"),
             ) {
-                if lhs.kind() == "identifier" && (operator.kind() == "<-" || operator.kind() == "=")
-                {
+                let is_assignment = operator.kind() == "<-" || operator.kind() == "=";
+                if lhs.kind() == "identifier" && is_assignment {
                     let name = rope.byte_slice(lhs.byte_range()).to_string();
-                    // Track as a variable declaration
                     tracker.declare_variable(name, lhs);
 
-                    // Process the RHS to mark any variables used there
                     if let Some(rhs) = node.child_by_field_name("rhs") {
                         let mut rhs_cursor = rhs.walk();
                         traverse(&mut rhs_cursor, rope, tracker);
@@ -244,31 +223,31 @@ fn traverse<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Variable
         }
 
         "identifier" => {
-            // Don't mark LHS of assignments as used
-            let parent = node.parent();
-            if let Some(parent) = parent {
-                if parent.kind() == "binary_operator" {
-                    if let Some(lhs) = parent.child_by_field_name("lhs") {
-                        if lhs.id() == node.id() {
-                            // This is the LHS of an assignment, not a usage
-                            if let Some(op) = parent.child_by_field_name("operator") {
-                                if op.kind() == "<-" || op.kind() == "=" {
-                                    return;
+            // Don't mark LHS of assignments or parameter names as used
+            if let Some(parent) = node.parent() {
+                match parent.kind() {
+                    "binary_operator" => {
+                        if let Some(lhs) = parent.child_by_field_name("lhs") {
+                            if lhs.id() == node.id() {
+                                if let Some(op) = parent.child_by_field_name("operator") {
+                                    if op.kind() == "<-" || op.kind() == "=" {
+                                        return;
+                                    }
                                 }
                             }
                         }
                     }
-                } else if parent.kind() == "parameter" {
-                    if let Some(name) = parent.child_by_field_name("name") {
-                        if name.id() == node.id() {
-                            // This is a parameter name, not a usage
-                            return;
+                    "parameter" => {
+                        if let Some(name) = parent.child_by_field_name("name") {
+                            if name.id() == node.id() {
+                                return;
+                            }
                         }
                     }
+                    _ => {}
                 }
             }
 
-            // Mark the variable as used
             let name = rope.byte_slice(node.byte_range()).to_string();
             tracker.mark_variable_used(&name);
             return;
@@ -276,7 +255,6 @@ fn traverse<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Variable
         _ => {}
     }
 
-    // Continue traversal for other nodes
     if cursor.goto_first_child() {
         loop {
             traverse(cursor, rope, tracker);
@@ -354,7 +332,6 @@ mod tests {
             "First declaration of x should be marked as unused due to shadowing"
         );
 
-        // To verify that only one x is marked as unused (the first one)
         let diagnostics = analyze(tree::parse(code, None).root_node(), &Rope::from_str(code));
         assert_eq!(
             diagnostics.len(),
@@ -362,7 +339,6 @@ mod tests {
             "Should have exactly one unused variable diagnostic"
         );
 
-        // Check the line number to make sure it's the first declaration that's marked as unused
         assert_eq!(
             diagnostics[0].range.start.line, 2,
             "The first declaration of x should be marked as unused (line 2)"
@@ -403,6 +379,7 @@ mod tests {
         assert!(unused_vars.contains("b"));
         assert!(!unused_vars.contains("c"));
     }
+
     #[test]
     fn shadowed_parameters() {
         let code = r#"
@@ -419,7 +396,6 @@ mod tests {
         );
 
         let diagnostics = analyze(tree::parse(code, None).root_node(), &Rope::from_str(code));
-        // Check the line number to confirm it's the parameter
         assert_eq!(
             diagnostics[0].range.start.line, 1,
             "The parameter 'a' should be marked as unused (line 1)"
