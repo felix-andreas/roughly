@@ -1,7 +1,10 @@
+#![allow(unused)]
+
 use {
+    crate::diagnostics,
     ropey::Rope,
     std::collections::HashMap,
-    tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range},
+    tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity},
     tree_sitter::{Node, TreeCursor},
 };
 
@@ -15,6 +18,7 @@ struct Scope<'a> {
 struct VarInfo<'a> {
     node: Node<'a>,
     is_used: bool,
+    shadowed: Option<Box<VarInfo<'a>>>,
 }
 
 impl<'a> VarInfo<'a> {
@@ -22,6 +26,7 @@ impl<'a> VarInfo<'a> {
         Self {
             node,
             is_used: false,
+            shadowed: None,
         }
     }
 }
@@ -62,10 +67,25 @@ impl<'a> VariableTracker<'a> {
         }
     }
 
+    // Track variable declaration
     fn declare_variable(&mut self, name: String, node: Node<'a>) {
-        self.scopes[self.current_scope]
-            .variables
-            .insert(name, VarInfo::new(node));
+        // When redeclaring a variable in the same scope, keep track of the shadowed version
+        if let Some(existing) = self.scopes[self.current_scope].variables.remove(&name) {
+            // Create a new variable that shadows the existing one
+            let mut new_var = VarInfo::new(node);
+            // Store the existing variable as shadowed
+            new_var.shadowed = Some(Box::new(existing));
+
+            // Insert the new variable with shadowing information
+            self.scopes[self.current_scope]
+                .variables
+                .insert(name, new_var);
+        } else {
+            // First declaration of this variable in this scope
+            self.scopes[self.current_scope]
+                .variables
+                .insert(name, VarInfo::new(node));
+        }
     }
 
     fn mark_variable_used(&mut self, name: &str) {
@@ -94,8 +114,18 @@ impl<'a> VariableTracker<'a> {
         for scope_idx in 1..self.scopes.len() {
             let scope = &self.scopes[scope_idx];
             for (name, info) in &scope.variables {
+                // Check if the current variable is unused
                 if !info.is_used {
                     unused.push((name.clone(), info.node));
+                }
+
+                // Check for shadowed variables that are unused
+                let mut shadow_info = &info.shadowed;
+                while let Some(shadowed) = shadow_info {
+                    if !shadowed.is_used {
+                        unused.push((name.clone(), shadowed.node));
+                    }
+                    shadow_info = &shadowed.shadowed;
                 }
             }
         }
@@ -104,24 +134,24 @@ impl<'a> VariableTracker<'a> {
     }
 }
 
-pub fn find_unused_variables(node: Node, rope: &Rope) -> Vec<Diagnostic> {
+pub fn analyze(node: Node, rope: &Rope) -> Vec<Diagnostic> {
     let node = unsafe { std::mem::transmute::<Node, Node<'static>>(node) };
 
     let mut tracker = VariableTracker::new();
     let mut cursor = node.walk();
 
-    analyze_node(&mut cursor, rope, &mut tracker);
+    traverse(&mut cursor, rope, &mut tracker);
 
     let unused_vars = tracker.get_unused_variables();
     unused_vars
         .into_iter()
         .map(|(name, node)| Diagnostic {
-            range: node_range(node),
+            range: diagnostics::node_range(node),
             severity: Some(DiagnosticSeverity::WARNING),
-            message: format!("Unused variable '{}'", name),
+            message: format!("unused variable '{}'", name),
             code: None,
             code_description: None,
-            source: Some("roughly".to_string()),
+            source: None,
             related_information: None,
             tags: None,
             data: None,
@@ -129,7 +159,7 @@ pub fn find_unused_variables(node: Node, rope: &Rope) -> Vec<Diagnostic> {
         .collect()
 }
 
-fn analyze_node<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut VariableTracker<'a>) {
+fn traverse<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut VariableTracker<'a>) {
     let node = cursor.node();
 
     match node.kind() {
@@ -159,7 +189,7 @@ fn analyze_node<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Vari
 
             if cursor.goto_first_child() {
                 loop {
-                    analyze_node(cursor, rope, tracker);
+                    traverse(cursor, rope, tracker);
                     if !cursor.goto_next_sibling() {
                         break;
                     }
@@ -191,7 +221,7 @@ fn analyze_node<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Vari
 
             if cursor.goto_first_child() {
                 loop {
-                    analyze_node(cursor, rope, tracker);
+                    traverse(cursor, rope, tracker);
                     if !cursor.goto_next_sibling() {
                         break;
                     }
@@ -205,6 +235,7 @@ fn analyze_node<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Vari
             return;
         }
 
+        // Check for variable assignments
         "binary_operator" => {
             if let (Some(lhs), Some(operator)) = (
                 node.child_by_field_name("lhs"),
@@ -213,7 +244,9 @@ fn analyze_node<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Vari
                 if lhs.kind() == "identifier" && (operator.kind() == "<-" || operator.kind() == "=")
                 {
                     let name = rope.byte_slice(lhs.byte_range()).to_string();
+                    // Only track as a variable declaration if we're in a local scope
                     if tracker.current_scope > 0 {
+                        // For R, any assignment is a declaration/redeclaration
                         tracker.declare_variable(name, lhs);
                     }
                 }
@@ -246,25 +279,12 @@ fn analyze_node<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Vari
 
     if cursor.goto_first_child() {
         loop {
-            analyze_node(cursor, rope, tracker);
+            traverse(cursor, rope, tracker);
             if !cursor.goto_next_sibling() {
                 break;
             }
         }
         cursor.goto_parent();
-    }
-}
-
-fn node_range(node: Node) -> Range {
-    Range {
-        start: Position {
-            line: node.start_position().row as u32,
-            character: node.start_position().column as u32,
-        },
-        end: Position {
-            line: node.end_position().row as u32,
-            character: node.end_position().column as u32,
-        },
     }
 }
 
@@ -275,7 +295,7 @@ mod tests {
     fn get_unused_var_names(code: &str) -> HashSet<String> {
         let tree = tree::parse(code, None);
         let rope = Rope::from_str(code);
-        let diagnostics = find_unused_variables(tree.root_node(), &rope);
+        let diagnostics = analyze(tree.root_node(), &rope);
 
         diagnostics
             .into_iter()
@@ -322,14 +342,31 @@ mod tests {
     fn shadowed_variable() {
         let code = r#"
         function() {
-			x = 4 # <- this should be unused
-			x = 5
-			x
+            x = 4 # <- this should be unused
+            x = 5
+            x
         }
         "#;
 
         let unused_vars = get_unused_var_names(code);
-        assert!(unused_vars.contains("x"));
+        assert!(
+            unused_vars.contains("x"),
+            "First declaration of x should be marked as unused due to shadowing"
+        );
+
+        // To verify that only one x is marked as unused (the first one)
+        let diagnostics = analyze(tree::parse(code, None).root_node(), &Rope::from_str(code));
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Should have exactly one unused variable diagnostic"
+        );
+
+        // Check the line number to make sure it's the first declaration that's marked as unused
+        assert_eq!(
+            diagnostics[0].range.start.line, 2,
+            "The first declaration of x should be marked as unused (line 2)"
+        );
     }
 
     #[test]
@@ -370,12 +407,22 @@ mod tests {
     fn shadowed_parameters() {
         let code = r#"
         function(a) {
-			a = 4
+            a = 4
             print(a)
         }
         "#;
 
         let unused_vars = get_unused_var_names(code);
-        assert!(unused_vars.contains("a"));
+        assert!(
+            unused_vars.contains("a"),
+            "Parameter 'a' should be marked as unused since it's immediately shadowed"
+        );
+
+        let diagnostics = analyze(tree::parse(code, None).root_node(), &Rope::from_str(code));
+        // Check the line number to confirm it's the parameter
+        assert_eq!(
+            diagnostics[0].range.start.line, 1,
+            "The parameter 'a' should be marked as unused (line 1)"
+        );
     }
 }

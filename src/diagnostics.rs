@@ -1,15 +1,19 @@
+mod fast;
+mod syntax;
+mod unused;
+
 use {
     crate::{
         cli::{self, LogLevel},
         config::{self, Case},
-        tree, utils,
+        tree,
     },
     console::style,
     ignore::Walk,
     ropey::Rope,
     std::path::PathBuf,
     tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range},
-    tree_sitter::{Node, TreeCursor},
+    tree_sitter::Node,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -75,7 +79,7 @@ pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), DiagnosticsError> {
             let tree = tree::parse(&old, None);
             let rope = Rope::from_str(&old);
 
-            for diagnostic in diagnostics(tree.root_node(), &rope, config) {
+            for diagnostic in analyze_fast(tree.root_node(), &rope, config) {
                 n_errors += 1;
                 cli::log(
                     match diagnostic.severity {
@@ -177,283 +181,15 @@ pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), DiagnosticsError> {
 #[derive(Debug)]
 pub struct DiagnosticsError;
 
-pub fn diagnostics(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
-    let mut diagnostics = diagnostics_syntax(node, rope);
-    diagnostics.extend(diagnostics_semantics(node, rope, config));
+pub fn analyze_fast(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
+    let mut diagnostics = syntax::analyze(node, rope);
+    diagnostics.extend(fast::analyze(node, rope, config));
     diagnostics
 }
 
-pub fn diagnostics_syntax(node: Node, rope: &Rope) -> Vec<Diagnostic> {
-    fn traverse(cursor: &mut TreeCursor, diagnostics: &mut Vec<Diagnostic>, rope: &Rope) -> bool {
-        let node = cursor.node();
-        if !(node.is_error() || node.has_error()) {
-            return false;
-        }
-
-        // DEBUG
-        // eprintln!(
-        //     "{}_{:?}_{}",
-        //     node.kind(),
-        //     node.has_error(),
-        //     rope.byte_slice(node.byte_range()),
-        // );
-
-        match node.kind() {
-            "arguments"
-            | "braced_expression"
-            | "for_statement"
-            | "if_statement"
-            | "parameters"
-            | "parenthesized_expression"
-            | "while_statement" => {
-                if let Some(open) = node.child_by_field_name("open") {
-                    if let Some(close) = node.child_by_field_name("close") {
-                        if close.is_missing() {
-                            diagnostics.push(error(
-                                open,
-                                format!("missing closing delimiter {}", close.kind()),
-                            ));
-                        }
-                    }
-                }
-            }
-            "binary_operator" => {
-                if let Some(operator) = node.child_by_field_name("operator") {
-                    if let Some(rhs) = node.child_by_field_name("rhs") {
-                        if rhs.is_missing() {
-                            diagnostics.push(error(
-                                operator,
-                                format!("missing rhs for operator {}", operator.kind()),
-                            ));
-                        }
-                    }
-                }
-            }
-            "function_definition" => {
-                if let Some(body) = node.child_by_field_name("body") {
-                    if body.is_missing() {
-                        diagnostics.push(error(node, "missing function body".into()));
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        let mut handled_error = false;
-        // let child_kinds = vec![];
-        if cursor.goto_first_child() {
-            if node.is_error() {
-                let child = cursor.node();
-                match child.kind() {
-                    "(" | "{" | "[" | "[[" => diagnostics.push(error(
-                        child,
-                        format!("missing closing delimiter {}", child.kind()),
-                    )),
-                    _ => {}
-                }
-            }
-
-            loop {
-                handled_error |= traverse(cursor, diagnostics, rope);
-
-                if !cursor.goto_next_sibling() {
-                    cursor.goto_parent();
-                    break;
-                }
-            }
-        }
-
-        if !handled_error && node.is_error() {
-            handled_error = true;
-            let raw = rope.byte_slice(node.byte_range()).to_string();
-            match raw.as_str() {
-                ")" | "}" | "]" | "]]" => diagnostics.push(error(
-                    node,
-                    format!("Syntax Error: unexpected closing delimiter {}", raw),
-                )),
-                _ => {
-                    diagnostics.push(error(node, format!("Syntax Error: unexpected {:?}", raw)));
-                }
-            }
-        }
-
-        handled_error
-    }
-
-    let mut diagnostics = Vec::new();
-    let mut cursor = node.walk();
-    traverse(&mut cursor, &mut diagnostics, rope);
-    diagnostics
-}
-
-pub fn diagnostics_semantics(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
-    #[derive(Debug, Clone, Copy, Default)]
-    struct State {
-        check_trailing_commas: bool,
-        check_case: bool,
-    }
-
-    impl State {
-        fn check_trailing_commas(&mut self, check: bool) {
-            self.check_trailing_commas = check;
-        }
-        fn check_case(&mut self, check: bool) {
-            self.check_case = check;
-        }
-    }
-
-    fn traverse(
-        cursor: &mut TreeCursor,
-        diagnostics: &mut Vec<Diagnostic>,
-        rope: &Rope,
-        config: Config,
-        mut state: State,
-    ) {
-        let node = cursor.node();
-
-        match node.kind() {
-            "arguments" => {
-                let mut last_comma = None;
-                if cursor.goto_first_child() {
-                    let mut last_argument = None;
-                    loop {
-                        let child = cursor.node();
-                        match child.kind() {
-                            "argument" => {
-                                if let Some(last_argment) = last_argument
-                                    && last_comma.is_none()
-                                {
-                                    diagnostics.push(error(
-                                        last_argment,
-                                        "Expected comma after argument".into(),
-                                    ));
-                                }
-                                last_argument = Some(child);
-                                last_comma = None;
-                            }
-                            "comma" => {
-                                last_comma = Some(child);
-                            }
-                            _ => {}
-                        }
-
-                        if !cursor.goto_next_sibling() {
-                            cursor.goto_parent();
-                            break;
-                        }
-                    }
-
-                    // note: we only check trailing commas for call not subset
-                    if let Some(last_comma) = last_comma
-                        && state.check_trailing_commas
-                    {
-                        diagnostics.push(error(
-                            last_comma,
-                            "Unexpected comma after last argument".into(),
-                        ));
-                    }
-                }
-
-                state.check_trailing_commas(false);
-            }
-            "binary_operator" => {
-                if let (Some(lhs), Some(operator)) = (
-                    node.child_by_field_name("lhs"),
-                    node.child_by_field_name("operator"),
-                ) {
-                    if lhs.kind() == "identifier" && operator.kind() == "<-" {
-                        let name = rope.byte_slice(lhs.byte_range()).to_string();
-                        if state.check_case {
-                            let correct_case = match config.case {
-                                Case::Camel => utils::to_camel_case(&name),
-                                Case::Snake => utils::to_snake_case(&name),
-                            };
-                            if name != correct_case {
-                                diagnostics.push(warning(
-                                    node,
-                                    format!(
-                                        "Variable '{}' should have {} name, e.g. {}",
-                                        lhs,
-                                        match config.case {
-                                            Case::Camel => "camelCase",
-                                            Case::Snake => "snake_case",
-                                        },
-                                        correct_case
-                                    ),
-                                ));
-                            }
-                        }
-                    }
-                }
-
-                if let Some(operator) = node.child_by_field_name("operator") {
-                    if operator.kind() == "=" {
-                        diagnostics.push(warning(node, "Use <-, not =, for assignment".into()));
-                    }
-                }
-            }
-            "call" => state.check_trailing_commas(true),
-            "function_definition" => state.check_case(true),
-            "parameter" => {
-                if let Some(name) = node.child_by_field_name("name") {
-                    if name.kind() == "identifier" {
-                        let raw = rope.byte_slice(name.byte_range()).to_string();
-                        let correct_case = match config.case {
-                            Case::Camel => utils::to_camel_case(&raw),
-                            Case::Snake => utils::to_snake_case(&raw),
-                        };
-                        if raw != correct_case {
-                            diagnostics.push(warning(
-                                name,
-                                format!(
-                                    "Parameter '{}' should have {} name, e.g. {}",
-                                    name,
-                                    match config.case {
-                                        Case::Camel => "camelCase",
-                                        Case::Snake => "snake_case",
-                                    },
-                                    correct_case
-                                ),
-                            ));
-                        }
-                    }
-                }
-            }
-            "identifier" => {
-                let name = rope.byte_slice(node.byte_range()).to_string();
-                let maybe_message = match name.as_str() {
-                    "T" => Some("Use TRUE, not T, for Boolean values".into()),
-                    "F" => Some("Use FALSE, not F, for Boolean values".into()),
-                    _ => None,
-                };
-                if let Some(message) = maybe_message {
-                    diagnostics.push(warning(node, message));
-                }
-            }
-            _ => {}
-        }
-
-        if cursor.goto_first_child() {
-            loop {
-                traverse(cursor, diagnostics, rope, config, state);
-
-                if !cursor.goto_next_sibling() {
-                    cursor.goto_parent();
-                    break;
-                }
-            }
-        }
-    }
-
-    let mut diagnostics = Vec::new();
-    let mut cursor = node.walk();
-    traverse(
-        &mut cursor,
-        &mut diagnostics,
-        rope,
-        config,
-        State::default(),
-    );
+pub fn analyze_full(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
+    let mut diagnostics = analyze_fast(node, rope, config);
+    diagnostics.extend(unused::analyze(node, rope));
     diagnostics
 }
 
