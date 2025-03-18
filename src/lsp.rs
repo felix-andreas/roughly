@@ -115,7 +115,7 @@ impl LanguageServer for Backend {
         let rope = Rope::from_str(&params.text_document.text);
         let tree = tree::parse(&params.text_document.text, None);
 
-        let diagnostics = diagnostics::diagnostics(
+        let diagnostics = diagnostics::analyze_full(
             tree.root_node(),
             &rope,
             diagnostics::Config::from_config(self.config),
@@ -202,7 +202,7 @@ impl LanguageServer for Backend {
             });
 
         if let Some(document) = self.document_map.get(&params.text_document.uri) {
-            let diagnostics = diagnostics::diagnostics(
+            let diagnostics = diagnostics::analyze_fast(
                 document.tree.root_node(),
                 &document.rope,
                 diagnostics::Config::from_config(self.config),
@@ -227,7 +227,7 @@ impl LanguageServer for Backend {
 
         index::index_update(&self.symbols_map, &params.text_document.uri);
         if let Some(document) = self.document_map.get(&params.text_document.uri) {
-            let diagnostics = diagnostics::diagnostics(
+            let diagnostics = diagnostics::analyze_full(
                 document.tree.root_node(),
                 &document.rope,
                 diagnostics::Config::from_config(self.config),

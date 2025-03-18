@@ -154,6 +154,10 @@ See https://github.com/r-lib/tree-sitter-r/issues/166
 * Empty loops: for, while, repeat
 * unused variables
 
+## Type checking
+
+* https://github.com/salsa-rs/salsa/blob/master/examples/calc/type_check.rs
+
 
 ## References
 
