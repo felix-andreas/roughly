@@ -9,7 +9,6 @@ use {
 struct Scope<'a> {
     variables: HashMap<String, VarInfo<'a>>,
     parent: Option<usize>,
-    is_closure: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -38,7 +37,6 @@ impl<'a> VariableTracker<'a> {
         let global_scope = Scope {
             variables: HashMap::new(),
             parent: None,
-            is_closure: false,
         };
         Self {
             scopes: vec![global_scope],
@@ -46,12 +44,11 @@ impl<'a> VariableTracker<'a> {
         }
     }
 
-    fn push_scope(&mut self, is_closure: bool) -> usize {
+    fn push_scope(&mut self) -> usize {
         let parent = self.current_scope;
         let new_scope = Scope {
             variables: HashMap::new(),
             parent: Some(parent),
-            is_closure,
         };
         self.scopes.push(new_scope);
         let new_scope_idx = self.scopes.len() - 1;
@@ -84,15 +81,8 @@ impl<'a> VariableTracker<'a> {
             }
 
             if let Some(parent) = self.scopes[scope_idx].parent {
-                if self.scopes[scope_idx].is_closure {
-                    // In closures, we can access parent scope variables
-                    scope_idx = parent;
-                } else {
-                    // Function definition creates a new lexical scope - can't access parent
-                    break;
-                }
+                scope_idx = parent;
             } else {
-                // Reached global scope
                 break;
             }
         }
@@ -115,7 +105,6 @@ impl<'a> VariableTracker<'a> {
 }
 
 pub fn find_unused_variables(node: Node, rope: &Rope) -> Vec<Diagnostic> {
-    // Make node 'static so we can store it
     let node = unsafe { std::mem::transmute::<Node, Node<'static>>(node) };
 
     let mut tracker = VariableTracker::new();
@@ -144,13 +133,9 @@ fn analyze_node<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Vari
     let node = cursor.node();
 
     match node.kind() {
-        // Function definition creates a new scope that's not a closure
         "function_definition" => {
-            // Determine if this is a nested function (closure)
-            let is_closure = tracker.current_scope > 0;
-            tracker.push_scope(is_closure);
+            tracker.push_scope();
 
-            // Track parameters as declared variables
             if let Some(params_node) = node.child_by_field_name("parameters") {
                 let mut param_cursor = params_node.walk();
                 if param_cursor.goto_first_child() {
@@ -172,7 +157,6 @@ fn analyze_node<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Vari
                 }
             }
 
-            // Process function body
             if cursor.goto_first_child() {
                 loop {
                     analyze_node(cursor, rope, tracker);
@@ -187,7 +171,6 @@ fn analyze_node<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Vari
             return;
         }
 
-        // local({...}) call creates a new scope
         "call" => {
             let mut is_local_call = false;
             let mut call_cursor = node.walk();
@@ -202,12 +185,10 @@ fn analyze_node<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Vari
                 }
             }
 
-            // If it's a local() call, create a new scope
             if is_local_call {
-                tracker.push_scope(true);
+                tracker.push_scope();
             }
 
-            // Process all child nodes
             if cursor.goto_first_child() {
                 loop {
                     analyze_node(cursor, rope, tracker);
@@ -224,7 +205,6 @@ fn analyze_node<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Vari
             return;
         }
 
-        // Check for variable assignments
         "binary_operator" => {
             if let (Some(lhs), Some(operator)) = (
                 node.child_by_field_name("lhs"),
@@ -233,7 +213,6 @@ fn analyze_node<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Vari
                 if lhs.kind() == "identifier" && (operator.kind() == "<-" || operator.kind() == "=")
                 {
                     let name = rope.byte_slice(lhs.byte_range()).to_string();
-                    // Only track as a variable declaration if we're in a local scope
                     if tracker.current_scope > 0 {
                         tracker.declare_variable(name, lhs);
                     }
@@ -241,37 +220,30 @@ fn analyze_node<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Vari
             }
         }
 
-        // Check for variable usage
         "identifier" => {
-            // Ignore if this is part of an assignment
             let parent = node.parent();
             if let Some(parent) = parent {
                 if parent.kind() == "binary_operator" {
                     if let Some(lhs) = parent.child_by_field_name("lhs") {
                         if lhs.id() == node.id() {
-                            // This identifier is on the left side of an assignment
-                            // It's a declaration, not a usage
                             return;
                         }
                     }
                 } else if parent.kind() == "parameter" {
                     if let Some(name) = parent.child_by_field_name("name") {
                         if name.id() == node.id() {
-                            // This is a parameter name, not a usage
                             return;
                         }
                     }
                 }
             }
 
-            // This is a variable usage
             let name = rope.byte_slice(node.byte_range()).to_string();
             tracker.mark_variable_used(&name);
         }
         _ => {}
     }
 
-    // Visit child nodes for other cases
     if cursor.goto_first_child() {
         loop {
             analyze_node(cursor, rope, tracker);
@@ -308,7 +280,6 @@ mod tests {
         diagnostics
             .into_iter()
             .map(|d| {
-                // Extract the variable name from the message
                 let message = d.message;
                 message.replace("Unused variable '", "").replace("'", "")
             })
@@ -336,7 +307,7 @@ mod tests {
         test <- function() {
             x <- 10
             inner <- function() {
-                return(x) # x is used in the closure
+                return(x)
             }
             inner()
         }
