@@ -111,7 +111,7 @@ impl<'a> VariableTracker<'a> {
     fn get_unused_variables(&self) -> Vec<(String, Node<'a>)> {
         let mut unused = Vec::new();
 
-        for scope_idx in 1..self.scopes.len() {
+        for scope_idx in 0..self.scopes.len() {
             let scope = &self.scopes[scope_idx];
             for (name, info) in &scope.variables {
                 // Check if the current variable is unused
@@ -187,14 +187,9 @@ fn traverse<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Variable
                 }
             }
 
-            if cursor.goto_first_child() {
-                loop {
-                    traverse(cursor, rope, tracker);
-                    if !cursor.goto_next_sibling() {
-                        break;
-                    }
-                }
-                cursor.goto_parent();
+            if let Some(body_node) = node.child_by_field_name("body") {
+                let mut body_cursor = body_node.walk();
+                traverse(&mut body_cursor, rope, tracker);
             }
 
             tracker.pop_scope();
@@ -203,12 +198,9 @@ fn traverse<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Variable
 
         "call" => {
             let mut is_local_call = false;
-            let mut call_cursor = node.walk();
-
-            if call_cursor.goto_first_child() {
-                let child = call_cursor.node();
-                if child.kind() == "identifier" {
-                    let name = rope.byte_slice(child.byte_range()).to_string();
+            if let Some(function_node) = node.child(0) {
+                if function_node.kind() == "identifier" {
+                    let name = rope.byte_slice(function_node.byte_range()).to_string();
                     if name == "local" {
                         is_local_call = true;
                     }
@@ -217,22 +209,15 @@ fn traverse<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Variable
 
             if is_local_call {
                 tracker.push_scope();
-            }
 
-            if cursor.goto_first_child() {
-                loop {
-                    traverse(cursor, rope, tracker);
-                    if !cursor.goto_next_sibling() {
-                        break;
-                    }
+                if let Some(args_node) = node.child_by_field_name("arguments") {
+                    let mut args_cursor = args_node.walk();
+                    traverse(&mut args_cursor, rope, tracker);
                 }
-                cursor.goto_parent();
-            }
 
-            if is_local_call {
                 tracker.pop_scope();
+                return;
             }
-            return;
         }
 
         // Check for variable assignments
@@ -244,39 +229,54 @@ fn traverse<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Variable
                 if lhs.kind() == "identifier" && (operator.kind() == "<-" || operator.kind() == "=")
                 {
                     let name = rope.byte_slice(lhs.byte_range()).to_string();
-                    // Only track as a variable declaration if we're in a local scope
-                    if tracker.current_scope > 0 {
-                        // For R, any assignment is a declaration/redeclaration
-                        tracker.declare_variable(name, lhs);
+                    // Track as a variable declaration
+                    tracker.declare_variable(name, lhs);
+
+                    // Process the RHS to mark any variables used there
+                    if let Some(rhs) = node.child_by_field_name("rhs") {
+                        let mut rhs_cursor = rhs.walk();
+                        traverse(&mut rhs_cursor, rope, tracker);
                     }
+
+                    return;
                 }
             }
         }
 
         "identifier" => {
+            // Don't mark LHS of assignments as used
             let parent = node.parent();
             if let Some(parent) = parent {
                 if parent.kind() == "binary_operator" {
                     if let Some(lhs) = parent.child_by_field_name("lhs") {
                         if lhs.id() == node.id() {
-                            return;
+                            // This is the LHS of an assignment, not a usage
+                            if let Some(op) = parent.child_by_field_name("operator") {
+                                if op.kind() == "<-" || op.kind() == "=" {
+                                    return;
+                                }
+                            }
                         }
                     }
                 } else if parent.kind() == "parameter" {
                     if let Some(name) = parent.child_by_field_name("name") {
                         if name.id() == node.id() {
+                            // This is a parameter name, not a usage
                             return;
                         }
                     }
                 }
             }
 
+            // Mark the variable as used
             let name = rope.byte_slice(node.byte_range()).to_string();
             tracker.mark_variable_used(&name);
+            return;
         }
         _ => {}
     }
 
+    // Continue traversal for other nodes
     if cursor.goto_first_child() {
         loop {
             traverse(cursor, rope, tracker);
@@ -301,7 +301,7 @@ mod tests {
             .into_iter()
             .map(|d| {
                 let message = d.message;
-                message.replace("Unused variable '", "").replace("'", "")
+                message.replace("unused variable '", "").replace("'", "")
             })
             .collect()
     }
