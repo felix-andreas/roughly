@@ -214,7 +214,7 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
         traverse(
             &mut node.walk(),
             &mut buffer,
-            ConfigHelper {
+            Context {
                 rope,
                 indent: config.indent,
                 line_ending,
@@ -237,7 +237,7 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ConfigHelper<'a> {
+struct Context<'a> {
     rope: &'a Rope,
     indent: &'a str,
     line_ending: &'static str,
@@ -247,26 +247,26 @@ struct ConfigHelper<'a> {
 fn traverse(
     cursor: &mut TreeCursor,
     out: &mut String,
-    config: ConfigHelper,
+    context: Context,
     level: usize,
     make_multiline: bool,
 ) -> Result<(), FormatError> {
     let space = |out: &mut String| out.push(' ');
-    let indent = |out: &mut String| out.push_str(config.indent);
+    let indent = |out: &mut String| out.push_str(context.indent);
     let newline = |out: &mut String| {
-        out.push_str(config.line_ending);
-        out.push_str(&config.indent.repeat(level));
+        out.push_str(context.line_ending);
+        out.push_str(&context.indent.repeat(level));
     };
     let newlines = |out: &mut String, node: Node, maybe_prev: Option<Node>| {
-        out.push_str(&config.line_ending.repeat(maybe_prev.map_or(0, |prev| {
+        out.push_str(&context.line_ending.repeat(maybe_prev.map_or(0, |prev| {
             usize::clamp(node.start_position().row - prev.end_position().row, 1, 2)
         })));
-        out.push_str(&config.indent.repeat(level));
+        out.push_str(&context.indent.repeat(level));
     };
 
     let fmt_with =
         |cursor: &mut TreeCursor, out: &mut String, level: usize, make_multline: bool| {
-            traverse(cursor, out, config, level, make_multline)
+            traverse(cursor, out, context, level, make_multline)
         };
 
     let fmt = |cursor: &mut TreeCursor, out: &mut String| fmt_with(cursor, out, level, false);
@@ -288,7 +288,7 @@ fn traverse(
         Ok(())
     };
 
-    let get_raw = |node: Node| config.rope.byte_slice(node.byte_range()).to_string();
+    let get_raw = |node: Node| context.rope.byte_slice(node.byte_range()).to_string();
     let fmt_raw = |node: Node, out: &mut String| {
         out.push_str(&get_raw(node));
         Ok(())
@@ -972,8 +972,14 @@ fn traverse(
         "parenthesized_expression" => {
             handles_comments = true;
 
-            let is_multiline = !same_line(node, node);
-            let is_empty = node.child_count() == 2;
+            let hug = {
+                let is_single_line = same_line(node, node);
+                let is_empty = node.child_count() == 2;
+                let is_braced_without_comments = field_optional(node, "body").is_some_and(|body| {
+                    body.kind() == "braced_expression" && node.child_count() == 3
+                });
+                is_single_line || is_empty || is_braced_without_comments
+            };
 
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
@@ -985,7 +991,7 @@ fn traverse(
                                 space(out);
                             } else {
                                 newline(out);
-                                out.push_str(config.indent);
+                                out.push_str(context.indent);
                             }
                             fmt(cursor, out)
                         }
@@ -994,18 +1000,15 @@ fn traverse(
                     Some(field_name) => match field_name {
                         "open" => fmt(cursor, out),
                         "body" => {
-                            if is_multiline {
-                                newline(out)
-                            }
-
-                            if is_multiline {
+                            if !hug {
+                                newline(out);
                                 fmt_indent(cursor, out)
                             } else {
                                 fmt(cursor, out)
                             }
                         }
                         "close" => {
-                            if is_multiline && !is_empty {
+                            if !hug {
                                 newline(out);
                             }
                             fmt(cursor, out)
@@ -1247,7 +1250,7 @@ fn traverse(
         let before = out.len();
         push_all_comments(cursor, out)?;
 
-        if config.stop_on_unhandled_comment && out.len() != before {
+        if context.stop_on_unhandled_comment && out.len() != before {
             let start = node.start_position();
             return Err(FormatError::UnhandledComment {
                 node: get_raw(node),

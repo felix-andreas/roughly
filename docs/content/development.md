@@ -149,6 +149,11 @@ bar
 
 See https://github.com/r-lib/tree-sitter-r/issues/166
 
+## Linting ideas
+
+* Empty loops: for, while, repeat
+* unused variables
+
 
 ## References
 

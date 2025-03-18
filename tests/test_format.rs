@@ -599,6 +599,24 @@ fn parenthesized_expression() {
         )
     "#};
 
+    // check that braced espressions are hugged
+    assert_fmt! {r#"
+        ({})
+        ({
+        })
+        (
+            { body }
+        )
+        (
+            {
+                body
+            }
+        )
+        ({
+            body
+        })
+    "#};
+
     // all comment positions
     assert_fmt! {r#"
         ( # open
