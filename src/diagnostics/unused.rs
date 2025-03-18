@@ -73,16 +73,16 @@ impl<'a> VariableTracker<'a> {
 
     fn mark_variable_used(&mut self, name: &str) {
         let mut scope_idx = self.current_scope;
-        if let Some(var_info) = self.scopes[scope_idx].variables.get_mut(name) {
-            var_info.is_used = true;
-            return;
-        }
-
-        while let Some(parent) = self.scopes[scope_idx].parent {
-            scope_idx = parent;
+        loop {
             if let Some(var_info) = self.scopes[scope_idx].variables.get_mut(name) {
                 var_info.is_used = true;
                 return;
+            }
+
+            if let Some(parent) = self.scopes[scope_idx].parent {
+                scope_idx = parent;
+            } else {
+                break;
             }
         }
     }
@@ -96,12 +96,12 @@ impl<'a> VariableTracker<'a> {
                     unused.push((name.clone(), info.node));
                 }
 
-                let mut shadow_info = &info.shadowed;
-                while let Some(shadowed) = shadow_info {
+                let mut current_shadow = &info.shadowed;
+                while let Some(shadowed) = current_shadow {
                     if !shadowed.is_used {
                         unused.push((name.clone(), shadowed.node));
                     }
-                    shadow_info = &shadowed.shadowed;
+                    current_shadow = &shadowed.shadowed;
                 }
             }
         }
@@ -323,10 +323,14 @@ mod tests {
         );
 
         let diagnostics = analyze(tree::parse(code, None).root_node(), &Rope::from_str(code));
-        assert_eq!(diagnostics.len(), 2,);
+        assert_eq!(diagnostics.len(), 2);
 
-        assert_eq!(diagnostics[0].range.start.line, 2);
-        assert_eq!(diagnostics[1].range.start.line, 3);
+        // Sort diagnostics by line number to ensure consistent test assertion
+        let mut sorted_diagnostics = diagnostics;
+        sorted_diagnostics.sort_by_key(|d| d.range.start.line);
+
+        assert_eq!(sorted_diagnostics[0].range.start.line, 2);
+        assert_eq!(sorted_diagnostics[1].range.start.line, 3);
     }
 
     #[test]
