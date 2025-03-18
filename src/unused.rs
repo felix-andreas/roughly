@@ -287,9 +287,9 @@ mod tests {
     }
 
     #[test]
-    fn test_unused_local_variable() {
+    fn unused_local_variable() {
         let code = r#"
-        test <- function() {
+        function() {
             x <- 10
             y <- 20
             return(x)
@@ -302,9 +302,9 @@ mod tests {
     }
 
     #[test]
-    fn test_used_in_nested_function() {
+    fn used_in_nested_function() {
         let code = r#"
-        test <- function() {
+        function() {
             x <- 10
             inner <- function() {
                 return(x)
@@ -319,9 +319,23 @@ mod tests {
     }
 
     #[test]
-    fn test_local_scope() {
+    fn shadowed_variable() {
         let code = r#"
-        test <- function() {
+        function() {
+			x = 4 # <- this should be unused
+			x = 5
+			x
+        }
+        "#;
+
+        let unused_vars = get_unused_var_names(code);
+        assert!(unused_vars.contains("x"));
+    }
+
+    #[test]
+    fn local_scope() {
+        let code = r#"
+        function() {
             x <- 10
             local({
                 y <- 20
@@ -339,9 +353,9 @@ mod tests {
     }
 
     #[test]
-    fn test_function_parameters() {
+    fn function_parameters() {
         let code = r#"
-        test <- function(a, b, c) {
+        function(a, b, c) {
             print(a)
             return(c)
         }
@@ -351,5 +365,17 @@ mod tests {
         assert!(!unused_vars.contains("a"));
         assert!(unused_vars.contains("b"));
         assert!(!unused_vars.contains("c"));
+    }
+    #[test]
+    fn shadowed_parameters() {
+        let code = r#"
+        function(a) {
+			a = 4
+            print(a)
+        }
+        "#;
+
+        let unused_vars = get_unused_var_names(code);
+        assert!(unused_vars.contains("a"));
     }
 }
