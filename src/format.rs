@@ -125,16 +125,10 @@ pub fn run(
     cli::info(&format!(
         "{} file{} {}, {} file{} {}",
         n_unformatted,
-        match n_unformatted {
-            1 => "",
-            _ => "s",
-        },
+        if n_unformatted == 1 { "" } else { "s" },
         action_format,
         n_unchanged,
-        match n_unchanged {
-            1 => "",
-            _ => "s",
-        },
+        if n_unchanged == 1 { "" } else { "s" },
         action_skip
     ));
 
@@ -265,8 +259,8 @@ fn traverse(
     };
 
     let fmt_with =
-        |cursor: &mut TreeCursor, out: &mut String, level: usize, make_multline: bool| {
-            traverse(cursor, out, context, level, make_multline)
+        |cursor: &mut TreeCursor, out: &mut String, level: usize, make_multiline: bool| {
+            traverse(cursor, out, context, level, make_multiline)
         };
 
     let fmt = |cursor: &mut TreeCursor, out: &mut String| fmt_with(cursor, out, level, false);
@@ -282,7 +276,6 @@ fn traverse(
         out.push('{');
         newline(out);
         fmt_indent(cursor, out)?;
-
         newline(out);
         out.push('}');
         Ok(())
@@ -301,6 +294,7 @@ fn traverse(
                 field: field_name,
             })
     }
+
     fn field_optional<'a>(node: Node<'a>, field_name: &'static str) -> Option<Node<'a>> {
         node.child_by_field_name(field_name)
     }
@@ -325,20 +319,11 @@ fn traverse(
             // note: this case is unexpected
             .unwrap_or_else(|| node.end_position())
     };
+
     let same_line = |a: Node, b: Node| end_position(a).row == b.start_position().row;
+
     let is_fmt_skip_comment =
         |node: Node| node.kind() == "comment" && get_raw(node).contains("fmt: skip");
-
-    let missing = |node: Node| FormatError::Missing {
-        kind: node.kind(),
-        line: node.start_position().row,
-        col: node.start_position().column,
-    };
-    let syntax_error = |node: Node| FormatError::SyntaxError {
-        kind: node.kind(),
-        line: node.start_position().row,
-        col: node.start_position().column,
-    };
 
     let node = cursor.node();
     let kind = node.kind();
@@ -356,13 +341,20 @@ fn traverse(
         })
     };
 
-    // note: currently we don't traverse open & close -> they never reach these conditions
     if node.is_error() {
-        return Err(syntax_error(node));
+        return Err(FormatError::SyntaxError {
+            kind: node.kind(),
+            line: node.start_position().row,
+            col: node.start_position().column,
+        });
     }
 
     if node.is_missing() {
-        return Err(missing(node));
+        return Err(FormatError::Missing {
+            kind: node.kind(),
+            line: node.start_position().row,
+            col: node.start_position().column,
+        });
     }
 
     // check if prev or next node is fmt-skip directive
@@ -392,10 +384,9 @@ fn traverse(
         "comment" => {
             let raw = get_raw(node);
             let raw = raw.trim_end();
-
             let mut chars = raw.chars();
 
-            let _ = chars.next();
+            let _ = chars.next(); // Skip the '#'
             // reformat comments like #foo to # foo but keep #' foo
             match chars.next() {
                 Some('\'') => match chars.next() {
@@ -560,9 +551,7 @@ fn traverse(
                                 fmt_indent(cursor, out)
                             }
                         }
-                        _ => {
-                            unreachable!()
-                        }
+                        _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
                         "lhs" => fmt(cursor, out),
@@ -891,7 +880,6 @@ fn traverse(
             let mut indent_comments = false;
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
-
                 let prev_is_comment = is_comment(maybe_prev);
 
                 match field_name {
