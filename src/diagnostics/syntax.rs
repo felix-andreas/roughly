@@ -12,14 +12,6 @@ pub fn analyze(node: Node, rope: &Rope) -> Vec<Diagnostic> {
             return false;
         }
 
-        // DEBUG
-        // eprintln!(
-        //     "{}_{:?}_{}",
-        //     node.kind(),
-        //     node.has_error(),
-        //     rope.byte_slice(node.byte_range()),
-        // );
-
         match node.kind() {
             "arguments"
             | "braced_expression"
@@ -62,7 +54,6 @@ pub fn analyze(node: Node, rope: &Rope) -> Vec<Diagnostic> {
         }
 
         let mut handled_error = false;
-        // let child_kinds = vec![];
         if cursor.goto_first_child() {
             if node.is_error() {
                 let child = cursor.node();

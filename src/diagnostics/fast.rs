@@ -1,7 +1,7 @@
 use {
     crate::{
         config::Case,
-        diagnostics::{self, Config, error},
+        diagnostics::{self, Config},
         utils,
     },
     ropey::Rope,
@@ -46,7 +46,7 @@ pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
                                 if let Some(last_argment) = last_argument
                                     && last_comma.is_none()
                                 {
-                                    diagnostics.push(error(
+                                    diagnostics.push(diagnostics::error(
                                         last_argment,
                                         "Expected comma after argument".into(),
                                     ));
@@ -70,7 +70,7 @@ pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
                     if let Some(last_comma) = last_comma
                         && state.check_trailing_commas
                     {
-                        diagnostics.push(error(
+                        diagnostics.push(diagnostics::error(
                             last_comma,
                             "Unexpected comma after last argument".into(),
                         ));
@@ -85,18 +85,18 @@ pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
                     node.child_by_field_name("operator"),
                 ) {
                     if lhs.kind() == "identifier" && operator.kind() == "<-" {
-                        let name = rope.byte_slice(lhs.byte_range()).to_string();
+                        let raw = rope.byte_slice(lhs.byte_range()).to_string();
                         if state.check_case {
                             let correct_case = match config.case {
-                                Case::Camel => utils::to_camel_case(&name),
-                                Case::Snake => utils::to_snake_case(&name),
+                                Case::Camel => utils::to_camel_case(&raw),
+                                Case::Snake => utils::to_snake_case(&raw),
                             };
-                            if name != correct_case {
+                            if raw != correct_case {
                                 diagnostics.push(diagnostics::warning(
                                     node,
                                     format!(
                                         "Variable '{}' should have {} name, e.g. {}",
-                                        lhs,
+                                        raw,
                                         match config.case {
                                             Case::Camel => "camelCase",
                                             Case::Snake => "snake_case",
@@ -133,7 +133,7 @@ pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
                                 name,
                                 format!(
                                     "Parameter '{}' should have {} name, e.g. {}",
-                                    name,
+                                    raw,
                                     match config.case {
                                         Case::Camel => "camelCase",
                                         Case::Snake => "snake_case",
