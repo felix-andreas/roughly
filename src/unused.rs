@@ -1,6 +1,6 @@
 use {
     ropey::Rope,
-    std::collections::{HashMap, HashSet},
+    std::collections::HashMap,
     tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range},
     tree_sitter::{Node, TreeCursor},
 };
@@ -35,7 +35,6 @@ struct VariableTracker<'a> {
 
 impl<'a> VariableTracker<'a> {
     fn new() -> Self {
-        // Start with global scope
         let global_scope = Scope {
             variables: HashMap::new(),
             parent: None,
@@ -47,7 +46,6 @@ impl<'a> VariableTracker<'a> {
         }
     }
 
-    // Create a new scope with the current scope as parent
     fn push_scope(&mut self, is_closure: bool) -> usize {
         let parent = self.current_scope;
         let new_scope = Scope {
@@ -61,21 +59,18 @@ impl<'a> VariableTracker<'a> {
         new_scope_idx
     }
 
-    // Return to parent scope
     fn pop_scope(&mut self) {
         if let Some(parent) = self.scopes[self.current_scope].parent {
             self.current_scope = parent;
         }
     }
 
-    // Track variable declaration
     fn declare_variable(&mut self, name: String, node: Node<'a>) {
         self.scopes[self.current_scope]
             .variables
             .insert(name, VarInfo::new(node));
     }
 
-    // Mark variable as used - search through current and parent scopes if needed
     fn mark_variable_used(&mut self, name: &str) {
         let mut scope_idx = self.current_scope;
         loop {
@@ -103,16 +98,14 @@ impl<'a> VariableTracker<'a> {
         }
     }
 
-    // Get all unused variables from all non-global scopes
     fn get_unused_variables(&self) -> Vec<(String, Node<'a>)> {
         let mut unused = Vec::new();
 
-        // Skip global scope (index 0)
         for scope_idx in 1..self.scopes.len() {
             let scope = &self.scopes[scope_idx];
             for (name, info) in &scope.variables {
                 if !info.is_used {
-                    unused.push((name.clone(), info.node.clone()));
+                    unused.push((name.clone(), info.node));
                 }
             }
         }
@@ -153,7 +146,9 @@ fn analyze_node<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Vari
     match node.kind() {
         // Function definition creates a new scope that's not a closure
         "function_definition" => {
-            tracker.push_scope(false);
+            // Determine if this is a nested function (closure)
+            let is_closure = tracker.current_scope > 0;
+            tracker.push_scope(is_closure);
 
             // Track parameters as declared variables
             if let Some(params_node) = node.child_by_field_name("parameters") {
@@ -252,11 +247,19 @@ fn analyze_node<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Vari
             let parent = node.parent();
             if let Some(parent) = parent {
                 if parent.kind() == "binary_operator" {
-                    let lhs = parent.child_by_field_name("lhs");
-                    if lhs.is_some() && lhs.unwrap().id() == node.id() {
-                        // This identifier is on the left side of an assignment
-                        // It's a declaration, not a usage
-                        return;
+                    if let Some(lhs) = parent.child_by_field_name("lhs") {
+                        if lhs.id() == node.id() {
+                            // This identifier is on the left side of an assignment
+                            // It's a declaration, not a usage
+                            return;
+                        }
+                    }
+                } else if parent.kind() == "parameter" {
+                    if let Some(name) = parent.child_by_field_name("name") {
+                        if name.id() == node.id() {
+                            // This is a parameter name, not a usage
+                            return;
+                        }
                     }
                 }
             }
@@ -295,7 +298,7 @@ fn node_range(node: Node) -> Range {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::tree};
+    use {super::*, crate::tree, std::collections::HashSet};
 
     fn get_unused_var_names(code: &str) -> HashSet<String> {
         let tree = tree::parse(code, None);
