@@ -309,8 +309,9 @@ mod tests {
     fn shadowed_variable() {
         let code = r#"
         function() {
-            x = 4 # <- this should be unused
-            x = 5
+            x = 1 # <- this should be unused
+            x = 2 # <- this should be unsued
+            x = 3
             x
         }
         "#;
@@ -322,16 +323,26 @@ mod tests {
         );
 
         let diagnostics = analyze(tree::parse(code, None).root_node(), &Rope::from_str(code));
-        assert_eq!(
-            diagnostics.len(),
-            1,
-            "Should have exactly one unused variable diagnostic"
-        );
+        assert_eq!(diagnostics.len(), 2,);
 
-        assert_eq!(
-            diagnostics[0].range.start.line, 2,
-            "The first declaration of x should be marked as unused (line 2)"
-        );
+        assert_eq!(diagnostics[0].range.start.line, 2);
+        assert_eq!(diagnostics[1].range.start.line, 3);
+    }
+
+    #[test]
+    fn chained_unsued() {
+        let code = r#"
+        function() {
+            a <- 1
+            b <- a
+            c <- b
+        }
+        "#;
+
+        let unused_vars = get_unused_var_names(code);
+        assert!(unused_vars.contains("a"));
+        assert!(unused_vars.contains("b"));
+        assert!(unused_vars.contains("c"));
     }
 
     #[test]
