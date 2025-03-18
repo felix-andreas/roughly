@@ -95,7 +95,7 @@ pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
                                 diagnostics.push(diagnostics::warning(
                                     node,
                                     format!(
-                                        "Variable '{}' should have {} name, e.g. {}",
+                                        "Variable `{}` should have {} name, e.g. {}",
                                         raw,
                                         match config.case {
                                             Case::Camel => "camelCase",
@@ -132,7 +132,7 @@ pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
                             diagnostics.push(diagnostics::warning(
                                 name,
                                 format!(
-                                    "Parameter '{}' should have {} name, e.g. {}",
+                                    "Parameter `{}` should have {} name, e.g. {}",
                                     raw,
                                     match config.case {
                                         Case::Camel => "camelCase",
