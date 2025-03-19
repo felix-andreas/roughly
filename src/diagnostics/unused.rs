@@ -268,7 +268,8 @@ mod tests {
             .into_iter()
             .map(|d| {
                 let message = d.message;
-                message.replace("unused variable '", "").replace("'", "")
+                // todo: this is an abonimation, fix this
+                message.replace("unused variable `", "").replace("`", "")
             })
             .collect()
     }
