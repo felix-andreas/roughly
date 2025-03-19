@@ -134,31 +134,31 @@ pub fn run(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(
 
 #[derive(Error, Debug)]
 pub enum FormatError {
-    #[error("Unexpected {kind} at line {line} col {col}")]
+    #[error("Syntax error: Unexpected {kind} at line {line}, column {col}")]
     SyntaxError {
         kind: &'static str,
         line: usize,
         col: usize,
     },
-    #[error("Missing {kind} at line {line} col {col}")]
+    #[error("Missing node: Expected {kind} at line {line}, column {col}")]
     Missing {
         kind: &'static str,
         line: usize,
         col: usize,
     },
-    #[error("The node has unknown type {kind}: {raw}")]
-    Unknown { kind: &'static str, raw: String },
-    #[error("Unhandled comment in node at {line}:{col}: \"{node}\"")]
-    UnhandledComment {
-        node: String,
-        line: usize,
-        col: usize,
-    },
-    #[error("Missing field {field} for node of kind {kind}")]
+    #[error("Missing required field '{field}' in node of type '{kind}'")]
     MissingField {
         kind: &'static str,
         field: &'static str,
     },
+    #[error("Unhandled comment found at line {line}, column {col}: \"{raw}\"")]
+    UnhandledComment {
+        raw: String,
+        line: usize,
+        col: usize,
+    },
+    #[error("Encountered unknown node type '{kind}' with content: \"{raw}\"")]
+    Unknown { kind: &'static str, raw: String },
 }
 
 pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatError> {
@@ -1232,7 +1232,7 @@ fn traverse(
         if out.len() != before {
             let start = node.start_position();
             return Err(FormatError::UnhandledComment {
-                node: get_raw(node),
+                raw: get_raw(node),
                 line: start.row,
                 col: start.column,
             });
