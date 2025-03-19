@@ -1,10 +1,8 @@
 use {
-    crate::{cli, config, tree, utils},
-    console::style,
-    ignore::Walk,
+    crate::{tree, utils},
     itertools::Itertools,
     ropey::Rope,
-    std::{path::PathBuf, time::Instant},
+    std::time::Instant,
     thiserror::Error,
     tree_sitter::{Node, TreeCursor},
 };
@@ -20,116 +18,6 @@ pub enum LineEnding {
     Auto,
     Lf,
     Crlf,
-}
-
-#[derive(Debug)]
-pub struct FormatRunError;
-
-pub fn run(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(), FormatRunError> {
-    let root: Vec<PathBuf> = vec![".".into()];
-    let files = maybe_files.unwrap_or(&root);
-
-    let paths_with_config = files
-        .iter()
-        .map(|file| {
-            let config = match config::Config::from_path(file) {
-                Ok(config) => config,
-                Err(error) => {
-                    cli::error(&error.to_string());
-                    return Err(FormatRunError);
-                }
-            };
-
-            let paths = Walk::new(file)
-                .filter_map(|entry| match entry {
-                    Ok(entry) => {
-                        let path = entry.into_path();
-                        path.extension()
-                            .is_some_and(|ext| ext == "R" || ext == "r")
-                            .then_some(Ok(path))
-                    }
-                    Err(error) => {
-                        cli::error(&error.to_string());
-                        Some(Err(FormatRunError))
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            Ok((paths, config))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let mut n_files = 0;
-    let mut n_unformatted = 0;
-    let mut n_errors = 0;
-    for (paths, config) in paths_with_config {
-        let config = Config {
-            indent: &" ".repeat(config.spaces),
-            line_ending: LineEnding::Auto,
-        };
-        for path in paths {
-            n_files += 1;
-            let old = match std::fs::read_to_string(&path) {
-                Ok(old) => old,
-                Err(err) => {
-                    n_errors += 1;
-                    cli::error(&format!("failed to format: {}", path.display()));
-                    eprintln!("{err}");
-                    continue;
-                }
-            };
-            let tree = tree::parse(&old, None);
-            let rope = Rope::from_str(&old);
-            let new = match format(tree.root_node(), &rope, config) {
-                Ok(new) => new,
-                Err(err) => {
-                    n_errors += 1;
-                    cli::error(&format!("failed to format: {}", path.display()));
-                    eprintln!("{err}");
-                    continue;
-                }
-            };
-            if old != new {
-                n_unformatted += 1;
-                if diff {
-                    eprintln!("Diff in {}:", path.display());
-                    utils::print_diff(&old, &new);
-                } else if check {
-                    eprintln!("Would reformat: {}", style(path.display()).bold());
-                } else if std::fs::write(&path, &new).is_err() {
-                    cli::error(&format!("failed to write to file: {}", path.display()));
-                }
-            }
-        }
-    }
-
-    if n_files == 0 {
-        cli::warning("No R files found under the given path(s)");
-        return Err(FormatRunError);
-    }
-
-    let (action_format, action_skip) = if check || diff {
-        ("would be reformatted", "already formatted")
-    } else {
-        ("reformatted", "left unchanged")
-    };
-
-    let n_unchanged = n_files - n_unformatted;
-    cli::info(&format!(
-        "{} file{} {}, {} file{} {}",
-        n_unformatted,
-        if n_unformatted == 1 { "" } else { "s" },
-        action_format,
-        n_unchanged,
-        if n_unchanged == 1 { "" } else { "s" },
-        action_skip
-    ));
-
-    if n_unformatted == 0 && n_errors == 0 {
-        Ok(())
-    } else {
-        Err(FormatRunError)
-    }
 }
 
 #[derive(Error, Debug)]

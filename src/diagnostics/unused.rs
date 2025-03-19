@@ -1,5 +1,5 @@
 use {
-    crate::diagnostics,
+    crate::diagnostics::{self, DiagnosticsError, field},
     ropey::Rope,
     std::collections::HashMap,
     tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity},
@@ -57,15 +57,16 @@ impl<'a> VariableTracker<'a> {
     }
 
     fn pop_scope(&mut self) {
-        self.current_scope = self.scopes[self.current_scope].parent.unwrap_or(0);
+        if let Some(parent) = self.scopes[self.current_scope].parent {
+            self.current_scope = parent;
+        }
     }
 
     fn declare_variable(&mut self, name: String, node: Node<'a>) {
         let current_scope = &mut self.scopes[self.current_scope];
-        if let Some(existing) = current_scope.variables.remove(&name) {
-            let mut new_var = VarInfo::new(node);
-            new_var.shadowed = Some(Box::new(existing));
-            current_scope.variables.insert(name, new_var);
+
+        if let Some(existing) = current_scope.variables.get_mut(&name) {
+            existing.shadowed = Some(Box::new(std::mem::replace(existing, VarInfo::new(node))));
         } else {
             current_scope.variables.insert(name, VarInfo::new(node));
         }
@@ -73,17 +74,16 @@ impl<'a> VariableTracker<'a> {
 
     fn mark_variable_used(&mut self, name: &str) {
         let mut scope_idx = self.current_scope;
-        loop {
-            if let Some(var_info) = self.scopes[scope_idx].variables.get_mut(name) {
-                var_info.is_used = true;
 
+        while let Some(scope) = self.scopes.get_mut(scope_idx) {
+            if let Some(var_info) = scope.variables.get_mut(name) {
+                var_info.is_used = true;
                 return;
             }
 
-            if let Some(parent) = self.scopes[scope_idx].parent {
-                scope_idx = parent;
-            } else {
-                break;
+            match scope.parent {
+                Some(parent) => scope_idx = parent,
+                None => break,
             }
         }
     }
@@ -91,20 +91,19 @@ impl<'a> VariableTracker<'a> {
     fn get_unused_variables(&self) -> Vec<(String, Node<'a>)> {
         let mut unused = Vec::new();
 
-        // Skip global scope (index 0) as we don't want to warn about global variables
-        for scope_idx in 1..self.scopes.len() {
-            let scope = &self.scopes[scope_idx];
+        // Skip global scope (index 0)
+        for scope in self.scopes.iter().skip(1) {
             for (name, info) in &scope.variables {
                 if !info.is_used {
                     unused.push((name.clone(), info.node));
                 }
 
-                let mut current_shadow = &info.shadowed;
-                while let Some(shadowed) = current_shadow {
+                let mut maybe_shadow = &info.shadowed;
+                while let Some(shadowed) = maybe_shadow {
                     if !shadowed.is_used {
                         unused.push((name.clone(), shadowed.node));
                     }
-                    current_shadow = &shadowed.shadowed;
+                    maybe_shadow = &shadowed.shadowed;
                 }
             }
         }
@@ -113,13 +112,11 @@ impl<'a> VariableTracker<'a> {
     }
 }
 
-pub fn analyze(node: Node, rope: &Rope) -> Vec<Diagnostic> {
+pub fn analyze(node: Node, rope: &Rope) -> Result<Vec<Diagnostic>, DiagnosticsError> {
     let mut tracker = VariableTracker::new();
-    let mut cursor = node.walk();
+    traverse(&mut node.walk(), rope, &mut tracker)?;
 
-    traverse(&mut cursor, rope, &mut tracker);
-
-    tracker
+    Ok(tracker
         .get_unused_variables()
         .into_iter()
         .map(|(name, node)| Diagnostic {
@@ -133,128 +130,99 @@ pub fn analyze(node: Node, rope: &Rope) -> Vec<Diagnostic> {
             tags: None,
             data: None,
         })
-        .collect()
+        .collect())
 }
 
-fn traverse<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut VariableTracker<'a>) {
+fn traverse<'a>(
+    cursor: &mut TreeCursor<'a>,
+    rope: &Rope,
+    tracker: &mut VariableTracker<'a>,
+) -> Result<(), DiagnosticsError> {
     let node = cursor.node();
 
     match node.kind() {
         "function_definition" => {
             tracker.push_scope();
 
-            if let Some(params_node) = node.child_by_field_name("parameters") {
-                let mut param_cursor = params_node.walk();
-                if param_cursor.goto_first_child() {
-                    loop {
-                        let child = param_cursor.node();
-                        if child.kind() == "parameter" {
-                            if let Some(name_node) = child.child_by_field_name("name") {
-                                if name_node.kind() == "identifier" {
-                                    let name = rope.byte_slice(name_node.byte_range()).to_string();
-                                    tracker.declare_variable(name, name_node);
-                                }
-                            }
-                        }
+            let params = field(node, "parameters")?;
 
-                        if !param_cursor.goto_next_sibling() {
-                            break;
-                        }
-                    }
+            for param in params.children_by_field_name("parameter", &mut cursor.clone()) {
+                let name = field(param, "name")?;
+                if name.kind() == "identifier" {
+                    let raw = rope.byte_slice(name.byte_range()).to_string();
+                    tracker.declare_variable(raw, name);
                 }
             }
 
-            if let Some(body_node) = node.child_by_field_name("body") {
-                let mut body_cursor = body_node.walk();
-                traverse(&mut body_cursor, rope, tracker);
-            }
+            let body = field(node, "body")?;
+            traverse(&mut body.walk(), rope, tracker)?;
 
             tracker.pop_scope();
-            return;
         }
 
         "call" => {
-            let is_local_call = node
-                .child_by_field_name("function")
-                .is_some_and(|function_node| {
-                    function_node.kind() == "identifier"
-                        && rope.byte_slice(function_node.byte_range()) == "local"
-                });
+            let function = field(node, "function")?;
 
-            if is_local_call {
+            // Process function first to mark it as used if it's an identifier
+            if function.kind() == "identifier" {
+                let name = rope.byte_slice(function.byte_range()).to_string();
+                tracker.mark_variable_used(&name);
+            } else {
+                traverse(&mut function.walk(), rope, tracker)?;
+            }
+
+            if function.kind() == "identifier" && rope.byte_slice(function.byte_range()) == "local"
+            {
                 tracker.push_scope();
 
-                if let Some(args_node) = node.child_by_field_name("arguments") {
-                    let mut args_cursor = args_node.walk();
-                    traverse(&mut args_cursor, rope, tracker);
-                }
+                let args = field(node, "arguments")?;
+                traverse(&mut args.walk(), rope, tracker)?;
 
                 tracker.pop_scope();
-                return;
+            } else {
+                // Process arguments for regular function calls
+                let args = field(node, "arguments")?;
+                traverse(&mut args.walk(), rope, tracker)?;
             }
         }
 
         "binary_operator" => {
-            if let (Some(lhs), Some(operator)) = (
-                node.child_by_field_name("lhs"),
-                node.child_by_field_name("operator"),
-            ) {
-                let is_assignment = operator.kind() == "<-" || operator.kind() == "=";
-                if lhs.kind() == "identifier" && is_assignment {
-                    if let Some(rhs) = node.child_by_field_name("rhs") {
-                        traverse(&mut rhs.walk(), rope, tracker);
-                    }
+            let lhs = field(node, "lhs")?;
+            let operator = field(node, "operator")?;
+            let rhs = field(node, "rhs")?;
 
+            let is_assignment = operator.kind() == "<-" || operator.kind() == "=";
+            if is_assignment {
+                traverse(&mut rhs.walk(), rope, tracker)?;
+                if lhs.kind() == "identifier" {
                     let name = rope.byte_slice(lhs.byte_range()).to_string();
                     tracker.declare_variable(name, lhs);
-
-                    return;
                 }
+            } else {
+                traverse(&mut lhs.walk(), rope, tracker)?;
+                traverse(&mut rhs.walk(), rope, tracker)?;
             }
         }
 
         "identifier" => {
-            if let Some(parent) = node.parent() {
-                match parent.kind() {
-                    "binary_operator"
-                        if parent
-                            .child_by_field_name("lhs")
-                            .is_some_and(|lhs| lhs.id() == node.id()) =>
-                    {
-                        if parent
-                            .child_by_field_name("operator")
-                            .is_some_and(|op| op.kind() == "<-" || op.kind() == "=")
-                        {
-                            return;
-                        }
-                    }
-                    "parameter"
-                        if parent
-                            .child_by_field_name("name")
-                            .is_some_and(|name| name.id() == node.id()) =>
-                    {
-                        return;
-                    }
-                    _ => {}
-                }
-            }
-
             let name = rope.byte_slice(node.byte_range()).to_string();
             tracker.mark_variable_used(&name);
-            return;
         }
-        _ => {}
-    }
 
-    if cursor.goto_first_child() {
-        loop {
-            traverse(cursor, rope, tracker);
-            if !cursor.goto_next_sibling() {
-                break;
+        _ => {
+            if cursor.goto_first_child() {
+                loop {
+                    traverse(cursor, rope, tracker)?;
+                    if !cursor.goto_next_sibling() {
+                        cursor.goto_parent();
+                        break;
+                    }
+                }
             }
         }
-        cursor.goto_parent();
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -267,9 +235,10 @@ mod tests {
         let diagnostics = analyze(tree.root_node(), &rope);
 
         diagnostics
+            .unwrap()
             .into_iter()
-            .map(|d| {
-                let message = d.message;
+            .map(|diag| {
+                let message = diag.message;
                 // todo: this is an abonimation, fix this
                 message.replace("unused variable `", "").replace("`", "")
             })
@@ -325,7 +294,8 @@ mod tests {
             "First declaration of x should be marked as unused due to shadowing"
         );
 
-        let diagnostics = analyze(tree::parse(code, None).root_node(), &Rope::from_str(code));
+        let diagnostics =
+            analyze(tree::parse(code, None).root_node(), &Rope::from_str(code)).unwrap();
         assert_eq!(diagnostics.len(), 2);
 
         // Sort diagnostics by line number to ensure consistent test assertion
@@ -431,7 +401,8 @@ mod tests {
             "Parameter 'a' should be marked as unused since it's immediately shadowed"
         );
 
-        let diagnostics = analyze(tree::parse(code, None).root_node(), &Rope::from_str(code));
+        let diagnostics =
+            analyze(tree::parse(code, None).root_node(), &Rope::from_str(code)).unwrap();
         assert_eq!(
             diagnostics[0].range.start.line, 1,
             "The parameter 'a' should be marked as unused (line 1)"

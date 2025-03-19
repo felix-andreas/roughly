@@ -1,6 +1,9 @@
 use {
     clap::{Parser, Subcommand},
-    roughly::{cli, dev, diagnostics, format, lsp},
+    roughly::{
+        cli::{self, CheckError, DebugError, FmtError},
+        lsp,
+    },
     std::{path::PathBuf, process::ExitCode},
 };
 
@@ -14,26 +17,22 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some(command) => match command {
-            Command::Check { files } => match diagnostics::run(files.as_deref()) {
+            Command::Check { files } => match cli::check(files.as_deref()) {
                 Ok(()) => ExitCode::SUCCESS,
-                Err(_) => ExitCode::FAILURE,
+                Err(CheckError) => ExitCode::FAILURE,
             },
-            Command::Fmt { files, check, diff } => match format::run(files.as_deref(), check, diff)
-            {
+            Command::Fmt { files, check, diff } => match cli::fmt(files.as_deref(), check, diff) {
                 Ok(()) => ExitCode::SUCCESS,
-                Err(_) => ExitCode::FAILURE,
+                Err(FmtError) => ExitCode::FAILURE,
             },
             Command::Lsp { stdio: _stdio } => {
                 lsp::run().await;
                 ExitCode::SUCCESS
             }
             Command::Debug(dev) => match dev {
-                Debug::PrintTree { path } => match dev::tree(&path) {
+                Debug::PrintTree { path } => match cli::print_tree(&path) {
                     Ok(()) => ExitCode::SUCCESS,
-                    Err(err) => {
-                        cli::error(&err.to_string());
-                        ExitCode::FAILURE
-                    }
+                    Err(DebugError) => ExitCode::FAILURE,
                 },
             },
         },

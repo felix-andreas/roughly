@@ -1,15 +1,4 @@
-use {
-    crate::tree,
-    std::path::Path,
-    tree_sitter::{Node, TreeCursor},
-};
-
-pub fn tree(path: &Path) -> Result<(), std::io::Error> {
-    let text = std::fs::read_to_string(path).unwrap();
-    let tree = tree::parse(&text, None);
-    println!("{}", format_tree(tree.root_node()));
-    Ok(())
-}
+use tree_sitter::{Node, TreeCursor};
 
 pub fn format_tree(node: Node) -> String {
     fn traverse(cursor: &mut TreeCursor, output: &mut String) {

@@ -9,6 +9,8 @@ use {
     tree_sitter::{Node, TreeCursor},
 };
 
+// note: we want these diagnostics even if there are syntax errors, therefore
+// we cannot make any assumtions if certain fields exist or not
 pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
     #[derive(Debug, Clone, Copy, Default)]
     struct State {

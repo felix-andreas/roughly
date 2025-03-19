@@ -3,15 +3,9 @@ mod syntax;
 mod unused;
 
 use {
-    crate::{
-        cli::{self, LogLevel},
-        config::{self, Case},
-        tree,
-    },
-    console::style,
-    ignore::Walk,
+    crate::config::{self, Case},
     ropey::Rope,
-    std::path::PathBuf,
+    thiserror::Error,
     tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range},
     tree_sitter::Node,
 };
@@ -27,160 +21,6 @@ impl Config {
     }
 }
 
-pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), DiagnosticsError> {
-    let root: Vec<PathBuf> = vec![".".into()];
-    let files = maybe_files.unwrap_or(&root);
-
-    let paths_with_config = files
-        .iter()
-        .map(|file| {
-            let config = match config::Config::from_path(file) {
-                Ok(config) => config,
-                Err(error) => {
-                    cli::error(&error.to_string());
-                    return Err(DiagnosticsError);
-                }
-            };
-
-            let paths = Walk::new(file)
-                .filter_map(|entry| match entry {
-                    Ok(entry) => {
-                        let path = entry.into_path();
-                        path.extension()
-                            .is_some_and(|ext| ext == "R" || ext == "r")
-                            .then_some(Ok(path))
-                    }
-                    Err(error) => {
-                        cli::error(&error.to_string());
-                        Some(Err(DiagnosticsError))
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            Ok((paths, config))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let mut n_files = 0;
-    let mut n_errors = 0;
-    for (paths, config) in paths_with_config {
-        let config = Config { case: config.case };
-        for path in paths {
-            n_files += 1;
-            let old = match std::fs::read_to_string(&path) {
-                Ok(old) => old,
-                Err(err) => {
-                    n_errors += 1;
-                    cli::error(&format!("failed to read: {}", path.display()));
-                    eprintln!("{err}");
-                    continue;
-                }
-            };
-            let tree = tree::parse(&old, None);
-            let rope = Rope::from_str(&old);
-
-            for diagnostic in analyze_fast(tree.root_node(), &rope, config) {
-                n_errors += 1;
-                cli::log(
-                    match diagnostic.severity {
-                        Some(DiagnosticSeverity::INFORMATION) => LogLevel::Info,
-                        Some(DiagnosticSeverity::WARNING) => LogLevel::Warning,
-                        Some(DiagnosticSeverity::ERROR) => LogLevel::Error,
-                        _ => LogLevel::Info,
-                    },
-                    &diagnostic.message,
-                );
-                let range = diagnostic.range;
-                let padding_arrow = range.end.line.to_string().len();
-                eprintln!(
-                    "{}{} {}:{}:{}",
-                    " ".repeat(padding_arrow),
-                    style("-->").bold().blue(),
-                    path.display(),
-                    range.start.line,
-                    range.start.character
-                );
-
-                let line_start = usize::max(1, range.start.line as usize) - 1;
-                let lines = {
-                    let start = rope.line_to_char(line_start);
-                    let end =
-                        rope.line_to_char(range.end.line as usize) + range.end.character as usize;
-                    rope.slice(start..end)
-                };
-                let width = padding_arrow + 1;
-                for (i, line) in lines.lines().enumerate() {
-                    eprint!(
-                        "{} {}",
-                        style(format!("{:<width$}|", line_start + i)).blue().bold(),
-                        line
-                    );
-                }
-                eprintln!();
-
-                let width_message = u32::max(
-                    1,
-                    if range.end.character > range.start.character {
-                        range.end.character - range.start.character
-                    } else {
-                        range.start.character - range.end.character
-                    },
-                );
-                eprintln!(
-                    "{}{}  {}",
-                    " ".repeat(width),
-                    " ".repeat(usize::min(
-                        range.start.character as usize,
-                        range.end.character as usize
-                    )),
-                    {
-                        let arrow = style("^".repeat(width_message as usize)).bold();
-                        match diagnostic.severity {
-                            Some(DiagnosticSeverity::INFORMATION) => arrow.blue(),
-                            Some(DiagnosticSeverity::WARNING) => arrow.yellow(),
-                            Some(DiagnosticSeverity::ERROR) => arrow.red(),
-                            _ => arrow,
-                        }
-                    }
-                );
-                eprintln!(
-                    "{}{}  {}",
-                    " ".repeat(width),
-                    " ".repeat(usize::min(
-                        range.start.character as usize,
-                        range.end.character as usize
-                    )),
-                    {
-                        let message = style(&diagnostic.message).bold();
-                        match diagnostic.severity {
-                            Some(DiagnosticSeverity::INFORMATION) => message.blue(),
-                            Some(DiagnosticSeverity::WARNING) => message.yellow(),
-                            Some(DiagnosticSeverity::ERROR) => message.red(),
-                            _ => message,
-                        }
-                    }
-                );
-
-                eprintln!("\n")
-            }
-        }
-    }
-
-    if n_files == 0 {
-        cli::warning("No R files found under the given path(s)");
-        return Err(DiagnosticsError);
-    }
-
-    if n_errors == 0 {
-        Ok(())
-    } else {
-        Err(DiagnosticsError)
-    }
-}
-
-#[derive(Debug)]
-pub struct DiagnosticsError;
-
 pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagnostic> {
     let mut diagnostics = syntax::analyze(node, rope);
     let has_syntax_errors = !diagnostics.is_empty();
@@ -188,7 +28,12 @@ pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagn
     diagnostics.extend(fast::analyze(node, rope, config));
 
     if full && !has_syntax_errors {
-        diagnostics.extend(unused::analyze(node, rope));
+        match unused::analyze(node, rope) {
+            Ok(diags) => diagnostics.extend(diags),
+            Err(error) => {
+                log::warn!("error while diagnostics {error}");
+            }
+        }
     }
 
     diagnostics
@@ -235,4 +80,27 @@ fn node_range(node: Node) -> Range {
             character: node.end_position().column as u32,
         },
     }
+}
+
+#[derive(Error, Debug)]
+pub enum DiagnosticsError {
+    #[error("Syntax error: Unexpected {kind} at line {line}, column {col}")]
+    SyntaxError {
+        kind: &'static str,
+        line: usize,
+        col: usize,
+    },
+}
+
+pub fn field<'a>(node: Node<'a>, field_name: &'static str) -> Result<Node<'a>, DiagnosticsError> {
+    node.child_by_field_name(field_name)
+        .ok_or(DiagnosticsError::SyntaxError {
+            kind: node.kind(),
+            line: node.start_position().row,
+            col: node.start_position().column,
+        })
+}
+
+pub fn field_optional<'a>(node: Node<'a>, field_name: &'static str) -> Option<Node<'a>> {
+    node.child_by_field_name(field_name)
 }
