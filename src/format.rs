@@ -13,7 +13,6 @@ use {
 pub struct Config<'a> {
     pub indent: &'a str,
     pub line_ending: LineEnding,
-    pub stop_on_unhandled_comment: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -26,12 +25,7 @@ pub enum LineEnding {
 #[derive(Debug)]
 pub struct FormatRunError;
 
-pub fn run(
-    maybe_files: Option<&[PathBuf]>,
-    check: bool,
-    diff: bool,
-    stop_on_unhandled_comment: bool,
-) -> Result<(), FormatRunError> {
+pub fn run(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(), FormatRunError> {
     let root: Vec<PathBuf> = vec![".".into()];
     let files = maybe_files.unwrap_or(&root);
 
@@ -72,7 +66,6 @@ pub fn run(
         let config = Config {
             indent: &" ".repeat(config.spaces),
             line_ending: LineEnding::Auto,
-            stop_on_unhandled_comment,
         };
         for path in paths {
             n_files += 1;
@@ -212,7 +205,6 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
                 rope,
                 indent: config.indent,
                 line_ending,
-                stop_on_unhandled_comment: config.stop_on_unhandled_comment,
             },
             0,
             false,
@@ -235,7 +227,6 @@ struct Context<'a> {
     rope: &'a Rope,
     indent: &'a str,
     line_ending: &'static str,
-    stop_on_unhandled_comment: bool,
 }
 
 fn traverse(
@@ -1238,7 +1229,7 @@ fn traverse(
         let before = out.len();
         push_all_comments(cursor, out)?;
 
-        if context.stop_on_unhandled_comment && out.len() != before {
+        if out.len() != before {
             let start = node.start_position();
             return Err(FormatError::UnhandledComment {
                 node: get_raw(node),

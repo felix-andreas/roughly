@@ -18,12 +18,8 @@ async fn main() -> ExitCode {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(_) => ExitCode::FAILURE,
             },
-            Command::Fmt {
-                files,
-                check,
-                diff,
-                stop_on_unhandled_comment,
-            } => match format::run(files.as_deref(), check, diff, stop_on_unhandled_comment) {
+            Command::Fmt { files, check, diff } => match format::run(files.as_deref(), check, diff)
+            {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(_) => ExitCode::FAILURE,
             },
@@ -73,9 +69,6 @@ enum Command {
         /// Show diff instead of modifying files; exit with error if changes needed
         #[clap(long, default_value_t = false)]
         diff: bool,
-        /// Stop if a comment can't be properly placed (exits with error if any comment would be moved to different location)
-        #[clap(long, default_value_t = false)]
-        stop_on_unhandled_comment: bool,
     },
     /// Run the language server
     Lsp {

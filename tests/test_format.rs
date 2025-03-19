@@ -22,7 +22,6 @@ fn format_str(text: &str) -> Result<String, FormatError> {
     format(tree.root_node(), &Rope::from_str(text), Config {
         indent: &" ".repeat(2),
         line_ending: LineEnding::Auto,
-        stop_on_unhandled_comment: false,
     })
 }
 

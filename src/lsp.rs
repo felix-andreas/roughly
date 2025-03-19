@@ -372,7 +372,6 @@ impl LanguageServer for Backend {
         let (rope, tree) = (&document.rope, &document.tree);
         let new = match format::format(tree.root_node(), rope, format::Config {
             indent: &" ".repeat(self.config.spaces),
-            stop_on_unhandled_comment: false,
             line_ending: LineEnding::Auto,
         }) {
             Ok(new) => new,
