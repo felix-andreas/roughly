@@ -171,18 +171,17 @@ fn traverse<'a>(
                 traverse(&mut function.walk(), rope, tracker)?;
             }
 
-            if function.kind() == "identifier" && rope.byte_slice(function.byte_range()) == "local"
-            {
+            let new_scope = function.kind() == "identifier"
+                && rope.byte_slice(function.byte_range()) == "local";
+
+            if new_scope {
                 tracker.push_scope();
+            }
 
-                let args = field(node, "arguments")?;
-                traverse(&mut args.walk(), rope, tracker)?;
+            traverse(&mut field(node, "arguments")?.walk(), rope, tracker)?;
 
+            if new_scope {
                 tracker.pop_scope();
-            } else {
-                // Process arguments for regular function calls
-                let args = field(node, "arguments")?;
-                traverse(&mut args.walk(), rope, tracker)?;
             }
         }
 
@@ -407,5 +406,142 @@ mod tests {
             diagnostics[0].range.start.line, 1,
             "The parameter 'a' should be marked as unused (line 1)"
         );
+    }
+    #[test]
+    fn nested_scopes() {
+        let code = r#"
+        function() {
+            a <- 10
+            local({
+                b <- 20
+                local({
+                    c <- 30
+                    print(a)
+                    print(b)
+                })
+                d <- 40
+            })
+            e <- 50
+            print(e)
+        }
+        "#;
+
+        let unused_vars = get_unused_var_names(code);
+        assert!(!unused_vars.contains("a"));
+        assert!(!unused_vars.contains("b"));
+        assert!(unused_vars.contains("c"));
+        assert!(unused_vars.contains("d"));
+        assert!(!unused_vars.contains("e"));
+    }
+
+    #[test]
+    fn nested_functions() {
+        let code = r#"
+        function() {
+            outer <- 1
+            unused <- 2
+            f1 <- function() {
+                mid <- 3
+                f2 <- function() {
+                    inner <- 4
+                    print(outer)
+                    print(mid)
+                }
+                return(f2)
+            }
+            nested <- f1()
+            nested()
+        }
+        "#;
+
+        let unused_vars = get_unused_var_names(code);
+        assert!(!unused_vars.contains("outer"));
+        assert!(unused_vars.contains("unused"));
+        assert!(!unused_vars.contains("mid"));
+        assert!(unused_vars.contains("inner"));
+        assert!(!unused_vars.contains("f1"));
+        assert!(!unused_vars.contains("f2"));
+        assert!(!unused_vars.contains("nested"));
+    }
+
+    #[test]
+    fn multiple_shadowing_levels() {
+        let code = r#"
+        function() {
+            x <- 1
+            x <- 2
+            x <- 3
+            x <- 4
+            x <- 5
+            print(x)
+        }
+        "#;
+
+        let diagnostics =
+            analyze(tree::parse(code, None).root_node(), &Rope::from_str(code)).unwrap();
+        assert_eq!(
+            diagnostics.len(),
+            4,
+            "Should have 4 unused shadowed variables"
+        );
+    }
+
+    #[test]
+    fn conditional_usage() {
+        let code = r#"
+        function() {
+            a <- 1
+            b <- 2
+            c <- 3
+            if (TRUE) {
+                print(a)
+            } else {
+                print(b)
+            }
+        }
+        "#;
+
+        let unused_vars = get_unused_var_names(code);
+        assert!(!unused_vars.contains("a"));
+        assert!(!unused_vars.contains("b"));
+        assert!(unused_vars.contains("c"));
+    }
+
+    #[test]
+    fn complex_nested_scopes() {
+        let code = r#"
+        function(param1, param2, param3) {
+            outer1 <- 10
+            outer2 <- 20
+            local({
+                inner1 <- 30
+                inner2 <- 40
+                print(param1)
+                print(outer1)
+            })
+
+            f <- function(x) {
+                z <- x + outer2
+                print(param2)
+                return(z)
+            }
+
+            result <- f(5)
+            print(result)
+        }
+        "#;
+
+        let unused_vars = get_unused_var_names(code);
+        assert!(!unused_vars.contains("param1"));
+        assert!(!unused_vars.contains("param2"));
+        assert!(unused_vars.contains("param3"));
+        assert!(!unused_vars.contains("outer1"));
+        assert!(!unused_vars.contains("outer2"));
+        assert!(unused_vars.contains("inner1"));
+        assert!(unused_vars.contains("inner2"));
+        assert!(!unused_vars.contains("f"));
+        assert!(!unused_vars.contains("x"));
+        assert!(!unused_vars.contains("z"));
+        assert!(!unused_vars.contains("result"));
     }
 }
