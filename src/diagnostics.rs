@@ -181,16 +181,25 @@ pub fn run(maybe_files: Option<&[PathBuf]>) -> Result<(), DiagnosticsError> {
 #[derive(Debug)]
 pub struct DiagnosticsError;
 
-pub fn analyze_fast(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
+pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagnostic> {
     let mut diagnostics = syntax::analyze(node, rope);
+    let has_syntax_errors = !diagnostics.is_empty();
+
     diagnostics.extend(fast::analyze(node, rope, config));
+
+    if full && !has_syntax_errors {
+        diagnostics.extend(unused::analyze(node, rope));
+    }
+
     diagnostics
 }
 
+pub fn analyze_fast(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
+    analyze(node, rope, config, false)
+}
+
 pub fn analyze_full(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
-    let mut diagnostics = analyze_fast(node, rope, config);
-    diagnostics.extend(unused::analyze(node, rope));
-    diagnostics
+    analyze(node, rope, config, true)
 }
 
 fn error(node: Node, message: String) -> Diagnostic {

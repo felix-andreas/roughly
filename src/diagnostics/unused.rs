@@ -76,6 +76,7 @@ impl<'a> VariableTracker<'a> {
         loop {
             if let Some(var_info) = self.scopes[scope_idx].variables.get_mut(name) {
                 var_info.is_used = true;
+
                 return;
             }
 
@@ -90,7 +91,9 @@ impl<'a> VariableTracker<'a> {
     fn get_unused_variables(&self) -> Vec<(String, Node<'a>)> {
         let mut unused = Vec::new();
 
-        for scope in &self.scopes {
+        // Skip global scope (index 0) as we don't want to warn about global variables
+        for scope_idx in 1..self.scopes.len() {
+            let scope = &self.scopes[scope_idx];
             for (name, info) in &scope.variables {
                 if !info.is_used {
                     unused.push((name.clone(), info.node));
@@ -198,13 +201,12 @@ fn traverse<'a>(cursor: &mut TreeCursor<'a>, rope: &Rope, tracker: &mut Variable
             ) {
                 let is_assignment = operator.kind() == "<-" || operator.kind() == "=";
                 if lhs.kind() == "identifier" && is_assignment {
+                    if let Some(rhs) = node.child_by_field_name("rhs") {
+                        traverse(&mut rhs.walk(), rope, tracker);
+                    }
+
                     let name = rope.byte_slice(lhs.byte_range()).to_string();
                     tracker.declare_variable(name, lhs);
-
-                    if let Some(rhs) = node.child_by_field_name("rhs") {
-                        let mut rhs_cursor = rhs.walk();
-                        traverse(&mut rhs_cursor, rope, tracker);
-                    }
 
                     return;
                 }
@@ -332,6 +334,33 @@ mod tests {
 
         assert_eq!(sorted_diagnostics[0].range.start.line, 2);
         assert_eq!(sorted_diagnostics[1].range.start.line, 3);
+    }
+
+    #[test]
+    fn shadowed_variable_used() {
+        let code = r#"
+        function() {
+            x <- 1 # <- this should be used
+            x <- x + 1 # <- this should be used
+            x <- x + 1
+            x
+        }
+        "#;
+
+        let unused_vars = get_unused_var_names(code);
+        assert_eq!(unused_vars.len(), 0,);
+    }
+
+    #[test]
+    fn dont_warn_global_scope() {
+        let code = r#"
+        x <- 1
+        y <- 1
+        z <- 1
+        "#;
+
+        let unused_vars = get_unused_var_names(code);
+        assert_eq!(unused_vars.len(), 0,);
     }
 
     // note: this would require to tracked used variables backwards starting from
