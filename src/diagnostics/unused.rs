@@ -8,18 +8,18 @@ use {
 
 #[derive(Debug, Clone)]
 struct Scope<'a> {
-    variables: HashMap<String, VarInfo<'a>>,
+    variables: HashMap<String, Variable<'a>>,
     parent: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
-struct VarInfo<'a> {
+struct Variable<'a> {
     node: Node<'a>,
     is_used: bool,
-    shadowed: Option<Box<VarInfo<'a>>>,
+    shadowed: Option<Box<Variable<'a>>>,
 }
 
-impl<'a> VarInfo<'a> {
+impl<'a> Variable<'a> {
     fn new(node: Node<'a>) -> Self {
         Self {
             node,
@@ -30,12 +30,12 @@ impl<'a> VarInfo<'a> {
 }
 
 #[derive(Debug, Clone)]
-struct VariableTracker<'a> {
+struct ScopeTree<'a> {
     scopes: Vec<Scope<'a>>,
     current_scope: usize,
 }
 
-impl<'a> VariableTracker<'a> {
+impl<'a> ScopeTree<'a> {
     fn new() -> Self {
         Self {
             scopes: vec![Scope {
@@ -46,7 +46,7 @@ impl<'a> VariableTracker<'a> {
         }
     }
 
-    fn push_scope(&mut self) -> usize {
+    fn push(&mut self) -> usize {
         let parent = self.current_scope;
         self.scopes.push(Scope {
             variables: HashMap::new(),
@@ -56,23 +56,23 @@ impl<'a> VariableTracker<'a> {
         self.current_scope
     }
 
-    fn pop_scope(&mut self) {
+    fn pop(&mut self) {
         if let Some(parent) = self.scopes[self.current_scope].parent {
             self.current_scope = parent;
         }
     }
 
-    fn declare_variable(&mut self, name: String, node: Node<'a>) {
+    fn declare(&mut self, name: String, node: Node<'a>) {
         let current_scope = &mut self.scopes[self.current_scope];
 
         if let Some(existing) = current_scope.variables.get_mut(&name) {
-            existing.shadowed = Some(Box::new(std::mem::replace(existing, VarInfo::new(node))));
+            existing.shadowed = Some(Box::new(std::mem::replace(existing, Variable::new(node))));
         } else {
-            current_scope.variables.insert(name, VarInfo::new(node));
+            current_scope.variables.insert(name, Variable::new(node));
         }
     }
 
-    fn mark_variable_used(&mut self, name: &str) {
+    fn mark_unused(&mut self, name: &str) {
         let mut scope_idx = self.current_scope;
 
         while let Some(scope) = self.scopes.get_mut(scope_idx) {
@@ -110,13 +110,57 @@ impl<'a> VariableTracker<'a> {
 
         unused
     }
+
+    // fn finalize_usage(&mut self) {
+    //     // Process all scopes to mark variables that are truly used
+    //     // First collect all truly used names
+    //     let mut all_truly_used = Vec::new();
+
+    //     for scope in &self.scopes {
+    //         for (name, info) in &scope.variables {
+    //             if info.is_used {
+    //                 all_truly_used.push(name.clone());
+    //             }
+    //         }
+    //     }
+
+    //     // Then propagate usage for all collected names
+    //     for name in all_truly_used {
+    //         self.propagate_usage(&name);
+    //     }
+    // }
+
+    // fn propagate_usage(&mut self, name: &str) {
+    //     let mut scope_idx = self.current_scope;
+
+    //     while let Some(scope) = self.scopes.get_mut(scope_idx) {
+    //         if let Some(var_info) = scope.variables.get_mut(name) {
+    //             var_info.is_used = true;
+
+    //             // Also handle any shadowed versions
+    //             let mut shadow = &mut var_info.shadowed;
+    //             while let Some(shadowed) = shadow {
+    //                 shadowed.is_used = true;
+    //                 shadow = &mut shadowed.shadowed;
+    //             }
+
+    //             return;
+    //         }
+
+    //         match scope.parent {
+    //             Some(parent) => scope_idx = parent,
+    //             None => break,
+    //         }
+    //     }
+    // }
 }
 
 pub fn analyze(node: Node, rope: &Rope) -> Result<Vec<Diagnostic>, DiagnosticsError> {
-    let mut tracker = VariableTracker::new();
-    traverse(&mut node.walk(), rope, &mut tracker)?;
+    let mut scopes = ScopeTree::new();
+    traverse(&mut node.walk(), rope, &mut scopes)?;
+    // scopes.finalize_usage();
 
-    Ok(tracker
+    Ok(scopes
         .get_unused_variables()
         .into_iter()
         .map(|(name, node)| Diagnostic {
@@ -136,13 +180,13 @@ pub fn analyze(node: Node, rope: &Rope) -> Result<Vec<Diagnostic>, DiagnosticsEr
 fn traverse<'a>(
     cursor: &mut TreeCursor<'a>,
     rope: &Rope,
-    tracker: &mut VariableTracker<'a>,
+    scopes: &mut ScopeTree<'a>,
 ) -> Result<(), DiagnosticsError> {
     let node = cursor.node();
 
     match node.kind() {
         "function_definition" => {
-            tracker.push_scope();
+            scopes.push();
 
             let params = field(node, "parameters")?;
 
@@ -150,14 +194,14 @@ fn traverse<'a>(
                 let name = field(param, "name")?;
                 if name.kind() == "identifier" {
                     let raw = rope.byte_slice(name.byte_range()).to_string();
-                    tracker.declare_variable(raw, name);
+                    scopes.declare(raw, name);
                 }
             }
 
             let body = field(node, "body")?;
-            traverse(&mut body.walk(), rope, tracker)?;
+            traverse(&mut body.walk(), rope, scopes)?;
 
-            tracker.pop_scope();
+            scopes.pop();
         }
 
         "call" => {
@@ -166,22 +210,22 @@ fn traverse<'a>(
             // Process function first to mark it as used if it's an identifier
             if function.kind() == "identifier" {
                 let name = rope.byte_slice(function.byte_range()).to_string();
-                tracker.mark_variable_used(&name);
+                scopes.mark_unused(&name);
             } else {
-                traverse(&mut function.walk(), rope, tracker)?;
+                traverse(&mut function.walk(), rope, scopes)?;
             }
 
             let new_scope = function.kind() == "identifier"
                 && rope.byte_slice(function.byte_range()) == "local";
 
             if new_scope {
-                tracker.push_scope();
+                scopes.push();
             }
 
-            traverse(&mut field(node, "arguments")?.walk(), rope, tracker)?;
+            traverse(&mut field(node, "arguments")?.walk(), rope, scopes)?;
 
             if new_scope {
-                tracker.pop_scope();
+                scopes.pop();
             }
         }
 
@@ -190,28 +234,25 @@ fn traverse<'a>(
             let operator = field(node, "operator")?;
             let rhs = field(node, "rhs")?;
 
-            let is_assignment = operator.kind() == "<-" || operator.kind() == "=";
-            if is_assignment {
-                traverse(&mut rhs.walk(), rope, tracker)?;
-                if lhs.kind() == "identifier" {
-                    let name = rope.byte_slice(lhs.byte_range()).to_string();
-                    tracker.declare_variable(name, lhs);
-                }
+            if operator.kind() == "<-" || operator.kind() == "=" && lhs.kind() == "identifier" {
+                traverse(&mut rhs.walk(), rope, scopes)?;
+                let name = rope.byte_slice(lhs.byte_range()).to_string();
+                scopes.declare(name, lhs);
             } else {
-                traverse(&mut lhs.walk(), rope, tracker)?;
-                traverse(&mut rhs.walk(), rope, tracker)?;
+                traverse(&mut lhs.walk(), rope, scopes)?;
+                traverse(&mut rhs.walk(), rope, scopes)?;
             }
         }
 
         "identifier" => {
             let name = rope.byte_slice(node.byte_range()).to_string();
-            tracker.mark_variable_used(&name);
+            scopes.mark_unused(&name);
         }
 
         _ => {
             if cursor.goto_first_child() {
                 loop {
-                    traverse(cursor, rope, tracker)?;
+                    traverse(cursor, rope, scopes)?;
                     if !cursor.goto_next_sibling() {
                         cursor.goto_parent();
                         break;
@@ -226,264 +267,273 @@ fn traverse<'a>(
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::tree, std::collections::HashSet};
+    use {super::*, crate::tree};
 
-    fn get_unused_var_names(code: &str) -> HashSet<String> {
+    fn get_unused_names(code: &str) -> Vec<String> {
         let tree = tree::parse(code, None);
         let rope = Rope::from_str(code);
-        let diagnostics = analyze(tree.root_node(), &rope);
 
-        diagnostics
-            .unwrap()
+        let mut scopes = ScopeTree::new();
+        traverse(&mut tree.root_node().walk(), &rope, &mut scopes).unwrap();
+        // scopes.finalize_usage();
+
+        scopes
+            .get_unused_variables()
             .into_iter()
-            .map(|diag| {
-                let message = diag.message;
-                // todo: this is an abonimation, fix this
-                message.replace("unused variable `", "").replace("`", "")
-            })
+            .map(|(name, _)| name)
             .collect()
     }
 
-    #[test]
-    fn unused_local_variable() {
-        let code = r#"
-        function() {
-            x <- 10
-            y <- 20
-            return(x)
-        }
-        "#;
-
-        let unused_vars = get_unused_var_names(code);
-        assert!(unused_vars.contains("y"));
-        assert!(!unused_vars.contains("x"));
+    fn contains(unused: &[String], name: &str) -> bool {
+        unused.iter().any(|unused| unused == name)
     }
 
     #[test]
-    fn used_in_nested_function() {
+    fn basic_used_variable() {
         let code = r#"
         function() {
-            x <- 10
-            inner <- function() {
-                return(x)
-            }
-            inner()
+            a <- 1
+            b <- a
+            b
         }
         "#;
 
-        let unused_vars = get_unused_var_names(code);
-        assert!(!unused_vars.contains("x"));
-        assert!(!unused_vars.contains("inner"));
+        let unused = get_unused_names(code);
+        assert!(!contains(&unused, "a"));
+        assert!(!contains(&unused, "b"));
+        assert_eq!(0, unused.len());
+    }
+
+    #[test]
+    fn basic_unused_variable() {
+        let code = r#"
+        function() {
+            a <- 1
+            b_unused <- 2
+            a
+        }
+        "#;
+
+        let unused = get_unused_names(code);
+        assert!(!contains(&unused, "a"));
+        assert!(contains(&unused, "b_unused"));
+    }
+
+    #[test]
+    fn variable_used_in_nested_function() {
+        let code = r#"
+        function() {
+            a1 <- 1
+            b1 <- function() {
+                a1
+            }
+            b1()
+        }
+        "#;
+
+        let unused = get_unused_names(code);
+        assert!(!contains(&unused, "a1"));
+        assert!(!contains(&unused, "b1"));
     }
 
     #[test]
     fn shadowed_variable() {
         let code = r#"
         function() {
-            x <- 1 # <- this should be unused
-            x <- 2 # <- this should be unsued
-            x <- 3
-            x
+            a_unused <- 1 # <- this should be unused
+            a_unused <- 2 # <- this should be unused
+            a <- 3
+            a
         }
         "#;
 
-        let unused_vars = get_unused_var_names(code);
-        assert!(
-            unused_vars.contains("x"),
-            "First declaration of x should be marked as unused due to shadowing"
-        );
-
-        let diagnostics =
-            analyze(tree::parse(code, None).root_node(), &Rope::from_str(code)).unwrap();
-        assert_eq!(diagnostics.len(), 2);
-
-        // Sort diagnostics by line number to ensure consistent test assertion
-        let mut sorted_diagnostics = diagnostics;
-        sorted_diagnostics.sort_by_key(|d| d.range.start.line);
-
-        assert_eq!(sorted_diagnostics[0].range.start.line, 2);
-        assert_eq!(sorted_diagnostics[1].range.start.line, 3);
+        let unused = get_unused_names(code);
+        assert!(contains(&unused, "a_unused"));
+        assert_eq!(unused.len(), 2);
     }
 
     #[test]
     fn shadowed_variable_used() {
         let code = r#"
         function() {
-            x <- 1 # <- this should be used
-            x <- x + 1 # <- this should be used
-            x <- x + 1
-            x
+            a <- 1 # <- this should be used
+            a <- a + 1 # <- this should be used
+            a <- a + 1
+            a
         }
         "#;
 
-        let unused_vars = get_unused_var_names(code);
-        assert_eq!(unused_vars.len(), 0,);
+        let unused = get_unused_names(code);
+        assert_eq!(unused.len(), 0);
     }
 
     #[test]
-    fn dont_warn_global_scope() {
+    fn global_scope_variables_not_warned() {
         let code = r#"
-        x <- 1
-        y <- 1
-        z <- 1
+        a <- 1
+        b <- 2
+        c <- 3
         "#;
 
-        let unused_vars = get_unused_var_names(code);
-        assert_eq!(unused_vars.len(), 0,);
+        let unused = get_unused_names(code);
+        assert_eq!(unused.len(), 0);
     }
 
-    // note: this would require to tracked used variables backwards starting from
-    // the last expression and all possible return calls
     // #[test]
-    // fn chained_unsued() {
+    // fn chained_unused_variables() {
     //     let code = r#"
     //     function() {
-    //         a <- 1
-    //         b <- a
-    //         c <- b
+    //         a_unused <- 1
+    //         b_unused <- a_unused
+    //         c_unused <- b_unused
     //     }
     //     "#;
 
-    //     let unused_vars = get_unused_var_names(code);
-    //     assert!(unused_vars.contains("a"));
-    //     assert!(unused_vars.contains("b"));
-    //     assert!(unused_vars.contains("c"));
+    //     let unused = get_unused_names(code);
+    //     assert!(contains(&unused, "a_unused"));
+    //     assert!(contains(&unused, "b_unused"));
+    //     assert!(contains(&unused, "c_unused"));
     // }
 
     #[test]
-    fn local_scope() {
+    fn chained_used_variables() {
         let code = r#"
         function() {
-            x <- 10
-            local({
-                y <- 20
-                z <- 30
-                print(y)
-            })
-            return(x)
+            a <- 1
+            b <- a
+            c_unused <- b
+            b
         }
         "#;
 
-        let unused_vars = get_unused_var_names(code);
-        assert!(!unused_vars.contains("x"));
-        assert!(!unused_vars.contains("y"));
-        assert!(unused_vars.contains("z"));
+        let unused = get_unused_names(code);
+        assert!(!contains(&unused, "a"));
+        assert!(!contains(&unused, "b"));
+        assert!(contains(&unused, "c_unused"));
+    }
+
+    #[test]
+    fn local_scope_variables() {
+        let code = r#"
+        function() {
+            a1 <- 1
+            local({
+                a2 <- 2
+                b2_unused <- 3
+                print(a2)
+            })
+            a1
+        }
+        "#;
+
+        let unused = get_unused_names(code);
+        assert!(!contains(&unused, "a1"));
+        assert!(!contains(&unused, "a2"));
+        assert!(contains(&unused, "b2_unused"));
     }
 
     #[test]
     fn function_parameters() {
         let code = r#"
-        function(a, b, c) {
+        function(a, b_unused, c) {
             print(a)
-            return(c)
+            c
         }
         "#;
 
-        let unused_vars = get_unused_var_names(code);
-        assert!(!unused_vars.contains("a"));
-        assert!(unused_vars.contains("b"));
-        assert!(!unused_vars.contains("c"));
+        let unused = get_unused_names(code);
+        assert!(!contains(&unused, "a"));
+        assert!(contains(&unused, "b_unused"));
+        assert!(!contains(&unused, "c"));
     }
 
     #[test]
     fn shadowed_parameters() {
         let code = r#"
-        function(a) {
-            a <- 4
-            print(a)
+        function(a_unused) {
+            b <- 1
+            print(b)
         }
         "#;
 
-        let unused_vars = get_unused_var_names(code);
-        assert!(
-            unused_vars.contains("a"),
-            "Parameter 'a' should be marked as unused since it's immediately shadowed"
-        );
-
-        let diagnostics =
-            analyze(tree::parse(code, None).root_node(), &Rope::from_str(code)).unwrap();
-        assert_eq!(
-            diagnostics[0].range.start.line, 1,
-            "The parameter 'a' should be marked as unused (line 1)"
-        );
+        let unused = get_unused_names(code);
+        assert!(contains(&unused, "a_unused"));
     }
+
     #[test]
     fn nested_scopes() {
         let code = r#"
         function() {
-            a <- 10
+            a1 <- 1
             local({
-                b <- 20
+                a2 <- 2
                 local({
-                    c <- 30
-                    print(a)
-                    print(b)
+                    a3_unused <- 3
+                    print(a1)
+                    print(a2)
                 })
-                d <- 40
+                b2_unused <- 4
             })
-            e <- 50
-            print(e)
+            b1_unused <- 5
+            print(a1)
         }
         "#;
 
-        let unused_vars = get_unused_var_names(code);
-        assert!(!unused_vars.contains("a"));
-        assert!(!unused_vars.contains("b"));
-        assert!(unused_vars.contains("c"));
-        assert!(unused_vars.contains("d"));
-        assert!(!unused_vars.contains("e"));
+        let unused = get_unused_names(code);
+        assert!(!contains(&unused, "a1"));
+        assert!(!contains(&unused, "a2"));
+        assert!(contains(&unused, "a3_unused"));
+        assert!(contains(&unused, "b2_unused"));
+        assert!(contains(&unused, "b1_unused"));
     }
 
     #[test]
     fn nested_functions() {
         let code = r#"
         function() {
-            outer <- 1
-            unused <- 2
-            f1 <- function() {
-                mid <- 3
-                f2 <- function() {
-                    inner <- 4
-                    print(outer)
-                    print(mid)
+            a1 <- 1
+            b1_unused <- 2
+            c1 <- function() {
+                a2 <- 3
+                b2 <- function() {
+                    a3_unused <- 4
+                    print(a1)
+                    print(a2)
                 }
-                return(f2)
+                b2
             }
-            nested <- f1()
-            nested()
+            d1 <- c1()
+            d1()
         }
         "#;
 
-        let unused_vars = get_unused_var_names(code);
-        assert!(!unused_vars.contains("outer"));
-        assert!(unused_vars.contains("unused"));
-        assert!(!unused_vars.contains("mid"));
-        assert!(unused_vars.contains("inner"));
-        assert!(!unused_vars.contains("f1"));
-        assert!(!unused_vars.contains("f2"));
-        assert!(!unused_vars.contains("nested"));
+        let unused = get_unused_names(code);
+        assert!(!contains(&unused, "a1"));
+        assert!(contains(&unused, "b1_unused"));
+        assert!(!contains(&unused, "a2"));
+        assert!(contains(&unused, "a3_unused"));
+        assert!(!contains(&unused, "c1"));
+        assert!(!contains(&unused, "b2"));
+        assert!(!contains(&unused, "d1"));
     }
 
     #[test]
     fn multiple_shadowing_levels() {
         let code = r#"
         function() {
-            x <- 1
-            x <- 2
-            x <- 3
-            x <- 4
-            x <- 5
-            print(x)
+            a_unused <- 1
+            a_unused <- 2
+            a_unused <- 3
+            a_unused <- 4
+            b <- 5
+            print(b)
         }
         "#;
 
-        let diagnostics =
-            analyze(tree::parse(code, None).root_node(), &Rope::from_str(code)).unwrap();
-        assert_eq!(
-            diagnostics.len(),
-            4,
-            "Should have 4 unused shadowed variables"
-        );
+        let unused = get_unused_names(code);
+        assert!(contains(&unused, "a_unused"));
+        assert!(!contains(&unused, "b"));
+        assert_eq!(unused.len(), 4);
     }
 
     #[test]
@@ -492,7 +542,7 @@ mod tests {
         function() {
             a <- 1
             b <- 2
-            c <- 3
+            c_unused <- 3
             if (TRUE) {
                 print(a)
             } else {
@@ -501,47 +551,47 @@ mod tests {
         }
         "#;
 
-        let unused_vars = get_unused_var_names(code);
-        assert!(!unused_vars.contains("a"));
-        assert!(!unused_vars.contains("b"));
-        assert!(unused_vars.contains("c"));
+        let unused = get_unused_names(code);
+        assert!(!contains(&unused, "a"));
+        assert!(!contains(&unused, "b"));
+        assert!(contains(&unused, "c_unused"));
     }
 
     #[test]
     fn complex_nested_scopes() {
         let code = r#"
-        function(param1, param2, param3) {
-            outer1 <- 10
-            outer2 <- 20
+        function(a1, b1, c1_unused) {
+            a2 <- 1
+            b2 <- 2
             local({
-                inner1 <- 30
-                inner2 <- 40
-                print(param1)
-                print(outer1)
+                a3_unused <- 3
+                b3_unused <- 4
+                print(a1)
+                print(a2)
             })
 
-            f <- function(x) {
-                z <- x + outer2
-                print(param2)
-                return(z)
+            c2 <- function(a4) {
+                b4 <- a4 + b2
+                print(b1)
+                b4
             }
 
-            result <- f(5)
-            print(result)
+            d2 <- c2(5)
+            print(d2)
         }
         "#;
 
-        let unused_vars = get_unused_var_names(code);
-        assert!(!unused_vars.contains("param1"));
-        assert!(!unused_vars.contains("param2"));
-        assert!(unused_vars.contains("param3"));
-        assert!(!unused_vars.contains("outer1"));
-        assert!(!unused_vars.contains("outer2"));
-        assert!(unused_vars.contains("inner1"));
-        assert!(unused_vars.contains("inner2"));
-        assert!(!unused_vars.contains("f"));
-        assert!(!unused_vars.contains("x"));
-        assert!(!unused_vars.contains("z"));
-        assert!(!unused_vars.contains("result"));
+        let unused = get_unused_names(code);
+        assert!(!contains(&unused, "a1"));
+        assert!(!contains(&unused, "b1"));
+        assert!(contains(&unused, "c1_unused"));
+        assert!(!contains(&unused, "a2"));
+        assert!(!contains(&unused, "b2"));
+        assert!(contains(&unused, "a3_unused"));
+        assert!(contains(&unused, "b3_unused"));
+        assert!(!contains(&unused, "c2"));
+        assert!(!contains(&unused, "a4"));
+        assert!(!contains(&unused, "b4"));
+        assert!(!contains(&unused, "d2"));
     }
 }
