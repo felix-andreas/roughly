@@ -289,6 +289,18 @@ mod tests {
     }
 
     #[test]
+    fn global_scope_variables_not_warned() {
+        let code = r#"
+        a <- 1
+        b <- 2
+        c <- 3
+        "#;
+
+        let unused = get_unused_names(code);
+        assert_eq!(unused.len(), 0);
+    }
+
+    #[test]
     fn basic_used_variable() {
         let code = r#"
         function() {
@@ -368,15 +380,21 @@ mod tests {
     }
 
     #[test]
-    fn global_scope_variables_not_warned() {
+    fn nested_shadowing() {
         let code = r#"
-        a <- 1
-        b <- 2
-        c <- 3
+        function() {
+            a <- 1
+            a <- a + 1 # this should be unused
+            local({
+                a <- 2
+                a
+            })
+        }
         "#;
 
         let unused = get_unused_names(code);
-        assert_eq!(unused.len(), 0);
+        assert!(contains(&unused, "a"));
+        assert_eq!(unused.len(), 1);
     }
 
     // #[test]
@@ -433,7 +451,7 @@ mod tests {
     }
 
     #[test]
-    fn function_parameters() {
+    fn basic_parameters() {
         let code = r#"
         function(a, b_unused, c) {
             print(a)
@@ -448,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn shadowed_parameters() {
+    fn parameters_shadowed() {
         let code = r#"
         function(a_unused) {
             b <- 1
