@@ -13,11 +13,15 @@ use {
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
     case: Case,
+    experimental: bool,
 }
 
 impl Config {
-    pub fn from_config(config: config::Config) -> Self {
-        Config { case: config.case }
+    pub fn from_config(config: config::Config, experimental: bool) -> Self {
+        Config {
+            case: config.case,
+            experimental,
+        }
     }
 }
 
@@ -28,10 +32,13 @@ pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagn
     diagnostics.extend(fast::analyze(node, rope, config));
 
     if full && !has_syntax_errors {
-        match unused::analyze(node, rope) {
-            Ok(diags) => diagnostics.extend(diags),
-            Err(error) => {
-                log::warn!("error while diagnostics {error}");
+        #[allow(clippy::collapsible_if)]
+        if config.experimental {
+            match unused::analyze(node, rope) {
+                Ok(diags) => diagnostics.extend(diags),
+                Err(error) => {
+                    log::warn!("error while diagnostics {error}");
+                }
             }
         }
     }

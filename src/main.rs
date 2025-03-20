@@ -11,13 +11,14 @@ use {
 async fn main() -> ExitCode {
     env_logger::init();
 
-    match Cli::parse().command {
+    let cli = Cli::parse();
+    match cli.command {
         None => {
-            lsp::run().await;
+            lsp::run(cli.experimental).await;
             ExitCode::SUCCESS
         }
         Some(command) => match command {
-            Command::Check { files } => match cli::check(files.as_deref()) {
+            Command::Check { files } => match cli::check(files.as_deref(), cli.experimental) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(CheckError) => ExitCode::FAILURE,
             },
@@ -26,7 +27,7 @@ async fn main() -> ExitCode {
                 Err(FmtError) => ExitCode::FAILURE,
             },
             Command::Lsp { stdio: _stdio } => {
-                lsp::run().await;
+                lsp::run(cli.experimental).await;
                 ExitCode::SUCCESS
             }
             Command::Debug(dev) => match dev {
@@ -49,6 +50,9 @@ struct Cli {
     /// Ignored ... here only to please VS Code
     #[clap(long, default_value_t = true)]
     stdio: bool,
+    /// Enable experimental features
+    #[clap(long, global = true, default_value_t = false)]
+    experimental: bool,
 }
 
 #[derive(Debug, Subcommand)]

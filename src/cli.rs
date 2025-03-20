@@ -55,7 +55,7 @@ pub fn error(message: &str) {
 #[derive(Debug)]
 pub struct CheckError;
 
-pub fn check(maybe_files: Option<&[PathBuf]>) -> Result<(), CheckError> {
+pub fn check(maybe_files: Option<&[PathBuf]>, experimental: bool) -> Result<(), CheckError> {
     let root: Vec<PathBuf> = vec![".".into()];
     let files = maybe_files.unwrap_or(&root);
 
@@ -92,7 +92,7 @@ pub fn check(maybe_files: Option<&[PathBuf]>) -> Result<(), CheckError> {
     let mut n_files = 0;
     let mut n_errors = 0;
     for (paths, config) in paths_with_config {
-        let config = diagnostics::Config::from_config(config);
+        let config = diagnostics::Config::from_config(config, experimental);
         for path in paths {
             n_files += 1;
             let old = match std::fs::read_to_string(&path) {

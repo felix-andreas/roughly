@@ -18,7 +18,7 @@ use {
     tree_sitter::{InputEdit, Point, Tree},
 };
 
-pub async fn run() {
+pub async fn run(experimental: bool) {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
@@ -31,8 +31,9 @@ pub async fn run() {
     };
 
     let (service, socket) = LspService::new(|client| Backend {
-        config,
         client,
+        config,
+        experimental,
         symbols_map: DashMap::new(),
         document_map: DashMap::new(),
     });
@@ -44,8 +45,9 @@ pub async fn run() {
 
 #[derive(Debug)]
 struct Backend {
-    config: Config,
     client: Client,
+    config: Config,
+    experimental: bool,
     symbols_map: DashMap<Url, Vec<DocumentSymbol>>,
     document_map: DashMap<Url, Document>,
 }
@@ -118,7 +120,7 @@ impl LanguageServer for Backend {
         let diagnostics = diagnostics::analyze_full(
             tree.root_node(),
             &rope,
-            diagnostics::Config::from_config(self.config),
+            diagnostics::Config::from_config(self.config, self.experimental),
         );
 
         self.document_map
@@ -205,7 +207,7 @@ impl LanguageServer for Backend {
             let diagnostics = diagnostics::analyze_fast(
                 document.tree.root_node(),
                 &document.rope,
-                diagnostics::Config::from_config(self.config),
+                diagnostics::Config::from_config(self.config, self.experimental),
             );
 
             self.client
@@ -230,7 +232,7 @@ impl LanguageServer for Backend {
             let diagnostics = diagnostics::analyze_full(
                 document.tree.root_node(),
                 &document.rope,
-                diagnostics::Config::from_config(self.config),
+                diagnostics::Config::from_config(self.config, self.experimental),
             );
 
             self.client
