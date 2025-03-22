@@ -70,28 +70,22 @@
 			"title": "Roughly",
 			"properties": {
 				"roughly.path": {
-					"scope": "machine-overridable",
-					"type": "string",
-					"default": "roughly",
-					"description": "Location of the language server command.",
-					"format": "path"
-				},
-				"roughly.maxNumberOfProblems": {
 					"scope": "resource",
-					"type": "number",
-					"default": 100,
-					"description": "Controls the maximum number of problems produced by the server."
-				},
-				"roughly.trace.server": {
-					"scope": "window",
 					"type": "string",
-					"enum": [
-						"off",
-						"messages",
-						"verbose"
+					"format": "path",
+					"default": "roughly",
+					"markdownDescription": "Location of the `roughly` executable, e.g., `[\"/path/to/roughly\"]`."
+				},
+				"roughly.args": {
+					"scope": "resource",
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [
+						"lsp"
 					],
-					"default": "off",
-					"description": "Traces the communication between VS Code and the language server."
+					"markdownDescription": "Arguments passed to `roughly`."
 				}
 			}
 		}
