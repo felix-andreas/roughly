@@ -108,6 +108,7 @@ impl LanguageServer for Backend {
         log::debug!("bye bye");
         Ok(())
     }
+
     //
     // TEXT SYNC
     //
@@ -191,6 +192,17 @@ impl LanguageServer for Backend {
                     });
 
                     // todo: use Parser::parse_with_options
+                    // let mut parser = tree_sitter::Parser::new();
+                    // let language = tree_sitter_r::LANGUAGE;
+                    // parser
+                    //     .set_language(&language.into())
+                    //     .expect("Error loading R parser");
+
+                    // parser.parse_with_options(
+                    //     &mut |i, point| rope.byte_slice(i..).bytes(),
+                    //     Some(&document.tree),
+                    //     None,
+                    // );
                     document.tree = tree::parse(document.rope.to_string(), Some(&document.tree));
                 }
 
@@ -227,7 +239,12 @@ impl LanguageServer for Backend {
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         log::debug!("did save {}", params.text_document.uri.path());
 
-        index::index_update(&self.symbols_map, &params.text_document.uri);
+        index::index_update(
+            &self.symbols_map,
+            &params.text_document.uri,
+            &params.text.unwrap(),
+        );
+
         if let Some(document) = self.document_map.get(&params.text_document.uri) {
             let diagnostics = diagnostics::analyze_full(
                 document.tree.root_node(),
@@ -366,6 +383,7 @@ impl LanguageServer for Backend {
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         log::debug!("format file {}", params.text_document.uri.path());
+
         let Some(document) = self.document_map.get(&params.text_document.uri) else {
             log::info!("formatting: failed to acquire symbols map");
             // todo: understand when this happens

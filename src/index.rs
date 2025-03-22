@@ -112,7 +112,7 @@ pub fn index_full(symbols_map: &DashMap<Url, Vec<DocumentSymbol>>) -> Result<(),
     Ok(())
 }
 
-pub fn index_update(symbols_map: &DashMap<Url, Vec<DocumentSymbol>>, url: &Url) {
+pub fn index_update(symbols_map: &DashMap<Url, Vec<DocumentSymbol>>, url: &Url, text: &str) {
     let start = std::time::Instant::now();
     let Ok(path) = url.to_file_path() else {
         log::error!("failed to get file path for {url}");
@@ -122,7 +122,7 @@ pub fn index_update(symbols_map: &DashMap<Url, Vec<DocumentSymbol>>, url: &Url) 
         "update index for {path:?} in {} ms",
         start.elapsed().as_millis()
     );
-    let symbols = index_file(path);
+    let symbols = index(text);
     symbols_map.insert(url.clone(), symbols);
 }
 
