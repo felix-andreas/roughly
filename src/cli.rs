@@ -426,10 +426,11 @@ pub fn index(paths: Option<&[PathBuf]>, print_items: bool) -> Result<(), DebugEr
     let global_elapsed = global_start.elapsed();
 
     info(&format!(
-        "Indexed {} symbols from {} files in {} ms ({} ms including I/O) ({}/s)",
+        "Indexed {} symbols from {} files in {} ms ({}/s) - including I/O: {} ms ({}/s)",
         total_symbols,
         total_files,
         total_time.as_millis(),
+        utils::human_bytes(total_bytes as f64 / total_time.as_secs_f64()),
         global_elapsed.as_millis(),
         utils::human_bytes(total_bytes as f64 / global_elapsed.as_secs_f64())
     ));
