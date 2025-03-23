@@ -4,13 +4,13 @@ use {
         dev,
         diagnostics::{self},
         format::{self, LineEnding},
+        lsp_types::DiagnosticSeverity,
         tree, utils,
     },
     console::style,
     ignore::Walk,
     ropey::Rope,
     std::path::{Path, PathBuf},
-    tower_lsp::lsp_types::DiagnosticSeverity,
 };
 
 //

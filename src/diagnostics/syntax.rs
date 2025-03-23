@@ -1,7 +1,6 @@
 use {
-    crate::diagnostics::error,
+    crate::{diagnostics::error, lsp_types::Diagnostic},
     ropey::Rope,
-    tower_lsp::lsp_types::Diagnostic,
     tree_sitter::{Node, TreeCursor},
 };
 

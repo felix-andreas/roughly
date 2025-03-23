@@ -7,6 +7,7 @@ use {
     std::{path::PathBuf, process::ExitCode},
 };
 
+// Only use tokio for lsp
 #[tokio::main]
 async fn main() -> ExitCode {
     env_logger::init();

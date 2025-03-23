@@ -161,16 +161,20 @@ See https://github.com/r-lib/tree-sitter-r/issues/166
 
 ## References
 
-* https://github.com/microsoft/vscode-extension-samples/tree/main/lsp-sample
-* https://github.com/semanticart/lsp-from-scratch
-* https://github.com/IWANABETHATGUY/tower-lsp-boilerplate
-* https://www.reddit.com/r/rust/comments/uu47mk/comment/i9dn0yg/
-* https://github.com/FuelLabs/sway
-* https://github.com/gleam-lang/gleam/tree/main/compiler-core/src/language_server
-* https://github.com/jfecher/ante/blob/5f7446375bc1c6c94b44a44bfb89777c1437aaf5/ante-ls/src/main.rs#L163
-* https://github.com/ziglang/vscode-zig/
-* https://github.com/nix-community/vscode-nix-ide
-* https://github.com/wch/r-source/blob/trunk/src/main/gram.y
-* https://cran.r-project.org/doc/manuals/r-release/R-lang.html
-* https://github.com/TenStrings/glicol-lsp/blob/77e97d9c687dc5d66871ad5ec91b6f049de2b8e8/src/main.rs#L16
-
+* R
+  * https://github.com/wch/r-source/blob/trunk/src/main/gram.y
+  * https://cran.r-project.org/doc/manuals/r-release/R-lang.html
+  * https://www.reddit.com/r/rust/comments/uu47mk/comment/i9dn0yg/
+* vs code
+  * https://github.com/microsoft/vscode-extension-samples/tree/main/lsp-sample
+  * https://github.com/semanticart/lsp-from-scratch
+  * https://github.com/nix-community/vscode-nix-ide
+  * https://github.com/ziglang/vscode-zig/
+* tower-lsp
+  * https://github.com/Desdaemon/-lsp/
+  * https://github.com/FuelLabs/sway
+  * https://github.com/IWANABETHATGUY/tower-lsp-boilerplate
+  * https://github.com/TenStrings/glicol-lsp/blob/77e97d9c687dc5d66871ad5ec91b6f049de2b8e8/src/main.rs#L16
+  * https://github.com/jfecher/ante/blob/5f7446375bc1c6c94b44a44bfb89777c1437aaf5/ante-ls/src/main.rs#L163
+* lsp-server
+  * https://github.com/gleam-lang/gleam/tree/main/compiler-core/src/language_server

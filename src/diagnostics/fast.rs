@@ -2,10 +2,10 @@ use {
     crate::{
         config::Case,
         diagnostics::{self, Config},
+        lsp_types::Diagnostic,
         utils,
     },
     ropey::Rope,
-    tower_lsp::lsp_types::Diagnostic,
     tree_sitter::{Node, TreeCursor},
 };
 

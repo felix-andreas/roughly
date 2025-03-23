@@ -10,7 +10,7 @@ use {
     dashmap::DashMap,
     ropey::Rope,
     std::path::Path,
-    tower_lsp::{
+    tower_lsp_server::{
         Client, LanguageServer, LspService, Server,
         jsonrpc::{Error, Result},
         lsp_types::*,
@@ -48,8 +48,8 @@ struct Backend {
     client: Client,
     config: Config,
     experimental: bool,
-    symbols_map: DashMap<Url, Vec<DocumentSymbol>>,
-    document_map: DashMap<Url, Document>,
+    symbols_map: DashMap<Uri, Vec<DocumentSymbol>>,
+    document_map: DashMap<Uri, Document>,
 }
 
 #[derive(Debug)]
@@ -58,7 +58,6 @@ struct Document {
     tree: Tree,
 }
 
-#[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     //
     // LIFE CYLE METHODS
@@ -264,7 +263,7 @@ impl LanguageServer for Backend {
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
-        log::debug!("Request completion items for: {uri}");
+        log::debug!("Request completion items for: {uri:?}");
         let position = params.text_document_position.position;
         // todo: proper error handling. make ropey, dashmap -> JSONRpc error
         let completions = || -> Option<Vec<CompletionItem>> {

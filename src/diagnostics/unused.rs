@@ -1,8 +1,10 @@
 use {
-    crate::diagnostics::{self, DiagnosticsError, field},
+    crate::{
+        diagnostics::{self, DiagnosticsError, field},
+        lsp_types::{Diagnostic, DiagnosticSeverity},
+    },
     ropey::Rope,
     std::collections::HashMap,
-    tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity},
     tree_sitter::{Node, TreeCursor},
 };
 

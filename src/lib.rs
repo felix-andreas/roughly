@@ -9,3 +9,5 @@ pub mod index;
 pub mod lsp;
 pub mod tree;
 pub mod utils;
+
+use tower_lsp_server::lsp_types;

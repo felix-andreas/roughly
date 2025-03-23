@@ -3,10 +3,12 @@ mod syntax;
 mod unused;
 
 use {
-    crate::config::{self, Case},
+    crate::{
+        config::{self, Case},
+        lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range},
+    },
     ropey::Rope,
     thiserror::Error,
-    tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range},
     tree_sitter::Node,
 };
 

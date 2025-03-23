@@ -1,9 +1,11 @@
 use {
-    crate::utils,
+    crate::{
+        lsp_types::*,
+        utils::{self, UriExt},
+    },
     dashmap::DashMap,
     ropey::Rope,
     std::path::Path,
-    tower_lsp::lsp_types::*,
     tree_sitter::{Node, Tree},
 };
 
@@ -18,17 +20,17 @@ macro_rules! regex {
 
 pub fn get_workspace_symbols(
     query: &str,
-    symbols_map: &DashMap<Url, Vec<DocumentSymbol>>,
+    symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>,
     limit: usize,
-    maybe_ignore_uri: Option<&Url>,
+    maybe_ignore_uri: Option<&Uri>,
 ) -> Vec<SymbolInformation> {
     let workspace_symbols: Vec<_> = symbols_map
         .iter()
         .flat_map(|ref_multi| {
-            let (url, symbols) = ref_multi.pair();
+            let (uri, symbols) = ref_multi.pair();
             match maybe_ignore_uri {
-                Some(ignore_uri) if ignore_uri == url => vec![],
-                _ => filter_symbols(query, url, symbols),
+                Some(ignore_uri) if ignore_uri == uri => vec![],
+                _ => filter_symbols(query, uri, symbols),
             }
         })
         .take(limit) // limit amount
@@ -38,18 +40,18 @@ pub fn get_workspace_symbols(
 }
 
 pub fn get_document_symbols(
-    url: &Url,
-    symbols_map: &DashMap<Url, Vec<DocumentSymbol>>,
+    uri: &Uri,
+    symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>,
 ) -> Vec<SymbolInformation> {
-    let Some(symbols) = symbols_map.get(url) else {
+    let Some(symbols) = symbols_map.get(uri) else {
         log::info!("failed to acquire symbols map");
         // todo: understand when this happens
         return vec![];
     };
-    filter_symbols("", url, &symbols)
+    filter_symbols("", uri, &symbols)
 }
 
-fn filter_symbols(query: &str, url: &Url, symbols: &[DocumentSymbol]) -> Vec<SymbolInformation> {
+fn filter_symbols(query: &str, uri: &Uri, symbols: &[DocumentSymbol]) -> Vec<SymbolInformation> {
     symbols
         .iter()
         .filter(|symbol| {
@@ -67,7 +69,7 @@ fn filter_symbols(query: &str, url: &Url, symbols: &[DocumentSymbol]) -> Vec<Sym
                 tags: None,
                 deprecated: None,
                 location: Location {
-                    uri: url.to_owned(),
+                    uri: uri.to_owned(),
                     range: symbol.range,
                 },
                 container_name: None,
@@ -79,7 +81,7 @@ fn filter_symbols(query: &str, url: &Url, symbols: &[DocumentSymbol]) -> Vec<Sym
 #[derive(Debug)]
 pub struct IndexError;
 
-pub fn index_full(symbols_map: &DashMap<Url, Vec<DocumentSymbol>>) -> Result<(), IndexError> {
+pub fn index_full(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>) -> Result<(), IndexError> {
     let start = std::time::Instant::now();
     let mut n = 0;
     let cwd = std::env::current_dir().unwrap();
@@ -100,8 +102,8 @@ pub fn index_full(symbols_map: &DashMap<Url, Vec<DocumentSymbol>>) -> Result<(),
 
             let symbols = index_file(&path);
             n += symbols.len();
-            let url = Url::from_file_path(path).map_err(|_| IndexError)?;
-            symbols_map.insert(url, symbols);
+            let uri = utils::uri_from_file_path(&path).ok_or(IndexError)?;
+            symbols_map.insert(uri, symbols);
         }
     }
 
@@ -112,18 +114,17 @@ pub fn index_full(symbols_map: &DashMap<Url, Vec<DocumentSymbol>>) -> Result<(),
     Ok(())
 }
 
-pub fn index_update(symbols_map: &DashMap<Url, Vec<DocumentSymbol>>, url: &Url, text: &str) {
+pub fn index_update(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>, uri: &Uri, text: &str) {
+    let path = uri.to_file_path();
+
     let start = std::time::Instant::now();
-    let Ok(path) = url.to_file_path() else {
-        log::error!("failed to get file path for {url}");
-        return;
-    };
+    let symbols = index(text);
     log::info!(
         "update index for {path:?} in {} ms",
         start.elapsed().as_millis()
     );
-    let symbols = index(text);
-    symbols_map.insert(url.clone(), symbols);
+
+    symbols_map.insert(uri.clone(), symbols);
 }
 
 pub fn index_file(path: impl AsRef<Path>) -> Vec<DocumentSymbol> {
@@ -217,8 +218,8 @@ fn index(text: &str) -> Vec<DocumentSymbol> {
 
 // DIAGNOSTICS
 
-pub async fn compute_diagnostics(uri: Url, _: &Rope) {
-    log::debug!("compute diagnostics for {uri}");
+pub async fn compute_diagnostics(uri: Uri, _: &Rope) {
+    log::debug!("compute diagnostics for {uri:?}");
     // let newlines = regex!(r#"\n"#);
     // let newline_positions = newlines
     //     .captures_iter(&rope)
@@ -328,10 +329,9 @@ pub fn parse_function(function: &Node, rope: &Rope) -> (Vec<DocumentSymbol>, Opt
 mod test {
     use {
         super::{get_document_symbols_ng, index},
-        crate::tree,
+        crate::{lsp_types::SymbolKind, tree},
         indoc::indoc,
         ropey::Rope,
-        tower_lsp::lsp_types::SymbolKind,
     };
 
     #[test]
