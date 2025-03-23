@@ -161,10 +161,6 @@ pub fn index(text: &str) -> Vec<DocumentSymbol> {
             Position::new(line as u32, (token_start - line_start) as u32),
             Position::new(line as u32, (name.end() - line_start) as u32),
         );
-        dbg!(token_start);
-        dbg!(line_start);
-        dbg!(name.end());
-        // dbg!(range);
 
         #[allow(deprecated)]
         DocumentSymbol {
