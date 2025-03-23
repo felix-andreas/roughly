@@ -233,7 +233,7 @@ pub fn uri_from_file_path(path: &Path) -> Option<Uri> {
 #[cfg(not(windows))]
 pub use std::fs::canonicalize as strict_canonicalize;
 
-/// On Windows, rewrites the wide path prefix `\\?\C:` to `C:`  
+/// On Windows, rewrites the wide path prefix `\\?\C:` to `C:`
 /// Source: https://stackoverflow.com/a/70970317
 #[inline]
 #[cfg(windows)]

@@ -18,6 +18,9 @@ use {
     tree_sitter::{InputEdit, Point, Tree},
 };
 
+// TODO: test if this fixes sync issues
+// #[tokio::main(flavor = "current_thread")]
+#[tokio::main]
 pub async fn run(experimental: bool) {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
@@ -84,7 +87,7 @@ impl LanguageServer for Backend {
                         open_close: Some(true),
                         change: Some(TextDocumentSyncKind::INCREMENTAL),
                         save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
-                            include_text: Some(true),
+                            include_text: Some(false),
                         })),
                         ..Default::default()
                     },
@@ -238,13 +241,13 @@ impl LanguageServer for Backend {
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         log::debug!("did save {}", params.text_document.uri.path());
 
-        index::index_update(
-            &self.symbols_map,
-            &params.text_document.uri,
-            &params.text.unwrap(),
-        );
-
         if let Some(document) = self.document_map.get(&params.text_document.uri) {
+            index::index_update(
+                &self.symbols_map,
+                &params.text_document.uri,
+                &document.rope.to_string(),
+            );
+
             let diagnostics = diagnostics::analyze_full(
                 document.tree.root_node(),
                 &document.rope,

@@ -4,13 +4,17 @@ use {
         dev,
         diagnostics::{self},
         format::{self, LineEnding},
-        lsp_types::DiagnosticSeverity,
+        index,
+        lsp_types::{self, DiagnosticSeverity},
         tree, utils,
     },
     console::style,
     ignore::Walk,
     ropey::Rope,
-    std::path::{Path, PathBuf},
+    std::{
+        path::{Path, PathBuf},
+        time::Duration,
+    },
 };
 
 //
@@ -26,11 +30,11 @@ pub enum LogLevel {
 
 pub fn log(level: LogLevel, message: &str) {
     eprintln!(
-        "{} {}",
+        "{}{}",
         match level {
             LogLevel::Info => style(""),
-            LogLevel::Warn => style("warning:").yellow().bold(),
-            LogLevel::Error => style("error:").red().bold(),
+            LogLevel::Warn => style("warning: ").yellow().bold(),
+            LogLevel::Error => style("error: ").red().bold(),
         },
         style(message).bold(),
     );
@@ -337,5 +341,98 @@ pub fn print_tree(path: &Path) -> Result<(), DebugError> {
     };
     let tree = tree::parse(&text, None);
     eprintln!("{}", dev::format_tree(tree.root_node()));
+    Ok(())
+}
+
+pub fn index(paths: Option<&[PathBuf]>, print_items: bool) -> Result<(), DebugError> {
+    let root: Vec<PathBuf> = vec![".".into()];
+    let paths = paths.unwrap_or(&root);
+
+    let global_start = std::time::Instant::now();
+
+    let mut total_files = 0;
+    let mut total_symbols = 0;
+    let mut total_bytes = 0;
+    let mut total_time = Duration::new(0, 0);
+
+    for path in paths {
+        for path in Walk::new(path)
+            .filter_map(|entry| match entry {
+                Ok(entry) => {
+                    let path = entry.into_path();
+                    path.extension()
+                        .is_some_and(|ext| ext == "R" || ext == "r")
+                        .then_some(Ok(path))
+                }
+                Err(err) => {
+                    error(&err.to_string());
+                    Some(Err(DebugError))
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?
+        {
+            let text = std::fs::read_to_string(&path).map_err(|err| {
+                error(&format!("failed to index: {}", path.display()));
+                eprintln!("{err}");
+                DebugError
+            })?;
+
+            // Only time the indexing operation, not the I/O
+            let start = std::time::Instant::now();
+            let symbols = index::index(&text);
+            let elapsed = start.elapsed();
+
+            total_bytes += text.len();
+            total_files += 1;
+            total_symbols += symbols.len();
+            total_time += elapsed;
+
+            eprintln!(
+                "{} ({}, {} ms, {}/s)",
+                style(path.display().to_string()).bold().blue(),
+                utils::human_bytes(text.len() as f64),
+                elapsed.as_millis(),
+                utils::human_bytes(text.len() as f64 / elapsed.as_secs_f64()),
+            );
+
+            if print_items {
+                for symbol in &symbols {
+                    eprintln!(
+                        "    {:04}:{:03} {} ({})",
+                        symbol.range.start.line,
+                        symbol.range.start.character,
+                        style(&symbol.name).bold(),
+                        style(match symbol.kind {
+                            lsp_types::SymbolKind::FUNCTION => "function",
+                            lsp_types::SymbolKind::CLASS => "class",
+                            lsp_types::SymbolKind::INTERFACE => "generic",
+                            lsp_types::SymbolKind::METHOD => "method",
+                            lsp_types::SymbolKind::VARIABLE => "variable",
+                            _ => "other",
+                        })
+                        .italic()
+                    );
+                }
+                eprintln!();
+            }
+        }
+    }
+
+    if total_files == 0 {
+        warn("No R files found under the given path(s)");
+        return Err(DebugError);
+    }
+
+    let global_elapsed = global_start.elapsed();
+
+    info(&format!(
+        "Indexed {} symbols from {} files in {} ms ({} ms including I/O) ({}/s)",
+        total_symbols,
+        total_files,
+        total_time.as_millis(),
+        global_elapsed.as_millis(),
+        utils::human_bytes(total_bytes as f64 / global_elapsed.as_secs_f64())
+    ));
+
     Ok(())
 }

@@ -7,15 +7,13 @@ use {
     std::{path::PathBuf, process::ExitCode},
 };
 
-// Only use tokio for lsp
-#[tokio::main]
-async fn main() -> ExitCode {
+fn main() -> ExitCode {
     env_logger::init();
 
     let cli = Cli::parse();
     match cli.command {
         None => {
-            lsp::run(cli.experimental).await;
+            lsp::run(cli.experimental);
             ExitCode::SUCCESS
         }
         Some(command) => match command {
@@ -28,11 +26,18 @@ async fn main() -> ExitCode {
                 Err(FmtError) => ExitCode::FAILURE,
             },
             Command::Lsp { stdio: _stdio } => {
-                lsp::run(cli.experimental).await;
+                lsp::run(cli.experimental);
                 ExitCode::SUCCESS
             }
             Command::Debug(dev) => match dev {
                 Debug::PrintTree { path } => match cli::print_tree(&path) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(DebugError) => ExitCode::FAILURE,
+                },
+                Debug::Index {
+                    paths: files,
+                    show_items: all,
+                } => match cli::index(files.as_deref(), all) {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(DebugError) => ExitCode::FAILURE,
                 },
@@ -89,4 +94,12 @@ enum Command {
 enum Debug {
     /// Print the syntax tree for the given file
     PrintTree { path: PathBuf },
+    /// Index the given files or directories
+    Index {
+        /// R files to index
+        paths: Option<Vec<PathBuf>>,
+        /// Show indexed items
+        #[clap(long, default_value_t = false)]
+        show_items: bool,
+    },
 }
