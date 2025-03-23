@@ -150,11 +150,21 @@ pub fn index(text: &str) -> Vec<DocumentSymbol> {
         let name = captures.get(1).unwrap();
         let kind = captures.get(2).unwrap();
         let token_start = name.start();
-        let line = newline_positions.partition_point(|&x| token_start > x) as u32;
+        let line = newline_positions.partition_point(|&x| token_start > x);
+        let line_start = if line == 0 {
+            0
+        } else {
+            newline_positions[line - 1] + 1
+        };
+
         let range = Range::new(
-            Position::new(line, token_start as u32),
-            Position::new(line, name.end() as u32),
+            Position::new(line as u32, (token_start - line_start) as u32),
+            Position::new(line as u32, (name.end() - line_start) as u32),
         );
+        dbg!(token_start);
+        dbg!(line_start);
+        dbg!(name.end());
+        // dbg!(range);
 
         #[allow(deprecated)]
         DocumentSymbol {
@@ -179,11 +189,18 @@ pub fn index(text: &str) -> Vec<DocumentSymbol> {
         let kind = captures.get(1).unwrap();
         let first = captures.get(2).unwrap();
         let second = captures.get(3);
+
         let token_start = kind.start();
-        let line = newline_positions.partition_point(|&x| token_start > x) as u32;
+        let line = newline_positions.partition_point(|&x| token_start > x);
+        let line_start = if line == 0 {
+            0
+        } else {
+            newline_positions[line - 1] + 1
+        };
+
         let range = Range::new(
-            Position::new(line, kind.start() as u32),
-            Position::new(line, kind.end() as u32),
+            Position::new(line as u32, (kind.start() - line_start) as u32),
+            Position::new(line as u32, (kind.end() - line_start) as u32),
         );
 
         let (name, kind) = match kind.as_str() {
