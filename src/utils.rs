@@ -194,7 +194,7 @@ impl UriExt for tower_lsp_server::lsp_types::Uri {
                 // in which case the path will include a leading slash we need to remove
                 let host = path.to_string_lossy();
                 let host = &host[1..];
-                return Some(Cow::Owned(PathBuf::from(host)));
+                return Cow::Owned(PathBuf::from(host));
             }
 
             let host = format!("{host}:");
@@ -213,7 +213,14 @@ impl UriExt for tower_lsp_server::lsp_types::Uri {
 
 pub fn uri_from_file_path(path: &Path) -> Option<Uri> {
     let fragment = if !path.is_absolute() {
-        Cow::from(strict_canonicalize(path).ok()?)
+        #[cfg(not(windows))]
+        {
+            Cow::from(strict_canonicalize(path).ok()?)
+        }
+        #[cfg(windows)]
+        {
+            Cow::from(strict_canonicalize(path)?)
+        }
     } else {
         Cow::from(path)
     };
@@ -237,29 +244,26 @@ pub use std::fs::canonicalize as strict_canonicalize;
 /// Source: https://stackoverflow.com/a/70970317
 #[inline]
 #[cfg(windows)]
-pub fn strict_canonicalize<P: AsRef<Path>>(path: P) -> anyhow::Result<PathBuf> {
-    use anyhow::Context;
-
-    fn impl_(path: PathBuf) -> anyhow::Result<PathBuf> {
-        let head = path.components().next().context("empty path")?;
+pub fn strict_canonicalize<P: AsRef<Path>>(path: P) -> Option<PathBuf> {
+    fn impl_(path: PathBuf) -> Option<PathBuf> {
+        let head = path.components().next()?;
         let disk_;
         let head = if let std::path::Component::Prefix(prefix) = head {
             if let std::path::Prefix::VerbatimDisk(disk) = prefix.kind() {
                 disk_ = format!("{}:", disk as char);
-                Path::new(&disk_)
-                    .components()
-                    .next()
-                    .context("failed to parse disk component")?
+                Path::new(&disk_).components().next()?
             } else {
                 head
             }
         } else {
             head
         };
-        Ok(std::iter::once(head)
-            .chain(path.components().skip(1))
-            .collect())
+        Some(
+            std::iter::once(head)
+                .chain(path.components().skip(1))
+                .collect(),
+        )
     }
-    let canon = std::fs::canonicalize(path)?;
+    let canon = std::fs::canonicalize(path).ok()?;
     impl_(canon)
 }

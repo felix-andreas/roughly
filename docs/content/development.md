@@ -178,3 +178,7 @@ See https://github.com/r-lib/tree-sitter-r/issues/166
   * https://github.com/jfecher/ante/blob/5f7446375bc1c6c94b44a44bfb89777c1437aaf5/ante-ls/src/main.rs#L163
 * lsp-server
   * https://github.com/gleam-lang/gleam/tree/main/compiler-core/src/language_server
+
+### Formatting
+
+* https://homepages.inf.ed.ac.uk/wadler/papers/prettier/prettier.pdf
