@@ -140,6 +140,13 @@ impl LanguageServer for Backend {
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         log::debug!("did change {}", params.text_document.uri.path());
+        let start = std::time::Instant::now();
+
+        // let random_duration = 200 + rand::random::<u64>() % 401;
+        // tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        // let random_duration = 200 + rand::random::<u64>() % 401;
+        // std::thread::sleep(std::time::Duration::from_millis(500));
+
         self.document_map
             .alter(&params.text_document.uri, |_, mut document| {
                 for change in params.content_changes {
@@ -209,7 +216,7 @@ impl LanguageServer for Backend {
                 }
 
                 // DEBUG
-                // eprintln!("<--DOCUMENT-->\n{}<--END-->", document.rope.to_string());
+                // eprintln!("<--DOCUMENT-->\n{}<--END-->", document.rope);
                 // eprintln!("{}", utils::format_node(document.tree.root_node()));
                 // if let Ok(code) = format::format(document.tree.root_node(), &document.rope) {
                 //     eprintln!("<--DOCUMENT-->\n{}<--END-->", code);
@@ -231,7 +238,12 @@ impl LanguageServer for Backend {
                     Some(params.text_document.version),
                 )
                 .await;
+        } else {
+            log::info!("did change: failed to acquire symbols map");
         };
+
+        let elapsed = start.elapsed();
+        log::debug!("did change in {} ms", elapsed.as_millis());
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -257,6 +269,8 @@ impl LanguageServer for Backend {
             self.client
                 .publish_diagnostics(params.text_document.uri.clone(), diagnostics, None)
                 .await;
+        } else {
+            log::info!("did change: failed to acquire symbols map");
         };
     }
 
