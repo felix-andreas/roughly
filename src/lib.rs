@@ -1,6 +1,7 @@
 #![feature(let_chains)]
 
 pub mod cli;
+pub mod completions;
 pub mod config;
 pub mod dev;
 pub mod diagnostics;
