@@ -18,7 +18,7 @@ use {
         client_monitor::ClientProcessMonitorLayer,
         concurrency::ConcurrencyLayer,
         lsp_types::{
-            CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+            CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
             DidCloseTextDocumentParams, DidSaveTextDocumentParams, DocumentFormattingParams,
             DocumentSymbolParams, DocumentSymbolResponse, Position, Range, TextEdit,
             WorkspaceSymbolParams, WorkspaceSymbolResponse,
@@ -83,7 +83,7 @@ pub async fn run(experimental: bool) {
         tokio_util::compat::TokioAsyncWriteCompatExt::compat_write(tokio::io::stdout()),
     );
 
-    tracing::info!("starting server ...");
+    tracing::info!("starting server using async-lsp ...");
     server.run_buffered(stdin, stdout).await.unwrap();
 }
 
@@ -139,12 +139,12 @@ impl LanguageServer for ServerState {
             Ok(InitializeResult {
                 capabilities: ServerCapabilities {
                     hover_provider: Some(HoverProviderCapability::Simple(true)), // todo: remove
-                    // completion_provider: Some(CompletionOptions {
-                    //     trigger_characters: Some(vec!["$".into(), "@".into()]),
-                    //     ..Default::default()
-                    // }),
+                    completion_provider: Some(CompletionOptions {
+                        trigger_characters: Some(vec!["$".into(), "@".into()]),
+                        ..Default::default()
+                    }),
                     document_formatting_provider: Some(OneOf::Left(true)),
-                    // document_symbol_provider: Some(OneOf::Left(true)),
+                    document_symbol_provider: Some(OneOf::Left(true)),
                     text_document_sync: Some(TextDocumentSyncCapability::Options(
                         TextDocumentSyncOptions {
                             open_close: Some(true),
@@ -155,7 +155,7 @@ impl LanguageServer for ServerState {
                             ..Default::default()
                         },
                     )),
-                    // workspace_symbol_provider: Some(OneOf::Left(true)),
+                    workspace_symbol_provider: Some(OneOf::Left(true)),
                     ..Default::default()
                 },
                 server_info: Some(ServerInfo {

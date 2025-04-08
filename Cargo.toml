@@ -37,6 +37,9 @@ tower = { version = "0.5.2", optional = true }
 async-lsp = { version = "0.2.2", features = ["tokio"], optional = true }
 tracing-tree = "0.4.0"
 
+[target.'cfg(not(unix))'.dependencies]
+tokio-util = { version = "0.7.14", features = ["compat"] }
+
 [dev-dependencies]
 insta = "1"
 
