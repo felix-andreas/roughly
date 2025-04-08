@@ -6,12 +6,10 @@ use {
         format::{self, LineEnding},
         index,
         lsp_types::{
-            CompletionOptions, DidChangeConfigurationParams, DidOpenTextDocumentParams,
-            DocumentSymbol, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
-            HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, MarkedString,
-            MessageType, OneOf, PublishDiagnosticsParams, SaveOptions, ServerCapabilities,
-            ServerInfo, ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind,
-            TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Url,
+            DidOpenTextDocumentParams, DocumentSymbol, HoverProviderCapability, InitializeParams,
+            InitializeResult, OneOf, PublishDiagnosticsParams, SaveOptions, ServerCapabilities,
+            ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+            TextDocumentSyncSaveOptions, Url,
         },
         tree,
     },
@@ -22,11 +20,8 @@ use {
         lsp_types::{
             CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
             DidCloseTextDocumentParams, DidSaveTextDocumentParams, DocumentFormattingParams,
-            DocumentSymbolParams, DocumentSymbolResponse, Position, Range, SymbolInformation,
-            TextEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
-            request::{
-                Completion, DocumentSymbolRequest, Formatting, Request, WorkspaceSymbolRequest,
-            },
+            DocumentSymbolParams, DocumentSymbolResponse, Position, Range, TextEdit,
+            WorkspaceSymbolParams, WorkspaceSymbolResponse,
         },
         panic::CatchUnwindLayer,
         router::Router,
@@ -36,7 +31,7 @@ use {
     dashmap::DashMap,
     futures::future::BoxFuture,
     ropey::Rope,
-    std::{ops::ControlFlow, path::Path, time::Duration},
+    std::{ops::ControlFlow, path::Path},
     tower::ServiceBuilder,
     tree_sitter::{InputEdit, Point, Tree},
 };
@@ -89,6 +84,7 @@ struct ServerState {
     counter: i32,
     config: Config,
     experimental: bool,
+    // TODO: propbably don't need dashmap here with async-lsp ...
     symbols_map: DashMap<Url, Vec<DocumentSymbol>>,
     document_map: DashMap<Url, Document>,
 }
@@ -137,7 +133,7 @@ impl LanguageServer for ServerState {
 
     fn initialize(
         &mut self,
-        params: InitializeParams,
+        _: InitializeParams,
     ) -> BoxFuture<'static, Result<InitializeResult, ResponseError>> {
         Box::pin(async move {
             Ok(InitializeResult {
