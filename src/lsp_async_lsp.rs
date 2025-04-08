@@ -6,27 +6,20 @@ use {
         format::{self, LineEnding},
         index,
         lsp_types::{
-            DidOpenTextDocumentParams, DocumentSymbol, HoverProviderCapability, InitializeParams,
-            InitializeResult, OneOf, PublishDiagnosticsParams, SaveOptions, ServerCapabilities,
-            ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-            TextDocumentSyncSaveOptions, Url,
+            CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+            DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+            DocumentFormattingParams, DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse,
+            InitializeParams, InitializeResult, OneOf, Position, PublishDiagnosticsParams, Range,
+            SaveOptions, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
+            TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
+            Url, WorkspaceSymbolParams, WorkspaceSymbolResponse,
         },
         tree,
     },
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
-        client_monitor::ClientProcessMonitorLayer,
-        concurrency::ConcurrencyLayer,
-        lsp_types::{
-            CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
-            DidCloseTextDocumentParams, DidSaveTextDocumentParams, DocumentFormattingParams,
-            DocumentSymbolParams, DocumentSymbolResponse, Position, Range, TextEdit,
-            WorkspaceSymbolParams, WorkspaceSymbolResponse,
-        },
-        panic::CatchUnwindLayer,
-        router::Router,
-        server::LifecycleLayer,
-        tracing::TracingLayer,
+        client_monitor::ClientProcessMonitorLayer, concurrency::ConcurrencyLayer,
+        panic::CatchUnwindLayer, router::Router, server::LifecycleLayer, tracing::TracingLayer,
     },
     dashmap::DashMap,
     futures::future::BoxFuture,
@@ -138,7 +131,6 @@ impl LanguageServer for ServerState {
         Box::pin(async move {
             Ok(InitializeResult {
                 capabilities: ServerCapabilities {
-                    hover_provider: Some(HoverProviderCapability::Simple(true)), // todo: remove
                     completion_provider: Some(CompletionOptions {
                         trigger_characters: Some(vec!["$".into(), "@".into()]),
                         ..Default::default()
