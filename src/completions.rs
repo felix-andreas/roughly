@@ -1,24 +1,24 @@
+#[cfg(feature = "async-lsp")]
+use crate::lsp_types::Url as Uri;
 use {
     crate::{
         index,
-        lsp::Document,
         lsp_types::{
             CompletionItem, CompletionItemKind, CompletionResponse, DocumentSymbol, Position,
-            SymbolKind, Uri,
+            SymbolKind,
         },
     },
     dashmap::DashMap,
+    ropey::Rope,
 };
 
 pub fn get(
-    uri: Uri,
     position: Position,
-    document_map: &DashMap<Uri, Document>,
+    rope: &Rope,
     symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>,
 ) -> Option<CompletionResponse> {
     // todo: proper error handling. make ropey, dashmap -> JSONRpc error
 
-    let rope = &document_map.get(&uri)?.rope;
     let line = rope.get_line(position.line as usize)?;
     let mut query = String::new();
     for (i, char) in line.chars().enumerate() {

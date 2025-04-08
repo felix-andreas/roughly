@@ -1,8 +1,9 @@
+#[cfg(feature = "async-lsp")]
+use crate::lsp_types::Url as Uri;
+#[cfg(feature = "tower-lsp")]
+use uri_ext::UriExt;
 use {
-    crate::{
-        lsp_types::*,
-        utils::{self, UriExt},
-    },
+    crate::{lsp_types::*, utils},
     dashmap::DashMap,
     ropey::Rope,
     std::path::Path,
@@ -102,7 +103,10 @@ pub fn index_full(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>) -> Result<(),
 
             let symbols = index_file(&path);
             n += symbols.len();
-            let uri = utils::uri_from_file_path(&path).ok_or(IndexError)?;
+            let uri = Uri::from_file_path(&path).map_err(|_| {
+                tracing::error!(?path, "Failed to convert path to URI");
+                IndexError
+            })?;
             symbols_map.insert(uri, symbols);
         }
     }
@@ -128,10 +132,10 @@ pub fn index_update(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>, uri: &Uri, 
 }
 
 pub fn index_update_file(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>, uri: &Uri) {
-    let path = uri.to_file_path();
+    let path = uri.to_file_path().unwrap();
 
     let Ok(text) = std::fs::read_to_string(&path) else {
-        tracing::info!("indexing: couldn't read file: '{:?}'!", path.as_ref());
+        tracing::info!(message = "indexing: couldn't read file", path = %path.display());
         return;
     };
 
@@ -141,7 +145,7 @@ pub fn index_update_file(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>, uri: &
 
 pub fn index_file(path: impl AsRef<Path>) -> Vec<DocumentSymbol> {
     let Ok(text) = std::fs::read_to_string(&path) else {
-        tracing::info!("indexing: couldn't read file: '{:?}'!", path.as_ref());
+        tracing::info!( message = "indexing: couldn't read file", path = %path.as_ref().display());
         return vec![];
     };
     index(&text)

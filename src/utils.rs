@@ -1,12 +1,6 @@
 use {
     crate::lsp_types::{Position, Range},
     ropey::Rope,
-    std::{
-        borrow::Cow,
-        path::{Path, PathBuf},
-        str::FromStr,
-    },
-    tower_lsp_server::lsp_types::Uri,
 };
 
 pub fn position_to_index(position: Position, rope: &Rope) -> Result<usize, ropey::Error> {
@@ -169,101 +163,4 @@ pub fn print_diff(old: &str, new: &str) {
             }
         }
     }
-}
-
-// from https://github.com/Desdaemon/odoo-lsp/blob/9c03a1219f01a54bbdee76db4f012856cf72d90b/src/utils.rs#L486-L533
-// https://github.com/gluon-lang/lsp-types/issues/284#issuecomment-2147394262
-// https://github.com/tower-lsp-community/tower-lsp-server/issues/34
-pub trait UriExt {
-    fn to_file_path(&self) -> Cow<Path>;
-}
-
-impl UriExt for tower_lsp_server::lsp_types::Uri {
-    fn to_file_path(&self) -> Cow<Path> {
-        let path = match self.path().as_estr().decode().into_string_lossy() {
-            Cow::Borrowed(ref_) => Cow::Borrowed(Path::new(ref_)),
-            Cow::Owned(owned) => Cow::Owned(PathBuf::from(owned)),
-        };
-
-        #[cfg(windows)]
-        {
-            let authority = self.authority().expect("url has no authority component");
-            let host = authority.host().as_str();
-            if host.is_empty() {
-                // very high chance this is a `file:///` uri
-                // in which case the path will include a leading slash we need to remove
-                let host = path.to_string_lossy();
-                let host = &host[1..];
-                return Cow::Owned(PathBuf::from(host));
-            }
-
-            let host = format!("{host}:");
-            Cow::Owned(
-                Path::new(&host)
-                    .components()
-                    .chain(path.components())
-                    .collect(),
-            )
-        }
-
-        #[cfg(not(windows))]
-        path
-    }
-}
-
-pub fn uri_from_file_path(path: &Path) -> Option<Uri> {
-    let fragment = if !path.is_absolute() {
-        #[cfg(not(windows))]
-        {
-            Cow::from(strict_canonicalize(path).ok()?)
-        }
-        #[cfg(windows)]
-        {
-            Cow::from(strict_canonicalize(path)?)
-        }
-    } else {
-        Cow::from(path)
-    };
-
-    #[cfg(windows)]
-    {
-        // we want to parse a triple-slash path for Windows paths
-        // it's a shorthand for `file://localhost/C:/Windows` with the `localhost` omitted
-        let raw = format!("file:///{}", fragment.to_string_lossy().replace("\\", "/"));
-        Uri::from_str(&raw).ok()
-    }
-
-    #[cfg(not(windows))]
-    Uri::from_str(&format!("file://{}", fragment.to_string_lossy())).ok()
-}
-
-#[cfg(not(windows))]
-pub use std::fs::canonicalize as strict_canonicalize;
-
-/// On Windows, rewrites the wide path prefix `\\?\C:` to `C:`
-/// Source: https://stackoverflow.com/a/70970317
-#[inline]
-#[cfg(windows)]
-pub fn strict_canonicalize<P: AsRef<Path>>(path: P) -> Option<PathBuf> {
-    fn impl_(path: PathBuf) -> Option<PathBuf> {
-        let head = path.components().next()?;
-        let disk_;
-        let head = if let std::path::Component::Prefix(prefix) = head {
-            if let std::path::Prefix::VerbatimDisk(disk) = prefix.kind() {
-                disk_ = format!("{}:", disk as char);
-                Path::new(&disk_).components().next()?
-            } else {
-                head
-            }
-        } else {
-            head
-        };
-        Some(
-            std::iter::once(head)
-                .chain(path.components().skip(1))
-                .collect(),
-        )
-    }
-    let canon = std::fs::canonicalize(path).ok()?;
-    impl_(canon)
 }
