@@ -53,13 +53,21 @@ pub async fn run(experimental: bool) {
         //     }
         // });
 
+        let config = match Config::from_path(Path::new(".")) {
+            Ok(config) => config,
+            Err(err) => {
+                cli::error(&err.to_string());
+                panic!("fixme");
+            }
+        };
+
         ServiceBuilder::new()
             .layer(TracingLayer::default())
             .layer(LifecycleLayer::default())
             .layer(CatchUnwindLayer::default())
             .layer(ConcurrencyLayer::default())
             .layer(ClientProcessMonitorLayer::new(client.clone()))
-            .service(ServerState::new_router(client, experimental))
+            .service(ServerState::new_router(client, config, experimental))
     });
 
     // Prefer truly asynchronous piped stdin/stdout without blocking tasks.
@@ -98,16 +106,7 @@ pub struct Document {
 struct TickEvent;
 
 impl ServerState {
-    fn new_router(client: ClientSocket, experimental: bool) -> Router<Self> {
-        // TODO: move this outside
-        let config = match Config::from_path(Path::new(".")) {
-            Ok(config) => config,
-            Err(err) => {
-                cli::error(&err.to_string());
-                panic!("fixme");
-            }
-        };
-
+    fn new_router(client: ClientSocket, config: Config, experimental: bool) -> Router<Self> {
         let mut router = Router::from_language_server(Self {
             client,
             config,
@@ -123,6 +122,7 @@ impl ServerState {
     fn on_tick(&mut self, _: TickEvent) -> ControlFlow<async_lsp::Result<()>> {
         tracing::info!("tick");
         self.counter += 1;
+
         ControlFlow::Continue(())
     }
 }
@@ -313,6 +313,7 @@ impl LanguageServer for ServerState {
 
         let elapsed = start.elapsed();
         tracing::debug!(elapsed = elapsed.as_millis());
+
         ControlFlow::Continue(())
     }
 
@@ -321,6 +322,7 @@ impl LanguageServer for ServerState {
         params: DidCloseTextDocumentParams,
     ) -> ControlFlow<async_lsp::Result<()>> {
         self.document_map.remove(&params.text_document.uri);
+
         ControlFlow::Continue(())
     }
 
