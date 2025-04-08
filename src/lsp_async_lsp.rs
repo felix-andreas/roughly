@@ -4,7 +4,7 @@ use {
         config::Config,
         diagnostics,
         format::{self, LineEnding},
-        index,
+        index::{self, IndexError},
         lsp_types::{
             CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
             DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
@@ -18,8 +18,13 @@ use {
     },
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
-        client_monitor::ClientProcessMonitorLayer, concurrency::ConcurrencyLayer,
-        panic::CatchUnwindLayer, router::Router, server::LifecycleLayer, tracing::TracingLayer,
+        client_monitor::ClientProcessMonitorLayer,
+        concurrency::ConcurrencyLayer,
+        lsp_types::{MessageType, ShowMessageParams},
+        panic::CatchUnwindLayer,
+        router::Router,
+        server::LifecycleLayer,
+        tracing::TracingLayer,
     },
     dashmap::DashMap,
     futures::future::BoxFuture,
@@ -128,6 +133,15 @@ impl LanguageServer for ServerState {
         &mut self,
         _: InitializeParams,
     ) -> BoxFuture<'static, Result<InitializeResult, ResponseError>> {
+        if let Err(IndexError) = index::index_full(&self.symbols_map) {
+            self.client
+                .show_message(ShowMessageParams {
+                    typ: MessageType::ERROR,
+                    message: "Failed to index files".into(),
+                })
+                .unwrap();
+        }
+
         Box::pin(async move {
             Ok(InitializeResult {
                 capabilities: ServerCapabilities {
