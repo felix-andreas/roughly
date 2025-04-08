@@ -7,11 +7,9 @@ edition = "2024"
 clap = { version = "4", features = ["derive"] }
 console = "0.15.10"
 dashmap = "6.1.0"
-env_logger = "0.11.6"
 ignore = "0.4.23"
 indoc = "2.0.5"
 itertools = "0.14.0"
-log = "0.4.25"
 regex = "1.11.1"
 ropey = "1"
 serde = "1.0.218"
@@ -20,6 +18,8 @@ thiserror = "2.0.11"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 toml = "0.8.20"
 tower-lsp-server = { git = "https://github.com/tower-lsp-community/tower-lsp-server", rev = "a493bf8476b891d1338522c68d0495e55ac27a67" }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 tree-sitter = "0.25.1"
 tree-sitter-r = "1.1.0"
 # tree-sitter-r = { path = "../tree-sitter-r/" }

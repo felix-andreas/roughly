@@ -39,7 +39,7 @@ pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagn
             match unused::analyze(node, rope) {
                 Ok(diags) => diagnostics.extend(diags),
                 Err(error) => {
-                    log::warn!("error while diagnostics {error}");
+                    tracing::warn!("error while diagnostics {error}");
                 }
             }
         }

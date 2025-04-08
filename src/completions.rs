@@ -31,7 +31,7 @@ pub fn get(
             break;
         }
     }
-    log::debug!("completion query: {query}");
+    tracing::debug!("completion query: {query}");
 
     // TODO: consider passing Some(&uri) to avoid showing local symbols twice ...
     let workspace_symbols = index::get_workspace_symbols(&query, symbols_map, 1000, None);
@@ -59,7 +59,7 @@ pub fn get(
     //         .map(|node| index::symbols_for_block(&node, &document.rope))
     //         .unwrap_or_default()
     // } else {
-    //     log::error!("failed to aquirce document :/");
+    //     tracing::error!("failed to aquirce document :/");
     //     vec![]
     // };
 

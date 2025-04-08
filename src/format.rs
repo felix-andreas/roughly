@@ -101,7 +101,7 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
     };
 
     let elapsed = start.elapsed();
-    log::debug!(
+    tracing::debug!(
         "formatted {} lines in {} ms ({}/s)",
         rope.len_lines(),
         elapsed.as_millis(),
@@ -1101,7 +1101,7 @@ fn traverse(
         "return" => out.push_str("return"),
         "true" => out.push_str("TRUE"),
         unknown => {
-            log::error!(
+            tracing::error!(
                 "unknown node kind: {unknown}, is extra {:?}",
                 node.is_extra()
             );

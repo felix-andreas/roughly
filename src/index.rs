@@ -35,7 +35,7 @@ pub fn get_workspace_symbols(
         })
         .take(limit) // limit amount
         .collect();
-    log::info!("get workspace symbols {}", workspace_symbols.len());
+    tracing::info!("get workspace symbols {}", workspace_symbols.len());
     workspace_symbols
 }
 
@@ -44,7 +44,7 @@ pub fn get_document_symbols(
     symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>,
 ) -> Vec<SymbolInformation> {
     let Some(symbols) = symbols_map.get(uri) else {
-        log::info!("indexing: failed to acquire symbols map");
+        tracing::info!("indexing: failed to acquire symbols map");
         // todo: understand when this happens
         return vec![];
     };
@@ -107,7 +107,7 @@ pub fn index_full(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>) -> Result<(),
         }
     }
 
-    log::info!(
+    tracing::info!(
         "build new index ({n} symbols) in {} ms",
         start.elapsed().as_millis()
     );
@@ -119,7 +119,7 @@ pub fn index_update(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>, uri: &Uri, 
 
     let start = std::time::Instant::now();
     let symbols = index(text);
-    log::info!(
+    tracing::info!(
         "update index for {path:?} in {} ms",
         start.elapsed().as_millis()
     );
@@ -127,9 +127,21 @@ pub fn index_update(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>, uri: &Uri, 
     symbols_map.insert(uri.clone(), symbols);
 }
 
+pub fn index_update_file(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>, uri: &Uri) {
+    let path = uri.to_file_path();
+
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        tracing::info!("indexing: couldn't read file: '{:?}'!", path.as_ref());
+        return;
+    };
+
+    let symbols = index(&text);
+    symbols_map.insert(uri.clone(), symbols);
+}
+
 pub fn index_file(path: impl AsRef<Path>) -> Vec<DocumentSymbol> {
     let Ok(text) = std::fs::read_to_string(&path) else {
-        log::info!("indexing: couldn't read file: '{:?}'!", path.as_ref());
+        tracing::info!("indexing: couldn't read file: '{:?}'!", path.as_ref());
         return vec![];
     };
     index(&text)
@@ -231,7 +243,7 @@ pub fn index(text: &str) -> Vec<DocumentSymbol> {
 
 // LOCAL SYMBOLS
 pub fn get_document_symbols_ng(tree: &Tree, rope: &Rope) -> Vec<DocumentSymbol> {
-    log::info!("parse symbols tree");
+    tracing::info!("parse symbols tree");
     let root = tree.root_node();
 
     symbols_for_block(&root, rope)

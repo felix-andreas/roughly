@@ -41,8 +41,8 @@ pub async fn run(experimental: bool) {
         document_map: DashMap::new(),
     });
 
-    log::info!("starting language server ... listing for stdin");
-    log::info!("for more info run 'roughly --help'");
+    tracing::info!("starting language server ... listing for stdin");
+    tracing::info!("for more info run 'roughly --help'");
     Server::new(stdin, stdout, socket).serve(service).await
 }
 
@@ -67,7 +67,7 @@ impl LanguageServer for Backend {
     //
 
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
-        log::info!("server :: initialize");
+        tracing::info!("server :: initialize");
         if let Err(IndexError) = index::index_full(&self.symbols_map) {
             self.client
                 .show_message(MessageType::ERROR, "failed to index files")
@@ -103,11 +103,11 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        log::info!("initialized")
+        tracing::info!("initialized")
     }
 
     async fn shutdown(&self) -> Result<()> {
-        log::debug!("bye bye");
+        tracing::debug!("bye bye");
         Ok(())
     }
 
@@ -116,7 +116,7 @@ impl LanguageServer for Backend {
     //
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        log::debug!("did open {}", params.text_document.uri.path());
+        tracing::debug!("did open {}", params.text_document.uri.path());
         let rope = Rope::from_str(&params.text_document.text);
         let tree = tree::parse(&params.text_document.text, None);
 
@@ -139,7 +139,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        log::debug!("did change {}", params.text_document.uri.path());
+        tracing::debug!("did change {}", params.text_document.uri.path());
         let start = std::time::Instant::now();
 
         // let random_duration = 200 + rand::random::<u64>() % 401;
@@ -151,7 +151,7 @@ impl LanguageServer for Backend {
             .alter(&params.text_document.uri, |_, mut document| {
                 for change in params.content_changes {
                     let Some(range) = change.range else {
-                        log::warn!("unexpected case #2141 - check");
+                        tracing::warn!("unexpected case #2141 - check");
                         continue;
                     };
                     // DEBUG
@@ -239,11 +239,11 @@ impl LanguageServer for Backend {
                 )
                 .await;
         } else {
-            log::info!("did change: failed to acquire symbols map");
+            tracing::info!("did change: failed to acquire symbols map");
         };
 
         let elapsed = start.elapsed();
-        log::debug!("did change in {} ms", elapsed.as_millis());
+        tracing::debug!("did change in {} ms", elapsed.as_millis());
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -251,7 +251,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
-        log::debug!("did save {}", params.text_document.uri.path());
+        tracing::debug!("did save {}", params.text_document.uri.path());
 
         if let Some(document) = self.document_map.get(&params.text_document.uri) {
             index::index_update(
@@ -270,7 +270,7 @@ impl LanguageServer for Backend {
                 .publish_diagnostics(params.text_document.uri.clone(), diagnostics, None)
                 .await;
         } else {
-            log::info!("did change: failed to acquire symbols map");
+            tracing::info!("did change: failed to acquire symbols map");
         };
     }
 
@@ -280,7 +280,7 @@ impl LanguageServer for Backend {
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
-        log::debug!("Request completion items for: {uri:?}");
+        tracing::debug!("Request completion items for: {uri:?}");
         let position = params.text_document_position.position;
         Ok(completions::get(
             uri,
@@ -295,10 +295,10 @@ impl LanguageServer for Backend {
     //
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
-        log::debug!("format file {}", params.text_document.uri.path());
+        tracing::debug!("format file {}", params.text_document.uri.path());
 
         let Some(document) = self.document_map.get(&params.text_document.uri) else {
-            log::info!("formatting: failed to acquire symbols map");
+            tracing::info!("formatting: failed to acquire symbols map");
             // todo: understand when this happens
             return Err(Error::internal_error());
         };
@@ -309,7 +309,7 @@ impl LanguageServer for Backend {
         }) {
             Ok(new) => new,
             Err(error) => {
-                log::error!("formatting: {}", error);
+                tracing::error!("formatting: {}", error);
                 return Ok(None);
             }
         };
@@ -340,7 +340,7 @@ impl LanguageServer for Backend {
         )))
         // Ok(Some(DocumentSymbolResponse::Nested({
         //     let Some(document) = self.document_map.get(&params.text_document.uri) else {
-        //         log::error!("failed to aquirce document :/");
+        //         tracing::error!("failed to aquirce document :/");
         //         return Ok(None);
         //     };
         //     index::get_document_symbols_ng(&document.tree, &document.rope)

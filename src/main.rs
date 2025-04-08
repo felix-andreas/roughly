@@ -8,7 +8,11 @@ use {
 };
 
 fn main() -> ExitCode {
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_ansi(false)
+        .with_writer(std::io::stderr)
+        .init();
 
     let cli = Cli::parse();
     match cli.command {
