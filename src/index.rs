@@ -104,9 +104,10 @@ pub fn index_full(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>) -> Result<(),
             let symbols = index_file(&path);
             n += symbols.len();
             let uri = Uri::from_file_path(&path).map_err(|_| {
-                tracing::error!(?path, "Failed to convert path to URI");
+                tracing::error!(?path, "failed to convert path to uri");
                 IndexError
             })?;
+            dbg!(&uri);
             symbols_map.insert(uri, symbols);
         }
     }
