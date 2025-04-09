@@ -29,7 +29,7 @@ use {
     dashmap::DashMap,
     futures::future::BoxFuture,
     ropey::Rope,
-    std::{ops::ControlFlow, path::Path},
+    std::{ops::ControlFlow, path::Path, time::Instant},
     tower::ServiceBuilder,
     tree_sitter::{InputEdit, Point, Tree},
 };
@@ -180,7 +180,10 @@ impl LanguageServer for ServerState {
         &mut self,
         params: DidOpenTextDocumentParams,
     ) -> ControlFlow<async_lsp::Result<()>> {
-        tracing::debug!("did open {}", params.text_document.uri.path());
+        let uri = params.text_document.uri;
+
+        tracing::debug!(?uri, "did open");
+
         let rope = Rope::from_str(&params.text_document.text);
         let tree = tree::parse(&params.text_document.text, None);
 
@@ -191,17 +194,17 @@ impl LanguageServer for ServerState {
         );
 
         self.document_map
-            .insert(params.text_document.uri.clone(), Document { rope, tree });
+            .insert(uri.clone(), Document { rope, tree });
 
         if let Err(error) = self
             .client
             .publish_diagnostics(PublishDiagnosticsParams::new(
-                params.text_document.uri.clone(),
+                uri.clone(),
                 diagnostics,
                 Some(params.text_document.version),
             ))
         {
-            tracing::error!(?error, "Failed to publish diagnostics");
+            tracing::error!(?error, "failed to publish diagnostics");
         }
 
         ControlFlow::Continue(())
@@ -211,92 +214,94 @@ impl LanguageServer for ServerState {
         &mut self,
         params: DidChangeTextDocumentParams,
     ) -> ControlFlow<async_lsp::Result<()>> {
-        tracing::debug!(path = params.text_document.uri.path());
-        let start = std::time::Instant::now();
+        let uri = params.text_document.uri;
+        let content_changes = params.content_changes;
+
+        tracing::debug!(?uri, "did change");
+
+        let start = Instant::now();
 
         // let random_duration = 200 + rand::random::<u64>() % 401;
         // tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         // let random_duration = 200 + rand::random::<u64>() % 401;
         // std::thread::sleep(std::time::Duration::from_millis(500));
 
-        self.document_map
-            .alter(&params.text_document.uri, |_, mut document| {
-                for change in params.content_changes {
-                    let Some(range) = change.range else {
-                        tracing::warn!("unexpected case #2141 - check");
-                        continue;
-                    };
-                    // DEBUG
-                    // eprintln!(
-                    //     "{}:{}, {}:{} - {}",
-                    //     range.start.line,
-                    //     range.start.character,
-                    //     range.end.line,
-                    //     range.end.character,
-                    //     change.text
-                    // );
-
-                    let (rope, tree) = (&mut document.rope, &mut document.tree);
-
-                    let start = rope.line_to_char(range.start.line as usize)
-                        + range.start.character as usize;
-
-                    let end =
-                        rope.line_to_char(range.end.line as usize) + range.end.character as usize;
-
-                    let old_end_byte = rope.try_char_to_byte(end).unwrap();
-
-                    rope.remove(start..end);
-                    rope.insert(start, &change.text);
-
-                    let new_end_char = start + change.text.len();
-                    let new_end_byte = rope.try_char_to_byte(new_end_char).unwrap();
-
-                    let new_end_line = rope.char_to_line(start + change.text.len());
-
-                    tree.edit(&InputEdit {
-                        start_byte: rope.try_char_to_byte(start).unwrap(),
-                        old_end_byte,
-                        new_end_byte,
-                        start_position: Point {
-                            row: range.start.line as usize,
-                            column: range.start.character as usize,
-                        },
-                        old_end_position: Point {
-                            row: range.end.line as usize,
-                            column: range.end.character as usize,
-                        },
-                        new_end_position: Point {
-                            row: new_end_line,
-                            column: new_end_char - rope.line_to_char(new_end_line),
-                        },
-                    });
-
-                    // todo: use Parser::parse_with_options
-                    // let mut parser = tree_sitter::Parser::new();
-                    // let language = tree_sitter_r::LANGUAGE;
-                    // parser
-                    //     .set_language(&language.into())
-                    //     .expect("Error loading R parser");
-
-                    // parser.parse_with_options(
-                    //     &mut |i, point| rope.byte_slice(i..).bytes(),
-                    //     Some(&document.tree),
-                    //     None,
-                    // );
-                    document.tree = tree::parse(document.rope.to_string(), Some(&document.tree));
-                }
-
+        self.document_map.alter(&uri, |_, mut document| {
+            for change in content_changes {
+                let Some(range) = change.range else {
+                    tracing::warn!("unexpected case #2141 - check");
+                    continue;
+                };
                 // DEBUG
-                // eprintln!("<--DOCUMENT-->\n{}<--END-->", document.rope);
-                // eprintln!("{}", utils::format_node(document.tree.root_node()));
-                // if let Ok(code) = format::format(document.tree.root_node(), &document.rope) {
-                //     eprintln!("<--DOCUMENT-->\n{}<--END-->", code);
-                // }
-                document
-            });
+                // eprintln!(
+                //     "{}:{}, {}:{} - {}",
+                //     range.start.line,
+                //     range.start.character,
+                //     range.end.line,
+                //     range.end.character,
+                //     change.text
+                // );
 
-        if let Some(document) = self.document_map.get(&params.text_document.uri) {
+                let (rope, tree) = (&mut document.rope, &mut document.tree);
+
+                let start =
+                    rope.line_to_char(range.start.line as usize) + range.start.character as usize;
+
+                let end = rope.line_to_char(range.end.line as usize) + range.end.character as usize;
+
+                let old_end_byte = rope.try_char_to_byte(end).unwrap();
+
+                rope.remove(start..end);
+                rope.insert(start, &change.text);
+
+                let new_end_char = start + change.text.len();
+                let new_end_byte = rope.try_char_to_byte(new_end_char).unwrap();
+
+                let new_end_line = rope.char_to_line(start + change.text.len());
+
+                tree.edit(&InputEdit {
+                    start_byte: rope.try_char_to_byte(start).unwrap(),
+                    old_end_byte,
+                    new_end_byte,
+                    start_position: Point {
+                        row: range.start.line as usize,
+                        column: range.start.character as usize,
+                    },
+                    old_end_position: Point {
+                        row: range.end.line as usize,
+                        column: range.end.character as usize,
+                    },
+                    new_end_position: Point {
+                        row: new_end_line,
+                        column: new_end_char - rope.line_to_char(new_end_line),
+                    },
+                });
+
+                // todo: use Parser::parse_with_options
+                // let mut parser = tree_sitter::Parser::new();
+                // let language = tree_sitter_r::LANGUAGE;
+                // parser
+                //     .set_language(&language.into())
+                //     .expect("Error loading R parser");
+
+                // parser.parse_with_options(
+                //     &mut |i, point| rope.byte_slice(i..).bytes(),
+                //     Some(&document.tree),
+                //     None,
+                // );
+                document.tree = tree::parse(document.rope.to_string(), Some(&document.tree));
+            }
+
+            // DEBUG
+            // eprintln!("<--DOCUMENT-->\n{}<--END-->", document.rope);
+            // eprintln!("{}", utils::format_node(document.tree.root_node()));
+            // if let Ok(code) = format::format(document.tree.root_node(), &document.rope) {
+            //     eprintln!("<--DOCUMENT-->\n{}<--END-->", code);
+            // }
+            document
+        });
+
+        if let Some(document) = self.document_map.get(&uri) {
             let diagnostics = diagnostics::analyze_fast(
                 document.tree.root_node(),
                 &document.rope,
@@ -306,19 +311,18 @@ impl LanguageServer for ServerState {
             if let Err(error) = self
                 .client
                 .publish_diagnostics(PublishDiagnosticsParams::new(
-                    params.text_document.uri.clone(),
+                    uri.clone(),
                     diagnostics,
                     Some(params.text_document.version),
                 ))
             {
-                tracing::error!(?error, "Failed to publish diagnostics");
+                tracing::error!(?error, "failed to publish diagnostics");
             }
         } else {
-            tracing::info!("did change: failed to acquire symbols map");
+            tracing::error!(?uri, "document not found");
         };
 
-        let elapsed = start.elapsed();
-        tracing::debug!(elapsed = elapsed.as_millis());
+        tracing::debug!(elapsed = start.elapsed().as_millis());
 
         ControlFlow::Continue(())
     }
@@ -327,7 +331,9 @@ impl LanguageServer for ServerState {
         &mut self,
         params: DidCloseTextDocumentParams,
     ) -> ControlFlow<async_lsp::Result<()>> {
-        self.document_map.remove(&params.text_document.uri);
+        let uri = params.text_document.uri;
+
+        self.document_map.remove(&uri);
 
         ControlFlow::Continue(())
     }
@@ -336,14 +342,12 @@ impl LanguageServer for ServerState {
         &mut self,
         params: DidSaveTextDocumentParams,
     ) -> ControlFlow<async_lsp::Result<()>> {
-        tracing::debug!("did save {}", params.text_document.uri.path());
+        let uri = params.text_document.uri;
 
-        if let Some(document) = self.document_map.get(&params.text_document.uri) {
-            index::index_update(
-                &self.symbols_map,
-                &params.text_document.uri,
-                &document.rope.to_string(),
-            );
+        tracing::debug!(?uri, "did save");
+
+        if let Some(document) = self.document_map.get(&uri) {
+            index::index_update(&self.symbols_map, &uri, &document.rope.to_string());
 
             let diagnostics = diagnostics::analyze_full(
                 document.tree.root_node(),
@@ -354,15 +358,15 @@ impl LanguageServer for ServerState {
             if let Err(error) = self
                 .client
                 .publish_diagnostics(PublishDiagnosticsParams::new(
-                    params.text_document.uri.clone(),
+                    uri.clone(),
                     diagnostics,
                     None,
                 ))
             {
-                tracing::error!(?error, "Failed to publish diagnostics");
+                tracing::error!(?error, "failed to publish diagnostics");
             }
         } else {
-            tracing::info!("did change: failed to acquire symbols map");
+            tracing::error!("document not found");
         };
 
         ControlFlow::Continue(())
@@ -377,12 +381,12 @@ impl LanguageServer for ServerState {
         params: CompletionParams,
     ) -> BoxFuture<'static, Result<Option<CompletionResponse>, ResponseError>> {
         let uri = params.text_document_position.text_document.uri;
-        tracing::debug!("Request completion items for: {uri:?}");
         let position = params.text_document_position.position;
 
+        tracing::debug!(?uri, "completion");
+
         let Some(document) = self.document_map.get(&uri) else {
-            tracing::info!("formatting: failed to acquire symbols map");
-            // todo: understand when this happens
+            tracing::error!(?uri, "document not found");
             return Box::pin(async move { Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")) });
         };
 
@@ -391,6 +395,7 @@ impl LanguageServer for ServerState {
             &document.rope,
             &self.symbols_map,
         ));
+
         Box::pin(async move { result })
     }
 
@@ -402,13 +407,15 @@ impl LanguageServer for ServerState {
         &mut self,
         params: DocumentFormattingParams,
     ) -> BoxFuture<'static, Result<Option<Vec<TextEdit>>, ResponseError>> {
-        tracing::debug!("format file {}", params.text_document.uri.path());
+        let uri = params.text_document.uri;
 
-        let Some(document) = self.document_map.get(&params.text_document.uri) else {
-            tracing::info!("formatting: failed to acquire symbols map");
-            // todo: understand when this happens
+        tracing::debug!(?uri, "format");
+
+        let Some(document) = self.document_map.get(&uri) else {
+            tracing::info!(?uri, "document not found");
             return Box::pin(async move { Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")) });
         };
+
         let (rope, tree) = (&document.rope, &document.tree);
         let new = match format::format(tree.root_node(), rope, format::Config {
             indent: &" ".repeat(self.config.spaces),
@@ -416,7 +423,7 @@ impl LanguageServer for ServerState {
         }) {
             Ok(new) => new,
             Err(error) => {
-                tracing::error!("formatting: {}", error);
+                tracing::error!(?error, "failed to format");
                 return Box::pin(async { Ok(None) });
             }
         };

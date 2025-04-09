@@ -45,10 +45,10 @@ pub fn get_document_symbols(
     symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>,
 ) -> Vec<SymbolInformation> {
     let Some(symbols) = symbols_map.get(uri) else {
-        tracing::info!("indexing: failed to acquire symbols map");
-        // todo: understand when this happens
+        tracing::error!(?uri, "symbols not found");
         return vec![];
     };
+
     filter_symbols("", uri, &symbols)
 }
 
@@ -124,8 +124,9 @@ pub fn index_update(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>, uri: &Uri, 
     let start = std::time::Instant::now();
     let symbols = index(text);
     tracing::info!(
-        "update index for {path:?} in {} ms",
-        start.elapsed().as_millis()
+        ?path,
+        elapsed = start.elapsed().as_millis(),
+        "update index file",
     );
 
     symbols_map.insert(uri.clone(), symbols);
@@ -135,7 +136,7 @@ pub fn index_update_file(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>, uri: &
     let path = uri.to_file_path().unwrap();
 
     let Ok(text) = std::fs::read_to_string(&path) else {
-        tracing::info!(message = "indexing: couldn't read file", path = %path.display());
+        tracing::error!(message = "indexing: couldn't read file", path = %path.display());
         return;
     };
 
@@ -145,7 +146,7 @@ pub fn index_update_file(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>, uri: &
 
 pub fn index_file(path: impl AsRef<Path>) -> Vec<DocumentSymbol> {
     let Ok(text) = std::fs::read_to_string(&path) else {
-        tracing::info!( message = "indexing: couldn't read file", path = %path.as_ref().display());
+        tracing::error!(message = "indexing: couldn't read file", path = %path.as_ref().display());
         return vec![];
     };
     index(&text)
