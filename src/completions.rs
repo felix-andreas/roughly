@@ -10,12 +10,13 @@ use {
     },
     dashmap::DashMap,
     ropey::Rope,
+    std::path::PathBuf,
 };
 
 pub fn get(
     position: Position,
     rope: &Rope,
-    symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>,
+    symbols_map: &DashMap<PathBuf, Vec<DocumentSymbol>>,
 ) -> Option<CompletionResponse> {
     // todo: proper error handling. make ropey, dashmap -> JSONRpc error
 
@@ -33,8 +34,21 @@ pub fn get(
     }
     tracing::debug!("completion query: {query}");
 
-    // TODO: consider passing Some(&uri) to avoid showing local symbols twice ...
-    let workspace_symbols = index::get_workspace_symbols(&query, symbols_map, 1000, None);
+    // TODO: avoid showing local symbols twice ...
+
+    let workspace_symbols = symbols_map
+        .iter()
+        .flat_map(|ref_multi| {
+            let (path, symbols) = ref_multi.pair();
+            let uri = Uri::from_file_path(path).unwrap();
+            symbols
+                .iter()
+                .filter(|symbol| index::filter_symbol(&query, symbol))
+                .map(move |symbol| index::to_symbol_information(symbol, &uri))
+                .collect::<Vec<_>>()
+        })
+        .take(1024) // limit amount
+        .collect::<Vec<_>>();
 
     // optimization would be to get all symbols for enclosing function
     // TODO: write code to get local completion items

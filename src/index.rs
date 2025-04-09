@@ -4,9 +4,8 @@ use crate::lsp_types::Url as Uri;
 use uri_ext::UriExt;
 use {
     crate::{lsp_types::*, utils},
-    dashmap::DashMap,
     ropey::Rope,
-    std::path::Path,
+    std::path::{Path, PathBuf},
     tree_sitter::{Node, Tree},
 };
 
@@ -18,131 +17,99 @@ macro_rules! regex {
         RE.get_or_init(|| Regex::new($re).unwrap())
     }};
 }
-
-pub fn get_workspace_symbols(
-    query: &str,
-    symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>,
-    limit: usize,
-    maybe_ignore_uri: Option<&Uri>,
-) -> Vec<SymbolInformation> {
-    let workspace_symbols: Vec<_> = symbols_map
-        .iter()
-        .flat_map(|ref_multi| {
-            let (uri, symbols) = ref_multi.pair();
-            match maybe_ignore_uri {
-                Some(ignore_uri) if ignore_uri == uri => vec![],
-                _ => filter_symbols(query, uri, symbols),
-            }
-        })
-        .take(limit) // limit amount
-        .collect();
-    tracing::info!("get workspace symbols {}", workspace_symbols.len());
-    workspace_symbols
-}
-
-pub fn get_document_symbols(
-    uri: &Uri,
-    symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>,
-) -> Vec<SymbolInformation> {
-    let Some(symbols) = symbols_map.get(uri) else {
-        tracing::error!(?uri, "symbols not found");
-        return vec![];
-    };
-
-    filter_symbols("", uri, &symbols)
-}
-
-fn filter_symbols(query: &str, uri: &Uri, symbols: &[DocumentSymbol]) -> Vec<SymbolInformation> {
+pub fn get_document_symbols(symbols: &[DocumentSymbol], uri: &Uri) -> Vec<SymbolInformation> {
     symbols
         .iter()
-        .filter(|symbol| {
-            query.is_empty()
-                || symbol
-                    .name
-                    .to_lowercase()
-                    .starts_with(&query.to_lowercase())
-        })
-        .map(|symbol| {
-            #[allow(deprecated)]
-            SymbolInformation {
-                name: symbol.name.to_string(),
-                kind: symbol.kind,
-                tags: None,
-                deprecated: None,
-                location: Location {
-                    uri: uri.to_owned(),
-                    range: symbol.range,
-                },
-                container_name: None,
-            }
-        })
-        .collect::<Vec<SymbolInformation>>()
+        .map(|symbol| to_symbol_information(symbol, uri))
+        .collect()
+}
+
+pub fn to_symbol_information(symbol: &DocumentSymbol, uri: &Uri) -> SymbolInformation {
+    #[allow(deprecated)]
+    SymbolInformation {
+        name: symbol.name.to_string(),
+        kind: symbol.kind,
+        tags: None,
+        deprecated: None,
+        location: Location {
+            uri: uri.to_owned(),
+            range: symbol.range,
+        },
+        container_name: None,
+    }
+}
+
+// pub fn filter_query<'a, 'b>(
+//     query: &str,
+//     symbol_iter: impl Iterator<Item = (&'a Path, &'b [DocumentSymbol])>,
+//     limit: usize,
+// ) -> Vec<SymbolInformation> {
+//     let workspace_symbols: Vec<_> = symbol_iter
+//         .flat_map(|(path, symbols)| {
+//             let uri = Uri::from_file_path(path).unwrap();
+//             symbols
+//                 .into_iter()
+//                 .filter(|symbol| {
+//                     query.is_empty()
+//                         || symbol
+//                             .name
+//                             .to_lowercase()
+//                             .starts_with(&query.to_lowercase())
+//                 })
+//                 .map(move |symbol| to_symbol_information(&symbol, &uri))
+//         })
+//         .take(limit) // limit amount
+//         .collect();
+
+//     tracing::info!("get workspace symbols {}", workspace_symbols.len());
+//     workspace_symbols
+// }
+
+pub fn filter_symbol(query: &str, symbol: &DocumentSymbol) -> bool {
+    query.is_empty()
+        || symbol
+            .name
+            .to_lowercase()
+            .starts_with(&query.to_lowercase())
 }
 
 #[derive(Debug)]
 pub struct IndexError;
 
-pub fn index_full(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>) -> Result<(), IndexError> {
+pub fn index_full() -> Result<Vec<(PathBuf, Vec<DocumentSymbol>)>, IndexError> {
     let start = std::time::Instant::now();
+
     let mut n = 0;
     let cwd = std::env::current_dir().unwrap();
-    if let Ok(entries) = std::fs::read_dir(cwd.join("R")) {
-        for entry in entries.flatten() {
-            let path = entry.path();
+    let paths = std::fs::read_dir(cwd.join("R"))
+        .and_then(|read_dir| {
+            read_dir
+                .map(|entries| entries.map(|entry| entry.path()))
+                .collect::<Result<Vec<_>, std::io::Error>>()
+        })
+        .map_err(|error| {
+            tracing::error!(?error, "failed to index");
+            IndexError
+        })?;
 
-            if !path.is_file() {
-                continue;
-            }
-
-            let Some(os_str) = path.extension() else {
-                continue;
-            };
-            let Some("r" | "R") = os_str.to_str() else {
-                continue;
-            };
-
+    let symbols = paths
+        .into_iter()
+        .filter(|path| {
+            path.is_file() && path.extension().is_some_and(|ext| ext == "R" || ext == "r")
+        })
+        .map(|path| {
             let symbols = index_file(&path);
             n += symbols.len();
-            let uri = Uri::from_file_path(&path).map_err(|_| {
-                tracing::error!(?path, "failed to convert path to uri");
-                IndexError
-            })?;
-            dbg!(&uri);
-            symbols_map.insert(uri, symbols);
-        }
-    }
+            (path, symbols)
+        })
+        .collect::<Vec<_>>();
 
     tracing::info!(
-        "build new index ({n} symbols) in {} ms",
-        start.elapsed().as_millis()
-    );
-    Ok(())
-}
-
-pub fn index_update(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>, uri: &Uri, text: &str) {
-    let path = uri.to_file_path();
-
-    let start = std::time::Instant::now();
-    let symbols = index(text);
-    tracing::info!(
-        ?path,
+        symbols = n,
         elapsed = start.elapsed().as_millis(),
-        "update index file",
+        "build full index",
     );
-
-    symbols_map.insert(uri.clone(), symbols);
-}
-
-pub fn index_update_file(symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>, uri: &Uri) {
-    let path = uri.to_file_path().unwrap();
-
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        tracing::error!(message = "indexing: couldn't read file", path = %path.display());
-        return;
-    };
-
-    let symbols = index(&text);
-    symbols_map.insert(uri.clone(), symbols);
+    Ok(symbols)
 }
 
 pub fn index_file(path: impl AsRef<Path>) -> Vec<DocumentSymbol> {
@@ -434,3 +401,19 @@ mod test {
         assert_eq!(symbols.len(), 9);
     }
 }
+
+// see: https://github.com/gluon-lang/lsp-types/issues/150
+// TODO: make this test work
+// #[cfg(test)]
+// mod test {
+//     #[test]
+//     fn test() {
+//         let url_from_vscode = url::Url::parse("file:///C%3A/test.txt").unwrap();
+//         let path = url_from_vscode.to_file_path().unwrap();
+//         let url_from_path = url::Url::from_file_path(&path).unwrap();
+//         println!("{:?}", &url_from_vscode);
+//         println!("{:?}", &path);
+//         println!("{:?}", &url_from_path);
+//         assert!(url_from_vscode == url_from_path);
+//     }
+// }

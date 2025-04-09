@@ -1,3 +1,7 @@
+#[cfg(feature = "async-lsp")]
+use crate::lsp_types::Url as Uri;
+#[cfg(feature = "tower-lsp")]
+use uri_ext::UriExt;
 use {
     crate::{
         cli, completions,
@@ -12,7 +16,7 @@ use {
             InitializeParams, InitializeResult, OneOf, Position, PublishDiagnosticsParams, Range,
             SaveOptions, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
             TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
-            Url, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+            WorkspaceSymbolParams, WorkspaceSymbolResponse,
         },
         tree,
     },
@@ -29,7 +33,11 @@ use {
     dashmap::DashMap,
     futures::future::BoxFuture,
     ropey::Rope,
-    std::{ops::ControlFlow, path::Path, time::Instant},
+    std::{
+        ops::ControlFlow,
+        path::{Path, PathBuf},
+        time::Instant,
+    },
     tower::ServiceBuilder,
     tree_sitter::{InputEdit, Point, Tree},
 };
@@ -38,19 +46,6 @@ use {
 #[tokio::main(flavor = "current_thread")]
 pub async fn run(experimental: bool) {
     let (server, _) = async_lsp::MainLoop::new_server(|client| {
-        // tokio::spawn({
-        //     let client = client.clone();
-        //     async move {
-        //         let mut interval = tokio::time::interval(Duration::from_secs(1));
-        //         loop {
-        //             interval.tick().await;
-        //             if client.emit(TickEvent).is_err() {
-        //                 break;
-        //             }
-        //         }
-        //     }
-        // });
-
         let config = match Config::from_path(Path::new(".")) {
             Ok(config) => config,
             Err(err) => {
@@ -87,12 +82,11 @@ pub async fn run(experimental: bool) {
 
 struct ServerState {
     client: ClientSocket,
-    counter: i32,
     config: Config,
     experimental: bool,
     // TODO: propbably don't need dashmap here with async-lsp ...
-    symbols_map: DashMap<Url, Vec<DocumentSymbol>>,
-    document_map: DashMap<Url, Document>,
+    symbols_map: DashMap<PathBuf, Vec<DocumentSymbol>>,
+    document_map: DashMap<PathBuf, Document>,
 }
 
 #[derive(Debug)]
@@ -101,27 +95,16 @@ pub struct Document {
     pub tree: Tree,
 }
 
-struct TickEvent;
-
 impl ServerState {
     fn new_router(client: ClientSocket, config: Config, experimental: bool) -> Router<Self> {
-        let mut router = Router::from_language_server(Self {
+        let router = Router::from_language_server(Self {
             client,
             config,
             experimental,
             symbols_map: DashMap::new(),
             document_map: DashMap::new(),
-            counter: 0,
         });
-        router.event(Self::on_tick);
         router
-    }
-
-    fn on_tick(&mut self, _: TickEvent) -> ControlFlow<async_lsp::Result<()>> {
-        tracing::info!("tick");
-        self.counter += 1;
-
-        ControlFlow::Continue(())
     }
 }
 
@@ -133,13 +116,17 @@ impl LanguageServer for ServerState {
         &mut self,
         _: InitializeParams,
     ) -> BoxFuture<'static, Result<InitializeResult, ResponseError>> {
-        if let Err(IndexError) = index::index_full(&self.symbols_map) {
-            self.client
+        tracing::info!("initialize");
+
+        match index::index_full() {
+            Ok(symbols) => self.symbols_map.extend(symbols),
+            Err(IndexError) => self
+                .client
                 .show_message(ShowMessageParams {
                     typ: MessageType::ERROR,
-                    message: "Failed to index files".into(),
+                    message: "failed to index files".into(),
                 })
-                .unwrap();
+                .unwrap(),
         }
 
         Box::pin(async move {
@@ -194,7 +181,7 @@ impl LanguageServer for ServerState {
         );
 
         self.document_map
-            .insert(uri.clone(), Document { rope, tree });
+            .insert(uri.to_file_path().unwrap(), Document { rope, tree });
 
         if let Err(error) = self
             .client
@@ -215,9 +202,10 @@ impl LanguageServer for ServerState {
         params: DidChangeTextDocumentParams,
     ) -> ControlFlow<async_lsp::Result<()>> {
         let uri = params.text_document.uri;
+        let path = uri.to_file_path().unwrap();
         let content_changes = params.content_changes;
 
-        tracing::debug!(?uri, "did change");
+        tracing::debug!(?path, "did change");
 
         let start = Instant::now();
 
@@ -226,7 +214,7 @@ impl LanguageServer for ServerState {
         // let random_duration = 200 + rand::random::<u64>() % 401;
         // std::thread::sleep(std::time::Duration::from_millis(500));
 
-        self.document_map.alter(&uri, |_, mut document| {
+        self.document_map.alter(&path, |_, mut document| {
             for change in content_changes {
                 let Some(range) = change.range else {
                     tracing::warn!("unexpected case #2141 - check");
@@ -301,7 +289,7 @@ impl LanguageServer for ServerState {
             document
         });
 
-        if let Some(document) = self.document_map.get(&uri) {
+        if let Some(document) = self.document_map.get(&path) {
             let diagnostics = diagnostics::analyze_fast(
                 document.tree.root_node(),
                 &document.rope,
@@ -332,8 +320,9 @@ impl LanguageServer for ServerState {
         params: DidCloseTextDocumentParams,
     ) -> ControlFlow<async_lsp::Result<()>> {
         let uri = params.text_document.uri;
+        let path = uri.to_file_path().unwrap();
 
-        self.document_map.remove(&uri);
+        self.document_map.remove(&path);
 
         ControlFlow::Continue(())
     }
@@ -343,11 +332,13 @@ impl LanguageServer for ServerState {
         params: DidSaveTextDocumentParams,
     ) -> ControlFlow<async_lsp::Result<()>> {
         let uri = params.text_document.uri;
+        let path = uri.to_file_path().unwrap();
 
         tracing::debug!(?uri, "did save");
 
-        if let Some(document) = self.document_map.get(&uri) {
-            index::index_update(&self.symbols_map, &uri, &document.rope.to_string());
+        if let Some(document) = self.document_map.get(&path) {
+            let symbols = index::index(&document.rope.to_string());
+            self.symbols_map.insert(path, symbols);
 
             let diagnostics = diagnostics::analyze_full(
                 document.tree.root_node(),
@@ -381,11 +372,12 @@ impl LanguageServer for ServerState {
         params: CompletionParams,
     ) -> BoxFuture<'static, Result<Option<CompletionResponse>, ResponseError>> {
         let uri = params.text_document_position.text_document.uri;
+        let path = uri.to_file_path().unwrap();
         let position = params.text_document_position.position;
 
         tracing::debug!(?uri, "completion");
 
-        let Some(document) = self.document_map.get(&uri) else {
+        let Some(document) = self.document_map.get(&path) else {
             tracing::error!(?uri, "document not found");
             return Box::pin(async move { Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")) });
         };
@@ -408,10 +400,11 @@ impl LanguageServer for ServerState {
         params: DocumentFormattingParams,
     ) -> BoxFuture<'static, Result<Option<Vec<TextEdit>>, ResponseError>> {
         let uri = params.text_document.uri;
+        let path = uri.to_file_path().unwrap();
 
         tracing::debug!(?uri, "format");
 
-        let Some(document) = self.document_map.get(&uri) else {
+        let Some(document) = self.document_map.get(&path) else {
             tracing::info!(?uri, "document not found");
             return Box::pin(async move { Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")) });
         };
@@ -450,8 +443,16 @@ impl LanguageServer for ServerState {
         &mut self,
         params: DocumentSymbolParams,
     ) -> BoxFuture<'static, Result<Option<DocumentSymbolResponse>, ResponseError>> {
+        let uri = params.text_document.uri;
+        let path = uri.to_file_path().unwrap();
+
+        let Some(symbols) = self.symbols_map.get(&path) else {
+            tracing::error!(?uri, "symbols not found");
+            return Box::pin(async move { Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")) });
+        };
+
         let result = Ok(Some(DocumentSymbolResponse::Flat(
-            index::get_document_symbols(&params.text_document.uri, &self.symbols_map),
+            index::get_document_symbols(&symbols, &uri),
         )));
         // Ok(Some(DocumentSymbolResponse::Nested({
         //     let Some(document) = self.document_map.get(&params.text_document.uri) else {
@@ -467,10 +468,24 @@ impl LanguageServer for ServerState {
         &mut self,
         params: WorkspaceSymbolParams,
     ) -> BoxFuture<'static, Result<Option<WorkspaceSymbolResponse>, ResponseError>> {
-        let result = Ok(Some(WorkspaceSymbolResponse::Flat(
-            index::get_workspace_symbols(&params.query, &self.symbols_map, 32, None),
-        )));
+        let query = params.query;
 
+        let symbols = self
+            .symbols_map
+            .iter()
+            .flat_map(|ref_multi| {
+                let (path, symbols) = ref_multi.pair();
+                let uri = Uri::from_file_path(path).unwrap();
+                symbols
+                    .iter()
+                    .filter(|symbol| index::filter_symbol(&query, symbol))
+                    .map(move |symbol| index::to_symbol_information(symbol, &uri))
+                    .collect::<Vec<_>>()
+            })
+            .take(32) // limit amount
+            .collect::<Vec<_>>();
+
+        let result = Ok(Some(WorkspaceSymbolResponse::Flat(symbols)));
         Box::pin(async { result })
     }
 }

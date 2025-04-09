@@ -360,7 +360,6 @@ impl LanguageServer for Backend {
             &params.query,
             &self.symbols_map,
             32,
-            None,
         )))
     }
 }
