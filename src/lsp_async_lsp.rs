@@ -1,5 +1,3 @@
-#[cfg(feature = "async-lsp")]
-use crate::lsp_types::Url as Uri;
 #[cfg(feature = "tower-lsp")]
 use uri_ext::UriExt;
 use {
@@ -30,10 +28,10 @@ use {
         server::LifecycleLayer,
         tracing::TracingLayer,
     },
-    dashmap::DashMap,
     futures::future::BoxFuture,
     ropey::Rope,
     std::{
+        collections::HashMap,
         ops::ControlFlow,
         path::{Path, PathBuf},
         time::Instant,
@@ -84,11 +82,10 @@ struct ServerState {
     client: ClientSocket,
     config: Config,
     experimental: bool,
-    // TODO: propbably don't need dashmap here with async-lsp ...
     base_path: PathBuf,
-    document_map: DashMap<PathBuf, Document>,
-    document_symbols: DashMap<PathBuf, Vec<DocumentSymbol>>,
-    workspace_symbols: DashMap<PathBuf, Vec<DocumentSymbol>>,
+    document_map: HashMap<PathBuf, Document>,
+    document_symbols: HashMap<PathBuf, Vec<DocumentSymbol>>,
+    workspace_symbols: HashMap<PathBuf, Vec<DocumentSymbol>>,
 }
 
 #[derive(Debug)]
@@ -104,9 +101,9 @@ impl ServerState {
             config,
             experimental,
             base_path: std::env::current_dir().unwrap().join("R"),
-            workspace_symbols: DashMap::new(),
-            document_symbols: DashMap::new(),
-            document_map: DashMap::new(),
+            workspace_symbols: HashMap::new(),
+            document_symbols: HashMap::new(),
+            document_map: HashMap::new(),
         })
     }
 }
@@ -223,7 +220,7 @@ impl LanguageServer for ServerState {
         // let random_duration = 200 + rand::random::<u64>() % 401;
         // std::thread::sleep(std::time::Duration::from_millis(500));
 
-        self.document_map.alter(&path, |_, mut document| {
+        if let Some(document) = self.document_map.get_mut(&path) {
             for change in content_changes {
                 let Some(range) = change.range else {
                     tracing::warn!("unexpected case #2141 - check");
@@ -295,8 +292,7 @@ impl LanguageServer for ServerState {
             // if let Ok(code) = format::format(document.tree.root_node(), &document.rope) {
             //     eprintln!("<--DOCUMENT-->\n{}<--END-->", code);
             // }
-            document
-        });
+        }
 
         if let Some(document) = self.document_map.get(&path) {
             let diagnostics = diagnostics::analyze_fast(
@@ -471,7 +467,7 @@ impl LanguageServer for ServerState {
         };
 
         let result = Ok(Some(DocumentSymbolResponse::Flat(
-            index::get_document_symbols(&symbols, &uri),
+            index::get_document_symbols(symbols, &uri),
         )));
         // Ok(Some(DocumentSymbolResponse::Nested({
         //     let Some(document) = self.document_map.get(&params.text_document.uri) else {
@@ -489,20 +485,7 @@ impl LanguageServer for ServerState {
     ) -> BoxFuture<'static, Result<Option<WorkspaceSymbolResponse>, ResponseError>> {
         let query = params.query;
 
-        let symbols = self
-            .workspace_symbols
-            .iter()
-            .flat_map(|ref_multi| {
-                let (path, symbols) = ref_multi.pair();
-                let uri = Uri::from_file_path(path).unwrap();
-                symbols
-                    .iter()
-                    .filter(|symbol| index::filter_symbol(&query, symbol))
-                    .map(move |symbol| index::to_symbol_information(symbol, &uri))
-                    .collect::<Vec<_>>()
-            })
-            .take(32) // limit amount
-            .collect::<Vec<_>>();
+        let symbols = index::get_workspace_symbols(&query, &self.workspace_symbols);
 
         let result = Ok(Some(WorkspaceSymbolResponse::Flat(symbols)));
         Box::pin(async { result })

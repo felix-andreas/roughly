@@ -5,7 +5,10 @@ use uri_ext::UriExt;
 use {
     crate::{lsp_types::*, utils},
     ropey::Rope,
-    std::path::{Path, PathBuf},
+    std::{
+        collections::HashMap,
+        path::{Path, PathBuf},
+    },
     tree_sitter::{Node, Tree},
 };
 
@@ -17,6 +20,49 @@ macro_rules! regex {
         RE.get_or_init(|| Regex::new($re).unwrap())
     }};
 }
+
+pub trait SymbolsMap<T> {
+    fn filtered<'a, I>(
+        &'a self,
+        key: impl Fn(&'a PathBuf, &'a Vec<DocumentSymbol>) -> I,
+        limit: usize,
+    ) -> Vec<T>
+    where
+        I: Iterator<Item = T> + 'a;
+}
+
+impl<T> SymbolsMap<T> for HashMap<PathBuf, Vec<DocumentSymbol>> {
+    fn filtered<'a, I>(
+        &'a self,
+        key: impl Fn(&'a PathBuf, &'a Vec<DocumentSymbol>) -> I,
+        limit: usize,
+    ) -> Vec<T>
+    where
+        I: Iterator<Item = T> + 'a,
+    {
+        self.iter()
+            .flat_map(|(path, symbols)| key(path, symbols))
+            .take(limit) // limit amount
+            .collect::<Vec<_>>()
+    }
+}
+
+pub fn get_workspace_symbols(
+    query: &str,
+    workspace_symbols: &impl SymbolsMap<SymbolInformation>,
+) -> Vec<SymbolInformation> {
+    workspace_symbols.filtered(
+        |path, symbols| {
+            let uri = Uri::from_file_path(path).unwrap();
+            symbols
+                .iter()
+                .filter(|symbol| filter_symbol(query, symbol))
+                .map(move |symbol| to_symbol_information(symbol, &uri))
+        },
+        32,
+    )
+}
+
 pub fn get_document_symbols(symbols: &[DocumentSymbol], uri: &Uri) -> Vec<SymbolInformation> {
     symbols
         .iter()
