@@ -76,12 +76,11 @@ pub fn filter_symbol(query: &str, symbol: &DocumentSymbol) -> bool {
 #[derive(Debug)]
 pub struct IndexError;
 
-pub fn index_full() -> Result<Vec<(PathBuf, Vec<DocumentSymbol>)>, IndexError> {
+pub fn index_full(base_path: &Path) -> Result<Vec<(PathBuf, Vec<DocumentSymbol>)>, IndexError> {
     let start = std::time::Instant::now();
 
     let mut n = 0;
-    let cwd = std::env::current_dir().unwrap();
-    let paths = std::fs::read_dir(cwd.join("R"))
+    let paths = std::fs::read_dir(base_path)
         .and_then(|read_dir| {
             read_dir
                 .map(|entries| entries.map(|entry| entry.path()))

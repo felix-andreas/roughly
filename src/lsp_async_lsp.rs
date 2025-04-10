@@ -85,8 +85,10 @@ struct ServerState {
     config: Config,
     experimental: bool,
     // TODO: propbably don't need dashmap here with async-lsp ...
-    symbols_map: DashMap<PathBuf, Vec<DocumentSymbol>>,
+    base_path: PathBuf,
     document_map: DashMap<PathBuf, Document>,
+    document_symbols: DashMap<PathBuf, Vec<DocumentSymbol>>,
+    workspace_symbols: DashMap<PathBuf, Vec<DocumentSymbol>>,
 }
 
 #[derive(Debug)]
@@ -97,14 +99,15 @@ pub struct Document {
 
 impl ServerState {
     fn new_router(client: ClientSocket, config: Config, experimental: bool) -> Router<Self> {
-        let router = Router::from_language_server(Self {
+        Router::from_language_server(Self {
             client,
             config,
             experimental,
-            symbols_map: DashMap::new(),
+            base_path: std::env::current_dir().unwrap().join("R"),
+            workspace_symbols: DashMap::new(),
+            document_symbols: DashMap::new(),
             document_map: DashMap::new(),
-        });
-        router
+        })
     }
 }
 
@@ -118,8 +121,8 @@ impl LanguageServer for ServerState {
     ) -> BoxFuture<'static, Result<InitializeResult, ResponseError>> {
         tracing::info!("initialize");
 
-        match index::index_full() {
-            Ok(symbols) => self.symbols_map.extend(symbols),
+        match index::index_full(&self.base_path) {
+            Ok(symbols) => self.workspace_symbols.extend(symbols),
             Err(IndexError) => self
                 .client
                 .show_message(ShowMessageParams {
@@ -168,11 +171,13 @@ impl LanguageServer for ServerState {
         params: DidOpenTextDocumentParams,
     ) -> ControlFlow<async_lsp::Result<()>> {
         let uri = params.text_document.uri;
+        let path = uri.to_file_path().unwrap();
+        let text = &params.text_document.text;
 
         tracing::debug!(?uri, "did open");
 
-        let rope = Rope::from_str(&params.text_document.text);
-        let tree = tree::parse(&params.text_document.text, None);
+        let rope = Rope::from_str(text);
+        let tree = tree::parse(text, None);
 
         let diagnostics = diagnostics::analyze_full(
             tree.root_node(),
@@ -180,13 +185,17 @@ impl LanguageServer for ServerState {
             diagnostics::Config::from_config(self.config, self.experimental),
         );
 
-        self.document_map
-            .insert(uri.to_file_path().unwrap(), Document { rope, tree });
+        if !path.starts_with(&self.base_path) {
+            let symbols = index::index(text);
+            self.document_symbols.insert(path.clone(), symbols);
+        };
+
+        self.document_map.insert(path, Document { rope, tree });
 
         if let Err(error) = self
             .client
             .publish_diagnostics(PublishDiagnosticsParams::new(
-                uri.clone(),
+                uri,
                 diagnostics,
                 Some(params.text_document.version),
             ))
@@ -338,7 +347,11 @@ impl LanguageServer for ServerState {
 
         if let Some(document) = self.document_map.get(&path) {
             let symbols = index::index(&document.rope.to_string());
-            self.symbols_map.insert(path, symbols);
+            if path.starts_with(&self.base_path) {
+                self.workspace_symbols.insert(path, symbols);
+            } else {
+                self.document_symbols.insert(path, symbols);
+            }
 
             let diagnostics = diagnostics::analyze_full(
                 document.tree.root_node(),
@@ -385,7 +398,7 @@ impl LanguageServer for ServerState {
         let result = Ok(completions::get(
             position,
             &document.rope,
-            &self.symbols_map,
+            &self.workspace_symbols,
         ));
 
         Box::pin(async move { result })
@@ -446,7 +459,13 @@ impl LanguageServer for ServerState {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
-        let Some(symbols) = self.symbols_map.get(&path) else {
+        let symbols_map = if path.starts_with(&self.base_path) {
+            &self.workspace_symbols
+        } else {
+            &self.document_symbols
+        };
+
+        let Some(symbols) = symbols_map.get(&path) else {
             tracing::error!(?uri, "symbols not found");
             return Box::pin(async move { Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")) });
         };
@@ -471,7 +490,7 @@ impl LanguageServer for ServerState {
         let query = params.query;
 
         let symbols = self
-            .symbols_map
+            .workspace_symbols
             .iter()
             .flat_map(|ref_multi| {
                 let (path, symbols) = ref_multi.pair();
