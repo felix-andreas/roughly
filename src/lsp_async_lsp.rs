@@ -391,13 +391,9 @@ impl LanguageServer for ServerState {
             return Box::pin(async move { Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")) });
         };
 
-        let result = Ok(completions::get(
-            position,
-            &document.rope,
-            &self.workspace_symbols,
-        ));
+        let completions = completions::get(position, &document.rope, &self.workspace_symbols);
 
-        Box::pin(async move { result })
+        Box::pin(async move { Ok(completions) })
     }
 
     //
@@ -431,7 +427,7 @@ impl LanguageServer for ServerState {
         };
 
         // TODO: only format if necessary and send text edits...
-        let result = Ok(Some(vec![TextEdit {
+        let edits = vec![TextEdit {
             range: Range::new(
                 Position::new(0, 0),
                 Position::new(
@@ -440,8 +436,9 @@ impl LanguageServer for ServerState {
                 ),
             ),
             new_text: new,
-        }]));
-        Box::pin(async move { result })
+        }];
+
+        Box::pin(async move { Ok(Some(edits)) })
     }
 
     //
@@ -466,9 +463,7 @@ impl LanguageServer for ServerState {
             return Box::pin(async move { Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")) });
         };
 
-        let result = Ok(Some(DocumentSymbolResponse::Flat(
-            index::get_document_symbols(symbols, &uri),
-        )));
+        let symbols = index::get_document_symbols(symbols, &uri);
         // Ok(Some(DocumentSymbolResponse::Nested({
         //     let Some(document) = self.document_map.get(&params.text_document.uri) else {
         //         tracing::error!("failed to aquirce document :/");
@@ -476,7 +471,7 @@ impl LanguageServer for ServerState {
         //     };
         //     index::get_document_symbols_ng(&document.tree, &document.rope)
         // })))
-        Box::pin(async move { result })
+        Box::pin(async move { Ok(Some(DocumentSymbolResponse::Flat(symbols))) })
     }
 
     fn symbol(
@@ -487,7 +482,6 @@ impl LanguageServer for ServerState {
 
         let symbols = index::get_workspace_symbols(&query, &self.workspace_symbols);
 
-        let result = Ok(Some(WorkspaceSymbolResponse::Flat(symbols)));
-        Box::pin(async { result })
+        Box::pin(async { Ok(Some(WorkspaceSymbolResponse::Flat(symbols))) })
     }
 }
