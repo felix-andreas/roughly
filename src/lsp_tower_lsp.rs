@@ -1,3 +1,5 @@
+// TODO: this file is a mess, clean it up
+
 use {
     crate::{
         cli, completions,
@@ -17,6 +19,11 @@ use {
     },
     tree_sitter::{InputEdit, Point, Tree},
 };
+#[cfg(feature = "async-lsp")]
+pub use {async_lsp::lsp_types, lsp_async_lsp::*};
+
+#[cfg(feature = "tower-lsp")]
+mod lsp_tower_lsp;
 
 // TODO: test if this fixes sync issues
 // #[tokio::main(flavor = "current_thread")]
@@ -355,7 +362,6 @@ impl LanguageServer for Backend {
             &params.query,
             &self.symbols_map,
             32,
-            None,
         )))
     }
 }

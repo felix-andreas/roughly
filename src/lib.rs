@@ -7,8 +7,15 @@ pub mod dev;
 pub mod diagnostics;
 pub mod format;
 pub mod index;
-pub mod lsp;
 pub mod tree;
 pub mod utils;
 
-use tower_lsp_server::lsp_types;
+#[cfg(feature = "async-lsp")]
+pub mod lsp_async_lsp;
+#[cfg(feature = "async-lsp")]
+pub use {async_lsp::lsp_types, lsp_async_lsp as lsp};
+
+#[cfg(feature = "tower-lsp")]
+mod lsp_tower_lsp;
+#[cfg(feature = "tower-lsp")]
+pub use {async_lsp::lsp_types, lsp_tower_lsp as lsp};

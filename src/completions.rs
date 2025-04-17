@@ -1,24 +1,22 @@
+#[cfg(feature = "async-lsp")]
+use crate::lsp_types::Url as Uri;
 use {
     crate::{
         index,
-        lsp::Document,
-        lsp_types::{
-            CompletionItem, CompletionItemKind, CompletionResponse, DocumentSymbol, Position,
-            SymbolKind, Uri,
-        },
+        index::SymbolsMap,
+        lsp_types::{CompletionItem, CompletionItemKind, CompletionResponse, Position, SymbolKind},
     },
-    dashmap::DashMap,
+    async_lsp::lsp_types::SymbolInformation,
+    ropey::Rope,
 };
 
 pub fn get(
-    uri: Uri,
     position: Position,
-    document_map: &DashMap<Uri, Document>,
-    symbols_map: &DashMap<Uri, Vec<DocumentSymbol>>,
+    rope: &Rope,
+    symbols_map: &impl SymbolsMap<SymbolInformation>,
 ) -> Option<CompletionResponse> {
     // todo: proper error handling. make ropey, dashmap -> JSONRpc error
 
-    let rope = &document_map.get(&uri)?.rope;
     let line = rope.get_line(position.line as usize)?;
     let mut query = String::new();
     for (i, char) in line.chars().enumerate() {
@@ -33,8 +31,18 @@ pub fn get(
     }
     tracing::debug!("completion query: {query}");
 
-    // TODO: consider passing Some(&uri) to avoid showing local symbols twice ...
-    let workspace_symbols = index::get_workspace_symbols(&query, symbols_map, 1000, None);
+    // TODO: avoid showing local symbols twice ...
+
+    let workspace_symbols = symbols_map.filtered(
+        |path, symbols| {
+            let uri = Uri::from_file_path(path).unwrap();
+            symbols
+                .iter()
+                .filter(|symbol| index::filter_symbol(&query, symbol))
+                .map(move |symbol| index::to_symbol_information(symbol, &uri))
+        },
+        1024,
+    );
 
     // optimization would be to get all symbols for enclosing function
     // TODO: write code to get local completion items

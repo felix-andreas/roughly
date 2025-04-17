@@ -5,13 +5,18 @@ use {
         lsp,
     },
     std::{path::PathBuf, process::ExitCode},
+    tracing_subscriber::prelude::*,
 };
 
 fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_ansi(false)
-        .with_writer(std::io::stderr)
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .with(
+            tracing_tree::HierarchicalLayer::new(2)
+                .with_ansi(false)
+                .with_targets(true)
+                .with_writer(std::io::stderr),
+        )
         .init();
 
     let cli = Cli::parse();

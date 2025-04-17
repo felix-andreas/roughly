@@ -15,17 +15,38 @@ ropey = "1"
 serde = "1.0.218"
 similar = { version = "2.7.0", features = ["inline"] }
 thiserror = "2.0.11"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
+tokio = { version = "1", features = [
+	"rt-multi-thread",
+	"macros",
+	"io-std",
+	"time",
+] }
 toml = "0.8.20"
-tower-lsp-server = { git = "https://github.com/tower-lsp-community/tower-lsp-server", rev = "a493bf8476b891d1338522c68d0495e55ac27a67" }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tracing-tree = "0.4.0"
 tree-sitter = "0.25.1"
 tree-sitter-r = "1.1.0"
 # tree-sitter-r = { path = "../tree-sitter-r/" }
 
+# tower-lsp
+tower-lsp-server = { version = "0.21.1", optional = true }
+
+# async-lsp
+async-lsp = { version = "0.2.2", features = ["tokio"], optional = true }
+tower = { version = "0.5.2", optional = true }
+futures = { version = "0.3.31", optional = true }
+
+[target.'cfg(not(unix))'.dependencies]
+tokio-util = { version = "0.7.14", features = ["compat"] }
+
 [dev-dependencies]
 insta = "1"
+
+[features]
+default = ["async-lsp"]
+async-lsp = ["dep:async-lsp", "dep:tower", "dep:futures"]
+tower-lsp = ["dep:tower-lsp-server"]
 
 [profile.dev.package]
 insta.opt-level = 3
