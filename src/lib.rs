@@ -7,6 +7,7 @@ pub mod dev;
 pub mod diagnostics;
 pub mod format;
 pub mod index;
+pub mod repl;
 pub mod tree;
 pub mod utils;
 

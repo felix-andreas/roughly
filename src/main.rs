@@ -2,7 +2,7 @@ use {
     clap::{Parser, Subcommand},
     roughly::{
         cli::{self, CheckError, DebugError, FmtError},
-        lsp,
+        lsp, repl,
     },
     std::{path::PathBuf, process::ExitCode},
     tracing_subscriber::prelude::*,
@@ -36,6 +36,10 @@ fn main() -> ExitCode {
             },
             Command::Lsp { stdio: _stdio } => {
                 lsp::run(cli.experimental);
+                ExitCode::SUCCESS
+            }
+            Command::Repl { vi } => {
+                repl::run(vi);
                 ExitCode::SUCCESS
             }
             Command::Debug(dev) => match dev {
@@ -93,6 +97,11 @@ enum Command {
         /// Ignored ... here only to please VS Code
         #[clap(long, default_value_t = true)]
         stdio: bool,
+    },
+    /// Start a R REPL
+    Repl {
+        #[clap(long, default_value_t = false)]
+        vi: bool,
     },
     /// Debugging and development commands
     #[command(subcommand)]

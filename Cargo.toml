@@ -36,6 +36,10 @@ tower-lsp-server = { version = "0.21.1", optional = true }
 async-lsp = { version = "0.2.2", features = ["tokio"], optional = true }
 tower = { version = "0.5.2", optional = true }
 futures = { version = "0.3.31", optional = true }
+reedline = "0.39.0"
+nu-ansi-term = "0.50.1"
+extendr-api = "0.8.0"
+extendr-engine = "0.8.0"
 
 [target.'cfg(not(unix))'.dependencies]
 tokio-util = { version = "0.7.14", features = ["compat"] }
