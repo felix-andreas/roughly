@@ -7,7 +7,6 @@ edition = "2024"
 clap = { version = "4", features = ["derive"] }
 console = "0.15.10"
 dashmap = "6.1.0"
-futures = "0.3.31"
 ignore = "0.4.23"
 indoc = "2.0.5"
 itertools = "0.14.0"
@@ -25,6 +24,7 @@ tokio = { version = "1", features = [
 toml = "0.8.20"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tracing-tree = "0.4.0"
 tree-sitter = "0.25.1"
 tree-sitter-r = "1.1.0"
 # tree-sitter-r = { path = "../tree-sitter-r/" }
@@ -33,9 +33,9 @@ tree-sitter-r = "1.1.0"
 tower-lsp-server = { version = "0.21.1", optional = true }
 
 # async-lsp
-tower = { version = "0.5.2", optional = true }
 async-lsp = { version = "0.2.2", features = ["tokio"], optional = true }
-tracing-tree = "0.4.0"
+tower = { version = "0.5.2", optional = true }
+futures = { version = "0.3.31", optional = true }
 
 [target.'cfg(not(unix))'.dependencies]
 tokio-util = { version = "0.7.14", features = ["compat"] }
@@ -45,7 +45,7 @@ insta = "1"
 
 [features]
 default = ["async-lsp"]
-async-lsp = ["dep:async-lsp", "dep:tower"]
+async-lsp = ["dep:async-lsp", "dep:tower", "dep:futures"]
 tower-lsp = ["dep:tower-lsp-server"]
 
 [profile.dev.package]

@@ -1,5 +1,3 @@
-#[cfg(feature = "tower-lsp")]
-use uri_ext::UriExt;
 use {
     crate::{
         cli, completions,

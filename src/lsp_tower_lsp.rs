@@ -1,3 +1,5 @@
+// TODO: this file is a mess, clean it up
+
 use {
     crate::{
         cli, completions,
