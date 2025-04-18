@@ -4,8 +4,11 @@ run *args:
 fmt *args:
 	@cargo run -q -- fmt {{args}}
 
-lint *args:
-	@cargo run -q -- lint {{args}}
+check *args:
+	@cargo run -q -- check {{args}}
+
+repl *args:
+	@cargo run -q -- repl {{args}}
 
 test *args:
 	cargo test -- --nocapture {{args}}

@@ -22,7 +22,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         None => {
-            lsp::run(cli.experimental);
+            repl::run(false);
             ExitCode::SUCCESS
         }
         Some(command) => match command {
@@ -64,11 +64,6 @@ fn main() -> ExitCode {
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
-    // #[clap(long, action = clap::ArgAction::HelpLong)]
-    // help: Option<bool>,
-    /// Ignored ... here only to please VS Code
-    #[clap(long, default_value_t = true)]
-    stdio: bool,
     /// Enable experimental features
     #[clap(long, global = true, default_value_t = false)]
     experimental: bool,

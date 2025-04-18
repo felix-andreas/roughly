@@ -1,51 +1,38 @@
 use {
+    extendr_api::{Rinternals, eval_string},
     nu_ansi_term::{Color as AnsiColor, Style},
     reedline::{
         Color, DefaultHinter, Emacs, Highlighter, Prompt, PromptEditMode, PromptHistorySearch,
-        PromptHistorySearchStatus, PromptViMode, Reedline, Signal, StyledText, Vi,
+        PromptHistorySearchStatus, PromptViMode, Reedline, Signal, StyledText, ValidationResult,
+        Validator, Vi,
     },
     std::{
         borrow::Cow,
-        io::{BufRead, BufReader, Write},
-        process::{Command, Stdio},
+        ops::Range,
+        sync::{Arc, RwLock},
     },
+    tree_sitter::{Parser, TreeCursor},
 };
 
 pub fn run(vi: bool) {
-    let highligher = RoughlyHighlighter;
+    let language = Arc::new(RwLock::new(Language::new()));
+
+    let highligher = RoughlyHighlighter::new(Arc::clone(&language));
     let hinter = DefaultHinter::default().with_style(Style::new().fg(AnsiColor::DarkGray));
+    let validator = RoughlyValidator::new(Arc::clone(&language));
     let prompt = RoughlyPrompt;
 
     let mut line_editor = Reedline::create()
         .with_highlighter(Box::new(highligher))
         .with_hinter(Box::new(hinter))
+        .with_validator(Box::new(validator))
         .with_edit_mode(if vi {
             Box::new(Vi::default())
         } else {
             Box::new(Emacs::default())
         });
 
-    let mut r_process = match Command::new("R")
-        .arg("--no-readline")
-        .arg("--no-save")
-        .arg("--quiet")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(e) => {
-            eprintln!("Failed to start R process: {}", e);
-            return;
-        }
-    };
-    let Some(stdout) = r_process.stdout.as_mut() else {
-        eprintln!("Failed to get R process stdout.");
-        return;
-    };
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::with_capacity(256);
+    extendr_engine::start_r();
 
     loop {
         match line_editor.read_line(&prompt) {
@@ -53,24 +40,10 @@ pub fn run(vi: bool) {
                 if buffer.is_empty() {
                     continue;
                 }
-                if let Some(stdin) = r_process.stdin.as_mut() {
-                    if let Err(e) = writeln!(stdin, "{}", buffer) {
-                        eprintln!("Failed to write to R process stdin: {}", e);
-                        break;
-                    }
-                } else {
-                    eprintln!("R process stdin is not available.");
-                    break;
-                }
 
-                loop {
-                    line.clear();
-                    let _bytes = reader.read_line(&mut line).unwrap_or(0);
-                    // print!("{}", line);
-
-                    // Read until R prompt appears (">> " at line start)
-                    if line.trim_start().starts_with(">>") {
-                        break;
+                if let Ok(value) = eval_string(&buffer) {
+                    if !value.is_null() {
+                        println!("{:?}", value);
                     }
                 }
             }
@@ -132,6 +105,10 @@ impl Prompt for RoughlyPrompt {
         Color::Reset
     }
 
+    fn get_prompt_multiline_color(&self) -> AnsiColor {
+        AnsiColor::Default
+    }
+
     fn get_indicator_color(&self) -> Color {
         Color::Reset
     }
@@ -145,12 +122,127 @@ impl Prompt for RoughlyPrompt {
     }
 }
 
-struct RoughlyHighlighter;
+struct RoughlyHighlighter {
+    language: Arc<RwLock<Language>>,
+}
+
+impl RoughlyHighlighter {
+    fn new(language: Arc<RwLock<Language>>) -> Self {
+        Self { language }
+    }
+}
 
 impl Highlighter for RoughlyHighlighter {
     fn highlight(&self, line: &str, _cursor: usize) -> StyledText {
         let mut styled_text = StyledText::new();
-        styled_text.push((Style::new().fg(AnsiColor::Default), line.to_string()));
+
+        let tree = {
+            let mut language = self.language.write().unwrap();
+            language.parser.parse(line, None).unwrap()
+        };
+
+        let mut styled_ranges = Vec::new();
+        traverse(&mut tree.root_node().walk(), &mut styled_ranges);
+
+        let mut last_end = 0;
+        for (style, range) in styled_ranges {
+            if last_end < range.start {
+                styled_text.push((
+                    Style::new().fg(AnsiColor::DarkGray),
+                    line[last_end..range.start].to_string(),
+                ));
+            }
+
+            styled_text.push((style, line[range.clone()].to_string()));
+            last_end = range.end;
+        }
+
+        if last_end < line.len() {
+            styled_text.push((
+                Style::new().fg(AnsiColor::DarkGray),
+                line[last_end..].to_string(),
+            ));
+        }
+
         styled_text
+    }
+}
+
+fn traverse(cursor: &mut TreeCursor, state: &mut Vec<(Style, Range<usize>)>) {
+    let node = cursor.node();
+
+    if node.has_error() {
+        let style = Style::new().underline().fg(AnsiColor::LightRed);
+        state.push((style, node.byte_range()));
+        return;
+    }
+
+    match node.kind() {
+        "identifier" => {
+            let style = Style::new().fg(AnsiColor::Default);
+            state.push((style, node.byte_range()));
+        }
+        "string" => {
+            let style = Style::new().fg(AnsiColor::Green);
+            state.push((style, node.byte_range()));
+        }
+        "integer" | "float" | "complex" => {
+            let style = Style::new().fg(AnsiColor::Blue);
+            state.push((style, node.byte_range()));
+        }
+        _ => {}
+    }
+
+    if cursor.goto_first_child() {
+        loop {
+            traverse(cursor, state);
+
+            if !cursor.goto_next_sibling() {
+                cursor.goto_parent();
+                break;
+            }
+        }
+    }
+}
+
+struct Language {
+    parser: Parser,
+    // TODO: use this to store the tree
+    // tree: Option<Tree>,
+}
+
+impl Language {
+    fn new() -> Self {
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_r::LANGUAGE.into())
+            .unwrap();
+        Self { parser }
+    }
+}
+
+struct RoughlyValidator {
+    language: Arc<RwLock<Language>>,
+}
+
+impl RoughlyValidator {
+    fn new(language: Arc<RwLock<Language>>) -> Self {
+        Self { language }
+    }
+}
+
+impl Validator for RoughlyValidator {
+    fn validate(&self, line: &str) -> ValidationResult {
+        let tree = {
+            let mut language = self.language.write().unwrap();
+            language.parser.parse(line, None).unwrap()
+        };
+        let node = tree.root_node();
+
+        if node.has_error() {
+            ValidationResult::Incomplete
+        } else {
+            ValidationResult::Complete
+        }
     }
 }
