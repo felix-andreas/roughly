@@ -93,7 +93,7 @@ enum Command {
         #[clap(long, default_value_t = true)]
         stdio: bool,
     },
-    /// Start a R REPL
+    /// Start an R REPL
     Repl {
         #[clap(long, default_value_t = false)]
         vi: bool,
