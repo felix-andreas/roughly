@@ -183,6 +183,10 @@ See https://github.com/r-lib/tree-sitter-r/issues/166
 
 * https://homepages.inf.ed.ac.uk/wadler/papers/prettier/prettier.pdf
 
+### Type Checker
+
+* https://github.com/Glyphack/enderpy
+
 ### Out of order issue
 
 * https://github.com/ebkalderon/tower-lsp/issues/284
