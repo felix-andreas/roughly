@@ -189,12 +189,9 @@ fn traverse(
             return node.end_position();
         }
 
-        node.child_by_field_name("rhs")
+        field_optional(node, "rhs")
             .map(|rhs| rhs.end_position())
-            .or_else(|| {
-                node.child_by_field_name("operator")
-                    .map(|operator| operator.end_position())
-            })
+            .or_else(|| field_optional(node, "operator").map(|operator| operator.end_position()))
             // note: this case is unexpected
             .unwrap_or_else(|| node.end_position())
     };
@@ -944,26 +941,22 @@ fn traverse(
             })?;
         }
         "string" => {
-            out.push('"');
-            tree::for_each_child(cursor, |_, child, field_name, cursor| match field_name {
-                None => match child.kind() {
-                    "\"" => Ok(()),
-                    "\'" => Ok(()),
-                    _ => unreachable!(),
-                },
-                Some("content") => fmt(out, cursor),
-                Some(_) => unreachable!(),
-            })?;
-            out.push('"');
-        }
-        "string_content" => {
-            let mut last_was_escape = false;
-            for char in get_raw(node).chars() {
-                match char {
-                    '"' if !last_was_escape => out.push_str("\\\""),
-                    _ => out.push(char),
+            if let Some(content) = field_optional(node, "content") {
+                let raw = get_raw(content);
+                let mut all_quotes_escaped = true;
+                let mut prev_was_escape = false;
+                for char in raw.chars() {
+                    if char == '"' {
+                        all_quotes_escaped &= prev_was_escape;
+                    }
+                    prev_was_escape = char == '\\' && !prev_was_escape;
                 }
-                last_was_escape = char == '\\' && !last_was_escape;
+                let quote = if all_quotes_escaped { '"' } else { '\'' };
+                out.push(quote);
+                out.push_str(&raw);
+                out.push(quote);
+            } else {
+                out.push_str(r#""""#);
             }
         }
         "unary_operator" => {
