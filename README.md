@@ -53,26 +53,26 @@ You can configure Roughly as an [external formatter in RStudio](https://roughly.
 
 ## Usage
 
-Start the language server:
+Run roughly as a formatter:
 
 ```
-roughly lsp
+roughly fmt             # Format all files in the current directory
+roughly fmt <path>      # Format all files in `<path>`
+roughly fmt --check     # Only check if files would be formatted
+roughly fmt --diff      # Only show diff if files would be formatted
 ```
 
-To run roughly as a formatter:
+To run Roughly as a linter:
 
 ```
-roughly fmt                # Format all files in the current directory
-roughly fmt <path>         # Format all files in `<path>`
-roughly fmt --check        # Only check if files would be formatted
-roughly fmt --diff         # Only show diff if files would be formatted
+roughly check           # Check all files in the current directory
+roughly check <path>    # Check all files in `<path>`
 ```
 
-Or, to run Roughly as a linter:
+Or, to run Roughly as a language server:
 
 ```
-roughly check               # Check all files in the current directory
-roughly check <path>        # Check all files in `<path>`
+roughly lsp             # Usually started automatically by your editor
 ```
 
 ## Configuration
@@ -84,10 +84,6 @@ case = "snake_case" # or camelCase
 spaces = 2
 ```
 
-## Documentation
-
-For comprehensive documentation, visit [roughly.felixandreas.me](https://roughly.felixandreas.me).
-
 ## Features
 
 * Completion
@@ -96,7 +92,7 @@ For comprehensive documentation, visit [roughly.felixandreas.me](https://roughly
 * Formatting
 * Diagnostics
   * Syntax
-  * Missing commans, Trailing commas, 
+  * Missing and trailing commas
   * Assignments, casing
 * Indexing
   * Globals
@@ -105,23 +101,12 @@ For comprehensive documentation, visit [roughly.felixandreas.me](https://roughly
     * Generics
     * Methods
   * (TODO) R6
-* Goto Document Symbol <kbd>Ctrl</kbd> <kbd>Shift</kbd> + <kbd>O</kbd>
-* Goto Workspace Symbol <kbd>Ctrl</kbd> + <kbd>T</kbd>
+* Goto Document Symbol (VS Code shortcut <kbd>Ctrl</kbd> <kbd>Shift</kbd> + <kbd>O</kbd>)
+* Goto Workspace Symbol (VS Code shortcut  <kbd>Ctrl</kbd> + <kbd>T</kbd>)
 * VS Code Extension
-  * Commands
+  * Commands (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd>)
     * Start/Stop/Restart the Language Server
     * Open logs
-
-## Project layout
-
-Currently this extension assumes that your `R` code has the following folder structure:
-
-| Path        | Type      |
-|-------------|-----------|
-| `R`         | directory |
-| `R/*.R`     | file      |
-| `NAMESPACE` | file      |
-
 
 ## Development
 
