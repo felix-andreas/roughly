@@ -1,13 +1,31 @@
-use tree_sitter::{Node, Tree, TreeCursor};
+use {
+    ropey::Rope,
+    tree_sitter::{Node, Parser, Tree, TreeCursor},
+};
 
 // todo: consider resusing global parser (maybe behind Mutex??)
-pub fn parse(text: impl AsRef<[u8]>, maybe_tree: Option<&Tree>) -> Tree {
+pub fn get_parser() -> Parser {
     let mut parser = tree_sitter::Parser::new();
-    let language = tree_sitter_r::LANGUAGE;
     parser
-        .set_language(&language.into())
+        .set_language(&tree_sitter_r::LANGUAGE.into())
         .expect("Error loading R parser");
+    parser
+}
+
+pub fn parse(text: impl AsRef<[u8]>, maybe_tree: Option<&Tree>) -> Tree {
+    let mut parser = get_parser();
     parser.parse(text, maybe_tree).unwrap()
+}
+
+pub fn parse_rope(rope: &Rope, tree: &Tree) -> Tree {
+    let mut lookup = |byte, _position| {
+        let (chunk, chunk_byte, _, _) = rope.chunk_at_byte(byte);
+        let offset = byte - chunk_byte;
+        &chunk.as_bytes()[offset..]
+    };
+    get_parser()
+        .parse_with_options(&mut lookup, Some(tree), None)
+        .expect("failed to parse")
 }
 
 #[inline]

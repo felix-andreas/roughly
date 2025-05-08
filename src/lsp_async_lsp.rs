@@ -201,10 +201,16 @@ impl LanguageServer for ServerState {
         ControlFlow::Continue(())
     }
 
+    // inspireed by:
+    // https://github.com/marceline-cramer/saturn-v/blob/93d1c8fd022f5b4905928d6e9154385c5b6822ab/lsp/src/lib.rs
     fn did_change(
         &mut self,
         params: DidChangeTextDocumentParams,
     ) -> ControlFlow<async_lsp::Result<()>> {
+        // DEBUG
+        // let random_duration = 200 + rand::random::<u64>() % 401;
+        // tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let content_changes = params.content_changes;
@@ -213,105 +219,73 @@ impl LanguageServer for ServerState {
 
         let start = Instant::now();
 
-        // let random_duration = 200 + rand::random::<u64>() % 401;
-        // tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        // let random_duration = 200 + rand::random::<u64>() % 401;
-        // std::thread::sleep(std::time::Duration::from_millis(500));
+        let Some(document) = self.document_map.get_mut(&path) else {
+            tracing::error!(?uri, "document not found");
+            return ControlFlow::Continue(());
+        };
 
-        if let Some(document) = self.document_map.get_mut(&path) {
-            for change in content_changes {
-                let Some(range) = change.range else {
-                    tracing::warn!("unexpected case #2141 - check");
-                    continue;
-                };
-                // DEBUG
-                // eprintln!(
-                //     "{}:{}, {}:{} - {}",
-                //     range.start.line,
-                //     range.start.character,
-                //     range.end.line,
-                //     range.end.character,
-                //     change.text
-                // );
+        let (rope, tree) = (&mut document.rope, &mut document.tree);
+        for change in content_changes {
+            let range = change.range.unwrap();
 
-                let (rope, tree) = (&mut document.rope, &mut document.tree);
+            let start_line = range.start.line as usize;
+            let start_col = range.start.character as usize;
+            let end_line = range.end.line as usize;
+            let end_col = range.end.character as usize;
 
-                let start =
-                    rope.line_to_char(range.start.line as usize) + range.start.character as usize;
+            let start_char = rope.line_to_char(start_line) + start_col;
+            let end_char = rope.line_to_char(end_line) + end_col;
 
-                let end = rope.line_to_char(range.end.line as usize) + range.end.character as usize;
+            let start_byte = rope.char_to_byte(start_char);
+            let old_end_byte = rope.char_to_byte(end_char);
+            let new_end_byte = start_byte + change.text.len();
 
-                let old_end_byte = rope.try_char_to_byte(end).unwrap();
+            rope.remove(start_char..end_char);
+            rope.insert(start_char, &change.text);
 
-                rope.remove(start..end);
-                rope.insert(start, &change.text);
+            let new_end_line = rope.byte_to_line(new_end_byte);
+            let new_end_col = rope.byte_to_char(new_end_byte) - rope.line_to_char(new_end_line);
 
-                let new_end_char = start + change.text.len();
-                let new_end_byte = rope.try_char_to_byte(new_end_char).unwrap();
-
-                let new_end_line = rope.char_to_line(start + change.text.len());
-
-                tree.edit(&InputEdit {
-                    start_byte: rope.try_char_to_byte(start).unwrap(),
-                    old_end_byte,
-                    new_end_byte,
-                    start_position: Point {
-                        row: range.start.line as usize,
-                        column: range.start.character as usize,
-                    },
-                    old_end_position: Point {
-                        row: range.end.line as usize,
-                        column: range.end.character as usize,
-                    },
-                    new_end_position: Point {
-                        row: new_end_line,
-                        column: new_end_char - rope.line_to_char(new_end_line),
-                    },
-                });
-
-                // todo: use Parser::parse_with_options
-                // let mut parser = tree_sitter::Parser::new();
-                // let language = tree_sitter_r::LANGUAGE;
-                // parser
-                //     .set_language(&language.into())
-                //     .expect("Error loading R parser");
-
-                // parser.parse_with_options(
-                //     &mut |i, point| rope.byte_slice(i..).bytes(),
-                //     Some(&document.tree),
-                //     None,
-                // );
-                document.tree = tree::parse(document.rope.to_string(), Some(&document.tree));
-            }
-
-            // DEBUG
-            // eprintln!("<--DOCUMENT-->\n{}<--END-->", document.rope);
-            // eprintln!("{}", utils::format_node(document.tree.root_node()));
-            // if let Ok(code) = format::format(document.tree.root_node(), &document.rope) {
-            //     eprintln!("<--DOCUMENT-->\n{}<--END-->", code);
-            // }
+            tree.edit(&InputEdit {
+                start_byte,
+                old_end_byte,
+                new_end_byte,
+                start_position: Point {
+                    row: start_line,
+                    column: start_col,
+                },
+                old_end_position: Point {
+                    row: end_line,
+                    column: end_col,
+                },
+                new_end_position: Point {
+                    row: new_end_line,
+                    column: new_end_col,
+                },
+            });
         }
 
-        if let Some(document) = self.document_map.get(&path) {
-            let diagnostics = diagnostics::analyze_fast(
-                document.tree.root_node(),
-                &document.rope,
-                diagnostics::Config::from_config(self.config, self.experimental),
-            );
+        document.tree = tree::parse_rope(rope, tree);
 
-            if let Err(error) = self
-                .client
-                .publish_diagnostics(PublishDiagnosticsParams::new(
-                    uri.clone(),
-                    diagnostics,
-                    Some(params.text_document.version),
-                ))
-            {
-                tracing::error!(?error, "failed to publish diagnostics");
-            }
-        } else {
-            tracing::error!(?uri, "document not found");
-        };
+        // DEBUG
+        // eprintln!("<--DOCUMENT-->\n{}<--END-->", rope);
+
+        let diagnostics = diagnostics::analyze_fast(
+            document.tree.root_node(),
+            &document.rope,
+            diagnostics::Config::from_config(self.config, self.experimental),
+        );
+
+        if let Err(error) = self
+            .client
+            .publish_diagnostics(PublishDiagnosticsParams::new(
+                uri.clone(),
+                diagnostics,
+                Some(params.text_document.version),
+            ))
+        {
+            tracing::error!(?error, "failed to publish diagnostics");
+        }
 
         tracing::debug!(elapsed = start.elapsed().as_millis());
 
