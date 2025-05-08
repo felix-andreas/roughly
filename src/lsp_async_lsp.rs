@@ -8,9 +8,10 @@ use {
         lsp_types::{
             CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
             DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-            DocumentFormattingParams, DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse,
-            InitializeParams, InitializeResult, OneOf, Position, PublishDiagnosticsParams, Range,
-            SaveOptions, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
+            DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol,
+            DocumentSymbolParams, DocumentSymbolResponse, InitializeParams, InitializeResult,
+            MessageType, OneOf, Position, PublishDiagnosticsParams, Range, SaveOptions,
+            ServerCapabilities, ServerInfo, ShowMessageParams, TextDocumentSyncCapability,
             TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
             WorkspaceSymbolParams, WorkspaceSymbolResponse,
         },
@@ -18,13 +19,8 @@ use {
     },
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
-        client_monitor::ClientProcessMonitorLayer,
-        concurrency::ConcurrencyLayer,
-        lsp_types::{MessageType, ShowMessageParams},
-        panic::CatchUnwindLayer,
-        router::Router,
-        server::LifecycleLayer,
-        tracing::TracingLayer,
+        client_monitor::ClientProcessMonitorLayer, concurrency::ConcurrencyLayer,
+        panic::CatchUnwindLayer, router::Router, server::LifecycleLayer, tracing::TracingLayer,
     },
     futures::future::BoxFuture,
     ropey::Rope,
@@ -134,6 +130,8 @@ impl LanguageServer for ServerState {
                         trigger_characters: Some(vec!["$".into(), "@".into()]),
                         ..Default::default()
                     }),
+
+                    document_range_formatting_provider: Some(OneOf::Left(true)),
                     document_formatting_provider: Some(OneOf::Left(true)),
                     document_symbol_provider: Some(OneOf::Left(true)),
                     text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -387,19 +385,19 @@ impl LanguageServer for ServerState {
         };
 
         let (rope, tree) = (&document.rope, &document.tree);
-        let new = match format::format(tree.root_node(), rope, format::Config {
+        let new_text = match format::format(tree.root_node(), rope, format::Config {
             indent: &" ".repeat(self.config.spaces),
             line_ending: LineEnding::Auto,
         }) {
-            Ok(new) => new,
+            Ok(text) => text,
             Err(error) => {
                 tracing::error!(?error, "failed to format");
                 return Box::pin(async { Ok(None) });
             }
         };
 
-        // TODO: only format if necessary and send text edits...
         let edits = vec![TextEdit {
+            new_text,
             range: Range::new(
                 Position::new(0, 0),
                 Position::new(
@@ -407,7 +405,55 @@ impl LanguageServer for ServerState {
                     (rope.len_chars() - rope.line_to_char(rope.len_lines() - 1)) as u32,
                 ),
             ),
-            new_text: new,
+        }];
+
+        Box::pin(async move { Ok(Some(edits)) })
+    }
+
+    fn range_formatting(
+        &mut self,
+        params: DocumentRangeFormattingParams,
+    ) -> BoxFuture<'static, Result<Option<Vec<TextEdit>>, ResponseError>> {
+        let uri = params.text_document.uri;
+        let range = params.range;
+        let path = uri.to_file_path().unwrap();
+
+        tracing::debug!(?uri, "format");
+
+        let Some(document) = self.document_map.get(&path) else {
+            tracing::info!(?uri, "document not found");
+            return Box::pin(async move { Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")) });
+        };
+
+        let (rope, tree) = (&document.rope, &document.tree);
+        let Some(node) = tree.root_node().descendant_for_point_range(
+            Point::new(range.start.line as usize, range.start.character as usize),
+            Point::new(range.end.line as usize, range.end.character as usize),
+        ) else {
+            tracing::info!(?range, "no node for range");
+            return Box::pin(async { Ok(None) });
+        };
+
+        let new_text = match format::format(node, rope, format::Config {
+            indent: &" ".repeat(self.config.spaces),
+            line_ending: LineEnding::Auto,
+        }) {
+            Ok(text) => text,
+            Err(error) => {
+                tracing::error!(?error, "failed to format");
+                return Box::pin(async { Ok(None) });
+            }
+        };
+
+        let start = node.start_position();
+        let end = node.end_position();
+
+        let edits = vec![TextEdit {
+            new_text,
+            range: Range::new(
+                Position::new(start.row as u32, start.column as u32),
+                Position::new(end.row as u32, end.column as u32),
+            ),
         }];
 
         Box::pin(async move { Ok(Some(edits)) })
