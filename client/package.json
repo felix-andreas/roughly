@@ -49,16 +49,16 @@
 	"contributes": {
 		"commands": [
 			{
-				"title": "Roughly: Restart Language Server",
-				"command": "roughly.restartLanguageServer"
+				"title": "Roughly: Restart Server",
+				"command": "roughly.restartServer"
 			},
 			{
-				"title": "Roughly: Start Language Server",
-				"command": "roughly.startLanguageServer"
+				"title": "Roughly: Start Server",
+				"command": "roughly.startServer"
 			},
 			{
-				"title": "Roughly: Stop Language Server",
-				"command": "roughly.stopLanguageServer"
+				"title": "Roughly: Stop Server",
+				"command": "roughly.stopServer"
 			},
 			{
 				"title": "Roughly: Open Logs",

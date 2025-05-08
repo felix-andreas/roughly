@@ -74,7 +74,7 @@ export function activate({ subscriptions, extension }: ExtensionContext) {
       }
     }),
     commands.registerCommand(
-      "roughly.restartLanguageServer",
+      "roughly.restartServer",
       async () => {
         if (client.isRunning) {
           await client.restart()
@@ -85,14 +85,14 @@ export function activate({ subscriptions, extension }: ExtensionContext) {
       }
     ),
     commands.registerCommand(
-      "roughly.startLanguageServer",
+      "roughly.startServer",
       async () => {
         await client.start()
         setServerStatus({ health: "started" })
       }
     ),
     commands.registerCommand(
-      "roughly.stopLanguageServer",
+      "roughly.stopServer",
       async () => {
         await client.stop()
         setServerStatus({ health: "stopped" })
@@ -147,10 +147,10 @@ function updateStatusBarItem() {
       break
     case "stopped":
       statusBar.tooltip.appendText("Server is stopped")
-      statusBar.tooltip.appendMarkdown("\n\n[Start server](command:roughly.startLanguageServer)")
+      statusBar.tooltip.appendMarkdown("\n\n[Start server](command:roughly.startServer)")
       statusBar.color = new ThemeColor("statusBarItem.warningForeground")
       statusBar.backgroundColor = new ThemeColor("statusBarItem.warningBackground")
-      statusBar.command = "roughly.startLanguageServer"
+      statusBar.command = "roughly.startServer"
       statusBar.text = "$(stop-circle) roughly"
       return
   }
@@ -162,8 +162,8 @@ function updateStatusBarItem() {
   statusBar.tooltip.appendMarkdown([
     `[Extension Info](command:roughly.serverVersion "Show version and server binary info"): Version ${version}, Server Version ${serverVersion}\n\n---`,
     '[$(terminal) Open Logs](command:roughly.openLogs "Open the server logs")',
-    '[$(debug-restart) Restart server](command:roughly.restartLanguageServer "Restart the server")',
-    '[$(stop-circle) Stop server](command:roughly.stopLanguageServer "Stop the server")',
+    '[$(debug-restart) Restart server](command:roughly.restartServer "Restart the server")',
+    '[$(stop-circle) Stop server](command:roughly.stopServer "Stop the server")',
   ].join("\n\n"))
 
   // if (true) icon = "$(loading~spin) "
