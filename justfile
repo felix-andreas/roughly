@@ -106,6 +106,11 @@ update-release $version:
 		"release/roughly-$version.exe#LSP server (Windows)" \
 		--clobber
 
+publish-marketplace $version:
+	@just vsce publish --packagePath ../release/roughly-linux-x64-$version.vsix
+	@just vsce publish --packagePath ../release/roughly-win32-x64-$version.vsix
+	@just vsce publish --packagePath ../release/roughly-$version.vsix
+
 # use rlib repos to test formatting
 rlib-clone:
 	#!/usr/bin/env bash
