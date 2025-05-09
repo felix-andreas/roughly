@@ -1,3 +1,6 @@
+import * as path from "path";
+import * as fs from 'fs';
+
 import {
   commands,
   languages,
@@ -17,18 +20,31 @@ import {
   TransportKind,
 } from 'vscode-languageclient/node'
 
+const logger = window.createOutputChannel("Roughly Extension", { log: true });
+
+const EXTENSION_ROOT_DIR = path.dirname(__dirname)
+const ROUGHLY_BINARY_NAME = process.platform === "win32" ? "roughly.exe" : "roughly"
+const BUNDLED_ROUGHLY_EXECUTABLE = path.join(EXTENSION_ROOT_DIR, "bin", ROUGHLY_BINARY_NAME)
+
 let client: LanguageClient
 let statusBar
-let version
 let status = { health: "started" }
+let version
 
 export function activate({ subscriptions, extension }: ExtensionContext) {
-  const config = workspace.getConfiguration("roughly")
-  const command = process.env.SERVER_PATH || config.get<string>("path", "roughly")
-  const args = config.get<string[]>("args", ["lsp"])
   version = extension.packageJSON.version ?? "<unknown>"
 
-  console.log("using server command:", [command, ...args].join(" "))
+  const config = workspace.getConfiguration("roughly")
+  const command = process.env.SERVER_PATH
+    || (fs.existsSync(BUNDLED_ROUGHLY_EXECUTABLE)
+      ? BUNDLED_ROUGHLY_EXECUTABLE
+      : config.get<string>("path", "roughly")
+    )
+
+  const args = config.get<string[]>("args", ["lsp"])
+
+  logger.info("using server command:", [command, ...args].join(" "))
+
   const outputChannel = window.createOutputChannel("Roughly");
 
   client = (() => {

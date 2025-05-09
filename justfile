@@ -16,8 +16,12 @@ docs:
 snapshot *args:
 	cargo insta test --review -- --nocapture {{args}}
 
-bundle *args:
-	bun --cwd=client run package -- {{args}}
+vsce *args:
+	@bun --cwd=client run vsce -- {{args}}
+
+vscode *args:
+	cp LICENSE client
+	@just vsce package {{args}}
 
 install:
 	code --install-extension client/roughly-*.vsix --force
@@ -38,11 +42,10 @@ new-release $version:
 bump-version $version:
 	#!/usr/bin/env bash
 	set -euo pipefail
-	sed -i 's/"version": "[ta-zA-Z0-9._-]*"/"version": "{{version}}"/' package.json
 	sed -i 's/"version": "[a-zA-Z0-9._-]*"/"version": "{{version}}"/' client/package.json
 	sed -i 's/^version = "[a-zA-Z0-9._-]*"/version = "{{version}}"/' Cargo.toml
 	cargo check # bonus: also updates version in lock file
-	git add package.json client/package.json Cargo.toml Cargo.lock
+	git add client/package.json Cargo.toml Cargo.lock
 	git commit -m "chore: Release v{{version}}"
 
 git-release $version="":
@@ -60,22 +63,39 @@ build-release $version:
 	set -euo pipefail
 	rm -rf release
 	mkdir release
-	# build client
-	just bundle --out ../release/roughly-$version.vsix
+
 	# build server
 	just linux
 	just windows
 	cp target/release/roughly release/roughly-$version
 	cp target/x86_64-pc-windows-gnu/release/roughly.exe release/roughly-$version.exe
 
+	# build vscode extension (Client only) 
+	rm -rf client/bin
+	just vscode --out ../release/roughly-$version.vsix
+
+	# build vscode extension (linux-x64)
+	rm -rf client/bin
+	mkdir -p client/bin
+	cp target/release/roughly client/bin/
+	just vscode --target linux-x64 --out ../release/roughly-linux-x64-$version.vsix
+
+	# build vscode extension (win32-x64)
+	rm -rf client/bin
+	mkdir -p client/bin
+	cp target/x86_64-pc-windows-gnu/release/roughly.exe client/bin/
+	just vscode --target win32-x64 --out ../release/roughly-win32-x64-$version.vsix
+
 publish-release $version:
 	#!/usr/bin/env bash
 	set -euo pipefail
 	git push
 	gh release create $version \
-		"release/roughly-$version.vsix#VS Code extension" \
-		"release/roughly-$version#LSP server (Linux)" \
-		"release/roughly-$version.exe#LSP server (Windows)" \
+		"release/roughly-$version#LSP server (Linux x86_64)" \
+		"release/roughly-$version.exe#LSP server (Windows x86_64)" \
+		"release/roughly-$version.vsix#VS Code extension (Client only)" \
+		"release/roughly-linux-x64-$version.vsix#VS Code extension (linux-x64)" \
+		"release/roughly-win32-x64-$version.vsix#VS Code extension (win32-x64)" \
 		--notes "" \
 		--prerelease
 

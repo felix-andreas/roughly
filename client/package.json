@@ -1,7 +1,7 @@
 {
 	"name": "roughly",
 	"displayName": "Roughly",
-	"description": "The R(oughly good enough) Language Server",
+	"description": "R language support",
 	"author": "Felix Andreas",
 	"version": "0.0.2",
 	"publisher": "felix-andreas",
