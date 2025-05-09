@@ -3,7 +3,7 @@
 	"displayName": "Roughly",
 	"description": "The R(oughly good enough) Language Server",
 	"author": "Felix Andreas",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"publisher": "felix-andreas",
 	"icon": "images/icon.png",
 	"repository": {
@@ -26,7 +26,8 @@
 		"compile": "tsc -b",
 		"watch": "tsc -b -w",
 		"lint": "eslint",
-		"package": "cp ../LICENSE . && vsce package"
+		"package": "vsce package",
+		"vsce": "vsce"
 	},
 	"dependencies": {
 		"vscode-languageclient": "^9.0.1"

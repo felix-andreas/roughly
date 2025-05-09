@@ -933,7 +933,7 @@ dependencies = [
 
 [[package]]
 name = "roughly"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "async-lsp",
  "clap",
