@@ -29,7 +29,7 @@ You can customize the Roughly extension in VS Code through the following setting
 
 ### Format Document
 
-![Format Document](https://github.com/user-attachments/assets/e4c7cf42-d5fa-44b9-900b-5c7758f5f7e3)
+![Format Document](https://github.com/user-attachments/assets/a03334a5-ed83-4f30-a4ea-7cbd615e4fdd)
 
 ### Workspace Symbol Search (Ctrl + T)
 
