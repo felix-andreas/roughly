@@ -33,7 +33,7 @@ You can customize the Roughly extension in VS Code through the following setting
 
 ### Workspace Symbol Search (Ctrl + T)
 
-![Workspace Symbol Search](https://github.com/user-attachments/assets/f948a45f-0762-4c3a-b244-f405cbc7f0d9)
+![Workspace Symbol Search](https://github.com/user-attachments/assets/e4c7cf42-d5fa-44b9-900b-5c7758f5f7e3)
 
 ### Document Symbol Search (Ctrl + Shift + O)
 
