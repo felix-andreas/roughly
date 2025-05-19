@@ -27,10 +27,9 @@ You can customize the Roughly extension in VS Code through the following setting
 
 ## Highlights
 
-
 ### Format Document
 
-![Format Document](https://github.com/user-attachments/assets/44c426d7-ab87-4626-942a-0b9b87a32512)
+![Format Document](https://github.com/user-attachments/assets/e4c7cf42-d5fa-44b9-900b-5c7758f5f7e3)
 
 ### Workspace Symbol Search (Ctrl + T)
 
@@ -38,11 +37,11 @@ You can customize the Roughly extension in VS Code through the following setting
 
 ### Document Symbol Search (Ctrl + Shift + O)
 
-![Document Symbol Search](https://github.com/user-attachments/assets/eed98b0d-1e1b-4f6c-83fb-5738e7aa631b)
+![Document Symbol Search](https://github.com/user-attachments/assets/0c608b3d-2eed-4372-b2d4-783ff67c6c0d)
 
 ### Syntax Errors
 
-![Syntax Errors](https://github.com/user-attachments/assets/ffcad99d-941f-4cda-a746-575a28ef4607)
+![Syntax Errors](https://github.com/user-attachments/assets/ef93a688-fc33-46dd-8cbb-7f3bab6948a7)
 
 ## Documentation
 
