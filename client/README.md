@@ -19,7 +19,7 @@ You can customize the Roughly extension in VS Code through the following setting
   "roughly.path": "/path/to/roughly"
 ```
 
-* Pass additional arguments to the language server, e.g to enable experimental features:
+* Pass additional arguments to the language server, e.g., to enable experimental features:
 
 ```json
   "roughly.args": ["lsp", "--experimental"]
