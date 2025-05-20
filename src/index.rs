@@ -264,27 +264,27 @@ pub fn get_document_symbols_ng(tree: &Tree, rope: &Rope) -> Vec<DocumentSymbol> 
     tracing::info!("parse symbols tree");
     let root = tree.root_node();
 
-    symbols_for_block(&root, rope)
+    symbols_for_block(root, rope)
 }
 
-pub fn symbols_for_block(root: &Node, rope: &Rope) -> Vec<DocumentSymbol> {
+pub fn symbols_for_block(root: Node, rope: &Rope) -> Vec<DocumentSymbol> {
     let mut cursor = root.walk();
     let mut symbols = vec![];
 
     for node in root.children(&mut cursor) {
         if node.kind() == "binary_operator" {
-            let lhs = node.child(0).unwrap();
-            let op = node.child(1).unwrap();
-            let rhs = node.child(2).unwrap();
+            let lhs = node.child_by_field_name("lhs").unwrap();
+            let op = node.child_by_field_name("operator").unwrap();
+            let rhs = node.child_by_field_name("rhs").unwrap();
             // todo: fix this
             if lhs.kind() == "identifier" && op.kind() == "<-" {
                 let (kind, detail, children) = match rhs.kind() {
                     "function_definition" => {
-                        let (children, detail) = parse_function(&rhs, rope);
+                        let (children, detail) = parse_function(rhs, rope);
                         (SymbolKind::FUNCTION, detail, Some(children))
                     }
                     "program" | "braced_expression" => {
-                        let block_symbols = symbols_for_block(&rhs, rope);
+                        let block_symbols = symbols_for_block(rhs, rope);
                         let kind = block_symbols
                             .last()
                             .map(|symbol| symbol.kind)
@@ -325,9 +325,9 @@ pub fn symbols_for_block(root: &Node, rope: &Rope) -> Vec<DocumentSymbol> {
     symbols
 }
 
-pub fn parse_function(function: &Node, rope: &Rope) -> (Vec<DocumentSymbol>, Option<String>) {
+pub fn parse_function(function: Node, rope: &Rope) -> (Vec<DocumentSymbol>, Option<String>) {
     let (parameters, body) = (function.child(1).unwrap(), function.child(2).unwrap());
-    let symbols = symbols_for_block(&body, rope);
+    let symbols = symbols_for_block(body, rope);
     let mut cursor = parameters.walk();
     let detail = parameters
         .children_by_field_name("parameter", &mut cursor)

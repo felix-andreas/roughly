@@ -361,7 +361,7 @@ impl LanguageServer for ServerState {
             return Box::pin(async move { Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")) });
         };
 
-        let completions = completions::get(position, &document.rope, &self.workspace_symbols);
+        let completions = completions::get(position, &document.rope, &document.tree, &self.workspace_symbols);
 
         Box::pin(async move { Ok(completions) })
     }
