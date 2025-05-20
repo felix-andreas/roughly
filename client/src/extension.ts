@@ -36,10 +36,11 @@ export function activate({ subscriptions, extension }: ExtensionContext) {
 
   const config = workspace.getConfiguration("roughly")
   const command = process.env.SERVER_PATH
-    || (fs.existsSync(BUNDLED_ROUGHLY_EXECUTABLE)
-      ? BUNDLED_ROUGHLY_EXECUTABLE
-      : config.get<string>("path", "roughly")
-    )
+    ?? (config.get<string>("path")
+      ?? (fs.existsSync(BUNDLED_ROUGHLY_EXECUTABLE)
+        ? BUNDLED_ROUGHLY_EXECUTABLE
+        : "roughly"
+      ))
 
   const args = config.get<string[]>("args", ["lsp"])
 
