@@ -51,7 +51,7 @@ export function activate({ subscriptions, extension }: ExtensionContext) {
   client = (() => {
     const serverOptions: ServerOptions = {
       command,
-      // args, // TODO: uncomment after some versions
+      args,
       transport: TransportKind.stdio,
       options: {
         env: {
