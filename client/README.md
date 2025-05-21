@@ -5,6 +5,13 @@ This extension provides support for the [R programming language](https://www.r-p
 > **Note**
 > The VS Code extension from the marketplace already includes a bundled version of the Roughly CLI, so you don't need to install the CLI separately.
 
+## Features
+
+* Autocomplete
+* Code Formatting
+* Syntax Diagnostics
+* Workspace Symbol Search
+
 ## Usage
 
 The extension will automatically start the Roughly language server for R files. You can also use the built-in commands to start, stop, or restart the server, or open logs.
@@ -43,6 +50,7 @@ You can customize the Roughly extension in VS Code through the following setting
 
 ![Syntax Errors](https://github.com/user-attachments/assets/ef93a688-fc33-46dd-8cbb-7f3bab6948a7)
 
-## Documentation
+## Links
 
-See [github.com/felix-andreas/roughly](https://github.com/felix-andreas/roughly) for more information.
+* [📦 Source Code](https://github.com/felix-andreas/roughly)
+* [📚 Documentation](https://roughly.felixandreas.me/)
