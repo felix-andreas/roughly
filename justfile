@@ -38,6 +38,7 @@ new-release $version:
 	just bump-version $version
 	just build-release $version
 	just publish-release $version
+	just publish-marketplace $version
 
 bump-version $version:
 	#!/usr/bin/env bash
@@ -110,9 +111,9 @@ update-release $version:
 		--clobber
 
 publish-marketplace $version:
-	@just vsce publish --packagePath ../release/$version/roughly-linux-x64.vsix
-	@just vsce publish --packagePath ../release/$version/roughly-win32-x64.vsix
-	@just vsce publish --packagePath ../release/$version/roughly.vsix
+	@just vsce publish --pre-release --packagePath ../release/$version/roughly-linux-x64.vsix
+	@just vsce publish --pre-release --packagePath ../release/$version/roughly-win32-x64.vsix
+	@just vsce publish --pre-release --packagePath ../release/$version/roughly.vsix
 
 # use rlib repos to test formatting
 rlib-clone:

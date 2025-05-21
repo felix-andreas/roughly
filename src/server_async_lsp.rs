@@ -198,7 +198,7 @@ impl LanguageServer for ServerState {
         ControlFlow::Continue(())
     }
 
-    // inspireed by:
+    // inspired by:
     // https://github.com/marceline-cramer/saturn-v/blob/93d1c8fd022f5b4905928d6e9154385c5b6822ab/lsp/src/lib.rs
     fn did_change(
         &mut self,
