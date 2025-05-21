@@ -1,12 +1,10 @@
-#[cfg(feature = "async-lsp")]
-use crate::lsp_types::Url as Uri;
 use {
     crate::{
         index,
         index::SymbolsMap,
         lsp_types::{CompletionItem, CompletionItemKind, CompletionResponse, Position, SymbolKind},
+        utils,
     },
-    async_lsp::lsp_types::SymbolInformation,
     ropey::Rope,
     tree_sitter::Point,
 };
@@ -15,7 +13,7 @@ pub fn get(
     position: Position,
     rope: &Rope,
     tree: &tree_sitter::Tree,
-    symbols_map: &impl SymbolsMap<SymbolInformation>,
+    symbols_map: &impl SymbolsMap,
 ) -> Option<CompletionResponse> {
     let line = rope.get_line(position.line as usize)?;
     let mut query = String::new();
@@ -87,13 +85,11 @@ pub fn get(
         })
         .unwrap_or_default();
 
-    let workspace_symbols = symbols_map.filtered(
-        |path, symbols| {
-            let uri = Uri::from_file_path(path).unwrap();
+    let workspace_symbols = symbols_map.filter_map(
+        |_, symbols| {
             symbols
                 .iter()
-                .filter(|symbol| index::filter_symbol(&query, symbol))
-                .map(move |symbol| index::to_symbol_information(symbol, &uri))
+                .filter(|symbol| utils::starts_with_lowercase(&symbol.name, &query))
         },
         1024,
     );
@@ -131,7 +127,7 @@ pub fn get(
             })
             .chain(local_symbols)
             .chain(workspace_symbols.into_iter().map(|symbol| CompletionItem {
-                label: symbol.name,
+                label: symbol.name.to_string(),
                 kind: Some(symbol_kind_to_completion_kind(symbol.kind)),
                 ..Default::default()
             }))

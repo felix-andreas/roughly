@@ -130,7 +130,6 @@ impl LanguageServer for ServerState {
                         trigger_characters: Some(vec!["$".into(), "@".into()]),
                         ..Default::default()
                     }),
-
                     document_range_formatting_provider: Some(OneOf::Left(true)),
                     document_formatting_provider: Some(OneOf::Left(true)),
                     document_symbol_provider: Some(OneOf::Left(true)),
@@ -361,7 +360,12 @@ impl LanguageServer for ServerState {
             return Box::pin(async move { Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")) });
         };
 
-        let completions = completions::get(position, &document.rope, &document.tree, &self.workspace_symbols);
+        let completions = completions::get(
+            position,
+            &document.rope,
+            &document.tree,
+            &self.workspace_symbols,
+        );
 
         Box::pin(async move { Ok(completions) })
     }
@@ -480,16 +484,9 @@ impl LanguageServer for ServerState {
             tracing::error!(?uri, "symbols not found");
             return Box::pin(async move { Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")) });
         };
+        let symbols = symbols.clone();
 
-        let symbols = index::get_document_symbols(symbols, &uri);
-        // Ok(Some(DocumentSymbolResponse::Nested({
-        //     let Some(document) = self.document_map.get(&params.text_document.uri) else {
-        //         tracing::error!("failed to aquirce document :/");
-        //         return Ok(None);
-        //     };
-        //     index::get_document_symbols_ng(&document.tree, &document.rope)
-        // })))
-        Box::pin(async move { Ok(Some(DocumentSymbolResponse::Flat(symbols))) })
+        Box::pin(async move { Ok(Some(DocumentSymbolResponse::Nested(symbols))) })
     }
 
     fn symbol(
@@ -500,6 +497,6 @@ impl LanguageServer for ServerState {
 
         let symbols = index::get_workspace_symbols(&query, &self.workspace_symbols);
 
-        Box::pin(async { Ok(Some(WorkspaceSymbolResponse::Flat(symbols))) })
+        Box::pin(async { Ok(Some(WorkspaceSymbolResponse::Nested(symbols))) })
     }
 }

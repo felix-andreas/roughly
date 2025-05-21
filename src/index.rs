@@ -21,24 +21,24 @@ macro_rules! regex {
     }};
 }
 
-pub trait SymbolsMap<T> {
-    fn filtered<'a, I>(
+pub trait SymbolsMap {
+    fn filter_map<'a, T, I>(
         &'a self,
-        key: impl Fn(&'a PathBuf, &'a Vec<DocumentSymbol>) -> I,
+        key: impl Fn(&'a PathBuf, &'a [DocumentSymbol]) -> I,
         limit: usize,
     ) -> Vec<T>
     where
-        I: Iterator<Item = T> + 'a;
+        I: Iterator<Item = T>;
 }
 
-impl<T> SymbolsMap<T> for HashMap<PathBuf, Vec<DocumentSymbol>> {
-    fn filtered<'a, I>(
+impl SymbolsMap for HashMap<PathBuf, Vec<DocumentSymbol>> {
+    fn filter_map<'a, T, I>(
         &'a self,
-        key: impl Fn(&'a PathBuf, &'a Vec<DocumentSymbol>) -> I,
+        key: impl Fn(&'a PathBuf, &'a [DocumentSymbol]) -> I,
         limit: usize,
     ) -> Vec<T>
     where
-        I: Iterator<Item = T> + 'a,
+        I: Iterator<Item = T>,
     {
         self.iter()
             .flat_map(|(path, symbols)| key(path, symbols))
@@ -49,39 +49,31 @@ impl<T> SymbolsMap<T> for HashMap<PathBuf, Vec<DocumentSymbol>> {
 
 pub fn get_workspace_symbols(
     query: &str,
-    workspace_symbols: &impl SymbolsMap<SymbolInformation>,
-) -> Vec<SymbolInformation> {
-    workspace_symbols.filtered(
+    workspace_symbols: &impl SymbolsMap,
+) -> Vec<WorkspaceSymbol> {
+    workspace_symbols.filter_map(
         |path, symbols| {
             let uri = Uri::from_file_path(path).unwrap();
             symbols
                 .iter()
-                .filter(|symbol| filter_symbol(query, symbol))
-                .map(move |symbol| to_symbol_information(symbol, &uri))
+                .filter(|symbol| utils::starts_with_lowercase(&symbol.name, query))
+                .map(move |symbol| to_workspace_symbol(symbol, &uri))
         },
         32,
     )
 }
 
-pub fn get_document_symbols(symbols: &[DocumentSymbol], uri: &Uri) -> Vec<SymbolInformation> {
-    symbols
-        .iter()
-        .map(|symbol| to_symbol_information(symbol, uri))
-        .collect()
-}
-
-pub fn to_symbol_information(symbol: &DocumentSymbol, uri: &Uri) -> SymbolInformation {
-    #[allow(deprecated)]
-    SymbolInformation {
+pub fn to_workspace_symbol(symbol: &DocumentSymbol, uri: &Uri) -> WorkspaceSymbol {
+    WorkspaceSymbol {
         name: symbol.name.to_string(),
         kind: symbol.kind,
         tags: None,
-        deprecated: None,
-        location: Location {
-            uri: uri.to_owned(),
-            range: symbol.range,
-        },
         container_name: None,
+        location: OneOf::Left(Location {
+            uri: uri.clone(),
+            range: symbol.range,
+        }),
+        data: None,
     }
 }
 
@@ -110,14 +102,6 @@ pub fn to_symbol_information(symbol: &DocumentSymbol, uri: &Uri) -> SymbolInform
 //     tracing::info!("get workspace symbols {}", workspace_symbols.len());
 //     workspace_symbols
 // }
-
-pub fn filter_symbol(query: &str, symbol: &DocumentSymbol) -> bool {
-    query.is_empty()
-        || symbol
-            .name
-            .to_lowercase()
-            .starts_with(&query.to_lowercase())
-}
 
 #[derive(Debug)]
 pub struct IndexError;

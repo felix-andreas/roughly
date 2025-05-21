@@ -3,6 +3,10 @@ use {
     ropey::Rope,
 };
 
+pub fn starts_with_lowercase(name: &str, query: &str) -> bool {
+    query.is_empty() || name.to_lowercase().starts_with(&query.to_lowercase())
+}
+
 pub fn position_to_index(position: Position, rope: &Rope) -> Result<usize, ropey::Error> {
     let line = position.line as usize;
     let line = rope.try_line_to_char(line)?;
