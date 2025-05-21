@@ -61,55 +61,58 @@ git-release $version="":
 build-release $version:
 	#!/usr/bin/env bash
 	set -euo pipefail
-	rm -rf release
-	mkdir release
+	mkdir -p release
+	rm -rf release/$version
+	mkdir -p release/$version
 
 	# build server
 	just linux
 	just windows
-	cp target/release/roughly release/roughly-$version
-	cp target/x86_64-pc-windows-gnu/release/roughly.exe release/roughly-$version.exe
+	cp target/release/roughly release/$version/roughly
+	cp target/x86_64-pc-windows-gnu/release/roughly.exe release/$version/roughly.exe
 
-	# build vscode extension (Client only) 
+	# build vscode extension (client only) 
 	rm -rf client/bin
-	just vscode --out ../release/roughly-$version.vsix
+	just vscode --out ../release/$version/roughly.vsix
 
 	# build vscode extension (linux-x64)
 	rm -rf client/bin
 	mkdir -p client/bin
-	cp target/release/roughly client/bin/
-	just vscode --target linux-x64 --out ../release/roughly-linux-x64-$version.vsix
+	cp release/$version/roughly client/bin
+	just vscode --target linux-x64 --out ../release/$version/roughly-linux-x64.vsix
 
 	# build vscode extension (win32-x64)
 	rm -rf client/bin
 	mkdir -p client/bin
-	cp target/x86_64-pc-windows-gnu/release/roughly.exe client/bin/
-	just vscode --target win32-x64 --out ../release/roughly-win32-x64-$version.vsix
+	cp release/$version/roughly.exe client/bin
+	just vscode --target win32-x64 --out ../release/$version/roughly-win32-x64.vsix
 
 publish-release $version:
 	#!/usr/bin/env bash
 	set -euo pipefail
 	git push
 	gh release create $version \
-		"release/roughly-$version#LSP server (Linux x86_64)" \
-		"release/roughly-$version.exe#LSP server (Windows x86_64)" \
-		"release/roughly-$version.vsix#VS Code extension (Client only)" \
-		"release/roughly-linux-x64-$version.vsix#VS Code extension (linux-x64)" \
-		"release/roughly-win32-x64-$version.vsix#VS Code extension (win32-x64)" \
+		"release/$version/roughly#Roughly CLI (linux-x64)" \
+		"release/$version/roughly.exe#Roughly CLI (win32-x64)" \
+		"release/$version/roughly.vsix#VS Code extension (client only)" \
+		"release/$version/roughly-linux-x64.vsix#VS Code extension (linux-x64)" \
+		"release/$version/roughly-win32-x64.vsix#VS Code extension (win32-x64)" \
 		--notes "" \
 		--prerelease
 
 update-release $version:
 	gh release upload $version \
-		"release/roughly-$version.vsix#VS Code extension" \
-		"release/roughly-$version#LSP server (Linux)" \
-		"release/roughly-$version.exe#LSP server (Windows)" \
+		"release/$version/roughly#Roughly CLI (linux-x64)" \
+		"release/$version/roughly.exe#Roughly CLI (win32-x64)" \
+		"release/$version/roughly.vsix#VS Code extension (client only)" \
+		"release/$version/roughly-linux-x64.vsix#VS Code extension (linux-x64)" \
+		"release/$version/roughly-win32-x64.vsix#VS Code extension (win32-x64)" \
 		--clobber
 
 publish-marketplace $version:
-	@just vsce publish --packagePath ../release/roughly-linux-x64-$version.vsix
-	@just vsce publish --packagePath ../release/roughly-win32-x64-$version.vsix
-	@just vsce publish --packagePath ../release/roughly-$version.vsix
+	@just vsce publish --packagePath ../release/$version/roughly-linux-x64.vsix
+	@just vsce publish --packagePath ../release/$version/roughly-win32-x64.vsix
+	@just vsce publish --packagePath ../release/$version/roughly.vsix
 
 # use rlib repos to test formatting
 rlib-clone:
