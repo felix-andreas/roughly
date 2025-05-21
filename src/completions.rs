@@ -15,18 +15,8 @@ pub fn get(
     tree: &tree_sitter::Tree,
     symbols_map: &impl SymbolsMap,
 ) -> Option<CompletionResponse> {
-    let line = rope.get_line(position.line as usize)?;
-    let mut query = String::new();
-    for (i, char) in line.chars().enumerate() {
-        if char.is_alphabetic() || char == '.' || (!query.is_empty() && char.is_numeric()) {
-            query.push(char)
-        } else {
-            query.clear();
-        }
-        if i == (position.character - 1) as usize {
-            break;
-        }
-    }
+    let query = extract_query(position, rope)?;
+
     tracing::debug!("completion query: {query}");
 
     let symbol_kind_to_completion_kind = |kind: SymbolKind| match kind {
@@ -36,54 +26,59 @@ pub fn get(
         _ => CompletionItemKind::VARIABLE,
     };
 
-    let point = Point {
-        row: position.line as usize,
-        column: position.character as usize,
-    };
+    let local_symbols: Vec<CompletionItem> = {
+        let point = Point {
+            row: position.line as usize,
+            column: position.character as usize,
+        };
+        tree.root_node()
+            .descendant_for_point_range(point, point)
+            .map(|node| {
+                std::iter::successors(Some(node), |node| node.parent())
+                    .filter(|node| node.kind() == "function_definition")
+                    .flat_map(|func_node| {
+                        let mut items = Vec::new();
 
-    // TODO: filter for query
-    let local_symbols: Vec<CompletionItem> = tree
-        .root_node()
-        .descendant_for_point_range(point, point)
-        .map(|node| {
-            std::iter::successors(Some(node), |node| node.parent())
-                .filter(|n| n.kind() == "function_definition")
-                .flat_map(|func_node| {
-                    let mut items = Vec::new();
-
-                    if let Some(parameters) = func_node.child_by_field_name("parameters") {
-                        items.extend(
-                            parameters
-                                .children_by_field_name("parameter", &mut parameters.walk())
-                                .filter_map(|parameter| {
-                                    parameter.child_by_field_name("name").map(|name| {
-                                        CompletionItem {
-                                            label: rope
-                                                .byte_slice(name.start_byte()..name.end_byte())
-                                                .to_string(),
-                                            kind: Some(CompletionItemKind::VARIABLE),
-                                            ..Default::default()
-                                        }
+                        if let Some(parameters) = func_node.child_by_field_name("parameters") {
+                            items.extend(
+                                parameters
+                                    .children_by_field_name("parameter", &mut parameters.walk())
+                                    .filter_map(|parameter| {
+                                        parameter.child_by_field_name("name").map(|name| {
+                                            rope.byte_slice(name.start_byte()..name.end_byte())
+                                                .to_string()
+                                        })
                                     })
-                                }),
-                        );
-                    }
+                                    .filter(|name| utils::starts_with_lowercase(name, &query))
+                                    .map(|label| CompletionItem {
+                                        label,
+                                        kind: Some(CompletionItemKind::VARIABLE),
+                                        ..Default::default()
+                                    }),
+                            );
+                        }
 
-                    if let Some(body) = func_node.child_by_field_name("body") {
-                        items.extend(index::symbols_for_block(body, rope).into_iter().map(
-                            |symbol| CompletionItem {
-                                label: symbol.name,
-                                kind: Some(symbol_kind_to_completion_kind(symbol.kind)),
-                                ..Default::default()
-                            },
-                        ));
-                    }
+                        if let Some(body) = func_node.child_by_field_name("body") {
+                            items.extend(
+                                index::symbols_for_block(body, rope)
+                                    .into_iter()
+                                    .filter(|symbol| {
+                                        utils::starts_with_lowercase(&symbol.name, &query)
+                                    })
+                                    .map(|symbol| CompletionItem {
+                                        label: symbol.name,
+                                        kind: Some(symbol_kind_to_completion_kind(symbol.kind)),
+                                        ..Default::default()
+                                    }),
+                            );
+                        }
 
-                    items
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+                        items
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
 
     let workspace_symbols = symbols_map.filter_map(
         |_, symbols| {
@@ -91,6 +86,7 @@ pub fn get(
                 .iter()
                 .filter(|symbol| utils::starts_with_lowercase(&symbol.name, &query))
         },
+        // TODO: use CompletionResponse::List.is_incomplete and only limit for short queries?
         1024,
     );
 
@@ -119,7 +115,7 @@ pub fn get(
     Some(CompletionResponse::Array(
         RESERVED_WORDS
             .iter()
-            // TODO: filter keywords
+            .filter(|keyword| utils::starts_with_lowercase(keyword, &query))
             .map(|reserved_word| CompletionItem {
                 label: reserved_word.to_string(),
                 kind: Some(CompletionItemKind::KEYWORD),
@@ -135,77 +131,137 @@ pub fn get(
     ))
 }
 
+// TODO: consider throwing error instead of optional
+// TODO: alternatively use tree-sitter to extract nearest identifer (to avoid reimplementing nearest identifer)
+fn extract_query(position: Position, rope: &Rope) -> Option<String> {
+    let line = rope.get_line(position.line as usize)?;
+    Some(
+        line.chars()
+            .take(position.character as usize)
+            .fold(String::new(), |mut acc, item| {
+                // see: https://cran.r-project.org/doc/manuals/r-release/R-lang.html#Identifiers-1
+                // note: we can be less strict than R otherwise its already an parser
+                if item.is_alphabetic()
+                    || item == '.'
+                    || item == '_'
+                    || (!acc.is_empty() && item.is_numeric())
+                {
+                    acc.push(item);
+                } else {
+                    acc.clear();
+                }
+                acc
+            }),
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        crate::tree,
-        async_lsp::lsp_types::{CompletionItemKind, Position},
-        indoc::indoc,
-        ropey::Rope,
-    };
+    use {super::*, crate::tree, indoc::indoc, ropey::Rope, std::collections::HashMap};
 
-    fn get_labels(
+    fn setup(
         text: &str,
-        line: u32,
-        character: u32,
-    ) -> Vec<(String, Option<CompletionItemKind>)> {
+        (line, character): (u32, u32),
+    ) -> (String, Vec<(String, CompletionItemKind)>) {
         let rope = Rope::from_str(text);
         let tree = tree::parse(text, None);
-        let dummy_symbols = std::collections::HashMap::new();
-        let result = get(Position { line, character }, &rope, &tree, &dummy_symbols).unwrap();
-        match result {
-            async_lsp::lsp_types::CompletionResponse::Array(items) => items
+        let position = Position::new(line, character);
+        let query = extract_query(position, &rope).unwrap();
+        let items = match get(position, &rope, &tree, &HashMap::new()).unwrap() {
+            CompletionResponse::Array(items) => items
                 .into_iter()
-                .map(|item| (item.label, item.kind))
+                .map(|item| (item.label, item.kind.unwrap()))
                 .collect(),
             _ => unreachable!(),
-        }
+        };
+        (query, items)
     }
 
     #[test]
     fn completes_local_variables() {
-        let text = indoc! {"
-            foo <- function(x) {
-                local_var <- 42
-                loc
-            }
-        "};
+        let (query, items) = setup(
+            indoc! {"
+                function(x) {
+                    local_var <- 42
+                    loc
+                }
+            "},
+            (2, 7),
+        );
 
-        let labels = get_labels(text, 2, 7);
-
-        assert!(labels.contains(&("local_var".into(), Some(CompletionItemKind::VARIABLE))));
+        assert_eq!(query, "loc");
+        assert_eq!(items.len(), 1);
+        assert!(items.contains(&("local_var".into(), CompletionItemKind::VARIABLE)));
     }
 
     #[test]
     fn completes_function_parameters() {
-        let text = indoc! {"
-            foo <- function(param1, param2) {
-                par
-            }
-        "};
+        let (query, items) = setup(
+            indoc! {"
+                function(param1, param2) {
+                    par
+                }
+            "},
+            (1, 7),
+        );
 
-        let labels = get_labels(text, 1, 7);
-
-        assert!(labels.contains(&("param1".into(), Some(CompletionItemKind::VARIABLE))));
-        assert!(labels.contains(&("param2".into(), Some(CompletionItemKind::VARIABLE))));
+        assert_eq!(query, "par");
+        assert_eq!(items.len(), 2);
+        assert!(items.contains(&("param1".into(), CompletionItemKind::VARIABLE)));
+        assert!(items.contains(&("param2".into(), CompletionItemKind::VARIABLE)));
     }
 
     #[test]
     fn completes_nested_function_variable() {
-        let text = indoc! {"
-            foo <- function(x) {
-                var_outer <- 1
-                bar <- function(y) {
-                    var_inner <- 2
-                    var
+        let (query, items) = setup(
+            indoc! {"
+                function(x) {
+                    var_a <- 1
+                    function(y) {
+                        var_b <- 2
+                        function(y) {
+                            var_c <- 3
+                            var
+                        }
+                    }
                 }
-            }
-        "};
+            "},
+            (6, 15),
+        );
 
-        let labels = get_labels(text, 4, 11);
+        assert_eq!(query, "var");
+        assert_eq!(items.len(), 3);
+        assert!(items.contains(&("var_a".into(), CompletionItemKind::VARIABLE)));
+        assert!(items.contains(&("var_b".into(), CompletionItemKind::VARIABLE)));
+        assert!(items.contains(&("var_c".into(), CompletionItemKind::VARIABLE)));
+    }
 
-        assert!(labels.contains(&("var_inner".into(), Some(CompletionItemKind::VARIABLE))));
-        assert!(labels.contains(&("var_outer".into(), Some(CompletionItemKind::VARIABLE))));
+    #[test]
+    fn completes_keywords() {
+        let (query, items) = setup("i", (0, 1));
+
+        assert_eq!(query, "i");
+        assert_eq!(items.len(), 3);
+        assert!(items.contains(&("if".into(), CompletionItemKind::KEYWORD)));
+        assert!(items.contains(&("in".into(), CompletionItemKind::KEYWORD)));
+        assert!(items.contains(&("Inf".into(), CompletionItemKind::KEYWORD)));
+
+        let (query, items) = setup("na_ ", (0, 3));
+
+        assert_eq!(query, "na_");
+        assert_eq!(items.len(), 4);
+    }
+
+    #[test]
+    fn extract_query_edge_cases() {
+        fn setup(pos: u32, text: &str) -> String {
+            extract_query(Position::new(0, pos), &Rope::from_str(text)).unwrap()
+        }
+
+        assert_eq!(setup(11, "foo.bar_123"), "foo.bar_123");
+        assert_eq!(setup(4, ".foo"), ".foo");
+        assert_eq!(setup(4, "1foo"), "foo");
+        assert_eq!(setup(4, "_foo"), "_foo");
+        assert_eq!(setup(5, ".1foo"), ".1foo");
     }
 }

@@ -431,7 +431,7 @@ pub fn index(paths: Option<&[PathBuf]>, print_items: bool) -> Result<(), DebugEr
     Ok(())
 }
 
-pub fn print_tree(path: &Path) -> Result<(), DebugError> {
+pub fn ast(path: &Path) -> Result<(), DebugError> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) => {

@@ -38,7 +38,7 @@ fn main() -> ExitCode {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(DebugError) => ExitCode::FAILURE,
             },
-            Debug::PrintTree { path } => match cli::print_tree(&path) {
+            Debug::Ast { path } => match cli::ast(&path) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(DebugError) => ExitCode::FAILURE,
             },
@@ -94,7 +94,7 @@ enum Command {
 #[derive(Debug, Subcommand)]
 enum Debug {
     /// Print the syntax tree for the given file
-    PrintTree { path: PathBuf },
+    Ast { path: PathBuf },
     /// Index the given files or directories
     Index {
         /// R files to index
