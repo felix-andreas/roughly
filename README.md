@@ -50,7 +50,7 @@ roughly check <path>    # Check all files in `<path>`
 Or, to run Roughly as a language server:
 
 ```
-roughly lsp             # Usually started automatically by your editor
+roughly server          # Usually started automatically by your editor
 ```
 
 ## VS Code extension
@@ -95,7 +95,7 @@ You can customize the Roughly extension in VS Code through the following setting
 * Pass additional arguments to the language server, e.g to enable experimental features:
 
 ```json
-  "roughly.args": ["lsp", "--experimental"]
+  "roughly.args": ["server", "--experimental"]
 ```
 
 ## RStudio Integration

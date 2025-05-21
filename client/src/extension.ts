@@ -42,7 +42,7 @@ export function activate({ subscriptions, extension }: ExtensionContext) {
         : "roughly"
       ))
 
-  const args = config.get<string[]>("args", ["lsp"])
+  const args = config.get<string[]>("args", ["server"])
 
   logger.info("using server command:", [command, ...args].join(" "))
 

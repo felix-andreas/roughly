@@ -1,12 +1,10 @@
 use {
     crate::{
-        config::{self},
-        dev,
-        diagnostics::{self},
+        config, dev, diagnostics,
         format::{self, LineEnding},
         index,
         lsp_types::{self, DiagnosticSeverity},
-        tree, utils,
+        server, tree, utils,
     },
     console::style,
     ignore::Walk,
@@ -325,24 +323,19 @@ pub fn fmt(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(
 }
 
 //
+// SERVER
+//
+
+pub fn server(experimental: bool) {
+    server::run(experimental);
+}
+
+//
 // DEBUG
 //
 
 #[derive(Debug)]
 pub struct DebugError;
-
-pub fn print_tree(path: &Path) -> Result<(), DebugError> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(err) => {
-            error(&err.to_string());
-            return Err(DebugError);
-        }
-    };
-    let tree = tree::parse(&text, None);
-    eprintln!("{}", dev::format_tree(tree.root_node()));
-    Ok(())
-}
 
 pub fn index(paths: Option<&[PathBuf]>, print_items: bool) -> Result<(), DebugError> {
     let root: Vec<PathBuf> = vec![".".into()];
@@ -435,5 +428,18 @@ pub fn index(paths: Option<&[PathBuf]>, print_items: bool) -> Result<(), DebugEr
         utils::human_bytes(total_bytes as f64 / global_elapsed.as_secs_f64())
     ));
 
+    Ok(())
+}
+
+pub fn print_tree(path: &Path) -> Result<(), DebugError> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) => {
+            error(&err.to_string());
+            return Err(DebugError);
+        }
+    };
+    let tree = tree::parse(&text, None);
+    eprintln!("{}", dev::format_tree(tree.root_node()));
     Ok(())
 }

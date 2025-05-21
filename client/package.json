@@ -85,7 +85,7 @@
 						"type": "string"
 					},
 					"default": [
-						"lsp"
+						"server"
 					],
 					"markdownDescription": "Arguments passed to `roughly`."
 				}
