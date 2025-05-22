@@ -36,19 +36,19 @@ You can customize the Roughly extension in VS Code through the following setting
 
 ### Format Document
 
-![Format Document](https://github.com/user-attachments/assets/a03334a5-ed83-4f30-a4ea-7cbd615e4fdd)
+![Format Document](https://assets-felixandreas-me.pages.dev/roughly/format.gif)
 
 ### Workspace Symbol Search (Ctrl + T)
 
-![Workspace Symbol Search](https://github.com/user-attachments/assets/e4c7cf42-d5fa-44b9-900b-5c7758f5f7e3)
+![Workspace Symbol Search](https://assets-felixandreas-me.pages.dev/roughly/workspace-symbols.gif)
 
 ### Document Symbol Search (Ctrl + Shift + O)
 
-![Document Symbol Search](https://github.com/user-attachments/assets/0c608b3d-2eed-4372-b2d4-783ff67c6c0d)
+![Document Symbol Search](https://assets-felixandreas-me.pages.dev/roughly/document-symbols.gif)
 
 ### Syntax Errors
 
-![Syntax Errors](https://github.com/user-attachments/assets/ef93a688-fc33-46dd-8cbb-7f3bab6948a7)
+![Syntax Errors](https://assets-felixandreas-me.pages.dev/roughly/syntax-errors.gif)
 
 ## Links
 
