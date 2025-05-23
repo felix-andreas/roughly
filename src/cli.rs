@@ -337,7 +337,11 @@ pub fn server(experimental: bool) {
 #[derive(Debug)]
 pub struct DebugError;
 
-pub fn index(paths: Option<&[PathBuf]>, print_items: bool) -> Result<(), DebugError> {
+pub fn index(
+    paths: Option<&[PathBuf]>,
+    recursive: bool,
+    print_items: bool,
+) -> Result<(), DebugError> {
     let root: Vec<PathBuf> = vec![".".into()];
     let paths = paths.unwrap_or(&root);
 
@@ -364,7 +368,7 @@ pub fn index(paths: Option<&[PathBuf]>, print_items: bool) -> Result<(), DebugEr
             })
             .collect::<Result<Vec<_>, _>>()?
         {
-            let text = std::fs::read_to_string(&path).map_err(|err| {
+            let rope = utils::read_to_rope(&path).map_err(|err| {
                 error(&format!("failed to index: {}", path.display()));
                 eprintln!("{err}");
                 DebugError
@@ -372,10 +376,12 @@ pub fn index(paths: Option<&[PathBuf]>, print_items: bool) -> Result<(), DebugEr
 
             // Only time the indexing operation, not the I/O
             let start = std::time::Instant::now();
-            let symbols = index::index(&text);
+            let tree = tree::parse_rope(&rope, None);
+            let symbols = index::index(tree.root_node(), &rope, recursive);
             let elapsed = start.elapsed();
 
-            total_bytes += text.len();
+            let bytes = rope.len_bytes();
+            total_bytes += bytes;
             total_files += 1;
             total_symbols += symbols.len();
             total_time += elapsed;
@@ -383,9 +389,9 @@ pub fn index(paths: Option<&[PathBuf]>, print_items: bool) -> Result<(), DebugEr
             eprintln!(
                 "{} ({}, {} ms, {}/s)",
                 style(path.display().to_string()).bold().blue(),
-                utils::human_bytes(text.len() as f64),
+                utils::human_bytes(bytes as f64),
                 elapsed.as_millis(),
-                utils::human_bytes(text.len() as f64 / elapsed.as_secs_f64()),
+                utils::human_bytes(bytes as f64 / elapsed.as_secs_f64()),
             );
 
             if print_items {
