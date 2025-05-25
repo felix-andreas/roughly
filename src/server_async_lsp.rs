@@ -112,7 +112,7 @@ impl LanguageServer for ServerState {
     ) -> BoxFuture<'static, Result<InitializeResult, ResponseError>> {
         tracing::info!("initialize");
 
-        match index::index_full(&self.base_path) {
+        match index::index_dir(&self.base_path) {
             Ok(symbols) => self.workspace_symbols.extend(symbols),
             Err(IndexError) => self
                 .client

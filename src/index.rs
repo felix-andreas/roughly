@@ -71,7 +71,7 @@ pub fn to_workspace_symbol(symbol: &DocumentSymbol, uri: &Uri) -> WorkspaceSymbo
 #[derive(Debug)]
 pub struct IndexError;
 
-pub fn index_full(base_path: &Path) -> Result<Vec<(PathBuf, Vec<DocumentSymbol>)>, IndexError> {
+pub fn index_dir(base_path: &Path) -> Result<Vec<(PathBuf, Vec<DocumentSymbol>)>, IndexError> {
     let start = std::time::Instant::now();
 
     let mut n = 0;
@@ -116,82 +116,250 @@ pub fn index_file(path: impl AsRef<Path>) -> Vec<DocumentSymbol> {
     index(tree.root_node(), &rope, false)
 }
 
-pub fn index(root: Node, rope: &Rope, recursive: bool) -> Vec<DocumentSymbol> {
+pub fn index(root: Node, rope: &Rope, nested: bool) -> Vec<DocumentSymbol> {
     let mut symbols = vec![];
 
+    // TODO: consider named children
+    // TODO: consider tree::for_each_child
     for node in root.children(&mut root.walk()) {
-        // TODO: also handle function_definition
-        if node.kind() == "binary_operator" {
-            let maybe_lhs = node.child_by_field_name("lhs");
-            let maybe_op = node.child_by_field_name("operator");
-            let maybe_rhs = node.child_by_field_name("rhs");
+        match node.kind() {
+            "binary_operator" => {
+                let maybe_lhs = node.child_by_field_name("lhs");
+                let maybe_op = node.child_by_field_name("operator");
+                let maybe_rhs = node.child_by_field_name("rhs");
 
-            // TODO: recurse lhs and rhs in else case?
-            if let Some(lhs) = maybe_lhs
-                && lhs.kind() == "identifier"
-                && maybe_op.is_some_and(|op| op.kind() == "<-")
-            {
-                let (kind, detail, children) = maybe_rhs
-                    .map(|rhs| match rhs.kind() {
-                        "function_definition" => {
-                            let function = rhs;
-                            let maybe_parameters = function.child_by_field_name("parameters");
-                            let maybe_body = function.child_by_field_name("body");
+                // TODO: recurse lhs and rhs in else case?
+                if let Some(lhs) = maybe_lhs
+                    && lhs.kind() == "identifier"
+                    && maybe_op.is_some_and(|op| op.kind() == "<-")
+                {
+                    let (kind, detail, children) = maybe_rhs
+                        .map(|rhs| match rhs.kind() {
+                            "function_definition" => index_function(rhs, rope, nested),
+                            "braced_expression" => {
+                                let block_symbols = index(rhs, rope, nested);
+                                symbols.extend(block_symbols);
 
-                            let detail = maybe_parameters.map(|parameters| {
-                                format!(
-                                    "fn({})",
-                                    parameters
-                                        .children_by_field_name("parameter", &mut parameters.walk())
-                                        .map(|parameter| match parameter.child(0) {
-                                            Some(name) => {
-                                                rope.byte_slice(name.byte_range()).to_string()
-                                            }
-                                            None => "UNKNOWN".into(),
-                                        })
-                                        .collect::<Vec<String>>()
-                                        .join(", ")
-                                )
-                            });
-                            let children = maybe_body
-                                .and_then(|body| recursive.then(|| index(body, rope, recursive)));
+                                (SymbolKind::VARIABLE, None, None)
+                            }
+                            "call" => todo!(),
+                            "integer" | "float" | "complex" => (SymbolKind::NUMBER, None, None),
+                            "true" | "false" => (SymbolKind::BOOLEAN, None, None),
+                            "string" => (SymbolKind::STRING, None, None),
+                            "null" => (SymbolKind::NULL, None, None),
+                            _ => (SymbolKind::VARIABLE, None, None),
+                        })
+                        .unwrap_or_else(|| (SymbolKind::VARIABLE, None, None));
 
-                            (SymbolKind::FUNCTION, detail, children)
-                        }
-                        "braced_expression" => {
-                            let block_symbols = index(rhs, rope, recursive);
-                            symbols.extend(block_symbols);
-
-                            (SymbolKind::VARIABLE, None, None)
-                        }
-                        "integer" | "float" | "complex" => (SymbolKind::NUMBER, None, None),
-                        "true" | "false" => (SymbolKind::BOOLEAN, None, None),
-                        "string" => (SymbolKind::STRING, None, None),
-                        "null" => (SymbolKind::NULL, None, None),
-                        _ => (SymbolKind::VARIABLE, None, None),
+                    #[allow(deprecated)]
+                    symbols.push(DocumentSymbol {
+                        name: rope.byte_slice(lhs.byte_range()).to_string(),
+                        kind,
+                        detail,
+                        tags: None,
+                        range: utils::rope_range_to_lsp_range(node.byte_range(), rope).unwrap(),
+                        selection_range: utils::rope_range_to_lsp_range(lhs.byte_range(), rope)
+                            .unwrap(),
+                        children,
+                        deprecated: None,
                     })
-                    .unwrap_or_else(|| (SymbolKind::VARIABLE, None, None));
-
-                #[allow(deprecated)]
-                symbols.push(DocumentSymbol {
-                    name: rope.byte_slice(lhs.byte_range()).to_string(),
-                    kind,
-                    detail,
-                    tags: None,
-                    range: utils::rope_range_to_lsp_range(node.byte_range(), rope).unwrap(),
-                    selection_range: utils::rope_range_to_lsp_range(lhs.byte_range(), rope)
-                        .unwrap(),
-                    children,
-                    deprecated: None,
-                })
+                }
             }
+            "braced_expression" => {
+                symbols.extend(index(node, rope, nested));
+            }
+            "call" => {
+                if let Some(symbol) = index_call(node, rope, nested) {
+                    symbols.push(symbol)
+                }
+            }
+            "function_definition" => {
+                let (_, _, maybe_chidlren) = index_function(node, rope, nested);
+                if let Some(children) = maybe_chidlren {
+                    symbols.extend(children);
+                }
+            }
+            "namespace_operator" => todo!(),
+            // what about if, for, etc?
+            // maybe need to implement recursion to find for edge cases?
+            _ => {}
         }
     }
     symbols
 }
 
+fn index_function(
+    function: Node,
+    rope: &Rope,
+    nested: bool,
+) -> (SymbolKind, Option<String>, Option<Vec<DocumentSymbol>>) {
+    let maybe_parameters = function.child_by_field_name("parameters");
+    let maybe_body = function.child_by_field_name("body");
+
+    let detail = maybe_parameters.map(|parameters| {
+        format!(
+            "fn({})",
+            parameters
+                .children_by_field_name("parameter", &mut parameters.walk())
+                .map(|parameter| match parameter.child(0) {
+                    Some(name) => {
+                        rope.byte_slice(name.byte_range()).to_string()
+                    }
+                    None => "UNKNOWN".into(),
+                })
+                .collect::<Vec<String>>()
+                .join(", ")
+        )
+    });
+    let children = maybe_body.and_then(|body| nested.then(|| index(body, rope, nested)));
+    (SymbolKind::FUNCTION, detail, children)
+}
+
+fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
+    let maybe_function = call.child_by_field_name("function");
+    let maybe_arguments = call.child_by_field_name("arguments");
+    let (Some(function), Some(arguments)) = (maybe_function, maybe_arguments) else {
+        return None;
+    };
+
+    let name = match function.kind() {
+        "identifier" => rope.byte_slice(function.byte_range()).to_string(),
+        "namespace_operator" => {
+            let (Some(lhs), Some(rhs)) = (
+                call.child_by_field_name("lhs"),
+                call.child_by_field_name("rhs"),
+            ) else {
+                return None;
+            };
+            if lhs.kind() != "identifer" || rhs.kind() != "identifier" {
+                return None;
+            }
+            let package = rope.byte_slice(lhs.byte_range()).to_string();
+            if !["methods", "R6"].contains(&package.as_str()) {
+                return None;
+            }
+
+            rope.byte_slice(rhs.byte_range()).to_string()
+        }
+        _ => return None,
+    };
+
+    let (kind, name, detail, children) = match name.as_str() {
+        "setClass" => (
+            SymbolKind::CLASS,
+            "Class".into(),
+            None,
+            // TODO: maybe include slots?
+            None,
+        ),
+        "setGeneric" => (SymbolKind::INTERFACE, "Generic".into(), None, None),
+        "setMethod" => {
+            // setMethod("foo", "Person", function(x) x@foo)
+            // setMethod(f = "baz", signature = "Person", definition = function(x) x@baz)
+            // setMethod("qux", c("Person", "Other"), function(x, y) x@qux + y@qux)
+
+            // Helper to extract argument by name or position
+            fn get_argument<'a>(
+                arguments: Node<'a>,
+                rope: &Rope,
+                query: &str,
+                pos: usize,
+            ) -> Option<Node<'a>> {
+                // Try named argument
+                for argument in arguments.children_by_field_name("argument", &mut arguments.walk())
+                {
+                    if let Some(name) = argument.child_by_field_name("name") {
+                        let name = rope.byte_slice(name.byte_range()).to_string();
+                        if name == query {
+                            return argument.child_by_field_name("value");
+                        }
+                    }
+                }
+
+                // TODO: maybe need to use naemd children because of comments?
+                // Fallback to positional
+                arguments
+                    .children_by_field_name("argument", &mut arguments.walk())
+                    .nth(pos)
+                    .and_then(|argument| argument.child_by_field_name("value"))
+            }
+
+            let function_name_node = get_argument(arguments, rope, "f", 0);
+            let signature_node = get_argument(arguments, rope, "signature", 1);
+
+            let name = function_name_node
+                .and_then(|n| {
+                    if n.kind() == "string" {
+                        Some(
+                            rope.byte_slice(n.byte_range())
+                                .to_string()
+                                .trim_matches('"')
+                                .to_string(),
+                        )
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| "UNKNOWN".to_string());
+
+            let signature = signature_node.and_then(|n| {
+                match n.kind() {
+                    "string" => Some(vec![
+                        n.child_by_field_name("content")
+                            .map(|content| rope.byte_slice(content.byte_range()).to_string())
+                            .unwrap_or_default(),
+                    ]),
+                    "call" => {
+                        // c("Person", "Other")
+                        let mut sigs = vec![];
+                        for child in n.children(&mut n.walk()) {
+                            if child.kind() == "string" {
+                                sigs.push(
+                                    child
+                                        .child_by_field_name("content")
+                                        .map(|content| {
+                                            rope.byte_slice(content.byte_range()).to_string()
+                                        })
+                                        .unwrap_or_default(),
+                                );
+                            }
+                        }
+                        if !sigs.is_empty() { Some(sigs) } else { None }
+                    }
+                    _ => None,
+                }
+            });
+
+            let method_name = format!(
+                "{} ({})",
+                name,
+                signature
+                    .map(|sig| sig.join(", "))
+                    .unwrap_or_else(|| "UNKNWON".into())
+            );
+
+            (SymbolKind::METHOD, method_name, None, None)
+        }
+        "R6Class" => todo!(),
+        _ => return None,
+    };
+
+    let range = utils::rope_range_to_lsp_range(call.byte_range(), rope).unwrap();
+    #[allow(deprecated)]
+    Some(DocumentSymbol {
+        name,
+        kind,
+        detail,
+        tags: None,
+        range,
+        selection_range: range,
+        children,
+        deprecated: None,
+    })
+}
+
 #[cfg(test)]
-mod test {
+mod tests {
     use {
         super::index,
         crate::{lsp_types::SymbolKind, tree},
@@ -206,18 +374,17 @@ mod test {
         index(tree.root_node(), &rope, recursive)
     }
 
-    fn setup_recursive(text: &str) -> Vec<DocumentSymbol> {
+    fn setup_nested(text: &str) -> Vec<DocumentSymbol> {
         setup(text, true)
     }
 
-    // TODO: when to use setup flat??
-    // fn setup_flat(text: &str) -> Vec<DocumentSymbol> {
-    //     setup(text, false)
-    // }
+    fn setup_flat(text: &str) -> Vec<DocumentSymbol> {
+        setup(text, false)
+    }
 
     #[test]
-    fn test_parse() {
-        let symbols = setup_recursive(indoc! {r#"
+    fn assignments() {
+        let text = indoc! {r#"
             foo <- function(a, b = True) {
                 a <- TRUE
                 b <- FALSE
@@ -227,35 +394,55 @@ mod test {
                 b <- "foo"
             }
             baz <- { "foo"; 3.14 }
-        "#});
+        "#};
 
-        assert_eq!(symbols[0].name, "foo");
-        assert_eq!(symbols[0].kind, SymbolKind::FUNCTION);
         {
-            let children = symbols[0].children.as_ref().unwrap();
-            assert_eq!(children[0].name, "a");
-            assert_eq!(children[0].kind, SymbolKind::BOOLEAN);
-            assert_eq!(children[1].name, "b");
-            assert_eq!(children[1].kind, SymbolKind::BOOLEAN);
+            let symbols = setup_nested(text);
+
+            assert_eq!(symbols[0].name, "foo");
+            assert_eq!(symbols[0].kind, SymbolKind::FUNCTION);
+            {
+                let children = symbols[0].children.as_ref().unwrap();
+                assert_eq!(children[0].name, "a");
+                assert_eq!(children[0].kind, SymbolKind::BOOLEAN);
+                assert_eq!(children[1].name, "b");
+                assert_eq!(children[1].kind, SymbolKind::BOOLEAN);
+            }
+
+            assert_eq!(symbols[1].name, "bar");
+            assert_eq!(symbols[1].kind, SymbolKind::FUNCTION);
+            {
+                let children = symbols[1].children.as_ref().unwrap();
+                assert_eq!(children[0].name, "a");
+                assert_eq!(children[0].kind, SymbolKind::NUMBER);
+                assert_eq!(children[1].name, "b");
+                assert_eq!(children[1].kind, SymbolKind::STRING);
+            }
+
+            assert_eq!(symbols[2].name, "baz");
+            assert_eq!(symbols[2].kind, SymbolKind::VARIABLE);
         }
 
-        assert_eq!(symbols[1].name, "bar");
-        assert_eq!(symbols[1].kind, SymbolKind::FUNCTION);
         {
-            let children = symbols[1].children.as_ref().unwrap();
-            assert_eq!(children[0].name, "a");
-            assert_eq!(children[0].kind, SymbolKind::NUMBER);
-            assert_eq!(children[1].name, "b");
-            assert_eq!(children[1].kind, SymbolKind::STRING);
-        }
+            let symbols = setup_flat(text);
 
-        assert_eq!(symbols[2].name, "baz");
-        assert_eq!(symbols[2].kind, SymbolKind::VARIABLE);
+            assert_eq!(symbols[0].name, "foo");
+            assert_eq!(symbols[0].kind, SymbolKind::FUNCTION);
+            assert_eq!(symbols[0].children, None);
+
+            assert_eq!(symbols[1].name, "bar");
+            assert_eq!(symbols[1].kind, SymbolKind::FUNCTION);
+            assert_eq!(symbols[1].children, None);
+
+            assert_eq!(symbols[2].name, "baz");
+            assert_eq!(symbols[2].kind, SymbolKind::VARIABLE);
+            assert_eq!(symbols[2].children, None);
+        }
     }
 
     #[test]
-    fn test_set_class() {
-        let symbols = setup_recursive(indoc! {r#"
+    fn s4_set_class() {
+        let symbols = setup_nested(indoc! {r#"
             setClass(
                 "Person",
                 slots = c(
@@ -305,8 +492,8 @@ mod test {
     }
 
     #[test]
-    fn test_set_generic() {
-        let symbols = setup_recursive(indoc! {r#"
+    fn s4_set_generic() {
+        let symbols = setup_nested(indoc! {r#"
             setGeneric("foo", function(x) standardGeneric("foo"))
             setGeneric("bar<-", function(x, value) standardGeneric("bar<-"))
         "#});
@@ -321,8 +508,8 @@ mod test {
     }
 
     #[test]
-    fn test_set_method() {
-        let symbols = setup_recursive(indoc! {r#"
+    fn s4_set_method() {
+        let symbols = setup_flat(indoc! {r#"
             setMethod("foo", "Person", function(x) x@foo)
             setMethod(
                 "bar<-",
@@ -344,8 +531,8 @@ mod test {
     }
 
     #[test]
-    fn test_set_method_with_signature_arg() {
-        let symbols = setup_recursive(indoc! {r#"
+    fn s4_set_method_with_signature_arg() {
+        let symbols = setup_flat(indoc! {r#"
             setMethod(
                 f = "baz",
                 signature = "Person",
@@ -359,8 +546,8 @@ mod test {
     }
 
     #[test]
-    fn test_set_method_with_vector_signature() {
-        let symbols = setup_recursive(indoc! {r#"
+    fn s4_set_method_with_vector_signature() {
+        let symbols = setup_flat(indoc! {r#"
             setMethod(
                 "qux",
                 c("Person", "Other"),
