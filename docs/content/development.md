@@ -115,7 +115,7 @@ out
 
 * For formatting we do an initial check if there are no errors, so we can safely assume that all required fields are present
 * For type-checking we should do the same
-* For checks/diagnostics that run while typing (sytnax & fast), we cannot mak any assumption
+* For checks/diagnostics that run while typing (syntax & fast), we cannot make any assumption
 * Same is true for index. It should still be possible to index a file, while there are parse errors
 
 ## tree-sitter-r vs R parser

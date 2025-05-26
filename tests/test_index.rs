@@ -6,10 +6,10 @@ use {
     tree_sitter::Node,
 };
 
-fn setup(text: &str, recursive: bool) -> Vec<DocumentSymbol> {
+fn setup(text: &str, nested: bool) -> Vec<DocumentSymbol> {
     let rope = Rope::from_str(text);
     let tree = tree::parse_rope(&rope, None);
-    index::index(tree.root_node(), &rope, recursive)
+    index::index(tree.root_node(), &rope, nested)
 }
 
 fn setup_nested(text: &str) -> Vec<DocumentSymbol> {

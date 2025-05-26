@@ -34,13 +34,13 @@ pub fn get(
         tree.root_node()
             .descendant_for_point_range(point, point)
             .map(|node| {
-                // TODO: just use document children
+                // TODO: just use document children (requires to think about where to use nested and where not)
                 std::iter::successors(Some(node), |node| node.parent())
                     .filter(|node| node.kind() == "function_definition")
-                    .flat_map(|func_node| {
+                    .flat_map(|node| {
                         let mut items = Vec::new();
 
-                        if let Some(parameters) = func_node.child_by_field_name("parameters") {
+                        if let Some(parameters) = node.child_by_field_name("parameters") {
                             items.extend(
                                 parameters
                                     .children_by_field_name("parameter", &mut parameters.walk())
@@ -58,9 +58,9 @@ pub fn get(
                             );
                         }
 
-                        if let Some(body) = func_node.child_by_field_name("body") {
+                        if let Some(body) = node.child_by_field_name("body") {
                             items.extend(
-                                // todo: use enalbe recursive and use children
+                                // todo: use enable nested and use children
                                 index::index(body, rope, false)
                                     .into_iter()
                                     .filter(|symbol| {
