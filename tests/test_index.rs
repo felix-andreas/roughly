@@ -276,12 +276,12 @@ fn test_r6_class() {
 #[test]
 fn get_argument_named_and_positional() {
     let text = indoc! {r#"
-            call(
-                "alpha",
-                second = "beta",
-                third = "gamma"
-            )
-        "#};
+        call(
+            "alpha",
+            second = "beta",
+            third = "gamma"
+        )
+    "#};
     let rope = Rope::from_str(text);
     let tree = tree::parse_rope(&rope, None);
     let arguments = tree
