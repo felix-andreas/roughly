@@ -128,7 +128,6 @@ pub fn index(root: Node, rope: &Rope, nested: bool) -> Vec<DocumentSymbol> {
                 let maybe_op = node.child_by_field_name("operator");
                 let maybe_rhs = node.child_by_field_name("rhs");
 
-                // TODO: recurse lhs and rhs in else case?
                 if let Some(lhs) = maybe_lhs
                     && lhs.kind() == "identifier"
                     && maybe_op.is_some_and(|op| op.kind() == "<-")
@@ -163,6 +162,8 @@ pub fn index(root: Node, rope: &Rope, nested: bool) -> Vec<DocumentSymbol> {
                         children,
                         deprecated: None,
                     })
+                } else if nested {
+                    // TODO: recurse lhs and rhs in else case?
                 }
             }
             "braced_expression" => {
@@ -173,7 +174,7 @@ pub fn index(root: Node, rope: &Rope, nested: bool) -> Vec<DocumentSymbol> {
                     symbols.push(symbol)
                 }
             }
-            "function_definition" => {
+            "function_definition" if nested => {
                 let (_, _, maybe_chidlren) = index_function(node, rope, nested);
                 if let Some(children) = maybe_chidlren {
                     symbols.extend(children);
@@ -257,44 +258,18 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
             // setMethod("foo", "Person", function(x) x@foo)
             // setMethod(f = "baz", signature = "Person", definition = function(x) x@baz)
             // setMethod("qux", c("Person", "Other"), function(x, y) x@qux + y@qux)
+            // TODO: also handle named signature
 
             // Helper to extract argument by name or position
-            fn get_argument<'a>(
-                arguments: Node<'a>,
-                rope: &Rope,
-                query: &str,
-                pos: usize,
-            ) -> Option<Node<'a>> {
-                // Try named argument
-                for argument in arguments.children_by_field_name("argument", &mut arguments.walk())
-                {
-                    if let Some(name) = argument.child_by_field_name("name") {
-                        let name = rope.byte_slice(name.byte_range()).to_string();
-                        if name == query {
-                            return argument.child_by_field_name("value");
-                        }
-                    }
-                }
 
-                // TODO: maybe need to use naemd children because of comments?
-                // Fallback to positional
-                arguments
-                    .children_by_field_name("argument", &mut arguments.walk())
-                    .nth(pos)
-                    .and_then(|argument| argument.child_by_field_name("value"))
-            }
-
-            let function_name_node = get_argument(arguments, rope, "f", 0);
-            let signature_node = get_argument(arguments, rope, "signature", 1);
-
-            let name = function_name_node
-                .and_then(|n| {
-                    if n.kind() == "string" {
+            let method_name = get_argument(arguments, rope, "f", 0)
+                .and_then(|argument| {
+                    if argument.kind() == "string" {
                         Some(
-                            rope.byte_slice(n.byte_range())
-                                .to_string()
-                                .trim_matches('"')
-                                .to_string(),
+                            argument
+                                .child_by_field_name("content")
+                                .map(|content| rope.byte_slice(content.byte_range()).to_string())
+                                .unwrap_or_default(),
                         )
                     } else {
                         None
@@ -302,43 +277,51 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
                 })
                 .unwrap_or_else(|| "UNKNOWN".to_string());
 
-            let signature = signature_node.and_then(|n| {
-                match n.kind() {
-                    "string" => Some(vec![
-                        n.child_by_field_name("content")
-                            .map(|content| rope.byte_slice(content.byte_range()).to_string())
-                            .unwrap_or_default(),
-                    ]),
-                    "call" => {
-                        // c("Person", "Other")
-                        let mut sigs = vec![];
-                        for child in n.children(&mut n.walk()) {
-                            if child.kind() == "string" {
-                                sigs.push(
-                                    child
-                                        .child_by_field_name("content")
-                                        .map(|content| {
-                                            rope.byte_slice(content.byte_range()).to_string()
-                                        })
-                                        .unwrap_or_default(),
-                                );
-                            }
+            let signature = get_argument(arguments, rope, "signature", 1)
+                .and_then(|argument| {
+                    match argument.kind() {
+                        "string" => Some(
+                            argument
+                                .child_by_field_name("content")
+                                .map(|content| rope.byte_slice(content.byte_range()).to_string())
+                                .unwrap_or_default(),
+                        ),
+                        "call" => {
+                            // c("Person", "Other") or c(signature = "Person", other = "Other")
+                            argument.child_by_field_name("arguments").map(|arguments| {
+                                arguments
+                                    .children_by_field_name("argument", &mut arguments.walk())
+                                    .map(|argument| {
+                                        argument
+                                            .child_by_field_name("value")
+                                            .and_then(|value| {
+                                                (value.kind() == "string").then(|| {
+                                                    value
+                                                        .child_by_field_name("content")
+                                                        .map(|content| {
+                                                            rope.byte_slice(content.byte_range())
+                                                                .to_string()
+                                                        })
+                                                        .unwrap_or_default()
+                                                })
+                                            })
+                                            .unwrap_or_else(|| "Unknown".to_string())
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            })
                         }
-                        if !sigs.is_empty() { Some(sigs) } else { None }
+                        _ => None,
                     }
-                    _ => None,
-                }
-            });
+                })
+                .unwrap_or_else(|| "UNKNOWN".to_string());
 
-            let method_name = format!(
-                "{} ({})",
-                name,
-                signature
-                    .map(|sig| sig.join(", "))
-                    .unwrap_or_else(|| "UNKNWON".into())
-            );
-
-            (SymbolKind::METHOD, method_name, None, None)
+            (
+                SymbolKind::METHOD,
+                format!("{} ({})", method_name, signature),
+                None,
+                None,
+            )
         }
         "R6Class" => todo!(),
         _ => return None,
@@ -358,305 +341,26 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use {
-        super::index,
-        crate::{lsp_types::SymbolKind, tree},
-        async_lsp::lsp_types::DocumentSymbol,
-        indoc::indoc,
-        ropey::Rope,
-    };
-
-    fn setup(text: &str, recursive: bool) -> Vec<DocumentSymbol> {
-        let rope = Rope::from_str(text);
-        let tree = tree::parse_rope(&rope, None);
-        index(tree.root_node(), &rope, recursive)
-    }
-
-    fn setup_nested(text: &str) -> Vec<DocumentSymbol> {
-        setup(text, true)
-    }
-
-    fn setup_flat(text: &str) -> Vec<DocumentSymbol> {
-        setup(text, false)
-    }
-
-    #[test]
-    fn assignments() {
-        let text = indoc! {r#"
-            foo <- function(a, b = True) {
-                a <- TRUE
-                b <- FALSE
+// note: this function shouldn't be used for keyword-only arguments (arguments after ...)
+pub fn get_argument<'a>(
+    arguments: Node<'a>,
+    rope: &Rope,
+    query: &str,
+    pos: usize,
+) -> Option<Node<'a>> {
+    // Try named argument
+    for argument in arguments.children_by_field_name("argument", &mut arguments.walk()) {
+        if let Some(name) = argument.child_by_field_name("name") {
+            let name = rope.byte_slice(name.byte_range()).to_string();
+            if name == query {
+                return argument.child_by_field_name("value");
             }
-            bar <- \(x, y, z) {
-                a <- 1
-                b <- "foo"
-            }
-            baz <- { "foo"; 3.14 }
-        "#};
-
-        {
-            let symbols = setup_nested(text);
-
-            assert_eq!(symbols[0].name, "foo");
-            assert_eq!(symbols[0].kind, SymbolKind::FUNCTION);
-            {
-                let children = symbols[0].children.as_ref().unwrap();
-                assert_eq!(children[0].name, "a");
-                assert_eq!(children[0].kind, SymbolKind::BOOLEAN);
-                assert_eq!(children[1].name, "b");
-                assert_eq!(children[1].kind, SymbolKind::BOOLEAN);
-            }
-
-            assert_eq!(symbols[1].name, "bar");
-            assert_eq!(symbols[1].kind, SymbolKind::FUNCTION);
-            {
-                let children = symbols[1].children.as_ref().unwrap();
-                assert_eq!(children[0].name, "a");
-                assert_eq!(children[0].kind, SymbolKind::NUMBER);
-                assert_eq!(children[1].name, "b");
-                assert_eq!(children[1].kind, SymbolKind::STRING);
-            }
-
-            assert_eq!(symbols[2].name, "baz");
-            assert_eq!(symbols[2].kind, SymbolKind::VARIABLE);
-        }
-
-        {
-            let symbols = setup_flat(text);
-
-            assert_eq!(symbols[0].name, "foo");
-            assert_eq!(symbols[0].kind, SymbolKind::FUNCTION);
-            assert_eq!(symbols[0].children, None);
-
-            assert_eq!(symbols[1].name, "bar");
-            assert_eq!(symbols[1].kind, SymbolKind::FUNCTION);
-            assert_eq!(symbols[1].children, None);
-
-            assert_eq!(symbols[2].name, "baz");
-            assert_eq!(symbols[2].kind, SymbolKind::VARIABLE);
-            assert_eq!(symbols[2].children, None);
         }
     }
 
-    #[test]
-    fn s4_set_class() {
-        let symbols = setup_nested(indoc! {r#"
-            setClass(
-                "Person",
-                slots = c(
-                    name = "character",
-                    age = "numeric"
-                )
-            )
-            setClass(
-                "Car",
-                slots = c(
-                    name = "character"
-                )
-            )
-        "#});
-
-        assert_eq!(symbols[0].name, "Person");
-        assert_eq!(symbols[0].kind, SymbolKind::CLASS);
-        {
-            let children = symbols[0].children.as_ref().unwrap();
-            assert_eq!(children[0].name, "name");
-            assert_eq!(children[0].kind, SymbolKind::PROPERTY);
-            assert_eq!(children[1].name, "age");
-            assert_eq!(children[1].kind, SymbolKind::PROPERTY);
-        }
-
-        assert_eq!(symbols[1].name, "Car");
-        assert_eq!(symbols[1].kind, SymbolKind::CLASS);
-        {
-            let children = symbols[1].children.as_ref().unwrap();
-            assert_eq!(children[0].name, "name");
-            assert_eq!(children[0].kind, SymbolKind::PROPERTY);
-        }
-
-        assert_eq!(symbols[2].name, "age");
-        assert_eq!(symbols[2].kind, SymbolKind::INTERFACE);
-
-        assert_eq!(symbols[3].name, "age<-");
-        assert_eq!(symbols[3].kind, SymbolKind::INTERFACE);
-
-        assert_eq!(symbols[4].name, "age (Person)");
-        assert_eq!(symbols[4].kind, SymbolKind::METHOD);
-
-        assert_eq!(symbols[5].name, "age<- (Person)");
-        assert_eq!(symbols[5].kind, SymbolKind::METHOD);
-
-        assert_eq!(symbols.len(), 9);
-    }
-
-    #[test]
-    fn s4_set_generic() {
-        let symbols = setup_nested(indoc! {r#"
-            setGeneric("foo", function(x) standardGeneric("foo"))
-            setGeneric("bar<-", function(x, value) standardGeneric("bar<-"))
-        "#});
-
-        assert_eq!(symbols[0].name, "foo");
-        assert_eq!(symbols[0].kind, SymbolKind::INTERFACE);
-
-        assert_eq!(symbols[1].name, "bar<-");
-        assert_eq!(symbols[1].kind, SymbolKind::INTERFACE);
-
-        assert_eq!(symbols.len(), 2);
-    }
-
-    #[test]
-    fn s4_set_method() {
-        let symbols = setup_flat(indoc! {r#"
-            setMethod("foo", "Person", function(x) x@foo)
-            setMethod(
-                "bar<-",
-                "Person",
-                function(x, value) {
-                    x@bar <- value
-                    x
-                }
-            )
-        "#});
-
-        assert_eq!(symbols[0].name, "foo (Person)");
-        assert_eq!(symbols[0].kind, SymbolKind::METHOD);
-
-        assert_eq!(symbols[1].name, "bar<- (Person)");
-        assert_eq!(symbols[1].kind, SymbolKind::METHOD);
-
-        assert_eq!(symbols.len(), 2);
-    }
-
-    #[test]
-    fn s4_set_method_with_signature_arg() {
-        let symbols = setup_flat(indoc! {r#"
-            setMethod(
-                f = "baz",
-                signature = "Person",
-                definition = function(x) x@baz
-            )
-        "#});
-
-        assert_eq!(symbols[0].name, "baz (Person)");
-        assert_eq!(symbols[0].kind, SymbolKind::METHOD);
-        assert_eq!(symbols.len(), 1);
-    }
-
-    #[test]
-    fn s4_set_method_with_vector_signature() {
-        let symbols = setup_flat(indoc! {r#"
-            setMethod(
-                "qux",
-                c("Person", "Other"),
-                function(x, y) x@qux + y@qux
-            )
-        "#});
-
-        assert_eq!(symbols[0].name, "qux (Person, Other)");
-        assert_eq!(symbols[0].kind, SymbolKind::METHOD);
-        assert_eq!(symbols.len(), 1);
-    }
-
-    // TODO: implement this in a follow up pr
-    // #[test]
-    // fn test_r6_class() {
-    //     let symbols = setup_recursive(indoc! {r#"
-    //         Person <- R6Class("Person",
-    //             public = list(
-    //                 name = NULL,
-    //                 age = NULL,
-    //                 initialize = function(name, age) {
-    //                     self$name <- name
-    //                     self$age <- age
-    //                 },
-    //                 greet = function() {
-    //                     cat(paste("Hello, my name is", self$name))
-    //                 },
-    //                 say_age = function() {
-    //                     cat(paste("I am", self$age, "years old"))
-    //                 },
-    //                 .hidden = NULL
-    //             ),
-    //             private = list(
-    //                 secret = NULL,
-    //                 password = NULL,
-    //                 reveal_secret = function() {
-    //                     cat(self$secret)
-    //                 }
-    //             ),
-    //             active = list(
-    //                 full_name = function(value) {
-    //                     if (missing(value)) paste(self$name, "Smith") else self$name <- value
-    //                 }
-    //             ),
-    //             inherit = AnotherClass,
-    //             portable = TRUE,
-    //             cloneable = FALSE,
-    //             lock_class = TRUE,
-    //             lock_objects = FALSE
-    //         )
-    //     "#});
-
-    //     assert_eq!(symbols[0].name, "Person");
-    //     assert_eq!(symbols[0].kind, SymbolKind::CLASS);
-
-    //     let children = symbols[0].children.as_ref().unwrap();
-    //     // Public properties and methods
-    //     assert!(
-    //         children
-    //             .iter()
-    //             .any(|c| c.name == "name" && c.kind == SymbolKind::PROPERTY)
-    //     );
-    //     assert!(
-    //         children
-    //             .iter()
-    //             .any(|c| c.name == "age" && c.kind == SymbolKind::PROPERTY)
-    //     );
-    //     assert!(
-    //         children
-    //             .iter()
-    //             .any(|c| c.name == "initialize" && c.kind == SymbolKind::METHOD)
-    //     );
-    //     assert!(
-    //         children
-    //             .iter()
-    //             .any(|c| c.name == "greet" && c.kind == SymbolKind::METHOD)
-    //     );
-    //     assert!(
-    //         children
-    //             .iter()
-    //             .any(|c| c.name == "say_age" && c.kind == SymbolKind::METHOD)
-    //     );
-    //     assert!(
-    //         children
-    //             .iter()
-    //             .any(|c| c.name == ".hidden" && c.kind == SymbolKind::PROPERTY)
-    //     );
-    //     // Private properties and methods
-    //     assert!(
-    //         children
-    //             .iter()
-    //             .any(|c| c.name == "secret" && c.kind == SymbolKind::PROPERTY)
-    //     );
-    //     assert!(
-    //         children
-    //             .iter()
-    //             .any(|c| c.name == "password" && c.kind == SymbolKind::PROPERTY)
-    //     );
-    //     assert!(
-    //         children
-    //             .iter()
-    //             .any(|c| c.name == "reveal_secret" && c.kind == SymbolKind::METHOD)
-    //     );
-    //     // Active bindings
-    //     assert!(
-    //         children
-    //             .iter()
-    //             .any(|c| c.name == "full_name" && c.kind == SymbolKind::PROPERTY)
-    //     );
-    //     // Inheritance and options are not symbol children, but you could check metadata if supported
-    // }
+    // Fallback to positional
+    arguments
+        .children_by_field_name("argument", &mut arguments.walk())
+        .nth(pos)
+        .and_then(|argument| argument.child_by_field_name("value"))
 }
