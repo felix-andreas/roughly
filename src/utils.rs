@@ -1,6 +1,7 @@
 use {
     crate::lsp_types::{Position, Range},
     ropey::Rope,
+    std::{fs::File, io::BufReader, path::Path},
 };
 
 pub fn starts_with_lowercase(name: &str, query: &str) -> bool {
@@ -22,22 +23,20 @@ pub fn index_to_position(index: usize, rope: &Rope) -> Result<Position, ropey::E
     })
 }
 
-pub fn lsp_range_to_rope_range(
-    range: Range,
-    rope: &Rope,
-) -> Result<std::ops::Range<usize>, ropey::Error> {
+pub fn to_rope_range(range: Range, rope: &Rope) -> Result<std::ops::Range<usize>, ropey::Error> {
     let start = position_to_index(range.start, rope)?;
     let end = position_to_index(range.end, rope)?;
     Ok(start..end)
 }
 
-pub fn rope_range_to_lsp_range(
-    range: std::ops::Range<usize>,
-    rope: &Rope,
-) -> Result<Range, ropey::Error> {
+pub fn to_lsp_range(range: std::ops::Range<usize>, rope: &Rope) -> Result<Range, ropey::Error> {
     let start = index_to_position(range.start, rope)?;
     let end = index_to_position(range.end, rope)?;
     Ok(Range { start, end })
+}
+
+pub fn read_to_rope(path: impl AsRef<Path>) -> std::io::Result<Rope> {
+    Rope::from_reader(BufReader::new(File::open(path)?))
 }
 
 // adapted from https://doc.rust-lang.org/stable/nightly-rustc/src/clippy_utils/str_utils.rs.html

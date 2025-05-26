@@ -3,6 +3,7 @@ use {
         diagnostics::{self, DiagnosticsError, field},
         lsp_types::{Diagnostic, DiagnosticSeverity},
     },
+    async_lsp::lsp_types::DiagnosticTag,
     ropey::Rope,
     std::collections::HashMap,
     tree_sitter::{Node, TreeCursor},
@@ -173,7 +174,7 @@ pub fn analyze(node: Node, rope: &Rope) -> Result<Vec<Diagnostic>, DiagnosticsEr
             code_description: None,
             source: None,
             related_information: None,
-            tags: None,
+            tags: Some(vec![DiagnosticTag::UNNECESSARY]),
             data: None,
         })
         .collect())

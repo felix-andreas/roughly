@@ -33,8 +33,9 @@ fn main() -> ExitCode {
         Command::Debug(dev) => match dev {
             Debug::Index {
                 paths: files,
-                show_items: all,
-            } => match cli::index(files.as_deref(), all) {
+                recursive,
+                show_items,
+            } => match cli::index(files.as_deref(), recursive, show_items) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(DebugError) => ExitCode::FAILURE,
             },
@@ -99,6 +100,9 @@ enum Debug {
     Index {
         /// R files to index
         paths: Option<Vec<PathBuf>>,
+        /// Recursively index all sub items
+        #[clap(long, default_value_t = false)]
+        recursive: bool,
         /// Show indexed items
         #[clap(long, default_value_t = false)]
         show_items: bool,

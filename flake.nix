@@ -71,6 +71,7 @@
                   ];
                 }
               ))
+              cargo-edit
               cargo-insta
               nodejs
               bun

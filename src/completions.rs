@@ -34,19 +34,19 @@ pub fn get(
         tree.root_node()
             .descendant_for_point_range(point, point)
             .map(|node| {
+                // TODO: just use document children (requires to think about where to use nested and where not)
                 std::iter::successors(Some(node), |node| node.parent())
                     .filter(|node| node.kind() == "function_definition")
-                    .flat_map(|func_node| {
+                    .flat_map(|node| {
                         let mut items = Vec::new();
 
-                        if let Some(parameters) = func_node.child_by_field_name("parameters") {
+                        if let Some(parameters) = node.child_by_field_name("parameters") {
                             items.extend(
                                 parameters
                                     .children_by_field_name("parameter", &mut parameters.walk())
                                     .filter_map(|parameter| {
                                         parameter.child_by_field_name("name").map(|name| {
-                                            rope.byte_slice(name.start_byte()..name.end_byte())
-                                                .to_string()
+                                            rope.byte_slice(name.byte_range()).to_string()
                                         })
                                     })
                                     .filter(|name| utils::starts_with_lowercase(name, &query))
@@ -58,9 +58,10 @@ pub fn get(
                             );
                         }
 
-                        if let Some(body) = func_node.child_by_field_name("body") {
+                        if let Some(body) = node.child_by_field_name("body") {
                             items.extend(
-                                index::symbols_for_block(body, rope)
+                                // todo: use enable nested and use children
+                                index::index(body, rope, false)
                                     .into_iter()
                                     .filter(|symbol| {
                                         utils::starts_with_lowercase(&symbol.name, &query)

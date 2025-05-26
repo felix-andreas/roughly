@@ -112,7 +112,7 @@ impl LanguageServer for ServerState {
     ) -> BoxFuture<'static, Result<InitializeResult, ResponseError>> {
         tracing::info!("initialize");
 
-        match index::index_full(&self.base_path) {
+        match index::index_dir(&self.base_path) {
             Ok(symbols) => self.workspace_symbols.extend(symbols),
             Err(IndexError) => self
                 .client
@@ -166,7 +166,7 @@ impl LanguageServer for ServerState {
         let path = uri.to_file_path().unwrap();
         let text = &params.text_document.text;
 
-        tracing::debug!(?uri, "did open");
+        tracing::debug!(?path, "did open");
 
         let rope = Rope::from_str(text);
         let tree = tree::parse(text, None);
@@ -178,7 +178,7 @@ impl LanguageServer for ServerState {
         );
 
         if !path.starts_with(&self.base_path) {
-            let symbols = index::index(text);
+            let symbols = index::index(tree.root_node(), &rope, false);
             self.document_symbols.insert(path.clone(), symbols);
         };
 
@@ -217,7 +217,7 @@ impl LanguageServer for ServerState {
         let start = Instant::now();
 
         let Some(document) = self.document_map.get_mut(&path) else {
-            tracing::error!(?uri, "document not found");
+            tracing::error!(?path, "document not found");
             return ControlFlow::Continue(());
         };
 
@@ -262,7 +262,7 @@ impl LanguageServer for ServerState {
             });
         }
 
-        document.tree = tree::parse_rope(rope, tree);
+        document.tree = tree::parse_rope(rope, Some(tree));
 
         // DEBUG
         // eprintln!("<--DOCUMENT-->\n{}<--END-->", rope);
@@ -296,6 +296,8 @@ impl LanguageServer for ServerState {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
+        tracing::debug!(?path, "did close");
+
         self.document_map.remove(&path);
 
         ControlFlow::Continue(())
@@ -308,35 +310,37 @@ impl LanguageServer for ServerState {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
-        tracing::debug!(?uri, "did save");
+        tracing::debug!(?path, "did save");
 
-        if let Some(document) = self.document_map.get(&path) {
-            let symbols = index::index(&document.rope.to_string());
-            if path.starts_with(&self.base_path) {
-                self.workspace_symbols.insert(path, symbols);
-            } else {
-                self.document_symbols.insert(path, symbols);
-            }
-
-            let diagnostics = diagnostics::analyze_full(
-                document.tree.root_node(),
-                &document.rope,
-                diagnostics::Config::from_config(self.config, self.experimental),
-            );
-
-            if let Err(error) = self
-                .client
-                .publish_diagnostics(PublishDiagnosticsParams::new(
-                    uri.clone(),
-                    diagnostics,
-                    None,
-                ))
-            {
-                tracing::error!(?error, "failed to publish diagnostics");
-            }
-        } else {
-            tracing::error!("document not found");
+        let Some(document) = self.document_map.get_mut(&path) else {
+            tracing::error!(?path, "document not found");
+            return ControlFlow::Continue(());
         };
+
+        let (rope, root_node) = (&document.rope, document.tree.root_node());
+        let symbols = index::index(root_node, rope, false);
+        if path.starts_with(&self.base_path) {
+            self.workspace_symbols.insert(path, symbols);
+        } else {
+            self.document_symbols.insert(path, symbols);
+        }
+
+        let diagnostics = diagnostics::analyze_full(
+            root_node,
+            rope,
+            diagnostics::Config::from_config(self.config, self.experimental),
+        );
+
+        if let Err(error) = self
+            .client
+            .publish_diagnostics(PublishDiagnosticsParams::new(
+                uri.clone(),
+                diagnostics,
+                None,
+            ))
+        {
+            tracing::error!(?error, "failed to publish diagnostics");
+        }
 
         ControlFlow::Continue(())
     }
