@@ -206,7 +206,7 @@ fn index_function(
                     Some(name) => {
                         rope.byte_slice(name.byte_range()).to_string()
                     }
-                    None => "UNKNOWN".into(),
+                    None => "Unknown".into(),
                 })
                 .collect::<Vec<String>>()
                 .join(", ")
@@ -246,14 +246,36 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
     };
 
     let (kind, name, detail, children) = match name.as_str() {
-        "setClass" => (
-            SymbolKind::CLASS,
-            "Class".into(),
-            None,
-            // TODO: maybe include slots?
-            None,
-        ),
-        "setGeneric" => (SymbolKind::INTERFACE, "Generic".into(), None, None),
+        "setClass" => {
+            // setClass("Person", slots = c(name = "character", age = "numeric"))
+            let class_name = get_argument(arguments, rope, "Class", 0)
+                .and_then(|argument| {
+                    (argument.kind() == "string").then(|| {
+                        argument
+                            .child_by_field_name("content")
+                            .map(|content| rope.byte_slice(content.byte_range()).to_string())
+                            .unwrap_or_default()
+                    })
+                })
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            (SymbolKind::CLASS, class_name, None, None)
+        }
+        "setGeneric" => {
+            // setGeneric("foo", function(x) standardGeneric("foo"))
+            let generic_name = get_argument(arguments, rope, "name", 0)
+                .and_then(|argument| {
+                    if argument.kind() == "string" {
+                        argument
+                            .child_by_field_name("content")
+                            .map(|content| rope.byte_slice(content.byte_range()).to_string())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| "Unknown".to_string());
+            (SymbolKind::INTERFACE, generic_name, None, None)
+        }
         "setMethod" => {
             // setMethod("foo", "Person", function(x) x@foo)
             // setMethod(f = "baz", signature = "Person", definition = function(x) x@baz)
@@ -275,7 +297,7 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
                         None
                     }
                 })
-                .unwrap_or_else(|| "UNKNOWN".to_string());
+                .unwrap_or_else(|| "Unknown".to_string());
 
             let signature = get_argument(arguments, rope, "signature", 1)
                 .and_then(|argument| {
@@ -314,7 +336,7 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
                         _ => None,
                     }
                 })
-                .unwrap_or_else(|| "UNKNOWN".to_string());
+                .unwrap_or_else(|| "Unknown".to_string());
 
             (
                 SymbolKind::METHOD,
