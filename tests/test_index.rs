@@ -307,7 +307,7 @@ fn get_argument_named_and_positional() {
     assert_eq!(extract_content(argument), "beta");
 
     // Named argument for gamma
-    let argument = index::get_argument(arguments, &rope, "gamma", 2).unwrap();
+    let argument = index::get_argument(arguments, &rope, "third", 2).unwrap();
     assert_eq!(argument.kind(), "string");
     assert_eq!(extract_content(argument), "gamma");
 
