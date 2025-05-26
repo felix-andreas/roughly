@@ -141,7 +141,13 @@ pub fn index(root: Node, rope: &Rope, nested: bool) -> Vec<DocumentSymbol> {
 
                                 (SymbolKind::VARIABLE, None, None)
                             }
-                            "call" => todo!(),
+                            "call" => {
+                                if let Some(symbol) = index_call(rhs, rope, nested) {
+                                    (symbol.kind, symbol.detail, symbol.children)
+                                } else {
+                                    (SymbolKind::VARIABLE, None, None)
+                                }
+                            }
                             "integer" | "float" | "complex" => (SymbolKind::NUMBER, None, None),
                             "true" | "false" => (SymbolKind::BOOLEAN, None, None),
                             "string" => (SymbolKind::STRING, None, None),
@@ -150,20 +156,19 @@ pub fn index(root: Node, rope: &Rope, nested: bool) -> Vec<DocumentSymbol> {
                         })
                         .unwrap_or_else(|| (SymbolKind::VARIABLE, None, None));
 
-                    #[allow(deprecated)]
-                    symbols.push(DocumentSymbol {
-                        name: rope.byte_slice(lhs.byte_range()).to_string(),
+                    let name = rope.byte_slice(lhs.byte_range()).to_string();
+                    let range = utils::to_lsp_range(node.byte_range(), rope).unwrap();
+                    let selection_range = utils::to_lsp_range(lhs.byte_range(), rope).unwrap();
+                    symbols.push(to_document_symbol(
+                        name,
                         kind,
                         detail,
-                        tags: None,
-                        range: utils::rope_range_to_lsp_range(node.byte_range(), rope).unwrap(),
-                        selection_range: utils::rope_range_to_lsp_range(lhs.byte_range(), rope)
-                            .unwrap(),
+                        range,
+                        selection_range,
                         children,
-                        deprecated: None,
-                    })
+                    ))
                 } else if nested {
-                    // TODO: recurse lhs and rhs in else case?
+                    // TODO: recurse lhs and rhs in else case? (and nested == true)
                 }
             }
             "braced_expression" => {
@@ -180,7 +185,6 @@ pub fn index(root: Node, rope: &Rope, nested: bool) -> Vec<DocumentSymbol> {
                     symbols.extend(children);
                 }
             }
-            "namespace_operator" => todo!(),
             // what about if, for, etc?
             // maybe need to implement recursion to find for edge cases?
             _ => {}
@@ -345,22 +349,109 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
                 None,
             )
         }
-        "R6Class" => todo!(),
+        "R6Class" => {
+            // R6Class("Person", ...)
+            // Extract class name (first argument, named "classname" or positional)
+            let class_name = get_argument(arguments, rope, "classname", 0)
+                .and_then(|argument| {
+                    if argument.kind() == "string" {
+                        argument
+                            .child_by_field_name("content")
+                            .map(|content| rope.byte_slice(content.byte_range()).to_string())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            let mut members = Vec::new();
+            for (field, position) in [("public", 1), ("private", 2), ("active", 3)] {
+                let Some(list) = get_argument(arguments, rope, field, position) else {
+                    continue;
+                };
+
+                // list_node is expected to be a call to list(...)
+                if list.kind() != "call" {
+                    continue;
+                }
+
+                let Some(args) = list.child_by_field_name("arguments") else {
+                    continue;
+                };
+
+                for member in args.children_by_field_name("argument", &mut args.walk()) {
+                    let Some(name) = member.child_by_field_name("name") else {
+                        continue;
+                    };
+
+                    if name.kind() != "identifier" {
+                        continue;
+                    }
+
+                    let name = rope.byte_slice(name.byte_range()).to_string();
+                    let value = member.child_by_field_name("value");
+                    let (kind, detail, children) = if let Some(value) = value
+                        && value.kind() == "function_definition"
+                    {
+                        let (_, detail, children) = index_function(value, rope, nested);
+                        (
+                            if field == "active" {
+                                SymbolKind::PROPERTY
+                            } else {
+                                SymbolKind::METHOD
+                            },
+                            detail,
+                            children,
+                        )
+                    } else {
+                        (
+                            if field == "active" {
+                                SymbolKind::PROPERTY
+                            } else {
+                                SymbolKind::FIELD
+                            },
+                            None,
+                            None,
+                        )
+                    };
+
+                    let range = utils::to_lsp_range(member.byte_range(), rope).unwrap();
+                    members.push(to_document_symbol(
+                        name, kind, detail, range, range, children,
+                    ));
+                }
+            }
+
+            (SymbolKind::CLASS, class_name, None, Some(members))
+        }
         _ => return None,
     };
 
-    let range = utils::rope_range_to_lsp_range(call.byte_range(), rope).unwrap();
+    let range = utils::to_lsp_range(call.byte_range(), rope).unwrap();
+    Some(to_document_symbol(
+        name, kind, detail, range, range, children,
+    ))
+}
+
+pub fn to_document_symbol(
+    name: String,
+    kind: SymbolKind,
+    detail: Option<String>,
+    range: Range,
+    selection_range: Range,
+    children: Option<Vec<DocumentSymbol>>,
+) -> DocumentSymbol {
     #[allow(deprecated)]
-    Some(DocumentSymbol {
+    DocumentSymbol {
         name,
         kind,
         detail,
         tags: None,
         range,
-        selection_range: range,
+        selection_range,
         children,
-        deprecated: None,
-    })
+        deprecated: None, // required for struct, but deprecated; allow deprecated field
+    }
 }
 
 // note: this function shouldn't be used for keyword-only arguments (arguments after ...)
@@ -384,5 +475,12 @@ pub fn get_argument<'a>(
     arguments
         .children_by_field_name("argument", &mut arguments.walk())
         .nth(pos)
-        .and_then(|argument| argument.child_by_field_name("value"))
+        .and_then(|argument| {
+            // Only return if there is no name (i.e., it's a positional argument)
+            if argument.child_by_field_name("name").is_none() {
+                argument.child_by_field_name("value")
+            } else {
+                None
+            }
+        })
 }

@@ -199,105 +199,79 @@ fn s4_set_method_with_named_signature() {
     assert_eq!(symbols.len(), 1);
 }
 
-// TODO: implement this in a follow up pr
-// #[test]
-// fn test_r6_class() {
-//     let symbols = setup_recursive(indoc! {r#"
-//         Person <- R6Class("Person",
-//             public = list(
-//                 name = NULL,
-//                 age = NULL,
-//                 initialize = function(name, age) {
-//                     self$name <- name
-//                     self$age <- age
-//                 },
-//                 greet = function() {
-//                     cat(paste("Hello, my name is", self$name))
-//                 },
-//                 say_age = function() {
-//                     cat(paste("I am", self$age, "years old"))
-//                 },
-//                 .hidden = NULL
-//             ),
-//             private = list(
-//                 secret = NULL,
-//                 password = NULL,
-//                 reveal_secret = function() {
-//                     cat(self$secret)
-//                 }
-//             ),
-//             active = list(
-//                 full_name = function(value) {
-//                     if (missing(value)) paste(self$name, "Smith") else self$name <- value
-//                 }
-//             ),
-//             inherit = AnotherClass,
-//             portable = TRUE,
-//             cloneable = FALSE,
-//             lock_class = TRUE,
-//             lock_objects = FALSE
-//         )
-//     "#});
+#[test]
+fn test_r6_class() {
+    let symbols = setup_flat(indoc! {r#"
+        Person <- R6Class("Person",
+            public = list(
+                name = NULL,
+                age = NULL,
+                initialize = function(name, age) {
+                    self$name <- name
+                    self$age <- age
+                },
+                greet = function() {
+                    cat(paste("Hello, my name is", self$name))
+                },
+                say_age = function() {
+                    cat(paste("I am", self$age, "years old"))
+                },
+                .hidden = NULL
+            ),
+            private = list(
+                secret = NULL,
+                password = NULL,
+                reveal_secret = function() {
+                    cat(self$secret)
+                }
+            ),
+            active = list(
+                full_name = function(value) {
+                    if (missing(value)) paste(self$name, "Smith") else self$name <- value
+                }
+            ),
+            inherit = AnotherClass,
+            portable = TRUE,
+            cloneable = FALSE,
+            lock_class = TRUE,
+            lock_objects = FALSE
+        )
+    "#});
 
-//     assert_eq!(symbols[0].name, "Person");
-//     assert_eq!(symbols[0].kind, SymbolKind::CLASS);
+    assert_eq!(symbols[0].name, "Person");
+    assert_eq!(symbols[0].kind, SymbolKind::CLASS);
 
-//     let children = symbols[0].children.as_ref().unwrap();
-//     // Public properties and methods
-//     assert!(
-//         children
-//             .iter()
-//             .any(|c| c.name == "name" && c.kind == SymbolKind::PROPERTY)
-//     );
-//     assert!(
-//         children
-//             .iter()
-//             .any(|c| c.name == "age" && c.kind == SymbolKind::PROPERTY)
-//     );
-//     assert!(
-//         children
-//             .iter()
-//             .any(|c| c.name == "initialize" && c.kind == SymbolKind::METHOD)
-//     );
-//     assert!(
-//         children
-//             .iter()
-//             .any(|c| c.name == "greet" && c.kind == SymbolKind::METHOD)
-//     );
-//     assert!(
-//         children
-//             .iter()
-//             .any(|c| c.name == "say_age" && c.kind == SymbolKind::METHOD)
-//     );
-//     assert!(
-//         children
-//             .iter()
-//             .any(|c| c.name == ".hidden" && c.kind == SymbolKind::PROPERTY)
-//     );
-//     // Private properties and methods
-//     assert!(
-//         children
-//             .iter()
-//             .any(|c| c.name == "secret" && c.kind == SymbolKind::PROPERTY)
-//     );
-//     assert!(
-//         children
-//             .iter()
-//             .any(|c| c.name == "password" && c.kind == SymbolKind::PROPERTY)
-//     );
-//     assert!(
-//         children
-//             .iter()
-//             .any(|c| c.name == "reveal_secret" && c.kind == SymbolKind::METHOD)
-//     );
-//     // Active bindings
-//     assert!(
-//         children
-//             .iter()
-//             .any(|c| c.name == "full_name" && c.kind == SymbolKind::PROPERTY)
-//     );
-//     // Inheritance and options are not symbol children, but you could check metadata if supported
-// }
+    let members = symbols[0].children.as_ref().unwrap();
+
+    let assert = |members: &[DocumentSymbol], name: &str, kind: SymbolKind| {
+        assert!(
+            members
+                .iter()
+                .any(|member| member.name == name && member.kind == kind),
+            "expected member with name '{}' and kind '{:?}' not found",
+            name,
+            kind
+        );
+    };
+
+    // Public properties and methods
+    assert(members, "name", SymbolKind::FIELD);
+    assert(members, "age", SymbolKind::FIELD);
+    assert(members, "initialize", SymbolKind::METHOD);
+    assert(members, "greet", SymbolKind::METHOD);
+    assert(members, "say_age", SymbolKind::METHOD);
+    assert(members, ".hidden", SymbolKind::FIELD);
+
+    // Private properties and methods
+    assert(members, "secret", SymbolKind::FIELD);
+    assert(members, "password", SymbolKind::FIELD);
+    assert(members, "reveal_secret", SymbolKind::METHOD);
+
+    // Active bindings
+    assert(members, "full_name", SymbolKind::PROPERTY);
+
+    // Inheritance and options are not symbol children, but you could check metadata if supported
+}
 
 #[test]
 fn get_argument_named_and_positional() {
