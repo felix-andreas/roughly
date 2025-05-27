@@ -73,9 +73,12 @@
 			"properties": {
 				"roughly.path": {
 					"scope": "resource",
-					"type": "string",
+					"type": [
+						"string",
+						"null"
+					],
 					"format": "path",
-					"default": "roughly",
+					"default": null,
 					"markdownDescription": "Location of the `roughly` executable, e.g., `[\"/path/to/roughly\"]`."
 				},
 				"roughly.args": {

@@ -24,8 +24,8 @@ vsce *args:
 # BUILD
 #
 
-install-extension $version:
-	code --install-extension client/roughly-*.vsix --force
+install-extension $path:
+	code --install-extension {{path}}
 
 build-linux:
 	cargo build --release --target x86_64-unknown-linux-gnu
