@@ -1,7 +1,8 @@
 use {
     crate::{
-        diagnostics::{self, DiagnosticsError, field},
+        diagnostics::{DiagnosticsError, field},
         lsp_types::{Diagnostic, DiagnosticSeverity},
+        utils,
     },
     async_lsp::lsp_types::DiagnosticTag,
     ropey::Rope,
@@ -167,7 +168,7 @@ pub fn analyze(node: Node, rope: &Rope) -> Result<Vec<Diagnostic>, DiagnosticsEr
         .get_unused_variables()
         .into_iter()
         .map(|(name, node)| Diagnostic {
-            range: diagnostics::node_range(node),
+            range: utils::node_range(node),
             severity: Some(DiagnosticSeverity::WARNING),
             message: format!("unused variable `{}`", name),
             code: None,

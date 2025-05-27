@@ -157,8 +157,8 @@ pub fn index(root: Node, rope: &Rope, nested: bool) -> Vec<DocumentSymbol> {
                         .unwrap_or_else(|| (SymbolKind::VARIABLE, None, None));
 
                     let name = rope.byte_slice(lhs.byte_range()).to_string();
-                    let range = utils::to_lsp_range(node.byte_range(), rope).unwrap();
-                    let selection_range = utils::to_lsp_range(lhs.byte_range(), rope).unwrap();
+                    let range = utils::node_range(node);
+                    let selection_range = utils::node_range(lhs);
                     symbols.push(to_document_symbol(
                         name,
                         kind,
@@ -284,10 +284,6 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
             // setMethod("foo", "Person", function(x) x@foo)
             // setMethod(f = "baz", signature = "Person", definition = function(x) x@baz)
             // setMethod("qux", c("Person", "Other"), function(x, y) x@qux + y@qux)
-            // TODO: also handle named signature
-
-            // Helper to extract argument by name or position
-
             let method_name = get_argument(arguments, rope, "f", 0)
                 .and_then(|argument| {
                     if argument.kind() == "string" {
@@ -415,7 +411,7 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
                         )
                     };
 
-                    let range = utils::to_lsp_range(member.byte_range(), rope).unwrap();
+                    let range = utils::node_range(member);
                     members.push(to_document_symbol(
                         name, kind, detail, range, range, children,
                     ));
@@ -427,7 +423,7 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
         _ => return None,
     };
 
-    let range = utils::to_lsp_range(call.byte_range(), rope).unwrap();
+    let range = utils::node_range(call);
     Some(to_document_symbol(
         name, kind, detail, range, range, children,
     ))

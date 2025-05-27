@@ -15,7 +15,7 @@ use {
             TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
             WorkspaceSymbolParams, WorkspaceSymbolResponse,
         },
-        tree,
+        tree, utils,
     },
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
@@ -198,6 +198,20 @@ impl LanguageServer for ServerState {
         ControlFlow::Continue(())
     }
 
+    fn did_close(
+        &mut self,
+        params: DidCloseTextDocumentParams,
+    ) -> ControlFlow<async_lsp::Result<()>> {
+        let uri = params.text_document.uri;
+        let path = uri.to_file_path().unwrap();
+
+        tracing::debug!(?path, "did close");
+
+        self.document_map.remove(&path);
+
+        ControlFlow::Continue(())
+    }
+
     // inspired by:
     // https://github.com/marceline-cramer/saturn-v/blob/93d1c8fd022f5b4905928d6e9154385c5b6822ab/lsp/src/lib.rs
     fn did_change(
@@ -285,20 +299,6 @@ impl LanguageServer for ServerState {
         }
 
         tracing::debug!(elapsed = start.elapsed().as_millis());
-
-        ControlFlow::Continue(())
-    }
-
-    fn did_close(
-        &mut self,
-        params: DidCloseTextDocumentParams,
-    ) -> ControlFlow<async_lsp::Result<()>> {
-        let uri = params.text_document.uri;
-        let path = uri.to_file_path().unwrap();
-
-        tracing::debug!(?path, "did close");
-
-        self.document_map.remove(&path);
 
         ControlFlow::Continue(())
     }
@@ -453,15 +453,9 @@ impl LanguageServer for ServerState {
             }
         };
 
-        let start = node.start_position();
-        let end = node.end_position();
-
         let edits = vec![TextEdit {
             new_text,
-            range: Range::new(
-                Position::new(start.row as u32, start.column as u32),
-                Position::new(end.row as u32, end.column as u32),
-            ),
+            range: utils::node_range(node),
         }];
 
         Box::pin(async move { Ok(Some(edits)) })
