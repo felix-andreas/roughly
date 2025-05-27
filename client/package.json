@@ -3,7 +3,7 @@
 	"displayName": "Roughly",
 	"description": "R language support",
 	"author": "Felix Andreas",
-	"version": "0.0.3",
+	"version": "0.0.4",
 	"publisher": "felix-andreas",
 	"icon": "images/icon.png",
 	"repository": {
