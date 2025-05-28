@@ -36,6 +36,7 @@ fn assignments() {
 
     {
         let symbols = setup_nested(text);
+        assert_eq!(symbols.len(), 3);
 
         assert_eq!(symbols[0].name, "foo");
         assert_eq!(symbols[0].kind, SymbolKind::FUNCTION);
@@ -63,6 +64,7 @@ fn assignments() {
 
     {
         let symbols = setup_flat(text);
+        assert_eq!(symbols.len(), 3);
 
         assert_eq!(symbols[0].name, "foo");
         assert_eq!(symbols[0].kind, SymbolKind::FUNCTION);
@@ -96,6 +98,8 @@ fn s4_set_class() {
 		)
 	"#});
 
+    assert_eq!(symbols.len(), 2);
+
     assert_eq!(symbols[0].name, "Person");
     assert_eq!(symbols[0].kind, SymbolKind::CLASS);
     // {
@@ -122,6 +126,8 @@ fn s4_set_generic() {
 		methods::setGeneric(name = "bar<-", def = function(x, value) standardGeneric("bar<-"))
 	"#});
 
+    assert_eq!(symbols.len(), 2);
+
     assert_eq!(symbols[0].name, "foo");
     assert_eq!(symbols[0].kind, SymbolKind::INTERFACE);
 
@@ -145,6 +151,8 @@ fn s4_set_method() {
 		)
 	"#});
 
+    assert_eq!(symbols.len(), 2);
+
     assert_eq!(symbols[0].name, "foo (Person)");
     assert_eq!(symbols[0].kind, SymbolKind::METHOD);
 
@@ -164,6 +172,8 @@ fn s4_set_method_with_signature_arg() {
 		)
 	"#});
 
+    assert_eq!(symbols.len(), 1);
+
     assert_eq!(symbols[0].name, "baz (Person)");
     assert_eq!(symbols[0].kind, SymbolKind::METHOD);
     assert_eq!(symbols.len(), 1);
@@ -179,6 +189,8 @@ fn s4_set_method_with_vector_signature() {
 		)
 	"#});
 
+    assert_eq!(symbols.len(), 1);
+
     assert_eq!(symbols[0].name, "qux (Person, Other)");
     assert_eq!(symbols[0].kind, SymbolKind::METHOD);
     assert_eq!(symbols.len(), 1);
@@ -193,6 +205,8 @@ fn s4_set_method_with_named_signature() {
 			definition = function(x, y) x@foo + y@foo
 		)
 	"#});
+
+    assert_eq!(symbols.len(), 1);
 
     assert_eq!(symbols[0].name, "foo (Person, Other)");
     assert_eq!(symbols[0].kind, SymbolKind::METHOD);
@@ -253,6 +267,8 @@ fn test_r6_class() {
                 .any(|member| member.name == name && member.kind == kind),
         );
     };
+
+    assert_eq!(symbols.len(), 2);
 
     // Person
     assert_eq!(symbols[0].name, "Person");
