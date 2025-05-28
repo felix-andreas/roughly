@@ -1,10 +1,10 @@
 use {
     crate::{
-        index,
-        index::SymbolsMap,
+        index::{self, SymbolsMap},
         lsp_types::{CompletionItem, CompletionItemKind, CompletionResponse, Position, SymbolKind},
         utils,
     },
+    async_lsp::lsp_types::CompletionItemLabelDetails,
     ropey::Rope,
     tree_sitter::Point,
 };
@@ -52,6 +52,10 @@ pub fn get(
                                     .filter(|name| utils::starts_with_lowercase(name, &query))
                                     .map(|label| CompletionItem {
                                         label,
+                                        label_details: Some(CompletionItemLabelDetails {
+                                            detail: None,
+                                            description: Some("Parameter".into()),
+                                        }),
                                         kind: Some(CompletionItemKind::VARIABLE),
                                         ..Default::default()
                                     }),
@@ -68,6 +72,10 @@ pub fn get(
                                     })
                                     .map(|symbol| CompletionItem {
                                         label: symbol.name,
+                                        label_details: Some(CompletionItemLabelDetails {
+                                            detail: None,
+                                            description: Some("Local".into()),
+                                        }),
                                         kind: Some(symbol_kind_to_completion_kind(symbol.kind)),
                                         ..Default::default()
                                     }),
@@ -119,12 +127,20 @@ pub fn get(
             .filter(|keyword| utils::starts_with_lowercase(keyword, &query))
             .map(|reserved_word| CompletionItem {
                 label: reserved_word.to_string(),
+                label_details: Some(CompletionItemLabelDetails {
+                    detail: None,
+                    description: Some("Keyword".into()),
+                }),
                 kind: Some(CompletionItemKind::KEYWORD),
                 ..Default::default()
             })
             .chain(local_symbols)
             .chain(workspace_symbols.into_iter().map(|symbol| CompletionItem {
                 label: symbol.name.to_string(),
+                label_details: Some(CompletionItemLabelDetails {
+                    detail: None,
+                    description: Some("Global".into()),
+                }),
                 kind: Some(symbol_kind_to_completion_kind(symbol.kind)),
                 ..Default::default()
             }))
