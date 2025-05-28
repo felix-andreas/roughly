@@ -4,7 +4,7 @@ use {
         lsp_types::{CompletionItem, CompletionItemKind, CompletionResponse, Position, SymbolKind},
         utils,
     },
-    async_lsp::lsp_types::CompletionItemLabelDetails,
+    async_lsp::lsp_types::{CompletionItemLabelDetails, InsertTextFormat},
     ropey::Rope,
     tree_sitter::Point,
 };
@@ -105,7 +105,7 @@ pub fn get(
         "repeat",
         "while",
         "function",
-        "for",
+        // "for",
         "in",
         "next",
         "break",
@@ -134,6 +134,12 @@ pub fn get(
                 kind: Some(CompletionItemKind::KEYWORD),
                 ..Default::default()
             })
+            .chain(std::iter::once(CompletionItem {
+                label: "for".into(),
+                insert_text: Some("for (${1:x} in $2) {\n${3:body}\n}".into()),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                ..Default::default()
+            }))
             .chain(local_symbols)
             .chain(workspace_symbols.into_iter().map(|symbol| CompletionItem {
                 label: symbol.name.to_string(),
