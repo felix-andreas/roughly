@@ -88,7 +88,7 @@ fn s4_set_class() {
 				age = "numeric"
 			)
 		)
-		setClass(
+		methods::setClass(
 			Class = "Car",
 			slots = c(
 				name = "character"
@@ -119,7 +119,7 @@ fn s4_set_class() {
 fn s4_set_generic() {
     let symbols = setup_nested(indoc! {r#"
 		setGeneric("foo", function(x) standardGeneric("foo"))
-		setGeneric(name = "bar<-", def = function(x, value) standardGeneric("bar<-"))
+		methods::setGeneric(name = "bar<-", def = function(x, value) standardGeneric("bar<-"))
 	"#});
 
     assert_eq!(symbols[0].name, "foo");
@@ -236,23 +236,29 @@ fn test_r6_class() {
             lock_class = TRUE,
             lock_objects = FALSE
         )
+
+        Car <- R6::R6Class(
+            "Person",
+            list(
+                length = NULL,
+                drive = function() {}
+            )
+        )
     "#});
-
-    assert_eq!(symbols[0].name, "Person");
-    assert_eq!(symbols[0].kind, SymbolKind::CLASS);
-
-    let members = symbols[0].children.as_ref().unwrap();
 
     let assert = |members: &[DocumentSymbol], name: &str, kind: SymbolKind| {
         assert!(
             members
                 .iter()
                 .any(|member| member.name == name && member.kind == kind),
-            "expected member with name '{}' and kind '{:?}' not found",
-            name,
-            kind
         );
     };
+
+    // Person
+    assert_eq!(symbols[0].name, "Person");
+    assert_eq!(symbols[0].kind, SymbolKind::CLASS);
+
+    let members = symbols[0].children.as_ref().unwrap();
 
     // Public properties and methods
     assert(members, "name", SymbolKind::FIELD);
@@ -270,7 +276,13 @@ fn test_r6_class() {
     // Active bindings
     assert(members, "full_name", SymbolKind::PROPERTY);
 
-    // Inheritance and options are not symbol children, but you could check metadata if supported
+    // Car
+    assert_eq!(symbols[1].name, "Car");
+    assert_eq!(symbols[1].kind, SymbolKind::CLASS);
+
+    let members = symbols[1].children.as_ref().unwrap();
+    assert(members, "length", SymbolKind::FIELD);
+    assert(members, "drive", SymbolKind::METHOD);
 }
 
 #[test]

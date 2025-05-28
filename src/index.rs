@@ -231,14 +231,16 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
         "identifier" => rope.byte_slice(function.byte_range()).to_string(),
         "namespace_operator" => {
             let (Some(lhs), Some(rhs)) = (
-                call.child_by_field_name("lhs"),
-                call.child_by_field_name("rhs"),
+                function.child_by_field_name("lhs"),
+                function.child_by_field_name("rhs"),
             ) else {
                 return None;
             };
-            if lhs.kind() != "identifer" || rhs.kind() != "identifier" {
+
+            if lhs.kind() != "identifier" || rhs.kind() != "identifier" {
                 return None;
             }
+
             let package = rope.byte_slice(lhs.byte_range()).to_string();
             if !["methods", "R6"].contains(&package.as_str()) {
                 return None;
@@ -340,7 +342,7 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
 
             (
                 SymbolKind::METHOD,
-                format!("{} ({})", method_name, signature),
+                format!("{method_name} ({signature})"),
                 None,
                 None,
             )
