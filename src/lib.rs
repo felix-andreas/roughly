@@ -12,11 +12,11 @@ pub mod tree;
 pub mod utils;
 
 #[cfg(feature = "async-lsp")]
-pub mod lsp_async_lsp;
+pub mod server_async_lsp;
 #[cfg(feature = "async-lsp")]
-pub use {async_lsp::lsp_types, lsp_async_lsp as lsp};
+pub use {async_lsp::lsp_types, server_async_lsp as server};
 
 #[cfg(feature = "tower-lsp")]
 mod lsp_tower_lsp;
 #[cfg(feature = "tower-lsp")]
-pub use {async_lsp::lsp_types, lsp_tower_lsp as lsp};
+pub use {async_lsp::lsp_types, lsp_tower_lsp as server};

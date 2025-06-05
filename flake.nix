@@ -1,7 +1,7 @@
 {
   inputs = {
     systems.url = "github:nix-systems/default";
-    nixpkgs.url = "unstable"; # local registry
+    nixpkgs.url = "nixpkgs"; # local registry
     devshell.url = "github:numtide/devshell";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
@@ -71,6 +71,7 @@
                   ];
                 }
               ))
+              cargo-edit
               cargo-insta
               nodejs
               bun

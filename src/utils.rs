@@ -1,39 +1,25 @@
 use {
     crate::lsp_types::{Position, Range},
     ropey::Rope,
+    std::{fs::File, io::BufReader, path::Path},
+    tree_sitter::Node,
 };
 
-pub fn position_to_index(position: Position, rope: &Rope) -> Result<usize, ropey::Error> {
-    let line = position.line as usize;
-    let line = rope.try_line_to_char(line)?;
-    Ok(line + position.character as usize)
+pub fn starts_with_lowercase(name: &str, query: &str) -> bool {
+    query.is_empty() || name.to_lowercase().starts_with(&query.to_lowercase())
 }
 
-pub fn index_to_position(index: usize, rope: &Rope) -> Result<Position, ropey::Error> {
-    let line = rope.try_char_to_line(index)?;
-    let char = index - rope.line_to_char(line);
-    Ok(Position {
-        line: line as u32,
-        character: char as u32,
-    })
+pub fn read_to_rope(path: impl AsRef<Path>) -> std::io::Result<Rope> {
+    Rope::from_reader(BufReader::new(File::open(path)?))
 }
 
-pub fn lsp_range_to_rope_range(
-    range: Range,
-    rope: &Rope,
-) -> Result<std::ops::Range<usize>, ropey::Error> {
-    let start = position_to_index(range.start, rope)?;
-    let end = position_to_index(range.end, rope)?;
-    Ok(start..end)
-}
-
-pub fn rope_range_to_lsp_range(
-    range: std::ops::Range<usize>,
-    rope: &Rope,
-) -> Result<Range, ropey::Error> {
-    let start = index_to_position(range.start, rope)?;
-    let end = index_to_position(range.end, rope)?;
-    Ok(Range { start, end })
+pub fn node_range(node: Node) -> Range {
+    let start = node.start_position();
+    let end = node.end_position();
+    Range::new(
+        Position::new(start.row as u32, start.column as u32),
+        Position::new(end.row as u32, end.column as u32),
+    )
 }
 
 // adapted from https://doc.rust-lang.org/stable/nightly-rustc/src/clippy_utils/str_utils.rs.html

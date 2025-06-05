@@ -1,9 +1,9 @@
 {
 	"name": "roughly",
 	"displayName": "Roughly",
-	"description": "The R(oughly good enough) Language Server",
+	"description": "R language support",
 	"author": "Felix Andreas",
-	"version": "0.0.1",
+	"version": "0.0.4",
 	"publisher": "felix-andreas",
 	"icon": "images/icon.png",
 	"repository": {
@@ -16,6 +16,7 @@
 	],
 	"categories": [
 		"Formatters",
+		"Linters",
 		"Programming Languages"
 	],
 	"engines": {
@@ -26,7 +27,8 @@
 		"compile": "tsc -b",
 		"watch": "tsc -b -w",
 		"lint": "eslint",
-		"package": "cp ../LICENSE . && vsce package"
+		"package": "vsce package",
+		"vsce": "vsce"
 	},
 	"dependencies": {
 		"vscode-languageclient": "^9.0.1"
@@ -49,16 +51,16 @@
 	"contributes": {
 		"commands": [
 			{
-				"title": "Roughly: Restart Language Server",
-				"command": "roughly.restartLanguageServer"
+				"title": "Roughly: Restart Server",
+				"command": "roughly.restartServer"
 			},
 			{
-				"title": "Roughly: Start Language Server",
-				"command": "roughly.startLanguageServer"
+				"title": "Roughly: Start Server",
+				"command": "roughly.startServer"
 			},
 			{
-				"title": "Roughly: Stop Language Server",
-				"command": "roughly.stopLanguageServer"
+				"title": "Roughly: Stop Server",
+				"command": "roughly.stopServer"
 			},
 			{
 				"title": "Roughly: Open Logs",
@@ -71,9 +73,12 @@
 			"properties": {
 				"roughly.path": {
 					"scope": "resource",
-					"type": "string",
+					"type": [
+						"string",
+						"null"
+					],
 					"format": "path",
-					"default": "roughly",
+					"default": null,
 					"markdownDescription": "Location of the `roughly` executable, e.g., `[\"/path/to/roughly\"]`."
 				},
 				"roughly.args": {
@@ -83,7 +88,7 @@
 						"type": "string"
 					},
 					"default": [
-						"lsp"
+						"server"
 					],
 					"markdownDescription": "Arguments passed to `roughly`."
 				}

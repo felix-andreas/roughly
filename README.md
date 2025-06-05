@@ -6,7 +6,7 @@
 
 *The R(oughly good enough) Language Server*
 
-[**📚 Docs**](https://roughly.felixandreas.me) | [**📦 Releases**](https://github.com/felix-andreas/roughly/releases)
+[**📚 Docs**](https://roughly.felixandreas.me) | [**📦 Releases**](https://github.com/felix-andreas/roughly/releases) | [**🧩 VS Code Extension**](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
 
 </div>
 
@@ -17,63 +17,93 @@ Roughly is an R language server, linter, and code formatter, written in Rust.
 
 ## Installation
 
-### Roughly CLI
+### Download Binary (Recommended)
 
-Build the CLI (or [download from here](https://github.com/felix-andreas/roughly/releases)):
+Download the pre-built binary for your platform from the [releases page](https://github.com/felix-andreas/roughly/releases).
 
-```
+### Build from Source
+
+Alternatively, build from source (requires the Rust nightly):
+
+```sh
 cargo build --release
 ```
 
-### VS Code extension
+## Usage
 
-Bundle the client (or [download from here](https://github.com/felix-andreas/roughly/releases)):
+Run roughly as a formatter:
 
 ```
+roughly fmt             # Format all files in the current directory
+roughly fmt <path>      # Format all files in `<path>`
+roughly fmt --check     # Only check if files would be formatted
+roughly fmt --diff      # Only show diff if files would be formatted
+```
+
+To run Roughly as a linter:
+
+```
+roughly check           # Check all files in the current directory
+roughly check <path>    # Check all files in `<path>`
+```
+
+Or, to run Roughly as a language server:
+
+```
+roughly server          # Usually started automatically by your editor
+```
+
+## VS Code extension
+
+### From Marketplace (Recommended)
+
+Install directly from VS Code:
+- Open VS Code
+- Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> to open Extensions
+- Search for "roughly"
+- Click "Install" on the extension by `felix-andreas`
+
+Or, install using the [VS Code Marketplace website](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly).
+
+> [!NOTE]
+> The VS Code extension from the marketplace already includes a bundled version of the Roughly CLI, so you don't need to install the CLI separately.
+
+### Manual Installation
+
+Alternatively, build the extension from source (or [download from releases](https://github.com/felix-andreas/roughly/releases)):
+
+```bash
 bun run package
 ```
 
-Install the VS code extension:
+Install the generated VSIX file:
 
-```
+```bash
 code --install-extension roughly.vsix
 ```
 
-Configure the VS Code extension via the `settings.json` to use the roughly binary:
+### Extension Settings
+
+You can customize the Roughly extension in VS Code through the following settings:
+
+* Specify a custom binary path to use your own version of Roughly instead of the bundled one:
 
 ```json
-{
-  "roughly.path": "<path>"
-}
+  "roughly.path": "/path/to/roughly"
 ```
 
-### RStudio (formatter only)
+* Pass additional arguments to the language server, e.g to enable experimental features:
+
+```json
+  "roughly.args": ["server", "--experimental"]
+```
+
+## RStudio Integration
+
+Roughly can be used as an external formatter in RStudio. See the [RStudio setup guide](https://roughly.felixandreas.me/getting-started/#rstudio-formatter-only) for detailed instructions.
 
 You can configure Roughly as an [external formatter in RStudio](https://roughly.felixandreas.me/getting-started/#rstudio-formatter-only)
 
-## Usage
-
-Start the language server:
-
-```
-roughly lsp
-```
-
-To run roughly as a formatter:
-
-```
-roughly fmt                # Format all files in the current directory
-roughly fmt <path>         # Format all files in `<path>`
-roughly fmt --check        # Only check if files would be formatted
-roughly fmt --diff         # Only show diff if files would be formatted
-```
-
-Or, to run Roughly as a linter:
-
-```
-roughly check               # Check all files in the current directory
-roughly check <path>        # Check all files in `<path>`
-```
 
 ## Configuration
 
@@ -84,10 +114,6 @@ case = "snake_case" # or camelCase
 spaces = 2
 ```
 
-## Documentation
-
-For comprehensive documentation, visit [roughly.felixandreas.me](https://roughly.felixandreas.me).
-
 ## Features
 
 * Completion
@@ -96,7 +122,7 @@ For comprehensive documentation, visit [roughly.felixandreas.me](https://roughly
 * Formatting
 * Diagnostics
   * Syntax
-  * Missing commans, Trailing commas, 
+  * Missing and trailing commas
   * Assignments, casing
 * Indexing
   * Globals
@@ -105,23 +131,12 @@ For comprehensive documentation, visit [roughly.felixandreas.me](https://roughly
     * Generics
     * Methods
   * (TODO) R6
-* Goto Document Symbol <kbd>Ctrl</kbd> <kbd>Shift</kbd> + <kbd>O</kbd>
-* Goto Workspace Symbol <kbd>Ctrl</kbd> + <kbd>T</kbd>
+* Goto Document Symbol (VS Code shortcut <kbd>Ctrl</kbd> <kbd>Shift</kbd> + <kbd>O</kbd>)
+* Goto Workspace Symbol (VS Code shortcut  <kbd>Ctrl</kbd> + <kbd>T</kbd>)
 * VS Code Extension
-  * Commands
+  * Commands (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd>)
     * Start/Stop/Restart the Language Server
     * Open logs
-
-## Project layout
-
-Currently this extension assumes that your `R` code has the following folder structure:
-
-| Path        | Type      |
-|-------------|-----------|
-| `R`         | directory |
-| `R/*.R`     | file      |
-| `NAMESPACE` | file      |
-
 
 ## Development
 

@@ -5,7 +5,8 @@ mod unused;
 use {
     crate::{
         config::{self, Case},
-        lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range},
+        lsp_types::{Diagnostic, DiagnosticSeverity},
+        utils,
     },
     ropey::Rope,
     thiserror::Error,
@@ -68,26 +69,13 @@ fn diag(node: Node, message: String, severity: DiagnosticSeverity) -> Diagnostic
     Diagnostic {
         message,
         severity: Some(severity),
-        range: node_range(node),
+        range: utils::node_range(node),
         code: None,
         code_description: None,
         source: None,
         related_information: None,
         tags: None,
         data: None,
-    }
-}
-
-fn node_range(node: Node) -> Range {
-    Range {
-        start: Position {
-            line: node.start_position().row as u32,
-            character: node.start_position().column as u32,
-        },
-        end: Position {
-            line: node.end_position().row as u32,
-            character: node.end_position().column as u32,
-        },
     }
 }
 

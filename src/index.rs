@@ -3,42 +3,33 @@ use crate::lsp_types::Url as Uri;
 #[cfg(feature = "tower-lsp")]
 use uri_ext::UriExt;
 use {
-    crate::{lsp_types::*, utils},
+    crate::{lsp_types::*, tree, utils},
     ropey::Rope,
     std::{
         collections::HashMap,
         path::{Path, PathBuf},
     },
-    tree_sitter::{Node, Tree},
+    tree_sitter::Node,
 };
 
-macro_rules! regex {
-    ($re:literal $(,)?) => {{
-        use {regex::Regex, std::sync::OnceLock};
-
-        static RE: OnceLock<Regex> = OnceLock::new();
-        RE.get_or_init(|| Regex::new($re).unwrap())
-    }};
-}
-
-pub trait SymbolsMap<T> {
-    fn filtered<'a, I>(
+pub trait SymbolsMap {
+    fn filter_map<'a, T, I>(
         &'a self,
-        key: impl Fn(&'a PathBuf, &'a Vec<DocumentSymbol>) -> I,
+        key: impl Fn(&'a PathBuf, &'a [DocumentSymbol]) -> I,
         limit: usize,
     ) -> Vec<T>
     where
-        I: Iterator<Item = T> + 'a;
+        I: Iterator<Item = T>;
 }
 
-impl<T> SymbolsMap<T> for HashMap<PathBuf, Vec<DocumentSymbol>> {
-    fn filtered<'a, I>(
+impl SymbolsMap for HashMap<PathBuf, Vec<DocumentSymbol>> {
+    fn filter_map<'a, T, I>(
         &'a self,
-        key: impl Fn(&'a PathBuf, &'a Vec<DocumentSymbol>) -> I,
+        key: impl Fn(&'a PathBuf, &'a [DocumentSymbol]) -> I,
         limit: usize,
     ) -> Vec<T>
     where
-        I: Iterator<Item = T> + 'a,
+        I: Iterator<Item = T>,
     {
         self.iter()
             .flat_map(|(path, symbols)| key(path, symbols))
@@ -49,80 +40,38 @@ impl<T> SymbolsMap<T> for HashMap<PathBuf, Vec<DocumentSymbol>> {
 
 pub fn get_workspace_symbols(
     query: &str,
-    workspace_symbols: &impl SymbolsMap<SymbolInformation>,
-) -> Vec<SymbolInformation> {
-    workspace_symbols.filtered(
+    workspace_symbols: &impl SymbolsMap,
+) -> Vec<WorkspaceSymbol> {
+    workspace_symbols.filter_map(
         |path, symbols| {
             let uri = Uri::from_file_path(path).unwrap();
             symbols
                 .iter()
-                .filter(|symbol| filter_symbol(query, symbol))
-                .map(move |symbol| to_symbol_information(symbol, &uri))
+                .filter(|symbol| utils::starts_with_lowercase(&symbol.name, query))
+                .map(move |symbol| to_workspace_symbol(symbol, &uri))
         },
         32,
     )
 }
 
-pub fn get_document_symbols(symbols: &[DocumentSymbol], uri: &Uri) -> Vec<SymbolInformation> {
-    symbols
-        .iter()
-        .map(|symbol| to_symbol_information(symbol, uri))
-        .collect()
-}
-
-pub fn to_symbol_information(symbol: &DocumentSymbol, uri: &Uri) -> SymbolInformation {
-    #[allow(deprecated)]
-    SymbolInformation {
+pub fn to_workspace_symbol(symbol: &DocumentSymbol, uri: &Uri) -> WorkspaceSymbol {
+    WorkspaceSymbol {
         name: symbol.name.to_string(),
         kind: symbol.kind,
         tags: None,
-        deprecated: None,
-        location: Location {
-            uri: uri.to_owned(),
-            range: symbol.range,
-        },
         container_name: None,
+        location: OneOf::Left(Location {
+            uri: uri.clone(),
+            range: symbol.range,
+        }),
+        data: None,
     }
-}
-
-// pub fn filter_query<'a, 'b>(
-//     query: &str,
-//     symbol_iter: impl Iterator<Item = (&'a Path, &'b [DocumentSymbol])>,
-//     limit: usize,
-// ) -> Vec<SymbolInformation> {
-//     let workspace_symbols: Vec<_> = symbol_iter
-//         .flat_map(|(path, symbols)| {
-//             let uri = Uri::from_file_path(path).unwrap();
-//             symbols
-//                 .into_iter()
-//                 .filter(|symbol| {
-//                     query.is_empty()
-//                         || symbol
-//                             .name
-//                             .to_lowercase()
-//                             .starts_with(&query.to_lowercase())
-//                 })
-//                 .map(move |symbol| to_symbol_information(&symbol, &uri))
-//         })
-//         .take(limit) // limit amount
-//         .collect();
-
-//     tracing::info!("get workspace symbols {}", workspace_symbols.len());
-//     workspace_symbols
-// }
-
-pub fn filter_symbol(query: &str, symbol: &DocumentSymbol) -> bool {
-    query.is_empty()
-        || symbol
-            .name
-            .to_lowercase()
-            .starts_with(&query.to_lowercase())
 }
 
 #[derive(Debug)]
 pub struct IndexError;
 
-pub fn index_full(base_path: &Path) -> Result<Vec<(PathBuf, Vec<DocumentSymbol>)>, IndexError> {
+pub fn index_dir(base_path: &Path) -> Result<Vec<(PathBuf, Vec<DocumentSymbol>)>, IndexError> {
     let start = std::time::Instant::now();
 
     let mut n = 0;
@@ -158,307 +107,378 @@ pub fn index_full(base_path: &Path) -> Result<Vec<(PathBuf, Vec<DocumentSymbol>)
 }
 
 pub fn index_file(path: impl AsRef<Path>) -> Vec<DocumentSymbol> {
-    let Ok(text) = std::fs::read_to_string(&path) else {
+    let Ok(rope) = utils::read_to_rope(&path) else {
         tracing::error!(message = "indexing: couldn't read file", path = %path.as_ref().display());
         return vec![];
     };
-    index(&text)
+
+    let tree = tree::parse_rope(&rope, None);
+    index(tree.root_node(), &rope, false)
 }
 
-pub fn index(text: &str) -> Vec<DocumentSymbol> {
-    let newlines = regex!(r#"\n"#);
-    let newline_positions = newlines
-        .captures_iter(text)
-        .map(|captures| captures.get(0).unwrap().start())
-        .collect::<Vec<usize>>();
-
-    // todo: consider removing comments (gets tricky positions :/)
-    // could replace comments with whitespace
-
-    let globals = regex!(r#"(?m)^([\w\.]+)\s*<-\s*(\\\(|function|\S)"#);
-    let symbols_globals = globals.captures_iter(text).map(|captures| {
-        let name = captures.get(1).unwrap();
-        let kind = captures.get(2).unwrap();
-        let token_start = name.start();
-        let line = newline_positions.partition_point(|&x| token_start > x);
-        let line_start = if line == 0 {
-            0
-        } else {
-            newline_positions[line - 1] + 1
-        };
-
-        let range = Range::new(
-            Position::new(line as u32, (token_start - line_start) as u32),
-            Position::new(line as u32, (name.end() - line_start) as u32),
-        );
-
-        #[allow(deprecated)]
-        DocumentSymbol {
-            name: name.as_str().to_string(),
-            detail: None,
-            kind: match kind.as_str() {
-                "\\(" | "function" => SymbolKind::FUNCTION,
-                _ => SymbolKind::VARIABLE,
-            },
-            tags: None,
-            deprecated: None,
-            range,
-            selection_range: range,
-            children: None,
-        }
-    });
-
-    let s4 = regex!(
-        r#"(?m)(setClass|setGeneric|setMethod)\s*\(\s*["']([\w\.<-]+)["']\s*,\s*(?:["']([\w\.]+)["'])?"#
-    );
-    let symbolds_s4 = s4.captures_iter(text).map(|captures| {
-        let kind = captures.get(1).unwrap();
-        let first = captures.get(2).unwrap();
-        let second = captures.get(3);
-
-        let token_start = kind.start();
-        let line = newline_positions.partition_point(|&x| token_start > x);
-        let line_start = if line == 0 {
-            0
-        } else {
-            newline_positions[line - 1] + 1
-        };
-
-        let range = Range::new(
-            Position::new(line as u32, (kind.start() - line_start) as u32),
-            Position::new(line as u32, (kind.end() - line_start) as u32),
-        );
-
-        let (name, kind) = match kind.as_str() {
-            "setClass" => (first.as_str().to_string(), SymbolKind::CLASS),
-            "setGeneric" => (first.as_str().to_string(), SymbolKind::INTERFACE),
-            "setMethod" => (
-                format!(
-                    "{} ({})",
-                    first.as_str(),
-                    second.map(|m| m.as_str()).unwrap_or("UNKNOWN")
-                ),
-                SymbolKind::METHOD,
-            ),
-            _ => ("UNKNOWN".to_string(), SymbolKind::VARIABLE),
-        };
-
-        #[allow(deprecated)]
-        DocumentSymbol {
-            name,
-            detail: None,
-            kind,
-            tags: None,
-            deprecated: None,
-            range,
-            selection_range: range,
-            children: None,
-        }
-    });
-
-    symbols_globals.chain(symbolds_s4).collect()
-}
-
-// LOCAL SYMBOLS
-pub fn get_document_symbols_ng(tree: &Tree, rope: &Rope) -> Vec<DocumentSymbol> {
-    tracing::info!("parse symbols tree");
-    let root = tree.root_node();
-
-    symbols_for_block(&root, rope)
-}
-
-pub fn symbols_for_block(root: &Node, rope: &Rope) -> Vec<DocumentSymbol> {
-    let mut cursor = root.walk();
+pub fn index(root: Node, rope: &Rope, nested: bool) -> Vec<DocumentSymbol> {
     let mut symbols = vec![];
 
-    for node in root.children(&mut cursor) {
-        if node.kind() == "binary_operator" {
-            let lhs = node.child(0).unwrap();
-            let op = node.child(1).unwrap();
-            let rhs = node.child(2).unwrap();
-            // todo: fix this
-            if lhs.kind() == "identifier" && op.kind() == "<-" {
-                let (kind, detail, children) = match rhs.kind() {
-                    "function_definition" => {
-                        let (children, detail) = parse_function(&rhs, rope);
-                        (SymbolKind::FUNCTION, detail, Some(children))
-                    }
-                    "program" | "braced_expression" => {
-                        let block_symbols = symbols_for_block(&rhs, rope);
-                        let kind = block_symbols
-                            .last()
-                            .map(|symbol| symbol.kind)
-                            .unwrap_or(SymbolKind::NULL);
-                        symbols.extend(block_symbols);
+    // TODO: consider named children
+    // TODO: consider tree::for_each_child
+    for node in root.children(&mut root.walk()) {
+        match node.kind() {
+            "binary_operator" => {
+                let maybe_lhs = node.child_by_field_name("lhs");
+                let maybe_op = node.child_by_field_name("operator");
+                let maybe_rhs = node.child_by_field_name("rhs");
 
-                        (
-                            kind, // note: kind of braced expression is last expression
-                            None, None,
-                        )
-                    }
-                    "integer" | "float" | "complex" => (SymbolKind::NUMBER, None, None),
-                    "true" | "false" => (SymbolKind::BOOLEAN, None, None),
-                    "string" => (SymbolKind::STRING, None, None),
-                    "null" => (SymbolKind::NULL, None, None),
-                    _ => (SymbolKind::VARIABLE, None, None),
-                };
-                let range =
-                    utils::rope_range_to_lsp_range(lhs.start_byte()..lhs.end_byte(), rope).unwrap();
-                symbols.push(
-                    #[allow(deprecated)]
-                    DocumentSymbol {
-                        name: rope
-                            .byte_slice(lhs.start_byte()..lhs.end_byte())
-                            .to_string(),
+                if let Some(lhs) = maybe_lhs
+                    && lhs.kind() == "identifier"
+                    && maybe_op.is_some_and(|op| op.kind() == "<-")
+                {
+                    let (kind, detail, children) = maybe_rhs
+                        .map(|rhs| match rhs.kind() {
+                            "function_definition" => index_function(rhs, rope, nested),
+                            "braced_expression" => {
+                                let block_symbols = index(rhs, rope, nested);
+                                symbols.extend(block_symbols);
+
+                                (SymbolKind::VARIABLE, None, None)
+                            }
+                            "call" => {
+                                if let Some(symbol) = index_call(rhs, rope, nested) {
+                                    (symbol.kind, symbol.detail, symbol.children)
+                                } else {
+                                    (SymbolKind::VARIABLE, None, None)
+                                }
+                            }
+                            "integer" | "float" | "complex" => (SymbolKind::NUMBER, None, None),
+                            "true" | "false" => (SymbolKind::BOOLEAN, None, None),
+                            "string" => (SymbolKind::STRING, None, None),
+                            "null" => (SymbolKind::NULL, None, None),
+                            _ => (SymbolKind::VARIABLE, None, None),
+                        })
+                        .unwrap_or_else(|| (SymbolKind::VARIABLE, None, None));
+
+                    let name = rope.byte_slice(lhs.byte_range()).to_string();
+                    let range = utils::node_range(node);
+                    let selection_range = utils::node_range(lhs);
+                    symbols.push(to_document_symbol(
+                        name,
                         kind,
                         detail,
-                        tags: None,
                         range,
-                        selection_range: range,
+                        selection_range,
                         children,
-                        deprecated: None,
-                    },
-                )
+                    ))
+                } else if nested {
+                    // TODO: recurse lhs and rhs in else case? (and nested == true)
+                }
             }
+            "braced_expression" => {
+                symbols.extend(index(node, rope, nested));
+            }
+            "call" => {
+                if let Some(symbol) = index_call(node, rope, nested) {
+                    symbols.push(symbol)
+                }
+            }
+            "function_definition" if nested => {
+                let (_, _, maybe_chidlren) = index_function(node, rope, nested);
+                if let Some(children) = maybe_chidlren {
+                    symbols.extend(children);
+                }
+            }
+            // what about if, for, etc?
+            // maybe need to implement recursion to find for edge cases?
+            _ => {}
         }
     }
     symbols
 }
 
-pub fn parse_function(function: &Node, rope: &Rope) -> (Vec<DocumentSymbol>, Option<String>) {
-    let (parameters, body) = (function.child(1).unwrap(), function.child(2).unwrap());
-    let symbols = symbols_for_block(&body, rope);
-    let mut cursor = parameters.walk();
-    let detail = parameters
-        .children_by_field_name("parameter", &mut cursor)
-        .map(|parameter| match parameter.child(0) {
-            Some(name) => rope
-                .byte_slice(name.start_byte()..name.end_byte())
-                .to_string(),
-            None => "UNKNOWN".into(),
-        })
-        .collect::<Vec<String>>()
-        .join(", ");
-    (symbols, Some(detail))
+fn index_function(
+    function: Node,
+    rope: &Rope,
+    nested: bool,
+) -> (SymbolKind, Option<String>, Option<Vec<DocumentSymbol>>) {
+    let maybe_parameters = function.child_by_field_name("parameters");
+    let maybe_body = function.child_by_field_name("body");
+
+    let detail = maybe_parameters.map(|parameters| {
+        format!(
+            "fn({})",
+            parameters
+                .children_by_field_name("parameter", &mut parameters.walk())
+                .map(|parameter| match parameter.child(0) {
+                    Some(name) => {
+                        rope.byte_slice(name.byte_range()).to_string()
+                    }
+                    None => "Unknown".into(),
+                })
+                .collect::<Vec<String>>()
+                .join(", ")
+        )
+    });
+    let children = maybe_body.and_then(|body| nested.then(|| index(body, rope, nested)));
+    (SymbolKind::FUNCTION, detail, children)
 }
 
-#[cfg(test)]
-mod test {
-    use {
-        super::{get_document_symbols_ng, index},
-        crate::{lsp_types::SymbolKind, tree},
-        indoc::indoc,
-        ropey::Rope,
+fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
+    let maybe_function = call.child_by_field_name("function");
+    let maybe_arguments = call.child_by_field_name("arguments");
+    let (Some(function), Some(arguments)) = (maybe_function, maybe_arguments) else {
+        return None;
     };
 
-    #[test]
-    fn test_parse() {
-        let text = indoc! {r#"
-            foo <- function(a, b = True) {
-                a <- TRUE
-                b <- FALSE
+    let name = match function.kind() {
+        "identifier" => rope.byte_slice(function.byte_range()).to_string(),
+        "namespace_operator" => {
+            let (Some(lhs), Some(rhs)) = (
+                function.child_by_field_name("lhs"),
+                function.child_by_field_name("rhs"),
+            ) else {
+                return None;
+            };
+
+            if lhs.kind() != "identifier" || rhs.kind() != "identifier" {
+                return None;
             }
-            bar <- \(x, y, z) {
-                a <- 1
-                b <- "foo"
+
+            let package = rope.byte_slice(lhs.byte_range()).to_string();
+            if !["methods", "R6"].contains(&package.as_str()) {
+                return None;
             }
-            baz <- { "foo"; 3.14 }
-        "#};
-        let symbols = get_document_symbols_ng(&tree::parse(text, None), &Rope::from_str(text));
 
-        assert_eq!(symbols[0].name, "foo");
-        assert_eq!(symbols[0].kind, SymbolKind::FUNCTION);
-        {
-            let children = symbols[0].children.as_ref().unwrap();
-            assert_eq!(children[0].name, "a");
-            assert_eq!(children[0].kind, SymbolKind::BOOLEAN);
-            assert_eq!(children[1].name, "b");
-            assert_eq!(children[1].kind, SymbolKind::BOOLEAN);
+            rope.byte_slice(rhs.byte_range()).to_string()
         }
+        _ => return None,
+    };
 
-        assert_eq!(symbols[1].name, "bar");
-        assert_eq!(symbols[1].kind, SymbolKind::FUNCTION);
-        {
-            let children = symbols[1].children.as_ref().unwrap();
-            assert_eq!(children[0].name, "a");
-            assert_eq!(children[0].kind, SymbolKind::NUMBER);
-            assert_eq!(children[1].name, "b");
-            assert_eq!(children[1].kind, SymbolKind::STRING);
+    let (kind, name, detail, children) = match name.as_str() {
+        "setClass" => {
+            // setClass("Person", slots = c(name = "character", age = "numeric"))
+            let class_name = get_argument(arguments, rope, "Class", 0)
+                .and_then(|argument| {
+                    (argument.kind() == "string").then(|| {
+                        argument
+                            .child_by_field_name("content")
+                            .map(|content| rope.byte_slice(content.byte_range()).to_string())
+                            .unwrap_or_default()
+                    })
+                })
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            (SymbolKind::CLASS, class_name, None, None)
         }
+        "setGeneric" => {
+            // setGeneric("foo", function(x) standardGeneric("foo"))
+            let generic_name = get_argument(arguments, rope, "name", 0)
+                .and_then(|argument| {
+                    if argument.kind() == "string" {
+                        argument
+                            .child_by_field_name("content")
+                            .map(|content| rope.byte_slice(content.byte_range()).to_string())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| "Unknown".to_string());
+            (SymbolKind::INTERFACE, generic_name, None, None)
+        }
+        "setMethod" => {
+            // setMethod("foo", "Person", function(x) x@foo)
+            // setMethod(f = "baz", signature = "Person", definition = function(x) x@baz)
+            // setMethod("qux", c("Person", "Other"), function(x, y) x@qux + y@qux)
+            let method_name = get_argument(arguments, rope, "f", 0)
+                .and_then(|argument| {
+                    if argument.kind() == "string" {
+                        Some(
+                            argument
+                                .child_by_field_name("content")
+                                .map(|content| rope.byte_slice(content.byte_range()).to_string())
+                                .unwrap_or_default(),
+                        )
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| "Unknown".to_string());
 
-        assert_eq!(symbols[2].name, "baz");
-        // TODO: make this work
-        // assert_eq!(symbols[2].kind, SymbolKind::NUMBER);
-    }
+            let signature = get_argument(arguments, rope, "signature", 1)
+                .and_then(|argument| {
+                    match argument.kind() {
+                        "string" => Some(
+                            argument
+                                .child_by_field_name("content")
+                                .map(|content| rope.byte_slice(content.byte_range()).to_string())
+                                .unwrap_or_default(),
+                        ),
+                        "call" => {
+                            // c("Person", "Other") or c(signature = "Person", other = "Other")
+                            argument.child_by_field_name("arguments").map(|arguments| {
+                                arguments
+                                    .children_by_field_name("argument", &mut arguments.walk())
+                                    .map(|argument| {
+                                        argument
+                                            .child_by_field_name("value")
+                                            .and_then(|value| {
+                                                (value.kind() == "string").then(|| {
+                                                    value
+                                                        .child_by_field_name("content")
+                                                        .map(|content| {
+                                                            rope.byte_slice(content.byte_range())
+                                                                .to_string()
+                                                        })
+                                                        .unwrap_or_default()
+                                                })
+                                            })
+                                            .unwrap_or_else(|| "Unknown".to_string())
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            })
+                        }
+                        _ => None,
+                    }
+                })
+                .unwrap_or_else(|| "Unknown".to_string());
 
-    #[test]
-    fn test_indexing() {
-        let symbols = index(indoc! {r#"
-			foo <- function() {}
-			bar <- \(x) {}
-			baz <- 4
-            setClass("Person",
-                slots = c(
-                    name = "character",
-                    age = "numeric"
-                )
+            (
+                SymbolKind::METHOD,
+                format!("{method_name} ({signature})"),
+                None,
+                None,
             )
-            setClass(
-            "Car", slots = c(
-                name = 
-            "character"))
-            setGeneric("age", function(x) standardGeneric("age"))
-            setGeneric("age<-", function(x, value) standardGeneric("age<-"))
-            setMethod("age", "Person", function(x) x@age)
-            setMethod("age<-", "Person", function(x, value) {
-                x@age <- value
-                x
-            })
-		"#});
+        }
+        "R6Class" => {
+            // R6Class("Person", ...)
+            // Extract class name (first argument, named "classname" or positional)
+            let class_name = get_argument(arguments, rope, "classname", 0)
+                .and_then(|argument| {
+                    if argument.kind() == "string" {
+                        argument
+                            .child_by_field_name("content")
+                            .map(|content| rope.byte_slice(content.byte_range()).to_string())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| "Unknown".to_string());
 
-        assert_eq!(symbols[0].name, "foo");
-        assert_eq!(symbols[0].kind, SymbolKind::FUNCTION);
+            let mut members = Vec::new();
+            for (field, position) in [("public", 1), ("private", 2), ("active", 3)] {
+                let Some(list) = get_argument(arguments, rope, field, position) else {
+                    continue;
+                };
 
-        assert_eq!(symbols[1].name, "bar");
-        assert_eq!(symbols[1].kind, SymbolKind::FUNCTION);
+                // list_node is expected to be a call to list(...)
+                if list.kind() != "call" {
+                    continue;
+                }
 
-        assert_eq!(symbols[2].name, "baz");
-        assert_eq!(symbols[2].kind, SymbolKind::VARIABLE);
+                let Some(args) = list.child_by_field_name("arguments") else {
+                    continue;
+                };
 
-        assert_eq!(symbols[3].name, "Person");
-        assert_eq!(symbols[3].kind, SymbolKind::CLASS);
+                for member in args.children_by_field_name("argument", &mut args.walk()) {
+                    let Some(name) = member.child_by_field_name("name") else {
+                        continue;
+                    };
 
-        assert_eq!(symbols[4].name, "Car");
-        assert_eq!(symbols[4].kind, SymbolKind::CLASS);
+                    if name.kind() != "identifier" {
+                        continue;
+                    }
 
-        assert_eq!(symbols[5].name, "age");
-        assert_eq!(symbols[5].kind, SymbolKind::INTERFACE);
+                    let name = rope.byte_slice(name.byte_range()).to_string();
+                    let value = member.child_by_field_name("value");
+                    let (kind, detail, children) = if let Some(value) = value
+                        && value.kind() == "function_definition"
+                    {
+                        let (_, detail, children) = index_function(value, rope, nested);
+                        (
+                            if field == "active" {
+                                SymbolKind::PROPERTY
+                            } else {
+                                SymbolKind::METHOD
+                            },
+                            detail,
+                            children,
+                        )
+                    } else {
+                        (
+                            if field == "active" {
+                                SymbolKind::PROPERTY
+                            } else {
+                                SymbolKind::FIELD
+                            },
+                            None,
+                            None,
+                        )
+                    };
 
-        assert_eq!(symbols[6].name, "age<-");
-        assert_eq!(symbols[6].kind, SymbolKind::INTERFACE);
+                    let range = utils::node_range(member);
+                    members.push(to_document_symbol(
+                        name, kind, detail, range, range, children,
+                    ));
+                }
+            }
 
-        assert_eq!(symbols[7].name, "age (Person)");
-        assert_eq!(symbols[7].kind, SymbolKind::METHOD);
+            (SymbolKind::CLASS, class_name, None, Some(members))
+        }
+        _ => return None,
+    };
 
-        assert_eq!(symbols[8].name, "age<- (Person)");
-        assert_eq!(symbols[8].kind, SymbolKind::METHOD);
+    let range = utils::node_range(call);
+    Some(to_document_symbol(
+        name, kind, detail, range, range, children,
+    ))
+}
 
-        assert_eq!(symbols.len(), 9);
+pub fn to_document_symbol(
+    name: String,
+    kind: SymbolKind,
+    detail: Option<String>,
+    range: Range,
+    selection_range: Range,
+    children: Option<Vec<DocumentSymbol>>,
+) -> DocumentSymbol {
+    #[allow(deprecated)]
+    DocumentSymbol {
+        name,
+        kind,
+        detail,
+        tags: None,
+        range,
+        selection_range,
+        children,
+        deprecated: None, // required for struct, but deprecated; allow deprecated field
     }
 }
 
-// see: https://github.com/gluon-lang/lsp-types/issues/150
-// TODO: make this test work
-// #[cfg(test)]
-// mod test {
-//     #[test]
-//     fn test() {
-//         let url_from_vscode = url::Url::parse("file:///C%3A/test.txt").unwrap();
-//         let path = url_from_vscode.to_file_path().unwrap();
-//         let url_from_path = url::Url::from_file_path(&path).unwrap();
-//         println!("{:?}", &url_from_vscode);
-//         println!("{:?}", &path);
-//         println!("{:?}", &url_from_path);
-//         assert!(url_from_vscode == url_from_path);
-//     }
-// }
+// note: this function shouldn't be used for keyword-only arguments (arguments after ...)
+pub fn get_argument<'a>(
+    arguments: Node<'a>,
+    rope: &Rope,
+    query: &str,
+    pos: usize,
+) -> Option<Node<'a>> {
+    // Try named argument
+    for argument in arguments.children_by_field_name("argument", &mut arguments.walk()) {
+        if let Some(name) = argument.child_by_field_name("name") {
+            let name = rope.byte_slice(name.byte_range()).to_string();
+            if name == query {
+                return argument.child_by_field_name("value");
+            }
+        }
+    }
+
+    // Fallback to positional
+    arguments
+        .children_by_field_name("argument", &mut arguments.walk())
+        .nth(pos)
+        .and_then(|argument| {
+            // Only return if there is no name (i.e., it's a positional argument)
+            if argument.child_by_field_name("name").is_none() {
+                argument.child_by_field_name("value")
+            } else {
+                None
+            }
+        })
+}

@@ -21,39 +21,34 @@ fn main() -> ExitCode {
 
     let cli = Cli::parse();
     match cli.command {
-        None => {
-            repl::run(false);
+        Command::Check { files } => match cli::check(files.as_deref(), cli.experimental) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(CheckError) => ExitCode::FAILURE,
+        },
+        Command::Fmt { files, check, diff } => match cli::fmt(files.as_deref(), check, diff) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(FmtError) => ExitCode::FAILURE,
+        },
+        Command::Server { stdio: _stdio } => {
+            cli::server(cli.experimental);
             ExitCode::SUCCESS
         }
-        Some(command) => match command {
-            Command::Check { files } => match cli::check(files.as_deref(), cli.experimental) {
+        Command::Repl { vi } => {
+            repl::run(vi);
+            ExitCode::SUCCESS
+        }
+        Command::Debug(dev) => match dev {
+            Debug::Index {
+                paths: files,
+                recursive,
+                show_items,
+            } => match cli::index(files.as_deref(), recursive, show_items) {
                 Ok(()) => ExitCode::SUCCESS,
-                Err(CheckError) => ExitCode::FAILURE,
+                Err(DebugError) => ExitCode::FAILURE,
             },
-            Command::Fmt { files, check, diff } => match cli::fmt(files.as_deref(), check, diff) {
+            Debug::Ast { path } => match cli::ast(&path) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(FmtError) => ExitCode::FAILURE,
-            },
-            Command::Lsp { stdio: _stdio } => {
-                lsp::run(cli.experimental);
-                ExitCode::SUCCESS
-            }
-            Command::Repl { vi } => {
-                repl::run(vi);
-                ExitCode::SUCCESS
-            }
-            Command::Debug(dev) => match dev {
-                Debug::PrintTree { path } => match cli::print_tree(&path) {
-                    Ok(()) => ExitCode::SUCCESS,
-                    Err(DebugError) => ExitCode::FAILURE,
-                },
-                Debug::Index {
-                    paths: files,
-                    show_items: all,
-                } => match cli::index(files.as_deref(), all) {
-                    Ok(()) => ExitCode::SUCCESS,
-                    Err(DebugError) => ExitCode::FAILURE,
-                },
             },
         },
     }
@@ -63,7 +58,12 @@ fn main() -> ExitCode {
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
-    command: Option<Command>,
+    command: Command,
+    // #[clap(long, action = clap::ArgAction::HelpLong)]
+    // help: Option<bool>,
+    /// Ignored ... here only to please VS Code
+    #[clap(long, default_value_t = true)]
+    stdio: bool,
     /// Enable experimental features
     #[clap(long, global = true, default_value_t = false)]
     experimental: bool,
@@ -88,7 +88,8 @@ enum Command {
         diff: bool,
     },
     /// Run the language server
-    Lsp {
+    #[clap(alias = "lsp")] // here for backwards compatibility
+    Server {
         /// Ignored ... here only to please VS Code
         #[clap(long, default_value_t = true)]
         stdio: bool,
@@ -106,11 +107,14 @@ enum Command {
 #[derive(Debug, Subcommand)]
 enum Debug {
     /// Print the syntax tree for the given file
-    PrintTree { path: PathBuf },
+    Ast { path: PathBuf },
     /// Index the given files or directories
     Index {
         /// R files to index
         paths: Option<Vec<PathBuf>>,
+        /// Recursively index all sub items
+        #[clap(long, default_value_t = false)]
+        recursive: bool,
         /// Show indexed items
         #[clap(long, default_value_t = false)]
         show_items: bool,

@@ -6,6 +6,8 @@
 !README.md
 !LICENSE
 !out/*.js
+!bin/roughly
+!bin/roughly.exe
 !images/icon.png
 # allow js
 node_modules/**

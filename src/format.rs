@@ -87,8 +87,8 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
 
         let mut buffer = String::with_capacity(rope.len_bytes() * 3 / 2);
         traverse(
-            &mut node.walk(),
             &mut buffer,
+            &mut node.walk(),
             Context {
                 rope,
                 indent: config.indent,
@@ -118,8 +118,8 @@ struct Context<'a> {
 }
 
 fn traverse(
-    cursor: &mut TreeCursor,
     out: &mut String,
+    cursor: &mut TreeCursor,
     context: Context,
     level: usize,
     make_multiline: bool,
@@ -138,23 +138,23 @@ fn traverse(
     };
 
     let fmt_with =
-        |cursor: &mut TreeCursor, out: &mut String, level: usize, make_multiline: bool| {
-            traverse(cursor, out, context, level, make_multiline)
+        |out: &mut String, cursor: &mut TreeCursor, level: usize, make_multiline: bool| {
+            traverse(out, cursor, context, level, make_multiline)
         };
 
-    let fmt = |cursor: &mut TreeCursor, out: &mut String| fmt_with(cursor, out, level, false);
-    let fmt_indent = |cursor: &mut TreeCursor, out: &mut String| {
+    let fmt = |out: &mut String, cursor: &mut TreeCursor| fmt_with(out, cursor, level, false);
+    let fmt_indent = |out: &mut String, cursor: &mut TreeCursor| {
         indent(out);
-        fmt_with(cursor, out, level + 1, false)
+        fmt_with(out, cursor, level + 1, false)
     };
     let fmt_indent_skip_first =
-        |cursor: &mut TreeCursor, out: &mut String| fmt_with(cursor, out, level + 1, false);
+        |out: &mut String, cursor: &mut TreeCursor| fmt_with(out, cursor, level + 1, false);
     let fmt_multiline =
-        |cursor: &mut TreeCursor, out: &mut String| fmt_with(cursor, out, level, true);
-    let fmt_braces = |cursor: &mut TreeCursor, out: &mut String| {
+        |out: &mut String, cursor: &mut TreeCursor| fmt_with(out, cursor, level, true);
+    let fmt_braces = |out: &mut String, cursor: &mut TreeCursor| {
         out.push('{');
         newline(out);
-        fmt_indent(cursor, out)?;
+        fmt_indent(out, cursor)?;
         newline(out);
         out.push('}');
         Ok(())
@@ -189,12 +189,9 @@ fn traverse(
             return node.end_position();
         }
 
-        node.child_by_field_name("rhs")
+        field_optional(node, "rhs")
             .map(|rhs| rhs.end_position())
-            .or_else(|| {
-                node.child_by_field_name("operator")
-                    .map(|operator| operator.end_position())
-            })
+            .or_else(|| field_optional(node, "operator").map(|operator| operator.end_position()))
             // note: this case is unexpected
             .unwrap_or_else(|| node.end_position())
     };
@@ -206,14 +203,14 @@ fn traverse(
 
     let node = cursor.node();
     let kind = node.kind();
-    let push_all_comments = |cursor: &mut TreeCursor, out: &mut String| {
+    let push_all_comments = |out: &mut String, cursor: &mut TreeCursor| {
         let is_first = true;
         tree::for_each_child(cursor, |_, child, _, cursor| {
             if child.kind() == "comment" {
                 if is_first && node.prev_sibling().is_some() {
                     newline(out);
                 }
-                fmt(cursor, out)?;
+                fmt(out, cursor)?;
                 newline(out);
             }
             Ok(())
@@ -306,7 +303,7 @@ fn traverse(
                             } else {
                                 newline(out);
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         "=" => {
                             out.push_str(" =");
@@ -315,16 +312,16 @@ fn traverse(
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "name" => fmt(cursor, out),
+                        "name" => fmt(out, cursor),
                         "value" | "default" => {
                             if is_comment(maybe_prev) {
                                 newline(out);
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             } else {
                                 if maybe_prev.is_some_and(|prev| prev.kind() == "=") {
                                     space(out);
                                 }
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             }
                         }
                         _ => unreachable!(),
@@ -353,10 +350,10 @@ fn traverse(
                         "comment" => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             } else {
                                 newlines(out, child, maybe_prev);
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             }
                         }
                         "comma" => {
@@ -375,12 +372,12 @@ fn traverse(
                             }) {
                                 space(out);
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "open" => fmt(cursor, out),
+                        "open" => fmt(out, cursor),
                         "argument" | "parameter" => {
                             if i == 1 {
                                 if is_multiline && !hug {
@@ -393,16 +390,16 @@ fn traverse(
                             }
 
                             if is_multiline && !hug {
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             } else {
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             }
                         }
                         "close" => {
                             if is_multiline && !hug && !is_empty {
                                 newline(out);
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         _ => unreachable!(),
                     },
@@ -424,36 +421,36 @@ fn traverse(
                         "comment" => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             } else {
                                 newline(out);
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             }
                         }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "lhs" => fmt(cursor, out),
+                        "lhs" => fmt(out, cursor),
                         "operator" => {
                             if is_comment(maybe_prev) {
                                 newline(out);
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             } else {
                                 if has_spacing {
                                     space(out);
                                 }
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             }
                         }
                         "rhs" => {
                             if break_after_operator {
                                 newline(out);
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             } else {
                                 if has_spacing {
                                     space(out)
                                 }
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             }
                         }
                         _ => unreachable!(),
@@ -475,16 +472,16 @@ fn traverse(
                         "comment" => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             } else {
                                 newlines(out, child, maybe_prev);
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             }
                         }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "open" => fmt(cursor, out),
+                        "open" => fmt(out, cursor),
                         "body" => {
                             if is_multiline {
                                 if i == 1 {
@@ -492,14 +489,14 @@ fn traverse(
                                 } else {
                                     newlines(out, child, maybe_prev);
                                 }
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             } else {
                                 if i == 1 {
                                     space(out)
                                 } else {
                                     out.push_str("; ");
                                 }
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             }
                         }
                         "close" => {
@@ -510,7 +507,7 @@ fn traverse(
                                     space(out)
                                 };
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         _ => unreachable!(),
                     },
@@ -538,21 +535,21 @@ fn traverse(
                         let maybe_prev = child.prev_sibling();
                         if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                             space(out);
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         } else {
                             newline(out);
-                            fmt_indent(cursor, out)
+                            fmt_indent(out, cursor)
                         }
                     }
                     _ => unreachable!(),
                 },
                 Some(field_name) => match field_name {
-                    "function" => fmt(cursor, out),
+                    "function" => fmt(out, cursor),
                     "arguments" => {
                         if additional_indent {
-                            fmt_indent_skip_first(cursor, out)
+                            fmt_indent_skip_first(out, cursor)
                         } else {
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                     }
                     _ => unreachable!(),
@@ -574,23 +571,23 @@ fn traverse(
                         "comment" => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             } else {
                                 newline(out);
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             }
                         }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "lhs" => fmt(cursor, out),
-                        "operator" => fmt(cursor, out),
+                        "lhs" => fmt(out, cursor),
+                        "operator" => fmt(out, cursor),
                         "rhs" => {
                             if is_multiline {
                                 newline(out);
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             } else {
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             }
                         }
                         _ => unreachable!(),
@@ -613,14 +610,14 @@ fn traverse(
 
                 match field_name {
                     None => match child.kind() {
-                        "for" => fmt(cursor, out),
+                        "for" => fmt(out, cursor),
                         "in" => {
                             if prev_is_comment || loop_header_is_multiline {
                                 newline(out);
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             } else {
                                 space(out);
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             }
                         }
                         "comment" => {
@@ -632,7 +629,7 @@ fn traverse(
                                     indent(out);
                                 }
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         _ => unreachable!(),
                     },
@@ -644,26 +641,26 @@ fn traverse(
                             } else {
                                 space(out)
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         "variable" => {
                             if prev_is_comment || condition_is_multiline {
                                 newline(out);
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             } else {
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             }
                         }
                         "sequence" => {
                             if prev_is_comment {
                                 newline(out);
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             } else {
                                 space(out);
                                 if condition_is_multiline {
-                                    fmt_indent_skip_first(cursor, out)
+                                    fmt_indent_skip_first(out, cursor)
                                 } else {
-                                    fmt(cursor, out)
+                                    fmt(out, cursor)
                                 }
                             }
                         }
@@ -672,7 +669,7 @@ fn traverse(
                             if prev_is_comment || condition_is_multiline {
                                 newline(out);
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         "body" => {
                             if prev_is_comment {
@@ -681,9 +678,9 @@ fn traverse(
                                 space(out)
                             }
                             if child.kind() == "braced_expression" {
-                                fmt_multiline(cursor, out)
+                                fmt_multiline(out, cursor)
                             } else {
-                                fmt_braces(cursor, out)
+                                fmt_braces(out, cursor)
                             }
                         }
                         _ => unreachable!(),
@@ -708,17 +705,17 @@ fn traverse(
                             } else {
                                 newline(out);
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "name" => fmt(cursor, out),
+                        "name" => fmt(out, cursor),
                         "parameters" => {
                             if prev_is_comment {
                                 newline(out);
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         "body" => {
                             if prev_is_comment {
@@ -728,12 +725,12 @@ fn traverse(
                             }
                             if is_multiline {
                                 if child.kind() == "braced_expression" {
-                                    fmt_multiline(cursor, out)
+                                    fmt_multiline(out, cursor)
                                 } else {
-                                    fmt_braces(cursor, out)
+                                    fmt_braces(out, cursor)
                                 }
                             } else {
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             }
                         }
                         _ => unreachable!(),
@@ -763,14 +760,14 @@ fn traverse(
 
                 match field_name {
                     None => match child.kind() {
-                        "if" => fmt(cursor, out),
+                        "if" => fmt(out, cursor),
                         "else" => {
                             if prev_is_comment {
                                 newline(out);
                             } else {
                                 space(out);
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         "comment" => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
@@ -781,7 +778,7 @@ fn traverse(
                                     indent(out);
                                 }
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         _ => unreachable!(),
                     },
@@ -793,14 +790,14 @@ fn traverse(
                             } else {
                                 space(out);
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         "condition" => {
                             if !hug {
                                 newline(out);
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             } else {
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             }
                         }
                         "close" => {
@@ -808,7 +805,7 @@ fn traverse(
                             if !hug {
                                 newline(out);
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         "consequence" | "alternative" => {
                             if prev_is_comment {
@@ -821,12 +818,12 @@ fn traverse(
                                     || (child.kind() == "if_statement"
                                         && field_name == "alternative")
                                 {
-                                    fmt_multiline(cursor, out)
+                                    fmt_multiline(out, cursor)
                                 } else {
-                                    fmt_braces(cursor, out)
+                                    fmt_braces(out, cursor)
                                 }
                             } else {
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             }
                         }
                         _ => unreachable!(),
@@ -860,25 +857,25 @@ fn traverse(
                                 newline(out);
                                 out.push_str(context.indent);
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "open" => fmt(cursor, out),
+                        "open" => fmt(out, cursor),
                         "body" => {
                             if !hug {
                                 newline(out);
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             } else {
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             }
                         }
                         "close" => {
                             if !hug {
                                 newline(out);
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         _ => unreachable!(),
                     },
@@ -899,7 +896,7 @@ fn traverse(
                         newlines(out, child, maybe_prev);
                     }
                 }
-                fmt(cursor, out)
+                fmt(out, cursor)
             })?;
             newline(out);
         }
@@ -912,14 +909,14 @@ fn traverse(
 
                 match field_name {
                     None => match child.kind() {
-                        "repeat" => fmt(cursor, out),
+                        "repeat" => fmt(out, cursor),
                         "comment" => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                             } else {
                                 newline(out);
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         _ => unreachable!(),
                     },
@@ -932,9 +929,9 @@ fn traverse(
                         match field_name {
                             "body" => {
                                 if child.kind() == "braced_expression" {
-                                    fmt_multiline(cursor, out)
+                                    fmt_multiline(out, cursor)
                                 } else {
-                                    fmt_braces(cursor, out)
+                                    fmt_braces(out, cursor)
                                 }
                             }
                             _ => unreachable!(),
@@ -944,26 +941,22 @@ fn traverse(
             })?;
         }
         "string" => {
-            out.push('"');
-            tree::for_each_child(cursor, |_, child, field_name, cursor| match field_name {
-                None => match child.kind() {
-                    "\"" => Ok(()),
-                    "\'" => Ok(()),
-                    _ => unreachable!(),
-                },
-                Some("content") => fmt(cursor, out),
-                Some(_) => unreachable!(),
-            })?;
-            out.push('"');
-        }
-        "string_content" => {
-            let mut last_was_escape = false;
-            for char in get_raw(node).chars() {
-                match char {
-                    '"' if !last_was_escape => out.push_str("\\\""),
-                    _ => out.push(char),
+            if let Some(content) = field_optional(node, "content") {
+                let raw = get_raw(content);
+                let mut all_quotes_escaped = true;
+                let mut prev_was_escape = false;
+                for char in raw.chars() {
+                    if char == '"' {
+                        all_quotes_escaped &= prev_was_escape;
+                    }
+                    prev_was_escape = char == '\\' && !prev_was_escape;
                 }
-                last_was_escape = char == '\\' && !last_was_escape;
+                let quote = if all_quotes_escaped { '"' } else { '\'' };
+                out.push(quote);
+                out.push_str(&raw);
+                out.push(quote);
+            } else {
+                out.push_str(r#""""#);
             }
         }
         "unary_operator" => {
@@ -984,25 +977,25 @@ fn traverse(
                         "comment" => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             } else {
                                 newlines(out, child, maybe_prev);
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             }
                         }
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "operator" => fmt(cursor, out),
+                        "operator" => fmt(out, cursor),
                         "rhs" => {
                             if is_comment(maybe_prev) {
                                 newline(out);
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             } else {
                                 if has_space {
                                     space(out);
                                 }
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             }
                         }
                         _ => unreachable!(),
@@ -1030,7 +1023,7 @@ fn traverse(
 
                 match field_name {
                     None => match child.kind() {
-                        "while" => fmt(cursor, out),
+                        "while" => fmt(out, cursor),
                         "comment" => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
@@ -1040,7 +1033,7 @@ fn traverse(
                                     indent(out);
                                 }
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         _ => unreachable!(),
                     },
@@ -1052,14 +1045,14 @@ fn traverse(
                             } else {
                                 space(out)
                             };
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         "condition" => {
                             if !hug {
                                 newline(out);
-                                fmt_indent(cursor, out)
+                                fmt_indent(out, cursor)
                             } else {
-                                fmt(cursor, out)
+                                fmt(out, cursor)
                             }
                         }
                         "close" => {
@@ -1067,7 +1060,7 @@ fn traverse(
                             if !hug {
                                 newline(out);
                             }
-                            fmt(cursor, out)
+                            fmt(out, cursor)
                         }
                         "body" => {
                             if prev_is_comment {
@@ -1076,9 +1069,9 @@ fn traverse(
                                 space(out)
                             }
                             if child.kind() == "braced_expression" {
-                                fmt_multiline(cursor, out)
+                                fmt_multiline(out, cursor)
                             } else {
-                                fmt_braces(cursor, out)
+                                fmt_braces(out, cursor)
                             }
                         }
                         _ => unreachable!(),
@@ -1115,7 +1108,7 @@ fn traverse(
 
     if !handles_comments {
         let before = out.len();
-        push_all_comments(cursor, out)?;
+        push_all_comments(out, cursor)?;
 
         if out.len() != before {
             let start = node.start_position();

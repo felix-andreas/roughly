@@ -1,75 +1,103 @@
-#[cfg(feature = "async-lsp")]
-use crate::lsp_types::Url as Uri;
 use {
     crate::{
-        index,
-        index::SymbolsMap,
+        index::{self, SymbolsMap},
         lsp_types::{CompletionItem, CompletionItemKind, CompletionResponse, Position, SymbolKind},
+        utils,
     },
-    async_lsp::lsp_types::SymbolInformation,
+    async_lsp::lsp_types::CompletionItemLabelDetails,
     ropey::Rope,
+    tree_sitter::Point,
 };
 
 pub fn get(
     position: Position,
     rope: &Rope,
-    symbols_map: &impl SymbolsMap<SymbolInformation>,
+    tree: &tree_sitter::Tree,
+    symbols_map: &impl SymbolsMap,
 ) -> Option<CompletionResponse> {
-    // todo: proper error handling. make ropey, dashmap -> JSONRpc error
+    let query = extract_query(position, rope)?;
 
-    let line = rope.get_line(position.line as usize)?;
-    let mut query = String::new();
-    for (i, char) in line.chars().enumerate() {
-        if char.is_alphabetic() || char == '.' || (!query.is_empty() && char.is_numeric()) {
-            query.push(char)
-        } else {
-            query.clear();
-        }
-        if i == (position.character - 1) as usize {
-            break;
-        }
-    }
     tracing::debug!("completion query: {query}");
 
-    // TODO: avoid showing local symbols twice ...
+    let symbol_kind_to_completion_kind = |kind: SymbolKind| match kind {
+        SymbolKind::FUNCTION => CompletionItemKind::FUNCTION,
+        SymbolKind::CLASS => CompletionItemKind::CLASS,
+        SymbolKind::METHOD => CompletionItemKind::METHOD,
+        _ => CompletionItemKind::VARIABLE,
+    };
 
-    let workspace_symbols = symbols_map.filtered(
-        |path, symbols| {
-            let uri = Uri::from_file_path(path).unwrap();
+    let local_symbols: Vec<CompletionItem> = {
+        let point = Point {
+            row: position.line as usize,
+            column: position.character as usize,
+        };
+        tree.root_node()
+            .descendant_for_point_range(point, point)
+            .map(|node| {
+                // TODO: just use document children (requires to think about where to use nested and where not)
+                std::iter::successors(Some(node), |node| node.parent())
+                    .filter(|node| node.kind() == "function_definition")
+                    .flat_map(|node| {
+                        let mut items = Vec::new();
+
+                        if let Some(parameters) = node.child_by_field_name("parameters") {
+                            items.extend(
+                                parameters
+                                    .children_by_field_name("parameter", &mut parameters.walk())
+                                    .filter_map(|parameter| {
+                                        parameter.child_by_field_name("name").map(|name| {
+                                            rope.byte_slice(name.byte_range()).to_string()
+                                        })
+                                    })
+                                    .filter(|name| utils::starts_with_lowercase(name, &query))
+                                    .map(|label| CompletionItem {
+                                        label,
+                                        label_details: Some(CompletionItemLabelDetails {
+                                            detail: None,
+                                            description: Some("Parameter".into()),
+                                        }),
+                                        kind: Some(CompletionItemKind::VARIABLE),
+                                        ..Default::default()
+                                    }),
+                            );
+                        }
+
+                        if let Some(body) = node.child_by_field_name("body") {
+                            items.extend(
+                                // todo: use enable nested and use children
+                                index::index(body, rope, false)
+                                    .into_iter()
+                                    .filter(|symbol| {
+                                        utils::starts_with_lowercase(&symbol.name, &query)
+                                    })
+                                    .map(|symbol| CompletionItem {
+                                        label: symbol.name,
+                                        label_details: Some(CompletionItemLabelDetails {
+                                            detail: None,
+                                            description: Some("Local".into()),
+                                        }),
+                                        kind: Some(symbol_kind_to_completion_kind(symbol.kind)),
+                                        ..Default::default()
+                                    }),
+                            );
+                        }
+
+                        items
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    let workspace_symbols = symbols_map.filter_map(
+        |_, symbols| {
             symbols
                 .iter()
-                .filter(|symbol| index::filter_symbol(&query, symbol))
-                .map(move |symbol| index::to_symbol_information(symbol, &uri))
+                .filter(|symbol| utils::starts_with_lowercase(&symbol.name, &query))
         },
+        // TODO: use CompletionResponse::List.is_incomplete and only limit for short queries?
         1024,
     );
-
-    // optimization would be to get all symbols for enclosing function
-    // TODO: write code to get local completion items
-    // let document_symbols = if let Some(document) = self.document_map.get(&uri) {
-    //     let point = Point {
-    //         row: position.line as usize,
-    //         column: position.character as usize,
-    //     };
-    //     document
-    //         .tree
-    //         .root_node()
-    //         .descendant_for_point_range(point, point)
-    //         .and_then(|node| {
-    //             let mut candidate = None;
-    //             while let Some(node) = node.parent() {
-    //                 if node.kind() == "function_definition" {
-    //                     candidate = Some(node);
-    //                 }
-    //             }
-    //             candidate.and_then(|function| function.child(2))
-    //         })
-    //         .map(|node| index::symbols_for_block(&node, &document.rope))
-    //         .unwrap_or_default()
-    // } else {
-    //     tracing::error!("failed to aquirce document :/");
-    //     vec![]
-    // };
 
     const RESERVED_WORDS: &[&str] = &[
         "if",
@@ -96,37 +124,161 @@ pub fn get(
     Some(CompletionResponse::Array(
         RESERVED_WORDS
             .iter()
+            .filter(|keyword| utils::starts_with_lowercase(keyword, &query))
             .map(|reserved_word| CompletionItem {
                 label: reserved_word.to_string(),
+                label_details: Some(CompletionItemLabelDetails {
+                    detail: None,
+                    description: Some("Keyword".into()),
+                }),
                 kind: Some(CompletionItemKind::KEYWORD),
                 ..Default::default()
             })
-            // todo: do proper traversing
-            // .chain(document_symbols.iter().fold(vec![], |mut symbols, symbol| {
-            //     symbols.push(CompletionItem {
-            //         label: symbol.name.clone(),
-            //         kind: Some(match symbol.kind {
-            //             SymbolKind::FUNCTION => CompletionItemKind::FUNCTION,
-            //             SymbolKind::CLASS => CompletionItemKind::CLASS,
-            //             SymbolKind::METHOD => CompletionItemKind::METHOD,
-            //             _ => CompletionItemKind::VARIABLE,
-            //         }),
-            //         detail: None,
-            //         ..Default::default()
-            //     });
-            //     symbols
-            // }))
+            .chain(local_symbols)
             .chain(workspace_symbols.into_iter().map(|symbol| CompletionItem {
-                label: symbol.name,
-                kind: Some(match symbol.kind {
-                    SymbolKind::FUNCTION => CompletionItemKind::FUNCTION,
-                    SymbolKind::CLASS => CompletionItemKind::CLASS,
-                    SymbolKind::METHOD => CompletionItemKind::METHOD,
-                    _ => CompletionItemKind::VARIABLE,
+                label: symbol.name.to_string(),
+                label_details: Some(CompletionItemLabelDetails {
+                    detail: None,
+                    description: Some("Global".into()),
                 }),
-                detail: None,
+                kind: Some(symbol_kind_to_completion_kind(symbol.kind)),
                 ..Default::default()
             }))
             .collect(),
     ))
+}
+
+// TODO: consider throwing error instead of optional
+// TODO: alternatively use tree-sitter to extract nearest identifer (to avoid reimplementing nearest identifer)
+fn extract_query(position: Position, rope: &Rope) -> Option<String> {
+    let line = rope.get_line(position.line as usize)?;
+    Some(
+        line.chars()
+            .take(position.character as usize)
+            .fold(String::new(), |mut acc, item| {
+                // see: https://cran.r-project.org/doc/manuals/r-release/R-lang.html#Identifiers-1
+                // note: we can be less strict than R otherwise its already an parser
+                if item.is_alphabetic()
+                    || item == '.'
+                    || item == '_'
+                    || (!acc.is_empty() && item.is_numeric())
+                {
+                    acc.push(item);
+                } else {
+                    acc.clear();
+                }
+                acc
+            }),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use {super::*, crate::tree, indoc::indoc, ropey::Rope, std::collections::HashMap};
+
+    fn setup(
+        text: &str,
+        (line, character): (u32, u32),
+    ) -> (String, Vec<(String, CompletionItemKind)>) {
+        let rope = Rope::from_str(text);
+        let tree = tree::parse(text, None);
+        let position = Position::new(line, character);
+        let query = extract_query(position, &rope).unwrap();
+        let items = match get(position, &rope, &tree, &HashMap::new()).unwrap() {
+            CompletionResponse::Array(items) => items
+                .into_iter()
+                .map(|item| (item.label, item.kind.unwrap()))
+                .collect(),
+            _ => unreachable!(),
+        };
+        (query, items)
+    }
+
+    #[test]
+    fn completes_local_variables() {
+        let (query, items) = setup(
+            indoc! {"
+                function(x) {
+                    local_var <- 42
+                    loc
+                }
+            "},
+            (2, 7),
+        );
+
+        assert_eq!(query, "loc");
+        assert_eq!(items.len(), 1);
+        assert!(items.contains(&("local_var".into(), CompletionItemKind::VARIABLE)));
+    }
+
+    #[test]
+    fn completes_function_parameters() {
+        let (query, items) = setup(
+            indoc! {"
+                function(param1, param2) {
+                    par
+                }
+            "},
+            (1, 7),
+        );
+
+        assert_eq!(query, "par");
+        assert_eq!(items.len(), 2);
+        assert!(items.contains(&("param1".into(), CompletionItemKind::VARIABLE)));
+        assert!(items.contains(&("param2".into(), CompletionItemKind::VARIABLE)));
+    }
+
+    #[test]
+    fn completes_nested_function_variable() {
+        let (query, items) = setup(
+            indoc! {"
+                function(x) {
+                    var_a <- 1
+                    function(y) {
+                        var_b <- 2
+                        function(y) {
+                            var_c <- 3
+                            var
+                        }
+                    }
+                }
+            "},
+            (6, 15),
+        );
+
+        assert_eq!(query, "var");
+        assert_eq!(items.len(), 3);
+        assert!(items.contains(&("var_a".into(), CompletionItemKind::VARIABLE)));
+        assert!(items.contains(&("var_b".into(), CompletionItemKind::VARIABLE)));
+        assert!(items.contains(&("var_c".into(), CompletionItemKind::VARIABLE)));
+    }
+
+    #[test]
+    fn completes_keywords() {
+        let (query, items) = setup("i", (0, 1));
+
+        assert_eq!(query, "i");
+        assert_eq!(items.len(), 3);
+        assert!(items.contains(&("if".into(), CompletionItemKind::KEYWORD)));
+        assert!(items.contains(&("in".into(), CompletionItemKind::KEYWORD)));
+        assert!(items.contains(&("Inf".into(), CompletionItemKind::KEYWORD)));
+
+        let (query, items) = setup("na_ ", (0, 3));
+
+        assert_eq!(query, "na_");
+        assert_eq!(items.len(), 4);
+    }
+
+    #[test]
+    fn extract_query_edge_cases() {
+        fn setup(pos: u32, text: &str) -> String {
+            extract_query(Position::new(0, pos), &Rope::from_str(text)).unwrap()
+        }
+
+        assert_eq!(setup(11, "foo.bar_123"), "foo.bar_123");
+        assert_eq!(setup(4, ".foo"), ".foo");
+        assert_eq!(setup(4, "1foo"), "foo");
+        assert_eq!(setup(4, "_foo"), "_foo");
+        assert_eq!(setup(5, ".1foo"), ".1foo");
+    }
 }

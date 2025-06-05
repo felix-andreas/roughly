@@ -1,9 +1,9 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n            '\"foo\"'\n            \"\\\"foo\\\"\"\n            '\\\"foo\"'\n            '\\\\\"foo\\\\\"'\n            \"\\\\\\\"foo\\\\\\\"\"\n        \"#\n}).unwrap()"
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{\n    r#\"\n        '\"foo\"'\n        \"\\\"foo\\\"\"\n        '\\\"foo\"'\n        '\\\\\"foo\\\\\"'\n        \"\\\\\\\"foo\\\\\\\"\"\n    \"#\n}).unwrap()"
 ---
+'"foo"'
 "\"foo\""
-"\"foo\""
-"\"foo\""
-"\\\"foo\\\""
+'\"foo"'
+'\\"foo\\"'
 "\\\"foo\\\""

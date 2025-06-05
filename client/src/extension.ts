@@ -1,3 +1,6 @@
+import * as path from "path";
+import * as fs from 'fs';
+
 import {
   commands,
   languages,
@@ -17,24 +20,40 @@ import {
   TransportKind,
 } from 'vscode-languageclient/node'
 
+const logger = window.createOutputChannel("Roughly Extension", { log: true });
+
+const EXTENSION_ROOT_DIR = path.dirname(__dirname)
+const ROUGHLY_BINARY_NAME = process.platform === "win32" ? "roughly.exe" : "roughly"
+const BUNDLED_ROUGHLY_EXECUTABLE = path.join(EXTENSION_ROOT_DIR, "bin", ROUGHLY_BINARY_NAME)
+
 let client: LanguageClient
 let statusBar
-let version
 let status = { health: "started" }
+let version
 
 export function activate({ subscriptions, extension }: ExtensionContext) {
-  const config = workspace.getConfiguration("roughly")
-  const command = process.env.SERVER_PATH || config.get<string>("path", "roughly")
-  const args = config.get<string[]>("args", ["lsp"])
   version = extension.packageJSON.version ?? "<unknown>"
 
-  console.log("using server command:", [command, ...args].join(" "))
+  const config = workspace.getConfiguration("roughly")
+
+  const command = process.env.SERVER_PATH
+    ?? config.get<string>("path")
+    ?? (
+      fs.existsSync(BUNDLED_ROUGHLY_EXECUTABLE)
+        ? BUNDLED_ROUGHLY_EXECUTABLE
+        : "roughly"
+    )
+
+  const args = config.get<string[]>("args", ["server"])
+
+  logger.info("using server command:", [command, ...args].join(" "))
+
   const outputChannel = window.createOutputChannel("Roughly");
 
   client = (() => {
     const serverOptions: ServerOptions = {
       command,
-      // args, // TODO: uncomment after some versions
+      args,
       transport: TransportKind.stdio,
       options: {
         env: {
@@ -74,7 +93,7 @@ export function activate({ subscriptions, extension }: ExtensionContext) {
       }
     }),
     commands.registerCommand(
-      "roughly.restartLanguageServer",
+      "roughly.restartServer",
       async () => {
         if (client.isRunning) {
           await client.restart()
@@ -85,14 +104,14 @@ export function activate({ subscriptions, extension }: ExtensionContext) {
       }
     ),
     commands.registerCommand(
-      "roughly.startLanguageServer",
+      "roughly.startServer",
       async () => {
         await client.start()
         setServerStatus({ health: "started" })
       }
     ),
     commands.registerCommand(
-      "roughly.stopLanguageServer",
+      "roughly.stopServer",
       async () => {
         await client.stop()
         setServerStatus({ health: "stopped" })
@@ -147,10 +166,10 @@ function updateStatusBarItem() {
       break
     case "stopped":
       statusBar.tooltip.appendText("Server is stopped")
-      statusBar.tooltip.appendMarkdown("\n\n[Start server](command:roughly.startLanguageServer)")
+      statusBar.tooltip.appendMarkdown("\n\n[Start server](command:roughly.startServer)")
       statusBar.color = new ThemeColor("statusBarItem.warningForeground")
       statusBar.backgroundColor = new ThemeColor("statusBarItem.warningBackground")
-      statusBar.command = "roughly.startLanguageServer"
+      statusBar.command = "roughly.startServer"
       statusBar.text = "$(stop-circle) roughly"
       return
   }
@@ -162,8 +181,8 @@ function updateStatusBarItem() {
   statusBar.tooltip.appendMarkdown([
     `[Extension Info](command:roughly.serverVersion "Show version and server binary info"): Version ${version}, Server Version ${serverVersion}\n\n---`,
     '[$(terminal) Open Logs](command:roughly.openLogs "Open the server logs")',
-    '[$(debug-restart) Restart server](command:roughly.restartLanguageServer "Restart the server")',
-    '[$(stop-circle) Stop server](command:roughly.stopLanguageServer "Stop the server")',
+    '[$(debug-restart) Restart server](command:roughly.restartServer "Restart the server")',
+    '[$(stop-circle) Stop server](command:roughly.stopServer "Stop the server")',
   ].join("\n\n"))
 
   // if (true) icon = "$(loading~spin) "

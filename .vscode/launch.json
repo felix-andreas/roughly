@@ -15,7 +15,8 @@
 			],
 			"preLaunchTask": "Watch",
 			"env": {
-				"SERVER_PATH": "${workspaceRoot}/target/debug/roughly"
+				// DEBUG: uncomment to pass path to binary
+				// "SERVER_PATH": "${workspaceRoot}/target/debug/roughly"
 			}
 		}
 	]
