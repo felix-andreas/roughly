@@ -8,15 +8,6 @@ default:
 roughly *args:
 	@cargo run -q -- {{args}}
 
-fmt *args:
-	@cargo run -q -- fmt {{args}}
-
-check *args:
-	@cargo run -q -- check {{args}}
-
-repl *args:
-	@cargo run -q -- repl {{args}}
-
 test *args:
 	cargo test -- --nocapture {{args}}
 
