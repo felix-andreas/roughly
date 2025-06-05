@@ -2,7 +2,7 @@ use {
     clap::{Parser, Subcommand},
     roughly::{
         cli::{self, CheckError, DebugError, FmtError},
-        lsp, repl,
+        repl,
     },
     std::{path::PathBuf, process::ExitCode},
     tracing_subscriber::prelude::*,
@@ -48,7 +48,7 @@ fn main() -> ExitCode {
             },
             Debug::Ast { path } => match cli::ast(&path) {
                 Ok(()) => ExitCode::SUCCESS,
-                Err(FmtError) => ExitCode::FAILURE,
+                Err(DebugError) => ExitCode::FAILURE,
             },
         },
     }

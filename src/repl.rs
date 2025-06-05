@@ -1,5 +1,5 @@
 use {
-    extendr_api::{Rinternals, eval_string},
+    extendr_api::Rinternals,
     nu_ansi_term::{Color as AnsiColor, Style},
     reedline::{
         Color, DefaultHinter, Emacs, Highlighter, Prompt, PromptEditMode, PromptHistorySearch,
@@ -41,7 +41,7 @@ pub fn run(vi: bool) {
                     continue;
                 }
 
-                if let Ok(value) = eval_string(&buffer) {
+                if let Ok(value) = extendr_api::eval_string(&buffer) {
                     if !value.is_null() {
                         println!("{:?}", value);
                     }
