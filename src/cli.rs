@@ -148,14 +148,8 @@ pub fn check(maybe_files: Option<&[PathBuf]>, experimental: bool) -> Result<(), 
                 }
                 eprintln!();
 
-                let width_message = u32::max(
-                    1,
-                    if range.end.character > range.start.character {
-                        range.end.character - range.start.character
-                    } else {
-                        range.start.character - range.end.character
-                    },
-                );
+                let width_message =
+                    u32::max(1, range.end.character.abs_diff(range.start.character));
                 eprintln!(
                     "{}{}  {}",
                     " ".repeat(width),

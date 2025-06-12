@@ -19,34 +19,32 @@ pub fn analyze(node: Node, rope: &Rope) -> Vec<Diagnostic> {
             | "parameters"
             | "parenthesized_expression"
             | "while_statement" => {
-                if let Some(open) = node.child_by_field_name("open") {
-                    if let Some(close) = node.child_by_field_name("close") {
-                        if close.is_missing() {
-                            diagnostics.push(error(
-                                open,
-                                format!("missing closing delimiter {}", close.kind()),
-                            ));
-                        }
-                    }
+                if let Some(open) = node.child_by_field_name("open")
+                    && let Some(close) = node.child_by_field_name("close")
+                    && close.is_missing()
+                {
+                    diagnostics.push(error(
+                        open,
+                        format!("missing closing delimiter {}", close.kind()),
+                    ));
                 }
             }
             "binary_operator" => {
-                if let Some(operator) = node.child_by_field_name("operator") {
-                    if let Some(rhs) = node.child_by_field_name("rhs") {
-                        if rhs.is_missing() {
-                            diagnostics.push(error(
-                                operator,
-                                format!("missing rhs for operator {}", operator.kind()),
-                            ));
-                        }
-                    }
+                if let Some(operator) = node.child_by_field_name("operator")
+                    && let Some(rhs) = node.child_by_field_name("rhs")
+                    && rhs.is_missing()
+                {
+                    diagnostics.push(error(
+                        operator,
+                        format!("missing rhs for operator {}", operator.kind()),
+                    ));
                 }
             }
             "function_definition" => {
-                if let Some(body) = node.child_by_field_name("body") {
-                    if body.is_missing() {
-                        diagnostics.push(error(node, "missing function body".into()));
-                    }
+                if let Some(body) = node.child_by_field_name("body")
+                    && body.is_missing()
+                {
+                    diagnostics.push(error(node, "missing function body".into()));
                 }
             }
             _ => {}
@@ -81,10 +79,10 @@ pub fn analyze(node: Node, rope: &Rope) -> Vec<Diagnostic> {
             match raw.as_str() {
                 ")" | "}" | "]" | "]]" => diagnostics.push(error(
                     node,
-                    format!("Syntax Error: unexpected closing delimiter {}", raw),
+                    format!("Syntax Error: unexpected closing delimiter {raw}"),
                 )),
                 _ => {
-                    diagnostics.push(error(node, format!("Syntax Error: unexpected {:?}", raw)));
+                    diagnostics.push(error(node, format!("Syntax Error: unexpected {raw:?}")));
                 }
             }
         }

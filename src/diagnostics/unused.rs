@@ -170,7 +170,7 @@ pub fn analyze(node: Node, rope: &Rope) -> Result<Vec<Diagnostic>, DiagnosticsEr
         .map(|(name, node)| Diagnostic {
             range: utils::node_range(node),
             severity: Some(DiagnosticSeverity::WARNING),
-            message: format!("unused variable `{}`", name),
+            message: format!("unused variable `{name}`"),
             code: None,
             code_description: None,
             source: None,
