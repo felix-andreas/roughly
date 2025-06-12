@@ -393,10 +393,14 @@ impl LanguageServer for ServerState {
         };
 
         let (rope, tree) = (&document.rope, &document.tree);
-        let new_text = match format::format(tree.root_node(), rope, format::Config {
-            indent: &" ".repeat(self.config.spaces),
-            line_ending: LineEnding::Auto,
-        }) {
+        let new_text = match format::format(
+            tree.root_node(),
+            rope,
+            format::Config {
+                indent: &" ".repeat(self.config.spaces),
+                line_ending: LineEnding::Auto,
+            },
+        ) {
             Ok(text) => text,
             Err(error) => {
                 tracing::error!(?error, "failed to format");
@@ -442,10 +446,14 @@ impl LanguageServer for ServerState {
             return Box::pin(async { Ok(None) });
         };
 
-        let new_text = match format::format(node, rope, format::Config {
-            indent: &" ".repeat(self.config.spaces),
-            line_ending: LineEnding::Auto,
-        }) {
+        let new_text = match format::format(
+            node,
+            rope,
+            format::Config {
+                indent: &" ".repeat(self.config.spaces),
+                line_ending: LineEnding::Auto,
+            },
+        ) {
             Ok(text) => text,
             Err(error) => {
                 tracing::error!(?error, "failed to format");
