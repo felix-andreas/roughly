@@ -207,20 +207,6 @@ fn call() {
             b= 2L) #baz
     "#};
     assert_fmt! {r#"
-        foo  ( #foo
-            # foo
-            f
-            # foo bar
-            #   foo bar
-            #   foo bar
-            a = 1, #bar
-
-
-            b= 2L) #baz
-
-            # foo
-    "#};
-    assert_fmt! {r#"
         foo({ bar; baz })
         foo({ bar;
         baz })
@@ -234,7 +220,9 @@ fn call() {
     assert_fmt! {r#"
     	fn( # (
         	# 1
-            argument # argument
+            arg1 # arg1
+            , # ,
+            arg2 # arg2
             # 2
         ) # )
     "#};

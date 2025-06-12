@@ -1,23 +1,11 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n            foo({ bar; baz })\n            foo({ bar;\n            baz })\n            foo({ bar;\n            baz }, qux)\n            foo(qux = { bar;\n            baz }, qux)\n        \"#\n}).unwrap()"
+source: tests/test_format.rs
+expression: "format_str(indoc!\n{r#\"\n    \tfn( # (\n        \t# 1\n            arg1 # arg1\n            , # ,\n            arg2 # arg2\n            # 2\n        ) # )\n    \"#}).unwrap()"
 ---
-foo({ bar; baz })
-foo({
-  bar
-  baz
-})
-foo(
-  {
-    bar
-    baz
-  },
-  qux
-)
-foo(
-  qux = {
-    bar
-    baz
-  },
-  qux
-)
+fn( # (
+  # 1
+  arg1 # arg1
+  , # ,
+  arg2 # arg2
+  # 2
+) # )

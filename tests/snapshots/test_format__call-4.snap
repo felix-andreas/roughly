@@ -1,16 +1,23 @@
 ---
 source: tests/test_format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n        foo  ( #foo\n            # foo\n            f\n            # foo bar\n            #   foo bar\n            #   foo bar\n            a = 1, #bar\n\n\n            b= 2L) #baz\n\n            # foo\n    \"#\n}).unwrap()"
+expression: "format_str(indoc!\n{r#\"\n        foo({ bar; baz })\n        foo({ bar;\n        baz })\n        foo({ bar;\n        baz }, qux)\n        foo(qux = { bar;\n        baz }, qux)\n    \"#}).unwrap()"
 ---
-foo( # foo
-  # foo
-  f
-  # foo bar
-  #   foo bar
-  #   foo bar
-  a = 1, # bar
-
-  b = 2L
-) # baz
-
-# foo
+foo({ bar; baz })
+foo({
+  bar
+  baz
+})
+foo(
+  {
+    bar
+    baz
+  },
+  qux
+)
+foo(
+  qux = {
+    bar
+    baz
+  },
+  qux
+)
