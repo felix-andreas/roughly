@@ -47,25 +47,31 @@ pub fn get_workspace_symbols(
             let uri = Uri::from_file_path(path).unwrap();
             symbols
                 .iter()
-                .filter(|symbol| utils::starts_with_lowercase(&symbol.name, query))
-                .map(move |symbol| to_workspace_symbol(symbol, &uri))
+                .flat_map(|symbol| {
+                    std::iter::once((symbol, None)).chain(
+                        symbol
+                            .children
+                            .as_ref()
+                            .into_iter()
+                            .flatten()
+                            .map(|child| (child, Some(symbol.name.as_ref()))),
+                    )
+                })
+                .filter(|(symbol, _)| utils::starts_with_lowercase(&symbol.name, query))
+                .map(move |(symbol, container_name)| WorkspaceSymbol {
+                    name: symbol.name.to_string(),
+                    kind: symbol.kind,
+                    tags: None,
+                    container_name: container_name.map(str::to_string),
+                    location: OneOf::Left(Location {
+                        uri: uri.clone(),
+                        range: symbol.range,
+                    }),
+                    data: None,
+                })
         },
         32,
     )
-}
-
-pub fn to_workspace_symbol(symbol: &DocumentSymbol, uri: &Uri) -> WorkspaceSymbol {
-    WorkspaceSymbol {
-        name: symbol.name.to_string(),
-        kind: symbol.kind,
-        tags: None,
-        container_name: None,
-        location: OneOf::Left(Location {
-            uri: uri.clone(),
-            range: symbol.range,
-        }),
-        data: None,
-    }
 }
 
 #[derive(Debug)]
@@ -159,7 +165,7 @@ pub fn index(root: Node, rope: &Rope, nested: bool) -> Vec<DocumentSymbol> {
                     let name = rope.byte_slice(lhs.byte_range()).to_string();
                     let range = utils::node_range(node);
                     let selection_range = utils::node_range(lhs);
-                    symbols.push(to_document_symbol(
+                    symbols.push(document_symbol(
                         name,
                         kind,
                         detail,
@@ -414,9 +420,7 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
                     };
 
                     let range = utils::node_range(member);
-                    members.push(to_document_symbol(
-                        name, kind, detail, range, range, children,
-                    ));
+                    members.push(document_symbol(name, kind, detail, range, range, children));
                 }
             }
 
@@ -426,12 +430,10 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
     };
 
     let range = utils::node_range(call);
-    Some(to_document_symbol(
-        name, kind, detail, range, range, children,
-    ))
+    Some(document_symbol(name, kind, detail, range, range, children))
 }
 
-pub fn to_document_symbol(
+pub fn document_symbol(
     name: String,
     kind: SymbolKind,
     detail: Option<String>,
