@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.5.38", features = ["derive"] }
 console = "0.15.11"
-dashmap = "6.1.0"
 ignore = "0.4.23"
 indoc = "2.0.6"
 itertools = "0.14.0"
@@ -28,13 +27,14 @@ tree-sitter = "0.25.4"
 tree-sitter-r = "1.1.0"
 # tree-sitter-r = { path = "../tree-sitter-r/" }
 
-# tower-lsp
-tower-lsp-server = { version = "0.21.1", optional = true }
-
 # async-lsp
 async-lsp = { version = "0.2.2", features = ["tokio"], optional = true }
 tower = { version = "0.5.2", optional = true }
 futures = { version = "0.3.31", optional = true }
+
+# tower-lsp
+tower-lsp-server = { version = "0.21.1", optional = true }
+dashmap = { version = "6.1.0", optional = true }
 
 [target.'cfg(not(unix))'.dependencies]
 tokio-util = { version = "0.7.15", features = ["compat"] }
@@ -45,7 +45,7 @@ insta = "1.43.1"
 [features]
 default = ["async-lsp"]
 async-lsp = ["dep:async-lsp", "dep:tower", "dep:futures"]
-tower-lsp = ["dep:tower-lsp-server"]
+tower-lsp = ["dep:tower-lsp-server", "dep:dashmap"]
 
 [profile.dev.package]
 insta.opt-level = 3
