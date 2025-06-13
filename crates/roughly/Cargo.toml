@@ -1,7 +1,7 @@
 [package]
 name = "roughly"
-version.workspace = true
 edition = "2024"
+version.workspace = true
 
 [dependencies]
 clap.workspace = true

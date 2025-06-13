@@ -8,6 +8,9 @@ default:
 roughly *args:
 	@cargo run -q -- {{args}}
 
+rofy *args:
+	@cargo run -p rofy -q -- {{args}}
+
 test *args:
 	cargo test -- --nocapture {{args}}
 

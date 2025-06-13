@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/roughly"]
+members = ["crates/roughly", "crates/rofy"]
 default-members = ["crates/roughly"]
 
 [workspace.package]
@@ -33,6 +33,12 @@ tree-sitter-r = "1.2.0"
 async-lsp = { version = "0.2.2", features = ["tokio"] }
 tower = { version = "0.5.2" }
 futures = { version = "0.3.31" }
+
+# rofy
+reedline = "0.40.0"
+nu-ansi-term = "0.50.1"
+extendr-api = "0.8.0"
+extendr-engine = "0.8.0"
 
 # dev-dependencies
 insta = "1.43.1"
