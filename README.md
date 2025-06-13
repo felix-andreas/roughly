@@ -144,4 +144,4 @@ See our [development documentation](https://roughly.felixandreas.me/development)
 
 ## License
 
-This repository is licensed under the [GNU General Public License v3.0](LICENSE).
+This repository is licensed under [The Universal Permissive License Version 1.0](LICENSE).

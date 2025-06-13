@@ -10,7 +10,7 @@
 		"type": "git",
 		"url": "https://github.com/felix-andreas/roughly"
 	},
-	"license": "GPL-3.0",
+	"license": "UPL-1.0",
 	"keywords": [
 		"r"
 	],
