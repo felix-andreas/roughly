@@ -18,7 +18,7 @@ snapshot *args:
 	cargo insta test --review -- --nocapture {{args}}
 
 vsce *args:
-	@bun --cwd=client run vsce -- {{args}}
+	@bun --cwd=editors/code run vsce -- {{args}}
 
 #
 # BUILD
@@ -33,12 +33,12 @@ build-linux:
 build-windows:
 	cargo build --release --target x86_64-pc-windows-gnu
 
-build-extension $release_flag *args:
+build-extension $kind *args:
 	#!/usr/bin/env bash
 	set -euo pipefail
 
 	release_flag=$(just vsce-release-flag $kind)
-	cp LICENSE client
+	cp LICENSE editors/code
 	just vsce package $release_flag {{args}}
 
 
@@ -50,10 +50,10 @@ bump-version $version:
 	#!/usr/bin/env bash
 	set -euo pipefail
 
-	sed -i 's/"version": "[a-zA-Z0-9._-]*"/"version": "{{version}}"/' client/package.json
+	sed -i 's/"version": "[a-zA-Z0-9._-]*"/"version": "{{version}}"/' editors/code/package.json
 	sed -i 's/^version = "[a-zA-Z0-9._-]*"/version = "{{version}}"/' Cargo.toml
 	cargo check # bonus: also updates version in lock file
-	git add client/package.json Cargo.toml Cargo.lock
+	git add editors/code/package.json Cargo.toml Cargo.lock
 	git commit -m "chore: Release v{{version}}"
 
 publish $version $kind:
@@ -92,20 +92,20 @@ build $version $kind:
 	cp target/x86_64-pc-windows-gnu/release/roughly.exe release/$version/roughly.exe
 
 	# build vscode extension (client only)
-	rm -rf client/bin
-	just build-extension $kind --out ../release/$version/roughly.vsix
+	rm -rf editors/code/bin
+	just build-extension $kind --out ../../release/$version/roughly.vsix
 
 	# build vscode extension (linux-x64)
-	rm -rf client/bin
-	mkdir -p client/bin
-	cp release/$version/roughly client/bin
-	just build-extension $kind --target linux-x64 --out ../release/$version/roughly-linux-x64.vsix
+	rm -rf editors/code/bin
+	mkdir -p editors/code/bin
+	cp release/$version/roughly editors/code/bin
+	just build-extension $kind --target linux-x64 --out ../../release/$version/roughly-linux-x64.vsix
 
 	# build vscode extension (win32-x64)
-	rm -rf client/bin
-	mkdir -p client/bin
-	cp release/$version/roughly.exe client/bin
-	just build-extension $kind --target win32-x64 --out ../release/$version/roughly-win32-x64.vsix
+	rm -rf editors/code/bin
+	mkdir -p editors/code/bin
+	cp release/$version/roughly.exe editors/code/bin
+	just build-extension $kind --target win32-x64 --out ../../release/$version/roughly-win32-x64.vsix
 
 publish-github $version:
 	#!/usr/bin/env bash
@@ -136,9 +136,9 @@ publish-marketplace $version $kind:
 
 	release_flag=$(just vsce-release-flag $kind)
 
-	just vsce publish $release_flag --packagePath ../release/$version/roughly-linux-x64.vsix
-	just vsce publish $release_flag --packagePath ../release/$version/roughly-win32-x64.vsix
-	just vsce publish $release_flag --packagePath ../release/$version/roughly.vsix
+	just vsce publish $release_flag --packagePath ../../release/$version/roughly-linux-x64.vsix
+	just vsce publish $release_flag --packagePath ../../release/$version/roughly-win32-x64.vsix
+	just vsce publish $release_flag --packagePath ../../release/$version/roughly.vsix
 
 #
 # UTILS

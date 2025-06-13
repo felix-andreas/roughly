@@ -3,9 +3,9 @@ title: Development
 description: How to contribute to Roughly
 ---
 
-## Client Setup
+## VS Code Extension Setup
 
-- Run `cd client && bun install`. This installs all necessary npm modules in the client
+- Run `cd editors/code && bun install`. This installs all necessary npm modules
 - Press Ctrl+Shift+B in VS Code to start compiling the client in [watch mode](https://code.visualstudio.com/docs/editor/tasks#:~:text=The%20first%20entry%20executes,the%20HelloWorld.js%20file.).
 - Switch to the Run and Debug View in the Sidebar (Ctrl+Shift+D).
 - Select `Launch Client` from the drop down (if it is not already).

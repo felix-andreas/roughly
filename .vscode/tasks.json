@@ -7,7 +7,7 @@
 			"command": "bun run compile",
 			"group": "build",
 			"options": {
-				"cwd": "${workspaceFolder}/client"
+				"cwd": "${workspaceFolder}/editors/code"
 			},
 			"presentation": {
 				"panel": "dedicated",
@@ -22,7 +22,7 @@
 			"type": "shell",
 			"command": "bun run watch",
 			"options": {
-				"cwd": "${workspaceFolder}/client"
+				"cwd": "${workspaceFolder}/editors/code"
 			},
 			"isBackground": true,
 			"group": {
