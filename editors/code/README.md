@@ -3,7 +3,7 @@
 This extension provides support for the [R programming language](https://www.r-project.org/), including workspace symbol search, code formatting, and syntax diagnostics.
 
 > **Note**
-> The VS Code extension from the marketplace already includes a bundled version of the Roughly CLI, so you don't need to install the CLI separately.
+> The VS Code extension from the marketplace includes a bundled version of the Roughly CLI **only for Windows and Linux x64**. If you are using macOS or a different architecture, you will need to install the Roughly CLI manually.
 
 ## Features
 
