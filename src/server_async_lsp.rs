@@ -123,35 +123,33 @@ impl LanguageServer for ServerState {
                 .unwrap(),
         }
 
-        Box::pin(async move {
-            Ok(InitializeResult {
-                capabilities: ServerCapabilities {
-                    completion_provider: Some(CompletionOptions {
-                        trigger_characters: Some(vec!["$".into(), "@".into()]),
-                        ..Default::default()
-                    }),
-                    document_range_formatting_provider: Some(OneOf::Left(true)),
-                    document_formatting_provider: Some(OneOf::Left(true)),
-                    document_symbol_provider: Some(OneOf::Left(true)),
-                    text_document_sync: Some(TextDocumentSyncCapability::Options(
-                        TextDocumentSyncOptions {
-                            open_close: Some(true),
-                            change: Some(TextDocumentSyncKind::INCREMENTAL),
-                            save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
-                                include_text: Some(false),
-                            })),
-                            ..Default::default()
-                        },
-                    )),
-                    workspace_symbol_provider: Some(OneOf::Left(true)),
+        box_future(Ok(InitializeResult {
+            capabilities: ServerCapabilities {
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec!["$".into(), "@".into()]),
                     ..Default::default()
-                },
-                server_info: Some(ServerInfo {
-                    name: env!("CARGO_PKG_NAME").into(),
-                    version: Some(env!("CARGO_PKG_VERSION").into()),
                 }),
-            })
-        })
+                document_formatting_provider: Some(OneOf::Left(true)),
+                document_range_formatting_provider: Some(OneOf::Left(self.experimental)),
+                document_symbol_provider: Some(OneOf::Left(true)),
+                text_document_sync: Some(TextDocumentSyncCapability::Options(
+                    TextDocumentSyncOptions {
+                        open_close: Some(true),
+                        change: Some(TextDocumentSyncKind::INCREMENTAL),
+                        save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
+                            include_text: Some(false),
+                        })),
+                        ..Default::default()
+                    },
+                )),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
+                ..Default::default()
+            },
+            server_info: Some(ServerInfo {
+                name: env!("CARGO_PKG_NAME").into(),
+                version: Some(env!("CARGO_PKG_VERSION").into()),
+            }),
+        }))
     }
 
     //
@@ -361,7 +359,7 @@ impl LanguageServer for ServerState {
 
         let Some(document) = self.document_map.get(&path) else {
             tracing::error!(?uri, "document not found");
-            return Box::pin(async move { Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")) });
+            return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
         };
 
         let completions = completions::get(
@@ -371,7 +369,7 @@ impl LanguageServer for ServerState {
             &self.workspace_symbols,
         );
 
-        Box::pin(async move { Ok(completions) })
+        box_future(Ok(completions))
     }
 
     //
@@ -389,7 +387,7 @@ impl LanguageServer for ServerState {
 
         let Some(document) = self.document_map.get(&path) else {
             tracing::info!(?uri, "document not found");
-            return Box::pin(async move { Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")) });
+            return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
         };
 
         let (rope, tree) = (&document.rope, &document.tree);
@@ -404,7 +402,7 @@ impl LanguageServer for ServerState {
             Ok(text) => text,
             Err(error) => {
                 tracing::error!(?error, "failed to format");
-                return Box::pin(async { Ok(None) });
+                return box_future(Ok(None));
             }
         };
 
@@ -419,7 +417,7 @@ impl LanguageServer for ServerState {
             ),
         }];
 
-        Box::pin(async move { Ok(Some(edits)) })
+        box_future(Ok(Some(edits)))
     }
 
     fn range_formatting(
@@ -434,7 +432,7 @@ impl LanguageServer for ServerState {
 
         let Some(document) = self.document_map.get(&path) else {
             tracing::info!(?uri, "document not found");
-            return Box::pin(async move { Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")) });
+            return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
         };
 
         let (rope, tree) = (&document.rope, &document.tree);
@@ -443,7 +441,7 @@ impl LanguageServer for ServerState {
             Point::new(range.end.line as usize, range.end.character as usize),
         ) else {
             tracing::info!(?range, "no node for range");
-            return Box::pin(async { Ok(None) });
+            return box_future(Ok(None));
         };
 
         let new_text = match format::format(
@@ -457,7 +455,7 @@ impl LanguageServer for ServerState {
             Ok(text) => text,
             Err(error) => {
                 tracing::error!(?error, "failed to format");
-                return Box::pin(async { Ok(None) });
+                return box_future(Ok(None));
             }
         };
 
@@ -466,7 +464,7 @@ impl LanguageServer for ServerState {
             range: utils::node_range(node),
         }];
 
-        Box::pin(async move { Ok(Some(edits)) })
+        box_future(Ok(Some(edits)))
     }
 
     //
@@ -488,11 +486,11 @@ impl LanguageServer for ServerState {
 
         let Some(symbols) = symbols_map.get(&path) else {
             tracing::error!(?uri, "symbols not found");
-            return Box::pin(async move { Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")) });
+            return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
         };
         let symbols = symbols.clone();
 
-        Box::pin(async move { Ok(Some(DocumentSymbolResponse::Nested(symbols))) })
+        box_future(Ok(Some(DocumentSymbolResponse::Nested(symbols))))
     }
 
     fn symbol(
@@ -503,6 +501,11 @@ impl LanguageServer for ServerState {
 
         let symbols = index::get_workspace_symbols(&query, &self.workspace_symbols);
 
-        Box::pin(async { Ok(Some(WorkspaceSymbolResponse::Nested(symbols))) })
+        box_future(Ok(Some(WorkspaceSymbolResponse::Nested(symbols))))
     }
+}
+
+#[inline(always)]
+fn box_future<T: Send + 'static>(content: T) -> BoxFuture<'static, T> {
+    Box::pin(async { content })
 }

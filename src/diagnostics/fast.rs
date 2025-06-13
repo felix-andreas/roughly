@@ -174,9 +174,8 @@ pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
     }
 
     let mut diagnostics = Vec::new();
-    let mut cursor = node.walk();
     traverse(
-        &mut cursor,
+        &mut node.walk(),
         &mut diagnostics,
         rope,
         config,
