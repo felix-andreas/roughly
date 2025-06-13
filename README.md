@@ -4,18 +4,19 @@
 
 # Roughly
 
-*The R(oughly good enough) Language Server*
+*An R language server, linter, and code formatter, written in Rust.*
 
 [**📚 Docs**](https://roughly.felixandreas.me) | [**📦 Releases**](https://github.com/felix-andreas/roughly/releases) | [**🧩 VS Code Extension**](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
 
 </div>
 
-Roughly is an R language server, linter, and code formatter, written in Rust.
+Roughly is an R language serve, linter, and code formatter, written in Rust.
 
-> [!WARNING]  
-> This project is a work in progress. Contributions and feedback are welcome!
+It can be used either as a standalone command-line tool or as an extension in supported editors like VS Code.
 
-## Installation
+## Roughly CLI
+
+You can install the Roughly CLI by downloading a pre-built binary or by building from source.
 
 ### Download Binary (Recommended)
 
@@ -29,7 +30,7 @@ Alternatively, build from source (requires the Rust nightly):
 cargo build --release
 ```
 
-## Usage
+### Usage
 
 Run roughly as a formatter:
 
@@ -54,6 +55,8 @@ roughly server          # Usually started automatically by your editor
 ```
 
 ## VS Code extension
+
+Roughly can also be used as a VS Code extension.
 
 ### From Marketplace (Recommended)
 
