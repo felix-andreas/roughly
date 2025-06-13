@@ -4,7 +4,7 @@ members = ["crates/roughly"]
 default-members = ["crates/roughly"]
 
 [workspace.package]
-version = "0.0.4"
+version = "0.0.5"
 
 [workspace.dependencies]
 clap = { version = "4.5.40", features = ["derive"] }
