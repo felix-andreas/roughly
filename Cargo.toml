@@ -1,6 +1,7 @@
 [workspace]
-members = ["roughly"]
 resolver = "3"
+members = ["crates/roughly"]
+default-members = ["crates/roughly"]
 
 [workspace.package]
 version = "0.0.4"
@@ -36,5 +37,15 @@ futures = { version = "0.3.31" }
 # dev-dependencies
 insta = "1.43.1"
 
-# [target.'cfg(not(unix))'.dependencies]
+# cfg(not(unix)) dependencies
 tokio-util = { version = "0.7.15", features = ["compat"] }
+
+[profile.dev.package]
+insta.opt-level = 3
+similar.opt-level = 3
+tree-sitter.opt-level = 3
+tree-sitter-r.opt-level = 3
+
+[profile.release]
+strip = true
+lto = true
