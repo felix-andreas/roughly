@@ -1,9 +1,11 @@
-[package]
-name = "roughly"
-version = "0.0.4"
-edition = "2024"
+[workspace]
+members = ["roughly"]
+resolver = "3"
 
-[dependencies]
+[workspace.package]
+version = "0.0.4"
+
+[workspace.dependencies]
 clap = { version = "4.5.40", features = ["derive"] }
 console = "0.15.11"
 ignore = "0.4.23"
@@ -14,10 +16,10 @@ serde = "1.0.219"
 similar = { version = "2.7.0", features = ["inline"] }
 thiserror = "2.0.12"
 tokio = { version = "1.45.1", features = [
-	"rt-multi-thread",
-	"macros",
-	"io-std",
-	"time",
+    "rt-multi-thread",
+    "macros",
+    "io-std",
+    "time",
 ] }
 toml = "0.8.23"
 tracing = "0.1.41"
@@ -27,26 +29,12 @@ tree-sitter = "0.25.6"
 tree-sitter-r = "1.2.0"
 
 # async-lsp
-async-lsp = { version = "0.2.2", features = ["tokio"], optional = true }
-tower = { version = "0.5.2", optional = true }
-futures = { version = "0.3.31", optional = true }
+async-lsp = { version = "0.2.2", features = ["tokio"] }
+tower = { version = "0.5.2" }
+futures = { version = "0.3.31" }
 
-[target.'cfg(not(unix))'.dependencies]
-tokio-util = { version = "0.7.15", features = ["compat"] }
-
-[dev-dependencies]
+# dev-dependencies
 insta = "1.43.1"
 
-[features]
-default = ["async-lsp"]
-async-lsp = ["dep:async-lsp", "dep:tower", "dep:futures"]
-
-[profile.dev.package]
-insta.opt-level = 3
-similar.opt-level = 3
-tree-sitter.opt-level = 3
-tree-sitter-r.opt-level = 3
-
-[profile.release]
-strip = true
-lto = true
+# [target.'cfg(not(unix))'.dependencies]
+tokio-util = { version = "0.7.15", features = ["compat"] }
