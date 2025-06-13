@@ -1,9 +1,8 @@
-#[cfg(feature = "async-lsp")]
-use crate::lsp_types::Url as Uri;
-#[cfg(feature = "tower-lsp")]
-use uri_ext::UriExt;
 use {
-    crate::{lsp_types::*, tree, utils},
+    crate::{
+        lsp_types::{Url as Uri, *},
+        tree, utils,
+    },
     ropey::Rope,
     std::{
         collections::HashMap,
