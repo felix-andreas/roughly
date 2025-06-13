@@ -10,9 +10,7 @@
 
 </div>
 
-Roughly is an R language serve, linter, and code formatter, written in Rust.
-
-It can be used either as a standalone command-line tool or as an extension in supported editors like VS Code.
+Roughly can be used either as a standalone command-line tool or as an extension in supported editors like VS Code.
 
 ## Roughly CLI
 

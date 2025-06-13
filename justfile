@@ -163,3 +163,16 @@ rlib *args:
 
 vsce-release-flag $kind:
 	@echo {{ if kind == "release" { "" } else if kind == "pre-release" { "--pre-release" } else { error("kind must be either release or pre-release") } }}
+
+#
+# ROFY
+#
+
+publish-rofy $version="nightly":
+	cargo build -p rofy --release --target x86_64-unknown-linux-gnu
+	cargo build -p rofy --release --target x86_64-pc-windows-gnu
+	gh release create rofy-$version \
+		"target/x86_64-unknown-linux-gnu/release/rofy#rofy (linux-x64)" \
+		"target/x86_64-pc-windows-gnu/release/rofy.exe#rofy (win32-x64)" \
+		--notes "" \
+		--prerelease
