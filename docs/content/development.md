@@ -191,13 +191,15 @@ See https://github.com/r-lib/tree-sitter-r/issues/166
 
 * https://homepages.inf.ed.ac.uk/wadler/papers/prettier/prettier.pdf
 
-### Type Checker
-
-* https://github.com/Glyphack/enderpy
-
 ### Out of order issue
 
 * https://github.com/ebkalderon/tower-lsp/issues/284
 * https://github.com/ethereum/fe/pull/1022
 * https://github.com/oxalica/async-lsp
 * https://github.com/tower-lsp-community/tower-lsp-server/issues/36
+
+## Language Design / Typing
+
+* https://github.com/Glyphack/enderpy
+* https://github.com/dgkf/R
+* https://github.com/fabriceHategekimana/typr

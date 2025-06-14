@@ -24,11 +24,11 @@
           system: nixpkgs':
           import nixpkgs' {
             inherit system;
+            config.allowUnsupportedSystem = true;
             overlays = [
               devshell.overlays.default
               (import rust-overlay)
             ];
-            allowUnsupportedSystem = true;
           };
         rpkgs =
           pkgs: with pkgs.rPackages; [
@@ -40,19 +40,27 @@
         default =
           let
             pkgs = self.lib.makePkgs system nixpkgs;
+            pkgsWin64 = pkgs.pkgsCross.mingwW64;
           in
           # pkgs.devshell.mkShell {
           # required for depsBuildBuild
           pkgs.mkShell {
             motd = "";
             buildInputs = [ pkgs.bashInteractive ];
-            depsBuildBuild = with pkgs; [
-              pkgsCross.mingwW64.stdenv.cc
-              pkgsCross.mingwW64.windows.pthreads
+            depsBuildBuild = [
+              pkgsWin64.stdenv.cc
+              pkgsWin64.windows.pthreads
             ];
+            # TODO: we need to link R for rofy
+            # nativeBuildInputs = [
+            #   (pkgsWin64.rWrapper.override {
+            #     packages = [ pkgsWin64.R ];
+            #     threads = pkgsWin64.windows.pthreads;
+            #   })
+            # ];
             # TODO: fixes issue undefined reference to `ts_node_end_byte' in tree-sitter
             # maybe we want a separate derivation to build for windows??
-            TARGET_CC = "${pkgs.pkgsCross.mingwW64.stdenv.cc}/bin/${pkgs.pkgsCross.mingwW64.stdenv.cc.targetPrefix}cc";
+            TARGET_CC = "${pkgsWin64.stdenv.cc}/bin/${pkgsWin64.stdenv.cc.targetPrefix}cc";
             packages = with pkgs; [
               just
               (radianWrapper.override {

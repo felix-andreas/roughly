@@ -4,18 +4,41 @@
 
 # Roughly
 
-*The R(oughly good enough) Language Server*
-
 [**📚 Docs**](https://roughly.felixandreas.me) | [**📦 Releases**](https://github.com/felix-andreas/roughly/releases) | [**🧩 VS Code Extension**](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
+
+*An R language server, linter, and code formatter, written in Rust.*
 
 </div>
 
-Roughly is an R language server, linter, and code formatter, written in Rust.
+Roughly can be used either as a standalone command-line tool or as an extension in supported editors like VS Code.
 
-> [!WARNING]  
-> This project is a work in progress. Contributions and feedback are welcome!
+## Features
 
-## Installation
+Roughly aims to support the following language server features (some are experimental or in progress):
+
+- **Symbol Search**
+  - Indexing of global symbols, S4 classes/generics/methods and R6 classes/methods
+  - Search current document (*VS Code:* <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd>)
+  - Search global workspace (*VS Code:* <kbd>Ctrl</kbd> + <kbd>T</kbd>)
+
+- **Diagnostics**
+  - Syntax errors (including missing or trailing commas)
+  - Basic linting rules (e.g. `<-` assignment and variable naming)
+  - Unused variables (🧪 experimental)
+
+- **Formatting**
+  - Entire documents
+  - Selected ranges (🧪 experimental)
+
+- **Code Completion**
+  - Local symbols
+  - Global symbols
+  - Package symbols (⚠️ missing)
+  - Signature help (⚠️ missing)
+
+## Roughly CLI
+
+You can install the Roughly CLI by downloading a pre-built binary or by building from source.
 
 ### Download Binary (Recommended)
 
@@ -29,7 +52,7 @@ Alternatively, build from source (requires the Rust nightly):
 cargo build --release
 ```
 
-## Usage
+### Usage
 
 Run roughly as a formatter:
 
@@ -54,6 +77,8 @@ roughly server          # Usually started automatically by your editor
 ```
 
 ## VS Code extension
+
+Roughly can also be used as a VS Code extension.
 
 ### From Marketplace (Recommended)
 
@@ -98,12 +123,16 @@ You can customize the Roughly extension in VS Code through the following setting
   "roughly.args": ["server", "--experimental"]
 ```
 
+### Commands
+
+You can access Roughly-specific commands in VS Code via the Command Palette (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>):
+
+- **Roughly: Start/Stop/Restart Server**
+- **Roughly: Open logs**
+
 ## RStudio Integration
 
 Roughly can be used as an external formatter in RStudio. See the [RStudio setup guide](https://roughly.felixandreas.me/getting-started/#rstudio-formatter-only) for detailed instructions.
-
-You can configure Roughly as an [external formatter in RStudio](https://roughly.felixandreas.me/getting-started/#rstudio-formatter-only)
-
 
 ## Configuration
 
@@ -113,30 +142,6 @@ You can configure roughly via a project-specific `roughly.toml` file:
 case = "snake_case" # or camelCase
 spaces = 2
 ```
-
-## Features
-
-* Completion
-  * Globals
-  * (WIP) Locals
-* Formatting
-* Diagnostics
-  * Syntax
-  * Missing and trailing commas
-  * Assignments, casing
-* Indexing
-  * Globals
-  * S4
-    * Classes
-    * Generics
-    * Methods
-  * (TODO) R6
-* Goto Document Symbol (VS Code shortcut <kbd>Ctrl</kbd> <kbd>Shift</kbd> + <kbd>O</kbd>)
-* Goto Workspace Symbol (VS Code shortcut  <kbd>Ctrl</kbd> + <kbd>T</kbd>)
-* VS Code Extension
-  * Commands (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd>)
-    * Start/Stop/Restart the Language Server
-    * Open logs
 
 ## Development
 
