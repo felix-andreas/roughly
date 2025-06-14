@@ -14,7 +14,7 @@
 ---
 ## ✨ Features
 
-- **Multiline editing**: Supports writing and editing multi-line R code.
+- **Multiline editing**: Write and edit multi-line R code directly in the REPL.
 - **Command history**: Recall previous commands using <kbd>Ctrl</kbd> + <kbd>R</kbd> (reverse search).
 - **Vim mode**: Optional Vim keybindings available with `rofy --vi`.
 - **Syntax highlighting**: Provides syntax highlighting for R code.
