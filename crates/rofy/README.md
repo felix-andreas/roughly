@@ -4,12 +4,14 @@
 
 # Rofy
 
-*An experimental interactive R REPL written in Rust.*
+*An experimental R REPL written in Rust.*
 
 </div>
 
----
+> [!WARNING]  
+> This project is in an extremely early stage of development.
 
+---
 ## ✨ Features
 
 - **Multiline editing**: Supports writing and editing multi-line R code.
