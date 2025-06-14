@@ -181,7 +181,8 @@ mod tests {
         (line, character): (u32, u32),
     ) -> (String, Vec<(String, CompletionItemKind)>) {
         let rope = Rope::from_str(text);
-        let tree = tree::parse(text, None);
+
+        let tree = tree::parse(&mut tree::new_parser(), text, None);
         let position = Position::new(line, character);
         let query = extract_query(position, &rope).unwrap();
         let items = match get(position, &rope, &tree, &HashMap::new()).unwrap() {

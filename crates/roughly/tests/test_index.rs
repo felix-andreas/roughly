@@ -8,7 +8,7 @@ use {
 
 fn setup(text: &str, nested: bool) -> Vec<DocumentSymbol> {
     let rope = Rope::from_str(text);
-    let tree = tree::parse_rope(&rope, None);
+    let tree = tree::parse_rope(&mut tree::new_parser(), &rope, None);
     index::index(tree.root_node(), &rope, nested)
 }
 
@@ -311,7 +311,7 @@ fn get_argument_named_and_positional() {
         )
     "#};
     let rope = Rope::from_str(text);
-    let tree = tree::parse_rope(&rope, None);
+    let tree = tree::parse_rope(&mut tree::new_parser(), &rope, None);
     let arguments = tree
         .root_node()
         .child(0)

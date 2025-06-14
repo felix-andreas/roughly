@@ -31,7 +31,7 @@ use {
         time::Instant,
     },
     tower::ServiceBuilder,
-    tree_sitter::{InputEdit, Point, Tree},
+    tree_sitter::{InputEdit, Parser, Point, Tree},
 };
 
 // #[tokio::main] # TODO: understand if this makes a difference???
@@ -80,6 +80,7 @@ struct ServerState {
     document_map: HashMap<PathBuf, Document>,
     document_symbols: HashMap<PathBuf, Vec<DocumentSymbol>>,
     workspace_symbols: HashMap<PathBuf, Vec<DocumentSymbol>>,
+    parser: Parser,
 }
 
 #[derive(Debug)]
@@ -98,6 +99,7 @@ impl ServerState {
             workspace_symbols: HashMap::new(),
             document_symbols: HashMap::new(),
             document_map: HashMap::new(),
+            parser: tree::new_parser(),
         })
     }
 }
@@ -112,7 +114,7 @@ impl LanguageServer for ServerState {
     ) -> BoxFuture<'static, Result<InitializeResult, ResponseError>> {
         tracing::info!("initialize");
 
-        match index::index_dir(&self.base_path) {
+        match index::index_dir(&self.base_path, &mut self.parser) {
             Ok(symbols) => self.workspace_symbols.extend(symbols),
             Err(IndexError) => self
                 .client
@@ -167,7 +169,7 @@ impl LanguageServer for ServerState {
         tracing::debug!(?path, "did open");
 
         let rope = Rope::from_str(text);
-        let tree = tree::parse(text, None);
+        let tree = tree::parse(&mut self.parser, text, None);
 
         let diagnostics = diagnostics::analyze_full(
             tree.root_node(),
@@ -274,7 +276,7 @@ impl LanguageServer for ServerState {
             });
         }
 
-        document.tree = tree::parse_rope(rope, Some(tree));
+        document.tree = tree::parse_rope(&mut self.parser, rope, Some(tree));
 
         // DEBUG
         // eprintln!("<--DOCUMENT-->\n{}<--END-->", rope);
