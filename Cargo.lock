@@ -1620,6 +1620,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "typing"
+version = "0.0.5"
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
