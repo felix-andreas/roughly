@@ -20,16 +20,13 @@ The extension will automatically start the Roughly language server for R files. 
 
 You can customize the Roughly extension in VS Code through the following settings:
 
-* Specify a custom binary path to use your own version of Roughly instead of the bundled one:
-
 ```json
+{
+  // Use a custom binary instead of the bundled one
   "roughly.path": "/path/to/roughly"
-```
-
-* Pass additional arguments to the language server, e.g., to enable experimental features:
-
-```json
+  // Pass extra arguments to the language server
   "roughly.args": ["server", "--experimental"]
+}
 ```
 
 ## Highlights
@@ -38,11 +35,11 @@ You can customize the Roughly extension in VS Code through the following setting
 
 ![Format Document](https://assets-felixandreas-me.pages.dev/roughly/format.gif)
 
-### Workspace Symbol Search (Ctrl + T)
+### Workspace Symbol Search <kbd>Ctrl</kbd> + <kbd>T</kbd>
 
 ![Workspace Symbol Search](https://assets-felixandreas-me.pages.dev/roughly/workspace-symbols.gif)
 
-### Document Symbol Search (Ctrl + Shift + O)
+### Document Symbol Search  <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd>
 
 ![Document Symbol Search](https://assets-felixandreas-me.pages.dev/roughly/document-symbols.gif)
 

@@ -111,16 +111,14 @@ code --install-extension roughly.vsix
 
 You can customize the Roughly extension in VS Code through the following settings:
 
-* Specify a custom binary path to use your own version of Roughly instead of the bundled one:
 
 ```json
+{
+  // Use a custom binary instead of the bundled one
   "roughly.path": "/path/to/roughly"
-```
-
-* Pass additional arguments to the language server, e.g to enable experimental features:
-
-```json
+  // Pass extra arguments to the language server
   "roughly.args": ["server", "--experimental"]
+}
 ```
 
 ### Commands
