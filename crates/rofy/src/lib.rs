@@ -17,13 +17,14 @@ use {
 pub fn run(vi: bool) {
     let language = Arc::new(RwLock::new(Language::new()));
 
-    let highligher = RoughlyHighlighter::new(Arc::clone(&language));
+    let prompt = RPrompt;
+
+    let highlighter = RHighlighter::new(Arc::clone(&language));
     let hinter = DefaultHinter::default().with_style(Style::new().fg(AnsiColor::DarkGray));
-    let validator = RoughlyValidator::new(Arc::clone(&language));
-    let prompt = RoughlyPrompt;
+    let validator = RValidator::new(Arc::clone(&language));
 
     let mut line_editor = Reedline::create()
-        .with_highlighter(Box::new(highligher))
+        .with_highlighter(Box::new(highlighter))
         .with_hinter(Box::new(hinter))
         .with_validator(Box::new(validator))
         .with_edit_mode(if vi {
@@ -60,9 +61,9 @@ pub fn run(vi: bool) {
     }
 }
 
-struct RoughlyPrompt;
+struct RPrompt;
 
-impl Prompt for RoughlyPrompt {
+impl Prompt for RPrompt {
     fn render_prompt_left(&self) -> Cow<'_, str> {
         "".into()
     }
@@ -122,17 +123,17 @@ impl Prompt for RoughlyPrompt {
     }
 }
 
-struct RoughlyHighlighter {
+struct RHighlighter {
     language: Arc<RwLock<Language>>,
 }
 
-impl RoughlyHighlighter {
+impl RHighlighter {
     fn new(language: Arc<RwLock<Language>>) -> Self {
         Self { language }
     }
 }
 
-impl Highlighter for RoughlyHighlighter {
+impl Highlighter for RHighlighter {
     fn highlight(&self, line: &str, _cursor: usize) -> StyledText {
         let mut styled_text = StyledText::new();
 
@@ -207,8 +208,6 @@ fn traverse(cursor: &mut TreeCursor, state: &mut Vec<(Style, Range<usize>)>) {
 
 struct Language {
     parser: Parser,
-    // TODO: use this to store the tree
-    // tree: Option<Tree>,
 }
 
 impl Language {
@@ -221,17 +220,17 @@ impl Language {
     }
 }
 
-struct RoughlyValidator {
+struct RValidator {
     language: Arc<RwLock<Language>>,
 }
 
-impl RoughlyValidator {
+impl RValidator {
     fn new(language: Arc<RwLock<Language>>) -> Self {
         Self { language }
     }
 }
 
-impl Validator for RoughlyValidator {
+impl Validator for RValidator {
     fn validate(&self, line: &str) -> ValidationResult {
         let tree = {
             let mut language = self.language.write().unwrap();
