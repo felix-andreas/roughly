@@ -8,8 +8,8 @@
 
 </div>
 
-> [!WARNING]  
-> This project is in an extremely early stage of development.
+> [!WARNING]
+> This project is in an extremely early stage of development. It is an experiment and, if successful, may be integrated into the Roughly CLI.
 
 ---
 ## ✨ Features

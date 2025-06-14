@@ -4,9 +4,9 @@
 
 # Roughly
 
-*An R language server, linter, and code formatter, written in Rust.*
-
 [**📚 Docs**](https://roughly.felixandreas.me) | [**📦 Releases**](https://github.com/felix-andreas/roughly/releases) | [**🧩 VS Code Extension**](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
+
+*An R language server, linter, and code formatter, written in Rust.*
 
 </div>
 
@@ -102,9 +102,6 @@ You can customize the Roughly extension in VS Code through the following setting
 ## RStudio Integration
 
 Roughly can be used as an external formatter in RStudio. See the [RStudio setup guide](https://roughly.felixandreas.me/getting-started/#rstudio-formatter-only) for detailed instructions.
-
-You can configure Roughly as an [external formatter in RStudio](https://roughly.felixandreas.me/getting-started/#rstudio-formatter-only)
-
 
 ## Configuration
 
