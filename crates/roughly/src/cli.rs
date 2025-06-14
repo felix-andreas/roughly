@@ -1,6 +1,6 @@
 use {
     crate::{
-        config, dev, diagnostics,
+        config, diagnostics,
         format::{self, LineEnding},
         index,
         lsp_types::{self, DiagnosticSeverity},
@@ -445,8 +445,8 @@ pub fn ast(path: &Path) -> Result<(), DebugError> {
             return Err(DebugError);
         }
     };
-    let mut parser = tree::new_parser();
-    let tree = tree::parse(&mut parser, &text, None);
-    eprintln!("{}", dev::format_tree(tree.root_node()));
+
+    let tree = tree::parse(&mut tree::new_parser(), &text, None);
+    eprintln!("{}", tree::format(tree.root_node()));
     Ok(())
 }
