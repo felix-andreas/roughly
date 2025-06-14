@@ -218,10 +218,6 @@ impl LanguageServer for ServerState {
         &mut self,
         params: DidChangeTextDocumentParams,
     ) -> ControlFlow<async_lsp::Result<()>> {
-        // DEBUG
-        // let random_duration = 200 + rand::random::<u64>() % 401;
-        // tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let content_changes = params.content_changes;
@@ -276,16 +272,22 @@ impl LanguageServer for ServerState {
             });
         }
 
-        document.tree = tree::parse_rope(&mut self.parser, rope, Some(tree));
-
-        // DEBUG
-        // eprintln!("<--DOCUMENT-->\n{}<--END-->", rope);
+        *tree = tree::parse_rope(&mut self.parser, rope, Some(tree));
 
         let diagnostics = diagnostics::analyze_fast(
-            document.tree.root_node(),
-            &document.rope,
+            tree.root_node(),
+            rope,
             diagnostics::Config::from_config(self.config, self.experimental),
         );
+
+        // note: We must re-index on every change (not just on save)
+        // because textDocument/documentSymbol is triggered before textDocument/didSave.
+        let symbols = index::index(tree.root_node(), rope, false);
+        if path.starts_with(&self.base_path) {
+            self.workspace_symbols.insert(path, symbols);
+        } else {
+            self.document_symbols.insert(path, symbols);
+        }
 
         if let Err(error) = self
             .client
@@ -318,12 +320,6 @@ impl LanguageServer for ServerState {
         };
 
         let (rope, root_node) = (&document.rope, document.tree.root_node());
-        let symbols = index::index(root_node, rope, false);
-        if path.starts_with(&self.base_path) {
-            self.workspace_symbols.insert(path, symbols);
-        } else {
-            self.document_symbols.insert(path, symbols);
-        }
 
         let diagnostics = diagnostics::analyze_full(
             root_node,
