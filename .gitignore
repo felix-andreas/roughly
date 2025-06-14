@@ -14,5 +14,5 @@ node_modules
 .local
 .rlib
 r-examples
-R
+R*/
 roughly.toml
