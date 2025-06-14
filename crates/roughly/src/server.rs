@@ -212,8 +212,6 @@ impl LanguageServer for ServerState {
         ControlFlow::Continue(())
     }
 
-    // inspired by:
-    // https://github.com/marceline-cramer/saturn-v/blob/93d1c8fd022f5b4905928d6e9154385c5b6822ab/lsp/src/lib.rs
     fn did_change(
         &mut self,
         params: DidChangeTextDocumentParams,
@@ -231,6 +229,8 @@ impl LanguageServer for ServerState {
             return ControlFlow::Continue(());
         };
 
+        // UPDATE ROPE AND TREE
+        // based on: https://github.com/marceline-cramer/saturn-v/blob/93d1c8fd02/lsp/src/lib.rs
         let (rope, tree) = (&mut document.rope, &mut document.tree);
         for change in content_changes {
             let range = change.range.unwrap();
@@ -274,12 +274,14 @@ impl LanguageServer for ServerState {
 
         *tree = tree::parse_rope(&mut self.parser, rope, Some(tree));
 
+        // UPDATE DIAGNOSTICS
         let diagnostics = diagnostics::analyze_fast(
             tree.root_node(),
             rope,
             diagnostics::Config::from_config(self.config, self.experimental),
         );
 
+        // UPDATE SYMBOLS
         // note: We must re-index on every change (not just on save)
         // because textDocument/documentSymbol is triggered before textDocument/didSave.
         let symbols = index::index(tree.root_node(), rope, false);
