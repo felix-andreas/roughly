@@ -274,7 +274,8 @@ mod tests {
     use {super::*, crate::tree};
 
     fn get_unused_names(code: &str) -> Vec<String> {
-        let tree = tree::parse(code, None);
+        let mut parser = tree::new_parser();
+        let tree = tree::parse(&mut parser, code, None);
         let rope = Rope::from_str(code);
 
         let mut scopes = ScopeTree::new();

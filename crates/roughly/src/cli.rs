@@ -58,6 +58,8 @@ pub fn error(message: &str) {
 pub struct CheckError;
 
 pub fn check(maybe_files: Option<&[PathBuf]>, experimental: bool) -> Result<(), CheckError> {
+    let mut parser = tree::new_parser();
+
     let root: Vec<PathBuf> = vec![".".into()];
     let files = maybe_files.unwrap_or(&root);
 
@@ -106,7 +108,7 @@ pub fn check(maybe_files: Option<&[PathBuf]>, experimental: bool) -> Result<(), 
                     continue;
                 }
             };
-            let tree = tree::parse(&old, None);
+            let tree = tree::parse(&mut parser, &old, None);
             let rope = Rope::from_str(&old);
 
             for diagnostic in diagnostics::analyze_full(tree.root_node(), &rope, config) {
@@ -210,6 +212,8 @@ pub fn check(maybe_files: Option<&[PathBuf]>, experimental: bool) -> Result<(), 
 pub struct FmtError;
 
 pub fn fmt(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(), FmtError> {
+    let mut parser = tree::new_parser();
+
     let root: Vec<PathBuf> = vec![".".into()];
     let files = maybe_files.unwrap_or(&root);
 
@@ -262,7 +266,7 @@ pub fn fmt(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(
                     continue;
                 }
             };
-            let tree = tree::parse(&old, None);
+            let tree = tree::parse(&mut parser, &old, None);
             let rope = Rope::from_str(&old);
             let new = match format::format(tree.root_node(), &rope, config) {
                 Ok(new) => new,
@@ -336,6 +340,8 @@ pub fn index(
     recursive: bool,
     print_items: bool,
 ) -> Result<(), DebugError> {
+    let mut parser = tree::new_parser();
+
     let root: Vec<PathBuf> = vec![".".into()];
     let paths = paths.unwrap_or(&root);
 
@@ -370,7 +376,7 @@ pub fn index(
 
             // Only time the indexing operation, not the I/O
             let start = std::time::Instant::now();
-            let tree = tree::parse_rope(&rope, None);
+            let tree = tree::parse_rope(&mut parser, &rope, None);
             let symbols = index::index(tree.root_node(), &rope, recursive);
             let elapsed = start.elapsed();
 
@@ -439,7 +445,8 @@ pub fn ast(path: &Path) -> Result<(), DebugError> {
             return Err(DebugError);
         }
     };
-    let tree = tree::parse(&text, None);
+    let mut parser = tree::new_parser();
+    let tree = tree::parse(&mut parser, &text, None);
     eprintln!("{}", dev::format_tree(tree.root_node()));
     Ok(())
 }

@@ -8,7 +8,7 @@ use {
         collections::HashMap,
         path::{Path, PathBuf},
     },
-    tree_sitter::Node,
+    tree_sitter::{Node, Parser},
 };
 
 pub trait SymbolsMap {
@@ -76,7 +76,10 @@ pub fn get_workspace_symbols(
 #[derive(Debug)]
 pub struct IndexError;
 
-pub fn index_dir(base_path: &Path) -> Result<Vec<(PathBuf, Vec<DocumentSymbol>)>, IndexError> {
+pub fn index_dir(
+    base_path: &Path,
+    parser: &mut Parser,
+) -> Result<Vec<(PathBuf, Vec<DocumentSymbol>)>, IndexError> {
     let start = std::time::Instant::now();
 
     let mut n = 0;
@@ -97,7 +100,7 @@ pub fn index_dir(base_path: &Path) -> Result<Vec<(PathBuf, Vec<DocumentSymbol>)>
             path.is_file() && path.extension().is_some_and(|ext| ext == "R" || ext == "r")
         })
         .map(|path| {
-            let symbols = index_file(&path);
+            let symbols = index_file(&path, parser);
             n += symbols.len();
             (path, symbols)
         })
@@ -111,13 +114,13 @@ pub fn index_dir(base_path: &Path) -> Result<Vec<(PathBuf, Vec<DocumentSymbol>)>
     Ok(symbols)
 }
 
-pub fn index_file(path: impl AsRef<Path>) -> Vec<DocumentSymbol> {
+pub fn index_file(path: impl AsRef<Path>, parser: &mut Parser) -> Vec<DocumentSymbol> {
     let Ok(rope) = utils::read_to_rope(&path) else {
         tracing::error!(message = "indexing: couldn't read file", path = %path.as_ref().display());
         return vec![];
     };
 
-    let tree = tree::parse_rope(&rope, None);
+    let tree = tree::parse_rope(parser, &rope, None);
     index(tree.root_node(), &rope, false)
 }
 
