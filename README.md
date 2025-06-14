@@ -12,6 +12,30 @@
 
 Roughly can be used either as a standalone command-line tool or as an extension in supported editors like VS Code.
 
+## Features
+
+Roughly aims to support the following language server features (some are experimental or in progress):
+
+- **Symbol Search**
+  - Indexing of global symbols, S4 classes/generics/methods and R6 classes/methods
+  - Search current document (*VS Code:* <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd>)
+  - Search global workspace (*VS Code:* <kbd>Ctrl</kbd> + <kbd>T</kbd>)
+
+- **Diagnostics**
+  - Syntax errors (including missing or trailing commas)
+  - Basic linting rules (e.g. `<-` assignment and variable naming)
+  - Unused variables (🧪 experimental)
+
+- **Formatting**
+  - Entire documents
+  - Selected ranges (🧪 experimental)
+
+- **Code Completion**
+  - Local symbols
+  - Global symbols
+  - Package symbols (⚠️ missing)
+  - Signature help (⚠️ missing)
+
 ## Roughly CLI
 
 You can install the Roughly CLI by downloading a pre-built binary or by building from source.
@@ -99,6 +123,13 @@ You can customize the Roughly extension in VS Code through the following setting
   "roughly.args": ["server", "--experimental"]
 ```
 
+### Commands
+
+You can access Roughly-specific commands in VS Code via the Command Palette (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>):
+
+- **Roughly: Start/Stop/Restart Server**
+- **Roughly: Open logs**
+
 ## RStudio Integration
 
 Roughly can be used as an external formatter in RStudio. See the [RStudio setup guide](https://roughly.felixandreas.me/getting-started/#rstudio-formatter-only) for detailed instructions.
@@ -111,30 +142,6 @@ You can configure roughly via a project-specific `roughly.toml` file:
 case = "snake_case" # or camelCase
 spaces = 2
 ```
-
-## Features
-
-* Completion
-  * Globals
-  * (WIP) Locals
-* Formatting
-* Diagnostics
-  * Syntax
-  * Missing and trailing commas
-  * Assignments, casing
-* Indexing
-  * Globals
-  * S4
-    * Classes
-    * Generics
-    * Methods
-  * (TODO) R6
-* Goto Document Symbol (VS Code shortcut <kbd>Ctrl</kbd> <kbd>Shift</kbd> + <kbd>O</kbd>)
-* Goto Workspace Symbol (VS Code shortcut  <kbd>Ctrl</kbd> + <kbd>T</kbd>)
-* VS Code Extension
-  * Commands (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd>)
-    * Start/Stop/Restart the Language Server
-    * Open logs
 
 ## Development
 
