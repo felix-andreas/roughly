@@ -1,5 +1,7 @@
 # Static Typing for R
 
+This document aims to serve as a design specification for the semantics of a static type checker for R, outlining the intended type system, annotation syntax, and key design considerations.
+
 > [!WARNING]
 > This project is currently in the conceptual and planning phase. This is a design document only—there is no working implementation yet, and all details are subject to change.
 
@@ -11,9 +13,11 @@ Adding static type checking to R is inherently difficult due to its dynamic natu
 
 A key design decision is how to implement type hints in R code.
 
+### Option A: No Type hints
+
 One approach is to avoid requiring any type hints, as seen in languages like Gleam, Elm, or Roc. In this model, the type checker attempts to infer all types automatically. While this can make code more concise, it may cause type errors to surface far from their actual source, making debugging more difficult. These languages also support explicit type annotations. In summary, type inference reduces boilerplate, but type hints or annotations are still needed for clarity and better error localization.
 
-### Option A: Type hints in R syntax
+### Option B: Type hints in R syntax
 
 Embedding type hints directly in R code would require an alternative shell or frontend for R, compiling down to base R (similar to how TypeScript compiles to JavaScript).
 
@@ -32,7 +36,7 @@ names: character[] <- c("Alice", "Bob")
 
 However, this syntax would require major changes to R's parser and is not practical for early experimentation.
 
-### Option B: JSDoc-style comments
+### Option C: JSDoc-style comments
 
 JSDoc is an alternative syntax for TypeScript that uses the same underlying type system and type checker. In this approach, types are provided in comments, making it practical for prototyping and not requiring changes to R itself.
 
@@ -62,28 +66,44 @@ R has a small set of core types:
 - Expression objects
 - Function objects
 - NULL
-- Builtin objects and special forms
 - Promise objects
 - Dot-dot-dot
 - Environments
+- S4 objects
 - Pairlist objects
 
-In practice, only Vectors, Lists, NULL, and Environments are commonly used. R objects can have attributes (key-value pairs), with the `class` attribute being especially important (e.g., data.frames are lists with special attributes). Reference-based classes use environments (e.g., data.table, R6).
+In practice, the most frequently used R types are Vectors, Lists, NULL, and Environments. All R objects (except NULL) can also carry arbitrary attributes—key-value pairs that provide metadata or modify behavior. The `class` attribute is particularly significant, as it enables R's object-oriented features (for example, a `data.frame` is essentially a list with specific attributes, including `class = "data.frame"`).
 
-Vectors and lists can have arbitrary length, but some constructs (like `if`) require scalars (length-one vectors). A sound type system for R must distinguish between scalars and general vectors.
+Reference-based object systems, such as those used by `data.table` and R6, leverage environments to implement mutable state and encapsulation.
+
+Vectors and lists can have arbitrary length, but some constructs (like `if`) require scalars (length-one vectors). Therefore a sound type system for R must distinguish between scalars and general vectors.
 
 ## Type System Goals
 
-- Add type features that exist only at type-checking time (not at runtime)
 - Support for:
-  - Scalar (length-one vector)
-  - Arrays (vector + array attributes)
-  - Records (lists of fixed size with names)
-  - Tuples (lists of fixed size, no names)
+  - **Scalar** (length-one vector)
+  - **Array** (vector + array attributes)
+  - **Record** (lists of fixed size with names)
+  - **Tuple** (lists of fixed size, no names)
+  - **Unknown** (type could not be inferred)
+  - **Any** (explicit opt-out of type checking)
 - Future:
-  - Sum types (tagged unions)
-  - Maybe/Result monads
-  - Nominal types
+  - **Sum types** (tagged unions)
+  - **Maybe/Result monads**
+  - **Nominal types**
+
+## Any and Unknown Types
+
+The types `Any` and `Unknown` are both special, permissive types in the type system:
+
+- **Any**: Every type can be coerced to `Any`. It is used when the programmer wants to explicitly opt out of type checking for a value or expression. Assigning a value to type `Any` disables type checking for that value, similar to `any` in TypeScript.
+
+- **Unknown**: Every type can also be coerced to `Unknown`. This type is used when the type checker is unable to infer the type of an expression. It acts as a placeholder for an unresolved type.
+
+While both types are permissive, their intent is different: `Any` is an explicit escape hatch for the programmer, while `Unknown` signals a limitation of the type checker.
+
+> [!NOTE]
+> In a possible strict mode, it could be a type error to use `Unknown` in a context where a specific type is required. This would help catch places where type inference failed and encourage more precise typing.
 
 ## Type Notation
 
@@ -95,12 +115,15 @@ The type of an R object must capture:
 
 Below are some example notations and their descriptions:
 
-| Type Notation                         | Description         |
-|---------------------------------------|---------------------|
-| `numeric`                             | scalar numeric      |
-| `character[]`                         | character vector    |
-| `list{name: character, age: numeric}` | record (named list) |
-| `list{character, numeric}`            | tuple (unnamed)     |
+| Type Notation                         | Description                       |
+| ------------------------------------- | --------------------------------- |
+| `null`                                | null                              |
+| `numeric`                             | scalar numeric                    |
+| `character[]`                         | character vector                  |
+| `list[numeric]`                       | list (homogenous)                 |
+| `list{name: character, age: numeric}` | record (heterogeneous, named)     |
+| `list(character, numeric)`            | tuple (heterogeneous, positional) |
+| `fn(character, age: numeric)`         | function                          |
 
 ### Variable Type Hint
 
