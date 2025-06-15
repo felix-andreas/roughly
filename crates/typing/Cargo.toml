@@ -1,0 +1,6 @@
+[package]
+name = "typing"
+edition = "2024"
+version.workspace = true
+
+[dependencies]
