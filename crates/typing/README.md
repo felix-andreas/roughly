@@ -224,14 +224,14 @@ This approach would benefit from a lightweight runtime library (e.g., `typing`) 
 
 ```r
 with_tag <- function(tag, value) {
-  attr(result, "tag") <- "Ok"
-  result
+  attr(value, "tag") <- tag
+  value
 }
 
-tag <- function(x) {
-  tag <- attr(x, "tag")
+tag <- function(value) {
+  tag <- attr(value, "tag")
   if (is.null(tag)) stop("Not a sum type")
-  return(tag)
+  tag
 }
 ```
 
@@ -241,23 +241,22 @@ Consider creating utility functions to simplify the creation and handling of fre
 #: @param value <T>
 #: @return [Ok <T>]
 Ok <- function(value) {
-  result <- list(value = value)
-  attr(result, "tag") <- "Ok"
-  class(result) <- "Result"
-  return(result)
+  value |> with_tag("Ok")
 }
 
-#: @param value <T>
-#: @return [Err <T>]
-Err <- function(message) {
-  result <- list(message = message)
-  attr(result, "tag") <- "Err"
-  class(result) <- "Result"
-  return(result)
+#: @param error <E>
+#: @return [Err <E>]
+Err <- function(error) {
+  error |> with_tag("Err")
 }
 
-is_ok <- function(x) tag(x) == "Ok"
-is_err <- function(x) tag(x) == "Err"
+#: @param x [Ok<T>, Err <E>]
+#: @return logical
+is_ok <- \(x) tag(x) == "Ok"
+
+#: @param x [Ok<T>, Err <E>]
+#: @return logical
+is_err <- \(x) tag(x) == "Err"
 ```
 
 ### Exhaustiveness Checking
