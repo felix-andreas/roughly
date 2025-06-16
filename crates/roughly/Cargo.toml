@@ -20,6 +20,7 @@ tracing-subscriber.workspace = true
 tracing-tree.workspace = true
 tree-sitter.workspace = true
 tree-sitter-r.workspace = true
+serde_json.workspace = true
 
 # async-lsp
 async-lsp.workspace = true

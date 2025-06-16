@@ -38,12 +38,12 @@ However, this syntax would require major changes to R's parser and is not practi
 
 ### Option C: JSDoc-style comments
 
-JSDoc is an alternative syntax for TypeScript that uses the same underlying type system and type checker. In this approach, types are provided in comments, making it practical for prototyping and not requiring changes to R itself.
+[JSDoc](https://www.typescriptlang.org/docs/handbook/jsdoc-supported-types.html) is an alternative syntax for TypeScript that uses the same underlying type system and type checker. In this approach, types are provided in comments, making it practical for prototyping and not requiring changes to R itself.
 
 ```r
 #: @param items character[] # character vector input
-#: @param count numeric  # scalar numeric input (expected length)
-#: @return logical       # returns a scalar logical
+#: @param count numeric     # scalar numeric input (expected length)
+#: @return logical          # returns a scalar logical
 has_expected_length <- function(items, count) {
   length(items) == count
 }
@@ -52,7 +52,7 @@ x <- 4 #: numeric
 names <- c("Alice", "Bob") #: character[]
 ```
 
-> [!INFO]
+> [!NOTE]
 > To distinguish from roxygen, use `#:` as the comment prefix:
 
 This is the option we use for now, as it enables experimentation without modifying R itself.

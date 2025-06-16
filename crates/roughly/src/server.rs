@@ -7,13 +7,16 @@ use {
         index::{self, IndexError},
         lsp_types::{
             CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+            DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
             DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
             DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol,
-            DocumentSymbolParams, DocumentSymbolResponse, InitializeParams, InitializeResult,
-            MessageType, OneOf, Position, PublishDiagnosticsParams, Range, SaveOptions,
-            ServerCapabilities, ServerInfo, ShowMessageParams, TextDocumentSyncCapability,
-            TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
-            WorkspaceSymbolParams, WorkspaceSymbolResponse,
+            DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
+            GlobPattern, InitializeParams, InitializeResult, InitializedParams, MessageType, OneOf,
+            Position, PublishDiagnosticsParams, Range, Registration, RegistrationParams,
+            SaveOptions, ServerCapabilities, ServerInfo, ShowMessageParams,
+            TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+            TextDocumentSyncSaveOptions, TextEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+            notification::{DidChangeWatchedFiles, Notification},
         },
         tree, utils,
     },
@@ -152,6 +155,42 @@ impl LanguageServer for ServerState {
                 version: Some(env!("CARGO_PKG_VERSION").into()),
             }),
         }))
+    }
+
+    fn initialized(&mut self, _: InitializedParams) -> ControlFlow<async_lsp::Result<()>> {
+        // TODO: consider to negotiate client capabilities
+        // see: https://github.com/oxalica/nil/blob/870a4b1b5f/crates/nil/src/capabilities.rs
+        let mut client = self.client.clone();
+        tokio::spawn(async move {
+            let register_options = DidChangeWatchedFilesRegistrationOptions {
+                watchers: vec![FileSystemWatcher {
+                    glob_pattern: GlobPattern::String(
+                        // TODO: don't hardcode path!
+                        "/home/felix/Projects/roughly/R/*.[rR]".into(),
+                    ),
+                    kind: None,
+                }],
+            };
+            let params = RegistrationParams {
+                registrations: vec![Registration {
+                    id: DidChangeWatchedFiles::METHOD.into(),
+                    method: DidChangeWatchedFiles::METHOD.into(),
+                    register_options: Some(serde_json::to_value(register_options).unwrap()),
+                }],
+            };
+
+            if let Err(err) = client.register_capability(params).await {
+                client
+                    .show_message(ShowMessageParams {
+                        typ: MessageType::ERROR,
+                        message: format!("failed to watch R files: {err:#}"),
+                    })
+                    .unwrap();
+            }
+            tracing::info!("registered file watching for R files");
+        });
+
+        ControlFlow::Continue(())
     }
 
     //
@@ -338,6 +377,26 @@ impl LanguageServer for ServerState {
             ))
         {
             tracing::error!(?error, "failed to publish diagnostics");
+        }
+
+        ControlFlow::Continue(())
+    }
+
+    fn did_change_watched_files(
+        &mut self,
+        params: DidChangeWatchedFilesParams,
+    ) -> ControlFlow<async_lsp::Result<()>> {
+        for change in params.changes {
+            let url = change.uri;
+            let typ = change.typ;
+
+            tracing::info!(url = url.path(), ?typ, "watched file changed");
+            // match change.typ {
+            //     FileChangeType::CHANGED => todo!(),
+            //     FileChangeType::CREATED => todo!(),
+            //     FileChangeType::DELETED => todo!(),
+            //     _ => unreachable!(),
+            // }
         }
 
         ControlFlow::Continue(())
