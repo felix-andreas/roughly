@@ -161,26 +161,29 @@ impl LanguageServer for ServerState {
     fn initialized(&mut self, _: InitializedParams) -> ControlFlow<async_lsp::Result<()>> {
         // TODO: consider to negotiate client capabilities
         // see: https://github.com/oxalica/nil/blob/870a4b1b5f/crates/nil/src/capabilities.rs
-        let mut client = self.client.clone();
-        let glob_pattern = GlobPattern::Relative(RelativePattern {
-            base_uri: OneOf::Right(Url::from_file_path(&self.base_path).unwrap()),
-            pattern: "*.[rR]".into(),
-        });
-        tokio::spawn(async move {
-            let register_options = DidChangeWatchedFilesRegistrationOptions {
-                watchers: vec![FileSystemWatcher {
-                    glob_pattern,
-                    kind: None,
-                }],
-            };
-            let params = RegistrationParams {
-                registrations: vec![Registration {
-                    id: DidChangeWatchedFiles::METHOD.into(),
-                    method: DidChangeWatchedFiles::METHOD.into(),
-                    register_options: Some(serde_json::to_value(register_options).unwrap()),
-                }],
-            };
+        let params = RegistrationParams {
+            registrations: vec![Registration {
+                id: DidChangeWatchedFiles::METHOD.into(),
+                method: DidChangeWatchedFiles::METHOD.into(),
+                register_options: Some(
+                    serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
+                        watchers: vec![FileSystemWatcher {
+                            glob_pattern: GlobPattern::Relative(RelativePattern {
+                                base_uri: OneOf::Right(
+                                    Url::from_file_path(&self.base_path).unwrap(),
+                                ),
+                                pattern: "*.[rR]".into(),
+                            }),
+                            kind: None,
+                        }],
+                    })
+                    .unwrap(),
+                ),
+            }],
+        };
 
+        let mut client = self.client.clone();
+        tokio::spawn(async move {
             if let Err(err) = client.register_capability(params).await {
                 client
                     .show_message(ShowMessageParams {
