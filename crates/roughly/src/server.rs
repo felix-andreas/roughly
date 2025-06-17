@@ -7,13 +7,17 @@ use {
         index::{self, IndexError},
         lsp_types::{
             CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+            DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
             DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
             DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol,
-            DocumentSymbolParams, DocumentSymbolResponse, InitializeParams, InitializeResult,
-            MessageType, OneOf, Position, PublishDiagnosticsParams, Range, SaveOptions,
-            ServerCapabilities, ServerInfo, ShowMessageParams, TextDocumentSyncCapability,
-            TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
-            WorkspaceSymbolParams, WorkspaceSymbolResponse,
+            DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
+            GlobPattern, InitializeParams, InitializeResult, InitializedParams, MessageType, OneOf,
+            Position, PublishDiagnosticsParams, Range, Registration, RegistrationParams,
+            RelativePattern, SaveOptions, ServerCapabilities, ServerInfo, ShowMessageParams,
+            TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+            TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceSymbolParams,
+            WorkspaceSymbolResponse,
+            notification::{DidChangeWatchedFiles, Notification},
         },
         tree, utils,
     },
@@ -78,7 +82,9 @@ struct ServerState {
     experimental: bool,
     base_path: PathBuf,
     document_map: HashMap<PathBuf, Document>,
+    /// stores symbolds for all other files
     document_symbols: HashMap<PathBuf, Vec<DocumentSymbol>>,
+    /// stores index for all files in R/ folder
     workspace_symbols: HashMap<PathBuf, Vec<DocumentSymbol>>,
     parser: Parser,
 }
@@ -154,6 +160,46 @@ impl LanguageServer for ServerState {
         }))
     }
 
+    fn initialized(&mut self, _: InitializedParams) -> ControlFlow<async_lsp::Result<()>> {
+        // TODO: consider to negotiate client capabilities
+        // see: https://github.com/oxalica/nil/blob/870a4b1b5f/crates/nil/src/capabilities.rs
+        let params = RegistrationParams {
+            registrations: vec![Registration {
+                id: DidChangeWatchedFiles::METHOD.into(),
+                method: DidChangeWatchedFiles::METHOD.into(),
+                register_options: Some(
+                    serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
+                        watchers: vec![FileSystemWatcher {
+                            glob_pattern: GlobPattern::Relative(RelativePattern {
+                                base_uri: OneOf::Right(
+                                    Url::from_file_path(&self.base_path).unwrap(),
+                                ),
+                                pattern: "*.[rR]".into(),
+                            }),
+                            kind: None,
+                        }],
+                    })
+                    .unwrap(),
+                ),
+            }],
+        };
+
+        let mut client = self.client.clone();
+        tokio::spawn(async move {
+            if let Err(err) = client.register_capability(params).await {
+                client
+                    .show_message(ShowMessageParams {
+                        typ: MessageType::ERROR,
+                        message: format!("failed to watch R files: {err:#}"),
+                    })
+                    .unwrap();
+            }
+            tracing::info!("registered file watching for R files");
+        });
+
+        ControlFlow::Continue(())
+    }
+
     //
     // TEXT SYNC
     //
@@ -177,10 +223,13 @@ impl LanguageServer for ServerState {
             diagnostics::Config::from_config(self.config, self.experimental),
         );
 
-        if !path.starts_with(&self.base_path) {
-            let symbols = index::index(tree.root_node(), &rope, false);
+        let symbols = index::index(tree.root_node(), &rope, false);
+        if path.starts_with(&self.base_path) {
+            // note: we need to insert into workspace in case a new file is created
+            self.workspace_symbols.insert(path.clone(), symbols);
+        } else {
             self.document_symbols.insert(path.clone(), symbols);
-        };
+        }
 
         self.document_map.insert(path, Document { rope, tree });
 
@@ -338,6 +387,35 @@ impl LanguageServer for ServerState {
             ))
         {
             tracing::error!(?error, "failed to publish diagnostics");
+        }
+
+        ControlFlow::Continue(())
+    }
+
+    fn did_change_watched_files(
+        &mut self,
+        params: DidChangeWatchedFilesParams,
+    ) -> ControlFlow<async_lsp::Result<()>> {
+        for change in params.changes {
+            let uri = change.uri;
+            let typ = change.typ;
+            let path = uri.to_file_path().unwrap();
+
+            tracing::info!(?path, ?typ, "watched file changed");
+
+            if path.starts_with(&self.base_path) {
+                match change.typ {
+                    FileChangeType::CREATED | FileChangeType::CHANGED => {
+                        // note: potential race condition if the user already has the file open and begins editing immediately.
+                        let symbols = index::index_file(&path, &mut self.parser);
+                        self.workspace_symbols.insert(path.clone(), symbols);
+                    }
+                    FileChangeType::DELETED => {
+                        self.workspace_symbols.remove(&path);
+                    }
+                    _ => unreachable!(),
+                }
+            }
         }
 
         ControlFlow::Continue(())

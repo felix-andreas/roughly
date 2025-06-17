@@ -34,16 +34,16 @@ x: numeric <- 4
 names: character[] <- c("Alice", "Bob")
 ```
 
-However, this syntax would require major changes to R's parser and is not practical for early experimentation.
+However, this syntax would require major changes to R's parser which is not practical for early experimentation.
 
 ### Option C: JSDoc-style comments
 
-JSDoc is an alternative syntax for TypeScript that uses the same underlying type system and type checker. In this approach, types are provided in comments, making it practical for prototyping and not requiring changes to R itself.
+[JSDoc](https://www.typescriptlang.org/docs/handbook/jsdoc-supported-types.html) is an alternative syntax for TypeScript that uses the same underlying type system and type checker. In this approach, types are provided in comments, so no changes to R itself are required.
 
 ```r
 #: @param items character[] # character vector input
-#: @param count numeric  # scalar numeric input (expected length)
-#: @return logical       # returns a scalar logical
+#: @param count numeric     # scalar numeric input (expected length)
+#: @return logical          # returns a scalar logical
 has_expected_length <- function(items, count) {
   length(items) == count
 }
@@ -52,7 +52,7 @@ x <- 4 #: numeric
 names <- c("Alice", "Bob") #: character[]
 ```
 
-> [!INFO]
+> [!NOTE]
 > To distinguish from roxygen, use `#:` as the comment prefix:
 
 This is the option we use for now, as it enables experimentation without modifying R itself.
@@ -82,9 +82,10 @@ Vectors and lists can have arbitrary length, but some constructs (like `if`) req
 
 - Support for:
   - **Scalar** (length-one vector)
-  - **Array** (vector + array attributes)
-  - **Record** (lists of fixed size with names)
-  - **Tuple** (lists of fixed size, no names)
+  - **Array** (arbitrary length vector)
+  - **List** (arbitrary length, homogenous list)
+  - **Record** (fixed length, heterogeneous list with named fields)
+  - **Tuple** (fixed length, heterogeneous list with positional fields)
   - **Unknown** (type could not be inferred)
   - **Any** (explicit opt-out of type checking)
 - Future:
@@ -250,11 +251,11 @@ Err <- function(error) {
   error |> with_tag("Err")
 }
 
-#: @param x [Ok<T>, Err <E>]
+#: @param x [Ok <T>, Err <E>]
 #: @return logical
 is_ok <- \(x) tag(x) == "Ok"
 
-#: @param x [Ok<T>, Err <E>]
+#: @param x [Ok <T>, Err <E>]
 #: @return logical
 is_err <- \(x) tag(x) == "Err"
 ```
@@ -263,23 +264,23 @@ is_err <- \(x) tag(x) == "Err"
 
 A key benefit of union types is that the type checker can enforce exhaustiveness in pattern matching or switch statements. This means that all possible variants of a union type must be handled explicitly, preventing bugs from unhandled cases.
 
-For example, consider a `Maybe` type with two variants: `Just` and `Nothing`:
+For example, suppose you have a function parameter that can be either `Just` or `Nothing`, representing a tagged union with two possible variants:
 
 ```r
-#: @param result [Just numeric, Nothing]
+#: @param maybe [Just numeric, Nothing]
 #: @return numeric
-process_result <- function(result) {
+process_maybe <- function(maybe) {
   switch(
-    tag(result),
-    Just = get_value(result),
+    tag(maybe),
+    Just = process(maybe),
     Nothing = 0
-    # If a new variant is added to the Maybe type, the type checker will report an error
-    # if it is not handled here.
+    # If a new variant is added to the `maybe` parameter,
+    # the type checker will report an error if it is not handled here.
   )
 }
 ```
 
-If you later extend `Maybe` with a new variant (e.g., `Unknown`), the type checker will require you to update all switch statements that handle `Maybe` to cover the new case, ensuring your code remains correct and robust.
+If you later extend the union with a new variant (e.g., `Unknown`), the type checker will require you to update all switch statements that handle `maybe` to cover the new case, ensuring your code remains correct and robust.
 
 ## Open Questions
 
