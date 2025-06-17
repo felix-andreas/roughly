@@ -82,7 +82,9 @@ struct ServerState {
     experimental: bool,
     base_path: PathBuf,
     document_map: HashMap<PathBuf, Document>,
+    /// stores symbolds for all other files
     document_symbols: HashMap<PathBuf, Vec<DocumentSymbol>>,
+    /// stores index for all files in R/ folder
     workspace_symbols: HashMap<PathBuf, Vec<DocumentSymbol>>,
     parser: Parser,
 }
@@ -221,10 +223,13 @@ impl LanguageServer for ServerState {
             diagnostics::Config::from_config(self.config, self.experimental),
         );
 
-        if !path.starts_with(&self.base_path) {
-            let symbols = index::index(tree.root_node(), &rope, false);
+        let symbols = index::index(tree.root_node(), &rope, false);
+        if path.starts_with(&self.base_path) {
+            // note: we need to insert into workspace in case a new file is created
+            self.workspace_symbols.insert(path.clone(), symbols);
+        } else {
             self.document_symbols.insert(path.clone(), symbols);
-        };
+        }
 
         self.document_map.insert(path, Document { rope, tree });
 
@@ -392,16 +397,25 @@ impl LanguageServer for ServerState {
         params: DidChangeWatchedFilesParams,
     ) -> ControlFlow<async_lsp::Result<()>> {
         for change in params.changes {
-            let url = change.uri;
+            let uri = change.uri;
             let typ = change.typ;
+            let path = uri.to_file_path().unwrap();
 
-            tracing::info!(url = url.path(), ?typ, "watched file changed");
-            // match change.typ {
-            //     FileChangeType::CHANGED => todo!(),
-            //     FileChangeType::CREATED => todo!(),
-            //     FileChangeType::DELETED => todo!(),
-            //     _ => unreachable!(),
-            // }
+            tracing::info!(?path, ?typ, "watched file changed");
+
+            if path.starts_with(&self.base_path) {
+                // note: we need to insert into workspace in case a new file is created
+                match change.typ {
+                    FileChangeType::CREATED | FileChangeType::CHANGED => {
+                        let symbols = index::index_file(&path, &mut self.parser);
+                        self.workspace_symbols.insert(path.clone(), symbols);
+                    }
+                    FileChangeType::DELETED => {
+                        self.workspace_symbols.remove(&path);
+                    }
+                    _ => unreachable!(),
+                }
+            }
         }
 
         ControlFlow::Continue(())
