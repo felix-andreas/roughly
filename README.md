@@ -18,8 +18,8 @@ Roughly aims to support the following language server features (some are experim
 
 - **Symbol Search**
   - Indexing of global symbols, S4 classes/generics/methods and R6 classes/methods
-  - Search current document (*VS Code:* <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd>)
-  - Search global workspace (*VS Code:* <kbd>Ctrl</kbd> + <kbd>T</kbd>)
+  - Search current document (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> *in VS Code*)
+  - Search global workspace (<kbd>Ctrl</kbd> + <kbd>T</kbd> *in VS Code*)
 
 - **Diagnostics**
   - Syntax errors (including missing or trailing commas)
