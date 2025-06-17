@@ -406,6 +406,7 @@ impl LanguageServer for ServerState {
             if path.starts_with(&self.base_path) {
                 match change.typ {
                     FileChangeType::CREATED | FileChangeType::CHANGED => {
+                        // note: potential race condition if the user already has the file open and begins editing immediately.
                         let symbols = index::index_file(&path, &mut self.parser);
                         self.workspace_symbols.insert(path.clone(), symbols);
                     }
