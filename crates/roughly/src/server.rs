@@ -404,7 +404,6 @@ impl LanguageServer for ServerState {
             tracing::info!(?path, ?typ, "watched file changed");
 
             if path.starts_with(&self.base_path) {
-                // note: we need to insert into workspace in case a new file is created
                 match change.typ {
                     FileChangeType::CREATED | FileChangeType::CHANGED => {
                         let symbols = index::index_file(&path, &mut self.parser);
