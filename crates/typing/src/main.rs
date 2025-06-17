@@ -1,10 +1,10 @@
 use tree_sitter::{Node, Parser, Tree};
 
 fn main() {
-    let exprs = vec![r#"4 + 4"#, r#""foo" + 4"#, r#"fn(foo)"#];
+    let mut parser = new_parser();
 
+    let exprs = vec![r#"4 + 4"#, r#""foo" + 4"#, r#"fn(foo)"#];
     for expr in exprs {
-        let mut parser = new_parser();
         let tree = parse(&mut parser, expr, None);
         let result = check(tree.root_node());
         match result {
