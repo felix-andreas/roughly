@@ -13,9 +13,10 @@ use {
             DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
             GlobPattern, InitializeParams, InitializeResult, InitializedParams, MessageType, OneOf,
             Position, PublishDiagnosticsParams, Range, Registration, RegistrationParams,
-            SaveOptions, ServerCapabilities, ServerInfo, ShowMessageParams,
+            RelativePattern, SaveOptions, ServerCapabilities, ServerInfo, ShowMessageParams,
             TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-            TextDocumentSyncSaveOptions, TextEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+            TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceSymbolParams,
+            WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
         },
         tree, utils,
@@ -161,13 +162,14 @@ impl LanguageServer for ServerState {
         // TODO: consider to negotiate client capabilities
         // see: https://github.com/oxalica/nil/blob/870a4b1b5f/crates/nil/src/capabilities.rs
         let mut client = self.client.clone();
+        let glob_pattern = GlobPattern::Relative(RelativePattern {
+            base_uri: OneOf::Right(Url::from_file_path(&self.base_path).unwrap()),
+            pattern: "*.[rR]".into(),
+        });
         tokio::spawn(async move {
             let register_options = DidChangeWatchedFilesRegistrationOptions {
                 watchers: vec![FileSystemWatcher {
-                    glob_pattern: GlobPattern::String(
-                        // TODO: don't hardcode path!
-                        "/home/felix/Projects/roughly/R/*.[rR]".into(),
-                    ),
+                    glob_pattern,
                     kind: None,
                 }],
             };
