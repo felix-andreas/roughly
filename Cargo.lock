@@ -1623,6 +1623,12 @@ dependencies = [
 [[package]]
 name = "typing"
 version = "0.0.5"
+dependencies = [
+ "tracing",
+ "tracing-subscriber",
+ "tree-sitter",
+ "tree-sitter-r",
+]
 
 [[package]]
 name = "unicode-ident"
