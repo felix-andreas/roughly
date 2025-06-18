@@ -3,6 +3,9 @@ mod syntax;
 mod unused;
 mod typing;
 
+#[cfg(test)]
+mod typing_integration_tests;
+
 use {
     crate::{
         config::{self, Case},
