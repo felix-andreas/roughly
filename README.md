@@ -117,7 +117,7 @@ You can customize the Roughly extension in VS Code through the following setting
   // Use a custom binary instead of the bundled one
   "roughly.path": "/path/to/roughly",
   // Pass extra arguments to the language server
-  "roughly.args": ["server", "--experimental"],
+  "roughly.args": ["server", "--experimental-features", "all"],
 }
 ```
 
