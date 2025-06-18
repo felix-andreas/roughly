@@ -231,7 +231,11 @@ impl LanguageServer for ServerState {
         let diagnostics = diagnostics::analyze_full(
             tree.root_node(),
             &rope,
-            diagnostics::Config::from_config(self.config, self.experimental_features.unused),
+            diagnostics::Config::from_config(
+                self.config,
+                self.experimental_features.unused,
+                self.experimental_features.typing,
+            ),
         );
 
         let symbols = index::index(tree.root_node(), &rope, false);
@@ -338,7 +342,11 @@ impl LanguageServer for ServerState {
         let diagnostics = diagnostics::analyze_fast(
             tree.root_node(),
             rope,
-            diagnostics::Config::from_config(self.config, self.experimental_features.unused),
+            diagnostics::Config::from_config(
+                self.config,
+                self.experimental_features.unused,
+                self.experimental_features.typing,
+            ),
         );
 
         // UPDATE SYMBOLS
@@ -386,7 +394,11 @@ impl LanguageServer for ServerState {
         let diagnostics = diagnostics::analyze_full(
             root_node,
             rope,
-            diagnostics::Config::from_config(self.config, self.experimental_features.unused),
+            diagnostics::Config::from_config(
+                self.config,
+                self.experimental_features.unused,
+                self.experimental_features.typing,
+            ),
         );
 
         if let Err(error) = self

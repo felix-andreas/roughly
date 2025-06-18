@@ -99,7 +99,11 @@ pub fn check(
     let mut n_files = 0;
     let mut n_errors = 0;
     for (paths, config) in paths_with_config {
-        let config = diagnostics::Config::from_config(config, experimental_features.unused);
+        let config = diagnostics::Config::from_config(
+            config,
+            experimental_features.unused,
+            experimental_features.typing,
+        );
         for path in paths {
             n_files += 1;
             let old = match std::fs::read_to_string(&path) {
@@ -461,13 +465,15 @@ pub fn ast(path: &Path) -> Result<(), DebugError> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExperimentalFeatures {
     pub range_formatting: bool,
+    pub typing: bool,
     pub unused: bool,
 }
 
 impl ExperimentalFeatures {
     pub fn parse(flags: &[impl AsRef<str>]) -> Self {
-        let mut unused = false;
         let mut range_formatting = false;
+        let mut typing = false;
+        let mut unused = false;
 
         for flag in flags {
             match flag.as_ref() {
@@ -476,6 +482,7 @@ impl ExperimentalFeatures {
                     range_formatting = true;
                 }
                 "range_formatting" => range_formatting = true,
+                "typing" => typing = true,
                 "unused" => unused = true,
                 unknown => {
                     warn(&format!("unknown experimental feature: {unknown}"));
@@ -485,6 +492,7 @@ impl ExperimentalFeatures {
 
         Self {
             unused,
+            typing,
             range_formatting,
         }
     }
