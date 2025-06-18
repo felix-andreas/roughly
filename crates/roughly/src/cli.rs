@@ -33,35 +33,25 @@ impl ExperimentalFeatures {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        !self.unused && !self.range_formatting
-    }
-}
+    pub fn from_strings(feature_strings: &[String]) -> Self {
+        let mut features = Self::new();
 
-impl Default for ExperimentalFeatures {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub fn parse_experimental_features(feature_strings: &[String]) -> ExperimentalFeatures {
-    let mut features = ExperimentalFeatures::new();
-
-    for feature_str in feature_strings {
-        match feature_str.as_str() {
-            "all" => {
-                features.unused = true;
-                features.range_formatting = true;
-            }
-            "unused" => features.unused = true,
-            "range_formatting" => features.range_formatting = true,
-            _ => {
-                warn(&format!("unknown experimental feature: {}", feature_str));
+        for feature_str in feature_strings {
+            match feature_str.as_str() {
+                "all" => {
+                    features.unused = true;
+                    features.range_formatting = true;
+                }
+                "unused" => features.unused = true,
+                "range_formatting" => features.range_formatting = true,
+                _ => {
+                    warn(&format!("unknown experimental feature: {}", feature_str));
+                }
             }
         }
-    }
 
-    features
+        features
+    }
 }
 
 //
