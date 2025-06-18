@@ -34,31 +34,35 @@ impl ExperimentalFeature {
     }
 }
 
-// Use a bitfield for efficient storage and copying
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExperimentalFeatures {
-    flags: u8,
+    pub unused: bool,
+    pub range_formatting: bool,
 }
 
 impl ExperimentalFeatures {
-    const UNUSED: u8 = 1 << 0;
-    const RANGE_FORMATTING: u8 = 1 << 1;
-
     pub fn new() -> Self {
-        Self { flags: 0 }
+        Self {
+            unused: false,
+            range_formatting: false,
+        }
     }
 
     pub fn from_strings(feature_strings: &[String]) -> (Self, Vec<String>) {
-        let mut flags = 0;
+        let mut features = Self::new();
         let mut unknown_features = Vec::new();
 
         for feature_str in feature_strings {
             if feature_str == "all" {
-                flags |= Self::UNUSED | Self::RANGE_FORMATTING;
+                features.unused = true;
+                features.range_formatting = true;
             } else {
                 match ExperimentalFeature::from_str(feature_str) {
                     Ok(feature) => {
-                        flags |= Self::feature_to_flag(feature);
+                        match feature {
+                            ExperimentalFeature::Unused => features.unused = true,
+                            ExperimentalFeature::RangeFormatting => features.range_formatting = true,
+                        }
                     }
                     Err(_) => {
                         unknown_features.push(feature_str.clone());
@@ -67,22 +71,18 @@ impl ExperimentalFeatures {
             }
         }
 
-        (Self { flags }, unknown_features)
-    }
-
-    fn feature_to_flag(feature: ExperimentalFeature) -> u8 {
-        match feature {
-            ExperimentalFeature::Unused => Self::UNUSED,
-            ExperimentalFeature::RangeFormatting => Self::RANGE_FORMATTING,
-        }
+        (features, unknown_features)
     }
 
     pub fn has(&self, feature: ExperimentalFeature) -> bool {
-        (self.flags & Self::feature_to_flag(feature)) != 0
+        match feature {
+            ExperimentalFeature::Unused => self.unused,
+            ExperimentalFeature::RangeFormatting => self.range_formatting,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.flags == 0
+        !self.unused && !self.range_formatting
     }
 }
 
