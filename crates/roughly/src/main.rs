@@ -64,7 +64,7 @@ struct Cli {
     #[clap(long, default_value_t = true)]
     stdio: bool,
     /// Enable experimental features (can be used multiple times)
-    #[clap(long = "experimental-feature", global = true, value_delimiter = ' ')]
+    #[clap(long = "experimental-features", global = true, value_delimiter = ' ')]
     experimental_features: Vec<String>,
 }
 
