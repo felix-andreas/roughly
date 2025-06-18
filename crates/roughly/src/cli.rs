@@ -21,36 +21,33 @@ use {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExperimentalFeatures {
-    pub unused: bool,
     pub range_formatting: bool,
+    pub unused: bool,
 }
 
 impl ExperimentalFeatures {
-    pub fn new() -> Self {
-        Self {
-            unused: false,
-            range_formatting: false,
-        }
-    }
+    pub fn parse(flags: &[impl AsRef<str>]) -> Self {
+        let mut unused = false;
+        let mut range_formatting = false;
 
-    pub fn from_strings(feature_strings: &[String]) -> Self {
-        let mut features = Self::new();
-
-        for feature_str in feature_strings {
-            match feature_str.as_str() {
+        for flag in flags {
+            match flag.as_ref() {
                 "all" => {
-                    features.unused = true;
-                    features.range_formatting = true;
+                    unused = true;
+                    range_formatting = true;
                 }
-                "unused" => features.unused = true,
-                "range_formatting" => features.range_formatting = true,
-                _ => {
-                    warn(&format!("unknown experimental feature: {}", feature_str));
+                "range_formatting" => range_formatting = true,
+                "unused" => unused = true,
+                unknown => {
+                    warn(&format!("unknown experimental feature: {unknown}"));
                 }
             }
         }
 
-        features
+        Self {
+            unused,
+            range_formatting,
+        }
     }
 }
 
@@ -96,7 +93,10 @@ pub fn error(message: &str) {
 #[derive(Debug)]
 pub struct CheckError;
 
-pub fn check(maybe_files: Option<&[PathBuf]>, experimental_features: ExperimentalFeatures) -> Result<(), CheckError> {
+pub fn check(
+    maybe_files: Option<&[PathBuf]>,
+    experimental_features: ExperimentalFeatures,
+) -> Result<(), CheckError> {
     let mut parser = tree::new_parser();
 
     let root: Vec<PathBuf> = vec![".".into()];
@@ -135,7 +135,7 @@ pub fn check(maybe_files: Option<&[PathBuf]>, experimental_features: Experimenta
     let mut n_files = 0;
     let mut n_errors = 0;
     for (paths, config) in paths_with_config {
-        let config = diagnostics::Config::from_config(config, experimental_features);
+        let config = diagnostics::Config::from_config(config, experimental_features.unused);
         for path in paths {
             n_files += 1;
             let old = match std::fs::read_to_string(&path) {

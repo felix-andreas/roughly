@@ -1,6 +1,7 @@
 use {
     crate::{
-        cli::{self, ExperimentalFeatures}, completions,
+        cli::{self, ExperimentalFeatures},
+        completions,
         config::Config,
         diagnostics,
         format::{self, LineEnding},
@@ -56,7 +57,11 @@ pub async fn run(experimental_features: ExperimentalFeatures) {
             .layer(CatchUnwindLayer::default())
             .layer(ConcurrencyLayer::default())
             .layer(ClientProcessMonitorLayer::new(client.clone()))
-            .service(ServerState::new_router(client, config, experimental_features))
+            .service(ServerState::new_router(
+                client,
+                config,
+                experimental_features,
+            ))
     });
 
     // Prefer truly asynchronous piped stdin/stdout without blocking tasks.
@@ -96,7 +101,11 @@ pub struct Document {
 }
 
 impl ServerState {
-    fn new_router(client: ClientSocket, config: Config, experimental_features: ExperimentalFeatures) -> Router<Self> {
+    fn new_router(
+        client: ClientSocket,
+        config: Config,
+        experimental_features: ExperimentalFeatures,
+    ) -> Router<Self> {
         Router::from_language_server(Self {
             client,
             config,
@@ -138,7 +147,9 @@ impl LanguageServer for ServerState {
                     ..Default::default()
                 }),
                 document_formatting_provider: Some(OneOf::Left(true)),
-                document_range_formatting_provider: Some(OneOf::Left(self.experimental_features.range_formatting)),
+                document_range_formatting_provider: Some(OneOf::Left(
+                    self.experimental_features.range_formatting,
+                )),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
                     TextDocumentSyncOptions {
@@ -220,7 +231,7 @@ impl LanguageServer for ServerState {
         let diagnostics = diagnostics::analyze_full(
             tree.root_node(),
             &rope,
-            diagnostics::Config::from_config(self.config, self.experimental_features),
+            diagnostics::Config::from_config(self.config, self.experimental_features.unused),
         );
 
         let symbols = index::index(tree.root_node(), &rope, false);
@@ -327,7 +338,7 @@ impl LanguageServer for ServerState {
         let diagnostics = diagnostics::analyze_fast(
             tree.root_node(),
             rope,
-            diagnostics::Config::from_config(self.config, self.experimental_features),
+            diagnostics::Config::from_config(self.config, self.experimental_features.unused),
         );
 
         // UPDATE SYMBOLS
@@ -375,7 +386,7 @@ impl LanguageServer for ServerState {
         let diagnostics = diagnostics::analyze_full(
             root_node,
             rope,
-            diagnostics::Config::from_config(self.config, self.experimental_features),
+            diagnostics::Config::from_config(self.config, self.experimental_features.unused),
         );
 
         if let Err(error) = self

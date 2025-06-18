@@ -4,7 +4,6 @@ mod unused;
 
 use {
     crate::{
-        cli::ExperimentalFeatures,
         config::{self, Case},
         lsp_types::{Diagnostic, DiagnosticSeverity},
         utils,
@@ -17,14 +16,14 @@ use {
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
     case: Case,
-    experimental_features: ExperimentalFeatures,
+    experimental_unused: bool,
 }
 
 impl Config {
-    pub fn from_config(config: config::Config, experimental_features: ExperimentalFeatures) -> Self {
+    pub fn from_config(config: config::Config, experimental_unused: bool) -> Self {
         Config {
             case: config.case,
-            experimental_features,
+            experimental_unused,
         }
     }
 }
@@ -37,7 +36,7 @@ pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagn
 
     if full && !has_syntax_errors {
         #[allow(clippy::collapsible_if)]
-        if config.experimental_features.unused {
+        if config.experimental_unused {
             match unused::analyze(node, rope) {
                 Ok(diags) => diagnostics.extend(diags),
                 Err(error) => {
