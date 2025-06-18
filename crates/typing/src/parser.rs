@@ -1,6 +1,4 @@
-use crate::types::RType;
-use std::collections::HashMap;
-use thiserror::Error;
+use {crate::types::RType, std::collections::HashMap, thiserror::Error};
 
 #[derive(Error, Debug)]
 pub enum ParseError {
@@ -47,10 +45,10 @@ impl TypeParser {
 
         let param_name = parts[1].to_string();
         let type_str = parts[2..].join(" ");
-        
+
         let mut parser = TypeParser::new(type_str);
         let r_type = parser.parse_type()?;
-        
+
         Ok((param_name, r_type))
     }
 
@@ -90,12 +88,12 @@ impl TypeParser {
 
     fn parse_primary_type(&mut self) -> Result<RType, ParseError> {
         self.skip_whitespace();
-        
+
         let _start_pos = self.position;
-        
+
         // Parse identifier
         let type_name = self.parse_identifier()?;
-        
+
         match type_name.as_str() {
             "null" => Ok(RType::Null),
             "numeric" => self.parse_array_suffix(RType::Numeric, RType::NumericArray),
@@ -112,7 +110,11 @@ impl TypeParser {
         }
     }
 
-    fn parse_array_suffix(&mut self, scalar_type: RType, array_type: RType) -> Result<RType, ParseError> {
+    fn parse_array_suffix(
+        &mut self,
+        scalar_type: RType,
+        array_type: RType,
+    ) -> Result<RType, ParseError> {
         self.skip_whitespace();
         if self.peek() == Some('[') && self.peek_at(self.position + 1) == Some(']') {
             self.position += 2;
@@ -124,7 +126,7 @@ impl TypeParser {
 
     fn parse_list_type(&mut self) -> Result<RType, ParseError> {
         self.skip_whitespace();
-        
+
         match self.peek() {
             Some('[') => {
                 // Homogeneous list: list[type]
@@ -141,27 +143,27 @@ impl TypeParser {
                 // Record: list{name: type, ...}
                 self.advance(); // consume '{'
                 let mut fields = HashMap::new();
-                
+
                 loop {
                     self.skip_whitespace();
                     if self.peek() == Some('}') {
                         self.advance();
                         break;
                     }
-                    
+
                     let field_name = self.parse_identifier()?;
                     self.skip_whitespace();
-                    
+
                     if self.peek() != Some(':') {
                         return Err(ParseError::UnexpectedToken {
                             token: format!("{:?}", self.peek()),
                         });
                     }
                     self.advance(); // consume ':'
-                    
+
                     let field_type = self.parse_primary_type()?;
                     fields.insert(field_name, field_type);
-                    
+
                     self.skip_whitespace();
                     if self.peek() == Some(',') {
                         self.advance(); // consume ','
@@ -171,24 +173,24 @@ impl TypeParser {
                         });
                     }
                 }
-                
+
                 Ok(RType::Record(fields))
             }
             Some('(') => {
                 // Tuple: list(type1, type2, ...)
                 self.advance(); // consume '('
                 let mut types = Vec::new();
-                
+
                 loop {
                     self.skip_whitespace();
                     if self.peek() == Some(')') {
                         self.advance();
                         break;
                     }
-                    
+
                     let field_type = self.parse_primary_type()?;
                     types.push(field_type);
-                    
+
                     self.skip_whitespace();
                     if self.peek() == Some(',') {
                         self.advance(); // consume ','
@@ -198,7 +200,7 @@ impl TypeParser {
                         });
                     }
                 }
-                
+
                 Ok(RType::Tuple(types))
             }
             _ => {
@@ -215,18 +217,18 @@ impl TypeParser {
                 token: format!("{:?}", self.peek()),
             });
         }
-        
+
         self.advance(); // consume '('
         let mut params = Vec::new();
         let mut named_params = HashMap::new();
-        
+
         loop {
             self.skip_whitespace();
             if self.peek() == Some(')') {
                 self.advance();
                 break;
             }
-            
+
             // Try to parse as named parameter (name: type)
             let start_pos = self.position;
             if let Ok(name) = self.parse_identifier() {
@@ -245,7 +247,7 @@ impl TypeParser {
                 let param_type = self.parse_primary_type()?;
                 params.push(param_type);
             }
-            
+
             self.skip_whitespace();
             if self.peek() == Some(',') {
                 self.advance(); // consume ','
@@ -255,16 +257,17 @@ impl TypeParser {
                 });
             }
         }
-        
+
         // Parse return type if present
         self.skip_whitespace();
-        let return_type = if self.peek() == Some('-') && self.peek_at(self.position + 1) == Some('>') {
-            self.position += 2; // consume '->'
-            Box::new(self.parse_primary_type()?)
-        } else {
-            Box::new(RType::Any) // Default return type
-        };
-        
+        let return_type =
+            if self.peek() == Some('-') && self.peek_at(self.position + 1) == Some('>') {
+                self.position += 2; // consume '->'
+                Box::new(self.parse_primary_type()?)
+            } else {
+                Box::new(RType::Any) // Default return type
+            };
+
         Ok(RType::Function {
             params,
             named_params,
@@ -275,7 +278,7 @@ impl TypeParser {
     fn parse_identifier(&mut self) -> Result<String, ParseError> {
         self.skip_whitespace();
         let start = self.position;
-        
+
         while let Some(ch) = self.peek() {
             if ch.is_alphanumeric() || ch == '_' {
                 self.advance();
@@ -283,13 +286,13 @@ impl TypeParser {
                 break;
             }
         }
-        
+
         if start == self.position {
             return Err(ParseError::InvalidSyntax {
                 message: "Expected identifier".to_string(),
             });
         }
-        
+
         Ok(self.input[start..self.position].to_string())
     }
 

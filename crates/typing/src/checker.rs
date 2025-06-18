@@ -1,8 +1,12 @@
-use crate::types::{RType, TypeAnnotation, SourceRange};
-use crate::parser::{TypeParser, ParseError};
-use std::collections::HashMap;
-use thiserror::Error;
-use tree_sitter::{Node, Parser, Tree};
+use {
+    crate::{
+        parser::{ParseError, TypeParser},
+        types::{RType, SourceRange, TypeAnnotation},
+    },
+    std::collections::HashMap,
+    thiserror::Error,
+    tree_sitter::{Node, Parser, Tree},
+};
 
 #[derive(Error, Debug)]
 pub enum TypeCheckError {
@@ -87,14 +91,17 @@ impl TypeChecker {
     }
 
     /// Extract type annotations from R source code
-    pub fn extract_type_annotations(&mut self, source: &str) -> Result<Vec<TypeAnnotation>, TypeCheckError> {
+    pub fn extract_type_annotations(
+        &mut self,
+        source: &str,
+    ) -> Result<Vec<TypeAnnotation>, TypeCheckError> {
         let mut annotations = Vec::new();
-        
+
         for (line_num, line) in source.lines().enumerate() {
             // Look for type annotations in comments
             if let Some(comment_start) = line.find("#:") {
                 let comment_part = &line[comment_start + 2..].trim();
-                
+
                 // Check if it's a parameter or return annotation
                 if comment_part.starts_with("@param") {
                     match TypeParser::parse_param_annotation(comment_part) {
@@ -110,7 +117,7 @@ impl TypeChecker {
                                 }),
                             };
                             self.context.define_symbol(param_name, symbol);
-                            
+
                             annotations.push(TypeAnnotation {
                                 r_type,
                                 source_range: Some(SourceRange {
@@ -156,7 +163,7 @@ impl TypeChecker {
                                 };
                                 self.context.define_symbol(var_name, symbol);
                             }
-                            
+
                             annotations.push(TypeAnnotation {
                                 r_type,
                                 source_range: Some(SourceRange {
@@ -172,7 +179,7 @@ impl TypeChecker {
                 }
             }
         }
-        
+
         Ok(annotations)
     }
 
@@ -181,12 +188,18 @@ impl TypeChecker {
         // Look for patterns like "var <-" or "var ="
         if let Some(pos) = line.find("<-") {
             let var_part = line[..pos].trim();
-            if var_part.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.') {
+            if var_part
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+            {
                 return Some(var_part.to_string());
             }
         } else if let Some(pos) = line.find("=") {
             let var_part = line[..pos].trim();
-            if var_part.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.') {
+            if var_part
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+            {
                 return Some(var_part.to_string());
             }
         }
@@ -194,7 +207,11 @@ impl TypeChecker {
     }
 
     /// Check if an assignment is type-safe
-    pub fn check_assignment(&self, var_name: &str, assigned_type: &RType) -> Result<(), TypeCheckError> {
+    pub fn check_assignment(
+        &self,
+        var_name: &str,
+        assigned_type: &RType,
+    ) -> Result<(), TypeCheckError> {
         if let Some(symbol) = self.context.get_symbol(var_name) {
             if !assigned_type.is_compatible_with(&symbol.r_type) {
                 return Err(TypeCheckError::TypeMismatch {
@@ -209,7 +226,7 @@ impl TypeChecker {
     /// Infer type from R expression using tree-sitter
     pub fn infer_expression_type(&mut self, expression: &str) -> RType {
         let trimmed = expression.trim();
-        
+
         // First try to parse with tree-sitter
         if let Some(tree) = parse_expression(&mut self.parser, trimmed) {
             match self.check_node(tree.root_node()) {
@@ -219,7 +236,7 @@ impl TypeChecker {
                 }
             }
         }
-        
+
         // Fallback to the original literal-based inference
         self.infer_literal_type(expression)
     }
@@ -254,15 +271,21 @@ impl TypeChecker {
 
     /// Check type of binary operator expressions
     fn check_binary_operator(&self, node: Node) -> Result<RType, TypeCheckError> {
-        let lhs = node.child_by_field_name("lhs").ok_or(TypeCheckError::InvalidFunctionCall {
-            message: "Binary operator missing left operand".to_string(),
-        })?;
-        let rhs = node.child_by_field_name("rhs").ok_or(TypeCheckError::InvalidFunctionCall {
-            message: "Binary operator missing right operand".to_string(),
-        })?;
-        let operator = node.child_by_field_name("operator").ok_or(TypeCheckError::InvalidFunctionCall {
-            message: "Binary operator missing operator".to_string(),
-        })?;
+        let lhs = node
+            .child_by_field_name("lhs")
+            .ok_or(TypeCheckError::InvalidFunctionCall {
+                message: "Binary operator missing left operand".to_string(),
+            })?;
+        let rhs = node
+            .child_by_field_name("rhs")
+            .ok_or(TypeCheckError::InvalidFunctionCall {
+                message: "Binary operator missing right operand".to_string(),
+            })?;
+        let operator =
+            node.child_by_field_name("operator")
+                .ok_or(TypeCheckError::InvalidFunctionCall {
+                    message: "Binary operator missing operator".to_string(),
+                })?;
 
         let lhs_type = self.check_node(lhs)?;
         let rhs_type = self.check_node(rhs)?;
@@ -281,7 +304,9 @@ impl TypeChecker {
         match (lhs_type, rhs_type) {
             (RType::Integer, RType::Integer) => Ok(RType::Integer),
             (RType::Numeric, RType::Numeric) => Ok(RType::Numeric),
-            (RType::Integer, RType::Numeric) | (RType::Numeric, RType::Integer) => Ok(RType::Numeric),
+            (RType::Integer, RType::Numeric) | (RType::Numeric, RType::Integer) => {
+                Ok(RType::Numeric)
+            }
             (RType::Character, RType::Character) => Ok(RType::Character),
             (RType::Any, _) | (_, RType::Any) => Ok(RType::Any),
             (RType::Unknown, _) | (_, RType::Unknown) => Ok(RType::Unknown),
@@ -297,7 +322,9 @@ impl TypeChecker {
         match (lhs_type, rhs_type) {
             (RType::Integer, RType::Integer) => Ok(RType::Integer),
             (RType::Numeric, RType::Numeric) => Ok(RType::Numeric),
-            (RType::Integer, RType::Numeric) | (RType::Numeric, RType::Integer) => Ok(RType::Numeric),
+            (RType::Integer, RType::Numeric) | (RType::Numeric, RType::Integer) => {
+                Ok(RType::Numeric)
+            }
             (RType::Any, _) | (_, RType::Any) => Ok(RType::Any),
             (RType::Unknown, _) | (_, RType::Unknown) => Ok(RType::Unknown),
             (a, b) => Err(TypeCheckError::TypeMismatch {
@@ -322,17 +349,17 @@ impl TypeChecker {
     /// Infer type from R literal values (fallback method)
     fn infer_literal_type(&self, value: &str) -> RType {
         let trimmed = value.trim();
-        
+
         // NULL
         if trimmed.eq_ignore_ascii_case("null") {
             return RType::Null;
         }
-        
+
         // Logical values
         if trimmed.eq_ignore_ascii_case("true") || trimmed.eq_ignore_ascii_case("false") {
             return RType::Logical;
         }
-        
+
         // Numeric values
         if trimmed.parse::<f64>().is_ok() {
             if trimmed.contains('.') {
@@ -341,13 +368,14 @@ impl TypeChecker {
                 return RType::Integer;
             }
         }
-        
+
         // Character strings
-        if (trimmed.starts_with('"') && trimmed.ends_with('"')) ||
-           (trimmed.starts_with('\'') && trimmed.ends_with('\'')) {
+        if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+            || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+        {
             return RType::Character;
         }
-        
+
         // Default to unknown for complex expressions
         RType::Unknown
     }
@@ -360,18 +388,18 @@ impl TypeChecker {
     /// Basic type checking for simple expressions
     pub fn check_expression(&self, expression: &str) -> Result<RType, TypeCheckError> {
         let trimmed = expression.trim();
-        
+
         // Check if it's a variable reference
         if let Some(symbol) = self.context.get_symbol(trimmed) {
             return Ok(symbol.r_type.clone());
         }
-        
+
         // Check if it's a literal
         let literal_type = self.infer_literal_type(trimmed);
         if !matches!(literal_type, RType::Unknown) {
             return Ok(literal_type);
         }
-        
+
         // For complex expressions, return Unknown for now
         Ok(RType::Unknown)
     }
@@ -396,10 +424,10 @@ y <- "hello" #: character
 #: @param a numeric
 #: @return logical
         "#;
-        
+
         let annotations = checker.extract_type_annotations(source).unwrap();
         assert_eq!(annotations.len(), 4);
-        
+
         // Check that symbols were defined
         assert!(checker.context.get_symbol("x").is_some());
         assert!(checker.context.get_symbol("y").is_some());
@@ -409,7 +437,7 @@ y <- "hello" #: character
     #[test]
     fn test_literal_type_inference() {
         let checker = TypeChecker::new();
-        
+
         assert_eq!(checker.infer_literal_type("42"), RType::Integer);
         assert_eq!(checker.infer_literal_type("3.14"), RType::Numeric);
         assert_eq!(checker.infer_literal_type("\"hello\""), RType::Character);
@@ -420,27 +448,27 @@ y <- "hello" #: character
     #[test]
     fn test_tree_sitter_expression_inference() {
         let mut checker = TypeChecker::new();
-        
+
         // Basic literals - tree-sitter should work for these
-        assert_eq!(checker.infer_expression_type("42"), RType::Numeric);  // In R, 42 is numeric, not integer
+        assert_eq!(checker.infer_expression_type("42"), RType::Numeric); // In R, 42 is numeric, not integer
         assert_eq!(checker.infer_expression_type("42L"), RType::Integer); // 42L is integer
         assert_eq!(checker.infer_expression_type("3.14"), RType::Numeric);
         assert_eq!(checker.infer_expression_type("\"hello\""), RType::Character);
         assert_eq!(checker.infer_expression_type("TRUE"), RType::Logical);
         assert_eq!(checker.infer_expression_type("NULL"), RType::Null);
-        
+
         // Test that tree-sitter parsing is working for more complex expressions
         let result = checker.infer_expression_type("4 + 4");
         // Should be numeric since 4 + 4 is numeric + numeric
         assert!(matches!(result, RType::Numeric | RType::Unknown));
-        
+
         let result = checker.infer_expression_type("3.14 + 2.86");
         assert!(matches!(result, RType::Numeric | RType::Unknown));
-        
+
         // Logical operations
         let result = checker.infer_expression_type("TRUE && FALSE");
         assert!(matches!(result, RType::Logical | RType::Unknown));
-        
+
         let result = checker.infer_expression_type("4 > 2");
         assert!(matches!(result, RType::Logical | RType::Unknown));
     }
@@ -448,7 +476,7 @@ y <- "hello" #: character
     #[test]
     fn test_assignment_checking() {
         let mut checker = TypeChecker::new();
-        
+
         // Define a symbol
         let symbol = Symbol {
             name: "x".to_string(),
@@ -456,11 +484,11 @@ y <- "hello" #: character
             source_range: None,
         };
         checker.context.define_symbol("x".to_string(), symbol);
-        
+
         // Valid assignment
         assert!(checker.check_assignment("x", &RType::Numeric).is_ok());
         assert!(checker.check_assignment("x", &RType::Integer).is_ok()); // Integer can be assigned to numeric
-        
+
         // Invalid assignment
         assert!(checker.check_assignment("x", &RType::Character).is_err());
     }
@@ -468,32 +496,41 @@ y <- "hello" #: character
     #[test]
     fn test_variable_name_extraction() {
         let checker = TypeChecker::new();
-        
-        assert_eq!(checker.extract_variable_name("x <- 4"), Some("x".to_string()));
-        assert_eq!(checker.extract_variable_name("my_var <- 'hello'"), Some("my_var".to_string()));
-        assert_eq!(checker.extract_variable_name("result = compute()"), Some("result".to_string()));
+
+        assert_eq!(
+            checker.extract_variable_name("x <- 4"),
+            Some("x".to_string())
+        );
+        assert_eq!(
+            checker.extract_variable_name("my_var <- 'hello'"),
+            Some("my_var".to_string())
+        );
+        assert_eq!(
+            checker.extract_variable_name("result = compute()"),
+            Some("result".to_string())
+        );
         assert_eq!(checker.extract_variable_name("invalid syntax"), None);
     }
 
     #[test]
     fn test_debug_binary_operations() {
         let mut checker = TypeChecker::new();
-        
+
         let expressions = vec!["4 + 4", "3.14 + 2.86", "TRUE && FALSE", "4 > 2"];
-        
+
         for expr in expressions {
             println!("\n--- Testing expression: '{}' ---", expr);
             if let Some(tree) = parse_expression(&mut checker.parser, expr) {
                 let root = tree.root_node();
                 println!("Root node kind: {}", root.kind());
-                
+
                 let mut walker = root.walk();
                 for child in root.children(&mut walker) {
                     println!("Child node kind: {}", child.kind());
                     print_node_recursive(child, expr, 1);
                 }
             }
-            
+
             let result = checker.infer_expression_type(expr);
             println!("Result for '{}': {:?}", expr, result);
         }
@@ -502,8 +539,14 @@ y <- "hello" #: character
     fn print_node_recursive(node: tree_sitter::Node, source: &str, depth: usize) {
         let indent = "  ".repeat(depth);
         let text = &source[node.start_byte()..node.end_byte()];
-        println!("{}Node: {} '{}' ({:?})", indent, node.kind(), text, (node.start_byte(), node.end_byte()));
-        
+        println!(
+            "{}Node: {} '{}' ({:?})",
+            indent,
+            node.kind(),
+            text,
+            (node.start_byte(), node.end_byte())
+        );
+
         let mut walker = node.walk();
         for child in node.children(&mut walker) {
             print_node_recursive(child, source, depth + 1);

@@ -1,5 +1,7 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use {
+    serde::{Deserialize, Serialize},
+    std::collections::HashMap,
+};
 
 /// Represents the basic types in R's type system
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -8,7 +10,7 @@ pub enum RType {
     Null,
     /// Scalar numeric (length 1)
     Numeric,
-    /// Scalar character (length 1) 
+    /// Scalar character (length 1)
     Character,
     /// Scalar logical (length 1)
     Logical,
@@ -45,11 +47,7 @@ impl RType {
     pub fn is_scalar(&self) -> bool {
         matches!(
             self,
-            RType::Numeric
-                | RType::Character
-                | RType::Logical
-                | RType::Integer
-                | RType::Null
+            RType::Numeric | RType::Character | RType::Logical | RType::Integer | RType::Null
         )
     }
 
@@ -57,10 +55,7 @@ impl RType {
     pub fn is_array(&self) -> bool {
         matches!(
             self,
-            RType::NumericArray
-                | RType::CharacterArray
-                | RType::LogicalArray
-                | RType::IntegerArray
+            RType::NumericArray | RType::CharacterArray | RType::LogicalArray | RType::IntegerArray
         )
     }
 
@@ -246,7 +241,10 @@ mod tests {
     fn test_type_display() {
         assert_eq!(RType::Numeric.to_string(), "numeric");
         assert_eq!(RType::NumericArray.to_string(), "numeric[]");
-        assert_eq!(RType::List(Box::new(RType::Numeric)).to_string(), "list[numeric]");
+        assert_eq!(
+            RType::List(Box::new(RType::Numeric)).to_string(),
+            "list[numeric]"
+        );
 
         let mut record = HashMap::new();
         record.insert("name".to_string(), RType::Character);

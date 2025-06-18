@@ -1,7 +1,5 @@
-pub mod types;
-pub mod parser;
 pub mod checker;
+pub mod parser;
+pub mod types;
 
-pub use types::*;
-pub use parser::*;
-pub use checker::*;
+pub use {checker::*, parser::*, types::*};

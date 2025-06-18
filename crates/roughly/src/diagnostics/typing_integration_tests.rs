@@ -1,6 +1,7 @@
-use crate::diagnostics;
-use crate::tree;
-use ropey::Rope;
+use {
+    crate::{diagnostics, tree},
+    ropey::Rope,
+};
 
 #[test]
 fn test_typing_integration() {
@@ -22,22 +23,22 @@ is_positive <- function(count) {
     let mut parser = tree::new_parser();
     let tree = tree::parse(&mut parser, source, None);
     let rope = Rope::from_str(source);
-    
+
     let config = diagnostics::Config {
         case: crate::config::Case::Snake,
         experimental: true,
     };
-    
+
     let diagnostics = diagnostics::analyze(tree.root_node(), &rope, config, true);
-    
+
     // Should have at least one type error diagnostic
     let type_errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| d.source.as_deref() == Some("typing"))
         .collect();
-    
+
     assert!(!type_errors.is_empty(), "Expected type checking errors");
-    
+
     // Check that the error message contains expected text
     let error_msg = &type_errors[0].message;
     assert!(error_msg.contains("Type mismatch"));
@@ -63,21 +64,24 @@ double_value <- function(x) {
     let mut parser = tree::new_parser();
     let tree = tree::parse(&mut parser, source, None);
     let rope = Rope::from_str(source);
-    
+
     let config = diagnostics::Config {
         case: crate::config::Case::Snake,
         experimental: true,
     };
-    
+
     let diagnostics = diagnostics::analyze(tree.root_node(), &rope, config, true);
-    
+
     // Should have no type error diagnostics
     let type_errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| d.source.as_deref() == Some("typing"))
         .collect();
-    
-    assert!(type_errors.is_empty(), "Expected no type checking errors for valid code");
+
+    assert!(
+        type_errors.is_empty(),
+        "Expected no type checking errors for valid code"
+    );
 }
 
 #[test]
@@ -91,19 +95,22 @@ pi_value <- 3.14 #: numeric
     let mut parser = tree::new_parser();
     let tree = tree::parse(&mut parser, source, None);
     let rope = Rope::from_str(source);
-    
+
     let config = diagnostics::Config {
         case: crate::config::Case::Snake,
         experimental: true,
     };
-    
+
     let diagnostics = diagnostics::analyze(tree.root_node(), &rope, config, true);
-    
+
     // Should have no type error diagnostics for integer to numeric coercion
     let type_errors: Vec<_> = diagnostics
         .iter()
         .filter(|d| d.source.as_deref() == Some("typing"))
         .collect();
-    
-    assert!(type_errors.is_empty(), "Expected no type errors for integer to numeric coercion");
+
+    assert!(
+        type_errors.is_empty(),
+        "Expected no type errors for integer to numeric coercion"
+    );
 }

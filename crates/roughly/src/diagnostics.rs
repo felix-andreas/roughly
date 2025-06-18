@@ -1,7 +1,7 @@
 mod fast;
 mod syntax;
-mod unused;
 mod typing;
+mod unused;
 
 #[cfg(test)]
 mod typing_integration_tests;
@@ -47,7 +47,7 @@ pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagn
                     tracing::warn!("error while diagnostics {error}");
                 }
             }
-            
+
             // Add type checking diagnostics
             match typing::analyze(node, rope) {
                 Ok(diags) => diagnostics.extend(diags),
