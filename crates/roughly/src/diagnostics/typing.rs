@@ -39,7 +39,7 @@ pub fn analyze(node: Node, rope: &Rope) -> Result<Vec<Diagnostic>, TypeDiagnosti
         }
         Err(type_error) => {
             // Report parse errors as diagnostics
-            let diagnostic = error(node, format!("Type annotation error: {}", type_error));
+            let diagnostic = error(node, format!("Type annotation error: {type_error}"));
             diagnostics.push(diagnostic);
         }
     }
@@ -54,9 +54,9 @@ fn check_line_for_type_errors(
     line_num: usize,
 ) -> Option<Diagnostic> {
     // Look for assignment patterns with type annotations
-    if line.contains("#:") && (line.contains("<-") || line.contains("=")) {
-        if let Some(var_name) = extract_variable_name(line) {
-            if let Some(assigned_value) = extract_assigned_value(line) {
+    if line.contains("#:") && (line.contains("<-") || line.contains("="))
+        && let Some(var_name) = extract_variable_name(line)
+            && let Some(assigned_value) = extract_assigned_value(line) {
                 let inferred_type = type_checker.infer_expression_type(assigned_value);
 
                 // Check if the assignment is compatible with the declared type
@@ -65,14 +65,11 @@ fn check_line_for_type_errors(
                         line_num,
                         line,
                         format!(
-                            "Type mismatch in assignment to '{}': {}",
-                            var_name, type_error
+                            "Type mismatch in assignment to '{var_name}': {type_error}"
                         ),
                     ));
                 }
             }
-        }
-    }
 
     None
 }
@@ -103,14 +100,13 @@ fn extract_assigned_value(line: &str) -> Option<&str> {
         if let Some(comment_pos) = value_part.find("#:") {
             return Some(value_part[..comment_pos].trim());
         }
-    } else if let Some(pos) = line.find("=") {
-        if !line[pos..].starts_with("==") {
+    } else if let Some(pos) = line.find("=")
+        && !line[pos..].starts_with("==") {
             let value_part = &line[pos + 1..];
             if let Some(comment_pos) = value_part.find("#:") {
                 return Some(value_part[..comment_pos].trim());
             }
         }
-    }
     None
 }
 
@@ -129,13 +125,11 @@ fn is_valid_identifier(s: &str) -> bool {
     }
 
     // If starts with dot, second character must not be digit
-    if first_char == '.' {
-        if let Some(second_char) = chars.next() {
-            if second_char.is_ascii_digit() {
+    if first_char == '.'
+        && let Some(second_char) = chars.next()
+            && second_char.is_ascii_digit() {
                 return false;
             }
-        }
-    }
 
     // Rest can be alphanumeric, underscore, or dot
     for ch in chars {
