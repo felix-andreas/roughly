@@ -9,6 +9,7 @@ use {
 pub struct Config {
     pub case: Case,
     pub spaces: usize,
+    pub case_linting: bool,
 }
 
 impl Default for Config {
@@ -16,6 +17,7 @@ impl Default for Config {
         Config {
             case: Case::Snake,
             spaces: 2,
+            case_linting: false,
         }
     }
 }
