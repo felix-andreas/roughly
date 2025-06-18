@@ -1,6 +1,17 @@
 [package]
 name = "typing"
-edition = "2024"
+edition = "2021"
 version.workspace = true
 
+[lib]
+name = "typing"
+path = "src/lib.rs"
+
 [dependencies]
+serde = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
+tree-sitter.workspace = true
+tree-sitter-r.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

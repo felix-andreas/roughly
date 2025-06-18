@@ -1110,6 +1110,7 @@ dependencies = [
  "tracing-tree",
  "tree-sitter",
  "tree-sitter-r",
+ "typing",
 ]
 
 [[package]]
@@ -1623,6 +1624,13 @@ dependencies = [
 [[package]]
 name = "typing"
 version = "0.0.5"
+dependencies = [
+ "insta",
+ "serde",
+ "thiserror",
+ "tree-sitter",
+ "tree-sitter-r",
+]
 
 [[package]]
 name = "unicode-ident"

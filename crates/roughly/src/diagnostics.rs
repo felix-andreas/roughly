@@ -1,6 +1,7 @@
 mod fast;
 mod syntax;
 mod unused;
+mod typing;
 
 use {
     crate::{
@@ -41,6 +42,14 @@ pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagn
                 Ok(diags) => diagnostics.extend(diags),
                 Err(error) => {
                     tracing::warn!("error while diagnostics {error}");
+                }
+            }
+            
+            // Add type checking diagnostics
+            match typing::analyze(node, rope) {
+                Ok(diags) => diagnostics.extend(diags),
+                Err(error) => {
+                    tracing::warn!("error while type checking {error}");
                 }
             }
         }
