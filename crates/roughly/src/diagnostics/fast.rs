@@ -89,24 +89,26 @@ pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
                     && operator.kind() == "<-"
                 {
                     let raw = rope.byte_slice(lhs.byte_range()).to_string();
-                    if state.check_case && config.case_linting {
-                        let correct_case = match config.case {
-                            Case::Camel => utils::to_camel_case(&raw),
-                            Case::Snake => utils::to_snake_case(&raw),
-                        };
-                        if raw != correct_case {
-                            diagnostics.push(diagnostics::warning(
-                                node,
-                                format!(
-                                    "Variable `{}` should have {} name, e.g. {}",
-                                    raw,
-                                    match config.case {
-                                        Case::Camel => "camelCase",
-                                        Case::Snake => "snake_case",
-                                    },
-                                    correct_case
-                                ),
-                            ));
+                    if state.check_case {
+                        if let Some(case) = config.case {
+                            let correct_case = match case {
+                                Case::Camel => utils::to_camel_case(&raw),
+                                Case::Snake => utils::to_snake_case(&raw),
+                            };
+                            if raw != correct_case {
+                                diagnostics.push(diagnostics::warning(
+                                    node,
+                                    format!(
+                                        "Variable `{}` should have {} name, e.g. {}",
+                                        raw,
+                                        match case {
+                                            Case::Camel => "camelCase",
+                                            Case::Snake => "snake_case",
+                                        },
+                                        correct_case
+                                    ),
+                                ));
+                            }
                         }
                     }
                 }
@@ -125,26 +127,27 @@ pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
             "parameter" => {
                 if let Some(name) = node.child_by_field_name("name")
                     && name.kind() == "identifier"
-                    && config.case_linting
                 {
-                    let raw = rope.byte_slice(name.byte_range()).to_string();
-                    let correct_case = match config.case {
-                        Case::Camel => utils::to_camel_case(&raw),
-                        Case::Snake => utils::to_snake_case(&raw),
-                    };
-                    if raw != correct_case {
-                        diagnostics.push(diagnostics::warning(
-                            name,
-                            format!(
-                                "Parameter `{}` should have {} name, e.g. {}",
-                                raw,
-                                match config.case {
-                                    Case::Camel => "camelCase",
-                                    Case::Snake => "snake_case",
-                                },
-                                correct_case
-                            ),
-                        ));
+                    if let Some(case) = config.case {
+                        let raw = rope.byte_slice(name.byte_range()).to_string();
+                        let correct_case = match case {
+                            Case::Camel => utils::to_camel_case(&raw),
+                            Case::Snake => utils::to_snake_case(&raw),
+                        };
+                        if raw != correct_case {
+                            diagnostics.push(diagnostics::warning(
+                                name,
+                                format!(
+                                    "Parameter `{}` should have {} name, e.g. {}",
+                                    raw,
+                                    match case {
+                                        Case::Camel => "camelCase",
+                                        Case::Snake => "snake_case",
+                                    },
+                                    correct_case
+                                ),
+                            ));
+                        }
                     }
                 }
             }
@@ -191,13 +194,12 @@ mod tests {
     use crate::{config::Case, tree};
     use ropey::Rope;
 
-    fn analyze_code(code: &str, case: Case, case_linting: bool) -> Vec<Diagnostic> {
+    fn analyze_code(code: &str, case: Option<Case>) -> Vec<Diagnostic> {
         let mut parser = tree::new_parser();
         let tree = tree::parse(&mut parser, code, None);
         let rope = Rope::from_str(code);
         let config = Config {
             case,
-            case_linting,
             experimental: false,
         };
         
@@ -214,7 +216,7 @@ mod tests {
         }
         "#;
 
-        let diagnostics = analyze_code(code, Case::Snake, false);
+        let diagnostics = analyze_code(code, None);
         
         // Should not have any case-related warnings when disabled
         let case_warnings = diagnostics.iter().any(|d| {
@@ -233,7 +235,7 @@ mod tests {
         }
         "#;
 
-        let diagnostics = analyze_code(code, Case::Snake, true);
+        let diagnostics = analyze_code(code, Some(Case::Snake));
         
         // Should have warnings for camelCase parameters and variables inside functions when snake_case is enforced
         // Note: Global variables are not checked for case
@@ -264,7 +266,7 @@ mod tests {
         }
         "#;
 
-        let diagnostics = analyze_code(code, Case::Camel, true);
+        let diagnostics = analyze_code(code, Some(Case::Camel));
         
         // Should have warnings for snake_case parameters and variables inside functions when camelCase is enforced
         // Note: Global variables are not checked for case
@@ -303,8 +305,8 @@ mod tests {
         }
         "#;
 
-        let snake_diagnostics = analyze_code(snake_code, Case::Snake, true);
-        let camel_diagnostics = analyze_code(camel_code, Case::Camel, true);
+        let snake_diagnostics = analyze_code(snake_code, Some(Case::Snake));
+        let camel_diagnostics = analyze_code(camel_code, Some(Case::Camel));
         
         // Should not have case warnings when using correct case style
         let snake_case_warnings = snake_diagnostics.iter().any(|d| {

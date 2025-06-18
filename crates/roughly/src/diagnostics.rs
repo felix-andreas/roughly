@@ -15,8 +15,7 @@ use {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
-    case: Case,
-    case_linting: bool,
+    case: Option<Case>,
     experimental: bool,
 }
 
@@ -24,7 +23,6 @@ impl Config {
     pub fn from_config(config: config::Config, experimental: bool) -> Self {
         Config {
             case: config.case,
-            case_linting: config.case_linting,
             experimental,
         }
     }

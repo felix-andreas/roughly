@@ -7,17 +7,15 @@ use {
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    pub case: Case,
+    pub case: Option<Case>,
     pub spaces: usize,
-    pub case_linting: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
-            case: Case::Snake,
+            case: None,
             spaces: 2,
-            case_linting: false,
         }
     }
 }

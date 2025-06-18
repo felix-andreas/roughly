@@ -69,13 +69,10 @@ Linter behavior can be customized via the `roughly.toml` configuration file:
 
 ```toml
 # Control the naming convention for variables and parameters
-case = "snake_case"  # or "camelCase"
-
-# Enable case linting (disabled by default)
-case_linting = true
+case = "snake_case"  # or "camelCase", omit to disable case linting entirely
 ```
 
-**Note**: Case linting is disabled by default. You must explicitly set `case_linting = true` to enable variable and parameter naming convention checks.
+**Note**: Case linting is disabled by default. You must explicitly set a `case` value ("snake_case" or "camelCase") to enable variable and parameter naming convention checks.
 
 ## Roadmap
 
