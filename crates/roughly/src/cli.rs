@@ -1,7 +1,6 @@
 use {
     crate::{
         config, diagnostics,
-        experimental::ExperimentalFeatures,
         format::{self, LineEnding},
         index,
         lsp_types::{self, DiagnosticSeverity},
@@ -15,6 +14,55 @@ use {
         time::Duration,
     },
 };
+
+//
+// EXPERIMENTAL FEATURES
+//
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExperimentalFeatures {
+    pub unused: bool,
+    pub range_formatting: bool,
+}
+
+impl ExperimentalFeatures {
+    pub fn new() -> Self {
+        Self {
+            unused: false,
+            range_formatting: false,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        !self.unused && !self.range_formatting
+    }
+}
+
+impl Default for ExperimentalFeatures {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub fn parse_experimental_features(feature_strings: &[String]) -> ExperimentalFeatures {
+    let mut features = ExperimentalFeatures::new();
+
+    for feature_str in feature_strings {
+        match feature_str.as_str() {
+            "all" => {
+                features.unused = true;
+                features.range_formatting = true;
+            }
+            "unused" => features.unused = true,
+            "range_formatting" => features.range_formatting = true,
+            _ => {
+                warn(&format!("unknown experimental feature: {}", feature_str));
+            }
+        }
+    }
+
+    features
+}
 
 //
 // LOG

@@ -1,9 +1,8 @@
 use {
     crate::{
-        cli, completions,
+        cli::{self, ExperimentalFeatures}, completions,
         config::Config,
         diagnostics,
-        experimental::{ExperimentalFeature, ExperimentalFeatures},
         format::{self, LineEnding},
         index::{self, IndexError},
         lsp_types::{
@@ -139,7 +138,7 @@ impl LanguageServer for ServerState {
                     ..Default::default()
                 }),
                 document_formatting_provider: Some(OneOf::Left(true)),
-                document_range_formatting_provider: Some(OneOf::Left(self.experimental_features.has(ExperimentalFeature::RangeFormatting))),
+                document_range_formatting_provider: Some(OneOf::Left(self.experimental_features.range_formatting)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
                     TextDocumentSyncOptions {

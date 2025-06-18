@@ -1,8 +1,7 @@
 use {
     clap::{Parser, Subcommand},
     roughly::{
-        cli::{self, CheckError, DebugError, FmtError},
-        experimental::ExperimentalFeatures,
+        cli::{self, parse_experimental_features, CheckError, DebugError, FmtError},
     },
     std::{path::PathBuf, process::ExitCode},
     tracing_subscriber::prelude::*,
@@ -22,10 +21,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     
     // Parse experimental features and warn about unknown ones
-    let (experimental_features, unknown_features) = ExperimentalFeatures::from_strings(&cli.experimental_features);
-    for unknown in &unknown_features {
-        eprintln!("warning: unknown experimental feature: {}", unknown);
-    }
+    let experimental_features = parse_experimental_features(&cli.experimental_features);
     
     match cli.command {
         Command::Check { files } => match cli::check(files.as_deref(), experimental_features) {

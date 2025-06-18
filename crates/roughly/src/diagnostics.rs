@@ -4,8 +4,8 @@ mod unused;
 
 use {
     crate::{
+        cli::ExperimentalFeatures,
         config::{self, Case},
-        experimental::{ExperimentalFeature, ExperimentalFeatures},
         lsp_types::{Diagnostic, DiagnosticSeverity},
         utils,
     },
@@ -37,7 +37,7 @@ pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagn
 
     if full && !has_syntax_errors {
         #[allow(clippy::collapsible_if)]
-        if config.experimental_features.has(ExperimentalFeature::Unused) {
+        if config.experimental_features.unused {
             match unused::analyze(node, rope) {
                 Ok(diags) => diagnostics.extend(diags),
                 Err(error) => {
