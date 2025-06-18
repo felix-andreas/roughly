@@ -16,42 +16,6 @@ use {
 };
 
 //
-// EXPERIMENTAL FEATURES
-//
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ExperimentalFeatures {
-    pub range_formatting: bool,
-    pub unused: bool,
-}
-
-impl ExperimentalFeatures {
-    pub fn parse(flags: &[impl AsRef<str>]) -> Self {
-        let mut unused = false;
-        let mut range_formatting = false;
-
-        for flag in flags {
-            match flag.as_ref() {
-                "all" => {
-                    unused = true;
-                    range_formatting = true;
-                }
-                "range_formatting" => range_formatting = true,
-                "unused" => unused = true,
-                unknown => {
-                    warn(&format!("unknown experimental feature: {unknown}"));
-                }
-            }
-        }
-
-        Self {
-            unused,
-            range_formatting,
-        }
-    }
-}
-
-//
 // LOG
 //
 
@@ -488,4 +452,40 @@ pub fn ast(path: &Path) -> Result<(), DebugError> {
     let tree = tree::parse(&mut tree::new_parser(), &text, None);
     eprintln!("{}", tree::format(tree.root_node()));
     Ok(())
+}
+
+//
+// EXPERIMENTAL FEATURES
+//
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExperimentalFeatures {
+    pub range_formatting: bool,
+    pub unused: bool,
+}
+
+impl ExperimentalFeatures {
+    pub fn parse(flags: &[impl AsRef<str>]) -> Self {
+        let mut unused = false;
+        let mut range_formatting = false;
+
+        for flag in flags {
+            match flag.as_ref() {
+                "all" => {
+                    unused = true;
+                    range_formatting = true;
+                }
+                "range_formatting" => range_formatting = true,
+                "unused" => unused = true,
+                unknown => {
+                    warn(&format!("unknown experimental feature: {unknown}"));
+                }
+            }
+        }
+
+        Self {
+            unused,
+            range_formatting,
+        }
+    }
 }
