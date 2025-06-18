@@ -478,8 +478,9 @@ impl ExperimentalFeatures {
         for flag in flags {
             match flag.as_ref() {
                 "all" => {
-                    unused = true;
                     range_formatting = true;
+                    typing = true;
+                    unused = true;
                 }
                 "range_formatting" => range_formatting = true,
                 "typing" => typing = true,
