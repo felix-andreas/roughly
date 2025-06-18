@@ -1,6 +1,9 @@
 use {
     clap::{Parser, Subcommand},
-    roughly::cli::{self, CheckError, DebugError, FmtError},
+    roughly::{
+        cli::{self, CheckError, DebugError, FmtError},
+        experimental::ExperimentalFeatures,
+    },
     std::{path::PathBuf, process::ExitCode},
     tracing_subscriber::prelude::*,
 };
@@ -17,8 +20,15 @@ fn main() -> ExitCode {
         .init();
 
     let cli = Cli::parse();
+    
+    // Parse experimental features and warn about unknown ones
+    let (experimental_features, unknown_features) = ExperimentalFeatures::from_strings(&cli.experimental_features);
+    for unknown in &unknown_features {
+        eprintln!("warning: unknown experimental feature: {}", unknown);
+    }
+    
     match cli.command {
-        Command::Check { files } => match cli::check(files.as_deref(), cli.experimental) {
+        Command::Check { files } => match cli::check(files.as_deref(), experimental_features) {
             Ok(()) => ExitCode::SUCCESS,
             Err(CheckError) => ExitCode::FAILURE,
         },
@@ -27,7 +37,7 @@ fn main() -> ExitCode {
             Err(FmtError) => ExitCode::FAILURE,
         },
         Command::Server { stdio: _stdio } => {
-            cli::server(cli.experimental);
+            cli::server(experimental_features);
             ExitCode::SUCCESS
         }
         Command::Debug(dev) => match dev {
@@ -57,9 +67,9 @@ struct Cli {
     /// Ignored ... here only to please VS Code
     #[clap(long, default_value_t = true)]
     stdio: bool,
-    /// Enable experimental features
-    #[clap(long, global = true, default_value_t = false)]
-    experimental: bool,
+    /// Enable experimental features (can be used multiple times)
+    #[clap(long = "experimental-feature", global = true)]
+    experimental_features: Vec<String>,
 }
 
 #[derive(Debug, Subcommand)]

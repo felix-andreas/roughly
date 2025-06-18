@@ -1,6 +1,7 @@
 use {
     crate::{
         config, diagnostics,
+        experimental::ExperimentalFeatures,
         format::{self, LineEnding},
         index,
         lsp_types::{self, DiagnosticSeverity},
@@ -57,7 +58,7 @@ pub fn error(message: &str) {
 #[derive(Debug)]
 pub struct CheckError;
 
-pub fn check(maybe_files: Option<&[PathBuf]>, experimental: bool) -> Result<(), CheckError> {
+pub fn check(maybe_files: Option<&[PathBuf]>, experimental_features: ExperimentalFeatures) -> Result<(), CheckError> {
     let mut parser = tree::new_parser();
 
     let root: Vec<PathBuf> = vec![".".into()];
@@ -96,7 +97,7 @@ pub fn check(maybe_files: Option<&[PathBuf]>, experimental: bool) -> Result<(), 
     let mut n_files = 0;
     let mut n_errors = 0;
     for (paths, config) in paths_with_config {
-        let config = diagnostics::Config::from_config(config, experimental);
+        let config = diagnostics::Config::from_config(config, experimental_features);
         for path in paths {
             n_files += 1;
             let old = match std::fs::read_to_string(&path) {
@@ -324,8 +325,8 @@ pub fn fmt(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(
 // SERVER
 //
 
-pub fn server(experimental: bool) {
-    server::run(experimental);
+pub fn server(experimental_features: ExperimentalFeatures) {
+    server::run(experimental_features);
 }
 
 //

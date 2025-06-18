@@ -4,6 +4,7 @@ pub mod cli;
 pub mod completions;
 pub mod config;
 pub mod diagnostics;
+pub mod experimental;
 pub mod format;
 pub mod index;
 pub mod server;
