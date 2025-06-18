@@ -57,7 +57,10 @@ pub fn error(message: &str) {
 #[derive(Debug)]
 pub struct CheckError;
 
-pub fn check(maybe_files: Option<&[PathBuf]>, experimental: bool) -> Result<(), CheckError> {
+pub fn check(
+    maybe_files: Option<&[PathBuf]>,
+    experimental_features: ExperimentalFeatures,
+) -> Result<(), CheckError> {
     let mut parser = tree::new_parser();
 
     let root: Vec<PathBuf> = vec![".".into()];
@@ -96,7 +99,7 @@ pub fn check(maybe_files: Option<&[PathBuf]>, experimental: bool) -> Result<(), 
     let mut n_files = 0;
     let mut n_errors = 0;
     for (paths, config) in paths_with_config {
-        let config = diagnostics::Config::from_config(config, experimental);
+        let config = diagnostics::Config::from_config(config, experimental_features.unused);
         for path in paths {
             n_files += 1;
             let old = match std::fs::read_to_string(&path) {
@@ -324,8 +327,8 @@ pub fn fmt(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(
 // SERVER
 //
 
-pub fn server(experimental: bool) {
-    server::run(experimental);
+pub fn server(experimental_features: ExperimentalFeatures) {
+    server::run(experimental_features);
 }
 
 //
@@ -449,4 +452,40 @@ pub fn ast(path: &Path) -> Result<(), DebugError> {
     let tree = tree::parse(&mut tree::new_parser(), &text, None);
     eprintln!("{}", tree::format(tree.root_node()));
     Ok(())
+}
+
+//
+// EXPERIMENTAL FEATURES
+//
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExperimentalFeatures {
+    pub range_formatting: bool,
+    pub unused: bool,
+}
+
+impl ExperimentalFeatures {
+    pub fn parse(flags: &[impl AsRef<str>]) -> Self {
+        let mut unused = false;
+        let mut range_formatting = false;
+
+        for flag in flags {
+            match flag.as_ref() {
+                "all" => {
+                    unused = true;
+                    range_formatting = true;
+                }
+                "range_formatting" => range_formatting = true,
+                "unused" => unused = true,
+                unknown => {
+                    warn(&format!("unknown experimental feature: {unknown}"));
+                }
+            }
+        }
+
+        Self {
+            unused,
+            range_formatting,
+        }
+    }
 }
