@@ -28,7 +28,7 @@ pub fn analyze(node: Node, rope: &Rope) -> Result<Vec<Diagnostic>, TypeDiagnosti
             
             // Check for simple type violations in the source
             for (line_num, line) in source.lines().enumerate() {
-                if let Some(diagnostic) = check_line_for_type_errors(&type_checker, line, line_num) {
+                if let Some(diagnostic) = check_line_for_type_errors(&mut type_checker, line, line_num) {
                     diagnostics.push(diagnostic);
                 }
             }
@@ -48,7 +48,7 @@ pub fn analyze(node: Node, rope: &Rope) -> Result<Vec<Diagnostic>, TypeDiagnosti
 
 /// Check a single line for basic type errors
 fn check_line_for_type_errors(
-    type_checker: &TypeChecker,
+    type_checker: &mut TypeChecker,
     line: &str,
     line_num: usize,
 ) -> Option<Diagnostic> {
@@ -56,7 +56,7 @@ fn check_line_for_type_errors(
     if line.contains("#:") && (line.contains("<-") || line.contains("=")) {
         if let Some(var_name) = extract_variable_name(line) {
             if let Some(assigned_value) = extract_assigned_value(line) {
-                let inferred_type = type_checker.infer_literal_type(assigned_value);
+                let inferred_type = type_checker.infer_expression_type(assigned_value);
                 
                 // Check if the assignment is compatible with the declared type
                 if let Err(type_error) = type_checker.check_assignment(&var_name, &inferred_type) {
