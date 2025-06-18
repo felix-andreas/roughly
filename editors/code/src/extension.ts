@@ -30,10 +30,9 @@ let client: LanguageClient
 let statusBar
 let status = { health: "started" }
 let version
+let outputChannel: any
 
-export function activate({ subscriptions, extension }: ExtensionContext) {
-  version = extension.packageJSON.version ?? "<unknown>"
-
+function createClient(): LanguageClient {
   const config = workspace.getConfiguration("roughly")
 
   const command = process.env.SERVER_PATH
@@ -48,33 +47,36 @@ export function activate({ subscriptions, extension }: ExtensionContext) {
 
   logger.info("using server command:", [command, ...args].join(" "))
 
-  const outputChannel = window.createOutputChannel("Roughly");
-
-  client = (() => {
-    const serverOptions: ServerOptions = {
-      command,
-      args,
-      transport: TransportKind.stdio,
-      options: {
-        env: {
-          ...process.env,
-          RUST_LOG: "debug",
-        },
+  const serverOptions: ServerOptions = {
+    command,
+    args,
+    transport: TransportKind.stdio,
+    options: {
+      env: {
+        ...process.env,
+        RUST_LOG: "debug",
       },
-    }
+    },
+  }
 
-    const clientOptions: LanguageClientOptions = {
-      documentSelector: [{ scheme: "file", language: "r" }],
-      outputChannel,
-    }
+  const clientOptions: LanguageClientOptions = {
+    documentSelector: [{ scheme: "file", language: "r" }],
+    outputChannel,
+  }
 
-    return new LanguageClient(
-      'roughly',
-      'Roughly',
-      serverOptions,
-      clientOptions
-    )
-  })()
+  return new LanguageClient(
+    'roughly',
+    'Roughly',
+    serverOptions,
+    clientOptions
+  )
+}
+
+export function activate({ subscriptions, extension }: ExtensionContext) {
+  version = extension.packageJSON.version ?? "<unknown>"
+
+  outputChannel = window.createOutputChannel("Roughly");
+  client = createClient()
 
   subscriptions.push(
     workspace.onDidChangeConfiguration(async (change) => {
@@ -85,7 +87,9 @@ export function activate({ subscriptions, extension }: ExtensionContext) {
           "Restart",
         )
         if (choice === "Restart") {
-          await client.restart()
+          await client.stop()
+          client = createClient()
+          await client.start()
           setTimeout(() => {
             client.outputChannel.show()
           }, 1500)
@@ -96,7 +100,9 @@ export function activate({ subscriptions, extension }: ExtensionContext) {
       "roughly.restartServer",
       async () => {
         if (client.isRunning) {
-          await client.restart()
+          await client.stop()
+          client = createClient()
+          await client.start()
         } else {
           await client.start()
         }
