@@ -4,6 +4,8 @@ edition = "2024"
 version.workspace = true
 
 [dependencies]
+typing.workspace = true
+
 clap.workspace = true
 console.workspace = true
 ignore.workspace = true

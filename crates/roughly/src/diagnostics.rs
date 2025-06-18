@@ -1,5 +1,6 @@
 mod fast;
 mod syntax;
+mod typing;
 mod unused;
 
 use {
@@ -15,15 +16,21 @@ use {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
-    case: Case,
-    experimental_unused: bool,
+    pub case: Case,
+    pub experimental_unused: bool,
+    pub experimental_typing: bool,
 }
 
 impl Config {
-    pub fn from_config(config: config::Config, experimental_unused: bool) -> Self {
+    pub fn from_config(
+        config: config::Config,
+        experimental_unused: bool,
+        experimental_typing: bool,
+    ) -> Self {
         Config {
             case: config.case,
             experimental_unused,
+            experimental_typing,
         }
     }
 }
@@ -43,6 +50,10 @@ pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagn
                     tracing::warn!("error while diagnostics {error}");
                 }
             }
+        }
+
+        if config.experimental_typing {
+            diagnostics.extend(typing::analyze(node, rope))
         }
     }
 

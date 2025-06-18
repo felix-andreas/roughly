@@ -7,6 +7,8 @@ default-members = ["crates/roughly"]
 version = "0.0.5"
 
 [workspace.dependencies]
+typing = { path = "crates/typing" }
+
 clap = { version = "4.5.40", features = ["derive"] }
 console = "0.15.11"
 ignore = "0.4.23"
