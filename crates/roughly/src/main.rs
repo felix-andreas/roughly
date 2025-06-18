@@ -1,6 +1,6 @@
 use {
     clap::{Parser, Subcommand},
-    roughly::cli::{self, CheckError, DebugError, FmtError},
+    roughly::cli::{self, CheckError, DebugError, ExperimentalFeatures, FmtError},
     std::{path::PathBuf, process::ExitCode},
     tracing_subscriber::prelude::*,
 };
@@ -17,8 +17,15 @@ fn main() -> ExitCode {
         .init();
 
     let cli = Cli::parse();
+    let experimental_features = ExperimentalFeatures::parse(
+        &cli.experimental_features
+            .as_ref()
+            .map(|flags| flags.split(' ').collect::<Vec<&str>>())
+            .unwrap_or_else(Vec::new),
+    );
+
     match cli.command {
-        Command::Check { files } => match cli::check(files.as_deref(), cli.experimental) {
+        Command::Check { files } => match cli::check(files.as_deref(), experimental_features) {
             Ok(()) => ExitCode::SUCCESS,
             Err(CheckError) => ExitCode::FAILURE,
         },
@@ -27,7 +34,7 @@ fn main() -> ExitCode {
             Err(FmtError) => ExitCode::FAILURE,
         },
         Command::Server { stdio: _stdio } => {
-            cli::server(cli.experimental);
+            cli::server(experimental_features);
             ExitCode::SUCCESS
         }
         Command::Debug(dev) => match dev {
@@ -57,9 +64,9 @@ struct Cli {
     /// Ignored ... here only to please VS Code
     #[clap(long, default_value_t = true)]
     stdio: bool,
-    /// Enable experimental features
-    #[clap(long, global = true, default_value_t = false)]
-    experimental: bool,
+    /// Enable experimental features (e.g. "all" or "feature-1 feature-2")
+    #[clap(long, global = true)]
+    experimental_features: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
