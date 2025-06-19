@@ -4,6 +4,7 @@ edition = "2024"
 version.workspace = true
 
 [dependencies]
+miette.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tree-sitter.workspace = true

@@ -7,7 +7,10 @@ fn main() {
         let result = typing::check(tree.root_node());
         match result {
             Ok(typ) => eprintln!("expr: {expr}\ntype: {typ:?}\n"),
-            Err((node, err)) => eprintln!("expr: {expr}\nnode: {node:?}\nerror: {}\n", err.0),
+            Err(err) => eprintln!(
+                "expr: {expr}\nrange: {:?}\nerror: {}\n",
+                err.range, err.message
+            ),
         }
     }
 

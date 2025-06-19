@@ -43,6 +43,9 @@ nu-ansi-term = "0.50.1"
 extendr-api = "0.8.0"
 extendr-engine = "0.8.0"
 
+# typing
+miette = { version = "7.6.0", features = ["fancy"] }
+
 # dev-dependencies
 insta = "1.43.1"
 
