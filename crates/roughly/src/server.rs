@@ -588,6 +588,8 @@ impl LanguageServer for ServerState {
     ) -> BoxFuture<'static, Result<Option<WorkspaceSymbolResponse>, ResponseError>> {
         let query = params.query;
 
+        tracing::debug!(?query);
+
         let symbols = index::get_workspace_symbols(&query, &self.workspace_symbols);
 
         box_future(Ok(Some(WorkspaceSymbolResponse::Nested(symbols))))
