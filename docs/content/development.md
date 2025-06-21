@@ -173,10 +173,13 @@ See https://github.com/r-lib/tree-sitter-r/issues/166
 
 ### VS Code Extensions
 
-* https://github.com/microsoft/vscode-extension-samples/tree/main/lsp-sample
-* https://github.com/semanticart/lsp-from-scratch
-* https://github.com/nix-community/vscode-nix-ide
-* https://github.com/ziglang/vscode-zig/
+* docs:
+  * https://code.visualstudio.com/api/references/vscode-api
+* examples:
+  * https://github.com/microsoft/vscode-extension-samples/tree/main/lsp-sample
+  * https://github.com/semanticart/lsp-from-scratch
+  * https://github.com/nix-community/vscode-nix-ide
+  * https://github.com/ziglang/vscode-zig/
 
 ### Other Language Servers written in Rust
 

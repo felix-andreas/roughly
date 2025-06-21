@@ -23,12 +23,14 @@ snapshot *args:
 vsce *args:
 	@bun --cwd=editors/code run vsce -- {{args}}
 
+install-extension:
+	mkdir -p release/dev
+	just build-extension pre-release --out ../../release/dev/roughly.vsix
+	code --install-extension release/dev/roughly.vsix
+
 #
 # BUILD
 #
-
-install-extension $path:
-	code --install-extension {{path}}
 
 build-linux:
 	cargo build --release --target x86_64-unknown-linux-gnu

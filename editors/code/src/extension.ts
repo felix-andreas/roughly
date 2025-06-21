@@ -1,5 +1,5 @@
-import * as path from "path";
-import * as fs from 'fs';
+import * as fs from "fs"
+import * as path from "path"
 
 import {
   commands,
@@ -9,6 +9,7 @@ import {
   ExtensionContext,
   MarkdownString,
   StatusBarAlignment,
+  StatusBarItem,
   TextEditor,
   ThemeColor,
 } from 'vscode'
@@ -20,20 +21,96 @@ import {
   TransportKind,
 } from 'vscode-languageclient/node'
 
-const logger = window.createOutputChannel("Roughly Extension", { log: true });
+const logger = window.createOutputChannel("Roughly Extension", { log: true })
+const outputChannel = window.createOutputChannel("Roughly")
 
 const EXTENSION_ROOT_DIR = path.dirname(__dirname)
 const ROUGHLY_BINARY_NAME = process.platform === "win32" ? "roughly.exe" : "roughly"
 const BUNDLED_ROUGHLY_EXECUTABLE = path.join(EXTENSION_ROOT_DIR, "bin", ROUGHLY_BINARY_NAME)
 
-let client: LanguageClient
-let statusBar
+let client: LanguageClient | null = null
+let statusBar: StatusBarItem
 let status = { health: "started" }
-let version
+let version: string | undefined
 
-export function activate({ subscriptions, extension }: ExtensionContext) {
+export async function activate({ subscriptions, extension, }: ExtensionContext): Promise<void> {
   version = extension.packageJSON.version ?? "<unknown>"
 
+  subscriptions.push(
+    workspace.onDidChangeConfiguration(async (change) => {
+      if (
+        change.affectsConfiguration("roughly.path", undefined)) {
+        const choice = await window.showWarningMessage(
+          "Configuration change requires restarting the language server",
+          "Restart",
+        )
+        if (choice === "Restart") {
+          await restartClient()
+          setTimeout(() => {
+            client?.outputChannel.show()
+          }, 1500)
+        }
+      }
+    }),
+    commands.registerCommand(
+      "roughly.restartServer",
+      async () => {
+        await restartClient()
+      }
+    ),
+    commands.registerCommand(
+      "roughly.startServer",
+      async () => {
+        await restartClient()
+      }
+    ),
+    commands.registerCommand(
+      "roughly.stopServer",
+      async () => {
+        await stopClient()
+      }
+    ),
+    commands.registerCommand(
+      "roughly.openLogs",
+      async () => {
+        if (client?.outputChannel) {
+          client.outputChannel.show()
+        }
+      }
+    )
+  )
+
+  statusBar = window.createStatusBarItem(StatusBarAlignment.Left)
+  updateStatusBarItem()
+
+  updateStatusBarVisibility(window.activeTextEditor)
+  window.onDidChangeActiveTextEditor((editor) => updateStatusBarVisibility(editor))
+
+  restartClient()
+}
+
+export async function deactivate(): Promise<void> {
+  await stopClient()
+}
+
+//
+// SERVER
+//
+
+async function restartClient(): Promise<void> {
+  const newClient = createClient()
+  try {
+    await newClient.start()
+    void stopClient()
+    client = newClient
+    setServerStatus({ health: "started" })
+  } catch (reason) {
+    void window.showWarningMessage("Failed to start Roughly language server.")
+    setServerStatus({ health: "stopped" })
+  }
+}
+
+function createClient(): LanguageClient {
   const config = workspace.getConfiguration("roughly")
 
   const command = process.env.SERVER_PATH
@@ -48,101 +125,61 @@ export function activate({ subscriptions, extension }: ExtensionContext) {
 
   logger.info("using server command:", [command, ...args].join(" "))
 
-  const outputChannel = window.createOutputChannel("Roughly");
-
-  client = (() => {
-    const serverOptions: ServerOptions = {
-      command,
-      args,
-      transport: TransportKind.stdio,
-      options: {
-        env: {
-          ...process.env,
-          RUST_LOG: "debug",
-        },
+  const serverOptions: ServerOptions = {
+    command,
+    args,
+    transport: TransportKind.stdio,
+    options: {
+      env: {
+        ...process.env,
+        RUST_LOG: "debug",
       },
-    }
+    },
+  }
 
-    const clientOptions: LanguageClientOptions = {
-      documentSelector: [{ scheme: "file", language: "r" }],
-      outputChannel,
-    }
+  const clientOptions: LanguageClientOptions = {
+    documentSelector: [{ scheme: "file", language: "r" }],
+    outputChannel,
+  }
 
-    return new LanguageClient(
-      'roughly',
-      'Roughly',
-      serverOptions,
-      clientOptions
-    )
-  })()
-
-  subscriptions.push(
-    workspace.onDidChangeConfiguration(async (change) => {
-      if (
-        change.affectsConfiguration("roughly.path", undefined)) {
-        const choice = await window.showWarningMessage(
-          "Configuration change requires restarting the language server",
-          "Restart",
-        )
-        if (choice === "Restart") {
-          await client.restart()
-          setTimeout(() => {
-            client.outputChannel.show()
-          }, 1500)
-        }
-      }
-    }),
-    commands.registerCommand(
-      "roughly.restartServer",
-      async () => {
-        if (client.isRunning) {
-          await client.restart()
-        } else {
-          await client.start()
-        }
-        setServerStatus({ health: "started" })
-      }
-    ),
-    commands.registerCommand(
-      "roughly.startServer",
-      async () => {
-        await client.start()
-        setServerStatus({ health: "started" })
-      }
-    ),
-    commands.registerCommand(
-      "roughly.stopServer",
-      async () => {
-        await client.stop()
-        setServerStatus({ health: "stopped" })
-      }
-    ),
-    commands.registerCommand(
-      "roughly.openLogs",
-      async () => {
-        if (client.outputChannel) {
-          client.outputChannel.show();
-        }
-      }
-    )
+  const client = new LanguageClient(
+    'roughly',
+    'Roughly',
+    serverOptions,
+    clientOptions
   )
 
-  statusBar = window.createStatusBarItem(StatusBarAlignment.Left)
-  updateStatusBarItem()
-
-  updateStatusBarVisibility(window.activeTextEditor)
-  window.onDidChangeActiveTextEditor((editor) => updateStatusBarVisibility(editor))
-
-  client.start() // this also launches the server
+  return client
 }
+
+
+async function stopClient(): Promise<void> {
+  if (!client) {
+    return
+  }
+
+  logger.info("stopping server ...")
+
+  const oldClient = client
+  client = null
+
+  // The `stop` call will send the "shutdown" notification to the LSP
+  await oldClient.stop()
+  // The `dipose` call will send the "exit" request to the LSP which actually tells the child process to exit
+  await oldClient.dispose()
+}
+
+//
+// STATUS BAR
+//
 
 type ServerStatus = {
   health: "started" | "stopped"
 }
 
 function setServerStatus(newStatus: ServerStatus) {
-  status = newStatus;
-  updateStatusBarItem();
+  status = newStatus
+  updateStatusBarItem()
 }
 
 function updateStatusBarVisibility(editor: TextEditor | undefined) {
@@ -187,12 +224,4 @@ function updateStatusBarItem() {
 
   // if (true) icon = "$(loading~spin) "
   statusBar.text = `${icon}Roughly`
-}
-
-
-export function deactivate(): Thenable<void> | undefined {
-  if (!client) {
-    return undefined
-  }
-  return client.stop()
 }
