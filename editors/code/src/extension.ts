@@ -61,7 +61,7 @@ export async function activate({ subscriptions, extension, }: ExtensionContext):
     commands.registerCommand(
       "roughly.startServer",
       async () => {
-        await restartClient
+        await restartClient()
       }
     ),
     commands.registerCommand(
