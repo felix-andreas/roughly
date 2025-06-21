@@ -98,14 +98,14 @@ export async function deactivate(): Promise<void> {
 //
 
 async function restartClient(): Promise<void> {
+  const newClient = createClient()
   try {
-    const newClient = createClient()
-    newClient.start()
+    await newClient.start()
     void stopClient()
     client = newClient
     setServerStatus({ health: "started" })
   } catch (reason) {
-    // void window.showWarningMessage("Failed to start Roughly language server.")
+    void window.showWarningMessage("Failed to start Roughly language server.")
     setServerStatus({ health: "stopped" })
   }
 }
