@@ -334,6 +334,27 @@ fn call() {
             body
         })
     "#};
+
+    // hugging: nested
+    assert_fmt! {r#"
+    	fn(fn(arg
+        ))
+
+    	fn(fn(
+        arg))
+
+    	fn(fn(
+        arg
+        ))
+
+    	fn(fn(fn(
+            arg
+        )))
+
+    	fn(arg = fn(arg =fn(
+            arg
+        )))
+    "#};
 }
 
 #[test]
