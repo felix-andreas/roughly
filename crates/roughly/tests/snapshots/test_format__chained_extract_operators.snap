@@ -6,8 +6,6 @@ foo$
   bar(a)$
   baz(a, b)
 
-(
-  foo
-)$
+(foo)$
   bar(a)$
   baz(a, b)$

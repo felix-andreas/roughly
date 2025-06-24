@@ -1,15 +1,10 @@
 ---
 source: crates/roughly/tests/test_format.rs
-expression: "format_str(indoc!\n{r#\"\n    \tfn(arg)\n\n    \tfn(arg\n        )\n\n    \tfn(\n        arg)\n\n    \tfn(\n        arg\n        )\n    \"#}).unwrap()"
+expression: "format_str(indoc!\n{r#\"\n    \tfn(arg1, fn(\n            arg\n        ) # comment\n        )\n    \"#}).unwrap()"
 ---
-fn(arg)
-
-fn(arg)
-
 fn(
-  arg
-)
-
-fn(
-  arg
+  arg1,
+  fn(
+    arg
+  ) # comment
 )

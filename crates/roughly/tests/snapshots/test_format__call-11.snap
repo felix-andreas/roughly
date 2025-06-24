@@ -1,15 +1,15 @@
 ---
 source: crates/roughly/tests/test_format.rs
-expression: "format_str(indoc!\n{r#\"\n    \tfn({ body })\n\n    \tfn({ body }\n        )\n\n    \tfn(\n        { body })\n\n    \tfn(\n        { body }\n        )\n    \"#}).unwrap()"
+expression: "format_str(indoc!\n{r#\"\n    \tfn(arg)\n\n    \tfn(arg\n        )\n\n    \tfn(\n        arg)\n\n    \tfn(\n        arg\n        )\n    \"#}).unwrap()"
 ---
-fn({ body })
+fn(arg)
 
-fn({ body })
+fn(arg)
 
 fn(
-  { body }
+  arg
 )
 
 fn(
-  { body }
+  arg
 )

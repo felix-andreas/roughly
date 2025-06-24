@@ -336,14 +336,12 @@ fn traverse(
             let is_empty = node.child_count() == 2;
 
             let hug = if kind == "arguments" {
-                let start_row = node.start_position().row;
-                node.children_by_field_name("argument", &mut node.walk())
-                    .last()
-                    .is_none_or(|argument| {
-                        argument
-                            .child_by_field_name("value")
-                            .is_some_and(|value| value.start_position().row == start_row)
-                    })
+                tree::find_2nd_last_child(cursor).is_none_or(|child| {
+                    child.kind() != "comment"
+                        && child.child_by_field_name("value").is_some_and(|value| {
+                            value.start_position().row == node.start_position().row
+                        })
+                })
             } else {
                 false
             };
@@ -843,14 +841,9 @@ fn traverse(
         "parenthesized_expression" => {
             handles_comments = true;
 
-            let hug = {
-                let is_single_line = same_line(node, node);
-                let is_empty = node.child_count() == 2;
-                let is_braced_without_comments = field_optional(node, "body").is_some_and(|body| {
-                    body.kind() == "braced_expression" && node.child_count() == 3
-                });
-                is_single_line || is_empty || is_braced_without_comments
-            };
+            let hug = tree::find_2nd_last_child(cursor).is_none_or(|child| {
+                child.kind() != "comment" && child.start_position().row == node.start_position().row
+            });
 
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();

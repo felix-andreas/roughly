@@ -45,6 +45,20 @@ pub fn for_each_child<'a, E>(
     Ok(())
 }
 
+pub fn find_2nd_last_child<'a>(cursor: &mut TreeCursor<'a>) -> Option<Node<'a>> {
+    let mut node = None;
+
+    if cursor.goto_last_child() {
+        if cursor.goto_previous_sibling() {
+            node = Some(cursor.node());
+        }
+
+        cursor.goto_parent();
+    }
+
+    node
+}
+
 pub fn find_next_error(node: Node) -> Option<Node> {
     let mut cursor = node.walk();
 

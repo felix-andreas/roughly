@@ -8,8 +8,8 @@ use {
 };
 
 macro_rules! assert_fmt {
-    ($input:expr) => {
-        insta::assert_snapshot!(format_str(indoc! {$input}).unwrap());
+    ($value:expr) => {
+        insta::assert_snapshot!(format_str(indoc! {$value}).unwrap());
     };
 }
 
@@ -227,7 +227,7 @@ fn call() {
         c=3)
     "#};
 
-    // comments
+    // comments: fuzzy formatting
     assert_fmt! {r#"
         fn  ( # 1
             # 2
@@ -248,6 +248,14 @@ fn call() {
             arg2 # arg2
             # 2
         ) # )
+    "#};
+
+    // hugging: comments
+    assert_fmt! {r#"
+    	fn(arg1, fn(
+            arg
+        ) # comment
+        )
     "#};
 
     // hugging: single line args
@@ -317,9 +325,11 @@ fn call() {
     // hugging: multiple arguments
     assert_fmt! {r#"
     	fn(arg1, fn(
+            arg
         ))
 
     	fn(arg1, arg2 = fn(
+            arg
         ))
 
     	fn(arg1, {
@@ -719,31 +729,80 @@ fn parenthesized_expression() {
         )
     "#};
 
-    // check that braced espressions are hugged
+    // hugging
     assert_fmt! {r#"
         ({})
+
         ({
         })
-        (
-            { body }
+
+        ({ body }
         )
+
+        (
+        { body })
+
+        (
+        { body }
+        )
+
+        ({
+            body
+        })
+
+        ({
+            body
+        }
+        )
+
+        (
+        {
+            body
+        })
+
         (
             {
                 body
             }
         )
-        ({
-            body
-        })
     "#};
 
-    // all comment positions
+    // comments: all positions
     assert_fmt! {r#"
         ( # open
             # 1
             body # body
             # 2
         ) # close
+    "#};
+
+    // comments: hugging
+    assert_fmt! {r#"
+        (lhs + rhs)
+
+        (lhs + rhs
+        )
+
+        (
+        lhs + rhs)
+
+        (
+        lhs + rhs
+        )
+
+        (lhs + rhs # comment
+        )
+
+        (
+        lhs +
+            rhs)
+
+        (lhs +
+            rhs
+        )
+
+        (lhs +
+            rhs)
     "#};
 }
 
