@@ -202,6 +202,10 @@ fn call() {
             # foo
             a = 1, #bar
             b= 2L) #baz
+
+    	fn(arg1, function() { # 1
+            body # 2
+        }) # 3
     "#};
     assert_fmt! {r#"
         foo({ bar; baz })
@@ -222,6 +226,77 @@ fn call() {
             arg2 # arg2
             # 2
         ) # )
+    "#};
+
+    // hugging: single line args
+    assert_fmt! {r#"
+    	fn(arg)
+
+    	fn(arg
+        )
+
+    	fn(
+        arg)
+
+    	fn(
+        arg
+        )
+    "#};
+
+    // hugging: single line block
+    assert_fmt! {r#"
+    	fn({ body })
+
+    	fn({ body }
+        )
+
+    	fn(
+        { body })
+
+    	fn(
+        { body }
+        )
+    "#};
+
+    // hugging: multi line block
+    assert_fmt! {r#"
+    	fn({
+            body
+        })
+
+    	fn({
+            body
+        }
+        )
+
+    	fn(
+        {
+            body
+        })
+
+    	fn(
+        {
+            body
+        }
+        )
+    "#};
+
+    // hugging: multiple arguments
+    assert_fmt! {r#"
+    	fn(arg1, fn(
+        ))
+
+    	fn(arg1, {
+            body
+        })
+
+    	fn(arg1, function() {
+            body
+        })
+
+    	fn(arg1, if(condition) {
+            body
+        })
     "#};
 }
 

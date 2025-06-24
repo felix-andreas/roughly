@@ -334,13 +334,16 @@ fn traverse(
 
             let is_multiline = !same_line(node, node);
             let is_empty = node.child_count() == 2;
-            let hug = node.child_count() == 3
-                && node
-                    .child_by_field_name("argument")
-                    .is_some_and(|argument| {
-                        argument.child_count() == 1
-                            && argument.child(0).unwrap().kind() == "braced_expression"
-                    });
+            let start_row = node.start_position().row;
+            let mut hug = true;
+            let _ = tree::for_each_child(cursor, |_, child, field_name, _| {
+                if let Some("argument" | "parameter") = field_name {
+                    hug &= child
+                        .child_by_field_name("value")
+                        .is_some_and(|value| value.start_position().row == start_row);
+                };
+                Ok::<_, ()>(())
+            });
 
             tree::for_each_child(cursor, |i, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
@@ -358,6 +361,7 @@ fn traverse(
                         }
                         "comma" => {
                             if is_multiline
+                                && !hug
                                 && (maybe_prev
                                     .is_none_or(|prev| ["comment", "comma"].contains(&prev.kind()))
                                     || i == 1)
@@ -383,7 +387,7 @@ fn traverse(
                                 if is_multiline && !hug {
                                     newline(out);
                                 }
-                            } else if is_multiline {
+                            } else if is_multiline && !hug {
                                 newlines(out, child, maybe_prev);
                             } else {
                                 space(out);
