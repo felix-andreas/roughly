@@ -466,7 +466,12 @@ fn traverse(
         "braced_expression" => {
             handles_comments = true;
 
-            let is_multiline = !same_line(node, node) || make_multiline;
+            let hug = tree::find_2nd_last_child(cursor).is_none_or(|child| {
+                child.kind() != "comment"
+                    && child.start_position().row == node.start_position().row
+                    && child.end_position().row == node.start_position().row
+            });
+            let is_multiline = !hug || make_multiline;
             let is_empty = node.child_count() == 2;
 
             tree::for_each_child(cursor, |i, child, field_name, cursor| {
@@ -604,9 +609,15 @@ fn traverse(
         "for_statement" => {
             handles_comments = true;
 
-            let condition_is_multiline = !same_line(field(node, "open")?, field(node, "close")?);
-            let loop_header_is_multiline =
-                !same_line(field(node, "variable")?, field(node, "sequence")?);
+            let sequence = field(node, "sequence")?;
+            let open = field(node, "open")?;
+            let variable = field(node, "variable")?;
+
+            let condition_is_multiline = !same_line(open, sequence)
+                || is_comment(sequence.prev_sibling())
+                || is_comment(sequence.next_sibling());
+
+            let loop_header_is_multiline = !same_line(variable, sequence);
 
             let mut indent_comments = false;
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
@@ -750,12 +761,10 @@ fn traverse(
 
             let hug = {
                 let condition = field(node, "condition")?;
-                let is_braced_without_comments = condition.kind() == "braced_expression"
-                    && !is_comment(condition.prev_sibling())
-                    && !is_comment(condition.next_sibling());
-                let condition_is_multiline =
-                    !same_line(field(node, "open")?, field(node, "close")?);
-                !condition_is_multiline || is_braced_without_comments
+                let no_comments =
+                    !is_comment(condition.prev_sibling()) && !is_comment(condition.next_sibling());
+                let is_same_line = same_line(field(node, "open")?, condition);
+                is_same_line && no_comments
             };
 
             let mut indent_comments = false;
@@ -1008,12 +1017,10 @@ fn traverse(
 
             let hug = {
                 let condition = field(node, "condition")?;
-                let is_braced_without_comments = condition.kind() == "braced_expression"
-                    && !is_comment(condition.prev_sibling())
-                    && !is_comment(condition.next_sibling());
-                let condition_is_multiline =
-                    !same_line(field(node, "open")?, field(node, "close")?);
-                !condition_is_multiline || is_braced_without_comments
+                let no_comments =
+                    !is_comment(condition.prev_sibling()) && !is_comment(condition.next_sibling());
+                let is_same_line = same_line(field(node, "open")?, condition);
+                is_same_line && no_comments
             };
 
             let mut indent_comments = false;
