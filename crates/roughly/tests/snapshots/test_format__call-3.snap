@@ -1,9 +1,5 @@
 ---
-source: src/format.rs
-expression: "fmt(indoc!\n{\n    r#\"\n            list  (\n                # foo\n                a = 1, #bar\n                b= 2L) #baz\n        \"#\n})"
+source: crates/roughly/tests/test_format.rs
+expression: "format_str(indoc! {r#\"\n        fn(a = 1, b = 2, c = 3)\n    \"#}).unwrap()"
 ---
-list(
-  # foo
-  a = 1, # bar
-  b = 2L
-) # baz
+fn(a = 1, b = 2, c = 3)

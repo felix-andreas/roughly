@@ -1,5 +1,5 @@
 ---
-source: src/format.rs
-expression: "fmt(indoc! { r#\"\n            list  (a = 1, b= 2L ,c =3i  )\n        \"# })"
+source: crates/roughly/tests/test_format.rs
+expression: "format_str(indoc! {r#\"\n        fn(arg)\n    \"#}).unwrap()"
 ---
-list(a = 1, b = 2L, c = 3i)
+fn(arg)
