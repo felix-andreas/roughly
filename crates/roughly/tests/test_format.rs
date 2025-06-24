@@ -319,6 +319,9 @@ fn call() {
     	fn(arg1, fn(
         ))
 
+    	fn(arg1, arg2 = fn(
+        ))
+
     	fn(arg1, {
             body
         })

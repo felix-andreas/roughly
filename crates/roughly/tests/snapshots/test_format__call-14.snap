@@ -1,8 +1,10 @@
 ---
 source: crates/roughly/tests/test_format.rs
-expression: "format_str(indoc!\n{r#\"\n    \tfn(arg1, fn(\n        ))\n\n    \tfn(arg1, {\n            body\n        })\n\n    \tfn(arg1, arg2 = value, function() {\n            body\n        })\n\n    \tfn(arg1, arg2 = value, if(condition) {\n            body\n        })\n    \"#}).unwrap()"
+expression: "format_str(indoc!\n{r#\"\n    \tfn(arg1, fn(\n        ))\n\n    \tfn(arg1, arg2 = fn(\n        ))\n\n    \tfn(arg1, {\n            body\n        })\n\n    \tfn(arg1, arg2 = value, function() {\n            body\n        })\n\n    \tfn(arg1, arg2 = value, if(condition) {\n            body\n        })\n    \"#}).unwrap()"
 ---
 fn(arg1, fn())
+
+fn(arg1, arg2 = fn())
 
 fn(arg1, {
   body
