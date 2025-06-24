@@ -334,16 +334,19 @@ fn traverse(
 
             let is_multiline = !same_line(node, node);
             let is_empty = node.child_count() == 2;
-            let start_row = node.start_position().row;
-            let mut hug = true;
-            let _ = tree::for_each_child(cursor, |_, child, field_name, _| {
-                if let Some("argument" | "parameter") = field_name {
-                    hug &= child
-                        .child_by_field_name("value")
-                        .is_some_and(|value| value.start_position().row == start_row);
-                };
-                Ok::<_, ()>(())
-            });
+
+            let hug = if kind == "arguments" {
+                let start_row = node.start_position().row;
+                node.children_by_field_name("argument", &mut node.walk())
+                    .last()
+                    .is_none_or(|argument| {
+                        argument
+                            .child_by_field_name("value")
+                            .is_some_and(|value| value.start_position().row == start_row)
+                    })
+            } else {
+                false
+            };
 
             tree::for_each_child(cursor, |i, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
