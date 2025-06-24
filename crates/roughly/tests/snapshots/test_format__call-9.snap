@@ -1,17 +1,11 @@
 ---
 source: crates/roughly/tests/test_format.rs
-expression: "format_str(indoc!\n{r#\"\n    \tfn(arg1, fn(\n        ))\n\n    \tfn(arg1, {\n            body\n        })\n\n    \tfn(arg1, function() {\n            body\n        })\n\n    \tfn(arg1, if(condition) {\n            body\n        })\n    \"#}).unwrap()"
+expression: "format_str(indoc!\n{r#\"\n    \tfn( # (\n        \t# 1\n            arg1 # arg1\n            , # ,\n            arg2 # arg2\n            # 2\n        ) # )\n    \"#}).unwrap()"
 ---
-fn(arg1, fn())
-
-fn(arg1, {
-  body
-})
-
-fn(arg1, function() {
-  body
-})
-
-fn(arg1, if (condition) {
-  body
-})
+fn( # (
+  # 1
+  arg1 # arg1
+  , # ,
+  arg2 # arg2
+  # 2
+) # )

@@ -1,13 +1,5 @@
 ---
 source: crates/roughly/tests/test_format.rs
-expression: "format_str(indoc!\n{r#\"\n        list  (\n            # foo\n            a = 1, #bar\n            b= 2L) #baz\n\n    \tfn(arg1, function() { # 1\n            body # 2\n        }) # 3\n    \"#}).unwrap()"
+expression: "format_str(indoc! {r#\"\n        fn(a = 1, b = 2, c = 3)\n    \"#}).unwrap()"
 ---
-list(
-  # foo
-  a = 1, # bar
-  b = 2L
-) # baz
-
-fn(arg1, function() { # 1
-  body # 2
-}) # 3
+fn(a = 1, b = 2, c = 3)

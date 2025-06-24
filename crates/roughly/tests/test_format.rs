@@ -190,34 +190,56 @@ fn braced_expression() {
 
 #[test]
 fn call() {
+    // single argument
     assert_fmt! {r#"
-        list  (a = 1, b= 2L ,c =3i  )
+        fn(arg)
+    "#};
+
+    // multiple arguments
+    assert_fmt! {r#"
+        fn(arg1, arg2)
+    "#};
+
+    // multiple named arguments
+    assert_fmt! {r#"
+        fn(a = 1, b = 2, c = 3)
+    "#};
+
+    // mixed positional and named arguments
+    assert_fmt! {r#"
+        fn(1, b = 2, c = 3)
+    "#};
+
+    // spacing:
+    assert_fmt! {r#"
+        fn (1 ,b=2 ,c=3   )
     "#};
     assert_fmt! {r#"
-        list  (a = 1,
-         b= 2L)
+        fn(
+            1,
+        b=2,
+            c=3
+        )
     "#};
     assert_fmt! {r#"
-        list  (
-            # foo
-            a = 1, #bar
-            b= 2L) #baz
+        fn(1
+        ,b=2,
+        c=3)
+    "#};
+
+    // comments
+    assert_fmt! {r#"
+        fn  ( # 1
+            # 2
+            a = 1, # 3
+            b= 2) # 4
 
     	fn(arg1, function() { # 1
             body # 2
         }) # 3
     "#};
-    assert_fmt! {r#"
-        foo({ bar; baz })
-        foo({ bar;
-        baz })
-        foo({ bar;
-        baz }, qux)
-        foo(qux = { bar;
-        baz }, qux)
-    "#};
 
-    // all comment positions
+    // comments: all positions
     assert_fmt! {r#"
     	fn( # (
         	# 1
@@ -281,6 +303,17 @@ fn call() {
         )
     "#};
 
+    // hugging: more complex blocks
+    assert_fmt! {r#"
+        fn({ body; body })
+        fn({ body;
+        body })
+        fn({ body;
+        body }, arg)
+        fn(a = { body;
+        body }, arg)
+    "#};
+
     // hugging: multiple arguments
     assert_fmt! {r#"
     	fn(arg1, fn(
@@ -290,11 +323,11 @@ fn call() {
             body
         })
 
-    	fn(arg1, function() {
+    	fn(arg1, arg2 = value, function() {
             body
         })
 
-    	fn(arg1, if(condition) {
+    	fn(arg1, arg2 = value, if(condition) {
             body
         })
     "#};
