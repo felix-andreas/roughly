@@ -210,7 +210,7 @@ fn call() {
         fn(1, b = 2, c = 3)
     "#};
 
-    // spacing:
+    // whitespace
     assert_fmt! {r#"
         fn (1 ,b=2 ,c=3   )
     "#};
