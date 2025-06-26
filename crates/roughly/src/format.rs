@@ -162,7 +162,8 @@ fn traverse(
 
     let get_raw = |node: Node| context.rope.byte_slice(node.byte_range()).to_string();
     let fmt_raw = |node: Node, out: &mut String| {
-        out.push_str(&get_raw(node));
+        // note: for CRLF documents, byte_range of comment node includes \r
+        out.push_str(get_raw(node).trim_end_matches('\r'));
         Ok(())
     };
 
@@ -213,6 +214,7 @@ fn traverse(
                 fmt(out, cursor)?;
                 newline(out);
             }
+
             Ok(())
         })
     };

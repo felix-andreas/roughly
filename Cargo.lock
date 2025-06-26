@@ -1613,8 +1613,7 @@ checksum = "c4013970217383f67b18aef68f6fb2e8d409bc5755227092d32efb0422ba24b8"
 [[package]]
 name = "tree-sitter-r"
 version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "429133cbda9f8a46e03ef3aae6abb6c3d22875f8585cad472138101bfd517255"
+source = "git+https://github.com/felix-andreas/tree-sitter-r?branch=fix%2Fcomment-carriage-return#1e4506387a9373946566dd5cd63e71c09f05088e"
 dependencies = [
  "cc",
  "tree-sitter-language",
