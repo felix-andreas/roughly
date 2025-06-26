@@ -1,0 +1,15 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: "format_str(indoc!\n{r#\"\n        if (condition) {}\n\n        if (condition\n        ) {}\n\n        if (\n        condition) {}\n\n        if (\n        condition\n        ) {}\n    \"#}).unwrap()"
+---
+if (condition) {}
+
+if (condition) {}
+
+if (
+  condition
+) {}
+
+if (
+  condition
+) {}

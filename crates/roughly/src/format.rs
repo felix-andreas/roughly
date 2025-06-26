@@ -51,6 +51,21 @@ pub enum FormatError {
 
 pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatError> {
     let start = Instant::now();
+
+    if node.has_error() {
+        let error = tree::find_next_error(node).unwrap();
+
+        let line = error.start_position().row;
+        let col = error.start_position().column;
+        let kind = error.kind();
+
+        return Err(if error.is_missing() {
+            FormatError::Missing { kind, line, col }
+        } else {
+            FormatError::SyntaxError { kind, line, col }
+        });
+    }
+
     let line_ending = match config.line_ending {
         LineEnding::Auto => rope
             .chars()
@@ -67,38 +82,18 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
         LineEnding::Crlf => "\r\n",
     };
 
-    let formatted = {
-        if node.has_error() {
-            let error = tree::find_next_error(node).unwrap();
-            return Err(if error.is_missing() {
-                FormatError::Missing {
-                    kind: error.kind(),
-                    line: error.start_position().row,
-                    col: error.start_position().column,
-                }
-            } else {
-                FormatError::SyntaxError {
-                    kind: error.kind(),
-                    line: error.start_position().row,
-                    col: error.start_position().column,
-                }
-            });
-        }
-
-        let mut buffer = String::with_capacity(rope.len_bytes() * 3 / 2);
-        traverse(
-            &mut buffer,
-            &mut node.walk(),
-            Context {
-                rope,
-                indent: config.indent,
-                line_ending,
-            },
-            0,
-            false,
-        )?;
-        buffer
-    };
+    let mut buffer = String::with_capacity(rope.len_bytes() * 3 / 2);
+    traverse(
+        &mut buffer,
+        &mut node.walk(),
+        Context {
+            rope,
+            indent: config.indent,
+            line_ending,
+        },
+        0,
+        false,
+    )?;
 
     let elapsed = start.elapsed();
     tracing::debug!(
@@ -107,7 +102,8 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
         elapsed.as_millis(),
         utils::human_bytes(rope.len_bytes() as f64 / elapsed.as_secs_f64())
     );
-    Ok(formatted)
+
+    Ok(buffer)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -162,7 +158,8 @@ fn traverse(
 
     let get_raw = |node: Node| context.rope.byte_slice(node.byte_range()).to_string();
     let fmt_raw = |node: Node, out: &mut String| {
-        out.push_str(&get_raw(node));
+        // note: for CRLF documents, byte_range of comment node includes \r
+        out.push_str(get_raw(node).trim_end_matches('\r'));
         Ok(())
     };
 
@@ -213,6 +210,7 @@ fn traverse(
                 fmt(out, cursor)?;
                 newline(out);
             }
+
             Ok(())
         })
     };
@@ -336,14 +334,12 @@ fn traverse(
             let is_empty = node.child_count() == 2;
 
             let hug = if kind == "arguments" {
-                let start_row = node.start_position().row;
-                node.children_by_field_name("argument", &mut node.walk())
-                    .last()
-                    .is_none_or(|argument| {
-                        argument
-                            .child_by_field_name("value")
-                            .is_some_and(|value| value.start_position().row == start_row)
-                    })
+                field(node, "close")?.prev_sibling().is_none_or(|child| {
+                    child.kind() != "comment"
+                        && child.child_by_field_name("value").is_some_and(|value| {
+                            value.start_position().row == node.start_position().row
+                        })
+                })
             } else {
                 false
             };
@@ -468,7 +464,12 @@ fn traverse(
         "braced_expression" => {
             handles_comments = true;
 
-            let is_multiline = !same_line(node, node) || make_multiline;
+            let hug = field(node, "close")?.prev_sibling().is_none_or(|child| {
+                child.kind() != "comment"
+                    && child.start_position().row == node.start_position().row
+                    && child.end_position().row == node.start_position().row
+            });
+            let is_multiline = !hug || make_multiline;
             let is_empty = node.child_count() == 2;
 
             tree::for_each_child(cursor, |i, child, field_name, cursor| {
@@ -606,9 +607,15 @@ fn traverse(
         "for_statement" => {
             handles_comments = true;
 
-            let condition_is_multiline = !same_line(field(node, "open")?, field(node, "close")?);
-            let loop_header_is_multiline =
-                !same_line(field(node, "variable")?, field(node, "sequence")?);
+            let sequence = field(node, "sequence")?;
+            let open = field(node, "open")?;
+            let variable = field(node, "variable")?;
+
+            let condition_is_multiline = !same_line(open, sequence)
+                || is_comment(sequence.prev_sibling())
+                || is_comment(sequence.next_sibling());
+
+            let loop_header_is_multiline = !same_line(variable, sequence);
 
             let mut indent_comments = false;
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
@@ -699,6 +706,7 @@ fn traverse(
             handles_comments = true;
 
             let is_multiline = !same_line(node, node);
+            let is_same_line = same_line(field(node, "name")?, field(node, "body")?);
 
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
@@ -731,7 +739,7 @@ fn traverse(
                                 space(out)
                             }
                             if is_multiline {
-                                if child.kind() == "braced_expression" {
+                                if child.kind() == "braced_expression" || is_same_line {
                                     fmt_multiline(out, cursor)
                                 } else {
                                     fmt_braces(out, cursor)
@@ -752,12 +760,10 @@ fn traverse(
 
             let hug = {
                 let condition = field(node, "condition")?;
-                let is_braced_without_comments = condition.kind() == "braced_expression"
-                    && !is_comment(condition.prev_sibling())
-                    && !is_comment(condition.next_sibling());
-                let condition_is_multiline =
-                    !same_line(field(node, "open")?, field(node, "close")?);
-                !condition_is_multiline || is_braced_without_comments
+                let no_comments =
+                    !is_comment(condition.prev_sibling()) && !is_comment(condition.next_sibling());
+                let is_same_line = same_line(field(node, "open")?, condition);
+                is_same_line && no_comments
             };
 
             let mut indent_comments = false;
@@ -843,14 +849,9 @@ fn traverse(
         "parenthesized_expression" => {
             handles_comments = true;
 
-            let hug = {
-                let is_single_line = same_line(node, node);
-                let is_empty = node.child_count() == 2;
-                let is_braced_without_comments = field_optional(node, "body").is_some_and(|body| {
-                    body.kind() == "braced_expression" && node.child_count() == 3
-                });
-                is_single_line || is_empty || is_braced_without_comments
-            };
+            let hug = field(node, "close")?.prev_sibling().is_none_or(|child| {
+                child.kind() != "comment" && child.start_position().row == node.start_position().row
+            });
 
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
@@ -1015,12 +1016,10 @@ fn traverse(
 
             let hug = {
                 let condition = field(node, "condition")?;
-                let is_braced_without_comments = condition.kind() == "braced_expression"
-                    && !is_comment(condition.prev_sibling())
-                    && !is_comment(condition.next_sibling());
-                let condition_is_multiline =
-                    !same_line(field(node, "open")?, field(node, "close")?);
-                !condition_is_multiline || is_braced_without_comments
+                let no_comments =
+                    !is_comment(condition.prev_sibling()) && !is_comment(condition.next_sibling());
+                let is_same_line = same_line(field(node, "open")?, condition);
+                is_same_line && no_comments
             };
 
             let mut indent_comments = false;

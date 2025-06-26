@@ -1,13 +1,37 @@
 ---
-source: tests/test_format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n        ({})\n        ({\n        })\n        (\n            { body }\n        )\n        (\n            {\n                body\n            }\n        )\n        ({\n            body\n        })\n    \"#\n}).unwrap()"
+source: crates/roughly/tests/test_format.rs
+expression: "format_str(indoc!\n{r#\"\n        ({})\n\n        ({\n        })\n\n        ({ body }\n        )\n\n        (\n        { body })\n\n        (\n        { body }\n        )\n\n        ({\n            body\n        })\n\n        ({\n            body\n        }\n        )\n\n        (\n        {\n            body\n        })\n\n        (\n            {\n                body\n            }\n        )\n    \"#}).unwrap()"
 ---
 ({})
+
 ({})
+
 ({ body })
+
+(
+  { body }
+)
+
+(
+  { body }
+)
+
 ({
   body
 })
+
 ({
   body
 })
+
+(
+  {
+    body
+  }
+)
+
+(
+  {
+    body
+  }
+)
