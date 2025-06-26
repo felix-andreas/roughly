@@ -577,10 +577,41 @@ fn function_definition() {
     assert_fmt! {r#"
         function (a,
         b) baz
-    "#};
-    assert_fmt! {r#"
+
         function (a,
         b) {baz}
+    "#};
+    assert_fmt! {r#"
+        function() call(a = 1, b = 1)
+
+        function()
+            call(a = 1, b = 1)
+
+        function() call(
+            a = 1,
+            b = 1
+        )
+
+        function()
+        call(
+            a = 1,
+            b = 1
+        )
+
+        function() { call(a = 1, b = 1) }
+
+        function() { call(a = 1, b = 1)
+        }
+
+        function() {
+        call(a = 1, b = 1) }
+
+        function() {
+            call(a = 1, b = 1)
+        }
+
+        function()
+            { call(a = 1, b = 1) }
     "#};
 
     // all comment positions

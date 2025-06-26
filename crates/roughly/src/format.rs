@@ -710,6 +710,7 @@ fn traverse(
             handles_comments = true;
 
             let is_multiline = !same_line(node, node);
+            let is_same_line = same_line(field(node, "name")?, field(node, "body")?);
 
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
@@ -742,7 +743,7 @@ fn traverse(
                                 space(out)
                             }
                             if is_multiline {
-                                if child.kind() == "braced_expression" {
+                                if child.kind() == "braced_expression" || is_same_line {
                                     fmt_multiline(out, cursor)
                                 } else {
                                     fmt_braces(out, cursor)
