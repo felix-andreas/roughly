@@ -91,15 +91,26 @@ pub fn get(
             .unwrap_or_default()
     };
 
-    let workspace_symbols = symbols_map.filter_map(
-        |_, symbols| {
-            symbols
-                .iter()
-                .filter(|symbol| utils::starts_with_lowercase(&symbol.name, &query))
-        },
-        // TODO: use CompletionResponse::List.is_incomplete and only limit for short queries?
-        1024,
-    );
+    let workspace_symbols = symbols_map
+        .filter_map(
+            |_, symbols| {
+                symbols
+                    .iter()
+                    .filter(|symbol| utils::starts_with_lowercase(&symbol.name, &query))
+            },
+            // TODO: use CompletionResponse::List.is_incomplete and only limit for short queries?
+            1024,
+        )
+        .into_iter()
+        .map(|symbol| CompletionItem {
+            label: symbol.name.to_string(),
+            label_details: Some(CompletionItemLabelDetails {
+                detail: None,
+                description: Some("Global".into()),
+            }),
+            kind: Some(symbol_kind_to_completion_kind(symbol.kind)),
+            ..Default::default()
+        });
 
     const RESERVED_WORDS: &[&str] = &[
         "if",
@@ -123,29 +134,23 @@ pub fn get(
         "NA_character_",
     ];
 
+    let keyword_symbols = RESERVED_WORDS
+        .iter()
+        .filter(|keyword| utils::starts_with_lowercase(keyword, &query))
+        .map(|reserved_word| CompletionItem {
+            label: reserved_word.to_string(),
+            label_details: Some(CompletionItemLabelDetails {
+                detail: None,
+                description: Some("Keyword".into()),
+            }),
+            kind: Some(CompletionItemKind::KEYWORD),
+            ..Default::default()
+        });
+
     Some(CompletionResponse::Array(
-        RESERVED_WORDS
-            .iter()
-            .filter(|keyword| utils::starts_with_lowercase(keyword, &query))
-            .map(|reserved_word| CompletionItem {
-                label: reserved_word.to_string(),
-                label_details: Some(CompletionItemLabelDetails {
-                    detail: None,
-                    description: Some("Keyword".into()),
-                }),
-                kind: Some(CompletionItemKind::KEYWORD),
-                ..Default::default()
-            })
+        keyword_symbols
             .chain(local_symbols)
-            .chain(workspace_symbols.into_iter().map(|symbol| CompletionItem {
-                label: symbol.name.to_string(),
-                label_details: Some(CompletionItemLabelDetails {
-                    detail: None,
-                    description: Some("Global".into()),
-                }),
-                kind: Some(symbol_kind_to_completion_kind(symbol.kind)),
-                ..Default::default()
-            }))
+            .chain(workspace_symbols)
             .collect(),
     ))
 }
