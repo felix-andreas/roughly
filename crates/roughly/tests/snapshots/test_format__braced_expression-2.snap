@@ -1,5 +1,23 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc! { r#\"\n            { 1L;2}\n        \"# }).unwrap()"
+source: crates/roughly/tests/test_format.rs
+expression: "format_str(indoc!\n{r#\"\n        { expr;expr}\n\n        { expr; expr\n        }\n\n        {\n        expr; expr }\n\n        {\n        expr; expr\n        }\n\n        { expr; lhs +\n            rhs }\n    \"#}).unwrap()"
 ---
-{ 1L; 2 }
+{ expr; expr }
+
+{ expr; expr }
+
+{
+  expr
+  expr
+}
+
+{
+  expr
+  expr
+}
+
+{
+  expr
+  lhs +
+    rhs
+}

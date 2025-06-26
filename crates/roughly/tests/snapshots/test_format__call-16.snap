@@ -1,0 +1,21 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: "format_str(indoc!\n{r#\"\n    \tfn(fn(arg\n        ))\n\n    \tfn(fn(\n        arg))\n\n    \tfn(fn(\n        arg\n        ))\n\n    \tfn(fn(fn(\n            arg\n        )))\n\n    \tfn(arg = fn(arg =fn(\n            arg\n        )))\n    \"#}).unwrap()"
+---
+fn(fn(arg))
+
+fn(fn(
+  arg
+))
+
+fn(fn(
+  arg
+))
+
+fn(fn(fn(
+  arg
+)))
+
+fn(arg = fn(arg = fn(
+  arg
+)))
