@@ -51,6 +51,21 @@ pub enum FormatError {
 
 pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatError> {
     let start = Instant::now();
+
+    if node.has_error() {
+        let error = tree::find_next_error(node).unwrap();
+
+        let line = error.start_position().row;
+        let col = error.start_position().column;
+        let kind = error.kind();
+
+        return Err(if error.is_missing() {
+            FormatError::Missing { kind, line, col }
+        } else {
+            FormatError::SyntaxError { kind, line, col }
+        });
+    }
+
     let line_ending = match config.line_ending {
         LineEnding::Auto => rope
             .chars()
@@ -67,38 +82,18 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
         LineEnding::Crlf => "\r\n",
     };
 
-    let formatted = {
-        if node.has_error() {
-            let error = tree::find_next_error(node).unwrap();
-            return Err(if error.is_missing() {
-                FormatError::Missing {
-                    kind: error.kind(),
-                    line: error.start_position().row,
-                    col: error.start_position().column,
-                }
-            } else {
-                FormatError::SyntaxError {
-                    kind: error.kind(),
-                    line: error.start_position().row,
-                    col: error.start_position().column,
-                }
-            });
-        }
-
-        let mut buffer = String::with_capacity(rope.len_bytes() * 3 / 2);
-        traverse(
-            &mut buffer,
-            &mut node.walk(),
-            Context {
-                rope,
-                indent: config.indent,
-                line_ending,
-            },
-            0,
-            false,
-        )?;
-        buffer
-    };
+    let mut buffer = String::with_capacity(rope.len_bytes() * 3 / 2);
+    traverse(
+        &mut buffer,
+        &mut node.walk(),
+        Context {
+            rope,
+            indent: config.indent,
+            line_ending,
+        },
+        0,
+        false,
+    )?;
 
     let elapsed = start.elapsed();
     tracing::debug!(
@@ -107,7 +102,8 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
         elapsed.as_millis(),
         utils::human_bytes(rope.len_bytes() as f64 / elapsed.as_secs_f64())
     );
-    Ok(formatted)
+
+    Ok(buffer)
 }
 
 #[derive(Debug, Clone, Copy)]
