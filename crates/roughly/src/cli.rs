@@ -338,11 +338,7 @@ pub fn server(experimental_features: ExperimentalFeatures) {
 #[derive(Debug)]
 pub struct DebugError;
 
-pub fn index(
-    paths: Option<&[PathBuf]>,
-    recursive: bool,
-    print_items: bool,
-) -> Result<(), DebugError> {
+pub fn index(paths: Option<&[PathBuf]>, nested: bool, print_items: bool) -> Result<(), DebugError> {
     let mut parser = tree::new_parser();
 
     let root: Vec<PathBuf> = vec![".".into()];
@@ -380,7 +376,7 @@ pub fn index(
             // Only time the indexing operation, not the I/O
             let start = std::time::Instant::now();
             let tree = tree::parse_rope(&mut parser, &rope, None);
-            let symbols = index::index(tree.root_node(), &rope, recursive);
+            let symbols = index::index(tree.root_node(), &rope, nested, false);
             let elapsed = start.elapsed();
 
             let bytes = rope.len_bytes();

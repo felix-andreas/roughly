@@ -234,7 +234,7 @@ impl LanguageServer for ServerState {
             diagnostics::Config::from_config(self.config, self.experimental_features.unused),
         );
 
-        let symbols = index::index(tree.root_node(), &rope, false);
+        let symbols = index::index(tree.root_node(), &rope, false, false);
         if path.starts_with(&self.base_path) {
             // note: we need to insert into workspace in case a new file is created
             self.workspace_symbols.insert(path.clone(), symbols);
@@ -344,7 +344,7 @@ impl LanguageServer for ServerState {
         // UPDATE SYMBOLS
         // note: We must re-index on every change (not just on save)
         // because textDocument/documentSymbol is triggered before textDocument/didSave.
-        let symbols = index::index(tree.root_node(), rope, false);
+        let symbols = index::index(tree.root_node(), rope, false, false);
         if path.starts_with(&self.base_path) {
             self.workspace_symbols.insert(path, symbols);
         } else {

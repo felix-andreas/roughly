@@ -34,8 +34,8 @@ pub fn get(
         tree.root_node()
             .descendant_for_point_range(point, point)
             .map(|node| {
-                // TODO: just use document children (requires to think about where to use nested and where not)
                 std::iter::successors(Some(node), |node| node.parent())
+                    // note: we just search functions, as global symbols are already included from workspace info
                     .filter(|node| node.kind() == "function_definition")
                     .flat_map(|node| {
                         let mut items = Vec::new();
@@ -64,8 +64,10 @@ pub fn get(
 
                         if let Some(body) = node.child_by_field_name("body") {
                             items.extend(
-                                // todo: use enable nested and use children
-                                index::index(body, rope, false)
+                                // note: we cannot just use nested true here!
+                                // we want to see all params/vars from parent scopes,
+                                // but we dont' want parent scopes to see vars from sub-scopes!
+                                index::index(body, rope, false, true)
                                     .into_iter()
                                     .filter(|symbol| {
                                         utils::starts_with_lowercase(&symbol.name, &query)
@@ -200,16 +202,16 @@ mod tests {
         let (query, items) = setup(
             indoc! {"
                 function(x) {
-                    local_var <- 42
-                    loc
+                    var <- 42
+                    va
                 }
             "},
-            (2, 7),
+            (2, 6),
         );
 
-        assert_eq!(query, "loc");
+        assert_eq!(query, "va");
         assert_eq!(items.len(), 1);
-        assert!(items.contains(&("local_var".into(), CompletionItemKind::VARIABLE)));
+        assert!(items.contains(&("var".into(), CompletionItemKind::VARIABLE)));
     }
 
     #[test]
@@ -281,5 +283,137 @@ mod tests {
         assert_eq!(setup(4, "1foo"), "foo");
         assert_eq!(setup(4, "_foo"), "_foo");
         assert_eq!(setup(5, ".1foo"), ".1foo");
+    }
+
+    #[test]
+    fn completes_block_variable() {
+        let (query, items) = setup(
+            indoc! {"
+                function(x) {
+                    {
+                        var <- 1
+                        va
+                    }
+                }
+            "},
+            (3, 10),
+        );
+
+        assert_eq!(query, "va");
+        assert!(items.contains(&("var".into(), CompletionItemKind::VARIABLE)));
+    }
+
+    #[test]
+    fn completes_if_statement_variable() {
+        let (query, items) = setup(
+            indoc! {"
+                function(x) {
+                    if (TRUE) {
+                        var <- 1
+                        va
+                    }
+                }
+            "},
+            (3, 10),
+        );
+
+        assert_eq!(query, "va");
+        assert!(items.contains(&("var".into(), CompletionItemKind::VARIABLE)));
+    }
+
+    #[test]
+    fn completes_for_loop_variable() {
+        let (query, items) = setup(
+            indoc! {"
+                function(x) {
+                    for (i in 1:3) {
+                        var <- 1
+                        va
+                    }
+                }
+            "},
+            (3, 10),
+        );
+
+        assert_eq!(query, "va");
+        assert!(items.contains(&("var".into(), CompletionItemKind::VARIABLE)));
+    }
+
+    #[test]
+    fn completes_while_loop_variable() {
+        let (query, items) = setup(
+            indoc! {"
+                function(x) {
+                    while (TRUE) {
+                        var <- 1
+                        va
+                    }
+                }
+            "},
+            (3, 10),
+        );
+
+        assert_eq!(query, "va");
+        assert!(items.contains(&("var".into(), CompletionItemKind::VARIABLE)));
+    }
+
+    #[test]
+    fn completes_repeat_loop_variable() {
+        let (query, items) = setup(
+            indoc! {"
+                function(x) {
+                    repeat {
+                        var <- 1
+                        va
+                    }
+                }
+            "},
+            (3, 10),
+        );
+
+        assert_eq!(query, "va");
+        assert!(items.contains(&("var".into(), CompletionItemKind::VARIABLE)));
+    }
+
+    #[test]
+    fn completes_nested_functions_scope_correctly() {
+        let code = indoc! {"
+            function(x) {
+                function(param_a) {
+                    var_a <- 1
+                    va
+                    pa
+                }
+                function(param_b) {
+                    var_b <- 2
+                    va
+                    pa
+                }
+            }
+        "};
+
+        // Only `var_a` should be completed after "var" in the first nested function
+        let (query, items) = setup(code, (3, 10));
+        assert_eq!(query, "va");
+        assert_eq!(items.len(), 1);
+        assert!(items.contains(&("var_a".into(), CompletionItemKind::VARIABLE)));
+
+        // Only `param_a` should be completed after "parm" in the first nested function
+        let (query, items) = setup(code, (4, 10));
+        assert_eq!(query, "pa");
+        assert_eq!(items.len(), 1);
+        assert!(items.contains(&("param_a".into(), CompletionItemKind::VARIABLE)));
+
+        // Only `var_b` should be completed after "var" in the second nested function
+        let (query, items) = setup(code, (8, 10));
+        assert_eq!(query, "va");
+        assert_eq!(items.len(), 1);
+        assert!(items.contains(&("var_b".into(), CompletionItemKind::VARIABLE)));
+
+        // Only `param_b` should be completed after "parm" in the second nested function
+        let (query, items) = setup(code, (9, 10));
+        assert_eq!(query, "pa");
+        assert_eq!(items.len(), 1);
+        assert!(items.contains(&("param_b".into(), CompletionItemKind::VARIABLE)));
     }
 }
