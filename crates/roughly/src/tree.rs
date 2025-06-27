@@ -29,12 +29,17 @@ pub fn parse_rope(parser: &mut Parser, rope: &Rope, maybe_tree: Option<&Tree>) -
 #[inline]
 pub fn for_each_child<'a, E>(
     cursor: &mut TreeCursor<'a>,
-    mut func: impl FnMut(usize, Node<'a>, Option<&'static str>, &mut TreeCursor<'a>) -> Result<(), E>,
+    mut func: impl FnMut(usize, Node<'a>, Option<u16>, &mut TreeCursor<'a>) -> Result<(), E>,
 ) -> Result<(), E> {
     let mut i = 0;
     if cursor.goto_first_child() {
         loop {
-            func(i, cursor.node(), cursor.field_name(), cursor)?;
+            func(
+                i,
+                cursor.node(),
+                cursor.field_id().map(|id| id.get()),
+                cursor,
+            )?;
             if !cursor.goto_next_sibling() {
                 cursor.goto_parent();
                 break;

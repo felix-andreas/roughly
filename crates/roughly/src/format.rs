@@ -8,27 +8,46 @@ use {
 };
 
 pub mod node_kind {
-    // LEAFS
+    // SPECIAL (NAMED)
     pub const IDENTIFIER: u16 = 1; // "identifier"
-    pub const ESCAPE_SEQUENCE: u16 = 49; // "escape_sequence"
+    pub const COMMENT: u16 = 65; // "comment"
+    pub const COMMA: u16 = 66; // "comma"
+    // KEYWORDS (NAMED)
     pub const DOTS: u16 = 50; // "dots"
     pub const DOT_DOT_I: u16 = 51; // "dot_dot_i"
     pub const RETURN: u16 = 52; // "return"
     pub const NEXT: u16 = 53; // "next"
     pub const BREAK: u16 = 54; // "break"
+    // KEYWORDS (UNAMED)
+    pub const BACKSLASH: u16 = 2; // "\\"
+    pub const FUNCTION: u16 = 3; // "function"
+    pub const EQUAL: u16 = 4; // "="
+    pub const IF: u16 = 5; // "if"
+    pub const FOR: u16 = 6; // "for"
+    pub const IN: u16 = 7; // "in"
+    pub const WHILE: u16 = 8; // "while"
+    pub const REPEAT: u16 = 9; // "repeat"
+    pub const ELSE: u16 = 71; // "else"
+    // LITERALS (NAMED)
+    pub const INTEGER: u16 = 108; // "integer"
+    pub const COMPLEX: u16 = 109; // "complex"
+    pub const FLOAT: u16 = 110; // "float"
+    pub const STRING: u16 = 112; // "string"
+    pub const NA: u16 = 118; // "na"
+    pub const STRING_CONTENT: u16 = 134; // "string_content"
+    pub const ESCAPE_SEQUENCE: u16 = 49; // "escape_sequence"
     pub const TRUE: u16 = 55; // "true"
     pub const FALSE: u16 = 56; // "false"
     pub const NULL: u16 = 57; // "null"
     pub const INF: u16 = 58; // "inf"
     pub const NAN: u16 = 59; // "nan"
+    // LITERALS (UNAMED)
     pub const NA_LITERAL: u16 = 60; // "NA"
     pub const NA_INTEGER: u16 = 61; // "NA_integer_"
     pub const NA_REAL: u16 = 62; // "NA_real_"
     pub const NA_COMPLEX: u16 = 63; // "NA_complex_"
     pub const NA_CHARACTER: u16 = 64; // "NA_character_"
-    pub const COMMENT: u16 = 65; // "comment"
-    pub const COMMA: u16 = 66; // "comma"
-    // COMPOUND EXPRESSIONS
+    // COMPOUND EXPRESSIONS (NAMED)
     pub const PROGRAM: u16 = 81; // "program"
     pub const FUNCTION_DEFINITION: u16 = 82; // "function_definition"
     pub const PARAMETERS: u16 = 83; // "parameters"
@@ -48,24 +67,18 @@ pub mod node_kind {
     pub const BINARY_OPERATOR: u16 = 105; // "binary_operator"
     pub const EXTRACT_OPERATOR: u16 = 106; // "extract_operator"
     pub const NAMESPACE_OPERATOR: u16 = 107; // "namespace_operator"
-    // PRIMITIVES
-    pub const INTEGER: u16 = 108; // "integer"
-    pub const COMPLEX: u16 = 109; // "complex"
-    pub const FLOAT: u16 = 110; // "float"
-    pub const STRING: u16 = 112; // "string"
-    pub const NA: u16 = 118; // "na"
-    pub const STRING_CONTENT: u16 = 134; // "string_content"
-    // KEYWORDS
-    pub const BACKSLASH: u16 = 2; // "\\"
-    pub const FUNCTION: u16 = 3; // "function"
-    pub const EQUAL: u16 = 4; // "="
-    pub const IF: u16 = 5; // "if"
-    pub const FOR: u16 = 6; // "for"
-    pub const IN: u16 = 7; // "in"
-    pub const WHILE: u16 = 8; // "while"
-    pub const REPEAT: u16 = 9; // "repeat"
-    pub const ELSE: u16 = 71; // "else"
-    // OPERATORS
+    // PUNCTUATION (UNAMED)
+    pub const SINGLE_QUOTE: u16 = 45; // "'"
+    pub const DOUBLE_QUOTE: u16 = 46; // "\""
+    pub const LPAREN: u16 = 72; // "("
+    pub const RPAREN: u16 = 73; // ")"
+    pub const LBRACE: u16 = 74; // "{"
+    pub const RBRACE: u16 = 75; // "}"
+    pub const LBRACKET: u16 = 76; // "["
+    pub const RBRACKET: u16 = 77; // "]"
+    pub const DOUBLE_LBRACKET: u16 = 78; // "[["
+    pub const DOUBLE_RBRACKET: u16 = 79; // "]]"
+    // OPERATORS (UNAMED)
     pub const QUESTION: u16 = 10; // "?"
     pub const TILDE: u16 = 11; // "~"
     pub const EXCLAMATION: u16 = 12; // "!"
@@ -99,17 +112,29 @@ pub mod node_kind {
     pub const TRIPLE_COLON: u16 = 40; // ":::"
     pub const L: u16 = 41; // "L"
     pub const I: u16 = 42; // "i"
-    // PUNCTUATION
-    pub const SINGLE_QUOTE: u16 = 45; // "'"
-    pub const DOUBLE_QUOTE: u16 = 46; // "\""
-    pub const LPAREN: u16 = 72; // "("
-    pub const RPAREN: u16 = 73; // ")"
-    pub const LBRACE: u16 = 74; // "{"
-    pub const RBRACE: u16 = 75; // "}"
-    pub const LBRACKET: u16 = 76; // "["
-    pub const RBRACKET: u16 = 77; // "]"
-    pub const DOUBLE_LBRACKET: u16 = 78; // "[["
-    pub const DOUBLE_RBRACKET: u16 = 79; // "]]"
+}
+
+pub mod field {
+    pub const ALTERNATIVE: u16 = 1; // "alternative"
+    pub const ARGUMENT: u16 = 2; // "argument"
+    pub const ARGUMENTS: u16 = 3; // "arguments"
+    pub const BODY: u16 = 4; // "body"
+    pub const CLOSE: u16 = 5; // "close"
+    pub const CONDITION: u16 = 6; // "condition"
+    pub const CONSEQUENCE: u16 = 7; // "consequence"
+    pub const CONTENT: u16 = 8; // "content"
+    pub const DEFAULT: u16 = 9; // "default"
+    pub const FUNCTION: u16 = 10; // "function"
+    pub const LHS: u16 = 11; // "lhs"
+    pub const NAME: u16 = 12; // "name"
+    pub const OPEN: u16 = 13; // "open"
+    pub const OPERATOR: u16 = 14; // "operator"
+    pub const PARAMETER: u16 = 15; // "parameter"
+    pub const PARAMETERS: u16 = 16; // "parameters"
+    pub const RHS: u16 = 17; // "rhs"
+    pub const SEQUENCE: u16 = 18; // "sequence"
+    pub const VALUE: u16 = 19; // "value"
+    pub const VARIABLE: u16 = 20; // "variable"
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -403,8 +428,8 @@ fn traverse(
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "name" => fmt(out, cursor),
-                        "value" | "default" => {
+                        field::NAME => fmt(out, cursor),
+                        field::VALUE | field::DEFAULT => {
                             if is_comment(maybe_prev) {
                                 newline(out);
                                 fmt_indent(out, cursor)
@@ -473,8 +498,8 @@ fn traverse(
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "open" => fmt(out, cursor),
-                        "argument" | "parameter" => {
+                        field::OPEN => fmt(out, cursor),
+                        field::ARGUMENT | field::PARAMETER => {
                             if i == 1 {
                                 if is_multiline && !hug {
                                     newline(out);
@@ -491,7 +516,7 @@ fn traverse(
                                 fmt(out, cursor)
                             }
                         }
-                        "close" => {
+                        field::CLOSE => {
                             if is_multiline {
                                 if !hug && !is_empty {
                                     newline(out);
@@ -530,8 +555,8 @@ fn traverse(
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "lhs" => fmt(out, cursor),
-                        "operator" => {
+                        field::LHS => fmt(out, cursor),
+                        field::OPERATOR => {
                             if is_comment(maybe_prev) {
                                 newline(out);
                                 fmt_indent(out, cursor)
@@ -542,7 +567,7 @@ fn traverse(
                                 fmt(out, cursor)
                             }
                         }
-                        "rhs" => {
+                        field::RHS => {
                             if break_after_operator {
                                 newline(out);
                                 fmt_indent(out, cursor)
@@ -586,8 +611,8 @@ fn traverse(
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "open" => fmt(out, cursor),
-                        "body" => {
+                        field::OPEN => fmt(out, cursor),
+                        field::BODY => {
                             if is_multiline {
                                 if i == 1 {
                                     newline(out)
@@ -604,7 +629,7 @@ fn traverse(
                                 fmt(out, cursor)
                             }
                         }
-                        "close" => {
+                        field::CLOSE => {
                             if !is_empty {
                                 if is_multiline {
                                     newline(out)
@@ -649,8 +674,8 @@ fn traverse(
                     _ => unreachable!(),
                 },
                 Some(field_name) => match field_name {
-                    "function" => fmt(out, cursor),
-                    "arguments" => {
+                    field::FUNCTION => fmt(out, cursor),
+                    field::ARGUMENTS => {
                         if additional_indent {
                             fmt_indent_skip_first(out, cursor)
                         } else {
@@ -685,9 +710,9 @@ fn traverse(
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "lhs" => fmt(out, cursor),
-                        "operator" => fmt(out, cursor),
-                        "rhs" => {
+                        field::LHS => fmt(out, cursor),
+                        field::OPERATOR => fmt(out, cursor),
+                        field::RHS => {
                             if is_multiline {
                                 newline(out);
                                 fmt_indent(out, cursor)
@@ -745,7 +770,7 @@ fn traverse(
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "open" => {
+                        field::OPEN => {
                             indent_comments = true;
                             if prev_is_comment {
                                 newline(out);
@@ -754,7 +779,7 @@ fn traverse(
                             }
                             fmt(out, cursor)
                         }
-                        "variable" => {
+                        field::VARIABLE => {
                             if prev_is_comment || condition_is_multiline {
                                 newline(out);
                                 fmt_indent(out, cursor)
@@ -762,7 +787,7 @@ fn traverse(
                                 fmt(out, cursor)
                             }
                         }
-                        "sequence" => {
+                        field::SEQUENCE => {
                             if prev_is_comment {
                                 newline(out);
                                 fmt_indent(out, cursor)
@@ -775,14 +800,14 @@ fn traverse(
                                 }
                             }
                         }
-                        "close" => {
+                        field::CLOSE => {
                             indent_comments = false;
                             if prev_is_comment || condition_is_multiline {
                                 newline(out);
                             }
                             fmt(out, cursor)
                         }
-                        "body" => {
+                        field::BODY => {
                             if prev_is_comment {
                                 newline(out);
                             } else {
@@ -822,14 +847,14 @@ fn traverse(
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "name" => fmt(out, cursor),
-                        "parameters" => {
+                        field::NAME => fmt(out, cursor),
+                        field::PARAMETERS => {
                             if prev_is_comment {
                                 newline(out);
                             }
                             fmt(out, cursor)
                         }
-                        "body" => {
+                        field::BODY => {
                             if prev_is_comment {
                                 newline(out)
                             } else {
@@ -893,7 +918,7 @@ fn traverse(
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "open" => {
+                        field::OPEN => {
                             indent_comments = true;
                             if prev_is_comment {
                                 newline(out);
@@ -902,7 +927,7 @@ fn traverse(
                             }
                             fmt(out, cursor)
                         }
-                        "condition" => {
+                        field::CONDITION => {
                             if !hug {
                                 newline(out);
                                 fmt_indent(out, cursor)
@@ -910,14 +935,14 @@ fn traverse(
                                 fmt(out, cursor)
                             }
                         }
-                        "close" => {
+                        field::CLOSE => {
                             indent_comments = false;
                             if !hug {
                                 newline(out);
                             }
                             fmt(out, cursor)
                         }
-                        "consequence" | "alternative" => {
+                        f if f == field::CONSEQUENCE || f == field::ALTERNATIVE => {
                             if prev_is_comment {
                                 newline(out);
                             } else {
@@ -926,7 +951,7 @@ fn traverse(
                             if is_multiline {
                                 if child.kind_id() == BRACED_EXPRESSION
                                     || (child.kind_id() == IF_STATEMENT
-                                        && field_name == "alternative")
+                                        && field_name == field::ALTERNATIVE)
                                 {
                                     fmt_multiline(out, cursor)
                                 } else {
@@ -968,8 +993,8 @@ fn traverse(
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "open" => fmt(out, cursor),
-                        "body" => {
+                        field::OPEN => fmt(out, cursor),
+                        field::BODY => {
                             if !hug {
                                 newline(out);
                                 fmt_indent(out, cursor)
@@ -977,7 +1002,7 @@ fn traverse(
                                 fmt(out, cursor)
                             }
                         }
-                        "close" => {
+                        field::CLOSE => {
                             if !hug {
                                 newline(out);
                             }
@@ -1033,7 +1058,7 @@ fn traverse(
                             space(out);
                         }
                         match field_name {
-                            "body" => {
+                            field::BODY => {
                                 if child.kind_id() == BRACED_EXPRESSION {
                                     fmt_multiline(out, cursor)
                                 } else {
@@ -1092,8 +1117,8 @@ fn traverse(
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "operator" => fmt(out, cursor),
-                        "rhs" => {
+                        field::OPERATOR => fmt(out, cursor),
+                        field::RHS => {
                             if is_comment(maybe_prev) {
                                 newline(out);
                                 fmt_indent(out, cursor)
@@ -1142,7 +1167,7 @@ fn traverse(
                         _ => unreachable!(),
                     },
                     Some(field_name) => match field_name {
-                        "open" => {
+                        field::OPEN => {
                             indent_comments = true;
                             if prev_is_comment {
                                 newline(out)
@@ -1151,7 +1176,7 @@ fn traverse(
                             };
                             fmt(out, cursor)
                         }
-                        "condition" => {
+                        field::CONDITION => {
                             if !hug {
                                 newline(out);
                                 fmt_indent(out, cursor)
@@ -1159,14 +1184,14 @@ fn traverse(
                                 fmt(out, cursor)
                             }
                         }
-                        "close" => {
+                        field::CLOSE => {
                             indent_comments = false;
                             if !hug {
                                 newline(out);
                             }
                             fmt(out, cursor)
                         }
-                        "body" => {
+                        field::BODY => {
                             if prev_is_comment {
                                 newline(out)
                             } else {
@@ -1191,12 +1216,12 @@ fn traverse(
         ESCAPE_SEQUENCE => fmt_raw(node, out)?,
         FALSE => out.push_str("FALSE"),
         IDENTIFIER => fmt_raw(node, out)?,
-        INF => out.push_str("Inf"),
-        NAN => out.push_str("NaN"),
-        NEXT => out.push_str("next"),
-        NULL => out.push_str("NULL"),
-        RETURN => out.push_str("return"),
-        TRUE => out.push_str("TRUE"),
+        // INF => out.push_str("Inf"),
+        // NAN => out.push_str("NaN"),
+        // NEXT => out.push_str("next"),
+        // NULL => out.push_str("NULL"),
+        // RETURN => out.push_str("return"),
+        // TRUE => out.push_str("TRUE"),
         _ => {
             tracing::error!(
                 "unknown node kind: {} (id: {}), is extra {:?}",
