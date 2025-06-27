@@ -316,11 +316,11 @@ pub fn fmt(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(
         action_skip
     ));
 
-    if n_unformatted == 0 && n_errors == 0 {
-        Ok(())
-    } else {
-        Err(FmtError)
+    if n_errors > 0 || (check && n_unformatted > 0) {
+        return Err(FmtError);
     }
+
+    Ok(())
 }
 
 //

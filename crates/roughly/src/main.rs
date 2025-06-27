@@ -77,6 +77,7 @@ enum Command {
         files: Option<Vec<PathBuf>>,
     },
     /// Run the formatter on the given files or directories
+    #[clap(alias = "format")]
     Fmt {
         /// R files to format
         files: Option<Vec<PathBuf>>,
