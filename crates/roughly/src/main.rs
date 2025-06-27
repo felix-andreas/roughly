@@ -29,7 +29,12 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(CheckError) => ExitCode::FAILURE,
         },
-        Command::Fmt { files, check, diff } => match cli::fmt(files.as_deref(), check, diff) {
+        Command::Fmt {
+            files,
+            check,
+            diff,
+            verbose,
+        } => match cli::fmt(files.as_deref(), check, diff, verbose) {
             Ok(()) => ExitCode::SUCCESS,
             Err(FmtError) => ExitCode::FAILURE,
         },
@@ -87,6 +92,9 @@ enum Command {
         /// Show diff instead of modifying files; exit with error if changes needed
         #[clap(long, default_value_t = false)]
         diff: bool,
+        /// Print verbose output
+        #[clap(short, long, default_value_t = false)]
+        verbose: bool,
     },
     /// Run the language server
     #[clap(alias = "lsp")] // here for backwards compatibility
