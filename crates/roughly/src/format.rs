@@ -7,6 +7,111 @@ use {
     tree_sitter::{Node, TreeCursor},
 };
 
+pub mod node_kind {
+    // LEAFS
+    pub const IDENTIFIER: u16 = 1; // "identifier"
+    pub const ESCAPE_SEQUENCE: u16 = 49; // "escape_sequence"
+    pub const DOTS: u16 = 50; // "dots"
+    pub const DOT_DOT_I: u16 = 51; // "dot_dot_i"
+    pub const RETURN: u16 = 52; // "return"
+    pub const NEXT: u16 = 53; // "next"
+    pub const BREAK: u16 = 54; // "break"
+    pub const TRUE: u16 = 55; // "true"
+    pub const FALSE: u16 = 56; // "false"
+    pub const NULL: u16 = 57; // "null"
+    pub const INF: u16 = 58; // "inf"
+    pub const NAN: u16 = 59; // "nan"
+    pub const NA_LITERAL: u16 = 60; // "NA"
+    pub const NA_INTEGER: u16 = 61; // "NA_integer_"
+    pub const NA_REAL: u16 = 62; // "NA_real_"
+    pub const NA_COMPLEX: u16 = 63; // "NA_complex_"
+    pub const NA_CHARACTER: u16 = 64; // "NA_character_"
+    pub const COMMENT: u16 = 65; // "comment"
+    pub const COMMA: u16 = 66; // "comma"
+    // COMPOUND EXPRESSIONS
+    pub const PROGRAM: u16 = 81; // "program"
+    pub const FUNCTION_DEFINITION: u16 = 82; // "function_definition"
+    pub const PARAMETERS: u16 = 83; // "parameters"
+    pub const PARAMETER: u16 = 84; // "parameter"
+    pub const IF_STATEMENT: u16 = 88; // "if_statement"
+    pub const FOR_STATEMENT: u16 = 89; // "for_statement"
+    pub const WHILE_STATEMENT: u16 = 90; // "while_statement"
+    pub const REPEAT_STATEMENT: u16 = 91; // "repeat_statement"
+    pub const BRACED_EXPRESSION: u16 = 92; // "braced_expression"
+    pub const PARENTHESIZED_EXPRESSION: u16 = 93; // "parenthesized_expression"
+    pub const CALL: u16 = 94; // "call"
+    pub const SUBSET: u16 = 95; // "subset"
+    pub const SUBSET2: u16 = 96; // "subset2"
+    pub const ARGUMENTS: u16 = 97; // "arguments"
+    pub const ARGUMENT: u16 = 100; // "argument"
+    pub const UNARY_OPERATOR: u16 = 104; // "unary_operator"
+    pub const BINARY_OPERATOR: u16 = 105; // "binary_operator"
+    pub const EXTRACT_OPERATOR: u16 = 106; // "extract_operator"
+    pub const NAMESPACE_OPERATOR: u16 = 107; // "namespace_operator"
+    // PRIMITIVES
+    pub const INTEGER: u16 = 108; // "integer"
+    pub const COMPLEX: u16 = 109; // "complex"
+    pub const FLOAT: u16 = 110; // "float"
+    pub const STRING: u16 = 112; // "string"
+    pub const NA: u16 = 118; // "na"
+    pub const STRING_CONTENT: u16 = 134; // "string_content"
+    // KEYWORDS
+    pub const BACKSLASH: u16 = 2; // "\\"
+    pub const FUNCTION: u16 = 3; // "function"
+    pub const EQUAL: u16 = 4; // "="
+    pub const IF: u16 = 5; // "if"
+    pub const FOR: u16 = 6; // "for"
+    pub const IN: u16 = 7; // "in"
+    pub const WHILE: u16 = 8; // "while"
+    pub const REPEAT: u16 = 9; // "repeat"
+    pub const ELSE: u16 = 71; // "else"
+    // OPERATORS
+    pub const QUESTION: u16 = 10; // "?"
+    pub const TILDE: u16 = 11; // "~"
+    pub const EXCLAMATION: u16 = 12; // "!"
+    pub const PLUS: u16 = 13; // "+"
+    pub const MINUS: u16 = 14; // "-"
+    pub const LEFT_ASSIGN: u16 = 15; // "<-"
+    pub const LEFT_ASSIGN2: u16 = 16; // "<<-"
+    pub const COLON_EQUAL: u16 = 17; // ":="
+    pub const RIGHT_ASSIGN: u16 = 18; // "->"
+    pub const RIGHT_ASSIGN2: u16 = 19; // "->>"
+    pub const PIPE: u16 = 20; // "|"
+    pub const AMPERSAND: u16 = 21; // "&"
+    pub const DOUBLE_PIPE: u16 = 22; // "||"
+    pub const DOUBLE_AMPERSAND: u16 = 23; // "&&"
+    pub const LT: u16 = 24; // "<"
+    pub const LTE: u16 = 25; // "<="
+    pub const GT: u16 = 26; // ">"
+    pub const GTE: u16 = 27; // ">="
+    pub const EQEQ: u16 = 28; // "=="
+    pub const NEQ: u16 = 29; // "!="
+    pub const STAR: u16 = 30; // "*"
+    pub const SLASH: u16 = 31; // "/"
+    pub const DOUBLE_STAR: u16 = 32; // "**"
+    pub const CARET: u16 = 33; // "^"
+    pub const SPECIAL: u16 = 34; // "special"
+    pub const PIPEBIND: u16 = 35; // "|>"
+    pub const COLON: u16 = 36; // ":"
+    pub const DOLLAR: u16 = 37; // "$"
+    pub const AT: u16 = 38; // "@"
+    pub const DOUBLE_COLON: u16 = 39; // "::"
+    pub const TRIPLE_COLON: u16 = 40; // ":::"
+    pub const L: u16 = 41; // "L"
+    pub const I: u16 = 42; // "i"
+    // PUNCTUATION
+    pub const SINGLE_QUOTE: u16 = 45; // "'"
+    pub const DOUBLE_QUOTE: u16 = 46; // "\""
+    pub const LPAREN: u16 = 72; // "("
+    pub const RPAREN: u16 = 73; // ")"
+    pub const LBRACE: u16 = 74; // "{"
+    pub const RBRACE: u16 = 75; // "}"
+    pub const LBRACKET: u16 = 76; // "["
+    pub const RBRACKET: u16 = 77; // "]"
+    pub const DOUBLE_LBRACKET: u16 = 78; // "[["
+    pub const DOUBLE_RBRACKET: u16 = 79; // "]]"
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Config<'a> {
     pub indent: &'a str,
@@ -120,6 +225,8 @@ fn traverse(
     level: usize,
     make_multiline: bool,
 ) -> Result<(), FormatError> {
+    use node_kind::*;
+
     let space = |out: &mut String| out.push(' ');
     let indent = |out: &mut String| out.push_str(context.indent);
     let newline = |out: &mut String| {
@@ -176,13 +283,13 @@ fn traverse(
     }
 
     let is_comment =
-        |maybe_node: Option<Node>| maybe_node.is_some_and(|next| next.kind() == "comment");
+        |maybe_node: Option<Node>| maybe_node.is_some_and(|next| next.kind_id() == COMMENT);
 
     // HACK: tree-sitter-r has wrong ending_position for extract with newlines before ths rhs:
     // it only includes the newline but not the rhs. this hack uses at least the correct end_position
     // see: https://github.com/users/felix-andreas/projects/5?pane=issue&itemId=100962575
     let end_position = |node: Node| {
-        if node.kind() != "extract_operator" {
+        if node.kind_id() != EXTRACT_OPERATOR {
             return node.end_position();
         }
 
@@ -196,24 +303,10 @@ fn traverse(
     let same_line = |a: Node, b: Node| end_position(a).row == b.start_position().row;
 
     let is_fmt_skip_comment =
-        |node: Node| node.kind() == "comment" && get_raw(node).contains("fmt: skip");
+        |node: Node| node.kind_id() == COMMENT && get_raw(node).contains("fmt: skip");
 
     let node = cursor.node();
-    let kind = node.kind();
-    let push_all_comments = |out: &mut String, cursor: &mut TreeCursor| {
-        let is_first = true;
-        tree::for_each_child(cursor, |_, child, _, cursor| {
-            if child.kind() == "comment" {
-                if is_first && node.prev_sibling().is_some() {
-                    newline(out);
-                }
-                fmt(out, cursor)?;
-                newline(out);
-            }
-
-            Ok(())
-        })
-    };
+    let kind_id = node.kind_id();
 
     if node.is_error() {
         return Err(FormatError::SyntaxError {
@@ -254,8 +347,8 @@ fn traverse(
 
     let mut handles_comments = false;
 
-    match kind {
-        "comment" => {
+    match kind_id {
+        COMMENT => {
             let raw = get_raw(node);
             let raw = raw.trim_end();
             let mut chars = raw.chars();
@@ -287,15 +380,15 @@ fn traverse(
                 None => out.push('#'),
             }
         }
-        "argument" | "parameter" => {
+        ARGUMENT | PARAMETER => {
             handles_comments = true;
 
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
 
                 match field_name {
-                    None => match child.kind() {
-                        "comment" => {
+                    None => match child.kind_id() {
+                        COMMENT => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                             } else {
@@ -303,7 +396,7 @@ fn traverse(
                             }
                             fmt(out, cursor)
                         }
-                        "=" => {
+                        EQUAL => {
                             out.push_str(" =");
                             Ok(())
                         }
@@ -316,7 +409,7 @@ fn traverse(
                                 newline(out);
                                 fmt_indent(out, cursor)
                             } else {
-                                if maybe_prev.is_some_and(|prev| prev.kind() == "=") {
+                                if maybe_prev.is_some_and(|prev| prev.kind_id() == EQUAL) {
                                     space(out);
                                 }
                                 fmt(out, cursor)
@@ -327,31 +420,29 @@ fn traverse(
                 }
             })?;
         }
-        "arguments" | "parameters" => {
+        ARGUMENTS | PARAMETERS => {
             handles_comments = true;
 
             let is_multiline = !same_line(node, node);
             let is_empty = node.child_count() == 2;
             let mut trailing_space = false;
 
-            let hug = if kind == "arguments" {
+            let hug = (kind_id == ARGUMENTS) && {
                 field(node, "close")?.prev_sibling().is_none_or(|child| {
-                    trailing_space = child.kind() == "comma";
-                    child.kind() != "comment"
+                    trailing_space = child.kind_id() == COMMA;
+                    child.kind_id() != COMMENT
                         && child.child_by_field_name("value").is_some_and(|value| {
                             value.start_position().row == node.start_position().row
                         })
                 })
-            } else {
-                false
             };
 
             tree::for_each_child(cursor, |i, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
 
                 match field_name {
-                    None => match child.kind() {
-                        "comment" => {
+                    None => match child.kind_id() {
+                        COMMENT => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                                 fmt(out, cursor)
@@ -360,20 +451,20 @@ fn traverse(
                                 fmt_indent(out, cursor)
                             }
                         }
-                        "comma" => {
+                        COMMA => {
                             if is_multiline
                                 && !hug
                                 && (maybe_prev
-                                    .is_none_or(|prev| ["comment", "comma"].contains(&prev.kind()))
+                                    .is_none_or(|prev| [COMMENT, COMMA].contains(&prev.kind_id()))
                                     || i == 1)
                             {
                                 newline(out);
                                 indent(out);
                             } else if maybe_prev.is_some_and(|prev| {
-                                ["argument", "parameter"].contains(&prev.kind())
+                                [ARGUMENT, PARAMETER].contains(&prev.kind_id())
                                     && prev
                                         .child(prev.child_count() - 1)
-                                        .is_some_and(|last| last.kind() == "=")
+                                        .is_some_and(|last| last.kind_id() == EQUAL)
                             }) {
                                 space(out);
                             }
@@ -415,19 +506,19 @@ fn traverse(
                 }
             })?;
         }
-        "binary_operator" => {
+        BINARY_OPERATOR => {
             handles_comments = true;
 
             let operator = field(node, "operator")?;
-            let has_spacing = !(operator.kind() == ":" || operator.kind() == "^");
+            let has_spacing = !(operator.kind_id() == COLON || operator.kind_id() == CARET);
             let break_after_operator = !same_line(operator, field(node, "rhs")?);
 
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
 
                 match field_name {
-                    None => match child.kind() {
-                        "comment" => {
+                    None => match child.kind_id() {
+                        COMMENT => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                                 fmt(out, cursor)
@@ -467,11 +558,11 @@ fn traverse(
                 }
             })?;
         }
-        "braced_expression" => {
+        BRACED_EXPRESSION => {
             handles_comments = true;
 
             let hug = field(node, "close")?.prev_sibling().is_none_or(|child| {
-                child.kind() != "comment"
+                child.kind_id() != COMMENT
                     && child.start_position().row == node.start_position().row
                     && child.end_position().row == node.start_position().row
             });
@@ -482,8 +573,8 @@ fn traverse(
                 let maybe_prev = child.prev_sibling();
 
                 match field_name {
-                    None => match child.kind() {
-                        "comment" => {
+                    None => match child.kind_id() {
+                        COMMENT => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                                 fmt(out, cursor)
@@ -528,14 +619,14 @@ fn traverse(
                 }
             })?;
         }
-        "call" | "subset" | "subset2" => {
+        CALL | SUBSET | SUBSET2 => {
             handles_comments = true;
 
             // note: `extract_operator` has higher precedence than calls, so we must add special indentation
             // `namespace_operator` doesn't allow newlines, so there shouldn't be a problem
             let function = field(node, "function")?;
-            let additional_indent = match function.kind() {
-                "extract_operator" => {
+            let additional_indent = match function.kind_id() {
+                EXTRACT_OPERATOR => {
                     let lhs = field(function, "lhs")?;
                     let maybe_rhs = field_optional(function, "rhs");
                     maybe_rhs.is_some_and(|rhs| !same_line(lhs, rhs))
@@ -544,8 +635,8 @@ fn traverse(
             };
 
             tree::for_each_child(cursor, |_, child, field_name, cursor| match field_name {
-                None => match child.kind() {
-                    "comment" => {
+                None => match child.kind_id() {
+                    COMMENT => {
                         let maybe_prev = child.prev_sibling();
                         if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                             space(out);
@@ -570,8 +661,8 @@ fn traverse(
                 },
             })?;
         }
-        "complex" => fmt_raw(node, out)?,
-        "extract_operator" | "namespace_operator" => {
+        COMPLEX => fmt_raw(node, out)?,
+        EXTRACT_OPERATOR | NAMESPACE_OPERATOR => {
             handles_comments = true;
 
             let lhs = field(node, "lhs")?;
@@ -581,8 +672,8 @@ fn traverse(
                 let maybe_prev = child.prev_sibling();
 
                 match field_name {
-                    None => match child.kind() {
-                        "comment" => {
+                    None => match child.kind_id() {
+                        COMMENT => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                                 fmt(out, cursor)
@@ -609,8 +700,8 @@ fn traverse(
                 }
             })?;
         }
-        "float" => fmt_raw(node, out)?,
-        "for_statement" => {
+        FLOAT => fmt_raw(node, out)?,
+        FOR_STATEMENT => {
             handles_comments = true;
 
             let sequence = field(node, "sequence")?;
@@ -629,9 +720,9 @@ fn traverse(
                 let prev_is_comment = is_comment(maybe_prev);
 
                 match field_name {
-                    None => match child.kind() {
-                        "for" => fmt(out, cursor),
-                        "in" => {
+                    None => match child.kind_id() {
+                        FOR => fmt(out, cursor),
+                        IN => {
                             if prev_is_comment || loop_header_is_multiline {
                                 newline(out);
                                 fmt_indent(out, cursor)
@@ -640,7 +731,7 @@ fn traverse(
                                 fmt(out, cursor)
                             }
                         }
-                        "comment" => {
+                        COMMENT => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                             } else {
@@ -695,9 +786,9 @@ fn traverse(
                             if prev_is_comment {
                                 newline(out);
                             } else {
-                                space(out)
+                                space(out);
                             }
-                            if child.kind() == "braced_expression" {
+                            if child.kind_id() == BRACED_EXPRESSION {
                                 fmt_multiline(out, cursor)
                             } else {
                                 fmt_braces(out, cursor)
@@ -708,7 +799,7 @@ fn traverse(
                 }
             })?;
         }
-        "function_definition" => {
+        FUNCTION_DEFINITION => {
             handles_comments = true;
 
             let is_multiline = !same_line(node, node);
@@ -719,8 +810,8 @@ fn traverse(
                 let prev_is_comment = is_comment(maybe_prev);
 
                 match field_name {
-                    None => match child.kind() {
-                        "comment" => {
+                    None => match child.kind_id() {
+                        COMMENT => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                             } else {
@@ -745,7 +836,7 @@ fn traverse(
                                 space(out)
                             }
                             if is_multiline {
-                                if child.kind() == "braced_expression" || is_same_line {
+                                if child.kind_id() == BRACED_EXPRESSION || is_same_line {
                                     fmt_multiline(out, cursor)
                                 } else {
                                     fmt_braces(out, cursor)
@@ -759,7 +850,7 @@ fn traverse(
                 }
             })?;
         }
-        "if_statement" => {
+        IF_STATEMENT => {
             handles_comments = true;
 
             let is_multiline = make_multiline || !same_line(node, node);
@@ -778,9 +869,9 @@ fn traverse(
                 let prev_is_comment = is_comment(maybe_prev);
 
                 match field_name {
-                    None => match child.kind() {
-                        "if" => fmt(out, cursor),
-                        "else" => {
+                    None => match child.kind_id() {
+                        IF => fmt(out, cursor),
+                        ELSE => {
                             if prev_is_comment {
                                 newline(out);
                             } else {
@@ -788,7 +879,7 @@ fn traverse(
                             }
                             fmt(out, cursor)
                         }
-                        "comment" => {
+                        COMMENT => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                             } else {
@@ -833,8 +924,8 @@ fn traverse(
                                 space(out);
                             }
                             if is_multiline {
-                                if child.kind() == "braced_expression"
-                                    || (child.kind() == "if_statement"
+                                if child.kind_id() == BRACED_EXPRESSION
+                                    || (child.kind_id() == IF_STATEMENT
                                         && field_name == "alternative")
                                 {
                                     fmt_multiline(out, cursor)
@@ -850,21 +941,22 @@ fn traverse(
                 }
             })?;
         }
-        "integer" => fmt_raw(node, out)?,
-        "na" => fmt_raw(node, out)?,
-        "parenthesized_expression" => {
+        INTEGER => fmt_raw(node, out)?,
+        NA => fmt_raw(node, out)?,
+        PARENTHESIZED_EXPRESSION => {
             handles_comments = true;
 
             let hug = field(node, "close")?.prev_sibling().is_none_or(|child| {
-                child.kind() != "comment" && child.start_position().row == node.start_position().row
+                child.kind_id() != COMMENT
+                    && child.start_position().row == node.start_position().row
             });
 
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
 
                 match field_name {
-                    None => match child.kind() {
-                        "comment" => {
+                    None => match child.kind_id() {
+                        COMMENT => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                             } else {
@@ -896,14 +988,14 @@ fn traverse(
                 }
             })?;
         }
-        "program" => {
+        PROGRAM => {
             handles_comments = true;
 
             tree::for_each_child(cursor, |_, child, _, cursor| {
                 let maybe_prev = child.prev_sibling();
 
-                match child.kind() {
-                    "comment" if maybe_prev.is_some_and(|prev| same_line(prev, child)) => {
+                match child.kind_id() {
+                    COMMENT if maybe_prev.is_some_and(|prev| same_line(prev, child)) => {
                         space(out);
                     }
                     _ => {
@@ -914,7 +1006,7 @@ fn traverse(
             })?;
             newline(out);
         }
-        "repeat_statement" => {
+        REPEAT_STATEMENT => {
             handles_comments = true;
 
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
@@ -922,9 +1014,9 @@ fn traverse(
                 let prev_is_comment = is_comment(maybe_prev);
 
                 match field_name {
-                    None => match child.kind() {
-                        "repeat" => fmt(out, cursor),
-                        "comment" => {
+                    None => match child.kind_id() {
+                        REPEAT => fmt(out, cursor),
+                        COMMENT => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                             } else {
@@ -942,7 +1034,7 @@ fn traverse(
                         }
                         match field_name {
                             "body" => {
-                                if child.kind() == "braced_expression" {
+                                if child.kind_id() == BRACED_EXPRESSION {
                                     fmt_multiline(out, cursor)
                                 } else {
                                     fmt_braces(out, cursor)
@@ -954,7 +1046,7 @@ fn traverse(
                 }
             })?;
         }
-        "string" => {
+        STRING => {
             if let Some(content) = field_optional(node, "content") {
                 let raw = get_raw(content);
                 let mut all_quotes_escaped = true;
@@ -973,22 +1065,22 @@ fn traverse(
                 out.push_str(r#""""#);
             }
         }
-        "unary_operator" => {
+        UNARY_OPERATOR => {
             handles_comments = true;
 
             let rhs = field(node, "rhs")?;
             let operator = field(node, "operator")?;
 
-            let has_space = operator.kind() == "~" && rhs.kind() != "identifer";
+            let has_space = operator.kind_id() == TILDE && rhs.kind_id() != IDENTIFIER;
 
             tree::for_each_child(&mut node.walk(), |_, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
 
                 match field_name {
-                    None => match child.kind() {
+                    None => match child.kind_id() {
                         // note: this branch should rarely be encountered
                         // maintaining the order of node make formatter idempotence easier
-                        "comment" => {
+                        COMMENT => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                                 fmt(out, cursor)
@@ -1017,7 +1109,7 @@ fn traverse(
                 }
             })?;
         }
-        "while_statement" => {
+        WHILE_STATEMENT => {
             handles_comments = true;
 
             let hug = {
@@ -1034,9 +1126,9 @@ fn traverse(
                 let prev_is_comment = is_comment(maybe_prev);
 
                 match field_name {
-                    None => match child.kind() {
-                        "while" => fmt(out, cursor),
-                        "comment" => {
+                    None => match child.kind_id() {
+                        WHILE => fmt(out, cursor),
+                        COMMENT => {
                             if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
                                 space(out);
                             } else {
@@ -1080,7 +1172,7 @@ fn traverse(
                             } else {
                                 space(out)
                             }
-                            if child.kind() == "braced_expression" {
+                            if child.kind_id() == BRACED_EXPRESSION {
                                 fmt_multiline(out, cursor)
                             } else {
                                 fmt_braces(out, cursor)
@@ -1092,27 +1184,29 @@ fn traverse(
             })?;
         }
         // SIMPLE
-        "break" => out.push_str("break"),
-        "comma" => out.push(','),
-        "dot_dot_i" => fmt_raw(node, out)?,
-        "dots" => out.push_str("..."),
-        "escape_sequence" => fmt_raw(node, out)?,
-        "false" => out.push_str("FALSE"),
-        "identifier" => fmt_raw(node, out)?,
-        "inf" => out.push_str("Inf"),
-        "nan" => out.push_str("NaN"),
-        "next" => out.push_str("next"),
-        "null" => out.push_str("NULL"),
-        "return" => out.push_str("return"),
-        "true" => out.push_str("TRUE"),
-        unknown => {
+        BREAK => out.push_str("break"),
+        COMMA => out.push(','),
+        DOT_DOT_I => fmt_raw(node, out)?,
+        DOTS => out.push_str("..."),
+        ESCAPE_SEQUENCE => fmt_raw(node, out)?,
+        FALSE => out.push_str("FALSE"),
+        IDENTIFIER => fmt_raw(node, out)?,
+        INF => out.push_str("Inf"),
+        NAN => out.push_str("NaN"),
+        NEXT => out.push_str("next"),
+        NULL => out.push_str("NULL"),
+        RETURN => out.push_str("return"),
+        TRUE => out.push_str("TRUE"),
+        _ => {
             tracing::error!(
-                "unknown node kind: {unknown}, is extra {:?}",
+                "unknown node kind: {} (id: {}), is extra {:?}",
+                node.kind(),
+                kind_id,
                 node.is_extra()
             );
 
             return Err(FormatError::Unknown {
-                kind,
+                kind: node.kind(),
                 raw: get_raw(node),
             });
         }
@@ -1120,7 +1214,18 @@ fn traverse(
 
     if !handles_comments {
         let before = out.len();
-        push_all_comments(out, cursor)?;
+        {
+            tree::for_each_child(cursor, |_, child, _, cursor| {
+                if child.kind_id() == COMMENT {
+                    if node.prev_sibling().is_some() {
+                        newline(out);
+                    }
+                    fmt(out, cursor)?;
+                    newline(out);
+                }
+                Ok::<(), FormatError>(())
+            })?;
+        }
 
         if out.len() != before {
             let start = node.start_position();
