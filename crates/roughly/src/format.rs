@@ -263,7 +263,7 @@ fn traverse(
             let _ = chars.next(); // Skip the '#'
             // reformat comments like #foo to # foo but keep #' foo
             match chars.next() {
-                Some('\'') => match chars.next() {
+                Some('\'' | '*' | ':') => match chars.next() {
                     Some(' ') => out.push_str(raw),
                     Some(other) => {
                         let rest = chars.collect::<String>();
