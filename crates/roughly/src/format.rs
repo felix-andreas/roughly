@@ -1243,18 +1243,17 @@ fn traverse(
 
     if !handles_comments {
         let before = out.len();
-        {
-            tree::for_each_child(cursor, |_, child, _, cursor| {
-                if child.kind_id() == COMMENT {
-                    if node.prev_sibling().is_some() {
-                        newline(out);
-                    }
-                    fmt(out, cursor)?;
+
+        tree::for_each_child(cursor, |_, child, _, cursor| {
+            if child.kind_id() == COMMENT {
+                if node.prev_sibling().is_some() {
                     newline(out);
                 }
-                Ok::<(), FormatError>(())
-            })?;
-        }
+                fmt(out, cursor)?;
+                newline(out);
+            }
+            Ok::<(), FormatError>(())
+        })?;
 
         if out.len() != before {
             let start = node.start_position();
