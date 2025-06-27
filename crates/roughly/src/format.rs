@@ -12,6 +12,25 @@ pub mod node_kind {
     pub const IDENTIFIER: u16 = 1; // "identifier"
     pub const COMMENT: u16 = 65; // "comment"
     pub const COMMA: u16 = 66; // "comma"
+    // LITERALS (NAMED)
+    pub const TRUE: u16 = 55; // "true"
+    pub const FALSE: u16 = 56; // "false"
+    pub const NULL: u16 = 57; // "null"
+    pub const INF: u16 = 58; // "inf"
+    pub const NAN: u16 = 59; // "nan"
+    pub const INTEGER: u16 = 108; // "integer"
+    pub const COMPLEX: u16 = 109; // "complex"
+    pub const FLOAT: u16 = 110; // "float"
+    pub const STRING: u16 = 112; // "string"
+    pub const NA: u16 = 118; // "na"
+    pub const STRING_CONTENT: u16 = 134; // "string_content"
+    pub const ESCAPE_SEQUENCE: u16 = 49; // "escape_sequence"
+    // LITERALS (UNAMED)
+    pub const NA_LITERAL: u16 = 60; // "NA"
+    pub const NA_INTEGER: u16 = 61; // "NA_integer_"
+    pub const NA_REAL: u16 = 62; // "NA_real_"
+    pub const NA_COMPLEX: u16 = 63; // "NA_complex_"
+    pub const NA_CHARACTER: u16 = 64; // "NA_character_"
     // KEYWORDS (NAMED)
     pub const DOTS: u16 = 50; // "dots"
     pub const DOT_DOT_I: u16 = 51; // "dot_dot_i"
@@ -28,25 +47,6 @@ pub mod node_kind {
     pub const WHILE: u16 = 8; // "while"
     pub const REPEAT: u16 = 9; // "repeat"
     pub const ELSE: u16 = 71; // "else"
-    // LITERALS (NAMED)
-    pub const INTEGER: u16 = 108; // "integer"
-    pub const COMPLEX: u16 = 109; // "complex"
-    pub const FLOAT: u16 = 110; // "float"
-    pub const STRING: u16 = 112; // "string"
-    pub const NA: u16 = 118; // "na"
-    pub const STRING_CONTENT: u16 = 134; // "string_content"
-    pub const ESCAPE_SEQUENCE: u16 = 49; // "escape_sequence"
-    pub const TRUE: u16 = 55; // "true"
-    pub const FALSE: u16 = 56; // "false"
-    pub const NULL: u16 = 57; // "null"
-    pub const INF: u16 = 58; // "inf"
-    pub const NAN: u16 = 59; // "nan"
-    // LITERALS (UNAMED)
-    pub const NA_LITERAL: u16 = 60; // "NA"
-    pub const NA_INTEGER: u16 = 61; // "NA_integer_"
-    pub const NA_REAL: u16 = 62; // "NA_real_"
-    pub const NA_COMPLEX: u16 = 63; // "NA_complex_"
-    pub const NA_CHARACTER: u16 = 64; // "NA_character_"
     // COMPOUND EXPRESSIONS (NAMED)
     pub const PROGRAM: u16 = 81; // "program"
     pub const FUNCTION_DEFINITION: u16 = 82; // "function_definition"
@@ -373,6 +373,8 @@ fn traverse(
     let mut handles_comments = false;
 
     match kind_id {
+        // SPECIAL
+        IDENTIFIER => fmt_raw(node, out)?,
         COMMENT => {
             let raw = get_raw(node);
             let raw = raw.trim_end();
@@ -405,6 +407,45 @@ fn traverse(
                 None => out.push('#'),
             }
         }
+        COMMA => out.push(','),
+        // LITERALS
+        TRUE => out.push_str("TRUE"),
+        FALSE => out.push_str("FALSE"),
+        NULL => out.push_str("NULL"),
+        INF => out.push_str("Inf"),
+        NAN => out.push_str("NaN"),
+        INTEGER => fmt_raw(node, out)?,
+        COMPLEX => fmt_raw(node, out)?,
+        FLOAT => fmt_raw(node, out)?,
+        STRING => {
+            if let Some(content) = field_optional(node, "content") {
+                let raw = get_raw(content);
+                let mut all_quotes_escaped = true;
+                let mut prev_was_escape = false;
+                for char in raw.chars() {
+                    if char == '"' {
+                        all_quotes_escaped &= prev_was_escape;
+                    }
+                    prev_was_escape = char == '\\' && !prev_was_escape;
+                }
+                let quote = if all_quotes_escaped { '"' } else { '\'' };
+                out.push(quote);
+                out.push_str(&raw);
+                out.push(quote);
+            } else {
+                out.push_str(r#""""#);
+            }
+        }
+        NA => fmt_raw(node, out)?,
+        // both handled by STRING
+        ESCAPE_SEQUENCE | STRING_CONTENT => unreachable!(),
+        // KEYWORDS
+        DOTS => out.push_str("..."),
+        DOT_DOT_I => fmt_raw(node, out)?,
+        RETURN => out.push_str("return"),
+        NEXT => out.push_str("next"),
+        BREAK => out.push_str("break"),
+        // COMPOUND EXPRESSIONS
         ARGUMENT | PARAMETER => {
             handles_comments = true;
 
@@ -686,7 +727,6 @@ fn traverse(
                 },
             })?;
         }
-        COMPLEX => fmt_raw(node, out)?,
         EXTRACT_OPERATOR | NAMESPACE_OPERATOR => {
             handles_comments = true;
 
@@ -725,7 +765,6 @@ fn traverse(
                 }
             })?;
         }
-        FLOAT => fmt_raw(node, out)?,
         FOR_STATEMENT => {
             handles_comments = true;
 
@@ -966,8 +1005,6 @@ fn traverse(
                 }
             })?;
         }
-        INTEGER => fmt_raw(node, out)?,
-        NA => fmt_raw(node, out)?,
         PARENTHESIZED_EXPRESSION => {
             handles_comments = true;
 
@@ -1070,25 +1107,6 @@ fn traverse(
                     }
                 }
             })?;
-        }
-        STRING => {
-            if let Some(content) = field_optional(node, "content") {
-                let raw = get_raw(content);
-                let mut all_quotes_escaped = true;
-                let mut prev_was_escape = false;
-                for char in raw.chars() {
-                    if char == '"' {
-                        all_quotes_escaped &= prev_was_escape;
-                    }
-                    prev_was_escape = char == '\\' && !prev_was_escape;
-                }
-                let quote = if all_quotes_escaped { '"' } else { '\'' };
-                out.push(quote);
-                out.push_str(&raw);
-                out.push(quote);
-            } else {
-                out.push_str(r#""""#);
-            }
         }
         UNARY_OPERATOR => {
             handles_comments = true;
@@ -1208,20 +1226,6 @@ fn traverse(
                 }
             })?;
         }
-        // SIMPLE
-        BREAK => out.push_str("break"),
-        COMMA => out.push(','),
-        DOT_DOT_I => fmt_raw(node, out)?,
-        DOTS => out.push_str("..."),
-        ESCAPE_SEQUENCE => fmt_raw(node, out)?,
-        FALSE => out.push_str("FALSE"),
-        IDENTIFIER => fmt_raw(node, out)?,
-        // INF => out.push_str("Inf"),
-        // NAN => out.push_str("NaN"),
-        // NEXT => out.push_str("next"),
-        // NULL => out.push_str("NULL"),
-        // RETURN => out.push_str("return"),
-        // TRUE => out.push_str("TRUE"),
         _ => {
             tracing::error!(
                 "unknown node kind: {} (id: {}), is extra {:?}",
