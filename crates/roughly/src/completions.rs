@@ -380,6 +380,28 @@ mod tests {
         assert!(items.contains(&("var".into(), CompletionItemKind::VARIABLE)));
     }
 
+    // TODO: fix this text
+    // #[test]
+    // fn completes_switch_statement_variable() {
+    //     let (query, items) = setup(
+    //         indoc! {"
+    //             function(x) {
+    //                 switch (
+    //                     x,
+    //                     a = {
+    //                         var <- 1
+    //                         va
+    //                     }
+    //                 )
+    //             }
+    //         "},
+    //         (4, 14),
+    //     );
+
+    //     assert_eq!(query, "va");
+    //     assert!(items.contains(&("var".into(), CompletionItemKind::VARIABLE)));
+    // }
+
     #[test]
     fn completes_nested_functions_scope_correctly() {
         let code = indoc! {"
