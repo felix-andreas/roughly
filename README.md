@@ -6,7 +6,7 @@
 </h1>
 
 <div align="center">
-  
+
 An R language server, linter, and code formatter, written in Rust.
 <br />
 [Docs](https://roughly.felixandreas.me) · [Releases](https://github.com/felix-andreas/roughly/releases) · [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
