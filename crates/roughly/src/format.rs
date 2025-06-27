@@ -332,9 +332,11 @@ fn traverse(
 
             let is_multiline = !same_line(node, node);
             let is_empty = node.child_count() == 2;
+            let mut trailing_space = false;
 
             let hug = if kind == "arguments" {
                 field(node, "close")?.prev_sibling().is_none_or(|child| {
+                    trailing_space = child.kind() == "comma";
                     child.kind() != "comment"
                         && child.child_by_field_name("value").is_some_and(|value| {
                             value.start_position().row == node.start_position().row
@@ -399,8 +401,12 @@ fn traverse(
                             }
                         }
                         "close" => {
-                            if is_multiline && !hug && !is_empty {
-                                newline(out);
+                            if is_multiline {
+                                if !hug && !is_empty {
+                                    newline(out);
+                                }
+                            } else if trailing_space {
+                                space(out);
                             }
                             fmt(out, cursor)
                         }
