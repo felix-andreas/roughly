@@ -42,14 +42,8 @@ pub enum FormatError {
         kind: &'static str,
         field: &'static str,
     },
-    #[error("Unhandled comment found at line {line}, column {col}: \"{raw}\"")]
-    UnhandledComment {
-        raw: String,
-        line: usize,
-        col: usize,
-    },
     #[error("Encountered unknown node type '{kind}' with content: \"{raw}\"")]
-    Unknown { kind: &'static str, raw: String },
+    UnknownKind { kind: &'static str, raw: String },
 }
 
 pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatError> {
@@ -246,8 +240,6 @@ fn traverse(
         return fmt_raw(node, out);
     }
 
-    let mut handles_comments = false;
-
     match kind_id {
         // SPECIAL
         kind::IDENTIFIER => fmt_raw(node, out)?,
@@ -323,8 +315,6 @@ fn traverse(
         kind::BREAK => out.push_str("break"),
         // COMPOUND EXPRESSIONS
         kind::ARGUMENT | kind::PARAMETER => {
-            handles_comments = true;
-
             tree::for_each_child(cursor, |_, child, field_id, cursor| {
                 let maybe_prev = child.prev_sibling();
 
@@ -363,8 +353,6 @@ fn traverse(
             })?;
         }
         kind::ARGUMENTS | kind::PARAMETERS => {
-            handles_comments = true;
-
             let is_multiline = !same_line(node, node);
             let is_empty = node.child_count() == 2;
             let mut trailing_space = false;
@@ -451,8 +439,6 @@ fn traverse(
             })?;
         }
         kind::BINARY_OPERATOR => {
-            handles_comments = true;
-
             let operator = field(node, field::OPERATOR)?;
             let has_spacing = ![kind::COLON, kind::CARET].contains(&operator.kind_id());
             let break_after_operator = !same_line(operator, field(node, field::RHS)?);
@@ -503,8 +489,6 @@ fn traverse(
             })?;
         }
         kind::BRACED_EXPRESSION => {
-            handles_comments = true;
-
             let hug = field(node, field::CLOSE)?
                 .prev_sibling()
                 .is_none_or(|child| {
@@ -566,8 +550,6 @@ fn traverse(
             })?;
         }
         kind::CALL | kind::SUBSET | kind::SUBSET2 => {
-            handles_comments = true;
-
             // note: `extract_operator` has higher precedence than calls, so we must add special indentation
             // `namespace_operator` doesn't allow newlines, so there shouldn't be a problem
             let function = field(node, field::FUNCTION)?;
@@ -608,8 +590,6 @@ fn traverse(
             })?;
         }
         kind::EXTRACT_OPERATOR | kind::NAMESPACE_OPERATOR => {
-            handles_comments = true;
-
             let lhs = field(node, field::LHS)?;
             let is_multiline =
                 field_optional(node, field::RHS).is_some_and(|rhs| !same_line(lhs, rhs));
@@ -647,8 +627,6 @@ fn traverse(
             })?;
         }
         kind::FOR_STATEMENT => {
-            handles_comments = true;
-
             let sequence = field(node, field::SEQUENCE)?;
             let open = field(node, field::OPEN)?;
             let variable = field(node, field::VARIABLE)?;
@@ -745,8 +723,6 @@ fn traverse(
             })?;
         }
         kind::FUNCTION_DEFINITION => {
-            handles_comments = true;
-
             let is_multiline = !same_line(node, node);
             let is_same_line = same_line(field(node, field::NAME)?, field(node, field::BODY)?);
 
@@ -796,8 +772,6 @@ fn traverse(
             })?;
         }
         kind::IF_STATEMENT => {
-            handles_comments = true;
-
             let is_multiline = make_multiline || !same_line(node, node);
 
             let hug = {
@@ -887,8 +861,6 @@ fn traverse(
             })?;
         }
         kind::PARENTHESIZED_EXPRESSION => {
-            handles_comments = true;
-
             let hug = field(node, field::CLOSE)?
                 .prev_sibling()
                 .is_none_or(|child| {
@@ -934,8 +906,6 @@ fn traverse(
             })?;
         }
         kind::PROGRAM => {
-            handles_comments = true;
-
             tree::for_each_child(cursor, |_, child, _, cursor| {
                 let maybe_prev = child.prev_sibling();
 
@@ -952,8 +922,6 @@ fn traverse(
             newline(out);
         }
         kind::REPEAT_STATEMENT => {
-            handles_comments = true;
-
             tree::for_each_child(cursor, |_, child, field_id, cursor| {
                 let maybe_prev = child.prev_sibling();
                 let prev_is_comment = is_comment(maybe_prev);
@@ -992,8 +960,6 @@ fn traverse(
             })?;
         }
         kind::UNARY_OPERATOR => {
-            handles_comments = true;
-
             let rhs = field(node, field::RHS)?;
             let operator = field(node, field::OPERATOR)?;
 
@@ -1036,8 +1002,6 @@ fn traverse(
             })?;
         }
         kind::WHILE_STATEMENT => {
-            handles_comments = true;
-
             let hug = {
                 let condition = field(node, field::CONDITION)?;
                 let no_comments =
@@ -1117,35 +1081,12 @@ fn traverse(
                 node.is_extra()
             );
 
-            return Err(FormatError::Unknown {
+            return Err(FormatError::UnknownKind {
                 kind: node.kind(),
                 raw: get_raw(node),
             });
         }
     };
 
-    if !handles_comments {
-        let before = out.len();
-
-        tree::for_each_child(cursor, |_, child, _, cursor| {
-            if child.kind_id() == kind::COMMENT {
-                if node.prev_sibling().is_some() {
-                    newline(out);
-                }
-                fmt(out, cursor)?;
-                newline(out);
-            }
-            Ok::<(), FormatError>(())
-        })?;
-
-        if out.len() != before {
-            let start = node.start_position();
-            return Err(FormatError::UnhandledComment {
-                raw: get_raw(node),
-                line: start.row,
-                col: start.column,
-            });
-        }
-    }
     Ok(())
 }
