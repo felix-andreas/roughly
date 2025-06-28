@@ -295,16 +295,19 @@ fn traverse(
         Ok(())
     };
 
-    fn field<'a>(node: Node<'a>, field_name: &'static str) -> Result<Node<'a>, FormatError> {
-        node.child_by_field_name(field_name)
+    fn field<'a>(node: Node<'a>, field_id: u16) -> Result<Node<'a>, FormatError> {
+        node.child_by_field_id(field_id)
             .ok_or(FormatError::MissingField {
                 kind: node.kind(),
-                field: field_name,
+                field: node
+                    .language()
+                    .field_name_for_id(field_id)
+                    .unwrap_or("unknown"),
             })
     }
 
-    fn field_optional<'a>(node: Node<'a>, field_name: &'static str) -> Option<Node<'a>> {
-        node.child_by_field_name(field_name)
+    fn field_optional<'a>(node: Node<'a>, field_id: u16) -> Option<Node<'a>> {
+        node.child_by_field_id(field_id)
     }
 
     let is_comment =
@@ -318,9 +321,11 @@ fn traverse(
             return node.end_position();
         }
 
-        field_optional(node, "rhs")
+        field_optional(node, field::RHS)
             .map(|rhs| rhs.end_position())
-            .or_else(|| field_optional(node, "operator").map(|operator| operator.end_position()))
+            .or_else(|| {
+                field_optional(node, field::OPERATOR).map(|operator| operator.end_position())
+            })
             // note: this case is unexpected
             .unwrap_or_else(|| node.end_position())
     };
@@ -418,7 +423,7 @@ fn traverse(
         COMPLEX => fmt_raw(node, out)?,
         FLOAT => fmt_raw(node, out)?,
         STRING => {
-            if let Some(content) = field_optional(node, "content") {
+            if let Some(content) = field_optional(node, field::CONTENT) {
                 let raw = get_raw(content);
                 let mut all_quotes_escaped = true;
                 let mut prev_was_escape = false;
@@ -494,13 +499,15 @@ fn traverse(
             let mut trailing_space = false;
 
             let hug = (kind_id == ARGUMENTS) && {
-                field(node, "close")?.prev_sibling().is_none_or(|child| {
-                    trailing_space = child.kind_id() == COMMA;
-                    child.kind_id() != COMMENT
-                        && child.child_by_field_name("value").is_some_and(|value| {
-                            value.start_position().row == node.start_position().row
-                        })
-                })
+                field(node, field::CLOSE)?
+                    .prev_sibling()
+                    .is_none_or(|child| {
+                        trailing_space = child.kind_id() == COMMA;
+                        child.kind_id() != COMMENT
+                            && child.child_by_field_id(field::VALUE).is_some_and(|value| {
+                                value.start_position().row == node.start_position().row
+                            })
+                    })
             };
 
             tree::for_each_child(cursor, |i, child, field_name, cursor| {
@@ -575,9 +582,9 @@ fn traverse(
         BINARY_OPERATOR => {
             handles_comments = true;
 
-            let operator = field(node, "operator")?;
+            let operator = field(node, field::OPERATOR)?;
             let has_spacing = !(operator.kind_id() == COLON || operator.kind_id() == CARET);
-            let break_after_operator = !same_line(operator, field(node, "rhs")?);
+            let break_after_operator = !same_line(operator, field(node, field::RHS)?);
 
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
@@ -627,11 +634,13 @@ fn traverse(
         BRACED_EXPRESSION => {
             handles_comments = true;
 
-            let hug = field(node, "close")?.prev_sibling().is_none_or(|child| {
-                child.kind_id() != COMMENT
-                    && child.start_position().row == node.start_position().row
-                    && child.end_position().row == node.start_position().row
-            });
+            let hug = field(node, field::CLOSE)?
+                .prev_sibling()
+                .is_none_or(|child| {
+                    child.kind_id() != COMMENT
+                        && child.start_position().row == node.start_position().row
+                        && child.end_position().row == node.start_position().row
+                });
             let is_multiline = !hug || make_multiline;
             let is_empty = node.child_count() == 2;
 
@@ -690,11 +699,11 @@ fn traverse(
 
             // note: `extract_operator` has higher precedence than calls, so we must add special indentation
             // `namespace_operator` doesn't allow newlines, so there shouldn't be a problem
-            let function = field(node, "function")?;
+            let function = field(node, field::FUNCTION)?;
             let additional_indent = match function.kind_id() {
                 EXTRACT_OPERATOR => {
-                    let lhs = field(function, "lhs")?;
-                    let maybe_rhs = field_optional(function, "rhs");
+                    let lhs = field(function, field::LHS)?;
+                    let maybe_rhs = field_optional(function, field::RHS);
                     maybe_rhs.is_some_and(|rhs| !same_line(lhs, rhs))
                 }
                 _ => false,
@@ -730,8 +739,9 @@ fn traverse(
         EXTRACT_OPERATOR | NAMESPACE_OPERATOR => {
             handles_comments = true;
 
-            let lhs = field(node, "lhs")?;
-            let is_multiline = field_optional(node, "rhs").is_some_and(|rhs| !same_line(lhs, rhs));
+            let lhs = field(node, field::LHS)?;
+            let is_multiline =
+                field_optional(node, field::RHS).is_some_and(|rhs| !same_line(lhs, rhs));
 
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
@@ -768,9 +778,9 @@ fn traverse(
         FOR_STATEMENT => {
             handles_comments = true;
 
-            let sequence = field(node, "sequence")?;
-            let open = field(node, "open")?;
-            let variable = field(node, "variable")?;
+            let sequence = field(node, field::SEQUENCE)?;
+            let open = field(node, field::OPEN)?;
+            let variable = field(node, field::VARIABLE)?;
 
             let condition_is_multiline = !same_line(open, sequence)
                 || is_comment(sequence.prev_sibling())
@@ -867,7 +877,7 @@ fn traverse(
             handles_comments = true;
 
             let is_multiline = !same_line(node, node);
-            let is_same_line = same_line(field(node, "name")?, field(node, "body")?);
+            let is_same_line = same_line(field(node, field::NAME)?, field(node, field::BODY)?);
 
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
@@ -920,10 +930,10 @@ fn traverse(
             let is_multiline = make_multiline || !same_line(node, node);
 
             let hug = {
-                let condition = field(node, "condition")?;
+                let condition = field(node, field::CONDITION)?;
                 let no_comments =
                     !is_comment(condition.prev_sibling()) && !is_comment(condition.next_sibling());
-                let is_same_line = same_line(field(node, "open")?, condition);
+                let is_same_line = same_line(field(node, field::OPEN)?, condition);
                 is_same_line && no_comments
             };
 
@@ -981,7 +991,7 @@ fn traverse(
                             }
                             fmt(out, cursor)
                         }
-                        f if f == field::CONSEQUENCE || f == field::ALTERNATIVE => {
+                        field::CONSEQUENCE | field::ALTERNATIVE => {
                             if prev_is_comment {
                                 newline(out);
                             } else {
@@ -1008,10 +1018,12 @@ fn traverse(
         PARENTHESIZED_EXPRESSION => {
             handles_comments = true;
 
-            let hug = field(node, "close")?.prev_sibling().is_none_or(|child| {
-                child.kind_id() != COMMENT
-                    && child.start_position().row == node.start_position().row
-            });
+            let hug = field(node, field::CLOSE)?
+                .prev_sibling()
+                .is_none_or(|child| {
+                    child.kind_id() != COMMENT
+                        && child.start_position().row == node.start_position().row
+                });
 
             tree::for_each_child(cursor, |_, child, field_name, cursor| {
                 let maybe_prev = child.prev_sibling();
@@ -1111,8 +1123,8 @@ fn traverse(
         UNARY_OPERATOR => {
             handles_comments = true;
 
-            let rhs = field(node, "rhs")?;
-            let operator = field(node, "operator")?;
+            let rhs = field(node, field::RHS)?;
+            let operator = field(node, field::OPERATOR)?;
 
             let has_space = operator.kind_id() == TILDE && rhs.kind_id() != IDENTIFIER;
 
@@ -1156,10 +1168,10 @@ fn traverse(
             handles_comments = true;
 
             let hug = {
-                let condition = field(node, "condition")?;
+                let condition = field(node, field::CONDITION)?;
                 let no_comments =
                     !is_comment(condition.prev_sibling()) && !is_comment(condition.next_sibling());
-                let is_same_line = same_line(field(node, "open")?, condition);
+                let is_same_line = same_line(field(node, field::OPEN)?, condition);
                 is_same_line && no_comments
             };
 
