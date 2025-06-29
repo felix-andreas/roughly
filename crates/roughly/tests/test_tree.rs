@@ -47,7 +47,7 @@ fn check_node_ids() {
         (kind::NA, "na"),
         (kind::STRING_CONTENT, "string_content"),
         (kind::ESCAPE_SEQUENCE, "escape_sequence"),
-        // LITERALS (UNAMED)
+        // LITERALS (UNNAMED)
         (kind::NA_LITERAL, "NA"),
         (kind::NA_INTEGER, "NA_integer_"),
         (kind::NA_REAL, "NA_real_"),
