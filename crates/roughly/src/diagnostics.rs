@@ -16,7 +16,6 @@ use {
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
     case: Option<Case>,
-    case: Case,
     experimental_unused: bool,
 }
 
