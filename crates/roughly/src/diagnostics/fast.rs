@@ -84,7 +84,7 @@ pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
                 state.check_trailing_commas(false);
             }
             kind::BINARY_OPERATOR => {
-                if let Some(case) = config.case
+                if let Some(case) = config.naming_style
                     && state.check_case
                 {
                     let maybe_lhs = node.child_by_field_name("lhs");
@@ -139,7 +139,7 @@ pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
                 }
             }
             kind::PARAMETER => {
-                if let Some(case) = config.case
+                if let Some(case) = config.naming_style
                     && state.check_case
                 {
                     let maybe_name = node.child_by_field_name("name");

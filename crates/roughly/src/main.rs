@@ -34,7 +34,13 @@ fn main() -> ExitCode {
             check,
             diff,
             verbose,
-        } => match cli::fmt(files.as_deref(), check, diff, verbose) {
+        } => match cli::fmt(
+            files.as_deref(),
+            check,
+            diff,
+            verbose,
+            experimental_features,
+        ) {
             Ok(()) => ExitCode::SUCCESS,
             Err(FmtError) => ExitCode::FAILURE,
         },

@@ -4,28 +4,22 @@ mod unused;
 
 use {
     crate::{
-        config::{self, Case},
+        config::Case,
         lsp_types::{Diagnostic, DiagnosticSeverity},
         utils,
     },
     ropey::Rope,
+    serde::Deserialize,
     thiserror::Error,
     tree_sitter::Node,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(default)]
+#[derive(Default)]
 pub struct Config {
-    case: Option<Case>,
-    experimental_unused: bool,
-}
-
-impl Config {
-    pub fn from_config(config: config::Config, experimental_unused: bool) -> Self {
-        Config {
-            case: config.case,
-            experimental_unused,
-        }
-    }
+    pub naming_style: Option<Case>,
+    pub experimental_unused: bool,
 }
 
 pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagnostic> {
@@ -34,14 +28,11 @@ pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagn
 
     diagnostics.extend(fast::analyze(node, rope, config));
 
-    if full && !has_syntax_errors {
-        #[allow(clippy::collapsible_if)]
-        if config.experimental_unused {
-            match unused::analyze(node, rope) {
-                Ok(diags) => diagnostics.extend(diags),
-                Err(error) => {
-                    tracing::warn!("error while diagnostics {error}");
-                }
+    if config.experimental_unused && full && !has_syntax_errors {
+        match unused::analyze(node, rope) {
+            Ok(diags) => diagnostics.extend(diags),
+            Err(error) => {
+                tracing::warn!("error while diagnostics {error}");
             }
         }
     }
