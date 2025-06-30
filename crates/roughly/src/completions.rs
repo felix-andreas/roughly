@@ -1,12 +1,13 @@
 use {
     crate::{
-        index::{self, SymbolsMap},
+        index::SymbolsMap,
         lsp_types::{CompletionItem, CompletionItemKind, CompletionResponse, Position, SymbolKind},
+        tree::kind,
         utils,
     },
     async_lsp::lsp_types::CompletionItemLabelDetails,
     ropey::Rope,
-    tree_sitter::Point,
+    tree_sitter::{Node, Point},
 };
 
 pub fn get(
@@ -26,69 +27,40 @@ pub fn get(
         _ => CompletionItemKind::VARIABLE,
     };
 
-    let local_symbols: Vec<CompletionItem> = {
-        let point = Point {
-            row: position.line as usize,
-            column: position.character as usize,
-        };
-        tree.root_node()
-            .descendant_for_point_range(point, point)
-            .map(|node| {
-                std::iter::successors(Some(node), |node| node.parent())
-                    // note: we just search functions, as global symbols are already included from workspace info
-                    .filter(|node| node.kind() == "function_definition")
-                    .flat_map(|node| {
-                        let mut items = Vec::new();
-
-                        if let Some(parameters) = node.child_by_field_name("parameters") {
-                            items.extend(
-                                parameters
-                                    .children_by_field_name("parameter", &mut parameters.walk())
-                                    .filter_map(|parameter| {
-                                        parameter.child_by_field_name("name").map(|name| {
-                                            rope.byte_slice(name.byte_range()).to_string()
-                                        })
-                                    })
-                                    .filter(|name| utils::starts_with_lowercase(name, &query))
-                                    .map(|label| CompletionItem {
-                                        label,
-                                        label_details: Some(CompletionItemLabelDetails {
-                                            detail: None,
-                                            description: Some("Parameter".into()),
-                                        }),
-                                        kind: Some(CompletionItemKind::VARIABLE),
-                                        ..Default::default()
-                                    }),
-                            );
-                        }
-
-                        if let Some(body) = node.child_by_field_name("body") {
-                            items.extend(
-                                // note: we cannot just use nested true here!
-                                // we want to see all params/vars from parent scopes,
-                                // but we dont' want parent scopes to see vars from sub-scopes!
-                                index::index(body, rope, false, true)
-                                    .into_iter()
-                                    .filter(|symbol| {
-                                        utils::starts_with_lowercase(&symbol.name, &query)
-                                    })
-                                    .map(|symbol| CompletionItem {
-                                        label: symbol.name,
-                                        label_details: Some(CompletionItemLabelDetails {
-                                            detail: None,
-                                            description: Some("Local".into()),
-                                        }),
-                                        kind: Some(symbol_kind_to_completion_kind(symbol.kind)),
-                                        ..Default::default()
-                                    }),
-                            );
-                        }
-
-                        items
-                    })
-                    .collect()
+    let keyword_symbols = {
+        const RESERVED_WORDS: &[&str] = &[
+            "if",
+            "else",
+            "repeat",
+            "while",
+            "function",
+            "for",
+            "in",
+            "next",
+            "break",
+            "TRUE",
+            "FALSE",
+            "NULL",
+            "Inf",
+            "NaN",
+            "NA",
+            "NA_integer_",
+            "NA_real_",
+            "NA_complex_",
+            "NA_character_",
+        ];
+        RESERVED_WORDS
+            .iter()
+            .filter(|keyword| utils::starts_with_lowercase(keyword, &query))
+            .map(|reserved_word| CompletionItem {
+                label: reserved_word.to_string(),
+                label_details: Some(CompletionItemLabelDetails {
+                    detail: None,
+                    description: Some("Keyword".into()),
+                }),
+                kind: Some(CompletionItemKind::KEYWORD),
+                ..Default::default()
             })
-            .unwrap_or_default()
     };
 
     let workspace_symbols = symbols_map
@@ -112,40 +84,55 @@ pub fn get(
             ..Default::default()
         });
 
-    const RESERVED_WORDS: &[&str] = &[
-        "if",
-        "else",
-        "repeat",
-        "while",
-        "function",
-        "for",
-        "in",
-        "next",
-        "break",
-        "TRUE",
-        "FALSE",
-        "NULL",
-        "Inf",
-        "NaN",
-        "NA",
-        "NA_integer_",
-        "NA_real_",
-        "NA_complex_",
-        "NA_character_",
-    ];
+    let local_symbols: Vec<CompletionItem> =
+        {
+            let point = Point {
+                row: position.line as usize,
+                column: position.character as usize,
+            };
+            tree.root_node()
+                .descendant_for_point_range(point, point)
+                .map(|node| {
+                    std::iter::successors(Some(node), |node| node.parent())
+                        // note: we just search functions, as global symbols are already included from workspace info
+                        .filter(|node| node.kind_id() == kind::FUNCTION_DEFINITION)
+                        .flat_map(|node| {
+                            let mut items = Vec::new();
 
-    let keyword_symbols = RESERVED_WORDS
-        .iter()
-        .filter(|keyword| utils::starts_with_lowercase(keyword, &query))
-        .map(|reserved_word| CompletionItem {
-            label: reserved_word.to_string(),
-            label_details: Some(CompletionItemLabelDetails {
-                detail: None,
-                description: Some("Keyword".into()),
-            }),
-            kind: Some(CompletionItemKind::KEYWORD),
-            ..Default::default()
-        });
+                            if let Some(parameters) = node.child_by_field_name("parameters") {
+                                items.extend(
+                                    parameters
+                                        .children_by_field_name("parameter", &mut parameters.walk())
+                                        .filter_map(|parameter| {
+                                            parameter.child_by_field_name("name").map(|name| {
+                                                rope.byte_slice(name.byte_range()).to_string()
+                                            })
+                                        })
+                                        .filter(|name| utils::starts_with_lowercase(name, &query))
+                                        .map(|label| CompletionItem {
+                                            label,
+                                            label_details: Some(CompletionItemLabelDetails {
+                                                detail: None,
+                                                description: Some("Parameter".into()),
+                                            }),
+                                            kind: Some(CompletionItemKind::VARIABLE),
+                                            ..Default::default()
+                                        }),
+                                );
+                            }
+
+                            if let Some(body) = node.child_by_field_name("body") {
+                                items.extend(locals_completion(body, rope).into_iter().filter(
+                                    |item| utils::starts_with_lowercase(&item.label, &query),
+                                ));
+                            }
+
+                            items
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
 
     Some(CompletionResponse::Array(
         keyword_symbols
@@ -177,6 +164,43 @@ fn extract_query(position: Position, rope: &Rope) -> Option<String> {
                 acc
             }),
     )
+}
+
+pub fn locals_completion(node: Node, rope: &Rope) -> Vec<CompletionItem> {
+    let mut symbols = vec![];
+
+    for child in node.named_children(&mut node.walk()) {
+        match child.kind_id() {
+            kind::BINARY_OPERATOR => {
+                let maybe_lhs = child.child_by_field_name("lhs");
+                let maybe_op = child.child_by_field_name("operator");
+
+                if let Some(lhs) = maybe_lhs
+                    && lhs.kind_id() == kind::IDENTIFIER
+                    && maybe_op
+                        .is_some_and(|op| [kind::EQUAL, kind::LEFT_ASSIGN].contains(&op.kind_id()))
+                {
+                    let label = rope.byte_slice(lhs.byte_range()).to_string();
+                    symbols.push(CompletionItem {
+                        label,
+                        label_details: Some(CompletionItemLabelDetails {
+                            detail: None,
+                            description: Some("Local".into()),
+                        }),
+                        kind: Some(CompletionItemKind::VARIABLE),
+                        ..Default::default()
+                    })
+                }
+            }
+            // note: we don't want to walk into sub scopes -> ignore function definition
+            kind::FUNCTION_DEFINITION => continue,
+            _ => {}
+        }
+        if child.child_count() > 0 {
+            symbols.extend(locals_completion(child, rope));
+        }
+    }
+    symbols
 }
 
 #[cfg(test)]
@@ -278,19 +302,6 @@ mod tests {
     }
 
     #[test]
-    fn extract_query_edge_cases() {
-        fn setup(pos: u32, text: &str) -> String {
-            extract_query(Position::new(0, pos), &Rope::from_str(text)).unwrap()
-        }
-
-        assert_eq!(setup(11, "foo.bar_123"), "foo.bar_123");
-        assert_eq!(setup(4, ".foo"), ".foo");
-        assert_eq!(setup(4, "1foo"), "foo");
-        assert_eq!(setup(4, "_foo"), "_foo");
-        assert_eq!(setup(5, ".1foo"), ".1foo");
-    }
-
-    #[test]
     fn completes_block_variable() {
         let (query, items) = setup(
             indoc! {"
@@ -380,27 +391,26 @@ mod tests {
         assert!(items.contains(&("var".into(), CompletionItemKind::VARIABLE)));
     }
 
-    // TODO: fix this text
-    // #[test]
-    // fn completes_switch_statement_variable() {
-    //     let (query, items) = setup(
-    //         indoc! {"
-    //             function(x) {
-    //                 switch (
-    //                     x,
-    //                     a = {
-    //                         var <- 1
-    //                         va
-    //                     }
-    //                 )
-    //             }
-    //         "},
-    //         (4, 14),
-    //     );
+    #[test]
+    fn completes_switch_statement_variable() {
+        let (query, items) = setup(
+            indoc! {"
+                function(x) {
+                    switch (
+                        x,
+                        a = {
+                            var <- 1
+                            va
+                        }
+                    )
+                }
+            "},
+            (4, 14),
+        );
 
-    //     assert_eq!(query, "va");
-    //     assert!(items.contains(&("var".into(), CompletionItemKind::VARIABLE)));
-    // }
+        assert_eq!(query, "va");
+        assert!(items.contains(&("var".into(), CompletionItemKind::VARIABLE)));
+    }
 
     #[test]
     fn completes_nested_functions_scope_correctly() {
@@ -442,5 +452,18 @@ mod tests {
         assert_eq!(query, "pa");
         assert_eq!(items.len(), 1);
         assert!(items.contains(&("param_b".into(), CompletionItemKind::VARIABLE)));
+    }
+
+    #[test]
+    fn extract_query_edge_cases() {
+        fn setup(pos: u32, text: &str) -> String {
+            extract_query(Position::new(0, pos), &Rope::from_str(text)).unwrap()
+        }
+
+        assert_eq!(setup(11, "foo.bar_123"), "foo.bar_123");
+        assert_eq!(setup(4, ".foo"), ".foo");
+        assert_eq!(setup(4, "1foo"), "foo");
+        assert_eq!(setup(4, "_foo"), "_foo");
+        assert_eq!(setup(5, ".1foo"), ".1foo");
     }
 }
