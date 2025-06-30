@@ -302,3 +302,7 @@ The formatter intelligently handles various R idioms and special patterns:
 ## Line Endings
 
 The formatter automatically detects and preserves the line ending style (`LF` or `CRLF`) used in the original file.
+
+## Configuration
+
+For details on configuring the formatter, see the [Configuration](/configuration) page.

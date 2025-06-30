@@ -20,7 +20,7 @@ fn format_str(text: &str) -> Result<String, FormatError> {
         tree.root_node(),
         &Rope::from_str(text),
         Config {
-            indent: &" ".repeat(2),
+            indent_width: 2,
             line_ending: LineEnding::Auto,
         },
     )

@@ -3,8 +3,7 @@ use {
         cli::{self, ExperimentalFeatures},
         completions,
         config::Config,
-        diagnostics,
-        format::{self, LineEnding},
+        diagnostics, format,
         index::{self, IndexError},
         lsp_types::{
             CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
@@ -43,7 +42,7 @@ use {
 #[tokio::main(flavor = "current_thread")]
 pub async fn run(experimental_features: ExperimentalFeatures) {
     let (server, _) = async_lsp::MainLoop::new_server(|client| {
-        let config = match Config::from_path(Path::new(".")) {
+        let config = match Config::from_path(Path::new("."), experimental_features) {
             Ok(config) => config,
             Err(err) => {
                 cli::error(&err.to_string());
@@ -228,11 +227,7 @@ impl LanguageServer for ServerState {
         let rope = Rope::from_str(text);
         let tree = tree::parse(&mut self.parser, text, None);
 
-        let diagnostics = diagnostics::analyze_full(
-            tree.root_node(),
-            &rope,
-            diagnostics::Config::from_config(self.config, self.experimental_features.unused),
-        );
+        let diagnostics = diagnostics::analyze_full(tree.root_node(), &rope, self.config.lint);
 
         let symbols = index::index(tree.root_node(), &rope, false, false);
         if path.starts_with(&self.base_path) {
@@ -335,11 +330,7 @@ impl LanguageServer for ServerState {
         *tree = tree::parse_rope(&mut self.parser, rope, Some(tree));
 
         // UPDATE DIAGNOSTICS
-        let diagnostics = diagnostics::analyze_fast(
-            tree.root_node(),
-            rope,
-            diagnostics::Config::from_config(self.config, self.experimental_features.unused),
-        );
+        let diagnostics = diagnostics::analyze_fast(tree.root_node(), rope, self.config.lint);
 
         // UPDATE SYMBOLS
         // note: We must re-index on every change (not just on save)
@@ -383,11 +374,7 @@ impl LanguageServer for ServerState {
 
         let (rope, root_node) = (&document.rope, document.tree.root_node());
 
-        let diagnostics = diagnostics::analyze_full(
-            root_node,
-            rope,
-            diagnostics::Config::from_config(self.config, self.experimental_features.unused),
-        );
+        let diagnostics = diagnostics::analyze_full(root_node, rope, self.config.lint);
 
         if let Err(error) = self
             .client
@@ -480,14 +467,7 @@ impl LanguageServer for ServerState {
         };
 
         let (rope, tree) = (&document.rope, &document.tree);
-        let new_text = match format::format(
-            tree.root_node(),
-            rope,
-            format::Config {
-                indent: &" ".repeat(self.config.spaces),
-                line_ending: LineEnding::Auto,
-            },
-        ) {
+        let new_text = match format::format(tree.root_node(), rope, self.config.format) {
             Ok(text) => text,
             Err(error) => {
                 tracing::error!(?error, "failed to format");
@@ -533,14 +513,7 @@ impl LanguageServer for ServerState {
             return box_future(Ok(None));
         };
 
-        let new_text = match format::format(
-            node,
-            rope,
-            format::Config {
-                indent: &" ".repeat(self.config.spaces),
-                line_ending: LineEnding::Auto,
-            },
-        ) {
+        let new_text = match format::format(node, rope, self.config.format) {
             Ok(text) => text,
             Err(error) => {
                 tracing::error!(?error, "failed to format");

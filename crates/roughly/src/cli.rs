@@ -1,8 +1,6 @@
 use {
     crate::{
-        config, diagnostics,
-        format::{self, LineEnding},
-        index,
+        config, diagnostics, format, index,
         lsp_types::{self, DiagnosticSeverity},
         server, tree, utils,
     },
@@ -69,7 +67,7 @@ pub fn check(
     let paths_with_config = files
         .iter()
         .map(|file| {
-            let config = match config::Config::from_path(file) {
+            let config = match config::Config::from_path(file, experimental_features) {
                 Ok(config) => config,
                 Err(err) => {
                     error(&err.to_string());
@@ -99,7 +97,6 @@ pub fn check(
     let mut n_files = 0;
     let mut n_errors = 0;
     for (paths, config) in paths_with_config {
-        let config = diagnostics::Config::from_config(config, experimental_features.unused);
         for path in paths {
             n_files += 1;
             let old = match std::fs::read_to_string(&path) {
@@ -114,7 +111,7 @@ pub fn check(
             let tree = tree::parse(&mut parser, &old, None);
             let rope = Rope::from_str(&old);
 
-            for diagnostic in diagnostics::analyze_full(tree.root_node(), &rope, config) {
+            for diagnostic in diagnostics::analyze_full(tree.root_node(), &rope, config.lint) {
                 n_errors += 1;
                 log(
                     match diagnostic.severity {
@@ -219,6 +216,7 @@ pub fn fmt(
     check: bool,
     diff: bool,
     verbose: bool,
+    experimental_features: ExperimentalFeatures,
 ) -> Result<(), FmtError> {
     let mut parser = tree::new_parser();
 
@@ -228,13 +226,10 @@ pub fn fmt(
     let paths_with_config = files
         .iter()
         .map(|file| {
-            let config = match config::Config::from_path(file) {
-                Ok(config) => config,
-                Err(err) => {
-                    error(&err.to_string());
-                    return Err(FmtError);
-                }
-            };
+            let config = config::Config::from_path(file, experimental_features).map_err(|err| {
+                error(&err.to_string());
+                FmtError
+            })?;
 
             let paths = Walk::new(file)
                 .filter_map(|entry| match entry {
@@ -263,10 +258,6 @@ pub fn fmt(
     let mut n_unformatted = 0;
     let mut n_errors = 0;
     for (paths, config) in paths_with_config {
-        let config = format::Config {
-            indent: &" ".repeat(config.spaces),
-            line_ending: LineEnding::Auto,
-        };
         for path in paths {
             n_files += 1;
 
@@ -283,7 +274,7 @@ pub fn fmt(
             let start = std::time::Instant::now();
             let tree = tree::parse(&mut parser, &initial, None);
             let rope = Rope::from_str(&initial);
-            let new = match format::format(tree.root_node(), &rope, config) {
+            let new = match format::format(tree.root_node(), &rope, config.format) {
                 Ok(new) => new,
                 Err(err) => {
                     n_errors += 1;
@@ -481,7 +472,7 @@ pub fn ast(path: &Path) -> Result<(), DebugError> {
 // EXPERIMENTAL FEATURES
 //
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ExperimentalFeatures {
     pub range_formatting: bool,
     pub unused: bool,

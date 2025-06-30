@@ -65,12 +65,7 @@ result <- sum(1, 2, 3,)
 
 ## Configuration
 
-Linter behavior can be customized via the `roughly.toml` configuration file:
-
-```toml
-# Control the naming convention for variables and parameters
-case = "snake_case"  # or "camelCase"
-```
+For details on configuring the linter, see the [Configuration](/configuration) page.
 
 ## Roadmap
 

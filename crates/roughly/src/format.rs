@@ -5,22 +5,34 @@ use {
     },
     itertools::Itertools,
     ropey::Rope,
+    serde::Deserialize,
     std::time::Instant,
     thiserror::Error,
     tree_sitter::{Node, TreeCursor},
 };
 
-#[derive(Debug, Clone, Copy)]
-pub struct Config<'a> {
-    pub indent: &'a str,
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct Config {
+    pub indent_width: usize,
     pub line_ending: LineEnding,
 }
 
-#[derive(Debug, Clone, Copy)]
+impl Default for Config {
+    fn default() -> Config {
+        Config {
+            indent_width: 2,
+            line_ending: LineEnding::Auto,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum LineEnding {
     Auto,
     Lf,
-    Crlf,
+    CrLf,
 }
 
 #[derive(Error, Debug)]
@@ -76,7 +88,7 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
             })
             .unwrap_or("\n"),
         LineEnding::Lf => "\n",
-        LineEnding::Crlf => "\r\n",
+        LineEnding::CrLf => "\r\n",
     };
 
     let mut buffer = String::with_capacity(rope.len_bytes() * 3 / 2);
@@ -85,7 +97,7 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
         &mut node.walk(),
         Context {
             rope,
-            indent: config.indent,
+            indent: &" ".repeat(config.indent_width),
             line_ending,
         },
         0,
