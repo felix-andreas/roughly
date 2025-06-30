@@ -3,6 +3,7 @@ use {
         config::Case,
         diagnostics::{self, Config},
         lsp_types::Diagnostic,
+        tree::kind,
         utils,
     },
     ropey::Rope,
@@ -35,16 +36,17 @@ pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
         mut state: State,
     ) {
         let node = cursor.node();
+        let kind_id = node.kind_id();
 
-        match node.kind() {
-            "arguments" => {
+        match kind_id {
+            kind::ARGUMENTS => {
                 let mut last_comma = None;
                 if cursor.goto_first_child() {
                     let mut last_argument = None;
                     loop {
                         let child = cursor.node();
-                        match child.kind() {
-                            "argument" => {
+                        match child.kind_id() {
+                            kind::ARGUMENT => {
                                 if let Some(last_argment) = last_argument
                                     && last_comma.is_none()
                                 {
@@ -56,7 +58,7 @@ pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
                                 last_argument = Some(child);
                                 last_comma = None;
                             }
-                            "comma" => {
+                            kind::COMMA => {
                                 last_comma = Some(child);
                             }
                             _ => {}
@@ -81,40 +83,41 @@ pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
 
                 state.check_trailing_commas(false);
             }
-            "binary_operator" => {
-                if let (Some(lhs), Some(operator)) = (
-                    node.child_by_field_name("lhs"),
-                    node.child_by_field_name("operator"),
-                ) && lhs.kind() == "identifier"
-                    && operator.kind() == "<-"
+            kind::BINARY_OPERATOR => {
+                if let Some(case) = config.case
+                    && state.check_case
                 {
-                    let raw = rope.byte_slice(lhs.byte_range()).to_string();
-                    if state.check_case {
-                        if let Some(case) = config.case {
-                            let correct_case = match case {
-                                Case::Camel => utils::to_camel_case(&raw),
-                                Case::Snake => utils::to_snake_case(&raw),
-                            };
-                            if raw != correct_case {
-                                diagnostics.push(diagnostics::warning(
-                                    node,
-                                    format!(
-                                        "Variable `{}` should have {} name, e.g. {}",
-                                        raw,
-                                        match case {
-                                            Case::Camel => "camelCase",
-                                            Case::Snake => "snake_case",
-                                        },
-                                        correct_case
-                                    ),
-                                ));
-                            }
+                    let maybe_lhs = node.child_by_field_name("lhs");
+                    let maybe_operator = node.child_by_field_name("operator");
+                    if let Some(lhs) = maybe_lhs
+                        && lhs.kind_id() == kind::IDENTIFIER
+                        && let Some(operator) = maybe_operator
+                        && [kind::LEFT_ASSIGN, kind::EQUAL].contains(&operator.kind_id())
+                    {
+                        let actual = rope.byte_slice(lhs.byte_range()).to_string();
+                        let expected = match case {
+                            Case::Camel => utils::to_camel_case(&actual),
+                            Case::Snake => utils::to_snake_case(&actual),
+                        };
+                        if actual != expected {
+                            diagnostics.push(diagnostics::warning(
+                                node,
+                                format!(
+                                    "Variable `{}` should have {} name, e.g. {}",
+                                    actual,
+                                    match case {
+                                        Case::Camel => "camelCase",
+                                        Case::Snake => "snake_case",
+                                    },
+                                    expected
+                                ),
+                            ));
                         }
                     }
                 }
 
                 if let Some(operator) = node.child_by_field_name("operator")
-                    && operator.kind() == "="
+                    && operator.kind_id() == kind::EQUAL
                 {
                     diagnostics.push(diagnostics::warning(
                         node,
@@ -122,36 +125,9 @@ pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
                     ));
                 }
             }
-            "call" => state.check_trailing_commas(true),
-            "function_definition" => state.check_case(true),
-            "parameter" => {
-                if let Some(name) = node.child_by_field_name("name")
-                    && name.kind() == "identifier"
-                {
-                    if let Some(case) = config.case {
-                        let raw = rope.byte_slice(name.byte_range()).to_string();
-                        let correct_case = match case {
-                            Case::Camel => utils::to_camel_case(&raw),
-                            Case::Snake => utils::to_snake_case(&raw),
-                        };
-                        if raw != correct_case {
-                            diagnostics.push(diagnostics::warning(
-                                name,
-                                format!(
-                                    "Parameter `{}` should have {} name, e.g. {}",
-                                    raw,
-                                    match case {
-                                        Case::Camel => "camelCase",
-                                        Case::Snake => "snake_case",
-                                    },
-                                    correct_case
-                                ),
-                            ));
-                        }
-                    }
-                }
-            }
-            "identifier" => {
+            kind::CALL => state.check_trailing_commas(true),
+            kind::FUNCTION_DEFINITION => state.check_case(true),
+            kind::IDENTIFIER => {
                 let name = rope.byte_slice(node.byte_range()).to_string();
                 let maybe_message = match name.as_str() {
                     "T" => Some("Use TRUE, not T, for Boolean values".into()),
@@ -160,6 +136,36 @@ pub fn analyze(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
                 };
                 if let Some(message) = maybe_message {
                     diagnostics.push(diagnostics::warning(node, message));
+                }
+            }
+            kind::PARAMETER => {
+                if let Some(case) = config.case
+                    && state.check_case
+                {
+                    let maybe_name = node.child_by_field_name("name");
+                    if let Some(name) = maybe_name
+                        && name.kind_id() == kind::IDENTIFIER
+                    {
+                        let actual = rope.byte_slice(name.byte_range()).to_string();
+                        let expected = match case {
+                            Case::Camel => utils::to_camel_case(&actual),
+                            Case::Snake => utils::to_snake_case(&actual),
+                        };
+                        if actual != expected {
+                            diagnostics.push(diagnostics::warning(
+                                name,
+                                format!(
+                                    "Parameter `{}` should have {} name, e.g. {}",
+                                    actual,
+                                    match case {
+                                        Case::Camel => "camelCase",
+                                        Case::Snake => "snake_case",
+                                    },
+                                    expected
+                                ),
+                            ));
+                        }
+                    }
                 }
             }
             _ => {}
