@@ -14,9 +14,8 @@ use {
     tree_sitter::Node,
 };
 
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(default)]
-#[derive(Default)]
+#[derive(Debug, Default, Clone, Copy, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
 pub struct Config {
     pub naming_style: Option<Case>,
     pub experimental_unused: bool,

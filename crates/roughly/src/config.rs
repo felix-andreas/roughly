@@ -94,12 +94,12 @@ mod tests {
     fn all_fields() {
         let toml = indoc! {r#"
             [format]
-            indent_width = 4
-            line_ending = "auto"
+            indent-width = 4
+            line-ending = "auto"
 
             [lint]
-            naming_style = "snake_case"
-            experimental_unused = true
+            naming-style = "snake_case"
+            experimental-unused = true
         "#};
         let config = parse(toml);
         assert_eq!(config.format.indent_width, 4);
@@ -110,16 +110,16 @@ mod tests {
     #[test]
     fn backwards_compatability() {
         let toml = indoc! {r#"
-            case = "snake_case" # should override format.indent_width
-            spaces = 6          # should override lint.naming_style
+            case = "snake_case" # should override format.indent-width
+            spaces = 6          # should override lint.naming-style
 
             [format]
-            indent_width = 4
-            line_ending = "cr-lf"
+            indent-width = 4
+            line-ending = "cr-lf"
 
             [lint]
-            naming_style = "camelCase"
-            experimental_unused = true
+            naming-style = "camelCase"
+            experimental-unused = true
         "#};
         let config = parse(toml);
         assert_eq!(config.format.indent_width, 6);

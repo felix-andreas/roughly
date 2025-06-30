@@ -141,8 +141,15 @@ Roughly can be used as an external formatter in RStudio. See the [RStudio setup 
 You can configure roughly via a project-specific `roughly.toml` file:
 
 ```toml
-case = "snake_case" # or camelCase
-spaces = 2
+[format]
+# number of spaces per indentation level
+indent-width = 4
+# automatically detect the appropriate line ending
+line-ending = "auto" # "lf" or "cr-lf"
+
+[lint]
+# control the naming convention for variables and parameters
+naming-style = "snake_case" # or "camelCase", omit to disable this lint entirely
 ```
 
 ## Development

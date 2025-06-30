@@ -12,7 +12,7 @@ use {
 };
 
 #[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(default)]
+#[serde(default, rename_all = "kebab-case")]
 pub struct Config {
     pub indent_width: usize,
     pub line_ending: LineEnding,

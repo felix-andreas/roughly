@@ -10,20 +10,16 @@ Roughly is deliberately opinionated and minimal in its configuration options. It
 You can configure Roughly via a project-specific `roughly.toml` file placed at the root of your project:
 
 ```toml
-# roughly.toml
-case = "snake_case" # Enable snake_case linting, or "camelCase" for camelCase linting
-# Omit 'case' option to disable case linting entirely
-spaces = 2
+[format]
+# number of spaces per indentation level
+indent-width = 4
+# automatically detect the appropriate line ending
+line-ending = "auto" # "lf" or "cr-lf"
+
+[lint]
+# control the naming convention for variables and parameters
+naming-style = "snake_case" # or "camelCase", omit to disable this lint entirely
 ```
-
-## Options
-
-Roughly supports the following configuration options:
-
-| Option   | Default | Description                                                                |
-|----------|---------|----------------------------------------------------------------------------|
-| `case`   | None    | Naming style for variables and functions. Set to "snake_case" or "camelCase" to enable case linting. Omit to disable case linting entirely. |
-| `spaces` | `2`     | Number of spaces to use for indentation                                   |
 
 ## Default Behavior
 
