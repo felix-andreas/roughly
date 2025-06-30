@@ -8,8 +8,8 @@ use {
 };
 
 macro_rules! assert_fmt {
-    ($input:expr) => {
-        insta::assert_snapshot!(format_str(indoc! {$input}).unwrap());
+    ($value:expr) => {
+        insta::assert_snapshot!(format_str(indoc! {$value}).unwrap());
     };
 }
 
@@ -126,11 +126,43 @@ fn binary_operator() {
 fn braced_expression() {
     assert_fmt! {r#"
         {}
+
         {
         }
+
+
+        { expr }
+
+        { expr
+        }
+
+        {
+        expr }
+
+        {
+        expr
+        }
+
+        { lhs +
+            rhs }
     "#};
+
+    // semicolon separated
     assert_fmt! {r#"
-        { 1L;2}
+        { expr;expr}
+
+        { expr; expr
+        }
+
+        {
+        expr; expr }
+
+        {
+        expr; expr
+        }
+
+        { expr; lhs +
+            rhs }
     "#};
     assert_fmt! {r#"
         {
@@ -178,7 +210,7 @@ fn braced_expression() {
         { foo; bar }
     "#};
 
-    // all comment positions
+    // comment: all positions
     assert_fmt! {r#"
         { # {
             # 1
@@ -186,34 +218,66 @@ fn braced_expression() {
             # 2
         } # }
     "#};
+
+    // comment: hugging
+    assert_fmt! {r#"
+        { expr # comment
+        }
+    "#};
 }
 
 #[test]
 fn call() {
+    // single argument
     assert_fmt! {r#"
-        list  (a = 1, b= 2L ,c =3i  )
-    "#};
-    assert_fmt! {r#"
-        list  (a = 1,
-         b= 2L)
-    "#};
-    assert_fmt! {r#"
-        list  (
-            # foo
-            a = 1, #bar
-            b= 2L) #baz
-    "#};
-    assert_fmt! {r#"
-        foo({ bar; baz })
-        foo({ bar;
-        baz })
-        foo({ bar;
-        baz }, qux)
-        foo(qux = { bar;
-        baz }, qux)
+        fn(arg)
     "#};
 
-    // all comment positions
+    // multiple arguments
+    assert_fmt! {r#"
+        fn(arg1, arg2)
+    "#};
+
+    // multiple named arguments
+    assert_fmt! {r#"
+        fn(a = 1, b = 2, c = 3)
+    "#};
+
+    // mixed positional and named arguments
+    assert_fmt! {r#"
+        fn(1, b = 2, c = 3)
+    "#};
+
+    // whitespace
+    assert_fmt! {r#"
+        fn (1 ,b=2 ,c=3   )
+    "#};
+    assert_fmt! {r#"
+        fn(
+            1,
+        b=2,
+            c=3
+        )
+    "#};
+    assert_fmt! {r#"
+        fn(1
+        ,b=2,
+        c=3)
+    "#};
+
+    // comments: fuzzy formatting
+    assert_fmt! {r#"
+        fn  ( # 1
+            # 2
+            a = 1, # 3
+            b= 2) # 4
+
+    	fn(arg1, function() { # 1
+            body # 2
+        }) # 3
+    "#};
+
+    // comments: all positions
     assert_fmt! {r#"
     	fn( # (
         	# 1
@@ -222,6 +286,122 @@ fn call() {
             arg2 # arg2
             # 2
         ) # )
+    "#};
+
+    // hugging: comments
+    assert_fmt! {r#"
+    	fn(arg1, fn(
+            arg
+        ) # comment
+        )
+    "#};
+
+    // hugging: single line args
+    assert_fmt! {r#"
+    	fn(arg)
+
+    	fn(arg
+        )
+
+    	fn(
+        arg)
+
+    	fn(
+        arg
+        )
+    "#};
+
+    // hugging: single line block
+    assert_fmt! {r#"
+    	fn({ body })
+
+    	fn({ body }
+        )
+
+    	fn(
+        { body })
+
+    	fn(
+        { body }
+        )
+    "#};
+
+    // hugging: multi line block
+    assert_fmt! {r#"
+    	fn({
+            body
+        })
+
+    	fn({
+            body
+        }
+        )
+
+    	fn(
+        {
+            body
+        })
+
+    	fn(
+        {
+            body
+        }
+        )
+    "#};
+
+    // hugging: more complex blocks
+    assert_fmt! {r#"
+        fn({ body; body })
+        fn({ body;
+        body })
+        fn({ body;
+        body }, arg)
+        fn(a = { body;
+        body }, arg)
+    "#};
+
+    // hugging: multiple arguments
+    assert_fmt! {r#"
+    	fn(arg1, fn(
+            arg
+        ))
+
+    	fn(arg1, arg2 = fn(
+            arg
+        ))
+
+    	fn(arg1, {
+            body
+        })
+
+    	fn(arg1, arg2 = value, function() {
+            body
+        })
+
+    	fn(arg1, arg2 = value, if(condition) {
+            body
+        })
+    "#};
+
+    // hugging: nested
+    assert_fmt! {r#"
+    	fn(fn(arg
+        ))
+
+    	fn(fn(
+        arg))
+
+    	fn(fn(
+        arg
+        ))
+
+    	fn(fn(fn(
+            arg
+        )))
+
+    	fn(arg = fn(arg =fn(
+            arg
+        )))
     "#};
 }
 
@@ -337,15 +517,32 @@ fn for_statement() {
         {
             sequence
         }) {}
-        "#
-    };
+    "#};
 
     // comment after condition but no block
     assert_fmt! {r#"
         for (variable in sequence) # 1
             body
-        "#
-    };
+    "#};
+
+    // hugging: line breaks
+    assert_fmt! {r#"
+        for (variable in sequence) {}
+
+        for (
+        variable in sequence) {}
+
+        for (variable in sequence
+        ) {}
+
+        for (
+        variable in sequence
+        ) {}
+
+        for (variable
+        in sequence
+        ) {}
+    "#};
 }
 
 #[test]
@@ -380,10 +577,41 @@ fn function_definition() {
     assert_fmt! {r#"
         function (a,
         b) baz
-    "#};
-    assert_fmt! {r#"
+
         function (a,
         b) {baz}
+    "#};
+    assert_fmt! {r#"
+        function() call(a = 1, b = 1)
+
+        function()
+            call(a = 1, b = 1)
+
+        function() call(
+            a = 1,
+            b = 1
+        )
+
+        function()
+        call(
+            a = 1,
+            b = 1
+        )
+
+        function() { call(a = 1, b = 1) }
+
+        function() { call(a = 1, b = 1)
+        }
+
+        function() {
+        call(a = 1, b = 1) }
+
+        function() {
+            call(a = 1, b = 1)
+        }
+
+        function()
+            { call(a = 1, b = 1) }
     "#};
 
     // all comment positions
@@ -483,6 +711,30 @@ fn if_statement() {
         if ({ foo; bar }) { baz }
         if ({ foo;
          bar }) { baz }
+    "#};
+
+    // hugging
+    assert_fmt! {r#"
+        if (condition) {}
+
+        if (condition
+        ) {}
+
+        if (
+        condition) {}
+
+        if (
+        condition
+        ) {}
+    "#};
+
+    // hugging: comments
+    assert_fmt! {r#"
+        if ( # comment
+        condition) {}
+
+        if ( condition # comment
+        ) {}
     "#};
 
     // TODO: tree-sitter-r cannot parse the code generated by this
@@ -587,31 +839,80 @@ fn parenthesized_expression() {
         )
     "#};
 
-    // check that braced espressions are hugged
+    // hugging
     assert_fmt! {r#"
         ({})
+
         ({
         })
-        (
-            { body }
+
+        ({ body }
         )
+
+        (
+        { body })
+
+        (
+        { body }
+        )
+
+        ({
+            body
+        })
+
+        ({
+            body
+        }
+        )
+
+        (
+        {
+            body
+        })
+
         (
             {
                 body
             }
         )
-        ({
-            body
-        })
     "#};
 
-    // all comment positions
+    // comments: all positions
     assert_fmt! {r#"
         ( # open
             # 1
             body # body
             # 2
         ) # close
+    "#};
+
+    // comments: hugging
+    assert_fmt! {r#"
+        (lhs + rhs)
+
+        (lhs + rhs
+        )
+
+        (
+        lhs + rhs)
+
+        (
+        lhs + rhs
+        )
+
+        (lhs + rhs # comment
+        )
+
+        (
+        lhs +
+            rhs)
+
+        (lhs +
+            rhs
+        )
+
+        (lhs +
+            rhs)
     "#};
 }
 
@@ -885,15 +1186,37 @@ fn while_statement() {
         }
         # 1
         ) {}
-        "#
-    };
+    "#};
 
     // comment after condition but no block
     assert_fmt! {r#"
         while (condition) # 1
             body
-        "#
-    };
+    "# };
+
+    // hugging
+    assert_fmt! {r#"
+        while (condition) {}
+
+        while (condition
+        ) {}
+
+        while (
+        condition) {}
+
+        while (
+        condition
+        ) {}
+    "#};
+
+    // hugging: comments
+    assert_fmt! {r#"
+        while ( # comment
+        condition) {}
+
+        while ( condition # comment
+        ) {}
+    "#};
 }
 
 // EDGE CASES

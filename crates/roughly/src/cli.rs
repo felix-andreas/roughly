@@ -57,7 +57,10 @@ pub fn error(message: &str) {
 #[derive(Debug)]
 pub struct CheckError;
 
-pub fn check(maybe_files: Option<&[PathBuf]>, experimental: bool) -> Result<(), CheckError> {
+pub fn check(
+    maybe_files: Option<&[PathBuf]>,
+    experimental_features: ExperimentalFeatures,
+) -> Result<(), CheckError> {
     let mut parser = tree::new_parser();
 
     let root: Vec<PathBuf> = vec![".".into()];
@@ -96,7 +99,7 @@ pub fn check(maybe_files: Option<&[PathBuf]>, experimental: bool) -> Result<(), 
     let mut n_files = 0;
     let mut n_errors = 0;
     for (paths, config) in paths_with_config {
-        let config = diagnostics::Config::from_config(config, experimental);
+        let config = diagnostics::Config::from_config(config, experimental_features.unused);
         for path in paths {
             n_files += 1;
             let old = match std::fs::read_to_string(&path) {
@@ -211,7 +214,12 @@ pub fn check(maybe_files: Option<&[PathBuf]>, experimental: bool) -> Result<(), 
 #[derive(Debug)]
 pub struct FmtError;
 
-pub fn fmt(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(), FmtError> {
+pub fn fmt(
+    maybe_files: Option<&[PathBuf]>,
+    check: bool,
+    diff: bool,
+    verbose: bool,
+) -> Result<(), FmtError> {
     let mut parser = tree::new_parser();
 
     let root: Vec<PathBuf> = vec![".".into()];
@@ -247,6 +255,10 @@ pub fn fmt(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    let start_global = std::time::Instant::now();
+    let mut elapsed_total = Duration::new(0, 0);
+    let mut bytes_total = 0;
+
     let mut n_files = 0;
     let mut n_unformatted = 0;
     let mut n_errors = 0;
@@ -257,8 +269,9 @@ pub fn fmt(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(
         };
         for path in paths {
             n_files += 1;
-            let old = match std::fs::read_to_string(&path) {
-                Ok(old) => old,
+
+            let initial = match std::fs::read_to_string(&path) {
+                Ok(text) => text,
                 Err(err) => {
                     n_errors += 1;
                     error(&format!("failed to format: {}", path.display()));
@@ -266,8 +279,10 @@ pub fn fmt(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(
                     continue;
                 }
             };
-            let tree = tree::parse(&mut parser, &old, None);
-            let rope = Rope::from_str(&old);
+
+            let start = std::time::Instant::now();
+            let tree = tree::parse(&mut parser, &initial, None);
+            let rope = Rope::from_str(&initial);
             let new = match format::format(tree.root_node(), &rope, config) {
                 Ok(new) => new,
                 Err(err) => {
@@ -277,11 +292,14 @@ pub fn fmt(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(
                     continue;
                 }
             };
-            if old != new {
+            elapsed_total += start.elapsed();
+            bytes_total += rope.len_bytes();
+
+            if initial != new {
                 n_unformatted += 1;
                 if diff {
                     eprintln!("Diff in {}:", path.display());
-                    utils::print_diff(&old, &new);
+                    utils::print_diff(&initial, &new);
                 } else if check {
                     eprintln!("Would reformat: {}", style(path.display()).bold());
                 } else if std::fs::write(&path, &new).is_err() {
@@ -313,19 +331,31 @@ pub fn fmt(maybe_files: Option<&[PathBuf]>, check: bool, diff: bool) -> Result<(
         action_skip
     ));
 
-    if n_unformatted == 0 && n_errors == 0 {
-        Ok(())
-    } else {
-        Err(FmtError)
+    if verbose {
+        let global_elapsed = start_global.elapsed();
+        info(&format!(
+            "Formatted {} bytes in {} ms ({}/s) - including I/O: {} ms ({}/s)",
+            utils::human_bytes(bytes_total as f64),
+            elapsed_total.as_millis(),
+            utils::human_bytes(bytes_total as f64 / elapsed_total.as_secs_f64()),
+            global_elapsed.as_millis(),
+            utils::human_bytes(bytes_total as f64 / global_elapsed.as_secs_f64())
+        ));
     }
+
+    if n_errors > 0 || (check && n_unformatted > 0) {
+        return Err(FmtError);
+    }
+
+    Ok(())
 }
 
 //
 // SERVER
 //
 
-pub fn server(experimental: bool) {
-    server::run(experimental);
+pub fn server(experimental_features: ExperimentalFeatures) {
+    server::run(experimental_features);
 }
 
 //
@@ -335,22 +365,18 @@ pub fn server(experimental: bool) {
 #[derive(Debug)]
 pub struct DebugError;
 
-pub fn index(
-    paths: Option<&[PathBuf]>,
-    recursive: bool,
-    print_items: bool,
-) -> Result<(), DebugError> {
+pub fn index(paths: Option<&[PathBuf]>, nested: bool, print_items: bool) -> Result<(), DebugError> {
     let mut parser = tree::new_parser();
 
     let root: Vec<PathBuf> = vec![".".into()];
     let paths = paths.unwrap_or(&root);
 
-    let global_start = std::time::Instant::now();
+    let start_global = std::time::Instant::now();
 
-    let mut total_files = 0;
-    let mut total_symbols = 0;
-    let mut total_bytes = 0;
-    let mut total_time = Duration::new(0, 0);
+    let mut n_files = 0;
+    let mut n_symbols = 0;
+    let mut n_bytes = 0;
+    let mut elapsed_total = Duration::new(0, 0);
 
     for path in paths {
         for path in Walk::new(path)
@@ -377,14 +403,14 @@ pub fn index(
             // Only time the indexing operation, not the I/O
             let start = std::time::Instant::now();
             let tree = tree::parse_rope(&mut parser, &rope, None);
-            let symbols = index::index(tree.root_node(), &rope, recursive);
+            let symbols = index::index(tree.root_node(), &rope, nested, false);
             let elapsed = start.elapsed();
 
             let bytes = rope.len_bytes();
-            total_bytes += bytes;
-            total_files += 1;
-            total_symbols += symbols.len();
-            total_time += elapsed;
+            n_bytes += bytes;
+            n_files += 1;
+            n_symbols += symbols.len();
+            elapsed_total += elapsed;
 
             eprintln!(
                 "{} ({}, {} ms, {}/s)",
@@ -417,21 +443,21 @@ pub fn index(
         }
     }
 
-    if total_files == 0 {
+    if n_files == 0 {
         warn("No R files found under the given path(s)");
         return Err(DebugError);
     }
 
-    let global_elapsed = global_start.elapsed();
+    let elapsed_global = start_global.elapsed();
 
     info(&format!(
         "Indexed {} symbols from {} files in {} ms ({}/s) - including I/O: {} ms ({}/s)",
-        total_symbols,
-        total_files,
-        total_time.as_millis(),
-        utils::human_bytes(total_bytes as f64 / total_time.as_secs_f64()),
-        global_elapsed.as_millis(),
-        utils::human_bytes(total_bytes as f64 / global_elapsed.as_secs_f64())
+        n_symbols,
+        n_files,
+        elapsed_total.as_millis(),
+        utils::human_bytes(n_bytes as f64 / elapsed_total.as_secs_f64()),
+        elapsed_global.as_millis(),
+        utils::human_bytes(n_bytes as f64 / elapsed_global.as_secs_f64())
     ));
 
     Ok(())
@@ -449,4 +475,40 @@ pub fn ast(path: &Path) -> Result<(), DebugError> {
     let tree = tree::parse(&mut tree::new_parser(), &text, None);
     eprintln!("{}", tree::format(tree.root_node()));
     Ok(())
+}
+
+//
+// EXPERIMENTAL FEATURES
+//
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExperimentalFeatures {
+    pub range_formatting: bool,
+    pub unused: bool,
+}
+
+impl ExperimentalFeatures {
+    pub fn parse(flags: &[impl AsRef<str>]) -> Self {
+        let mut unused = false;
+        let mut range_formatting = false;
+
+        for flag in flags {
+            match flag.as_ref() {
+                "all" => {
+                    unused = true;
+                    range_formatting = true;
+                }
+                "range_formatting" => range_formatting = true,
+                "unused" => unused = true,
+                unknown => {
+                    warn(&format!("unknown experimental feature: {unknown}"));
+                }
+            }
+        }
+
+        Self {
+            unused,
+            range_formatting,
+        }
+    }
 }

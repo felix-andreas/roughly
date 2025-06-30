@@ -1,8 +1,5 @@
 ---
-source: src/format.rs
-expression: "fmt(indoc! { r#\"\n            list  (a = 1,\n             b= 2L)\n        \"# })"
+source: crates/roughly/tests/test_format.rs
+expression: "format_str(indoc! {r#\"\n        fn(arg1, arg2)\n    \"#}).unwrap()"
 ---
-list(
-  a = 1,
-  b = 2L
-)
+fn(arg1, arg2)

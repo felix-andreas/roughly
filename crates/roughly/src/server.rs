@@ -1,6 +1,7 @@
 use {
     crate::{
-        cli, completions,
+        cli::{self, ExperimentalFeatures},
+        completions,
         config::Config,
         diagnostics,
         format::{self, LineEnding},
@@ -40,7 +41,7 @@ use {
 
 // #[tokio::main] # TODO: understand if this makes a difference???
 #[tokio::main(flavor = "current_thread")]
-pub async fn run(experimental: bool) {
+pub async fn run(experimental_features: ExperimentalFeatures) {
     let (server, _) = async_lsp::MainLoop::new_server(|client| {
         let config = match Config::from_path(Path::new(".")) {
             Ok(config) => config,
@@ -56,7 +57,11 @@ pub async fn run(experimental: bool) {
             .layer(CatchUnwindLayer::default())
             .layer(ConcurrencyLayer::default())
             .layer(ClientProcessMonitorLayer::new(client.clone()))
-            .service(ServerState::new_router(client, config, experimental))
+            .service(ServerState::new_router(
+                client,
+                config,
+                experimental_features,
+            ))
     });
 
     // Prefer truly asynchronous piped stdin/stdout without blocking tasks.
@@ -79,7 +84,7 @@ pub async fn run(experimental: bool) {
 struct ServerState {
     client: ClientSocket,
     config: Config,
-    experimental: bool,
+    experimental_features: ExperimentalFeatures,
     base_path: PathBuf,
     document_map: HashMap<PathBuf, Document>,
     /// stores symbolds for all other files
@@ -96,11 +101,15 @@ pub struct Document {
 }
 
 impl ServerState {
-    fn new_router(client: ClientSocket, config: Config, experimental: bool) -> Router<Self> {
+    fn new_router(
+        client: ClientSocket,
+        config: Config,
+        experimental_features: ExperimentalFeatures,
+    ) -> Router<Self> {
         Router::from_language_server(Self {
             client,
             config,
-            experimental,
+            experimental_features,
             base_path: std::env::current_dir().unwrap().join("R"),
             workspace_symbols: HashMap::new(),
             document_symbols: HashMap::new(),
@@ -138,7 +147,9 @@ impl LanguageServer for ServerState {
                     ..Default::default()
                 }),
                 document_formatting_provider: Some(OneOf::Left(true)),
-                document_range_formatting_provider: Some(OneOf::Left(self.experimental)),
+                document_range_formatting_provider: Some(OneOf::Left(
+                    self.experimental_features.range_formatting,
+                )),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
                     TextDocumentSyncOptions {
@@ -220,10 +231,10 @@ impl LanguageServer for ServerState {
         let diagnostics = diagnostics::analyze_full(
             tree.root_node(),
             &rope,
-            diagnostics::Config::from_config(self.config, self.experimental),
+            diagnostics::Config::from_config(self.config, self.experimental_features.unused),
         );
 
-        let symbols = index::index(tree.root_node(), &rope, false);
+        let symbols = index::index(tree.root_node(), &rope, false, false);
         if path.starts_with(&self.base_path) {
             // note: we need to insert into workspace in case a new file is created
             self.workspace_symbols.insert(path.clone(), symbols);
@@ -327,13 +338,13 @@ impl LanguageServer for ServerState {
         let diagnostics = diagnostics::analyze_fast(
             tree.root_node(),
             rope,
-            diagnostics::Config::from_config(self.config, self.experimental),
+            diagnostics::Config::from_config(self.config, self.experimental_features.unused),
         );
 
         // UPDATE SYMBOLS
         // note: We must re-index on every change (not just on save)
         // because textDocument/documentSymbol is triggered before textDocument/didSave.
-        let symbols = index::index(tree.root_node(), rope, false);
+        let symbols = index::index(tree.root_node(), rope, false, false);
         if path.starts_with(&self.base_path) {
             self.workspace_symbols.insert(path, symbols);
         } else {
@@ -375,7 +386,7 @@ impl LanguageServer for ServerState {
         let diagnostics = diagnostics::analyze_full(
             root_node,
             rope,
-            diagnostics::Config::from_config(self.config, self.experimental),
+            diagnostics::Config::from_config(self.config, self.experimental_features.unused),
         );
 
         if let Err(error) = self
@@ -576,6 +587,8 @@ impl LanguageServer for ServerState {
         params: WorkspaceSymbolParams,
     ) -> BoxFuture<'static, Result<Option<WorkspaceSymbolResponse>, ResponseError>> {
         let query = params.query;
+
+        tracing::debug!(?query);
 
         let symbols = index::get_workspace_symbols(&query, &self.workspace_symbols);
 

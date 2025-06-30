@@ -38,7 +38,7 @@ setGeneric("<name><-", function(x, value) standardGeneric("<name><-"))
 
 setMethod("<name>", "<class>", function(x) x@<name>)
 setMethod("<name><-", "<class>", function(x, value) {
-  x@<name> <- value
+  x@name <- value
   x
 })
 """

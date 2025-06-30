@@ -9,7 +9,7 @@ use {
 fn setup(text: &str, nested: bool) -> Vec<DocumentSymbol> {
     let rope = Rope::from_str(text);
     let tree = tree::parse_rope(&mut tree::new_parser(), &rope, None);
-    index::index(tree.root_node(), &rope, nested)
+    index::index(tree.root_node(), &rope, nested, false)
 }
 
 fn setup_nested(text: &str) -> Vec<DocumentSymbol> {

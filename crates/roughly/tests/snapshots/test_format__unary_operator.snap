@@ -1,6 +1,6 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n            !a\n            +a\n            -a\n            foo(!a, +   b)\n            foo(- a , bar)\n            !\n            a\n            -  b\n            -42\n            + 42\n            !TRUE\n            ~foo\n            -foo + bar\n            -  (foo + bar)\n            ! foo && bar\n            ~  foo | bar\n        \"#\n})"
+source: crates/roughly/tests/test_format.rs
+expression: "format_str(indoc!\n{r#\"\n        !a\n        +a\n        -a\n        foo(!a, +   b)\n        foo(- a , bar)\n        !\n        a\n        -  b\n        -42\n        + 42\n        !TRUE\n        ~foo\n        -foo + bar\n        -  (foo + bar)\n        ! foo && bar\n        ~  foo | bar\n    \"#}).unwrap()"
 ---
 !a
 +a
@@ -12,7 +12,7 @@ foo(-a, bar)
 -42
 +42
 !TRUE
-~ foo
+~foo
 -foo + bar
 -(foo + bar)
 !foo && bar

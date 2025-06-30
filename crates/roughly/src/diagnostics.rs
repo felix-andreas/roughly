@@ -16,14 +16,15 @@ use {
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
     case: Option<Case>,
-    experimental: bool,
+    case: Case,
+    experimental_unused: bool,
 }
 
 impl Config {
-    pub fn from_config(config: config::Config, experimental: bool) -> Self {
+    pub fn from_config(config: config::Config, experimental_unused: bool) -> Self {
         Config {
             case: config.case,
-            experimental,
+            experimental_unused,
         }
     }
 }
@@ -36,7 +37,7 @@ pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagn
 
     if full && !has_syntax_errors {
         #[allow(clippy::collapsible_if)]
-        if config.experimental {
+        if config.experimental_unused {
             match unused::analyze(node, rope) {
                 Ok(diags) => diagnostics.extend(diags),
                 Err(error) => {

@@ -1,16 +1,20 @@
+<h1>
+  <p align="center">
+    <img src="docs/public/logo.svg" alt="Logo" height="128" >
+    <br />Roughly
+  </p>
+</h1>
+
 <div align="center">
 
-<img height="128px" src="docs/public/logo.svg" />
-
-# Roughly
-
-[**📚 Docs**](https://roughly.felixandreas.me) | [**📦 Releases**](https://github.com/felix-andreas/roughly/releases) | [**🧩 VS Code Extension**](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
-
-*An R language server, linter, and code formatter, written in Rust.*
+An R language server, linter, and code formatter, written in Rust.
+<br />
+[Docs](https://roughly.felixandreas.me) · [Releases](https://github.com/felix-andreas/roughly/releases) · [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
 
 </div>
 
-Roughly can be used either as a standalone command-line tool or as an extension in supported editors like VS Code.
+> [!NOTE]
+> Roughly can be used either as a standalone command-line tool or as an extension in supported editors like VS Code.
 
 ## Features
 
@@ -35,7 +39,7 @@ Roughly aims to support the following language server features (some are experim
   - Global symbols
   - Package symbols (⚠️ missing)
   - Signature help (⚠️ missing)
-
+ 
 ## Roughly CLI
 
 You can install the Roughly CLI by downloading a pre-built binary or by building from source.
@@ -117,7 +121,7 @@ You can customize the Roughly extension in VS Code through the following setting
   // Use a custom binary instead of the bundled one
   "roughly.path": "/path/to/roughly",
   // Pass extra arguments to the language server
-  "roughly.args": ["server", "--experimental"],
+  "roughly.args": ["server", "--experimental-features", "all"],
 }
 ```
 

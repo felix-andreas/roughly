@@ -3,7 +3,7 @@
 	"displayName": "Roughly",
 	"description": "R language support",
 	"author": "Felix Andreas",
-	"version": "0.0.5",
+	"version": "0.0.6",
 	"publisher": "felix-andreas",
 	"icon": "images/icon.png",
 	"repository": {
@@ -34,14 +34,13 @@
 		"vscode-languageclient": "^9.0.1"
 	},
 	"devDependencies": {
-		"@eslint/js": "^9.29.0",
-		"@stylistic/eslint-plugin": "^2.13.0",
-		"@types/node": "^20.19.0",
-		"@types/vscode": "^1.101.0",
+		"@eslint/js": "^9.13.0",
+		"@types/node": "^20",
+		"@types/vscode": "^1.75.1",
 		"@vscode/vsce": "^3.5.0",
 		"eslint": "^9.29.0",
 		"typescript": "^5.8.3",
-		"typescript-eslint": "^8.34.0"
+		"typescript-eslint": "^8.34.1"
 	},
 	"main": "./out/extension",
 	"activationEvents": [

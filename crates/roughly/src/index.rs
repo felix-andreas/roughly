@@ -121,15 +121,13 @@ pub fn index_file(path: impl AsRef<Path>, parser: &mut Parser) -> Vec<DocumentSy
     };
 
     let tree = tree::parse_rope(parser, &rope, None);
-    index(tree.root_node(), &rope, false)
+    index(tree.root_node(), &rope, false, false)
 }
 
-pub fn index(root: Node, rope: &Rope, nested: bool) -> Vec<DocumentSymbol> {
+pub fn index(root: Node, rope: &Rope, nested: bool, other: bool) -> Vec<DocumentSymbol> {
     let mut symbols = vec![];
 
-    // TODO: consider named children
-    // TODO: consider tree::for_each_child
-    for node in root.children(&mut root.walk()) {
+    for node in root.named_children(&mut root.walk()) {
         match node.kind() {
             "binary_operator" => {
                 let maybe_lhs = node.child_by_field_name("lhs");
@@ -144,7 +142,7 @@ pub fn index(root: Node, rope: &Rope, nested: bool) -> Vec<DocumentSymbol> {
                         .map(|rhs| match rhs.kind() {
                             "function_definition" => index_function(rhs, rope, nested),
                             "braced_expression" => {
-                                let block_symbols = index(rhs, rope, nested);
+                                let block_symbols = index(rhs, rope, nested, other);
                                 symbols.extend(block_symbols);
 
                                 (SymbolKind::VARIABLE, None, None)
@@ -180,7 +178,7 @@ pub fn index(root: Node, rope: &Rope, nested: bool) -> Vec<DocumentSymbol> {
                 }
             }
             "braced_expression" => {
-                symbols.extend(index(node, rope, nested));
+                symbols.extend(index(node, rope, nested, other));
             }
             "call" => {
                 if let Some(symbol) = index_call(node, rope, nested) {
@@ -193,8 +191,20 @@ pub fn index(root: Node, rope: &Rope, nested: bool) -> Vec<DocumentSymbol> {
                     symbols.extend(children);
                 }
             }
-            // what about if, for, etc?
-            // maybe need to implement recursion to find for edge cases?
+            "if_statement" => {
+                if let Some(consequence) = node.child_by_field_name("consequence") {
+                    symbols.extend(index(consequence, rope, nested, other));
+                }
+
+                if let Some(alternative) = node.child_by_field_name("alternative") {
+                    symbols.extend(index(alternative, rope, nested, other));
+                }
+            }
+            "for_statement" | "repeat_statement" | "while_statement" if other => {
+                if let Some(body) = node.child_by_field_name("body") {
+                    symbols.extend(index(body, rope, nested, other));
+                }
+            }
             _ => {}
         }
     }
@@ -224,7 +234,7 @@ fn index_function(
                 .join(", ")
         )
     });
-    let children = maybe_body.and_then(|body| nested.then(|| index(body, rope, nested)));
+    let children = maybe_body.and_then(|body| nested.then(|| index(body, rope, nested, false)));
     (SymbolKind::FUNCTION, detail, children)
 }
 

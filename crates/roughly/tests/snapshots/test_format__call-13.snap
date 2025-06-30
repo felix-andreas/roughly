@@ -1,0 +1,23 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: "format_str(indoc!\n{r#\"\n    \tfn({\n            body\n        })\n\n    \tfn({\n            body\n        }\n        )\n\n    \tfn(\n        {\n            body\n        })\n\n    \tfn(\n        {\n            body\n        }\n        )\n    \"#}).unwrap()"
+---
+fn({
+  body
+})
+
+fn({
+  body
+})
+
+fn(
+  {
+    body
+  }
+)
+
+fn(
+  {
+    body
+  }
+)

@@ -1,10 +1,8 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n            \"foo\n                bar\"\n            foo(\"foo\n                bar\")\n        \"#\n}).unwrap()"
+source: crates/roughly/tests/test_format.rs
+expression: "format_str(indoc!\n{r#\"\n        \"foo\n            bar\"\n        foo(\"foo\n            bar\")\n    \"#}).unwrap()"
 ---
 "foo
     bar"
-foo(
-  "foo
-    bar"
-)
+foo("foo
+    bar")

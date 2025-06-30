@@ -4,11 +4,11 @@ members = ["crates/roughly", "crates/rofy", "crates/typing"]
 default-members = ["crates/roughly"]
 
 [workspace.package]
-version = "0.0.5"
+version = "0.0.6"
 
 [workspace.dependencies]
 clap = { version = "4.5.40", features = ["derive"] }
-console = "0.15.11"
+console = "0.16.0"
 ignore = "0.4.23"
 indoc = "2.0.6"
 itertools = "0.14.0"
@@ -28,7 +28,10 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 tracing-tree = "0.4.0"
 tree-sitter = "0.25.6"
-tree-sitter-r = "1.2.0"
+# note: wait for https://github.com/r-lib/tree-sitter-r/pull/184 to get merged
+# tree-sitter-r = "1.2.0"
+tree-sitter-r = { git = "https://github.com/felix-andreas/tree-sitter-r", branch = "fix/comment-carriage-return" }
+
 
 # async-lsp
 async-lsp = { version = "0.2.2", features = ["tokio"] }

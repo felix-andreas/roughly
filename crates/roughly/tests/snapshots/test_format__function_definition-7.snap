@@ -1,7 +1,14 @@
 ---
-source: src/format.rs
-expression: "format_str(indoc!\n{ r#\"\n            function (a, \n            b) baz\n        \"# }).unwrap()"
+source: crates/roughly/tests/test_format.rs
+expression: "format_str(indoc!\n{r#\"\n        function (a,\n        b) baz\n\n        function (a,\n        b) {baz}\n    \"#}).unwrap()"
 ---
+function(
+  a,
+  b
+) {
+  baz
+}
+
 function(
   a,
   b
