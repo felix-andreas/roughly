@@ -190,6 +190,7 @@ See https://github.com/r-lib/tree-sitter-r/issues/166
   * https://github.com/FuelLabs/sway
   * https://github.com/IWANABETHATGUY/tower-lsp-boilerplate
   * https://github.com/TenStrings/glicol-lsp/blob/77e97d9c687dc5d66871ad5ec91b6f049de2b8e8/src/main.rs#L16
+  * https://github.com/Automattic/harper
   * https://github.com/jfecher/ante/blob/5f7446375bc1c6c94b44a44bfb89777c1437aaf5/ante-ls/src/main.rs#L163
 * async_lsp
   * https://github.com/oxalica/nil
