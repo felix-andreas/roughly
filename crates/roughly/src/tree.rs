@@ -1,7 +1,11 @@
 use {
-    ropey::Rope,
-    tree_sitter::{Node, Parser, Tree, TreeCursor},
+    ropey::{Rope, iter::Chunks},
+    tree_sitter::{Node, Parser, Query, QueryCursor, QueryMatches, Tree, TreeCursor},
 };
+
+//
+// PARSING
+//
 
 pub fn new_parser() -> Parser {
     let mut parser = Parser::new();
@@ -25,6 +29,48 @@ pub fn parse_rope(parser: &mut Parser, rope: &Rope, maybe_tree: Option<&Tree>) -
         .parse_with_options(&mut lookup, maybe_tree, None)
         .expect("failed to parse")
 }
+
+//
+// QUERYING
+//
+
+pub fn new_query_cursor() -> QueryCursor {
+    QueryCursor::new()
+}
+
+pub fn matches_rope<'cursor: 'query, 'query, 'rope, 'tree>(
+    cursor: &'cursor mut QueryCursor,
+    query: &'query Query,
+    rope: &'rope Rope,
+    node: Node<'tree>,
+) -> QueryMatches<'query, 'tree, TextProvider<'rope>, &'rope [u8]> {
+    cursor.matches(query, node, TextProvider(rope))
+}
+
+// based on https://github.com/zedless-editor/zed/blob/5925846cd/crates/language/src/syntax_map.rs#L219
+pub struct TextProvider<'a>(pub &'a Rope);
+
+pub struct ByteChunks<'a>(Chunks<'a>);
+
+impl<'a> tree_sitter::TextProvider<&'a [u8]> for TextProvider<'a> {
+    type I = ByteChunks<'a>;
+
+    fn text(&mut self, node: Node) -> Self::I {
+        ByteChunks(self.0.byte_slice(node.byte_range()).chunks())
+    }
+}
+
+impl<'a> Iterator for ByteChunks<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(str::as_bytes)
+    }
+}
+
+//
+// UTILS
+//
 
 #[inline]
 pub fn for_each_child<'a, E>(
@@ -125,6 +171,10 @@ pub fn format(node: Node) -> String {
     traverse(&mut node.walk(), &mut result);
     result
 }
+
+//
+// MAPPING
+//
 
 pub mod kind {
     // SPECIAL (NAMED)

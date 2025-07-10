@@ -2,12 +2,12 @@ use {
     crate::{
         index::SymbolsMap,
         lsp_types::{CompletionItem, CompletionItemKind, CompletionResponse, Position, SymbolKind},
-        tree::kind,
+        tree::{self, kind},
         utils,
     },
     async_lsp::lsp_types::CompletionItemLabelDetails,
     ropey::Rope,
-    tree_sitter::{Node, Point},
+    tree_sitter::{Node, Point, Query, StreamingIterator},
 };
 
 pub fn get(
@@ -16,9 +16,53 @@ pub fn get(
     tree: &tree_sitter::Tree,
     symbols_map: &impl SymbolsMap,
 ) -> Option<CompletionResponse> {
-    let query = extract_query(position, rope)?;
+    let (context, query) = extract_query(position, rope)?;
 
-    tracing::debug!("completion query: {query}");
+    tracing::debug!(?context, ?query, "completion");
+
+    match context {
+        Context::Default => {}
+        // note: proper autocompletion for fields, collection items, or namespace items would
+        // require type inference. for now, we use a simple heuristic: show all identifiers
+        // already used in the current file.
+        Context::Field | Context::Item | Context::Namespace => {
+            let ts_query = Query::new(
+                &tree_sitter_r::LANGUAGE.into(),
+                match context {
+                    Context::Field => FIELD_QUERY,
+                    Context::Item => ITEM_QUERY,
+                    Context::Namespace => NAMESPACE_QUERY,
+                    _ => unreachable!(),
+                },
+            )
+            .unwrap();
+
+            let mut cursor = tree::new_query_cursor();
+            let mut matches = tree::matches_rope(&mut cursor, &ts_query, rope, tree.root_node());
+
+            let mut completions = std::iter::from_fn(move || {
+                matches.next().map(|m| {
+                    let identifier = m.captures[0].node;
+                    rope.byte_slice(identifier.byte_range()).to_string()
+                })
+            })
+            // the len check ensures that the query itself does not appear in the list of completions
+            .filter(|item| utils::starts_with_lowercase(item, &query) && item.len() != query.len())
+            .collect::<Vec<_>>();
+            completions.dedup();
+
+            return Some(CompletionResponse::Array(
+                completions
+                    .into_iter()
+                    .map(|item| CompletionItem {
+                        label: item,
+                        ..Default::default()
+                    })
+                    .collect(),
+            ));
+        }
+        Context::MaybeNamespace => return None,
+    }
 
     let symbol_kind_to_completion_kind = |kind: SymbolKind| match kind {
         SymbolKind::FUNCTION => CompletionItemKind::FUNCTION,
@@ -142,28 +186,48 @@ pub fn get(
     ))
 }
 
-// TODO: consider throwing error instead of optional
-// TODO: alternatively use tree-sitter to extract nearest identifer (to avoid reimplementing nearest identifer)
-fn extract_query(position: Position, rope: &Rope) -> Option<String> {
+#[derive(Debug, PartialEq, Eq)]
+enum Context {
+    Default,
+    Field,
+    Item,
+    Namespace,
+    MaybeNamespace,
+}
+
+fn extract_query(position: Position, rope: &Rope) -> Option<(Context, String)> {
     let line = rope.get_line(position.line as usize)?;
-    Some(
-        line.chars()
-            .take(position.character as usize)
-            .fold(String::new(), |mut acc, item| {
-                // see: https://cran.r-project.org/doc/manuals/r-release/R-lang.html#Identifiers-1
-                // note: we can be less strict than R otherwise its already an parser
-                if item.is_alphabetic()
-                    || item == '.'
-                    || item == '_'
-                    || (!acc.is_empty() && item.is_numeric())
-                {
-                    acc.push(item);
-                } else {
-                    acc.clear();
-                }
-                acc
-            }),
-    )
+    let mut previous = None;
+    Some(line.chars().take(position.character as usize).fold(
+        (Context::Default, String::new()),
+        |(mut context, mut query), item| {
+            // note: we can be less strict than R
+            // see: https://cran.r-project.org/doc/manuals/r-release/R-lang.html#Identifiers-1
+            if item.is_alphabetic()
+                || item == '.'
+                || item == '_'
+                || (!query.is_empty() && item.is_numeric())
+            {
+                query.push(item);
+            } else {
+                context = match item {
+                    '@' => Context::Field,
+                    '$' => Context::Item,
+                    ':' => {
+                        if previous.is_some_and(|previous| previous == ':') {
+                            Context::Namespace
+                        } else {
+                            Context::MaybeNamespace
+                        }
+                    }
+                    _ => Context::Default,
+                };
+                query.clear();
+            }
+            previous = Some(item);
+            (context, query)
+        },
+    ))
 }
 
 pub fn locals_completion(node: Node, rope: &Rope) -> Vec<CompletionItem> {
@@ -203,6 +267,10 @@ pub fn locals_completion(node: Node, rope: &Rope) -> Vec<CompletionItem> {
     symbols
 }
 
+const FIELD_QUERY: &str = r#"(extract_operator operator: "@" rhs: (identifier) @ident)"#;
+const ITEM_QUERY: &str = r#"(extract_operator operator: "$" rhs: (identifier) @ident)"#;
+const NAMESPACE_QUERY: &str = r#"(namespace_operator rhs: (identifier) @ident)"#;
+
 #[cfg(test)]
 mod tests {
     use {super::*, crate::tree, indoc::indoc, ropey::Rope, std::collections::HashMap};
@@ -215,7 +283,7 @@ mod tests {
 
         let tree = tree::parse(&mut tree::new_parser(), text, None);
         let position = Position::new(line, character);
-        let query = extract_query(position, &rope).unwrap();
+        let (_, query) = extract_query(position, &rope).unwrap();
         let items = match get(position, &rope, &tree, &HashMap::new()).unwrap() {
             CompletionResponse::Array(items) => items
                 .into_iter()
@@ -456,14 +524,46 @@ mod tests {
 
     #[test]
     fn extract_query_edge_cases() {
-        fn setup(pos: u32, text: &str) -> String {
+        fn setup(pos: u32, text: &str) -> (Context, String) {
             extract_query(Position::new(0, pos), &Rope::from_str(text)).unwrap()
         }
 
-        assert_eq!(setup(11, "foo.bar_123"), "foo.bar_123");
-        assert_eq!(setup(4, ".foo"), ".foo");
-        assert_eq!(setup(4, "1foo"), "foo");
-        assert_eq!(setup(4, "_foo"), "_foo");
-        assert_eq!(setup(5, ".1foo"), ".1foo");
+        // Default context
+        assert_eq!(setup(4, "name"), (Context::Default, "name".to_string()));
+        assert_eq!(setup(5, ".name"), (Context::Default, ".name".to_string()));
+        assert_eq!(setup(5, "_name"), (Context::Default, "_name".to_string()));
+        assert_eq!(setup(5, "1name"), (Context::Default, "name".to_string()));
+        assert_eq!(setup(6, ".1name"), (Context::Default, ".1name".to_string()));
+        assert_eq!(
+            setup(9, "name._123"),
+            (Context::Default, "name._123".to_string())
+        );
+
+        assert_eq!(setup(0, ""), (Context::Default, "".to_string()));
+        assert_eq!(setup(1, " "), (Context::Default, "".to_string()));
+        assert_eq!(setup(6, "expr +"), (Context::Default, "".to_string()));
+
+        // Field context (@)
+        assert_eq!(setup(4, "lhs@"), (Context::Field, "".to_string()));
+        assert_eq!(setup(9, "lhs@field"), (Context::Field, "field".to_string()));
+
+        // Item context ($)
+        assert_eq!(setup(4, "lhs$"), (Context::Item, "".to_string()));
+        assert_eq!(setup(8, "lhs$item"), (Context::Item, "item".to_string()));
+
+        // Namespace context (::)
+        assert_eq!(setup(9, "package::"), (Context::Namespace, "".to_string()));
+        assert_eq!(
+            setup(13, "package::item"),
+            (Context::Namespace, "item".to_string())
+        );
+    }
+
+    #[test]
+    fn queries_compile() {
+        // These should compile and not panic
+        let _field = Query::new(&tree_sitter_r::LANGUAGE.into(), FIELD_QUERY).unwrap();
+        let _item = Query::new(&tree_sitter_r::LANGUAGE.into(), ITEM_QUERY).unwrap();
+        let _namespace = Query::new(&tree_sitter_r::LANGUAGE.into(), NAMESPACE_QUERY).unwrap();
     }
 }

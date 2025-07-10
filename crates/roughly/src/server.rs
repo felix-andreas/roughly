@@ -142,7 +142,7 @@ impl LanguageServer for ServerState {
         box_future(Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 completion_provider: Some(CompletionOptions {
-                    trigger_characters: Some(vec!["$".into(), "@".into()]),
+                    trigger_characters: Some(vec!["$".into(), "@".into(), ":".into()]),
                     ..Default::default()
                 }),
                 document_formatting_provider: Some(OneOf::Left(true)),
