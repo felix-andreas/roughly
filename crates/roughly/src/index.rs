@@ -69,7 +69,7 @@ pub fn get_workspace_symbols(
                     data: None,
                 })
         },
-        32,
+        128,
     )
 }
 
