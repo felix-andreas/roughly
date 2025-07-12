@@ -33,7 +33,13 @@ pub fn goto(
     };
 
     // todo: consider searching in R6 if $-extract
-    if let kind::EXTRACT_OPERATOR | kind::NAMESPACE_OPERATOR = parent.kind_id() {
+    if matches!(
+        parent.kind_id(),
+        kind::EXTRACT_OPERATOR | kind::NAMESPACE_OPERATOR
+    ) && parent
+        .child_by_field_id(field::RHS)
+        .is_some_and(|rhs| rhs.id() == node.id())
+    {
         return None;
     }
 
@@ -121,6 +127,24 @@ mod tests {
     }
 
     #[test]
+    fn finds_global_definition() {
+        let src = indoc! {r#"
+            x <- 1
+            x
+        "#};
+        assert_eq!(setup(src, 1, 0), Some((0, 0)));
+    }
+
+    #[test]
+    fn finds_self_referening() {
+        let src = indoc! {r#"
+            x <- 1
+            x <- x + 1
+        "#};
+        assert_eq!(setup(src, 1, 0), Some((0, 0)));
+    }
+
+    #[test]
     fn finds_parameter_definition() {
         let src = indoc! {r#"
             function(x, y) {
@@ -192,4 +216,7 @@ mod tests {
         assert_eq!(setup(src, 2, 4), Some((1, 4)));
         assert_eq!(setup(src, 5, 8), Some((4, 8)));
     }
+
+    // TODO: add extract operator with lhs
+    // add complex code where 8 different locations are tested
 }
