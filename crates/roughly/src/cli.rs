@@ -474,32 +474,31 @@ pub fn ast(path: &Path) -> Result<(), DebugError> {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ExperimentalFeatures {
+    pub goto_definition: bool,
     pub range_formatting: bool,
     pub unused: bool,
 }
 
 impl ExperimentalFeatures {
     pub fn parse(flags: &[impl AsRef<str>]) -> Self {
-        let mut unused = false;
-        let mut range_formatting = false;
+        let mut features = ExperimentalFeatures::default();
 
         for flag in flags {
             match flag.as_ref() {
                 "all" => {
-                    unused = true;
-                    range_formatting = true;
+                    features.unused = true;
+                    features.range_formatting = true;
+                    features.goto_definition = true;
                 }
-                "range_formatting" => range_formatting = true,
-                "unused" => unused = true,
+                "range_formatting" => features.range_formatting = true,
+                "goto_definition" => features.goto_definition = true,
+                "unused" => features.unused = true,
                 unknown => {
                     warn(&format!("unknown experimental feature: {unknown}"));
                 }
             }
         }
 
-        Self {
-            unused,
-            range_formatting,
-        }
+        features
     }
 }

@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod completions;
 pub mod config;
+pub mod definition;
 pub mod diagnostics;
 pub mod format;
 pub mod index;

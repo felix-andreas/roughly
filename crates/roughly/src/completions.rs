@@ -1,11 +1,13 @@
 use {
     crate::{
         index::SymbolsMap,
-        lsp_types::{CompletionItem, CompletionItemKind, CompletionResponse, Position, SymbolKind},
-        tree::{self, kind},
+        lsp_types::{
+            CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse,
+            Position, SymbolKind,
+        },
+        tree::{self, field, kind},
         utils,
     },
-    async_lsp::lsp_types::CompletionItemLabelDetails,
     ropey::Rope,
     tree_sitter::{Node, Point, Query, StreamingIterator},
 };
@@ -130,10 +132,7 @@ pub fn get(
 
     let local_symbols: Vec<CompletionItem> =
         {
-            let point = Point {
-                row: position.line as usize,
-                column: position.character as usize,
-            };
+            let point = Point::new(position.line as usize, position.character as usize);
             tree.root_node()
                 .descendant_for_point_range(point, point)
                 .map(|node| {
@@ -143,12 +142,12 @@ pub fn get(
                         .flat_map(|node| {
                             let mut items = Vec::new();
 
-                            if let Some(parameters) = node.child_by_field_name("parameters") {
+                            if let Some(parameters) = node.child_by_field_id(field::PARAMETERS) {
                                 items.extend(
                                     parameters
                                         .children_by_field_name("parameter", &mut parameters.walk())
                                         .filter_map(|parameter| {
-                                            parameter.child_by_field_name("name").map(|name| {
+                                            parameter.child_by_field_id(field::NAME).map(|name| {
                                                 rope.byte_slice(name.byte_range()).to_string()
                                             })
                                         })
@@ -165,7 +164,7 @@ pub fn get(
                                 );
                             }
 
-                            if let Some(body) = node.child_by_field_name("body") {
+                            if let Some(body) = node.child_by_field_id(field::BODY) {
                                 items.extend(locals_completion(body, rope).into_iter().filter(
                                     |item| utils::starts_with_lowercase(&item.label, &query),
                                 ));

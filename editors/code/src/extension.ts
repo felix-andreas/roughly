@@ -39,7 +39,9 @@ export async function activate({ subscriptions, extension, }: ExtensionContext):
   subscriptions.push(
     workspace.onDidChangeConfiguration(async (change) => {
       if (
-        change.affectsConfiguration("roughly.path", undefined)) {
+        change.affectsConfiguration("roughly.path")
+        || change.affectsConfiguration("roughly.args")
+      ) {
         const choice = await window.showWarningMessage(
           "Configuration change requires restarting the language server",
           "Restart",
