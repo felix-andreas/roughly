@@ -428,10 +428,10 @@ impl LanguageServer for ServerState {
         let path = uri.to_file_path().unwrap();
         let position = params.text_document_position.position;
 
-        tracing::debug!(?uri, "completion");
+        tracing::debug!(?path, "completion");
 
         let Some(document) = self.document_map.get(&path) else {
-            tracing::error!(?uri, "document not found");
+            tracing::error!(?path, "document not found");
             return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
         };
 
@@ -456,21 +456,23 @@ impl LanguageServer for ServerState {
         let path = uri.to_file_path().unwrap();
         let position = params.text_document_position_params.position;
 
-        tracing::debug!(?uri, "format");
+        tracing::debug!(?path, "goto definition");
 
         let Some(document) = self.document_map.get(&path) else {
-            tracing::info!(?uri, "document not found");
+            tracing::info!(?path, "document not found");
             return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
         };
 
         let definitions = definition::goto(
             &uri,
-            position,
+            position.line as usize,
+            position.character as usize,
             &document.rope,
             &document.tree,
             &self.workspace_symbols,
         );
 
+        tracing::debug!(?definitions, "result");
         box_future(Ok(definitions))
     }
 
@@ -485,10 +487,10 @@ impl LanguageServer for ServerState {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
-        tracing::debug!(?uri, "format");
+        tracing::debug!(?path, "format");
 
         let Some(document) = self.document_map.get(&path) else {
-            tracing::info!(?uri, "document not found");
+            tracing::info!(?path, "document not found");
             return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
         };
 
@@ -523,10 +525,10 @@ impl LanguageServer for ServerState {
         let range = params.range;
         let path = uri.to_file_path().unwrap();
 
-        tracing::debug!(?uri, "format");
+        tracing::debug!(?path, "format");
 
         let Some(document) = self.document_map.get(&path) else {
-            tracing::info!(?uri, "document not found");
+            tracing::info!(?path, "document not found");
             return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
         };
 
@@ -573,7 +575,7 @@ impl LanguageServer for ServerState {
         };
 
         let Some(symbols) = symbols_map.get(&path) else {
-            tracing::error!(?uri, "symbols not found");
+            tracing::error!(?path, "symbols not found");
             return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
         };
         let symbols = symbols.clone();

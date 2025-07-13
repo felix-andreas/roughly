@@ -1,6 +1,6 @@
 use {
     ropey::{Rope, iter::Chunks},
-    tree_sitter::{Node, Parser, Query, QueryCursor, QueryMatches, Tree, TreeCursor},
+    tree_sitter::{Node, Parser, Point, Query, QueryCursor, QueryMatches, Range, Tree, TreeCursor},
 };
 
 //
@@ -113,6 +113,12 @@ pub fn find_next_error(node: Node) -> Option<Node> {
             }
         }
     }
+}
+
+pub fn point_in_range(point: Point, range: Range) -> bool {
+    let start = range.start_point;
+    let end = range.end_point;
+    start <= point && point <= end
 }
 
 pub fn format(node: Node) -> String {
