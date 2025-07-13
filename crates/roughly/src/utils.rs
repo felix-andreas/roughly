@@ -1,5 +1,5 @@
 use {
-    crate::lsp_types::{Position, Range},
+    crate::lsp_types::{Position, Range as LspRange},
     ropey::Rope,
     std::{fs::File, io::BufReader, path::Path},
     tree_sitter::Node,
@@ -13,10 +13,10 @@ pub fn read_to_rope(path: impl AsRef<Path>) -> std::io::Result<Rope> {
     Rope::from_reader(BufReader::new(File::open(path)?))
 }
 
-pub fn node_range(node: Node) -> Range {
+pub fn node_range(node: Node) -> LspRange {
     let start = node.start_position();
     let end = node.end_position();
-    Range::new(
+    LspRange::new(
         Position::new(start.row as u32, start.column as u32),
         Position::new(end.row as u32, end.column as u32),
     )

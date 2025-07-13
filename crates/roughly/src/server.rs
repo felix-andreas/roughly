@@ -3,7 +3,7 @@ use {
         cli::{self, ExperimentalFeatures},
         completions,
         config::Config,
-        diagnostics, format,
+        definition, diagnostics, format,
         index::{self, IndexError},
         lsp_types::{
             CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
@@ -23,8 +23,13 @@ use {
     },
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
-        client_monitor::ClientProcessMonitorLayer, concurrency::ConcurrencyLayer,
-        panic::CatchUnwindLayer, router::Router, server::LifecycleLayer, tracing::TracingLayer,
+        client_monitor::ClientProcessMonitorLayer,
+        concurrency::ConcurrencyLayer,
+        lsp_types::{GotoDefinitionParams, GotoDefinitionResponse},
+        panic::CatchUnwindLayer,
+        router::Router,
+        server::LifecycleLayer,
+        tracing::TracingLayer,
     },
     futures::future::BoxFuture,
     ropey::Rope,
@@ -126,7 +131,7 @@ impl LanguageServer for ServerState {
         &mut self,
         _: InitializeParams,
     ) -> BoxFuture<'static, Result<InitializeResult, ResponseError>> {
-        tracing::info!("initialize");
+        tracing::info!(?self.experimental_features, "initialize");
 
         match index::index_dir(&self.base_path, &mut self.parser) {
             Ok(symbols) => self.workspace_symbols.extend(symbols),
@@ -145,6 +150,7 @@ impl LanguageServer for ServerState {
                     trigger_characters: Some(vec!["$".into(), "@".into(), ":".into()]),
                     ..Default::default()
                 }),
+                definition_provider: Some(OneOf::Left(self.experimental_features.goto_definition)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(
                     self.experimental_features.range_formatting,
@@ -312,18 +318,9 @@ impl LanguageServer for ServerState {
                 start_byte,
                 old_end_byte,
                 new_end_byte,
-                start_position: Point {
-                    row: start_line,
-                    column: start_col,
-                },
-                old_end_position: Point {
-                    row: end_line,
-                    column: end_col,
-                },
-                new_end_position: Point {
-                    row: new_end_line,
-                    column: new_end_col,
-                },
+                start_position: Point::new(start_line, start_col),
+                old_end_position: Point::new(end_line, end_col),
+                new_end_position: Point::new(new_end_line, new_end_col),
             });
         }
 
@@ -431,10 +428,10 @@ impl LanguageServer for ServerState {
         let path = uri.to_file_path().unwrap();
         let position = params.text_document_position.position;
 
-        tracing::debug!(?uri, "completion");
+        tracing::debug!(?path, "completion");
 
         let Some(document) = self.document_map.get(&path) else {
-            tracing::error!(?uri, "document not found");
+            tracing::error!(?path, "document not found");
             return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
         };
 
@@ -449,6 +446,37 @@ impl LanguageServer for ServerState {
     }
 
     //
+    // DEFINITION
+    //
+    fn definition(
+        &mut self,
+        params: GotoDefinitionParams,
+    ) -> BoxFuture<'static, Result<Option<GotoDefinitionResponse>, ResponseError>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let path = uri.to_file_path().unwrap();
+        let position = params.text_document_position_params.position;
+
+        tracing::debug!(?path, "goto definition");
+
+        let Some(document) = self.document_map.get(&path) else {
+            tracing::info!(?path, "document not found");
+            return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
+        };
+
+        let definitions = definition::goto(
+            &uri,
+            position.line as usize,
+            position.character as usize,
+            &document.rope,
+            &document.tree,
+            &self.workspace_symbols,
+        );
+
+        tracing::debug!(?definitions, "result");
+        box_future(Ok(definitions))
+    }
+
+    //
     // FORMATTING
     //
 
@@ -459,10 +487,10 @@ impl LanguageServer for ServerState {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
-        tracing::debug!(?uri, "format");
+        tracing::debug!(?path, "format");
 
         let Some(document) = self.document_map.get(&path) else {
-            tracing::info!(?uri, "document not found");
+            tracing::info!(?path, "document not found");
             return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
         };
 
@@ -497,10 +525,10 @@ impl LanguageServer for ServerState {
         let range = params.range;
         let path = uri.to_file_path().unwrap();
 
-        tracing::debug!(?uri, "format");
+        tracing::debug!(?path, "format");
 
         let Some(document) = self.document_map.get(&path) else {
-            tracing::info!(?uri, "document not found");
+            tracing::info!(?path, "document not found");
             return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
         };
 
@@ -547,7 +575,7 @@ impl LanguageServer for ServerState {
         };
 
         let Some(symbols) = symbols_map.get(&path) else {
-            tracing::error!(?uri, "symbols not found");
+            tracing::error!(?path, "symbols not found");
             return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
         };
         let symbols = symbols.clone();
