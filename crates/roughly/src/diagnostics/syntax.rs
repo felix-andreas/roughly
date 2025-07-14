@@ -62,7 +62,6 @@ pub fn analyze(node: Node, rope: &Rope) -> Vec<Diagnostic> {
                     _ => {}
                 }
             }
-
             loop {
                 handled_error |= traverse(cursor, diagnostics, rope);
 
@@ -77,10 +76,12 @@ pub fn analyze(node: Node, rope: &Rope) -> Vec<Diagnostic> {
             handled_error = true;
             let raw = rope.byte_slice(node.byte_range()).to_string();
             match raw.as_str() {
-                ")" | "}" | "]" | "]]" => diagnostics.push(error(
-                    node,
-                    format!("Syntax Error: unexpected closing delimiter {raw}"),
-                )),
+                "(" | "{" | "[" | "[[" => {
+                    diagnostics.push(error(node, format!("unexpected opening delimiter {raw}")))
+                }
+                ")" | "}" | "]" | "]]" => {
+                    diagnostics.push(error(node, format!("unexpected closing delimiter {raw}")))
+                }
                 _ => {
                     diagnostics.push(error(node, format!("Syntax Error: unexpected {raw:?}")));
                 }
@@ -91,7 +92,6 @@ pub fn analyze(node: Node, rope: &Rope) -> Vec<Diagnostic> {
     }
 
     let mut diagnostics = Vec::new();
-    let mut cursor = node.walk();
-    traverse(&mut cursor, &mut diagnostics, rope);
+    traverse(&mut node.walk(), &mut diagnostics, rope);
     diagnostics
 }

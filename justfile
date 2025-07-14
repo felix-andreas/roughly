@@ -46,7 +46,6 @@ build-extension $kind *args:
 	cp LICENSE editors/code
 	just vsce package $release_flag {{args}}
 
-
 #
 # RELEASE
 #
@@ -80,7 +79,6 @@ publish-commit $version="":
 	fi
 	just build $version pre-release
 	just publish-github $version
-
 
 build $version $kind:
 	#!/usr/bin/env bash
