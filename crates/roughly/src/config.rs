@@ -1,8 +1,5 @@
 use {
-    crate::{
-        cli::ExperimentalFeatures, diagnostics::Config as LintConfig,
-        format::Config as FormatConfig,
-    },
+    crate::{diagnostics::Config as LintConfig, format::Config as FormatConfig},
     serde::Deserialize,
     std::{io, path::Path},
     thiserror::Error,
@@ -54,6 +51,10 @@ pub enum ConfigError {
     Invalid(#[from] toml::de::Error),
 }
 
+//
+// TOML
+//
+
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(default)]
 #[derive(Default)]
@@ -81,6 +82,17 @@ impl ConfigToml {
             lint: self.lint,
         }
     }
+}
+
+//
+// EXPERIMENTAL FEATURES
+//
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ExperimentalFeatures {
+    pub goto_definition: bool,
+    pub range_formatting: bool,
+    pub unused: bool,
 }
 
 #[cfg(test)]

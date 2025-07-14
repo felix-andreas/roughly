@@ -41,6 +41,7 @@ export async function activate({ subscriptions, extension, }: ExtensionContext):
       if (
         change.affectsConfiguration("roughly.path")
         || change.affectsConfiguration("roughly.args")
+        || change.affectsConfiguration("roughly.experimentalFeatures")
       ) {
         const choice = await window.showWarningMessage(
           "Configuration change requires restarting the language server",
@@ -116,14 +117,19 @@ function createClient(): LanguageClient {
   const config = workspace.getConfiguration("roughly")
 
   const command = process.env.SERVER_PATH
-    ?? config.get<string>("path")
+    ?? config.get<string | null>("path")
     ?? (
       fs.existsSync(BUNDLED_ROUGHLY_EXECUTABLE)
         ? BUNDLED_ROUGHLY_EXECUTABLE
         : "roughly"
     )
 
-  const args = config.get<string[]>("args", ["server"])
+  const commandArgs = config.get<string[] | null>("args") ?? ["server"]
+  const experimentalFeatures = config.get<string[] | null>("experimentalFeatures")
+  const experimentalArgs = experimentalFeatures
+    ? ["--experimental-features", experimentalFeatures.join(" ")]
+    : []
+  const args = [...experimentalArgs, ...commandArgs]
 
   logger.info("using server command:", [command, ...args].join(" "))
 

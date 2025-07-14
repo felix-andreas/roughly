@@ -1,8 +1,7 @@
 use {
     crate::{
-        cli::{self, ExperimentalFeatures},
-        completions,
-        config::Config,
+        cli, completions,
+        config::{Config, ExperimentalFeatures},
         definition, diagnostics, format,
         index::{self, IndexError},
         lsp_types::{

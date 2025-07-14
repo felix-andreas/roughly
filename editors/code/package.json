@@ -73,23 +73,36 @@
 				"roughly.path": {
 					"scope": "resource",
 					"type": [
-						"string",
-						"null"
+						"null",
+						"string"
 					],
 					"format": "path",
-					"default": null,
-					"markdownDescription": "Location of the `roughly` executable, e.g., `[\"/path/to/roughly\"]`."
+					"markdownDescription": "Location of the `roughly` executable, e.g., `\"/path/to/roughly\"`.",
+					"default": null
 				},
 				"roughly.args": {
 					"scope": "resource",
-					"type": "array",
+					"type": [
+						"null",
+						"array"
+					],
 					"items": {
 						"type": "string"
 					},
-					"default": [
-						"server"
+					"markdownDescription": "Arguments passed to the `roughly` executable.",
+					"default": null
+				},
+				"roughly.experimentalFeatures": {
+					"scope": "resource",
+					"type": [
+						"null",
+						"array"
 					],
-					"markdownDescription": "Arguments passed to `roughly`."
+					"items": {
+						"type": "string"
+					},
+					"markdownDescription": "Enable experimental features.",
+					"default": null
 				}
 			}
 		}

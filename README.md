@@ -20,10 +20,11 @@ An R language server, linter, and code formatter, written in Rust.
 
 Roughly aims to support the following language server features (some are experimental or in progress):
 
-- **Symbol Search**
-  - Indexing of global symbols, S4 classes/generics/methods and R6 classes/methods
+- **Code Navigation**
+  - Goto definition (🧪 experimental)
   - Search current document (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> *in VS Code*)
   - Search global workspace (<kbd>Ctrl</kbd> + <kbd>T</kbd> *in VS Code*)
+  - Indexing of global symbols, S4 classes/generics/methods and R6 classes/methods
 
 - **Diagnostics**
   - Syntax errors (including missing or trailing commas)
@@ -121,9 +122,14 @@ You can customize the Roughly extension in VS Code through the following setting
   // Use a custom binary instead of the bundled one
   "roughly.path": "/path/to/roughly",
   // Pass extra arguments to the language server
-  "roughly.args": ["server", "--experimental-features", "all"],
+  "roughly.args": ["server", "--extra", "arg"],
+  // Enable experimental features
+  "roughly.experimentalFeatures": ["goto_definition", "range_formatting"],
 }
 ```
+
+> [!NOTE]
+> For a complete list of experimental features and their descriptions, [see below](#experimental-features).
 
 ### Commands
 
@@ -151,6 +157,18 @@ line-ending = "auto" # "lf" or "cr-lf"
 # control the naming convention for variables and parameters
 naming-style = "snake_case" # or "camelCase", omit to disable this lint entirely
 ```
+
+## Experimental Features
+
+Roughly includes several experimental features that can be enabled in the VS Code extension settings or via the CLI:
+
+
+| Name               | Description                       |
+| ------------------ | --------------------------------- |
+| `all`              | Enables all experimental features |
+| `goto_definition`  | Jump to symbol definitions        |
+| `range_formatting` | Format selected code ranges       |
+| `unused`           | Detect unused variables           |
 
 ## Development
 

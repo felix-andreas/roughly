@@ -1,6 +1,6 @@
 use {
     clap::{Parser, Subcommand},
-    roughly::cli::{self, CheckError, DebugError, ExperimentalFeatures, FmtError},
+    roughly::cli::{self, CheckError, DebugError, FmtError},
     std::{path::PathBuf, process::ExitCode},
     tracing_subscriber::prelude::*,
 };
@@ -17,10 +17,15 @@ fn main() -> ExitCode {
         .init();
 
     let cli = Cli::parse();
-    let experimental_features = ExperimentalFeatures::parse(
+    let experimental_features = cli::parse_experimental_flags(
         &cli.experimental_features
             .as_ref()
-            .map(|flags| flags.split(' ').collect::<Vec<&str>>())
+            .map(|flags| {
+                flags
+                    .iter()
+                    .flat_map(|flag| flag.split(' '))
+                    .collect::<Vec<&str>>()
+            })
             .unwrap_or_else(Vec::new),
     );
 
@@ -77,7 +82,7 @@ struct Cli {
     stdio: bool,
     /// Enable experimental features (e.g. "all" or "feature-1 feature-2")
     #[clap(long, global = true)]
-    experimental_features: Option<String>,
+    experimental_features: Option<Vec<String>>,
 }
 
 #[derive(Debug, Subcommand)]

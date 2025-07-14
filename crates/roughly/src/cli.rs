@@ -1,6 +1,7 @@
 use {
     crate::{
-        config, diagnostics, format, index,
+        config::{self, ExperimentalFeatures},
+        diagnostics, format, index,
         lsp_types::{self, DiagnosticSeverity},
         server, tree, utils,
     },
@@ -472,33 +473,25 @@ pub fn ast(path: &Path) -> Result<(), DebugError> {
 // EXPERIMENTAL FEATURES
 //
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct ExperimentalFeatures {
-    pub goto_definition: bool,
-    pub range_formatting: bool,
-    pub unused: bool,
-}
+pub fn parse_experimental_flags(flags: &[impl AsRef<str>]) -> ExperimentalFeatures {
+    // note: each flag may contain multiple features separated by spaces, e.g., "feature1 feature2"
+    let mut features = ExperimentalFeatures::default();
 
-impl ExperimentalFeatures {
-    pub fn parse(flags: &[impl AsRef<str>]) -> Self {
-        let mut features = ExperimentalFeatures::default();
-
-        for flag in flags {
-            match flag.as_ref() {
-                "all" => {
-                    features.unused = true;
-                    features.range_formatting = true;
-                    features.goto_definition = true;
-                }
-                "range_formatting" => features.range_formatting = true,
-                "goto_definition" => features.goto_definition = true,
-                "unused" => features.unused = true,
-                unknown => {
-                    warn(&format!("unknown experimental feature: {unknown}"));
-                }
+    for flag in flags.iter().flat_map(|flag| flag.as_ref().split(' ')) {
+        match flag {
+            "all" => {
+                features.unused = true;
+                features.range_formatting = true;
+                features.goto_definition = true;
+            }
+            "range_formatting" => features.range_formatting = true,
+            "goto_definition" => features.goto_definition = true,
+            "unused" => features.unused = true,
+            unknown => {
+                warn(&format!("unknown experimental feature: {unknown}"));
             }
         }
-
-        features
     }
+
+    features
 }
