@@ -1,6 +1,6 @@
 use {
     crate::{
-        cli, completions,
+        cli, completion,
         config::{Config, ExperimentalFeatures},
         definition, diagnostics, format,
         index::{self, IndexError},
@@ -435,7 +435,7 @@ impl LanguageServer for ServerState {
             return box_future(Err(path_not_found_error(&path)));
         };
 
-        let completions = completions::get(
+        let completions = completion::get(
             position,
             &document.rope,
             &document.tree,

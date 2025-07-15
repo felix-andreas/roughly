@@ -1,5 +1,5 @@
 pub mod cli;
-pub mod completions;
+pub mod completion;
 pub mod config;
 pub mod definition;
 pub mod diagnostics;

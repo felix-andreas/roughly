@@ -161,7 +161,6 @@ fn find_definition<'a>(start: Node<'a>, rope: &Rope, name: &str) -> Option<Node<
 }
 
 fn find_scope_containing<'a>(node: Node<'a>) -> Option<Node<'a>> {
-    // Start from the node and traverse up to find containing scope
     let mut current = Some(node);
     while let Some(node) = current {
         match node.kind_id() {
