@@ -47,7 +47,16 @@ pub fn get_workspace_symbols(
             symbols
                 .iter()
                 .flat_map(|symbol| {
-                    std::iter::once((symbol, None)).chain(
+                    // note: This is a bit hacky. For S4 methods, we want to make the signature searchable
+                    // by adding it as the container name. Currently, we store it in the detail string.
+                    // Long-term, we could use a custom data structure instead of DocumentSymbol for the global index.
+                    let container_name = if symbol.kind == SymbolKind::METHOD {
+                        symbol.detail.as_deref()
+                    } else {
+                        None
+                    };
+
+                    std::iter::once((symbol, container_name)).chain(
                         symbol
                             .children
                             .as_ref()
@@ -56,9 +65,22 @@ pub fn get_workspace_symbols(
                             .map(|child| (child, Some(symbol.name.as_ref()))),
                     )
                 })
-                .filter(|(symbol, _)| utils::starts_with_lowercase(&symbol.name, query))
+                .filter(|(symbol, _)| {
+                    // let name_matches = utils::starts_with_lowercase(&symbol.name, query);
+                    // let detail_matches = symbol
+                    //     .detail
+                    //     .as_ref()
+                    //     .is_some_and(|detail| utils::starts_with_lowercase(detail, query));
+                    // name_matches || detail_matches
+                    true
+                })
                 .map(move |(symbol, container_name)| WorkspaceSymbol {
-                    name: symbol.name.to_string(),
+                    name: match symbol.detail.as_deref() {
+                        Some(detail) if !detail.is_empty() => {
+                            format!("{} ({})", symbol.name, detail)
+                        }
+                        _ => symbol.name.clone(),
+                    },
                     kind: symbol.kind,
                     tags: None,
                     container_name: container_name.map(str::to_string),
@@ -358,12 +380,9 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
                 })
                 .unwrap_or_else(|| "Unknown".to_string());
 
-            (
-                SymbolKind::METHOD,
-                format!("{method_name} ({signature})"),
-                None,
-                None,
-            )
+            // note: atm, we store signature in detail, otherwise we have no match for goto definition
+            // also we want to show sigature in container
+            (SymbolKind::METHOD, method_name, Some(signature), None)
         }
         "R6Class" => {
             // R6Class("Person", ...)

@@ -5,6 +5,7 @@ use {
     tree_sitter::Node,
 };
 
+#[inline(always)]
 pub fn starts_with_lowercase(name: &str, query: &str) -> bool {
     query.is_empty() || name.to_lowercase().starts_with(&query.to_lowercase())
 }
