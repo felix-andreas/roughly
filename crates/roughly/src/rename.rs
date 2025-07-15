@@ -247,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn test_basic_variable_rename() {
+    fn basic_variable_rename() {
         let src = indoc! {r#"
             x <- 1
             y <- x + 2
@@ -266,7 +266,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parameter_rename() {
+    fn parameter_rename() {
         let src = indoc! {r#"
             function(x, y) {
                 x + y
@@ -284,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rename_not_allowed_for_rhs_of_extract() {
+    fn rename_not_allowed_for_rhs_of_extract() {
         let src = indoc! {r#"
             obj@field
         "#};
@@ -294,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rename_not_allowed_for_rhs_of_subset() {
+    fn rename_not_allowed_for_rhs_of_subset() {
         let src = indoc! {r#"
             obj$field
         "#};
@@ -304,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rename_not_allowed_for_rhs_of_namespace() {
+    fn rename_not_allowed_for_rhs_of_namespace() {
         let src = indoc! {r#"
             pkg::func
         "#};
@@ -314,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn test_local_scope_only() {
+    fn local_scope_only() {
         let src = indoc! {r#"
             x <- 1
             function() {
@@ -334,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn test_undefined_variable() {
+    fn undefined_variable() {
         let src = indoc! {r#"
             function() {
                 undefined_var
@@ -346,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn test_nested_function_scope() {
+    fn nested_function_scope() {
         let src = indoc! {r#"
             function() {
                 x <- 1
@@ -368,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn test_shadowing_variables() {
+    fn shadowing_variables() {
         let src = indoc! {r#"
             x <- 1
             function() {
@@ -387,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parameter_in_nested_function() {
+    fn parameter_in_nested_function() {
         let src = indoc! {r#"
             function(x) {
                 function(y) {
@@ -406,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn test_variable_in_control_structures() {
+    fn variable_in_control_structures() {
         let src = indoc! {r#"
             x <- 1
             if (TRUE) {
