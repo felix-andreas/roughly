@@ -483,10 +483,12 @@ pub fn parse_experimental_flags(flags: &[impl AsRef<str>]) -> ExperimentalFeatur
                 features.unused = true;
                 features.range_formatting = true;
                 features.goto_definition = true;
+                features.rename = true;
             }
             "range_formatting" => features.range_formatting = true,
             "goto_definition" => features.goto_definition = true,
             "unused" => features.unused = true,
+            "rename" => features.rename = true,
             unknown => {
                 warn(&format!("unknown experimental feature: {unknown}"));
             }
