@@ -63,8 +63,6 @@ pub fn rename(
         return None;
     }
 
-    tracing::debug!(?edits);
-
     Some(WorkspaceEdit {
         changes: Some(HashMap::from_iter([(uri.clone(), edits)])),
         ..Default::default()
