@@ -499,3 +499,44 @@ pub fn parse_experimental_flags(flags: &[impl AsRef<str>]) -> ExperimentalFeatur
 
     features
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_parse_experimental_flags() {
+        let flags = vec!["goto_references"];
+        let features = parse_experimental_flags(&flags);
+        
+        assert!(features.goto_references);
+        assert!(!features.goto_definition);
+        assert!(!features.rename);
+        assert!(!features.range_formatting);
+        assert!(!features.unused);
+    }
+    
+    #[test]
+    fn test_parse_experimental_flags_all() {
+        let flags = vec!["all"];
+        let features = parse_experimental_flags(&flags);
+        
+        assert!(features.goto_references);
+        assert!(features.goto_definition);
+        assert!(features.rename);
+        assert!(features.range_formatting);
+        assert!(features.unused);
+    }
+    
+    #[test]
+    fn test_parse_experimental_flags_multiple() {
+        let flags = vec!["goto_references", "goto_definition"];
+        let features = parse_experimental_flags(&flags);
+        
+        assert!(features.goto_references);
+        assert!(features.goto_definition);
+        assert!(!features.rename);
+        assert!(!features.range_formatting);
+        assert!(!features.unused);
+    }
+}
