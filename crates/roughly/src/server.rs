@@ -2,7 +2,7 @@ use {
     crate::{
         cli, completions,
         config::{Config, ExperimentalFeatures},
-        definition, diagnostics, format, rename,
+        definition, diagnostics, format,
         index::{self, IndexError},
         lsp_types::{
             CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
@@ -12,13 +12,13 @@ use {
             DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
             GlobPattern, InitializeParams, InitializeResult, InitializedParams, MessageType, OneOf,
             Position, PublishDiagnosticsParams, Range, Registration, RegistrationParams,
-            RelativePattern, SaveOptions, ServerCapabilities, ServerInfo, ShowMessageParams,
-            TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-            TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceSymbolParams,
-            WorkspaceSymbolResponse, RenameParams, WorkspaceEdit,
+            RelativePattern, RenameParams, SaveOptions, ServerCapabilities, ServerInfo,
+            ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind,
+            TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceEdit,
+            WorkspaceSymbolParams, WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
         },
-        tree, utils,
+        rename, tree, utils,
     },
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
@@ -432,7 +432,7 @@ impl LanguageServer for ServerState {
 
         let Some(document) = self.document_map.get(&path) else {
             tracing::error!(?path, "document not found");
-            return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
+            return box_future(Err(path_not_found_error(&path)));
         };
 
         let completions = completions::get(
@@ -448,6 +448,7 @@ impl LanguageServer for ServerState {
     //
     // DEFINITION
     //
+
     fn definition(
         &mut self,
         params: GotoDefinitionParams,
@@ -460,7 +461,7 @@ impl LanguageServer for ServerState {
 
         let Some(document) = self.document_map.get(&path) else {
             tracing::info!(?path, "document not found");
-            return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
+            return box_future(Err(path_not_found_error(&path)));
         };
 
         let definitions = definition::goto(
@@ -472,37 +473,7 @@ impl LanguageServer for ServerState {
             &self.workspace_symbols,
         );
 
-        tracing::debug!(?definitions, "result");
         box_future(Ok(definitions))
-    }
-
-    fn rename(
-        &mut self,
-        params: RenameParams,
-    ) -> BoxFuture<'static, Result<Option<WorkspaceEdit>, ResponseError>> {
-        let uri = params.text_document_position.text_document.uri;
-        let path = uri.to_file_path().unwrap();
-        let position = params.text_document_position.position;
-        let new_name = params.new_name;
-
-        tracing::debug!(?path, ?position, ?new_name, "rename");
-
-        let Some(document) = self.document_map.get(&path) else {
-            tracing::info!(?path, "document not found");
-            return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
-        };
-
-        let workspace_edit = rename::rename(
-            &uri,
-            position.line as usize,
-            position.character as usize,
-            &new_name,
-            &document.rope,
-            &document.tree,
-        );
-
-        tracing::debug!(?workspace_edit, "result");
-        box_future(Ok(workspace_edit))
     }
 
     //
@@ -520,7 +491,7 @@ impl LanguageServer for ServerState {
 
         let Some(document) = self.document_map.get(&path) else {
             tracing::info!(?path, "document not found");
-            return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
+            return box_future(Err(path_not_found_error(&path)));
         };
 
         let (rope, tree) = (&document.rope, &document.tree);
@@ -558,7 +529,7 @@ impl LanguageServer for ServerState {
 
         let Some(document) = self.document_map.get(&path) else {
             tracing::info!(?path, "document not found");
-            return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
+            return box_future(Err(path_not_found_error(&path)));
         };
 
         let (rope, tree) = (&document.rope, &document.tree);
@@ -587,6 +558,38 @@ impl LanguageServer for ServerState {
     }
 
     //
+    // RENAME
+    //
+
+    fn rename(
+        &mut self,
+        params: RenameParams,
+    ) -> BoxFuture<'static, Result<Option<WorkspaceEdit>, ResponseError>> {
+        let uri = params.text_document_position.text_document.uri;
+        let path = uri.to_file_path().unwrap();
+        let position = params.text_document_position.position;
+        let new_name = params.new_name;
+
+        tracing::debug!(?path, ?position, ?new_name, "rename");
+
+        let Some(document) = self.document_map.get(&path) else {
+            tracing::info!(?path, "document not found");
+            return box_future(Err(path_not_found_error(&path)));
+        };
+
+        let workspace_edit = rename::rename(
+            &uri,
+            position.line as usize,
+            position.character as usize,
+            &new_name,
+            &document.rope,
+            &document.tree,
+        );
+
+        box_future(Ok(workspace_edit))
+    }
+
+    //
     // SYMBOLS
     //
 
@@ -605,7 +608,7 @@ impl LanguageServer for ServerState {
 
         let Some(symbols) = symbols_map.get(&path) else {
             tracing::error!(?path, "symbols not found");
-            return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
+            return box_future(Err(path_not_found_error(&path)));
         };
         let symbols = symbols.clone();
 
@@ -629,4 +632,11 @@ impl LanguageServer for ServerState {
 #[inline(always)]
 fn box_future<T: Send + 'static>(content: T) -> BoxFuture<'static, T> {
     Box::pin(async { content })
+}
+
+fn path_not_found_error(path: &Path) -> ResponseError {
+    ResponseError::new(
+        ErrorCode::REQUEST_FAILED,
+        format!("path not found '{}'", path.display()),
+    )
 }

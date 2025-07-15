@@ -9,7 +9,6 @@ use {
     tree_sitter::{Node, Point, Tree},
 };
 
-/// Performs rename operation on a symbol at the given position
 pub fn rename(
     uri: &Uri,
     line: usize,
@@ -31,7 +30,7 @@ pub fn rename(
     );
 
     // Check if rename is allowed - don't allow renaming RHS of certain operators
-    if !is_rename_allowed(&start, &parent) {
+    if !is_rename_allowed(start, parent) {
         tracing::debug!("Rename not allowed for this symbol");
         return None;
     }
@@ -63,10 +62,9 @@ pub fn rename(
     })
 }
 
-/// Check if renaming is allowed for the given symbol
-fn is_rename_allowed(symbol: &Node, parent: &Node) -> bool {
-    // Don't allow renaming RHS of @ (extract), $ (subset), or :: (namespace) operators
-    if [kind::EXTRACT_OPERATOR, kind::SUBSET2, kind::NAMESPACE_OPERATOR].contains(&parent.kind_id())
+fn is_rename_allowed(symbol: Node, parent: Node) -> bool {
+    // Don't allow renaming RHS of extract @, extract $, or namespace :: operators
+    if [kind::EXTRACT_OPERATOR, kind::NAMESPACE_OPERATOR].contains(&parent.kind_id())
         && parent
             .child_by_field_id(field::RHS)
             .is_some_and(|rhs| rhs.id() == symbol.id())
@@ -77,7 +75,6 @@ fn is_rename_allowed(symbol: &Node, parent: &Node) -> bool {
     true
 }
 
-/// Try to get an identifier node at the given position
 fn try_get_identifier<'tree>(tree: &'tree Tree, line: usize, col: usize) -> Option<Node<'tree>> {
     let start = {
         let point = Point::new(line, col);
@@ -100,7 +97,7 @@ fn try_get_identifier<'tree>(tree: &'tree Tree, line: usize, col: usize) -> Opti
 /// Find all references to a symbol within its scope
 fn find_all_references<'a>(start: Node<'a>, rope: &Rope, name: &str) -> Option<Vec<Node<'a>>> {
     let mut references = Vec::new();
-    
+
     // Find the definition of the symbol
     let definition = find_definition(start, rope, name)?;
 
@@ -113,7 +110,7 @@ fn find_all_references<'a>(start: Node<'a>, rope: &Rope, name: &str) -> Option<V
     // Deduplicate references by node ID
     let mut unique_refs = Vec::new();
     let mut seen_ids = std::collections::HashSet::new();
-    
+
     for reference in references {
         if seen_ids.insert(reference.id()) {
             unique_refs.push(reference);
@@ -123,7 +120,6 @@ fn find_all_references<'a>(start: Node<'a>, rope: &Rope, name: &str) -> Option<V
     Some(unique_refs)
 }
 
-/// Find the definition of a symbol (similar to definition.rs logic)
 fn find_definition<'a>(start: Node<'a>, rope: &Rope, name: &str) -> Option<Node<'a>> {
     let mut node = start;
     loop {
@@ -164,7 +160,6 @@ fn find_definition<'a>(start: Node<'a>, rope: &Rope, name: &str) -> Option<Node<
     }
 }
 
-/// Find the scope that contains the given node
 fn find_scope_containing<'a>(node: Node<'a>) -> Option<Node<'a>> {
     // Start from the node and traverse up to find containing scope
     let mut current = Some(node);
@@ -178,31 +173,37 @@ fn find_scope_containing<'a>(node: Node<'a>) -> Option<Node<'a>> {
     None
 }
 
-/// Find all references to a symbol within the given scope
-fn find_references_in_scope<'a>(scope: Node<'a>, rope: &Rope, name: &str, definition: Node<'a>, references: &mut Vec<Node<'a>>) {
+fn find_references_in_scope<'a>(
+    scope: Node<'a>,
+    rope: &Rope,
+    name: &str,
+    definition: Node<'a>,
+    references: &mut Vec<Node<'a>>,
+) {
     // Use a queue to traverse nodes level by level
     let mut queue = vec![scope];
-    
+
     while let Some(node) = queue.pop() {
         // If this is an identifier with matching name, check if it refers to our definition
-        if node.kind_id() == kind::IDENTIFIER 
-            && rope.byte_slice(node.byte_range()) == name 
-            && is_reference_to_symbol(node, rope, name) 
-            && refers_to_definition(node, definition, rope, name) {
+        if node.kind_id() == kind::IDENTIFIER
+            && rope.byte_slice(node.byte_range()) == name
+            && is_reference_to_symbol(node, rope, name)
+            && refers_to_definition(node, definition, rope, name)
+        {
             references.push(node);
         }
-        
+
         // Add children to queue for processing
         let mut child_cursor = node.walk();
         if child_cursor.goto_first_child() {
             loop {
                 let child = child_cursor.node();
-                
+
                 // We need to traverse nested functions too for free variables
                 // But we need to be careful about scope - we'll let the definition
                 // finding logic handle whether a reference is valid
                 queue.push(child);
-                
+
                 if !child_cursor.goto_next_sibling() {
                     break;
                 }
@@ -211,34 +212,20 @@ fn find_references_in_scope<'a>(scope: Node<'a>, rope: &Rope, name: &str, defini
     }
 }
 
-/// Check if an identifier node is a reference to our target symbol
 fn is_reference_to_symbol(node: Node, rope: &Rope, name: &str) -> bool {
-    if node.kind_id() != kind::IDENTIFIER {
-        return false;
-    }
-    
-    let node_name = rope.byte_slice(node.byte_range()).to_string();
-    if node_name != name {
-        return false;
-    }
-    
-    // Check if this is not a forbidden reference (RHS of @, $, ::)
-    if let Some(parent) = node.parent() {
-        if !is_rename_allowed(&node, &parent) {
-            return false;
-        }
-    }
-    
-    true
+    node.kind_id() == kind::IDENTIFIER
+        && rope.byte_slice(node.byte_range()) == name
+        && (node
+            .parent()
+            .is_none_or(|parent| is_rename_allowed(node, parent)))
 }
 
-/// Check if a reference node actually refers to our target definition
 fn refers_to_definition(reference: Node, definition: Node, rope: &Rope, name: &str) -> bool {
     // If this is the definition itself, include it
     if reference.id() == definition.id() {
         return true;
     }
-    
+
     // Use the same logic as find_definition to see if this reference would resolve to our definition
     let found_definition = find_definition(reference, rope, name);
     match found_definition {
@@ -251,7 +238,7 @@ fn refers_to_definition(reference: Node, definition: Node, rope: &Rope, name: &s
 mod tests {
     use {super::*, crate::tree, indoc::indoc, ropey::Rope};
 
-    fn setup_rename_test(src: &str, line: usize, col: usize, new_name: &str) -> Option<WorkspaceEdit> {
+    fn setup(src: &str, line: usize, col: usize, new_name: &str) -> Option<WorkspaceEdit> {
         let rope = Rope::from_str(src);
         let mut parser = tree::new_parser();
         let tree = tree::parse(&mut parser, src, None);
@@ -266,12 +253,12 @@ mod tests {
             y <- x + 2
             x
         "#};
-        
-        let result = setup_rename_test(src, 0, 0, "new_var").unwrap();
+
+        let result = setup(src, 0, 0, "new_var").unwrap();
         let changes = result.changes.unwrap();
         let uri = Uri::parse("file:///test.R").unwrap();
         let edits = &changes[&uri];
-        
+
         assert_eq!(edits.len(), 3); // Should find 3 references
         assert_eq!(edits[0].new_text, "new_var");
         assert_eq!(edits[1].new_text, "new_var");
@@ -285,12 +272,12 @@ mod tests {
                 x + y
             }
         "#};
-        
-        let result = setup_rename_test(src, 0, 9, "new_param").unwrap();
+
+        let result = setup(src, 0, 9, "new_param").unwrap();
         let changes = result.changes.unwrap();
         let uri = Uri::parse("file:///test.R").unwrap();
         let edits = &changes[&uri];
-        
+
         assert_eq!(edits.len(), 2); // Parameter definition and usage
         assert_eq!(edits[0].new_text, "new_param");
         assert_eq!(edits[1].new_text, "new_param");
@@ -301,8 +288,8 @@ mod tests {
         let src = indoc! {r#"
             obj@field
         "#};
-        
-        let result = setup_rename_test(src, 0, 4, "new_field");
+
+        let result = setup(src, 0, 4, "new_field");
         assert!(result.is_none()); // Should not allow renaming RHS of @
     }
 
@@ -311,8 +298,8 @@ mod tests {
         let src = indoc! {r#"
             obj$field
         "#};
-        
-        let result = setup_rename_test(src, 0, 4, "new_field");
+
+        let result = setup(src, 0, 4, "new_field");
         assert!(result.is_none()); // Should not allow renaming RHS of $
     }
 
@@ -321,8 +308,8 @@ mod tests {
         let src = indoc! {r#"
             pkg::func
         "#};
-        
-        let result = setup_rename_test(src, 0, 5, "new_func");
+
+        let result = setup(src, 0, 5, "new_func");
         assert!(result.is_none()); // Should not allow renaming RHS of ::
     }
 
@@ -336,13 +323,13 @@ mod tests {
             }
             x
         "#};
-        
+
         // Rename the inner x
-        let result = setup_rename_test(src, 2, 4, "inner_x").unwrap();
+        let result = setup(src, 2, 4, "inner_x").unwrap();
         let changes = result.changes.unwrap();
         let uri = Uri::parse("file:///test.R").unwrap();
         let edits = &changes[&uri];
-        
+
         assert_eq!(edits.len(), 2); // Should only rename the inner x (definition and usage)
     }
 
@@ -353,8 +340,8 @@ mod tests {
                 undefined_var
             }
         "#};
-        
-        let result = setup_rename_test(src, 1, 4, "new_name");
+
+        let result = setup(src, 1, 4, "new_name");
         assert!(result.is_none()); // Should not allow renaming undefined variables
     }
 
@@ -370,13 +357,13 @@ mod tests {
                 x
             }
         "#};
-        
+
         // Rename the inner y - should only affect inner function
-        let result = setup_rename_test(src, 3, 8, "inner_y").unwrap();
+        let result = setup(src, 3, 8, "inner_y").unwrap();
         let changes = result.changes.unwrap();
         let uri = Uri::parse("file:///test.R").unwrap();
         let edits = &changes[&uri];
-        
+
         assert_eq!(edits.len(), 2); // Definition and usage of y
     }
 
@@ -389,13 +376,13 @@ mod tests {
                 x
             }
         "#};
-        
+
         // Rename outer x - should only affect outer scope
-        let result = setup_rename_test(src, 0, 0, "outer_x").unwrap();
+        let result = setup(src, 0, 0, "outer_x").unwrap();
         let changes = result.changes.unwrap();
         let uri = Uri::parse("file:///test.R").unwrap();
         let edits = &changes[&uri];
-        
+
         assert_eq!(edits.len(), 1); // Only outer x definition
     }
 
@@ -408,13 +395,13 @@ mod tests {
                 }
             }
         "#};
-        
+
         // Rename parameter x from outer function
-        let result = setup_rename_test(src, 0, 9, "param_x").unwrap();
+        let result = setup(src, 0, 9, "param_x").unwrap();
         let changes = result.changes.unwrap();
         let uri = Uri::parse("file:///test.R").unwrap();
         let edits = &changes[&uri];
-        
+
         assert_eq!(edits.len(), 2); // Parameter definition and usage in nested function
     }
 
@@ -428,17 +415,17 @@ mod tests {
             }
             x
         "#};
-        
+
         // In R, if blocks don't create new scopes, so `x <- 2` reassigns the same variable
         // However, this is a complex case - let's just verify basic functionality for now
-        let result = setup_rename_test(src, 2, 4, "if_x");
-        
+        let result = setup(src, 2, 4, "if_x");
+
         // For now, we'll accept the current behavior - we can improve it later
         if let Some(workspace_edit) = result {
             let changes = workspace_edit.changes.unwrap();
             let uri = Uri::parse("file:///test.R").unwrap();
             let edits = &changes[&uri];
-            
+
             // The current implementation might not handle all cases perfectly
             // This is acceptable for an initial implementation
             assert!(edits.len() >= 2);
