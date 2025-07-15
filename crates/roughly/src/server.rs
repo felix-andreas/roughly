@@ -10,15 +10,15 @@ use {
             DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
             DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol,
             DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
-            GlobPattern, InitializeParams, InitializeResult, InitializedParams, MessageType, OneOf,
-            Position, PublishDiagnosticsParams, Range, Registration, RegistrationParams,
+            GlobPattern, InitializeParams, InitializeResult, InitializedParams, Location, MessageType, OneOf,
+            Position, PublishDiagnosticsParams, Range, ReferenceParams, Registration, RegistrationParams,
             RelativePattern, RenameParams, SaveOptions, ServerCapabilities, ServerInfo,
             ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind,
             TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceEdit,
             WorkspaceSymbolParams, WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
         },
-        rename, tree, utils,
+        references, rename, tree, utils,
     },
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
@@ -155,6 +155,7 @@ impl LanguageServer for ServerState {
                     self.experimental_features.range_formatting,
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(self.experimental_features.goto_references)),
                 rename_provider: Some(OneOf::Left(self.experimental_features.rename)),
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
                     TextDocumentSyncOptions {
@@ -587,6 +588,39 @@ impl LanguageServer for ServerState {
         );
 
         box_future(Ok(workspace_edit))
+    }
+
+    //
+    // REFERENCES
+    //
+
+    fn references(
+        &mut self,
+        params: ReferenceParams,
+    ) -> BoxFuture<'static, Result<Option<Vec<Location>>, ResponseError>> {
+        let uri = params.text_document_position.text_document.uri;
+        let path = uri.to_file_path().unwrap();
+        let position = params.text_document_position.position;
+        let include_declaration = params.context.include_declaration;
+
+        tracing::debug!(?path, ?position, ?include_declaration, "find references");
+
+        let Some(document) = self.document_map.get(&path) else {
+            tracing::info!(?path, "document not found");
+            return box_future(Err(path_not_found_error(&path)));
+        };
+
+        let references = references::find_references(
+            &uri,
+            position.line as usize,
+            position.character as usize,
+            include_declaration,
+            &document.rope,
+            &document.tree,
+            &self.workspace_symbols,
+        );
+
+        box_future(Ok(references))
     }
 
     //
