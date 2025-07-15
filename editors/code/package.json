@@ -5,14 +5,21 @@
 	"author": "Felix Andreas",
 	"version": "0.0.7",
 	"publisher": "felix-andreas",
-	"icon": "images/icon.png",
+	"license": "UPL-1.0",
+	"homepage": "https://roughly.felixandreas.me",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/felix-andreas/roughly"
 	},
-	"license": "UPL-1.0",
+	"bugs": {
+		"url": "https://github.com/astral-sh/ty-vscode/issues"
+	},
+	"icon": "images/icon.png",
 	"keywords": [
-		"r"
+		"r",
+		"language server",
+		"formatting",
+		"linting"
 	],
 	"categories": [
 		"Formatters",
@@ -45,9 +52,29 @@
 	"main": "./out/extension",
 	"activationEvents": [
 		"onLanguage:r",
-		"workspaceContains:R"
+		"workspaceContains:*.r",
+		"workspaceContains:*.R"
 	],
 	"contributes": {
+		"languages": [
+			{
+				"id": "r",
+				"aliases": [
+					"R",
+					"r"
+				],
+				"extensions": [
+					".R",
+					".r",
+					".Rprofile",
+					".rprofile"
+				],
+				"filenames": [
+					"NAMESPACE"
+				],
+				"configuration": "language-configuration.json"
+			}
+		],
 		"commands": [
 			{
 				"title": "Roughly: Restart Server",
