@@ -2,7 +2,7 @@ use {
     crate::{
         cli, completions,
         config::{Config, ExperimentalFeatures},
-        definition, diagnostics, format,
+        definition, diagnostics, format, rename,
         index::{self, IndexError},
         lsp_types::{
             CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
@@ -15,7 +15,7 @@ use {
             RelativePattern, SaveOptions, ServerCapabilities, ServerInfo, ShowMessageParams,
             TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
             TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceSymbolParams,
-            WorkspaceSymbolResponse,
+            WorkspaceSymbolResponse, RenameParams, WorkspaceEdit,
             notification::{DidChangeWatchedFiles, Notification},
         },
         tree, utils,
@@ -155,6 +155,7 @@ impl LanguageServer for ServerState {
                     self.experimental_features.range_formatting,
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Left(self.experimental_features.rename)),
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
                     TextDocumentSyncOptions {
                         open_close: Some(true),
@@ -473,6 +474,35 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(?definitions, "result");
         box_future(Ok(definitions))
+    }
+
+    fn rename(
+        &mut self,
+        params: RenameParams,
+    ) -> BoxFuture<'static, Result<Option<WorkspaceEdit>, ResponseError>> {
+        let uri = params.text_document_position.text_document.uri;
+        let path = uri.to_file_path().unwrap();
+        let position = params.text_document_position.position;
+        let new_name = params.new_name;
+
+        tracing::debug!(?path, ?position, ?new_name, "rename");
+
+        let Some(document) = self.document_map.get(&path) else {
+            tracing::info!(?path, "document not found");
+            return box_future(Err(ResponseError::new(ErrorCode::INTERNAL_ERROR, "")));
+        };
+
+        let workspace_edit = rename::rename(
+            &uri,
+            position.line as usize,
+            position.character as usize,
+            &new_name,
+            &document.rope,
+            &document.tree,
+        );
+
+        tracing::debug!(?workspace_edit, "result");
+        box_future(Ok(workspace_edit))
     }
 
     //

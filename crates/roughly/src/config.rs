@@ -93,6 +93,7 @@ pub struct ExperimentalFeatures {
     pub goto_definition: bool,
     pub range_formatting: bool,
     pub unused: bool,
+    pub rename: bool,
 }
 
 #[cfg(test)]
