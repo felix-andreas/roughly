@@ -9,7 +9,8 @@ use {
 fn setup(text: &str, nested: bool) -> Vec<DocumentSymbol> {
     let rope = Rope::from_str(text);
     let tree = tree::parse_rope(&mut tree::new_parser(), &rope, None);
-    index::index(tree.root_node(), &rope, nested, false)
+    let items = index::index(tree.root_node(), &rope, nested, false);
+    items.into_iter().map(|item| item.to_document_symbol()).collect()
 }
 
 fn setup_nested(text: &str) -> Vec<DocumentSymbol> {
@@ -342,4 +343,63 @@ fn get_argument_named_and_positional() {
     // Non-existent named argument
     let arg = index::get_argument(arguments, &rope, "does_not_exist", 10);
     assert!(arg.is_none());
+}
+
+#[test]
+fn test_s4_method_signature_separation() {
+    let text = indoc! {r#"
+        setMethod("foo", "Person", function(x) x@foo)
+    "#};
+    
+    let rope = Rope::from_str(text);
+    let tree = tree::parse_rope(&mut tree::new_parser(), &rope, None);
+    let items = index::index(tree.root_node(), &rope, false, false);
+    
+    assert_eq!(items.len(), 1);
+    let item = &items[0];
+    
+    // Verify that name is just the method name (no signature)
+    assert_eq!(item.name, "foo");
+    
+    // Verify that display_name includes the signature
+    assert_eq!(item.display_name(), "foo (Person)");
+    
+    // Verify that it's an S4Method with correct signature stored separately
+    match &item.info {
+        index::ItemInfo::S4Method { signature } => {
+            assert_eq!(signature, "Person");
+        },
+        _ => panic!("Expected S4Method info type, got {:?}", item.info),
+    }
+    
+    // Also test the DocumentSymbol conversion
+    let doc_symbol = item.to_document_symbol();
+    assert_eq!(doc_symbol.name, "foo (Person)");
+}
+
+#[test]
+fn test_workspace_symbols_with_s4_methods() {
+    let text = indoc! {r#"
+        setMethod("find_element", "Person", function(x) x@name)
+        setMethod("process", c("Person", "Other"), function(x, y) x@value + y@value)
+    "#};
+    
+    let rope = Rope::from_str(text);
+    let tree = tree::parse_rope(&mut tree::new_parser(), &rope, None);
+    let items = index::index(tree.root_node(), &rope, false, false);
+    
+    // Create a workspace symbols map
+    let mut workspace_symbols = std::collections::HashMap::new();
+    let path = std::path::PathBuf::from("/test/file.R");
+    workspace_symbols.insert(path, items);
+    
+    // Test workspace symbols with query "find"
+    let symbols = index::get_workspace_symbols("find", &workspace_symbols);
+    assert_eq!(symbols.len(), 1);
+    assert_eq!(symbols[0].name, "find_element (Person)");
+    
+    // Test workspace symbols with query "process"
+    let symbols = index::get_workspace_symbols("process", &workspace_symbols);
+    assert_eq!(symbols.len(), 1);
+    assert_eq!(symbols[0].name, "process (Person, Other)");
 }

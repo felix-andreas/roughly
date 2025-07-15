@@ -11,20 +11,76 @@ use {
     tree_sitter::{Node, Parser},
 };
 
+#[derive(Debug, Clone)]
+pub struct Item {
+    pub name: String,
+    pub kind: SymbolKind,
+    pub detail: Option<String>,
+    pub range: Range,
+    pub selection_range: Range,
+    pub children: Option<Vec<Item>>,
+    pub info: ItemInfo,
+}
+
+#[derive(Debug, Clone)]
+pub enum ItemInfo {
+    Regular,
+    S4Method { signature: String },
+}
+
+impl Item {
+    pub fn display_name(&self) -> String {
+        match &self.info {
+            ItemInfo::Regular => self.name.clone(),
+            ItemInfo::S4Method { signature } => format!("{} ({})", self.name, signature),
+        }
+    }
+
+    pub fn to_document_symbol(&self) -> DocumentSymbol {
+        #[allow(deprecated)]
+        DocumentSymbol {
+            name: self.display_name(),
+            kind: self.kind,
+            detail: self.detail.clone(),
+            tags: None,
+            range: self.range,
+            selection_range: self.selection_range,
+            children: self.children.as_ref().map(|children| {
+                children.iter().map(|child| child.to_document_symbol()).collect()
+            }),
+            deprecated: None,
+        }
+    }
+
+    pub fn from_document_symbol(symbol: DocumentSymbol) -> Self {
+        Self {
+            name: symbol.name,
+            kind: symbol.kind,
+            detail: symbol.detail,
+            range: symbol.range,
+            selection_range: symbol.selection_range,
+            children: symbol.children.map(|children| {
+                children.into_iter().map(Item::from_document_symbol).collect()
+            }),
+            info: ItemInfo::Regular,
+        }
+    }
+}
+
 pub trait SymbolsMap {
     fn filter_map<'a, T, I>(
         &'a self,
-        key: impl Fn(&'a PathBuf, &'a [DocumentSymbol]) -> I,
+        key: impl Fn(&'a PathBuf, &'a [Item]) -> I,
         limit: usize,
     ) -> Vec<T>
     where
         I: Iterator<Item = T>;
 }
 
-impl SymbolsMap for HashMap<PathBuf, Vec<DocumentSymbol>> {
+impl SymbolsMap for HashMap<PathBuf, Vec<Item>> {
     fn filter_map<'a, T, I>(
         &'a self,
-        key: impl Fn(&'a PathBuf, &'a [DocumentSymbol]) -> I,
+        key: impl Fn(&'a PathBuf, &'a [Item]) -> I,
         limit: usize,
     ) -> Vec<T>
     where
@@ -56,9 +112,9 @@ pub fn get_workspace_symbols(
                             .map(|child| (child, Some(symbol.name.as_ref()))),
                     )
                 })
-                .filter(|(symbol, _)| utils::starts_with_lowercase(&symbol.name, query))
+                .filter(|(symbol, _)| utils::starts_with_lowercase(&symbol.display_name(), query))
                 .map(move |(symbol, container_name)| WorkspaceSymbol {
-                    name: symbol.name.to_string(),
+                    name: symbol.display_name(),
                     kind: symbol.kind,
                     tags: None,
                     container_name: container_name.map(str::to_string),
@@ -79,7 +135,7 @@ pub struct IndexError;
 pub fn index_dir(
     base_path: &Path,
     parser: &mut Parser,
-) -> Result<Vec<(PathBuf, Vec<DocumentSymbol>)>, IndexError> {
+) -> Result<Vec<(PathBuf, Vec<Item>)>, IndexError> {
     let start = std::time::Instant::now();
 
     let mut n = 0;
@@ -114,7 +170,7 @@ pub fn index_dir(
     Ok(symbols)
 }
 
-pub fn index_file(path: impl AsRef<Path>, parser: &mut Parser) -> Vec<DocumentSymbol> {
+pub fn index_file(path: impl AsRef<Path>, parser: &mut Parser) -> Vec<Item> {
     let Ok(rope) = utils::read_to_rope(&path) else {
         tracing::error!(message = "indexing: couldn't read file", path = %path.as_ref().display());
         return vec![];
@@ -124,7 +180,7 @@ pub fn index_file(path: impl AsRef<Path>, parser: &mut Parser) -> Vec<DocumentSy
     index(tree.root_node(), &rope, false, false)
 }
 
-pub fn index(root: Node, rope: &Rope, nested: bool, other: bool) -> Vec<DocumentSymbol> {
+pub fn index(root: Node, rope: &Rope, nested: bool, other: bool) -> Vec<Item> {
     let mut symbols = vec![];
 
     for node in root.named_children(&mut root.walk()) {
@@ -165,13 +221,14 @@ pub fn index(root: Node, rope: &Rope, nested: bool, other: bool) -> Vec<Document
                     let name = rope.byte_slice(lhs.byte_range()).to_string();
                     let range = utils::node_range(node);
                     let selection_range = utils::node_range(lhs);
-                    symbols.push(document_symbol(
+                    symbols.push(create_item(
                         name,
                         kind,
                         detail,
                         range,
                         selection_range,
                         children,
+                        ItemInfo::Regular,
                     ))
                 } else if nested {
                     // TODO: recurse lhs and rhs in else case? (and nested == true)
@@ -215,7 +272,7 @@ fn index_function(
     function: Node,
     rope: &Rope,
     nested: bool,
-) -> (SymbolKind, Option<String>, Option<Vec<DocumentSymbol>>) {
+) -> (SymbolKind, Option<String>, Option<Vec<Item>>) {
     let maybe_parameters = function.child_by_field_name("parameters");
     let maybe_body = function.child_by_field_name("body");
 
@@ -238,7 +295,7 @@ fn index_function(
     (SymbolKind::FUNCTION, detail, children)
 }
 
-fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
+fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<Item> {
     let maybe_function = call.child_by_field_name("function");
     let maybe_arguments = call.child_by_field_name("arguments");
     let (Some(function), Some(arguments)) = (maybe_function, maybe_arguments) else {
@@ -269,7 +326,7 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
         _ => return None,
     };
 
-    let (kind, name, detail, children) = match name.as_str() {
+    let (kind, name, detail, children, signature) = match name.as_str() {
         "setClass" => {
             // setClass("Person", slots = c(name = "character", age = "numeric"))
             let class_name = get_argument(arguments, rope, "Class", 0)
@@ -283,7 +340,7 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
                 })
                 .unwrap_or_else(|| "Unknown".to_string());
 
-            (SymbolKind::CLASS, class_name, None, None)
+            (SymbolKind::CLASS, class_name, None, None, None)
         }
         "setGeneric" => {
             // setGeneric("foo", function(x) standardGeneric("foo"))
@@ -298,7 +355,7 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
                     }
                 })
                 .unwrap_or_else(|| "Unknown".to_string());
-            (SymbolKind::INTERFACE, generic_name, None, None)
+            (SymbolKind::INTERFACE, generic_name, None, None, None)
         }
         "setMethod" => {
             // setMethod("foo", "Person", function(x) x@foo)
@@ -360,9 +417,10 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
 
             (
                 SymbolKind::METHOD,
-                format!("{method_name} ({signature})"),
+                method_name,
                 None,
                 None,
+                Some(signature),
             )
         }
         "R6Class" => {
@@ -432,17 +490,41 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<DocumentSymbol> {
                     };
 
                     let range = utils::node_range(member);
-                    members.push(document_symbol(name, kind, detail, range, range, children));
+                    members.push(create_item(name, kind, detail, range, range, children, ItemInfo::Regular));
                 }
             }
 
-            (SymbolKind::CLASS, class_name, None, Some(members))
+            (SymbolKind::CLASS, class_name, None, Some(members), None)
         }
         _ => return None,
     };
 
     let range = utils::node_range(call);
-    Some(document_symbol(name, kind, detail, range, range, children))
+    let info = match signature {
+        Some(sig) => ItemInfo::S4Method { signature: sig },
+        None => ItemInfo::Regular,
+    };
+    Some(create_item(name, kind, detail, range, range, children, info))
+}
+
+pub fn create_item(
+    name: String,
+    kind: SymbolKind,
+    detail: Option<String>,
+    range: Range,
+    selection_range: Range,
+    children: Option<Vec<Item>>,
+    info: ItemInfo,
+) -> Item {
+    Item {
+        name,
+        kind,
+        detail,
+        range,
+        selection_range,
+        children,
+        info,
+    }
 }
 
 pub fn document_symbol(
