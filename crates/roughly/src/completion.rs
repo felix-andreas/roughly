@@ -57,7 +57,8 @@ pub fn get(
                 completions
                     .into_iter()
                     .map(|item| CompletionItem {
-                        label: item,
+                        label: item.clone(),
+                        sort_text: Some(format!("1_{}", item)),
                         ..Default::default()
                     })
                     .collect(),
@@ -105,6 +106,7 @@ pub fn get(
                     description: Some("Keyword".into()),
                 }),
                 kind: Some(CompletionItemKind::KEYWORD),
+                sort_text: Some(format!("0_{}", reserved_word)),
                 ..Default::default()
             })
     };
@@ -127,6 +129,7 @@ pub fn get(
                 description: Some("Global".into()),
             }),
             kind: Some(symbol_kind_to_completion_kind(symbol.kind)),
+            sort_text: Some(format!("2_{}", symbol.name)),
             ..Default::default()
         });
 
@@ -153,21 +156,31 @@ pub fn get(
                                         })
                                         .filter(|name| utils::starts_with_lowercase(name, &query))
                                         .map(|label| CompletionItem {
-                                            label,
+                                            label: label.clone(),
                                             label_details: Some(CompletionItemLabelDetails {
                                                 detail: None,
                                                 description: Some("Parameter".into()),
                                             }),
                                             kind: Some(CompletionItemKind::VARIABLE),
+                                            sort_text: Some(format!("1_{}", label)),
                                             ..Default::default()
                                         }),
                                 );
                             }
 
                             if let Some(body) = node.child_by_field_id(field::BODY) {
-                                items.extend(locals_completion(body, rope).into_iter().filter(
-                                    |item| utils::starts_with_lowercase(&item.label, &query),
-                                ));
+                                items.extend(
+                                    locals_completion(body, rope)
+                                        .into_iter()
+                                        .filter(|item| utils::starts_with_lowercase(&item.label, &query))
+                                        .map(|mut item| {
+                                            // Update sort_text for local variables to ensure consistent precedence
+                                            if let Some(sort_text) = &item.sort_text {
+                                                item.sort_text = Some(sort_text.clone());
+                                            }
+                                            item
+                                        }),
+                                );
                             }
 
                             items
@@ -245,12 +258,13 @@ pub fn locals_completion(node: Node, rope: &Rope) -> Vec<CompletionItem> {
                 {
                     let label = rope.byte_slice(lhs.byte_range()).to_string();
                     symbols.push(CompletionItem {
-                        label,
+                        label: label.clone(),
                         label_details: Some(CompletionItemLabelDetails {
                             detail: None,
                             description: Some("Local".into()),
                         }),
                         kind: Some(CompletionItemKind::VARIABLE),
+                        sort_text: Some(format!("1_{}", label)),
                         ..Default::default()
                     })
                 }
@@ -272,7 +286,10 @@ const NAMESPACE_QUERY: &str = r#"(namespace_operator rhs: (identifier) @ident)"#
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::tree, indoc::indoc, ropey::Rope, std::collections::HashMap};
+    use {
+    super::*, crate::tree, indoc::indoc, ropey::Rope, std::collections::HashMap,
+    crate::lsp_types::{DocumentSymbol, Range, SymbolKind},
+};
 
     fn setup(
         text: &str,
@@ -564,5 +581,116 @@ mod tests {
         let _field = Query::new(&tree_sitter_r::LANGUAGE.into(), FIELD_QUERY).unwrap();
         let _item = Query::new(&tree_sitter_r::LANGUAGE.into(), ITEM_QUERY).unwrap();
         let _namespace = Query::new(&tree_sitter_r::LANGUAGE.into(), NAMESPACE_QUERY).unwrap();
+    }
+
+    #[test]
+    fn local_symbols_have_higher_precedence_than_global() {
+        let rope = Rope::from_str(indoc! {"
+            function(x) {
+                var_local <- 1
+                var_
+            }
+        "});
+
+        let tree = tree::parse(&mut tree::new_parser(), rope.to_string().as_str(), None);
+        let position = Position::new(2, 8);
+        
+        // Create a mock symbols map with a global symbol that starts with "var_"
+        let mut symbols_map = HashMap::new();
+        symbols_map.insert(
+            std::path::PathBuf::from("test.R"),
+            vec![DocumentSymbol {
+                name: "var_global".to_string(),
+                kind: SymbolKind::VARIABLE,
+                range: Range::new(Position::new(0, 0), Position::new(0, 10)),
+                selection_range: Range::new(Position::new(0, 0), Position::new(0, 10)),
+                detail: None,
+                tags: None,
+                deprecated: None,
+                children: None,
+            }],
+        );
+
+        let completion_response = get(position, &rope, &tree, &symbols_map).unwrap();
+        
+        if let CompletionResponse::Array(items) = completion_response {
+            // Find the local and global variable items
+            let local_item = items.iter().find(|item| item.label == "var_local").unwrap();
+            let global_item = items.iter().find(|item| item.label == "var_global").unwrap();
+            
+            // Check that local item has higher precedence (lower sort_text)
+            assert!(local_item.sort_text.is_some());
+            assert!(global_item.sort_text.is_some());
+            
+            let local_sort = local_item.sort_text.as_ref().unwrap();
+            let global_sort = global_item.sort_text.as_ref().unwrap();
+            
+            // Local symbols should have sort_text starting with "1_", global with "2_"
+            assert!(local_sort.starts_with("1_"));
+            assert!(global_sort.starts_with("2_"));
+            
+            // Therefore, local should sort before global
+            assert!(local_sort < global_sort);
+        } else {
+            panic!("Expected CompletionResponse::Array");
+        }
+    }
+
+    #[test]
+    fn precedence_order_keywords_local_global() {
+        let rope = Rope::from_str(indoc! {"
+            function(x) {
+                if_local <- 1
+                i
+            }
+        "});
+
+        let tree = tree::parse(&mut tree::new_parser(), rope.to_string().as_str(), None);
+        let position = Position::new(2, 5);
+        
+        // Create a mock symbols map with a global symbol that starts with "i"
+        let mut symbols_map = HashMap::new();
+        symbols_map.insert(
+            std::path::PathBuf::from("test.R"),
+            vec![DocumentSymbol {
+                name: "if_global".to_string(),
+                kind: SymbolKind::VARIABLE,
+                range: Range::new(Position::new(0, 0), Position::new(0, 10)),
+                selection_range: Range::new(Position::new(0, 0), Position::new(0, 10)),
+                detail: None,
+                tags: None,
+                deprecated: None,
+                children: None,
+            }],
+        );
+
+        let completion_response = get(position, &rope, &tree, &symbols_map).unwrap();
+        
+        if let CompletionResponse::Array(items) = completion_response {
+            // Find the keyword, local, and global items
+            let keyword_item = items.iter().find(|item| item.label == "if").unwrap();
+            let local_item = items.iter().find(|item| item.label == "if_local").unwrap();
+            let global_item = items.iter().find(|item| item.label == "if_global").unwrap();
+            
+            // Check that all items have sort_text
+            assert!(keyword_item.sort_text.is_some());
+            assert!(local_item.sort_text.is_some());
+            assert!(global_item.sort_text.is_some());
+            
+            let keyword_sort = keyword_item.sort_text.as_ref().unwrap();
+            let local_sort = local_item.sort_text.as_ref().unwrap();
+            let global_sort = global_item.sort_text.as_ref().unwrap();
+            
+            // Verify the precedence order: keywords (0_) > local (1_) > global (2_)
+            assert!(keyword_sort.starts_with("0_"));
+            assert!(local_sort.starts_with("1_"));
+            assert!(global_sort.starts_with("2_"));
+            
+            // Therefore, keyword < local < global
+            assert!(keyword_sort < local_sort);
+            assert!(local_sort < global_sort);
+        } else {
+            panic!("Expected CompletionResponse::Array");
+        }
     }
 }
