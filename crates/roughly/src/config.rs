@@ -1,5 +1,6 @@
 use {
     crate::{diagnostics::Config as LintConfig, format::Config as FormatConfig},
+    miette::Diagnostic,
     serde::Deserialize,
     std::{io, path::Path},
     thiserror::Error,
@@ -43,11 +44,20 @@ pub enum Case {
     Snake,
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Diagnostic)]
 pub enum ConfigError {
-    #[error("failed to read config")]
+    #[error("Failed to read config file")]
+    #[diagnostic(
+        code(roughly::config::io),
+        help("Check that the config file exists and is readable")
+    )]
     IoError(#[from] io::Error),
-    #[error("invalid config file")]
+    
+    #[error("Invalid config file format")]
+    #[diagnostic(
+        code(roughly::config::invalid),
+        help("Check the TOML syntax in your roughly.toml file")
+    )]
     Invalid(#[from] toml::de::Error),
 }
 

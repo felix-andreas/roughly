@@ -7,12 +7,79 @@ use {
     },
     console::style,
     ignore::Walk,
+    miette::{Diagnostic, Report},
     ropey::Rope,
     std::{
         path::{Path, PathBuf},
         time::Duration,
     },
+    thiserror::Error,
 };
+
+//
+// ERRORS
+//
+
+#[derive(Error, Debug, Diagnostic)]
+pub enum CliError {
+    #[error("Check failed")]
+    #[diagnostic(code(roughly::check::failed))]
+    Check,
+    
+    #[error("Format failed")]
+    #[diagnostic(code(roughly::format::failed))]
+    Format,
+    
+    #[error("Debug command failed")]
+    #[diagnostic(code(roughly::debug::failed))]
+    Debug,
+    
+    #[error("Configuration error")]
+    #[diagnostic(code(roughly::config::error))]
+    Config {
+        #[source]
+        source: config::ConfigError,
+    },
+    
+    #[error("I/O error")]
+    #[diagnostic(code(roughly::io::error))]
+    Io {
+        #[source]
+        source: std::io::Error,
+        path: PathBuf,
+    },
+    
+    #[error("Format error")]
+    #[diagnostic(code(roughly::format::error))]
+    FormatError {
+        #[source]
+        source: format::FormatError,
+        path: PathBuf,
+        #[source_code]
+        source_code: String,
+    },
+}
+
+// Keep the old error types for backwards compatibility
+#[derive(Debug)]
+pub struct CheckError;
+
+#[derive(Debug)]
+pub struct FmtError;
+
+#[derive(Debug)]
+pub struct DebugError;
+
+/// Report an error using miette
+pub fn report_error<T: Into<Report>>(error: T) {
+    eprintln!("{:?}", error.into());
+}
+
+/// Report a diagnostic error using miette
+pub fn report_diagnostic_error<T: Diagnostic + Send + Sync + 'static>(error: T) {
+    let report = Report::new(error);
+    eprintln!("{:?}", report);
+}
 
 //
 // LOG
@@ -53,9 +120,6 @@ pub fn error(message: &str) {
 // CHECK
 //
 
-#[derive(Debug)]
-pub struct CheckError;
-
 pub fn check(
     maybe_files: Option<&[PathBuf]>,
     experimental_features: ExperimentalFeatures,
@@ -71,7 +135,7 @@ pub fn check(
             let config = match config::Config::from_path(file, experimental_features) {
                 Ok(config) => config,
                 Err(err) => {
-                    error(&err.to_string());
+                    report_diagnostic_error(err);
                     return Err(CheckError);
                 }
             };
@@ -209,9 +273,6 @@ pub fn check(
 // FMT
 //
 
-#[derive(Debug)]
-pub struct FmtError;
-
 pub fn fmt(
     maybe_files: Option<&[PathBuf]>,
     check: bool,
@@ -228,7 +289,7 @@ pub fn fmt(
         .iter()
         .map(|file| {
             let config = config::Config::from_path(file, experimental_features).map_err(|err| {
-                error(&err.to_string());
+                report_diagnostic_error(err);
                 FmtError
             })?;
 
@@ -279,8 +340,8 @@ pub fn fmt(
                 Ok(new) => new,
                 Err(err) => {
                     n_errors += 1;
-                    error(&format!("failed to format: {}", path.display()));
-                    eprintln!("{err}");
+                    eprintln!("Failed to format: {}", path.display());
+                    report_diagnostic_error(err);
                     continue;
                 }
             };
@@ -353,9 +414,6 @@ pub fn server(experimental_features: ExperimentalFeatures) {
 //
 // DEBUG
 //
-
-#[derive(Debug)]
-pub struct DebugError;
 
 pub fn index(paths: Option<&[PathBuf]>, nested: bool, print_items: bool) -> Result<(), DebugError> {
     let mut parser = tree::new_parser();
@@ -496,4 +554,55 @@ pub fn parse_experimental_flags(flags: &[impl AsRef<str>]) -> ExperimentalFeatur
     }
 
     features
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use miette::Report;
+    use crate::config::ConfigError;
+    use crate::format::FormatError;
+    
+    #[test]
+    fn test_config_error_is_miette_diagnostic() {
+        let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "config file not found");
+        let config_error = ConfigError::IoError(io_error);
+        
+        // Test that we can create a miette Report from the error
+        let report = Report::new(config_error);
+        let error_string = format!("{:?}", report);
+        
+        // Should contain the error code and help text
+        assert!(error_string.contains("roughly::config::io"));
+        assert!(error_string.contains("Failed to read config file"));
+    }
+    
+    #[test]
+    fn test_format_error_is_miette_diagnostic() {
+        let format_error = FormatError::SyntaxError {
+            kind: "identifier",
+            line: 1,
+            col: 10,
+        };
+        
+        // Test that we can create a miette Report from the error
+        let report = Report::new(format_error);
+        let error_string = format!("{:?}", report);
+        
+        // Should contain the error code and help text
+        assert!(error_string.contains("roughly::format::syntax"));
+        assert!(error_string.contains("Syntax error"));
+    }
+    
+    #[test]
+    fn test_report_diagnostic_error() {
+        let format_error = FormatError::Missing {
+            kind: "identifier",
+            line: 2,
+            col: 17,
+        };
+        
+        // This should not panic and should format properly
+        report_diagnostic_error(format_error);
+    }
 }

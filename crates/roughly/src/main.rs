@@ -6,6 +6,9 @@ use {
 };
 
 fn main() -> ExitCode {
+    // Initialize miette
+    miette::set_panic_hook();
+    
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .with(

@@ -4,6 +4,7 @@ use {
         utils,
     },
     itertools::Itertools,
+    miette::Diagnostic,
     ropey::Rope,
     serde::Deserialize,
     std::time::Instant,
@@ -35,26 +36,45 @@ pub enum LineEnding {
     CrLf,
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Diagnostic)]
 pub enum FormatError {
     #[error("Syntax error: Unexpected {kind} at line {line}, column {col}")]
+    #[diagnostic(
+        code(roughly::format::syntax),
+        help("Check the R syntax in your file")
+    )]
     SyntaxError {
         kind: &'static str,
         line: usize,
         col: usize,
     },
+    
     #[error("Missing node: Expected {kind} at line {line}, column {col}")]
+    #[diagnostic(
+        code(roughly::format::missing),
+        help("This appears to be a parser error - the code may have syntax issues")
+    )]
     Missing {
         kind: &'static str,
         line: usize,
         col: usize,
     },
+    
     #[error("Missing required field '{field}' in node of type '{kind}'")]
+    #[diagnostic(
+        code(roughly::format::missing_field),
+        help("This is an internal error - please report this bug")
+    )]
     MissingField {
         kind: &'static str,
         field: &'static str,
     },
+    
     #[error("Encountered unknown node type '{kind}' with content: \"{raw}\"")]
+    #[diagnostic(
+        code(roughly::format::unknown_kind),
+        help("This is an internal error - please report this bug")
+    )]
     UnknownKind { kind: &'static str, raw: String },
 }
 

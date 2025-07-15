@@ -9,6 +9,7 @@ console.workspace = true
 ignore.workspace = true
 indoc.workspace = true
 itertools.workspace = true
+miette.workspace = true
 ropey.workspace = true
 serde.workspace = true
 similar.workspace = true
