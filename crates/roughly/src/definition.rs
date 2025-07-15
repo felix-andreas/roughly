@@ -98,7 +98,7 @@ fn try_get_identifier<'tree>(tree: &'tree Tree, line: usize, col: usize) -> Opti
     (start.kind_id() == kind::IDENTIFIER).then_some(start)
 }
 
-fn find_previous_definition<'a>(start: Node<'a>, rope: &Rope, name: &str) -> Option<Node<'a>> {
+pub fn find_previous_definition<'a>(start: Node<'a>, rope: &Rope, name: &str) -> Option<Node<'a>> {
     let mut node = start;
     loop {
         let is_descendent;

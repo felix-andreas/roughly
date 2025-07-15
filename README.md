@@ -168,6 +168,7 @@ Roughly includes several experimental features that can be enabled in the VS Cod
 | `all`              | Enables all experimental features |
 | `goto_definition`  | Jump to symbol definitions        |
 | `range_formatting` | Format selected code ranges       |
+| `rename`           | Rename symbols                    |
 | `unused`           | Detect unused variables           |
 
 ## Development
