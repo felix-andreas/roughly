@@ -76,6 +76,7 @@ fn find_references_in_scope<'a>(
         // If this is an identifier with matching name, check if it refers to our definition
         if node.kind_id() == kind::IDENTIFIER
             && rope.byte_slice(node.byte_range()) == name
+            // don't rename RHS of extract @, extract $, or namespace :: operators
             && !tree::is_rhs_of_extract_or_namespace(node)
             && refers_to_definition(node, definition, rope, name)
         {
