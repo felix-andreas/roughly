@@ -55,8 +55,7 @@ pub fn find_references(
         }
     } else {
         // This might be a global symbol - check if it's defined in this file or other files
-        let is_local_scope = std::iter::successors(Some(start), |node| node.parent())
-            .any(|node| node.kind_id() == kind::FUNCTION_DEFINITION);
+        let is_local_scope = tree::find_containing_function(start).is_some();
 
         // Find references in current file
         if !is_local_scope {
@@ -117,9 +116,7 @@ fn find_local_references<'a>(
     references: &mut Vec<Node<'a>>,
 ) {
     // Find the scope containing the definition
-    let scope = std::iter::successors(Some(definition), |node| node.parent())
-        .find(|node| node.kind_id() == kind::FUNCTION_DEFINITION)
-        .unwrap_or(root);
+    let scope = tree::find_containing_function(definition).unwrap_or(root);
 
     find_references_in_scope(
         scope,

@@ -34,7 +34,7 @@ pub fn rename(
     }
 
     let definition = definition::find_previous_definition(start, rope, &name)?;
-    let scope = find_scope_containing(definition)?; // for now we return if global scope
+    let scope = tree::find_containing_function(definition)?; // for now we return if global scope
 
     let mut references = Vec::new();
     find_references_in_scope(scope, rope, &name, definition, &mut references);
@@ -60,11 +60,6 @@ pub fn rename(
         changes: Some(HashMap::from_iter([(uri.clone(), edits)])),
         ..Default::default()
     })
-}
-
-fn find_scope_containing(node: Node) -> Option<Node> {
-    std::iter::successors(Some(node), |node| node.parent())
-        .find(|node| node.kind_id() == kind::FUNCTION_DEFINITION)
 }
 
 fn find_references_in_scope<'a>(

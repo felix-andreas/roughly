@@ -121,6 +121,11 @@ pub fn find_next_error(node: Node) -> Option<Node> {
     }
 }
 
+pub fn find_containing_function(node: Node) -> Option<Node> {
+    std::iter::successors(Some(node), |node| node.parent())
+        .find(|node| node.kind_id() == kind::FUNCTION_DEFINITION)
+}
+
 pub fn try_get_identifier<'tree>(
     tree: &'tree Tree,
     line: usize,
