@@ -1,5 +1,6 @@
 import * as fs from "fs"
 import * as path from "path"
+import { spawn } from "child_process"
 
 import {
   commands,
@@ -12,7 +13,10 @@ import {
   StatusBarItem,
   TextEditor,
   ThemeColor,
+  ViewColumn,
+  Uri,
 } from 'vscode'
+import * as vscode from 'vscode'
 
 import {
   LanguageClient,
@@ -33,7 +37,8 @@ let statusBar: StatusBarItem
 let status = { health: "started" }
 let version: string | undefined
 
-export async function activate({ subscriptions, extension, }: ExtensionContext): Promise<void> {
+export async function activate(context: ExtensionContext): Promise<void> {
+  const { subscriptions, extension } = context
   version = extension.packageJSON.version ?? "<unknown>"
 
   subscriptions.push(
@@ -80,6 +85,12 @@ export async function activate({ subscriptions, extension, }: ExtensionContext):
           client.outputChannel.show()
         }
       }
+    ),
+    commands.registerCommand(
+      "roughly.showSyntaxTree",
+      async () => {
+        await showSyntaxTree()
+      }
     )
   )
 
@@ -89,11 +100,31 @@ export async function activate({ subscriptions, extension, }: ExtensionContext):
   updateStatusBarVisibility(window.activeTextEditor)
   window.onDidChangeActiveTextEditor((editor) => updateStatusBarVisibility(editor))
 
+  registerAstContentProvider(context)
+
   restartClient()
 }
 
 export async function deactivate(): Promise<void> {
   await stopClient()
+}
+
+//
+// CONTENT PROVIDER
+//
+
+class AstContentProvider implements vscode.TextDocumentContentProvider {
+  provideTextDocumentContent(uri: vscode.Uri): string {
+    const content = astContentMap.get(uri.toString())
+    return content || "Failed to load AST content"
+  }
+}
+
+// Register the content provider
+function registerAstContentProvider(context: ExtensionContext) {
+  const provider = new AstContentProvider()
+  const registration = workspace.registerTextDocumentContentProvider('roughly-ast', provider)
+  context.subscriptions.push(registration)
 }
 
 //
@@ -107,7 +138,7 @@ async function restartClient(): Promise<void> {
     void stopClient()
     client = newClient
     setServerStatus({ health: "started" })
-  } catch (reason) {
+  } catch (_) {
     void window.showWarningMessage("Failed to start Roughly language server.")
     setServerStatus({ health: "stopped" })
   }
@@ -178,6 +209,91 @@ async function stopClient(): Promise<void> {
 }
 
 //
+// SYNTAX TREE
+//
+
+async function showSyntaxTree(): Promise<void> {
+  const editor = window.activeTextEditor
+  if (!editor) {
+    window.showErrorMessage("No active editor found")
+    return
+  }
+
+  const document = editor.document
+  if (document.languageId !== 'r') {
+    window.showErrorMessage("Current file is not an R file")
+    return
+  }
+
+  const filePath = document.uri.fsPath
+  if (!filePath) {
+    window.showErrorMessage("Please save the file first")
+    return
+  }
+
+  const config = workspace.getConfiguration("roughly")
+  const roughlyPath = process.env.SERVER_PATH
+    ?? config.get<string | null>("path")
+    ?? (
+      fs.existsSync(BUNDLED_ROUGHLY_EXECUTABLE)
+        ? BUNDLED_ROUGHLY_EXECUTABLE
+        : "roughly"
+    )
+
+  const experimentalFeatures = config.get<string[] | null>("experimentalFeatures")
+  const experimentalArgs = experimentalFeatures
+    ? ["--experimental-features", experimentalFeatures.join(" ")]
+    : []
+
+  try {
+    const astOutput = await executeRoughlyDebugAst(roughlyPath, filePath, experimentalArgs)
+    const uri = Uri.parse(`roughly-ast:${path.basename(filePath)}.ast`)
+    
+    // Store the AST output so the content provider can access it
+    astContentMap.set(uri.toString(), astOutput)
+    
+    // Open the virtual document
+    const doc = await workspace.openTextDocument(uri)
+    await window.showTextDocument(doc, ViewColumn.Beside)
+  } catch (error) {
+    window.showErrorMessage(`Failed to generate syntax tree: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+function executeRoughlyDebugAst(roughlyPath: string, filePath: string, experimentalArgs: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const args = [...experimentalArgs, "debug", "ast", filePath]
+    const child = spawn(roughlyPath, args, { stdio: 'pipe' })
+    
+    let stdout = ""
+    let stderr = ""
+    
+    child.stdout.on('data', (data) => {
+      stdout += data.toString()
+    })
+    
+    child.stderr.on('data', (data) => {
+      stderr += data.toString()
+    })
+    
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(stdout)
+      } else {
+        reject(new Error(`roughly debug ast failed with code ${code}: ${stderr}`))
+      }
+    })
+    
+    child.on('error', (error) => {
+      reject(error)
+    })
+  })
+}
+
+// Map to store AST content for virtual documents
+const astContentMap = new Map<string, string>()
+
+//
 // STATUS BAR
 //
 
@@ -200,7 +316,7 @@ function updateStatusBarVisibility(editor: TextEditor | undefined) {
 }
 
 function updateStatusBarItem() {
-  let icon = ""
+  const icon = ""
   statusBar.tooltip = new MarkdownString("", true)
   statusBar.tooltip.isTrusted = true
   switch (status.health) {
