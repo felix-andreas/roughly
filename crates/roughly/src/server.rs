@@ -3,7 +3,7 @@ use {
         cli, completion,
         config::{Config, ExperimentalFeatures},
         definition, diagnostics, format,
-        index::{self, IndexError},
+        index::{self, IndexError, Item},
         lsp_types::{
             CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
             DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
@@ -91,9 +91,9 @@ struct ServerState {
     base_path: PathBuf,
     document_map: HashMap<PathBuf, Document>,
     /// stores symbolds for all other files
-    document_symbols: HashMap<PathBuf, Vec<DocumentSymbol>>,
+    document_symbols: HashMap<PathBuf, Vec<Item>>,
     /// stores index for all files in R/ folder
-    workspace_symbols: HashMap<PathBuf, Vec<DocumentSymbol>>,
+    workspace_symbols: HashMap<PathBuf, Vec<Item>>,
     parser: Parser,
 }
 
@@ -644,7 +644,7 @@ impl LanguageServer for ServerState {
             tracing::error!(?path, "symbols not found");
             return box_future(Err(path_not_found_error(&path)));
         };
-        let symbols = symbols.clone();
+        let symbols: Vec<DocumentSymbol> = symbols.iter().map(|item| item.to_document_symbol()).collect();
 
         box_future(Ok(Some(DocumentSymbolResponse::Nested(symbols))))
     }

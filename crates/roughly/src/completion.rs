@@ -1,9 +1,9 @@
 use {
     crate::{
-        index::SymbolsMap,
+        index::{ItemInfo, SymbolsMap},
         lsp_types::{
             CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse,
-            Position, SymbolKind,
+            Position,
         },
         tree::{self, field, kind},
         utils,
@@ -66,10 +66,12 @@ pub fn get(
         Context::MaybeNamespace => return None,
     }
 
-    let symbol_kind_to_completion_kind = |kind: SymbolKind| match kind {
-        SymbolKind::FUNCTION => CompletionItemKind::FUNCTION,
-        SymbolKind::CLASS => CompletionItemKind::CLASS,
-        SymbolKind::METHOD => CompletionItemKind::METHOD,
+    let to_completion_kind = |info: &ItemInfo| match info {
+        ItemInfo::Function => CompletionItemKind::FUNCTION,
+        ItemInfo::S4Class | ItemInfo::R6Class => CompletionItemKind::CLASS,
+        ItemInfo::S4Generic => CompletionItemKind::INTERFACE,
+        ItemInfo::S4Method { .. } | ItemInfo::R6Method => CompletionItemKind::METHOD,
+        ItemInfo::R6Field => CompletionItemKind::FIELD,
         _ => CompletionItemKind::VARIABLE,
     };
 
@@ -126,7 +128,7 @@ pub fn get(
                 detail: None,
                 description: Some("Global".into()),
             }),
-            kind: Some(symbol_kind_to_completion_kind(symbol.kind)),
+            kind: Some(to_completion_kind(&symbol.info)),
             ..Default::default()
         });
 
