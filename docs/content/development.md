@@ -161,8 +161,6 @@ See https://github.com/r-lib/tree-sitter-r/issues/166
 * Empty loops: for, while, repeat
 * unused variables
 
-
-
 ## References
 
 ### R
@@ -175,6 +173,7 @@ See https://github.com/r-lib/tree-sitter-r/issues/166
 
 * docs:
   * https://code.visualstudio.com/api/references/vscode-api
+  * https://code.visualstudio.com/api/language-extensions
 * examples:
   * https://github.com/microsoft/vscode-extension-samples/tree/main/lsp-sample
   * https://github.com/semanticart/lsp-from-scratch
