@@ -23,7 +23,7 @@
 		"vscode": "^1.75.0"
 	},
 	"scripts": {
-		"vscode:prepublish": "bun run compile",
+		"vscode:prepublish": "npm run compile",
 		"compile": "tsc -b",
 		"watch": "tsc -b -w",
 		"lint": "eslint",
