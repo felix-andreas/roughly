@@ -10,12 +10,12 @@ use {
             DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
             DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol,
             DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
-            GlobPattern, InitializeParams, InitializeResult, InitializedParams, Location, MessageType, OneOf,
-            Position, PublishDiagnosticsParams, Range, ReferenceParams, Registration, RegistrationParams,
-            RelativePattern, RenameParams, SaveOptions, ServerCapabilities, ServerInfo,
-            ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind,
-            TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceEdit,
-            WorkspaceSymbolParams, WorkspaceSymbolResponse,
+            GlobPattern, InitializeParams, InitializeResult, InitializedParams, Location,
+            MessageType, OneOf, Position, PublishDiagnosticsParams, Range, ReferenceParams,
+            Registration, RegistrationParams, RelativePattern, RenameParams, SaveOptions,
+            ServerCapabilities, ServerInfo, ShowMessageParams, TextDocumentSyncCapability,
+            TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
+            Url, WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
         },
         references, rename, tree, utils,
@@ -559,38 +559,6 @@ impl LanguageServer for ServerState {
     }
 
     //
-    // RENAME
-    //
-
-    fn rename(
-        &mut self,
-        params: RenameParams,
-    ) -> BoxFuture<'static, Result<Option<WorkspaceEdit>, ResponseError>> {
-        let uri = params.text_document_position.text_document.uri;
-        let path = uri.to_file_path().unwrap();
-        let position = params.text_document_position.position;
-        let new_name = params.new_name;
-
-        tracing::debug!(?path, ?position, ?new_name, "rename");
-
-        let Some(document) = self.document_map.get(&path) else {
-            tracing::info!(?path, "document not found");
-            return box_future(Err(path_not_found_error(&path)));
-        };
-
-        let workspace_edit = rename::rename(
-            &uri,
-            position.line as usize,
-            position.character as usize,
-            &new_name,
-            &document.rope,
-            &document.tree,
-        );
-
-        box_future(Ok(workspace_edit))
-    }
-
-    //
     // REFERENCES
     //
 
@@ -621,6 +589,38 @@ impl LanguageServer for ServerState {
         );
 
         box_future(Ok(references))
+    }
+
+    //
+    // RENAME
+    //
+
+    fn rename(
+        &mut self,
+        params: RenameParams,
+    ) -> BoxFuture<'static, Result<Option<WorkspaceEdit>, ResponseError>> {
+        let uri = params.text_document_position.text_document.uri;
+        let path = uri.to_file_path().unwrap();
+        let position = params.text_document_position.position;
+        let new_name = params.new_name;
+
+        tracing::debug!(?path, ?position, ?new_name, "rename");
+
+        let Some(document) = self.document_map.get(&path) else {
+            tracing::info!(?path, "document not found");
+            return box_future(Err(path_not_found_error(&path)));
+        };
+
+        let workspace_edit = rename::rename(
+            &uri,
+            position.line as usize,
+            position.character as usize,
+            &new_name,
+            &document.rope,
+            &document.tree,
+        );
+
+        box_future(Ok(workspace_edit))
     }
 
     //
