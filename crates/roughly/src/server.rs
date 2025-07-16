@@ -13,12 +13,13 @@ use {
             GlobPattern, InitializeParams, InitializeResult, InitializedParams, MessageType, OneOf,
             Position, PublishDiagnosticsParams, Range, Registration, RegistrationParams,
             RelativePattern, RenameParams, SaveOptions, ServerCapabilities, ServerInfo,
-            ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind,
-            TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceEdit,
-            WorkspaceSymbolParams, WorkspaceSymbolResponse,
+            ShowMessageParams, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+            TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+            TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceEdit, WorkspaceSymbolParams,
+            WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
         },
-        rename, tree, utils,
+        rename, signature_help, tree, utils,
     },
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
@@ -156,6 +157,11 @@ impl LanguageServer for ServerState {
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Left(self.experimental_features.rename)),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".into(), ",".into()]),
+                    retrigger_characters: None,
+                    work_done_progress_options: Default::default(),
+                }),
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
                     TextDocumentSyncOptions {
                         open_close: Some(true),
@@ -474,6 +480,35 @@ impl LanguageServer for ServerState {
         );
 
         box_future(Ok(definitions))
+    }
+
+    //
+    // SIGNATURE HELP
+    //
+
+    fn signature_help(
+        &mut self,
+        params: SignatureHelpParams,
+    ) -> BoxFuture<'static, Result<Option<SignatureHelp>, ResponseError>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let path = uri.to_file_path().unwrap();
+        let position = params.text_document_position_params.position;
+
+        tracing::debug!(?path, "signature help");
+
+        let Some(document) = self.document_map.get(&path) else {
+            tracing::info!(?path, "document not found");
+            return box_future(Err(path_not_found_error(&path)));
+        };
+
+        let signature_help = signature_help::get(
+            position,
+            &document.rope,
+            &document.tree,
+            &self.workspace_symbols,
+        );
+
+        box_future(Ok(signature_help))
     }
 
     //
