@@ -2,7 +2,7 @@ use {
     crate::{
         definition,
         lsp_types::{TextEdit, Url as Uri, WorkspaceEdit},
-        tree::kind,
+        tree::{self, kind},
         utils,
     },
     ropey::Rope,
@@ -23,17 +23,12 @@ pub fn rename(
     rope: &Rope,
     tree: &Tree,
 ) -> Option<WorkspaceEdit> {
-    let start = utils::try_get_identifier(tree, line, col)?;
+    let start = tree::try_get_identifier(tree, line, col)?;
     let name = rope.byte_slice(start.byte_range()).to_string();
 
-    tracing::debug!(
-        ?name,
-        ?new_name,
-        start = start.kind(),
-        "rename request"
-    );
+    tracing::debug!(?name, ?new_name, start = start.kind(), "rename request");
 
-    if utils::is_rhs_of_extract_or_namespace(start) {
+    if tree::is_rhs_of_extract_or_namespace(start) {
         tracing::debug!("Rename not allowed for this symbol");
         return None;
     }
@@ -86,7 +81,7 @@ fn find_references_in_scope<'a>(
         // If this is an identifier with matching name, check if it refers to our definition
         if node.kind_id() == kind::IDENTIFIER
             && rope.byte_slice(node.byte_range()) == name
-            && !utils::is_rhs_of_extract_or_namespace(node)
+            && !tree::is_rhs_of_extract_or_namespace(node)
             && refers_to_definition(node, definition, rope, name)
         {
             references.push(node);

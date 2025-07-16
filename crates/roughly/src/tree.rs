@@ -72,6 +72,12 @@ impl<'a> Iterator for ByteChunks<'a> {
 // UTILS
 //
 
+pub fn point_in_range(point: Point, range: Range) -> bool {
+    let start = range.start_point;
+    let end = range.end_point;
+    start <= point && point <= end
+}
+
 #[inline]
 pub fn for_each_child<'a, E>(
     cursor: &mut TreeCursor<'a>,
@@ -115,11 +121,43 @@ pub fn find_next_error(node: Node) -> Option<Node> {
     }
 }
 
-pub fn point_in_range(point: Point, range: Range) -> bool {
-    let start = range.start_point;
-    let end = range.end_point;
-    start <= point && point <= end
+pub fn try_get_identifier<'tree>(
+    tree: &'tree Tree,
+    line: usize,
+    col: usize,
+) -> Option<Node<'tree>> {
+    let start = {
+        let point = Point::new(line, col);
+        let node = tree.root_node().descendant_for_point_range(point, point)?;
+        // If the cursor is at the very start of the program, `descendant_for_point_range` may
+        // return the program node itself. Since only the program node can start at the same
+        // position as an identifier, it's safe to check the first child node in this case
+        match node.kind_id() {
+            kind::PROGRAM => match node.child(0) {
+                Some(child) if point_in_range(point, child.range()) => {
+                    child.descendant_for_point_range(point, point)?
+                }
+                _ => return None,
+            },
+            _ => node,
+        }
+    };
+
+    (start.kind_id() == kind::IDENTIFIER).then_some(start)
 }
+
+pub fn is_rhs_of_extract_or_namespace(node: Node) -> bool {
+    node.parent().is_some_and(|parent| {
+        [kind::EXTRACT_OPERATOR, kind::NAMESPACE_OPERATOR].contains(&parent.kind_id())
+            && parent
+                .child_by_field_id(field::RHS)
+                .is_some_and(|rhs| rhs.id() == node.id())
+    })
+}
+
+//
+// FORMAT AST
+//
 
 pub fn format(node: Node) -> String {
     fn traverse(cursor: &mut TreeCursor, output: &mut String) {

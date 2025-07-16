@@ -2,7 +2,7 @@ use {
     crate::{
         index::SymbolsMap,
         lsp_types::{GotoDefinitionResponse, Location, Url as Uri},
-        tree::{field, kind},
+        tree::{self, field, kind},
         utils,
     },
     ropey::Rope,
@@ -17,18 +17,14 @@ pub fn goto(
     tree: &Tree,
     symbols_map: &impl SymbolsMap,
 ) -> Option<GotoDefinitionResponse> {
-    let start = utils::try_get_identifier(tree, line, col)?;
+    let start = tree::try_get_identifier(tree, line, col)?;
     let name = rope.byte_slice(start.byte_range()).to_string();
 
-    tracing::debug!(
-        ?name,
-        start = start.kind(),
-        "goto definition"
-    );
+    tracing::debug!(?name, start = start.kind(), "goto definition");
 
     // TODO: to implement this correctly we would need to infer the type of rhs expr
     // However, we could just search all fields and methods for possible matches.
-    if utils::is_rhs_of_extract_or_namespace(start) {
+    if tree::is_rhs_of_extract_or_namespace(start) {
         return None;
     }
 
@@ -122,7 +118,7 @@ mod tests {
         let rope = Rope::from_str(src);
         let mut parser = tree::new_parser();
         let tree = tree::parse(&mut parser, src, None);
-        let start = utils::try_get_identifier(&tree, line, col).unwrap();
+        let start = tree::try_get_identifier(&tree, line, col).unwrap();
         let name = rope.byte_slice(start.byte_range()).to_string();
         find_previous_definition(start, &rope, &name).map(|node| {
             let point = node.start_position();
@@ -134,7 +130,7 @@ mod tests {
         let rope = Rope::from_str(src);
         let mut parser = tree::new_parser();
         let tree = tree::parse(&mut parser, src, None);
-        utils::try_get_identifier(&tree, line, col)
+        tree::try_get_identifier(&tree, line, col)
             .map(|node| rope.byte_slice(node.byte_range()).to_string())
     }
 

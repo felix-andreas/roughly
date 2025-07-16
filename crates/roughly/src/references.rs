@@ -3,7 +3,7 @@ use {
         definition,
         index::SymbolsMap,
         lsp_types::{Location, Url as Uri},
-        tree::kind,
+        tree::{self, kind},
         utils,
     },
     ropey::Rope,
@@ -19,7 +19,7 @@ pub fn find_references(
     tree: &Tree,
     symbols_map: &impl SymbolsMap,
 ) -> Option<Vec<Location>> {
-    let start = utils::try_get_identifier(tree, line, col)?;
+    let start = tree::try_get_identifier(tree, line, col)?;
     let name = rope.byte_slice(start.byte_range()).to_string();
 
     tracing::debug!(
@@ -30,7 +30,7 @@ pub fn find_references(
     );
 
     // Don't allow finding references for RHS of extract @, extract $, or namespace :: operators
-    if utils::is_rhs_of_extract_or_namespace(start) {
+    if tree::is_rhs_of_extract_or_namespace(start) {
         return None;
     }
 
@@ -40,8 +40,15 @@ pub fn find_references(
     if let Some(definition) = definition::find_previous_definition(start, rope, &name) {
         // This is a local variable - find references within the current file
         let mut references = Vec::new();
-        find_local_references(tree.root_node(), rope, &name, definition, include_declaration, &mut references);
-        
+        find_local_references(
+            tree.root_node(),
+            rope,
+            &name,
+            definition,
+            include_declaration,
+            &mut references,
+        );
+
         // Convert nodes to locations
         for node in references {
             locations.push(Location::new(uri.clone(), utils::node_range(node)));
@@ -54,8 +61,14 @@ pub fn find_references(
         // Find references in current file
         if !is_local_scope {
             let mut references = Vec::new();
-            find_global_references_in_file(tree.root_node(), rope, &name, include_declaration, &mut references);
-            
+            find_global_references_in_file(
+                tree.root_node(),
+                rope,
+                &name,
+                include_declaration,
+                &mut references,
+            );
+
             // Convert nodes to locations
             for node in references {
                 locations.push(Location::new(uri.clone(), utils::node_range(node)));
@@ -108,7 +121,14 @@ fn find_local_references<'a>(
         .find(|node| node.kind_id() == kind::FUNCTION_DEFINITION)
         .unwrap_or(root);
 
-    find_references_in_scope(scope, rope, name, definition, include_declaration, references);
+    find_references_in_scope(
+        scope,
+        rope,
+        name,
+        definition,
+        include_declaration,
+        references,
+    );
 }
 
 fn find_global_references_in_file<'a>(
@@ -136,8 +156,9 @@ fn find_references_in_scope<'a>(
         // If this is an identifier with matching name, check if it refers to our definition
         if node.kind_id() == kind::IDENTIFIER && rope.byte_slice(node.byte_range()) == name {
             // Don't include RHS of extract operators in references
-            if !utils::is_rhs_of_extract_or_namespace(node) 
-                && refers_to_definition(node, definition, rope, name) {
+            if !tree::is_rhs_of_extract_or_namespace(node)
+                && refers_to_definition(node, definition, rope, name)
+            {
                 // Include the declaration if requested, or if it's not the definition node
                 if include_declaration || node.id() != definition.id() {
                     references.push(node);
@@ -180,12 +201,25 @@ fn refers_to_definition(reference: Node, definition: Node, rope: &Rope, name: &s
 mod tests {
     use {super::*, crate::tree, indoc::indoc, ropey::Rope};
 
-    fn setup(src: &str, line: usize, col: usize, include_declaration: bool) -> Option<Vec<Location>> {
+    fn setup(
+        src: &str,
+        line: usize,
+        col: usize,
+        include_declaration: bool,
+    ) -> Option<Vec<Location>> {
         let rope = Rope::from_str(src);
         let tree = tree::parse(&mut tree::new_parser(), src, None);
         let uri = Uri::parse("file:///test.R").unwrap();
         let empty_symbols = std::collections::HashMap::new();
-        find_references(&uri, line, col, include_declaration, &rope, &tree, &empty_symbols)
+        find_references(
+            &uri,
+            line,
+            col,
+            include_declaration,
+            &rope,
+            &tree,
+            &empty_symbols,
+        )
     }
 
     #[test]

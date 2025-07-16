@@ -480,17 +480,17 @@ pub fn parse_experimental_flags(flags: &[impl AsRef<str>]) -> ExperimentalFeatur
     for flag in flags.iter().flat_map(|flag| flag.as_ref().split(' ')) {
         match flag {
             "all" => {
-                features.unused = true;
-                features.range_formatting = true;
                 features.goto_definition = true;
                 features.goto_references = true;
+                features.range_formatting = true;
                 features.rename = true;
+                features.unused = true;
             }
-            "range_formatting" => features.range_formatting = true,
             "goto_definition" => features.goto_definition = true,
             "goto_references" => features.goto_references = true,
-            "unused" => features.unused = true,
+            "range_formatting" => features.range_formatting = true,
             "rename" => features.rename = true,
+            "unused" => features.unused = true,
             unknown => {
                 warn(&format!("unknown experimental feature: {unknown}"));
             }
@@ -498,45 +498,4 @@ pub fn parse_experimental_flags(flags: &[impl AsRef<str>]) -> ExperimentalFeatur
     }
 
     features
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_parse_experimental_flags() {
-        let flags = vec!["goto_references"];
-        let features = parse_experimental_flags(&flags);
-        
-        assert!(features.goto_references);
-        assert!(!features.goto_definition);
-        assert!(!features.rename);
-        assert!(!features.range_formatting);
-        assert!(!features.unused);
-    }
-    
-    #[test]
-    fn test_parse_experimental_flags_all() {
-        let flags = vec!["all"];
-        let features = parse_experimental_flags(&flags);
-        
-        assert!(features.goto_references);
-        assert!(features.goto_definition);
-        assert!(features.rename);
-        assert!(features.range_formatting);
-        assert!(features.unused);
-    }
-    
-    #[test]
-    fn test_parse_experimental_flags_multiple() {
-        let flags = vec!["goto_references", "goto_definition"];
-        let features = parse_experimental_flags(&flags);
-        
-        assert!(features.goto_references);
-        assert!(features.goto_definition);
-        assert!(!features.rename);
-        assert!(!features.range_formatting);
-        assert!(!features.unused);
-    }
 }

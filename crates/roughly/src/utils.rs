@@ -1,8 +1,8 @@
 use {
-    crate::{lsp_types::{Position, Range as LspRange}, tree::{self, field, kind}},
+    crate::lsp_types::{Position, Range as LspRange},
     ropey::Rope,
     std::{fs::File, io::BufReader, path::Path},
-    tree_sitter::{Node, Point, Tree},
+    tree_sitter::Node,
 };
 
 pub fn starts_with_lowercase(name: &str, query: &str) -> bool {
@@ -148,39 +148,5 @@ pub fn print_diff(old: &str, new: &str) {
                 }
             }
         }
-    }
-}
-
-/// Attempts to get an identifier node at the given position in the tree.
-/// This function handles the edge case where the cursor is at the very start of the program.
-pub fn try_get_identifier<'tree>(tree: &'tree Tree, line: usize, col: usize) -> Option<Node<'tree>> {
-    let start = {
-        let point = Point::new(line, col);
-        let node = tree.root_node().descendant_for_point_range(point, point)?;
-        // Handle case where cursor is at the very start of program
-        match node.kind_id() {
-            kind::PROGRAM => match node.child(0) {
-                Some(child) if tree::point_in_range(point, child.range()) => {
-                    child.descendant_for_point_range(point, point)?
-                }
-                _ => return None,
-            },
-            _ => node,
-        }
-    };
-
-    (start.kind_id() == kind::IDENTIFIER).then_some(start)
-}
-
-/// Checks if a node is on the RHS of an extract operator (@, $) or namespace operator (::).
-/// This is used to determine if operations like "find references" or "rename" should be disabled.
-pub fn is_rhs_of_extract_or_namespace(node: Node) -> bool {
-    if let Some(parent) = node.parent() {
-        [kind::EXTRACT_OPERATOR, kind::NAMESPACE_OPERATOR].contains(&parent.kind_id())
-            && parent
-                .child_by_field_id(field::RHS)
-                .is_some_and(|rhs| rhs.id() == node.id())
-    } else {
-        false
     }
 }
