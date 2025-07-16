@@ -21,7 +21,7 @@ pub struct Item {
     pub info: ItemInfo,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ItemInfo {
     Unknown,
     // Primitives
@@ -546,7 +546,7 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<Item> {
                 None,
                 range,
                 range,
-                None,
+                Some(members),
                 ItemInfo::R6Class,
             ))
         }
