@@ -2,7 +2,7 @@ use {
     crate::{
         config::{self, ExperimentalFeatures},
         diagnostics, format, index,
-        lsp_types::{self, DiagnosticSeverity},
+        lsp_types::DiagnosticSeverity,
         server, tree, utils,
     },
     console::style,
@@ -419,13 +419,21 @@ pub fn index(paths: Option<&[PathBuf]>, nested: bool, print_items: bool) -> Resu
                         symbol.range.start.line,
                         symbol.range.start.character,
                         style(&symbol.name).bold(),
-                        style(match symbol.kind {
-                            lsp_types::SymbolKind::FUNCTION => "function",
-                            lsp_types::SymbolKind::CLASS => "class",
-                            lsp_types::SymbolKind::INTERFACE => "generic",
-                            lsp_types::SymbolKind::METHOD => "method",
-                            lsp_types::SymbolKind::VARIABLE => "variable",
-                            _ => "other",
+                        style(match symbol.info {
+                            index::ItemInfo::Unknown => "unknown",
+                            index::ItemInfo::Integer => "integer",
+                            index::ItemInfo::Float => "float",
+                            index::ItemInfo::Complex => "complex",
+                            index::ItemInfo::Bool => "bool",
+                            index::ItemInfo::String => "string",
+                            index::ItemInfo::Null => "null",
+                            index::ItemInfo::Function => "function",
+                            index::ItemInfo::S4Class => "S4Class",
+                            index::ItemInfo::S4Generic => "S4Generic",
+                            index::ItemInfo::S4Method { .. } => "S4Method",
+                            index::ItemInfo::R6Class => "R6Class",
+                            index::ItemInfo::R6Method => "R6Method",
+                            index::ItemInfo::R6Field => "R6Field",
                         })
                         .italic()
                     );

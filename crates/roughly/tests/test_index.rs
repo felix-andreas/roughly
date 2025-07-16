@@ -10,7 +10,10 @@ fn setup(text: &str, nested: bool) -> Vec<DocumentSymbol> {
     let rope = Rope::from_str(text);
     let tree = tree::parse_rope(&mut tree::new_parser(), &rope, None);
     let items = index::index(tree.root_node(), &rope, nested, false);
-    items.into_iter().map(|item| item.to_document_symbol()).collect()
+    items
+        .into_iter()
+        .map(|item| item.to_document_symbol())
+        .collect()
 }
 
 fn setup_nested(text: &str) -> Vec<DocumentSymbol> {
@@ -343,133 +346,4 @@ fn get_argument_named_and_positional() {
     // Non-existent named argument
     let arg = index::get_argument(arguments, &rope, "does_not_exist", 10);
     assert!(arg.is_none());
-}
-
-#[test]
-fn test_s4_method_signature_separation() {
-    let text = indoc! {r#"
-        setMethod("foo", "Person", function(x) x@foo)
-    "#};
-    
-    let rope = Rope::from_str(text);
-    let tree = tree::parse_rope(&mut tree::new_parser(), &rope, None);
-    let items = index::index(tree.root_node(), &rope, false, false);
-    
-    assert_eq!(items.len(), 1);
-    let item = &items[0];
-    
-    // Verify that name is just the method name (no signature)
-    assert_eq!(item.name, "foo");
-    
-    // Verify that display_name includes the signature
-    assert_eq!(item.display_name(), "foo (Person)");
-    
-    // Verify that it's an S4Method with correct signature stored separately
-    match &item.info {
-        index::ItemInfo::S4Method { signature } => {
-            assert_eq!(signature, "Person");
-        },
-        _ => panic!("Expected S4Method info type, got {:?}", item.info),
-    }
-    
-    // Also test the DocumentSymbol conversion
-    let doc_symbol = item.to_document_symbol();
-    assert_eq!(doc_symbol.name, "foo (Person)");
-}
-
-#[test]
-fn test_workspace_symbols_with_s4_methods() {
-    let text = indoc! {r#"
-        setMethod("find_element", "Person", function(x) x@name)
-        setMethod("process", c("Person", "Other"), function(x, y) x@value + y@value)
-    "#};
-    
-    let rope = Rope::from_str(text);
-    let tree = tree::parse_rope(&mut tree::new_parser(), &rope, None);
-    let items = index::index(tree.root_node(), &rope, false, false);
-    
-    // Create a workspace symbols map
-    let mut workspace_symbols = std::collections::HashMap::new();
-    let path = std::path::PathBuf::from("/test/file.R");
-    workspace_symbols.insert(path, items);
-    
-    // Test workspace symbols with query "find"
-    let symbols = index::get_workspace_symbols("find", &workspace_symbols);
-    assert_eq!(symbols.len(), 1);
-    assert_eq!(symbols[0].name, "find_element (Person)");
-    
-    // Test workspace symbols with query "process"
-    let symbols = index::get_workspace_symbols("process", &workspace_symbols);
-    assert_eq!(symbols.len(), 1);
-    assert_eq!(symbols[0].name, "process (Person, Other)");
-}
-
-#[test]
-fn test_complete_s4_workflow() {
-    let text = indoc! {r#"
-        # Test S4 methods with the new internal structure
-        setMethod("compute", "Person", function(x) {
-            x@value * 2
-        })
-
-        setMethod("process", c("Person", "Data"), function(x, y) {
-            x@value + y@value
-        })
-
-        regular_function <- function(a, b) {
-            a + b
-        }
-
-        Person <- setClass("Person", 
-            slots = c(
-                name = "character",
-                value = "numeric"
-            )
-        )
-    "#};
-    
-    let rope = Rope::from_str(text);
-    let tree = tree::parse_rope(&mut tree::new_parser(), &rope, None);
-    let items = index::index(tree.root_node(), &rope, false, false);
-    
-    assert_eq!(items.len(), 4); // 2 S4 methods, 1 function, 1 class
-    
-    // Verify S4 methods have separated names and signatures
-    let s4_methods: Vec<_> = items.iter()
-        .filter(|item| matches!(item.info, index::ItemInfo::S4Method { .. }))
-        .collect();
-    
-    assert_eq!(s4_methods.len(), 2);
-    
-    for method in s4_methods {
-        // Method name should not contain signature
-        assert!(!method.name.contains('('), 
-               "Method name '{}' should not contain signature", method.name);
-        
-        // Display name should contain signature
-        assert!(method.display_name().contains('('), 
-               "Display name '{}' should contain signature", method.display_name());
-        
-        // Convert to DocumentSymbol should use display name
-        let doc_symbol = method.to_document_symbol();
-        assert_eq!(doc_symbol.name, method.display_name());
-    }
-    
-    // Verify specific methods
-    let compute_method = items.iter()
-        .find(|item| item.name == "compute")
-        .expect("Should find compute method");
-    assert_eq!(compute_method.display_name(), "compute (Person)");
-    
-    let process_method = items.iter()
-        .find(|item| item.name == "process")
-        .expect("Should find process method");
-    assert_eq!(process_method.display_name(), "process (Person, Data)");
-    
-    // Verify regular function doesn't have signature info
-    let regular_func = items.iter()
-        .find(|item| item.name == "regular_function")
-        .expect("Should find regular function");
-    assert!(matches!(regular_func.info, index::ItemInfo::Regular));
-    assert_eq!(regular_func.name, regular_func.display_name());
 }

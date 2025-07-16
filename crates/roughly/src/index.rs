@@ -14,7 +14,6 @@ use {
 #[derive(Debug, Clone)]
 pub struct Item {
     pub name: String,
-    pub kind: SymbolKind,
     pub detail: Option<String>,
     pub range: Range,
     pub selection_range: Range,
@@ -24,15 +23,65 @@ pub struct Item {
 
 #[derive(Debug, Clone)]
 pub enum ItemInfo {
-    Regular,
+    Unknown,
+    // Primitives
+    Integer,
+    Float,
+    Complex,
+    Bool,
+    String,
+    Null,
+    Function,
+    // S4
+    S4Class,
+    S4Generic,
     S4Method { signature: String },
+    // R6
+    R6Class,
+    R6Method,
+    R6Field,
+}
+
+fn to_symbol_kind(info: &ItemInfo) -> SymbolKind {
+    match info {
+        ItemInfo::Unknown => SymbolKind::VARIABLE,
+        ItemInfo::Integer | ItemInfo::Float | ItemInfo::Complex => SymbolKind::NUMBER,
+        ItemInfo::Bool => SymbolKind::BOOLEAN,
+        ItemInfo::String => SymbolKind::STRING,
+        ItemInfo::Null => SymbolKind::NULL,
+        ItemInfo::Function => SymbolKind::FUNCTION,
+        ItemInfo::S4Class => SymbolKind::CLASS,
+        ItemInfo::S4Generic => SymbolKind::INTERFACE,
+        ItemInfo::S4Method { .. } => SymbolKind::METHOD,
+        ItemInfo::R6Class => SymbolKind::CLASS,
+        ItemInfo::R6Method => SymbolKind::METHOD,
+        ItemInfo::R6Field => SymbolKind::FIELD,
+    }
 }
 
 impl Item {
+    pub fn new(
+        name: String,
+        detail: Option<String>,
+        range: Range,
+        selection_range: Range,
+        children: Option<Vec<Item>>,
+        info: ItemInfo,
+    ) -> Item {
+        Item {
+            name,
+            detail,
+            range,
+            selection_range,
+            children,
+            info,
+        }
+    }
+
     pub fn display_name(&self) -> String {
         match &self.info {
-            ItemInfo::Regular => self.name.clone(),
             ItemInfo::S4Method { signature } => format!("{} ({})", self.name, signature),
+            _ => self.name.clone(),
         }
     }
 
@@ -40,29 +89,18 @@ impl Item {
         #[allow(deprecated)]
         DocumentSymbol {
             name: self.display_name(),
-            kind: self.kind,
+            kind: to_symbol_kind(&self.info),
             detail: self.detail.clone(),
             tags: None,
             range: self.range,
             selection_range: self.selection_range,
             children: self.children.as_ref().map(|children| {
-                children.iter().map(|child| child.to_document_symbol()).collect()
+                children
+                    .iter()
+                    .map(|child| child.to_document_symbol())
+                    .collect()
             }),
             deprecated: None,
-        }
-    }
-
-    pub fn from_document_symbol(symbol: DocumentSymbol) -> Self {
-        Self {
-            name: symbol.name,
-            kind: symbol.kind,
-            detail: symbol.detail,
-            range: symbol.range,
-            selection_range: symbol.selection_range,
-            children: symbol.children.map(|children| {
-                children.into_iter().map(Item::from_document_symbol).collect()
-            }),
-            info: ItemInfo::Regular,
         }
     }
 }
@@ -115,7 +153,7 @@ pub fn get_workspace_symbols(
                 .filter(|(symbol, _)| utils::starts_with_lowercase(&symbol.display_name(), query))
                 .map(move |(symbol, container_name)| WorkspaceSymbol {
                     name: symbol.display_name(),
-                    kind: symbol.kind,
+                    kind: to_symbol_kind(&symbol.info),
                     tags: None,
                     container_name: container_name.map(str::to_string),
                     location: OneOf::Left(Location {
@@ -194,41 +232,42 @@ pub fn index(root: Node, rope: &Rope, nested: bool, other: bool) -> Vec<Item> {
                     && lhs.kind() == "identifier"
                     && maybe_op.is_some_and(|op| op.kind() == "<-")
                 {
-                    let (kind, detail, children) = maybe_rhs
+                    let (info, detail, children) = maybe_rhs
                         .map(|rhs| match rhs.kind() {
                             "function_definition" => index_function(rhs, rope, nested),
                             "braced_expression" => {
                                 let block_symbols = index(rhs, rope, nested, other);
                                 symbols.extend(block_symbols);
 
-                                (SymbolKind::VARIABLE, None, None)
+                                (ItemInfo::Unknown, None, None)
                             }
                             "call" => {
                                 if let Some(symbol) = index_call(rhs, rope, nested) {
-                                    (symbol.kind, symbol.detail, symbol.children)
+                                    (symbol.info, symbol.detail, symbol.children)
                                 } else {
-                                    (SymbolKind::VARIABLE, None, None)
+                                    (ItemInfo::Unknown, None, None)
                                 }
                             }
-                            "integer" | "float" | "complex" => (SymbolKind::NUMBER, None, None),
-                            "true" | "false" => (SymbolKind::BOOLEAN, None, None),
-                            "string" => (SymbolKind::STRING, None, None),
-                            "null" => (SymbolKind::NULL, None, None),
-                            _ => (SymbolKind::VARIABLE, None, None),
+                            "integer" => (ItemInfo::Integer, None, None),
+                            "float" => (ItemInfo::Float, None, None),
+                            "complex" => (ItemInfo::Complex, None, None),
+                            "true" | "false" => (ItemInfo::Bool, None, None),
+                            "string" => (ItemInfo::String, None, None),
+                            "null" => (ItemInfo::Null, None, None),
+                            _ => (ItemInfo::Unknown, None, None),
                         })
-                        .unwrap_or_else(|| (SymbolKind::VARIABLE, None, None));
+                        .unwrap_or_else(|| (ItemInfo::Unknown, None, None));
 
                     let name = rope.byte_slice(lhs.byte_range()).to_string();
                     let range = utils::node_range(node);
                     let selection_range = utils::node_range(lhs);
-                    symbols.push(create_item(
+                    symbols.push(Item::new(
                         name,
-                        kind,
                         detail,
                         range,
                         selection_range,
                         children,
-                        ItemInfo::Regular,
+                        info,
                     ))
                 } else if nested {
                     // TODO: recurse lhs and rhs in else case? (and nested == true)
@@ -272,7 +311,7 @@ fn index_function(
     function: Node,
     rope: &Rope,
     nested: bool,
-) -> (SymbolKind, Option<String>, Option<Vec<Item>>) {
+) -> (ItemInfo, Option<String>, Option<Vec<Item>>) {
     let maybe_parameters = function.child_by_field_name("parameters");
     let maybe_body = function.child_by_field_name("body");
 
@@ -292,7 +331,7 @@ fn index_function(
         )
     });
     let children = maybe_body.and_then(|body| nested.then(|| index(body, rope, nested, false)));
-    (SymbolKind::FUNCTION, detail, children)
+    (ItemInfo::Function, detail, children)
 }
 
 fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<Item> {
@@ -326,7 +365,8 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<Item> {
         _ => return None,
     };
 
-    let (kind, name, detail, children, signature) = match name.as_str() {
+    let range = utils::node_range(call);
+    match name.as_str() {
         "setClass" => {
             // setClass("Person", slots = c(name = "character", age = "numeric"))
             let class_name = get_argument(arguments, rope, "Class", 0)
@@ -340,7 +380,14 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<Item> {
                 })
                 .unwrap_or_else(|| "Unknown".to_string());
 
-            (SymbolKind::CLASS, class_name, None, None, None)
+            Some(Item::new(
+                class_name,
+                None,
+                range,
+                range,
+                None,
+                ItemInfo::S4Class,
+            ))
         }
         "setGeneric" => {
             // setGeneric("foo", function(x) standardGeneric("foo"))
@@ -355,7 +402,14 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<Item> {
                     }
                 })
                 .unwrap_or_else(|| "Unknown".to_string());
-            (SymbolKind::INTERFACE, generic_name, None, None, None)
+            Some(Item::new(
+                generic_name,
+                None,
+                range,
+                range,
+                None,
+                ItemInfo::S4Generic,
+            ))
         }
         "setMethod" => {
             // setMethod("foo", "Person", function(x) x@foo)
@@ -415,13 +469,14 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<Item> {
                 })
                 .unwrap_or_else(|| "Unknown".to_string());
 
-            (
-                SymbolKind::METHOD,
+            Some(Item::new(
                 method_name,
                 None,
+                range,
+                range,
                 None,
-                Some(signature),
-            )
+                ItemInfo::S4Method { signature },
+            ))
         }
         "R6Class" => {
             // R6Class("Person", ...)
@@ -464,66 +519,38 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<Item> {
 
                     let name = rope.byte_slice(name.byte_range()).to_string();
                     let value = member.child_by_field_name("value");
-                    let (kind, detail, children) = if let Some(value) = value
+                    let (info, detail, children) = if let Some(value) = value
                         && value.kind() == "function_definition"
                     {
                         let (_, detail, children) = index_function(value, rope, nested);
                         (
                             if field == "active" {
-                                SymbolKind::PROPERTY
+                                ItemInfo::R6Field
                             } else {
-                                SymbolKind::METHOD
+                                ItemInfo::R6Method
                             },
                             detail,
                             children,
                         )
                     } else {
-                        (
-                            if field == "active" {
-                                SymbolKind::PROPERTY
-                            } else {
-                                SymbolKind::FIELD
-                            },
-                            None,
-                            None,
-                        )
+                        (ItemInfo::R6Field, None, None)
                     };
 
                     let range = utils::node_range(member);
-                    members.push(create_item(name, kind, detail, range, range, children, ItemInfo::Regular));
+                    members.push(Item::new(name, detail, range, range, children, info));
                 }
             }
 
-            (SymbolKind::CLASS, class_name, None, Some(members), None)
+            Some(Item::new(
+                class_name,
+                None,
+                range,
+                range,
+                None,
+                ItemInfo::R6Class,
+            ))
         }
-        _ => return None,
-    };
-
-    let range = utils::node_range(call);
-    let info = match signature {
-        Some(sig) => ItemInfo::S4Method { signature: sig },
-        None => ItemInfo::Regular,
-    };
-    Some(create_item(name, kind, detail, range, range, children, info))
-}
-
-pub fn create_item(
-    name: String,
-    kind: SymbolKind,
-    detail: Option<String>,
-    range: Range,
-    selection_range: Range,
-    children: Option<Vec<Item>>,
-    info: ItemInfo,
-) -> Item {
-    Item {
-        name,
-        kind,
-        detail,
-        range,
-        selection_range,
-        children,
-        info,
+        _ => None,
     }
 }
 
