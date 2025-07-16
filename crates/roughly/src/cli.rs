@@ -480,15 +480,17 @@ pub fn parse_experimental_flags(flags: &[impl AsRef<str>]) -> ExperimentalFeatur
     for flag in flags.iter().flat_map(|flag| flag.as_ref().split(' ')) {
         match flag {
             "all" => {
-                features.unused = true;
-                features.range_formatting = true;
                 features.goto_definition = true;
+                features.goto_references = true;
+                features.range_formatting = true;
                 features.rename = true;
+                features.unused = true;
             }
-            "range_formatting" => features.range_formatting = true,
             "goto_definition" => features.goto_definition = true,
-            "unused" => features.unused = true,
+            "goto_references" => features.goto_references = true,
+            "range_formatting" => features.range_formatting = true,
             "rename" => features.rename = true,
+            "unused" => features.unused = true,
             unknown => {
                 warn(&format!("unknown experimental feature: {unknown}"));
             }
