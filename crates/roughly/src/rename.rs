@@ -2,12 +2,12 @@ use {
     crate::{
         definition,
         lsp_types::{TextEdit, Url as Uri, WorkspaceEdit},
-        tree::{self, field, kind},
+        tree::kind,
         utils,
     },
     ropey::Rope,
     std::collections::{HashMap, HashSet},
-    tree_sitter::{Node, Point, Tree},
+    tree_sitter::{Node, Tree},
 };
 
 // 1. figure out if expression at position can be renamed (is identifier and not rhs of @ or $)
@@ -23,19 +23,17 @@ pub fn rename(
     rope: &Rope,
     tree: &Tree,
 ) -> Option<WorkspaceEdit> {
-    let start = try_get_identifier(tree, line, col)?;
-    let parent = start.parent()?;
+    let start = utils::try_get_identifier(tree, line, col)?;
     let name = rope.byte_slice(start.byte_range()).to_string();
 
     tracing::debug!(
         ?name,
         ?new_name,
         start = start.kind(),
-        parent = parent.kind(),
         "rename request"
     );
 
-    if !is_rename_allowed(start, parent) {
+    if utils::is_rhs_of_extract_or_namespace(start) {
         tracing::debug!("Rename not allowed for this symbol");
         return None;
     }
@@ -69,33 +67,6 @@ pub fn rename(
     })
 }
 
-fn is_rename_allowed(symbol: Node, parent: Node) -> bool {
-    // Don't allow renaming RHS of extract @, extract $, or namespace :: operators
-    !([kind::EXTRACT_OPERATOR, kind::NAMESPACE_OPERATOR].contains(&parent.kind_id())
-        && parent
-            .child_by_field_id(field::RHS)
-            .is_some_and(|rhs| rhs.id() == symbol.id()))
-}
-
-fn try_get_identifier<'tree>(tree: &'tree Tree, line: usize, col: usize) -> Option<Node<'tree>> {
-    let start = {
-        let point = Point::new(line, col);
-        let node = tree.root_node().descendant_for_point_range(point, point)?;
-        // Handle case where cursor is at the very start of program
-        match node.kind_id() {
-            kind::PROGRAM => match node.child(0) {
-                Some(child) if tree::point_in_range(point, child.range()) => {
-                    child.descendant_for_point_range(point, point)?
-                }
-                _ => return None,
-            },
-            _ => node,
-        }
-    };
-
-    (start.kind_id() == kind::IDENTIFIER).then_some(start)
-}
-
 fn find_scope_containing(node: Node) -> Option<Node> {
     std::iter::successors(Some(node), |node| node.parent())
         .find(|node| node.kind_id() == kind::FUNCTION_DEFINITION)
@@ -115,10 +86,7 @@ fn find_references_in_scope<'a>(
         // If this is an identifier with matching name, check if it refers to our definition
         if node.kind_id() == kind::IDENTIFIER
             && rope.byte_slice(node.byte_range()) == name
-            // todo consider moving this check up
-            && (node
-                .parent()
-                .is_none_or(|parent| is_rename_allowed(node, parent)))
+            && !utils::is_rhs_of_extract_or_namespace(node)
             && refers_to_definition(node, definition, rope, name)
         {
             references.push(node);

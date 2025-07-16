@@ -2,11 +2,11 @@ use {
     crate::{
         index::SymbolsMap,
         lsp_types::{GotoDefinitionResponse, Location, Url as Uri},
-        tree::{self, field, kind},
+        tree::{field, kind},
         utils,
     },
     ropey::Rope,
-    tree_sitter::{Node, Point, Tree},
+    tree_sitter::{Node, Tree},
 };
 
 pub fn goto(
@@ -17,24 +17,18 @@ pub fn goto(
     tree: &Tree,
     symbols_map: &impl SymbolsMap,
 ) -> Option<GotoDefinitionResponse> {
-    let start = try_get_identifier(tree, line, col)?;
-    let parent = start.parent()?; // ? because at least program node should always exists
+    let start = utils::try_get_identifier(tree, line, col)?;
     let name = rope.byte_slice(start.byte_range()).to_string();
 
     tracing::debug!(
         ?name,
         start = start.kind(),
-        parent = parent.kind(),
         "goto definition"
     );
 
     // TODO: to implement this correctly we would need to infer the type of rhs expr
     // However, we could just search all fields and methods for possible matches.
-    if [kind::EXTRACT_OPERATOR, kind::NAMESPACE_OPERATOR].contains(&parent.kind_id())
-        && parent
-            .child_by_field_id(field::RHS)
-            .is_some_and(|rhs| rhs.id() == start.id())
-    {
+    if utils::is_rhs_of_extract_or_namespace(start) {
         return None;
     }
 
@@ -74,28 +68,6 @@ pub fn goto(
             .map(GotoDefinitionResponse::Scalar),
         _ => Some(GotoDefinitionResponse::Array(globals)),
     }
-}
-
-fn try_get_identifier<'tree>(tree: &'tree Tree, line: usize, col: usize) -> Option<Node<'tree>> {
-    let start = {
-        let point = Point::new(line, col);
-        let node = tree.root_node().descendant_for_point_range(point, point)?;
-        // If the cursor is at the very start of the program, `descendant_for_point_range` may
-        // return the program node itself. Since only the program node can start at the same
-        // position as an identifier, it's safe to check the first child node in this case
-        match node.kind_id() {
-            kind::PROGRAM => match node.child(0) {
-                Some(child) if tree::point_in_range(point, child.range()) => {
-                    child.descendant_for_point_range(point, point)?
-                }
-                _ => return None,
-            },
-            _ => node,
-        }
-    };
-
-    // If the cursor is at the very start of the program, `descendant_for_point_range` may
-    (start.kind_id() == kind::IDENTIFIER).then_some(start)
 }
 
 pub fn find_previous_definition<'a>(start: Node<'a>, rope: &Rope, name: &str) -> Option<Node<'a>> {
@@ -150,7 +122,7 @@ mod tests {
         let rope = Rope::from_str(src);
         let mut parser = tree::new_parser();
         let tree = tree::parse(&mut parser, src, None);
-        let start = try_get_identifier(&tree, line, col).unwrap();
+        let start = utils::try_get_identifier(&tree, line, col).unwrap();
         let name = rope.byte_slice(start.byte_range()).to_string();
         find_previous_definition(start, &rope, &name).map(|node| {
             let point = node.start_position();
@@ -162,7 +134,7 @@ mod tests {
         let rope = Rope::from_str(src);
         let mut parser = tree::new_parser();
         let tree = tree::parse(&mut parser, src, None);
-        try_get_identifier(&tree, line, col)
+        utils::try_get_identifier(&tree, line, col)
             .map(|node| rope.byte_slice(node.byte_range()).to_string())
     }
 

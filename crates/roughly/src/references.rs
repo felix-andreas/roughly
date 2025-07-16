@@ -3,11 +3,11 @@ use {
         definition,
         index::SymbolsMap,
         lsp_types::{Location, Url as Uri},
-        tree::{self, field, kind},
+        tree::kind,
         utils,
     },
     ropey::Rope,
-    tree_sitter::{Node, Point, Tree},
+    tree_sitter::{Node, Tree},
 };
 
 pub fn find_references(
@@ -19,24 +19,18 @@ pub fn find_references(
     tree: &Tree,
     symbols_map: &impl SymbolsMap,
 ) -> Option<Vec<Location>> {
-    let start = try_get_identifier(tree, line, col)?;
-    let parent = start.parent()?;
+    let start = utils::try_get_identifier(tree, line, col)?;
     let name = rope.byte_slice(start.byte_range()).to_string();
 
     tracing::debug!(
         ?name,
         ?include_declaration,
         start = start.kind(),
-        parent = parent.kind(),
         "find references"
     );
 
     // Don't allow finding references for RHS of extract @, extract $, or namespace :: operators
-    if [kind::EXTRACT_OPERATOR, kind::NAMESPACE_OPERATOR].contains(&parent.kind_id())
-        && parent
-            .child_by_field_id(field::RHS)
-            .is_some_and(|rhs| rhs.id() == start.id())
-    {
+    if utils::is_rhs_of_extract_or_namespace(start) {
         return None;
     }
 
@@ -101,25 +95,6 @@ pub fn find_references(
     }
 }
 
-fn try_get_identifier<'tree>(tree: &'tree Tree, line: usize, col: usize) -> Option<Node<'tree>> {
-    let start = {
-        let point = Point::new(line, col);
-        let node = tree.root_node().descendant_for_point_range(point, point)?;
-        // Handle case where cursor is at the very start of program
-        match node.kind_id() {
-            kind::PROGRAM => match node.child(0) {
-                Some(child) if tree::point_in_range(point, child.range()) => {
-                    child.descendant_for_point_range(point, point)?
-                }
-                _ => return None,
-            },
-            _ => node,
-        }
-    };
-
-    (start.kind_id() == kind::IDENTIFIER).then_some(start)
-}
-
 fn find_local_references<'a>(
     root: Node<'a>,
     rope: &Rope,
@@ -160,19 +135,12 @@ fn find_references_in_scope<'a>(
     while let Some(node) = queue.pop() {
         // If this is an identifier with matching name, check if it refers to our definition
         if node.kind_id() == kind::IDENTIFIER && rope.byte_slice(node.byte_range()) == name {
-            if let Some(parent) = node.parent() {
-                // Don't include RHS of extract operators in references
-                if [kind::EXTRACT_OPERATOR, kind::NAMESPACE_OPERATOR].contains(&parent.kind_id())
-                    && parent
-                        .child_by_field_id(field::RHS)
-                        .is_some_and(|rhs| rhs.id() == node.id())
-                {
-                    // Skip this reference
-                } else if refers_to_definition(node, definition, rope, name) {
-                    // Include the declaration if requested, or if it's not the definition node
-                    if include_declaration || node.id() != definition.id() {
-                        references.push(node);
-                    }
+            // Don't include RHS of extract operators in references
+            if !utils::is_rhs_of_extract_or_namespace(node) 
+                && refers_to_definition(node, definition, rope, name) {
+                // Include the declaration if requested, or if it's not the definition node
+                if include_declaration || node.id() != definition.id() {
+                    references.push(node);
                 }
             }
         }
