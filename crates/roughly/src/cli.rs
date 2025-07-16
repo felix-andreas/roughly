@@ -7,7 +7,7 @@ use {
     },
     console::style,
     ignore::Walk,
-    miette::{Diagnostic, Report},
+    miette::{Diagnostic, Report, SourceSpan},
     ropey::Rope,
     std::{
         path::{Path, PathBuf},
@@ -60,6 +60,42 @@ pub enum CliError {
     },
 }
 
+#[derive(Error, Debug, Diagnostic)]
+pub enum CheckDiagnostic {
+    #[error("{message}")]
+    #[diagnostic(code(roughly::check::info))]
+    Info {
+        message: String,
+        #[source_code]
+        source_code: String,
+        #[label("here")]
+        span: miette::SourceSpan,
+        filename: String,
+    },
+    
+    #[error("{message}")]
+    #[diagnostic(code(roughly::check::warning))]
+    Warning {
+        message: String,
+        #[source_code]
+        source_code: String,
+        #[label("here")]
+        span: miette::SourceSpan,
+        filename: String,
+    },
+    
+    #[error("{message}")]
+    #[diagnostic(code(roughly::check::error))]
+    Error {
+        message: String,
+        #[source_code]
+        source_code: String,
+        #[label("here")]
+        span: miette::SourceSpan,
+        filename: String,
+    },
+}
+
 // Keep the old error types for backwards compatibility
 #[derive(Debug)]
 pub struct CheckError;
@@ -79,6 +115,46 @@ pub fn report_error<T: Into<Report>>(error: T) {
 pub fn report_diagnostic_error<T: Diagnostic + Send + Sync + 'static>(error: T) {
     let report = Report::new(error);
     eprintln!("{:?}", report);
+}
+
+/// Convert LSP diagnostic to miette diagnostic
+fn lsp_diagnostic_to_miette(
+    diagnostic: &lsp_types::Diagnostic,
+    source_code: &str,
+    filename: &str,
+    rope: &Rope,
+) -> CheckDiagnostic {
+    let start_line = diagnostic.range.start.line as usize;
+    let start_char = diagnostic.range.start.character as usize;
+    let end_line = diagnostic.range.end.line as usize;
+    let end_char = diagnostic.range.end.character as usize;
+    
+    // Convert LSP range to byte offset
+    let start_offset = rope.line_to_char(start_line) + start_char;
+    let end_offset = rope.line_to_char(end_line) + end_char;
+    
+    let span = SourceSpan::new(start_offset.into(), (end_offset - start_offset).into());
+    
+    match diagnostic.severity {
+        Some(DiagnosticSeverity::INFORMATION) => CheckDiagnostic::Info {
+            message: diagnostic.message.clone(),
+            source_code: source_code.to_string(),
+            span,
+            filename: filename.to_string(),
+        },
+        Some(DiagnosticSeverity::WARNING) => CheckDiagnostic::Warning {
+            message: diagnostic.message.clone(),
+            source_code: source_code.to_string(),
+            span,
+            filename: filename.to_string(),
+        },
+        Some(DiagnosticSeverity::ERROR) | None | Some(_) => CheckDiagnostic::Error {
+            message: diagnostic.message.clone(),
+            source_code: source_code.to_string(),
+            span,
+            filename: filename.to_string(),
+        },
+    }
 }
 
 //
@@ -178,81 +254,15 @@ pub fn check(
 
             for diagnostic in diagnostics::analyze_full(tree.root_node(), &rope, config.lint) {
                 n_errors += 1;
-                log(
-                    match diagnostic.severity {
-                        Some(DiagnosticSeverity::INFORMATION) => LogLevel::Info,
-                        Some(DiagnosticSeverity::WARNING) => LogLevel::Warn,
-                        Some(DiagnosticSeverity::ERROR) => LogLevel::Error,
-                        _ => LogLevel::Info,
-                    },
-                    &diagnostic.message,
+                
+                let miette_diagnostic = lsp_diagnostic_to_miette(
+                    &diagnostic,
+                    &old,
+                    &path.display().to_string(),
+                    &rope,
                 );
-                let range = diagnostic.range;
-                let padding_arrow = range.end.line.to_string().len();
-                eprintln!(
-                    "{}{} {}:{}:{}",
-                    " ".repeat(padding_arrow),
-                    style("-->").bold().blue(),
-                    path.display(),
-                    range.start.line,
-                    range.start.character
-                );
-
-                let line_start = usize::max(1, range.start.line as usize) - 1;
-                let lines = {
-                    let start = rope.line_to_char(line_start);
-                    let end =
-                        rope.line_to_char(range.end.line as usize) + range.end.character as usize;
-                    rope.slice(start..end)
-                };
-                let width = padding_arrow + 1;
-                for (i, line) in lines.lines().enumerate() {
-                    eprint!(
-                        "{} {}",
-                        style(format!("{:<width$}|", line_start + i)).blue().bold(),
-                        line
-                    );
-                }
-                eprintln!();
-
-                let width_message =
-                    u32::max(1, range.end.character.abs_diff(range.start.character));
-                eprintln!(
-                    "{}{}  {}",
-                    " ".repeat(width),
-                    " ".repeat(usize::min(
-                        range.start.character as usize,
-                        range.end.character as usize
-                    )),
-                    {
-                        let arrow = style("^".repeat(width_message as usize)).bold();
-                        match diagnostic.severity {
-                            Some(DiagnosticSeverity::INFORMATION) => arrow.blue(),
-                            Some(DiagnosticSeverity::WARNING) => arrow.yellow(),
-                            Some(DiagnosticSeverity::ERROR) => arrow.red(),
-                            _ => arrow,
-                        }
-                    }
-                );
-                eprintln!(
-                    "{}{}  {}",
-                    " ".repeat(width),
-                    " ".repeat(usize::min(
-                        range.start.character as usize,
-                        range.end.character as usize
-                    )),
-                    {
-                        let message = style(&diagnostic.message).bold();
-                        match diagnostic.severity {
-                            Some(DiagnosticSeverity::INFORMATION) => message.blue(),
-                            Some(DiagnosticSeverity::WARNING) => message.yellow(),
-                            Some(DiagnosticSeverity::ERROR) => message.red(),
-                            _ => message,
-                        }
-                    }
-                );
-
-                eprintln!("\n")
+                
+                report_diagnostic_error(miette_diagnostic);
             }
         }
     }
@@ -595,14 +605,119 @@ mod tests {
     }
     
     #[test]
-    fn test_report_diagnostic_error() {
-        let format_error = FormatError::Missing {
-            kind: "identifier",
-            line: 2,
-            col: 17,
+    fn test_lsp_diagnostic_to_miette() {
+        use crate::lsp_types::{Position, Range, DiagnosticSeverity};
+        use ropey::Rope;
+        
+        let source_code = "x <- 1\ny <- 2\nz <- 3";
+        let rope = Rope::from_str(source_code);
+        
+        let diagnostic = crate::lsp_types::Diagnostic {
+            message: "Test error message".to_string(),
+            severity: Some(DiagnosticSeverity::ERROR),
+            range: Range {
+                start: Position { line: 1, character: 0 },
+                end: Position { line: 1, character: 1 },
+            },
+            code: None,
+            code_description: None,
+            source: None,
+            related_information: None,
+            tags: None,
+            data: None,
         };
         
-        // This should not panic and should format properly
-        report_diagnostic_error(format_error);
+        let miette_diagnostic = lsp_diagnostic_to_miette(
+            &diagnostic,
+            source_code,
+            "test.R",
+            &rope,
+        );
+        
+        // Test that we can create a miette Report from the diagnostic
+        let report = Report::new(miette_diagnostic);
+        let error_string = format!("{:?}", report);
+        
+        // Should contain the error code and message
+        assert!(error_string.contains("roughly::check::error"));
+        assert!(error_string.contains("Test error message"));
+    }
+    
+    #[test]
+    fn test_lsp_diagnostic_to_miette_warning() {
+        use crate::lsp_types::{Position, Range, DiagnosticSeverity};
+        use ropey::Rope;
+        
+        let source_code = "x <- 1\ny <- 2\nz <- 3";
+        let rope = Rope::from_str(source_code);
+        
+        let diagnostic = crate::lsp_types::Diagnostic {
+            message: "Test warning message".to_string(),
+            severity: Some(DiagnosticSeverity::WARNING),
+            range: Range {
+                start: Position { line: 0, character: 0 },
+                end: Position { line: 0, character: 1 },
+            },
+            code: None,
+            code_description: None,
+            source: None,
+            related_information: None,
+            tags: None,
+            data: None,
+        };
+        
+        let miette_diagnostic = lsp_diagnostic_to_miette(
+            &diagnostic,
+            source_code,
+            "test.R",
+            &rope,
+        );
+        
+        // Test that we can create a miette Report from the diagnostic
+        let report = Report::new(miette_diagnostic);
+        let error_string = format!("{:?}", report);
+        
+        // Should contain the warning code and message
+        assert!(error_string.contains("roughly::check::warning"));
+        assert!(error_string.contains("Test warning message"));
+    }
+    
+    #[test]
+    fn test_lsp_diagnostic_to_miette_info() {
+        use crate::lsp_types::{Position, Range, DiagnosticSeverity};
+        use ropey::Rope;
+        
+        let source_code = "x <- 1\ny <- 2\nz <- 3";
+        let rope = Rope::from_str(source_code);
+        
+        let diagnostic = crate::lsp_types::Diagnostic {
+            message: "Test info message".to_string(),
+            severity: Some(DiagnosticSeverity::INFORMATION),
+            range: Range {
+                start: Position { line: 2, character: 0 },
+                end: Position { line: 2, character: 1 },
+            },
+            code: None,
+            code_description: None,
+            source: None,
+            related_information: None,
+            tags: None,
+            data: None,
+        };
+        
+        let miette_diagnostic = lsp_diagnostic_to_miette(
+            &diagnostic,
+            source_code,
+            "test.R",
+            &rope,
+        );
+        
+        // Test that we can create a miette Report from the diagnostic
+        let report = Report::new(miette_diagnostic);
+        let error_string = format!("{:?}", report);
+        
+        // Should contain the info code and message
+        assert!(error_string.contains("roughly::check::info"));
+        assert!(error_string.contains("Test info message"));
     }
 }
