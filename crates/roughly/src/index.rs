@@ -1,8 +1,5 @@
 use {
-    crate::{
-        lsp_types::{Url as Uri, *},
-        tree, utils,
-    },
+    crate::{lsp_types::Range, tree, utils},
     ropey::Rope,
     std::{
         collections::HashMap,
@@ -42,23 +39,6 @@ pub enum ItemInfo {
     R6Field,
 }
 
-fn to_symbol_kind(info: &ItemInfo) -> SymbolKind {
-    match info {
-        ItemInfo::Unknown => SymbolKind::VARIABLE,
-        ItemInfo::Integer | ItemInfo::Float | ItemInfo::Complex => SymbolKind::NUMBER,
-        ItemInfo::Bool => SymbolKind::BOOLEAN,
-        ItemInfo::String => SymbolKind::STRING,
-        ItemInfo::Null => SymbolKind::NULL,
-        ItemInfo::Function => SymbolKind::FUNCTION,
-        ItemInfo::S4Class => SymbolKind::CLASS,
-        ItemInfo::S4Generic => SymbolKind::INTERFACE,
-        ItemInfo::S4Method { .. } => SymbolKind::METHOD,
-        ItemInfo::R6Class => SymbolKind::CLASS,
-        ItemInfo::R6Method => SymbolKind::METHOD,
-        ItemInfo::R6Field => SymbolKind::FIELD,
-    }
-}
-
 impl Item {
     pub fn new(
         name: String,
@@ -82,25 +62,6 @@ impl Item {
         match &self.info {
             ItemInfo::S4Method { signature } => format!("{} ({})", self.name, signature),
             _ => self.name.clone(),
-        }
-    }
-
-    pub fn to_document_symbol(&self) -> DocumentSymbol {
-        #[allow(deprecated)]
-        DocumentSymbol {
-            name: self.display_name(),
-            kind: to_symbol_kind(&self.info),
-            detail: self.detail.clone(),
-            tags: None,
-            range: self.range,
-            selection_range: self.selection_range,
-            children: self.children.as_ref().map(|children| {
-                children
-                    .iter()
-                    .map(|child| child.to_document_symbol())
-                    .collect()
-            }),
-            deprecated: None,
         }
     }
 }
@@ -129,42 +90,6 @@ impl SymbolsMap for HashMap<PathBuf, Vec<Item>> {
             .take(limit) // limit amount
             .collect::<Vec<_>>()
     }
-}
-
-pub fn get_workspace_symbols(
-    query: &str,
-    workspace_symbols: &impl SymbolsMap,
-) -> Vec<WorkspaceSymbol> {
-    workspace_symbols.filter_map(
-        |path, symbols| {
-            let uri = Uri::from_file_path(path).unwrap();
-            symbols
-                .iter()
-                .flat_map(|symbol| {
-                    std::iter::once((symbol, None)).chain(
-                        symbol
-                            .children
-                            .as_ref()
-                            .into_iter()
-                            .flatten()
-                            .map(|child| (child, Some(symbol.name.as_ref()))),
-                    )
-                })
-                .filter(|(symbol, _)| utils::starts_with_lowercase(&symbol.display_name(), query))
-                .map(move |(symbol, container_name)| WorkspaceSymbol {
-                    name: symbol.display_name(),
-                    kind: to_symbol_kind(&symbol.info),
-                    tags: None,
-                    container_name: container_name.map(str::to_string),
-                    location: OneOf::Left(Location {
-                        uri: uri.clone(),
-                        range: symbol.range,
-                    }),
-                    data: None,
-                })
-        },
-        128,
-    )
 }
 
 #[derive(Debug)]
@@ -551,27 +476,6 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<Item> {
             ))
         }
         _ => None,
-    }
-}
-
-pub fn document_symbol(
-    name: String,
-    kind: SymbolKind,
-    detail: Option<String>,
-    range: Range,
-    selection_range: Range,
-    children: Option<Vec<DocumentSymbol>>,
-) -> DocumentSymbol {
-    #[allow(deprecated)]
-    DocumentSymbol {
-        name,
-        kind,
-        detail,
-        tags: None,
-        range,
-        selection_range,
-        children,
-        deprecated: None, // required for struct, but deprecated; allow deprecated field
     }
 }
 
