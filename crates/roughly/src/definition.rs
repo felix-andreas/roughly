@@ -35,8 +35,7 @@ pub fn goto(
         )));
     }
 
-    let is_local_scope = std::iter::successors(Some(start), |node| node.parent())
-        .any(|node| node.kind_id() == kind::FUNCTION_DEFINITION);
+    let is_local_scope = tree::find_containing_function(start).is_some();
 
     let globals = symbols_map.filter_map(
         |path, symbols| {
