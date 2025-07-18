@@ -7,10 +7,33 @@ This extension provides support for the [R programming language](https://www.r-p
 
 ## Features
 
-* Autocomplete
-* Code Formatting
-* Syntax Diagnostics
-* Workspace Symbol Search
+Roughly aims to support the following language server features (some are experimental or in progress):
+
+- **Formatting**
+  - Format entire document
+  - Format selected code range *(🧪 experimental)*
+
+- **Navigation**
+  - Index global variables, S4 and R6 classes/methods
+  - Search current document - <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> *in VS Code*
+  - Search global workspace - <kbd>Ctrl</kbd> + <kbd>T</kbd> *in VS Code*
+  - Go to definition *(🧪 experimental)*
+  - Find all references *(🧪 experimental)*
+
+- **Diagnostics**
+  - Syntax errors - *including missing or trailing commas*
+  - Basic linting rules - *[full list here](https://roughly.felixandreas.me/linter/#semantics-checks)*
+  - Warning for unused variables *(🧪 experimental)*
+  - Error for undefined variable *(⚠️ missing)*
+  - Argument validation for function calls *(⚠️ missing)*
+  - Type checking *([💡 early design phase](crates/typing/README.md))*
+
+- **Editing**
+  - Autocomplete local and global variables
+  - Autocomplete variables from other packages *(⚠️ missing)*
+  - Rename local variables *(🧪 experimental)*
+  - Rename global variables *(⚠️ missing)*
+  - Signature help *(🔨 work in progress)*
 
 ## Usage
 
@@ -24,8 +47,8 @@ You can customize the Roughly extension in VS Code through the following setting
 {
   // Use a custom binary instead of the bundled one
   "roughly.path": "/path/to/roughly",
-  // Pass extra arguments to the language server
-  "roughly.args": ["server", "--extra", "arg"],
+  // Pass custom arguments; defaults to ["server"]
+  "roughly.args": ["server", "--verbose"],
   // Enable experimental features
   "roughly.experimentalFeatures": ["goto_definition", "range_formatting"],
 }
