@@ -41,13 +41,13 @@
 		"vscode-languageclient": "^9.0.1"
 	},
 	"devDependencies": {
-		"@eslint/js": "^9.13.0",
-		"@types/node": "^20",
+		"@eslint/js": "^9.31.0",
+		"@types/node": "^20.19.8",
 		"@types/vscode": "^1.75.1",
-		"@vscode/vsce": "^3.5.0",
-		"eslint": "^9.29.0",
+		"@vscode/vsce": "^3.6.0",
+		"eslint": "^9.31.0",
 		"typescript": "^5.8.3",
-		"typescript-eslint": "^8.34.1"
+		"typescript-eslint": "^8.37.0"
 	},
 	"main": "./out/extension",
 	"activationEvents": [
