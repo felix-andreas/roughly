@@ -97,7 +97,7 @@ Roughly can also be used as a VS Code extension.
 Install the extension from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly).
 
 > [!NOTE]
-> The VS Code extension from the marketplace includes a bundled version of the Roughly CLI **only for Windows and Linux x64**. If you are using macOS or a different architecture, you will need to install the Roughly CLI manually.
+> The VS Code extension from the marketplace includes a bundled version of the Roughly CLI for **Linux x86_64, Windows x86_64, and macOS aarch64**. If you are using a different architecture, you will need to install the Roughly CLI manually.
 
 ### Manual Installation
 
