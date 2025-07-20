@@ -2,8 +2,8 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = c) { body }
-
-function(a, b = c) {
-  body
-}
+{ # {
+  # 1
+  body # body
+  # 2
+} # }

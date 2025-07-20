@@ -2,8 +2,5 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = c) { body }
-
-function(a, b = c) {
-  body
-}
+f <- function(x) x^2
+result <- f(3)

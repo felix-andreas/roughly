@@ -2,8 +2,6 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = c) { body }
-
-function(a, b = c) {
-  body
-}
+x <- y
+x <<- y
+x = y

@@ -4,10 +4,10 @@ expression: code
 ---
 function(a, b) {}
 
-function(a, b = default) {}
+function(a, b = c) {}
 
-function(a, b = default) { body }
+function(a, b = c) { body }
 
-function(a, b = default) {
+function(a, b = c) {
   body
 }

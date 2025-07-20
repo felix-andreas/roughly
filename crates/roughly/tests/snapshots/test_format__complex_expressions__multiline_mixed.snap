@@ -2,8 +2,20 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = c) { body }
+foo(
+  1
+) + 2
 
-function(a, b = c) {
-  body
-}
+(
+  1
+) +
+  2
+
+1 + foo(
+  2
+)
+
+1 +
+  foo(
+    2
+  )

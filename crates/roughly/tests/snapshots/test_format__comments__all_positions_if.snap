@@ -1,0 +1,25 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+(
+  # before
+  if # if
+  # 1
+  ( # open
+    # 2
+    a && b # condition
+    # 3
+  ) # close
+  # 4
+  {
+    y
+  }
+  # 5
+  else # else
+  # 6
+  {
+    z
+  }
+  # after
+)

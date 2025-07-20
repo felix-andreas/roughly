@@ -2,8 +2,7 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = c) { body }
-
-function(a, b = c) {
-  body
+function(x) {
+  names(foo[[x]]) <- bar
+  foo[x]
 }

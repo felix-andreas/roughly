@@ -2,8 +2,10 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = c) { body }
+for (x in y) {
+  body
+}
 
-function(a, b = c) {
+for (x in y) {
   body
 }

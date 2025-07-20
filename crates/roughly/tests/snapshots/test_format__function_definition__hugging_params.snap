@@ -2,11 +2,4 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = default) { body }
-
-# function(a, b = default # TODO: consider if this should be single line
-# ) { body }
-
-# function(a, b = default # TODO: consider if this should be single line
-# ) { body
-# }
+function(a, b = c) { body }

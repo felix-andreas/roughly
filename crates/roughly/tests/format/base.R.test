@@ -5,15 +5,171 @@
 #---- appends_trailing_newline
 body
 
+#==== literals
+#---- constants
+TRUE
+FALSE
+NULL
+Inf
+NaN
+NA
+NA_real_
+NA_character_
+NA_complex_
+
+#---- integers
+42L
+0L
+0xDEADL
+1e1L
+
+#---- floats
+.66
+123.4123
+1e322
+1e-3
+1.8e10
+
+#---- strings
+""
+"x"
+"x y"
+'x'
+'x y'
+
+#---- dot_dot_i
+..1
+..10
+
+#---- identifiers
+x
+x2
+x.y
+.x.y
+`_x`
+`a "literal"`
+
+#==== operators
+#---- binary_basic
+x + y
+x - y
+x * y
+x / y
+x ^ y
+x %% y
+x %/% y
+
+#---- binary_assignment
+x <- y
+x <<- y
+x = y
+
+#---- binary_comparison  
+x == y
+x != y
+x < y
+x > y
+x <= y
+x >= y
+
+#---- binary_logical
+x & y
+x | y
+x && y
+x || y
+
+#---- binary_special
+x:y
+x %in% y
+x %>% y
+x |> y
+
+#---- unary_basic
+!x
++x
+-x
+~x
+
+#==== expressions
+#---- braced_basic
+{}
+{ x }
+{ x; y }
+
+#---- braced_multiline
+{
+    x
+}
+
+{
+    x
+    y
+}
+
+#---- parenthesized_basic
+(x)
+(x + y)
+
+#---- parenthesized_multiline
+(
+    x
+)
+
+(
+    x + y
+)
+
+#==== calls
+#---- call_basic
+f()
+f(x)
+f(x, y)
+f(a = x, b = y)
+
+#---- call_multiline
+f(
+    x
+)
+
+f(
+    x,
+    y
+)
+
+f(
+    a = x,
+    b = y
+)
+
+#---- subset_basic
+x[]
+x[y]
+x[y, z]
+x[a = y, b = z]
+
+#---- subset2_basic
+x[[]]
+x[[y]]
+x[[y, z]]
+x[[a = y, b = z]]
+
+#---- extract_basic
+x$y
+x@y
+
+#---- namespace_basic
+x::y
+x:::y
+
 #==== function_definition
 #---- simple
 function(a, b) {}
 
-function(a, b = default) {}
+function(a, b = c) {}
 
-function(a, b = default) { body }
+function(a, b = c) { body }
 
-function(a, b = default) {
+function(a, b = c) {
     body
 }
 
@@ -30,27 +186,17 @@ function(
 ) {}
 
 #---- no_spaces
-function(a,b=default){body}
+function(a,b=c){body}
 
-function(a,b=default){
+function(a,b=c){
 body
 }
 
 #---- hugging_params
-function(a, b = default) { body }
-
-# function(a, b = default # TODO: consider if this should be single line
-# ) { body }
-
-# function(a, b = default # TODO: consider if this should be single line
-# ) { body
-# }
+function(a, b = c) { body }
 
 #---- hugging_body
 function() { body }
-
-# function() { body # TODO: consider if this should be single line
-# }
 
 function() {
 body }
@@ -59,17 +205,14 @@ function() {
     body
 }
 
-# function() # TODO: consider if this should be single line
-#   { body }
-
 #---- immediately_invocated
 (\(a, b) a * b)(x, y)
 
 (\(a, b) a * b
-)(x,y)
+)(x, y)
 
 (\(a, b)
-a * b)(x,y)
+a * b)(x, y)
 
 #---- body_no_braces
 function() body
@@ -94,15 +237,63 @@ call(
     b = 1
 )
 
-#---- all_comment_positions
-( # hack: only parses correctly with surrounding parentheses
-    function # function
-    # 1
-    ( # (
-        # 2
-        param # param
-        # 3
-    ) # )
-    # 4
-    {} # body
-)
+#==== control_flow
+#---- if_basic
+if (condition) body
+
+if (condition) {
+    body
+}
+
+if (condition) {
+    body
+} else {
+    body
+}
+
+if (condition) {
+    body
+} else if (condition) {
+    body
+} else {
+    body
+}
+
+#---- for_basic
+for (x in y) body
+
+for (x in y) {
+    body
+}
+
+#---- while_basic
+while (condition) body
+
+while (condition) {
+    body
+}
+
+#---- repeat_basic
+repeat body
+
+repeat {
+    body
+}
+
+#==== program_structure
+#---- simple_program
+x <- 1 + 2
+y <- x * 3
+
+#---- program_with_functions
+f <- function(x) x^2
+result <- f(3)
+
+#---- program_with_control_flow
+for (i in 1:3) {
+    print(i)
+}
+
+while (x < 10) {
+    x <- x + 1
+}

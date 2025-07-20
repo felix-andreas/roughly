@@ -2,8 +2,9 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = c) { body }
-
-function(a, b = c) {
-  body
-}
+x
+x2
+x.y
+.x.y
+`_x`
+`a "literal"`

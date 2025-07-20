@@ -4,9 +4,6 @@ expression: code
 ---
 function() { body }
 
-# function() { body # TODO: consider if this should be single line
-# }
-
 function() {
   body
 }
@@ -14,6 +11,3 @@ function() {
 function() {
   body
 }
-
-# function() # TODO: consider if this should be single line
-#   { body }

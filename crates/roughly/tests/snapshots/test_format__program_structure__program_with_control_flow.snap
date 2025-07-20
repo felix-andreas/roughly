@@ -2,8 +2,10 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = c) { body }
+for (i in 1:3) {
+  print(i)
+}
 
-function(a, b = c) {
-  body
+while (x < 10) {
+  x <- x + 1
 }
