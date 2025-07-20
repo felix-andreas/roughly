@@ -1,5 +1,0 @@
----
-source: src/format.rs
-expression: "format_str(indoc! { r#\"\n            { foo; bar }\n        \"# }).unwrap()"
----
-{ foo; bar }

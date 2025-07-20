@@ -1,9 +1,0 @@
----
-source: src/format.rs
-expression: "fmt(indoc!\n{\n    r#\"\n            foo |> # foo\n            #bar\n            bar |>#bar\n            baz |>\n                qux\n        \"#\n})"
----
-foo |> # foo
-  # bar
-  bar |> # bar
-  baz |>
-  qux

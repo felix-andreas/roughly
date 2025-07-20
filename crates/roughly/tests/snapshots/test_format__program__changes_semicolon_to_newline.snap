@@ -2,9 +2,5 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-""
-"x"
-"x y"
-"x"
-"x y"
-'"'
+expr
+expr

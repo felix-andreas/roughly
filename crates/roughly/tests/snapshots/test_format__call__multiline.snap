@@ -2,9 +2,16 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-""
-"x"
-"x y"
-"x"
-"x y"
-'"'
+f(
+  x
+)
+
+f(
+  x,
+  y
+)
+
+f(
+  a = x,
+  b = y
+)

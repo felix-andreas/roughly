@@ -1,5 +1,0 @@
----
-source: src/format.rs
-expression: "fmt(indoc! { r#\"\n            (\\(a, b) a *  b)(2, 3)\n        \"# })"
----
-(\(a, b) a * b)(2, 3)

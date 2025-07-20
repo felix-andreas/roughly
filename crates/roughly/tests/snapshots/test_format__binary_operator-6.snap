@@ -1,6 +1,0 @@
----
-source: src/format.rs
-expression: "fmt(indoc!\n{ r#\"\n            foo %>% bar %>%\n                    baz\n        \"# })"
----
-foo %>% bar %>%
-  baz

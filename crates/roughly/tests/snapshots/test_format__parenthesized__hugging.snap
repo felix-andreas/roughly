@@ -1,0 +1,30 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+(lhs + rhs)
+
+(lhs + rhs)
+
+(
+  lhs + rhs
+)
+
+(
+  lhs + rhs
+)
+
+(
+  lhs + rhs # comment
+)
+
+(
+  lhs +
+    rhs
+)
+
+(lhs +
+  rhs)
+
+(lhs +
+  rhs)

@@ -1,9 +1,0 @@
----
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n            {\n                a\n\n                b\n            }\n        \"#\n})"
----
-{
-  a
-
-  b
-}

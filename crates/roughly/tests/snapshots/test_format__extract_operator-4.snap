@@ -1,6 +1,0 @@
----
-source: tests/test_format.rs
-expression: "format_str(indoc! { r#\"\n    \tlhs$ # 1\n            rhs # 2\n    \"# }).unwrap()"
----
-lhs$ # 1
-  rhs # 2

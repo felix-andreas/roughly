@@ -1,0 +1,28 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+{ expr; expr }
+
+{
+  expr
+  expr
+}
+
+{ expr; expr }
+
+{
+  expr
+  expr
+}
+
+{
+  expr
+  expr
+}
+
+{
+  expr
+  x +
+    y
+}

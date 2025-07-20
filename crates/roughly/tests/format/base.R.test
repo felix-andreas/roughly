@@ -489,11 +489,6 @@ in
 for (item in sequence) # 1
     body
 
-
-
-### TODO FIXED UNTIL HERE!
-
-
 #==== function_definition
 #---- simple
 function(a, b) {}
