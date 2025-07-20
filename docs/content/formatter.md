@@ -167,30 +167,44 @@ complex_call(
 
 **Argument hugging**: When function arguments can fit on a single line and the last argument's value starts on the same line as the opening parenthesis, the formatter keeps a compact format. Otherwise, it expands to multiple lines with proper indentation.
 
+**Nested function calls** are formatted with hugging when appropriate:
+
+```r
+# Before formatting
+result <- outer(inner(a,b),other(c,d))
+
+# After formatting  
+result <- outer(inner(a, b), other(c, d))
+```
+
 ### Function Definitions
 
 Function definitions follow consistent formatting rules for parameters and body structure:
 
 ```r
 # Before formatting
-calculate_stats<-function(data,method="mean",trim=0){
-  process_data(data,method,trim)
+calc<-function(x,y=1){x+y}
+stats<-function(data,method="mean"){
+  result(data,method)
 }
 
 # After formatting
-calculate_stats <- function(data, method = "mean", trim = 0) {
-  process_data(data, method, trim)
+calc <- function(x, y = 1) x + y
+stats <- function(data, method = "mean") {
+  result(data, method)
 }
 ```
+
+**Single line functions**: When the function body is a single expression, braces can be omitted if the expression starts on the same line. **Multi-line functions**: Always receive braces, even when the body starts on the same line as the function declaration.
 
 **Anonymous functions** (lambda expressions) are also properly formatted:
 
 ```r
 # Before formatting
-apply(matrix,1,\(row)sum(row,na.rm=TRUE))
+lapply(data,\(x)x+1)
 
 # After formatting
-apply(matrix, 1, \(row) sum(row, na.rm = TRUE))
+lapply(data, \(x) x + 1)
 ```
 
 **Body formatting**: If a function definition spans multiple lines or has a multiline condition, non-braced bodies are automatically wrapped in braces for consistency.
@@ -202,18 +216,18 @@ apply(matrix, 1, \(row) sum(row, na.rm = TRUE))
 ```r
 # Before formatting
 if(condition){action} else{alternative}
-if(very_long_condition_that_spans_multiple_lines||
-   another_condition){
-  complex_action()
+if(long_condition ||
+   other_condition){
+  action()
 }
 
 # After formatting
 if (condition) { action } else { alternative }
 if (
-  very_long_condition_that_spans_multiple_lines ||
-  another_condition
+  long_condition ||
+  other_condition
 ) {
-  complex_action()
+  action()
 }
 ```
 
@@ -228,16 +242,10 @@ if (
 ```r
 # Before formatting
 for(item in collection) process(item)
-for(i in 1:length(data)){
-    calculate(data[i])
-}
 
 # After formatting
 for (item in collection) {
   process(item)
-}
-for (i in 1:length(data)) {
-  calculate(data[i])
 }
 ```
 
@@ -274,14 +282,14 @@ Parenthesized expressions maintain their layout with smart formatting for readab
 ```r
 # Before formatting
 (x+y*z)
-(very_long_expression+
- another_part)
+(long_expression+
+ other_part)
 
 # After formatting
 (x + y * z)
 (
-  very_long_expression +
-  another_part
+  long_expression +
+  other_part
 )
 ```
 
@@ -289,19 +297,17 @@ Parenthesized expressions maintain their layout with smart formatting for readab
 
 ### String Literals
 
-String literals receive intelligent quote normalization:
+String literals receive intelligent quote normalization. The formatter prefers double quotes (`"`) unless the string contains unescaped double quotes:
 
 ```r
 # Before formatting
-message <- "Hello world"
+message <- 'Hello world'
 quoted_content <- 'Say "hello"'
 
 # After formatting
 message <- "Hello world"
 quoted_content <- 'Say "hello"'
 ```
-
-**Quote selection**: The formatter prefers single quotes unless the string content contains unescaped double quotes. This helps avoid unnecessary escaping while maintaining readability.
 
 ### Subsetting and Member Access
 
@@ -310,35 +316,13 @@ quoted_content <- 'Say "hello"'
 ```r
 # Before formatting
 data[row_index,column_index]
-matrix[i=1,j=2,drop=FALSE]
+environment[["variable_name"]]
+object$member_variable
 
 # After formatting
 data[row_index, column_index]
-matrix[i = 1, j = 2, drop = FALSE]
-```
-
-**Double bracket subsetting** for list/environment access:
-
-```r
-# Before formatting
 environment[["variable_name"]]
-nested_list[[key1]][[key2]]
-
-# After formatting
-environment[["variable_name"]]
-nested_list[[key1]][[key2]]
-```
-
-**Member access operators** (`$` and `@`):
-
-```r
-# Before formatting
 object$member_variable
-s4_object@slot_name
-
-# After formatting
-object$member_variable
-s4_object@slot_name
 ```
 
 **Namespace operators** (`::` and `:::`):
@@ -359,9 +343,9 @@ Unary operators receive appropriate spacing based on their type and context:
 
 ```r
 # Before formatting
-result=!condition
-number=-42
-formula=~response+predictor
+result = ! condition
+number = - 42
+formula = ~ response + predictor
 
 # After formatting
 result = !condition
@@ -371,100 +355,26 @@ formula = ~ response + predictor
 
 **Special spacing rule**: The `~` (formula) operator gets a space when followed by complex expressions, but not when followed by simple identifiers.
 
-## Compound Expressions
-
-Roughly excels at formatting complex, nested expressions while maintaining readability. Here are some examples of how compound expressions are handled:
-
-### Chained Operations
-
-**Pipeline chains** receive consistent indentation:
-
-```r
-# Before formatting
-data %>%
-filter(status=="active") %>%
-group_by(category) %>%
-summarize(total=sum(amount,na.rm=TRUE)) %>%
-arrange(desc(total))
-
-# After formatting
-data %>%
-  filter(status == "active") %>%
-  group_by(category) %>%
-  summarize(total = sum(amount, na.rm = TRUE)) %>%
-  arrange(desc(total))
-```
-
-### Nested Function Calls
-
-**Complex nesting** maintains proper indentation levels:
-
-```r
-# Before formatting
-result<-calculate(
-transform(data,new_column=apply(matrix,2,function(column){
-mean(column,na.rm=TRUE)
-})),
-method="robust"
-)
-
-# After formatting
-result <- calculate(
-  transform(
-    data,
-    new_column = apply(matrix, 2, function(column) {
-      mean(column, na.rm = TRUE)
-    })
-  ),
-  method = "robust"
-)
-```
-
-### Mixed Expression Types
-
-**Combinations of different constructs** are handled intelligently:
-
-```r
-# Before formatting
-if(length(data)>0){
-process_results<-lapply(split(data,data$group),function(subset){
-if(nrow(subset)>min_size){
-calculate_stats(subset$values)
-} else {
-NULL
-}
-})
-}
-
-# After formatting
-if (length(data) > 0) {
-  process_results <- lapply(split(data, data$group), function(subset) {
-    if (nrow(subset) > min_size) {
-      calculate_stats(subset$values)
-    } else {
-      NULL
-    }
-  })
-}
-```
-
 ## Format Suppression
 
 You can disable formatting for specific code sections using the `# fmt: skip` comment directive:
 
 ```r
 # fmt: skip
-data_table <- data.frame(
-  column1=c(1,2,3),
-  column2=c("a","b","c")
-)
+matrix(
+  c(
+    1, 2,
+    3, 4
+  ),
+  nrow=2
+) # This code won't be reformatted
 
-processed_data <- clean_data(data_table)  # This will be formatted
+matrix(c(1, 2,
+         3, 4), nrow = 2)  # This code will be formatted
 
-results <- calculate(
-  data=processed_data,
-  method="custom"
-) # fmt: skip
+matrix(c(1, 2,
+         3, 4), nrow=2) # fmt: skip
+# The line above won't be reformatted
 ```
 
 The `fmt: skip` directive can be placed:
@@ -508,19 +418,6 @@ Semicolon-separated expressions receive appropriate formatting:
 
 # After formatting
 { initialize(); process(); cleanup() }
-```
-
-### Data Structure Access
-Complex subsetting patterns are handled gracefully:
-
-```r
-# Before formatting
-multi_dim_array[,,index,drop=FALSE]
-nested_access$level1[["level2"]]@slot
-
-# After formatting
-multi_dim_array[, , index, drop = FALSE]
-nested_access$level1[["level2"]]@slot
 ```
 
 ### R6 Class Definitions
