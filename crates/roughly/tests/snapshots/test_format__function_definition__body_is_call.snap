@@ -1,0 +1,21 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+function() call(a = 1, b = 1)
+
+function() {
+  call(a = 1, b = 1)
+}
+
+function() call(
+  a = 1,
+  b = 1
+)
+
+function() {
+  call(
+    a = 1,
+    b = 1
+  )
+}

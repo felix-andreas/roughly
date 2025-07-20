@@ -1,0 +1,27 @@
+# fmt: skip-file
+#==== newlines
+#---- removes consecutive newlines
+a
+
+
+b
+
+c
+
+#==== directives
+#---- fmt__skip
+# fmt: skip
+x+y
+
+#---- fmt__skip_file
+# fmt: skip-file
+x+y
+
+#---- fmt__on_off
+x+y
+
+# fmt: off
+x+y
+
+# fmt: on
+x+y
