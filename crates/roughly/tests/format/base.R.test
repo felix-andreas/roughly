@@ -3,16 +3,16 @@
 #---- empty
 
 #---- basic
-expr
+x
 
 #---- joins_consecutive_newlines
-expr
+x
 
 
-expr
+y
 
 #---- changes_semicolon_to_newline
-expr; expr
+x; y
 
 #==== literals
 #---- constants
@@ -65,7 +65,6 @@ x.y
 +x
 -x
 ~x
-
 
 #---- basic
 x + y
@@ -211,23 +210,23 @@ x }
 x + y }
 
 #---- semicolon
-{ expr; expr }
+{ x; y }
 
-{ expr;
-    expr }
-
-{ expr; expr
-}
-
-{
-expr; expr }
-
-{
-expr; expr
-}
-
-{ expr; x +
+{ x;
     y }
+
+{ x; y
+}
+
+{
+x; y }
+
+{
+x; y
+}
+
+{ x; y +
+    z }
 
 #---- comment_all_positions
 { # {
@@ -249,6 +248,7 @@ f(a = x, b = y)
 
 #---- spacing
 f( )
+f( x )
 f( x,y )
 f( a=x,b=y )
 
