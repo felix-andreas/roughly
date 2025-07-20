@@ -20,10 +20,21 @@ roughly fmt --diff         # Show diff of formatting changes without applying th
 
 The formatter follows these key principles:
 
-* **Non-invasive formatting**: The formatter only adds line breaks if expressions are already multi-line, and won't break one-liners unnecessarily
-* **Consistent style**: Standardizes spacing, indentation, and other aspects of R code style
+* **Non-invasive formatting**: The formatter only adds line breaks if expressions are already multi-line, and won't break one-liners unnecessarily. See [Why Non-Invasive?](#why-non-invasive) for more details.
 * **Comment preservation**: Maintains all comments while improving their formatting
 * **Smart indentation**: Uses context-aware indentation for complex expressions
+* **Auto-bracing and hugging**: Automatically adds braces when needed for clarity and applies intelligent spacing. See [Auto-Bracing](#auto-bracing) and [Hugging Behavior](#hugging-behavior) sections.
+
+### Why Non-Invasive?
+
+R is an expression-based language with a strong focus on numerical computing and data analysis. Unlike many other programming languages, R code is often written interactively and exploratively, where preserving the original intent and structure of expressions is crucial for readability and debugging.
+
+The non-invasive approach means roughly respects your existing line breaks and won't arbitrarily split expressions that you've chosen to keep on one line. This is particularly important in R because:
+
+- **Data analysis workflows**: Short, expressive one-liners are common and meaningful
+- **Interactive development**: Code is often built incrementally, and forced line breaks can disrupt the flow
+- **Mathematical expressions**: Complex formulas are often more readable when kept compact
+- **Functional style**: R's functional nature benefits from preserving the structure of nested calls
 
 ## Formatting Rules
 
@@ -444,6 +455,92 @@ PersonClass <- R6Class(
 - **Multi-line strings**: String literal structure is preserved
 - **Formula objects**: Proper spacing around `~` operator based on complexity
 - **S4 slot access**: `@` operator formatting maintained
+
+## Auto-Bracing
+
+The formatter automatically adds braces to control flow structures when they improve clarity and consistency:
+
+**Function definitions**: Multi-line functions always receive braces, even when the body starts on the same line:
+
+```r
+# Before formatting
+f <- function(x) 
+  x + 1
+
+# After formatting  
+f <- function(x) {
+  x + 1
+}
+```
+
+**Conditional statements**: Multi-line conditions or bodies are automatically braced:
+
+```r
+# Before formatting
+if (condition)
+  single_statement
+
+# After formatting
+if (condition) {
+  single_statement
+}
+```
+
+**Loops**: All loop bodies are automatically braced for consistency:
+
+```r
+# Before formatting
+for (i in 1:n)
+  process(i)
+
+# After formatting
+for (i in 1:n) {
+  process(i)
+}
+```
+
+## Hugging Behavior
+
+The formatter applies "hugging" - keeping content close to delimiters when it fits naturally:
+
+**Function arguments**: When arguments fit on one line, they hug the parentheses:
+
+```r
+# Hugged format
+result <- calculate(x, y, z)
+
+# Expanded format for longer arguments
+result <- process(
+  very_long_parameter_name,
+  another_long_parameter,
+  final_parameter
+)
+```
+
+**Nested calls**: Consecutive function calls are formatted compactly:
+
+```r
+# Hugged nested calls
+data %>% filter(x > 0) %>% select(a, b)
+
+# Expanded when necessary
+data %>% 
+  filter(complex_condition_here) %>%
+  select(many, different, columns, here)
+```
+
+**Parenthesized expressions**: Content hugs parentheses when appropriate:
+
+```r
+# Hugged
+result <- (x + y) * z
+
+# Expanded for complex content
+result <- (
+  complex_expression +
+  another_part
+) * multiplier
+```
 
 ## Line Endings
 
