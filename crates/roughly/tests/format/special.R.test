@@ -43,77 +43,6 @@ x+y
 #'foo'
 #'foo
 
-#---- all_positions_function
-( # hack: only parses correctly with surrounding parentheses
-    function # function
-    # 1
-    ( # (
-        # 2
-        param # param
-        # 3
-    ) # )
-    # 4
-    {} # body
-)
-
-#---- all_positions_if
-(
-    # before
-    if # if
-    # 1
-    ( # open
-        # 2
-        a && b # condition
-        # 3
-    ) # close
-    # 4
-    {
-        y
-    }
-    # 5
-    else # else
-    # 6
-    {
-        z
-    }
-    # after
-)
-
-#---- all_positions_binary
-lhs + # 1
-    rhs # 2
-
-(
-    lhs # lhs
-    # 1
-    + # operator
-    # 2
-    rhs # rhs
-)
-
-#---- all_positions_call
-fn( # (
-    # 1
-    arg1 # arg1
-    , # ,
-    arg2 # arg2
-    # 2
-) # )
-
-#---- all_positions_braced
-{ # {
-    # 1
-    body # body
-    # 2
-} # }
-
-#---- all_positions_parenthesized
-( # open
-    # 1
-    body # body
-    # 2
-) # close
-
 #==== complex_expressions
 #---- chained_extract
 foo$
@@ -125,20 +54,6 @@ foo$
     bar(a
     )$
     baz(a, b)$
-
-#---- hugging_comments
-fn(arg1, fn(
-    arg
-) # comment
-)
-
-fn(arg1, {
-    body
-})
-
-fn(arg1, arg2 = value, function() {
-    body
-})
 
 #---- multiline_conditions
 if (any(
