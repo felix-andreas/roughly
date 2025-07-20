@@ -56,7 +56,7 @@ Download the pre-built binary for your platform from the [releases page](https:/
 
 ### Build from Source
 
-Alternatively, build from source (requires Rust nightly):
+Alternatively, build from source:
 
 ```sh
 cargo build --release
