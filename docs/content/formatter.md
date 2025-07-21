@@ -501,45 +501,61 @@ for (i in 1:n) {
 
 ## Hugging Behavior
 
-The formatter applies "hugging" - keeping content close to delimiters when it fits naturally:
+"Hugging" refers to how nested function calls are formatted - keeping them compact by allowing the inner calls to start on the same line as the outer call's opening parenthesis. This is part of roughly's non-invasive approach: both hugged and expanded formats are allowed.
 
-**Function arguments**: When arguments fit on one line, they hug the parentheses:
+**Nested function calls** can be formatted in a hugged style:
 
 ```r
-# Hugged format
-result <- calculate(x, y, z)
+# Hugged format - both functions start on the same line
+result <- outer(inner(
+  arg
+))
 
-# Expanded format for longer arguments
-result <- process(
-  very_long_parameter_name,
-  another_long_parameter,
-  final_parameter
+# Expanded format - also valid
+result <- outer(
+  inner(
+    arg
+  )
 )
 ```
 
-**Nested calls**: Consecutive function calls are formatted compactly:
+**Non-invasive multi-line formatting**: When expressions are already multi-line, roughly only adds necessary spacing but preserves the overall structure. However, if all arguments don't fit on their separate lines, they will be properly separated:
 
 ```r
-# Hugged nested calls
-data %>% filter(x > 0) %>% select(a, b)
+# Before formatting - mixed line breaks
+call(
+  a=x,
+  b=y, c=z)
 
-# Expanded when necessary
-data %>% 
-  filter(complex_condition_here) %>%
-  select(many, different, columns, here)
+# After formatting - proper spacing and line breaks
+call(
+  a = x,
+  b = y,
+  c = z
+)
 ```
 
-**Parenthesized expressions**: Content hugs parentheses when appropriate:
+**Mixed line formats** are allowed when the last argument starts on the same line:
 
 ```r
-# Hugged
-result <- (x + y) * z
+# This format is preserved - last argument starts on same line
+call(a = x, b = y, c = inner(
+  expr
+))
+```
 
-# Expanded for complex content
-result <- (
-  complex_expression +
-  another_part
-) * multiplier
+This behavior is particularly useful for testing frameworks and S4 method definitions:
+
+```r
+# testthat example
+test_that("description", {
+  expect_equal(result, expected)
+})
+
+# S4 setMethod example  
+setMethod("show", "MyClass", function(object) {
+  cat("MyClass object\n")
+})
 ```
 
 ## Line Endings
