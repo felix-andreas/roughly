@@ -1,8 +1,9 @@
 {
-	"editor.insertSpaces": false,
-	"typescript.tsc.autoDetect": "off",
-	"typescript.preferences.quoteStyle": "single",
-	"editor.codeActionsOnSave": {
-		"source.fixAll.eslint": "explicit"
-	},
+    "editor.codeActionsOnSave": {
+        "source.fixAll.eslint": "explicit"
+    },
+    "files.associations": {
+        "*.R.test": "r",
+    },
+    "typescript.tsc.autoDetect": "off",
 }

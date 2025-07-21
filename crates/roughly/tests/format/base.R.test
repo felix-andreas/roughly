@@ -1,0 +1,108 @@
+# fmt: skip-file
+#==== program
+#---- empty
+
+#---- appends_trailing_newline
+body
+
+#==== function_definition
+#---- simple
+function(a, b) {}
+
+function(a, b = default) {}
+
+function(a, b = default) { body }
+
+function(a, b = default) {
+    body
+}
+
+#---- empty
+function() {}
+
+function() {
+}
+
+function()
+{}
+
+function(
+) {}
+
+#---- no_spaces
+function(a,b=default){body}
+
+function(a,b=default){
+body
+}
+
+#---- hugging_params
+function(a, b = default) { body }
+
+# function(a, b = default # TODO: consider if this should be single line
+# ) { body }
+
+# function(a, b = default # TODO: consider if this should be single line
+# ) { body
+# }
+
+#---- hugging_body
+function() { body }
+
+# function() { body # TODO: consider if this should be single line
+# }
+
+function() {
+body }
+
+function() {
+    body
+}
+
+# function() # TODO: consider if this should be single line
+#   { body }
+
+#---- immediately_invocated
+(\(a, b) a * b)(x, y)
+
+(\(a, b) a * b
+)(x,y)
+
+(\(a, b)
+a * b)(x,y)
+
+#---- body_no_braces
+function() body
+
+function()
+    body
+
+#---- body_is_call
+function() call(a = 1, b = 1)
+
+function()
+    call(a = 1, b = 1)
+
+function() call(
+    a = 1,
+    b = 1
+)
+
+function()
+call(
+    a = 1,
+    b = 1
+)
+
+#---- all_comment_positions
+( # hack: only parses correctly with surrounding parentheses
+    function # function
+    # 1
+    ( # (
+        # 2
+        param # param
+        # 3
+    ) # )
+    # 4
+    {} # body
+)
