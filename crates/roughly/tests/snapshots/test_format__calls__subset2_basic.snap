@@ -1,8 +1,0 @@
----
-source: crates/roughly/tests/test_format.rs
-expression: code
----
-x[[]]
-x[[y]]
-x[[y, z]]
-x[[a = y, b = z]]

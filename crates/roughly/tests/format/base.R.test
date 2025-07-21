@@ -439,7 +439,7 @@ y
 # note: this is not parsed correctly
 # see: https://github.com/r-lib/tree-sitter-r/issues/166
 # list(a = 1)$
-
+#
 # a
 
 #---- complex_chaining
@@ -460,13 +460,17 @@ x$ # 1
 
 #==== for_statement
 #---- basic
+for (item in sequence) {}
+
 for (item in sequence) {
     body
 }
 
 #---- spacing
+for( item in sequence ){ }
+
 for( item in sequence ){
-    body
+body
 }
 
 #---- auto_braces
@@ -476,8 +480,6 @@ for (item in sequence)
     body
 
 #---- multiline
-for (item in sequence) {}
-
 for (
     item in sequence
 ) {}
@@ -507,13 +509,13 @@ for (item in sequence
 for (
 item in sequence) {}
 
-for (
-item in sequence
-) {}
-
 for (item
 in sequence
 ) {}
+
+for (
+item
+in sequence) {}
 
 #---- comments_multiline_sequence
 for (
@@ -589,6 +591,9 @@ function(a, b = c) { body }
 #---- hugging_body
 function() { body }
 
+function() { body
+}
+
 function() {
 body }
 
@@ -606,26 +611,40 @@ function() {
 a * b)(x, y)
 
 #---- auto_braces
-function() body
-
 function()
     body
 
-#---- body_is_call
-function() call(a = 1, b = 1)
-
 function()
     call(a = 1, b = 1)
+
+function()
+call(
+    a = 1,
+    b = 1
+)
+
+#---- no_auto_braces
+function() body
+
+function() call(a = 1, b = 1)
 
 function() call(
     a = 1,
     b = 1
 )
 
-function()
-call(
-    a = 1,
-    b = 1
+#---- comments_all_positions
+# hack: only parses correctly with surrounding parentheses
+(
+    function # function
+    # 1
+    ( # (
+        # 2
+        parameter # parameter
+        # 3
+    ) # )
+    # 4
+    {}
 )
 
 #==== if_statement
@@ -716,7 +735,7 @@ if (condition
 ) {}
 
 if ({ x;
-y }) { }
+y }) {}
 
 #---- hugging_with_comments
 if ( # comment

@@ -2,27 +2,27 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-{ expr; expr }
+{ x; y }
 
 {
-  expr
-  expr
+  x
+  y
 }
 
-{ expr; expr }
+{ x; y }
 
 {
-  expr
-  expr
-}
-
-{
-  expr
-  expr
+  x
+  y
 }
 
 {
-  expr
-  x +
-    y
+  x
+  y
+}
+
+{
+  x
+  y +
+    z
 }

@@ -1,5 +1,0 @@
----
-source: crates/roughly/tests/test_format.rs
-expression: code
----
-# These cases result in parse errors that the formatter should handle gracefully

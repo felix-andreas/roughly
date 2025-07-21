@@ -2,8 +2,10 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-for (item in sequence) {}
+if (condition) { body } else { body }
 
-for (item in sequence) {
+if (condition) {
+  body
+} else {
   body
 }

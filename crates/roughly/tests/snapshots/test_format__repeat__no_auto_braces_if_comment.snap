@@ -2,8 +2,11 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-for (item in sequence) {}
-
-for (item in sequence) {
+repeat # 1
+{
+  body
+}
+repeat # 1
+{
   body
 }

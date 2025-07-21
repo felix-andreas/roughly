@@ -14,7 +14,6 @@ c
 x+y
 
 #---- fmt_skip_end_expression
-# fmt: skip
 c(
     1, 2,
     3, 4

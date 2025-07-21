@@ -2,8 +2,5 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-for (item in sequence) {}
-
-for (item in sequence) {
-  body
-}
+- # 1
+  rhs

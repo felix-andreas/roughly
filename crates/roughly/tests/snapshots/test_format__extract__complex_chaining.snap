@@ -2,8 +2,12 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-for (item in sequence) {}
+lhs$
+  fn(x)$
+  fn(x, y)
 
-for (item in sequence) {
-  body
-}
+({
+  expr
+})$
+  fn(x)$
+  fn(x, y)

@@ -1,0 +1,16 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+# hack: only parses correctly with surrounding parentheses
+(
+  function # function
+  # 1
+  ( # (
+    # 2
+    parameter # parameter
+    # 3
+  ) # )
+  # 4
+  {}
+)

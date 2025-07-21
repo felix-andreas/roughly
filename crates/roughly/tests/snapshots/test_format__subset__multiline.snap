@@ -2,8 +2,15 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-for (item in sequence) {}
+x[
+  x
+]
 
-for (item in sequence) {
-  body
-}
+x[
+  x,
+  y
+]
+
+x[, x, y + call(
+  arg
+)]
