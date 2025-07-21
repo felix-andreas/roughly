@@ -2,4 +2,14 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = c) { body }
+fn(arg)
+
+fn(arg)
+
+fn(
+  arg
+)
+
+fn(
+  arg
+)

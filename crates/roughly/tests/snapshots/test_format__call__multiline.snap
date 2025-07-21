@@ -2,4 +2,16 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = c) { body }
+f(
+  x
+)
+
+f(
+  x,
+  y
+)
+
+f(
+  a = x,
+  b = y
+)

@@ -2,4 +2,9 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = c) { body }
+""
+"x"
+"x y"
+"x"
+"x y"
+'"'

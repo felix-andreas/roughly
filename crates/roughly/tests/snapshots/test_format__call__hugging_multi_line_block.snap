@@ -2,16 +2,22 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function() { body }
-
-function() {
+fn({
   body
-}
+})
 
-function() {
+fn({
   body
-}
+})
 
-function() {
-  body
-}
+fn(
+  {
+    body
+  }
+)
+
+fn(
+  {
+    body
+  }
+)

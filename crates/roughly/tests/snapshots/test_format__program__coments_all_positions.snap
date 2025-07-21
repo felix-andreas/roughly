@@ -2,4 +2,6 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = c) { body }
+# 1
+program # program
+# 2

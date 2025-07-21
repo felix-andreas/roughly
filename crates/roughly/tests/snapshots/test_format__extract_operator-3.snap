@@ -1,8 +1,0 @@
----
-source: src/format.rs
-expression: "fmt(indoc!\n{ r#\"\n            list(foo = 1, bar =\n            2)@baz\n        \"# })"
----
-list(
-  foo = 1,
-  bar = 2
-)@baz

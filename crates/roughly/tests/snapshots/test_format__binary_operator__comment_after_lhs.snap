@@ -1,0 +1,9 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+# allow operator and rhs on same line if there is a comment after lhs
+(
+  lhs # lhs
+    + rhs
+)

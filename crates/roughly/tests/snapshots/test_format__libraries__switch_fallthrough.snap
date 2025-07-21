@@ -2,4 +2,10 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = c) { body }
+switch(
+  foo,
+  x = 1,
+  "y" = 2,
+  z = ,
+  3
+)

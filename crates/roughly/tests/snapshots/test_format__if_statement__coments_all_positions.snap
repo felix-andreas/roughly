@@ -1,0 +1,26 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+# for some weird reason this is only parsed correctly if in a parentheses
+(
+  # before
+  if # if
+  # 1
+  ( # open
+    # 2
+    condition # condition
+    # 3
+  ) # close
+  # 4
+  {
+    y
+  }
+  # 5
+  else # else
+  # 6
+  {
+    4
+  }
+  # after
+)

@@ -2,4 +2,9 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = c) { body }
+while (
+  # 1
+  x && # x
+    y # y
+  # 2
+) {}

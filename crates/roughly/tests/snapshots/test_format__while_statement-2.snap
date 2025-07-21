@@ -1,9 +1,0 @@
----
-source: crates/roughly/tests/test_format.rs
-expression: "format_str(indoc! {r#\"\n        while(foo(\n        bar)) baz\n    \"#}).unwrap()"
----
-while (foo(
-  bar
-)) {
-  baz
-}

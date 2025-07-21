@@ -1,5 +1,0 @@
----
-source: crates/roughly/tests/test_format.rs
-expression: "format_str(indoc! {r#\"\n        fn(arg1, arg2)\n    \"#}).unwrap()"
----
-fn(arg1, arg2)
