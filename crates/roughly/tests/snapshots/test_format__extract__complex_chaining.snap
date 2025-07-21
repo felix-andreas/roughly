@@ -2,4 +2,12 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = c) { body }
+lhs$
+  fn(x)$
+  fn(x, y)
+
+({
+  expr
+})$
+  fn(x)$
+  fn(x, y)

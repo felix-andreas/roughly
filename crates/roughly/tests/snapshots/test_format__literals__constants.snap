@@ -2,4 +2,12 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-function(a, b = c) { body }
+TRUE
+FALSE
+NULL
+Inf
+NaN
+NA
+NA_real_
+NA_character_
+NA_complex_

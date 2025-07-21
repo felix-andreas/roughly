@@ -1,8 +1,0 @@
----
-source: src/format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n            function(x) {\n                names(foo[[x]]) <- bar; foo[x]\n            }\n        \"#\n}).unwrap()"
----
-function(x) {
-  names(foo[[x]]) <- bar
-  foo[x]
-}

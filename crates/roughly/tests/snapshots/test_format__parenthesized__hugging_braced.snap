@@ -1,0 +1,37 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+({})
+
+({})
+
+({ body })
+
+(
+  { body }
+)
+
+(
+  { body }
+)
+
+({
+  body
+})
+
+({
+  body
+})
+
+(
+  {
+    body
+  }
+)
+
+(
+  {
+    body
+  }
+)

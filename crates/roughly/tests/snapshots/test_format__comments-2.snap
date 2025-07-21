@@ -1,5 +1,0 @@
----
-source: src/format.rs
-expression: "format_str(indoc!\n{ r#\"\n            #!/usr/bin/env Rscript\n        \"# }).unwrap()"
----
-#!/usr/bin/env Rscript

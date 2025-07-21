@@ -1,7 +1,0 @@
----
-source: tests/test_format.rs
-expression: "format_str(indoc!\n{\n    r#\"\n        repeat # repeat\n        # 1\n        {\n        }\n    \"#\n}).unwrap()"
----
-repeat # repeat
-# 1
-{}

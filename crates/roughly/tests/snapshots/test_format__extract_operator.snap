@@ -1,8 +1,0 @@
----
-source: src/format.rs
-expression: "fmt(indoc!\n{\n    r#\"\n            foo@bar\n            foo$bar\n            foo @ bar\n            foo$  bar\n        \"#\n})"
----
-foo@bar
-foo$bar
-foo@bar
-foo$bar

@@ -1,6 +1,6 @@
 ---
 source: crates/roughly/tests/test_tree.rs
-expression: "(0u16..node_kind_count).filter(|&i| language.node_kind_is_visible(i) &&\nlanguage.node_kind_is_named(i)).map(|i|\nformat(language.node_kind_for_id(i).unwrap(), i)).join(\"\\n\")"
+expression: "(0u16..language.node_kind_count() as\nu16).filter(|&i| language.node_kind_is_visible(i) &&\nlanguage.node_kind_is_named(i) ==\nfilter_named).map(|id|\nformat(language.node_kind_for_id(id).unwrap(), id)).join(\"\\n\")"
 ---
 pub const IDENTIFIER: u16 = 1; // "identifier"
 pub const ESCAPE_SEQUENCE: u16 = 49; // "escape_sequence"

@@ -1,9 +1,0 @@
----
-source: crates/roughly/tests/test_format.rs
-expression: code
----
-function(a, b = default) { body }
-
-function(a, b = default) {
-  body
-}

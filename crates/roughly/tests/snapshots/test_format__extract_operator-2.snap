@@ -1,5 +1,0 @@
----
-source: src/format.rs
-expression: "fmt(indoc! { r#\"\n            ( foo+ bar )@baz\n        \"# })"
----
-(foo + bar)@baz
