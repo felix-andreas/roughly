@@ -13,6 +13,23 @@ c
 # fmt: skip
 x+y
 
+#---- fmt_skip_end_expression
+# fmt: skip
+c(
+    1, 2,
+    3, 4
+) # fmt: skip
+
+#---- fmt_only_sub_expression
+call(
+    # fmt: skip
+    a = c(
+        1, 2,
+        3, 4
+    ),
+    b=0
+)
+
 #---- fmt_skip_file
 # fmt: skip-file
 x+y
@@ -26,22 +43,6 @@ x+y
 # fmt: on
 x+y
 
-#==== comments
-#---- comment_formatting
-#foo
-##foo
-## foo
-### foo
-# # foo
-#    foo
-#'foo
-#
-# #
-#'@param
-#' @param
-#"foo"
-#'foo'
-#'foo
 
 #==== complex_expressions
 #---- chained_extract
@@ -157,38 +158,6 @@ x; y }
 x; y
 }
 
-#---- empty_arguments
-foo[ ]
-foo[, ]
-foo[, ,]
-foo[ x, ]
-foo[x,,]
-foo[,x ]
-foo[,,x]
-foo[x, ,y]
-foo[,,x,,y,,]
-
-foo[[ ]]
-foo[[, ]]
-foo[[, ,]]
-foo[[ x, ]]
-foo[[x,,]]
-foo[[,x ]]
-foo[[,,x]]
-foo[[x, ,y]]
-foo[[,,x,,y,,]]
-
-#==== error_handling
-#---- missing_delimiter
-# These cases result in parse errors that the formatter should handle gracefully
-
-#---- multiline_strings
-"foo
-    bar"
-
-foo("foo
-    bar")
-
 #==== libraries
 #---- r6_classes
 Person <- R6Class(
@@ -212,7 +181,7 @@ Person <- R6Class(
     )
 )
 
-#---- switch_fallthrough  
+#---- switch_fallthrough
 switch(foo,
     x = 1,
     "y" = 2,

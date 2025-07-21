@@ -7,6 +7,87 @@ use {
     },
 };
 
+#[test]
+fn base() {
+    const BASE_TESTS: &str = include_str!("format/base.R.test");
+    run_test_groups(&parse_test_file(BASE_TESTS));
+}
+
+#[test]
+fn special() {
+    const SPECIAL_TESTS: &str = include_str!("format/special.R.test");
+    run_test_groups(&parse_test_file(SPECIAL_TESTS));
+}
+
+#[test]
+fn misc() {
+    const MISC_TESTS: &str = include_str!("format/misc.R.test");
+    run_test_groups(&parse_test_file(MISC_TESTS));
+}
+
+#[test]
+fn trailing_spaces_in_comments() {
+    assert_eq!(format_str("#' \n#' comment  ").unwrap(), "#'\n#' comment");
+}
+
+#[test]
+fn line_formatting() {
+    assert_eq!(format_str("x \n y \n y \n").unwrap(), "x\ny\ny\n");
+    assert_eq!(format_str("x\ny\r\ny\r\n").unwrap(), "x\ny\ny\n");
+    assert_eq!(format_str("x\r\ny\r\ny\r\n").unwrap(), "x\r\ny\r\ny\r\n");
+    assert_eq!(format_str("x\r\ny\ny\n").unwrap(), "x\r\ny\r\ny\r\n");
+}
+
+#[test]
+fn error() {
+    let result = format_str(indoc! {r#"
+        function
+    "#});
+
+    let Err(FormatError::SyntaxError { kind, line, col }) = result else {
+        panic!()
+    };
+    assert_eq!(kind, "ERROR");
+    assert_eq!(line, 0);
+    assert_eq!(col, 0);
+}
+
+#[test]
+fn missing() {
+    let result = format_str(indoc! {r#"
+        x <- 1
+        function() { # missing function body
+            x <- 2
+            x <- 3
+        x <- 3
+    "#});
+
+    assert!(matches!(
+        result,
+        Err(FormatError::Missing {
+            kind: "}",
+            line: 5,
+            col: 0
+        })
+    ));
+
+    let result = format_str(indoc! {r#"
+        call(
+    "#});
+    assert!(matches!(
+        result,
+        Err(FormatError::Missing {
+            kind: ")",
+            line: 0,
+            col: 5
+        })
+    ));
+}
+
+//
+// UTILS
+//
+
 fn format_str(text: &str) -> Result<String, FormatError> {
     format(
         tree::parse(&mut tree::new_parser(), text, None).root_node(),
@@ -74,150 +155,3 @@ fn run_test_groups(groups: &[TestGroup]) {
         }
     }
 }
-
-#[test]
-fn base() {
-    const BASE_TESTS: &str = include_str!("format/base.R.test");
-    run_test_groups(&parse_test_file(BASE_TESTS));
-}
-
-#[test]
-fn special() {
-    const BASE_TESTS: &str = include_str!("format/special.R.test");
-    run_test_groups(&parse_test_file(BASE_TESTS));
-}
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// EDGE CASES
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Line formatting is tested internally - this function verifies the line ending behavior
-#[test]
-fn line_formatting() {
-    assert_eq!(
-        "foo\nbar\nbaz\n",
-        format_str("foo \n bar \n baz \n").unwrap()
-    );
-    assert_eq!(
-        "foo\nbar\nbaz\n",
-        format_str("foo\nbar\r\nbaz\r\n").unwrap()
-    );
-    assert_eq!(
-        "foo\r\nbar\r\nbaz\r\n",
-        format_str("foo\r\nbar\r\nbaz\r\n").unwrap()
-    );
-    assert_eq!(
-        "foo\r\nbar\r\nbaz\r\n",
-        format_str("foo\r\nbar\nbaz\n").unwrap()
-    );
-}
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// ERROR CASES
-#[test]
-fn error() {
-    let result = format_str(indoc! {r#"
-        function
-    "#});
-
-    let Err(FormatError::SyntaxError { kind, line, col }) = result else {
-        panic!()
-    };
-    assert_eq!(kind, "ERROR");
-    assert_eq!(line, 0);
-    assert_eq!(col, 0);
-}
-
-#[test]
-fn missing() {
-    let result = format_str(indoc! {r#"
-        x <- 1
-        function() { # missing function body
-            x <- 2
-            x <- 3
-        x <- 3
-    "#});
-
-    assert!(matches!(
-        result,
-        Err(FormatError::Missing {
-            kind: "}",
-            line: 5,
-            col: 0
-        })
-    ));
-
-    let result = format_str(indoc! {r#"
-        foo(
-    "#});
-    assert!(matches!(
-        result,
-        Err(FormatError::Missing {
-            kind: ")",
-            line: 0,
-            col: 4
-        })
-    ));
-}
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
-
-// Migrated to base.R.test and special.R.test
