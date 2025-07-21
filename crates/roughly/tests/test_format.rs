@@ -14,10 +14,8 @@ macro_rules! assert_fmt {
 }
 
 fn format_str(text: &str) -> Result<String, FormatError> {
-    let tree = tree::parse(&mut tree::new_parser(), text, None);
-
     format(
-        tree.root_node(),
+        tree::parse(&mut tree::new_parser(), text, None).root_node(),
         &Rope::from_str(text),
         Config {
             indent_width: 2,
@@ -26,10 +24,73 @@ fn format_str(text: &str) -> Result<String, FormatError> {
     )
 }
 
+#[derive(Debug)]
+struct TestGroup {
+    name: &'static str,
+    cases: Vec<TestCase>,
+}
+
+#[derive(Debug)]
+struct TestCase {
+    name: &'static str,
+    code: &'static str,
+}
+
+fn parse_test_file(text: &'static str) -> Vec<TestGroup> {
+    text.split("#====")
+        .filter_map(|block| {
+            if block.trim().is_empty() {
+                return None;
+            }
+            let (name, cases) = block.split_once('\n').unwrap();
+            Some(TestGroup {
+                name: name.trim(), // trim potental \r
+                cases: cases
+                    .split("#----")
+                    .filter_map(|case| {
+                        if case.trim().is_empty() {
+                            return None;
+                        }
+                        let (name, code) = case.split_once("\n").unwrap();
+                        Some(TestCase {
+                            name: name.trim(), // trim potental \r
+                            code,
+                        })
+                    })
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
+fn run_test_groups(groups: &[TestGroup]) {
+    let maybe_filter = std::env::var("FORMAT_FILTER").ok();
+    for group in groups {
+        for case in &group.cases {
+            let snapshot = format!("{}__{}", group.name, case.name);
+            if maybe_filter
+                .as_ref()
+                .is_some_and(|filter| !snapshot.contains(filter))
+            {
+                continue;
+            }
+
+            let code = format_str(case.code).unwrap();
+            insta::assert_snapshot!(snapshot, code);
+        }
+    }
+}
+
 #[test]
-fn dev() {
-    assert_fmt! {r#"
-    "#};
+fn base() {
+    const BASE_TESTS: &str = include_str!("format/base.R.test");
+    run_test_groups(&parse_test_file(BASE_TESTS));
+}
+
+#[test]
+fn special() {
+    const BASE_TESTS: &str = include_str!("format/special.R.test");
+    run_test_groups(&parse_test_file(BASE_TESTS));
 }
 
 #[test]

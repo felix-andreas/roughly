@@ -1,0 +1,19 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+function() { body }
+
+# function() { body # TODO: consider if this should be single line
+# }
+
+function() {
+  body
+}
+
+function() {
+  body
+}
+
+# function() # TODO: consider if this should be single line
+#   { body }
