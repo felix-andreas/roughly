@@ -5,6 +5,7 @@ use {
         format::{Config, FormatError, LineEnding, format},
         tree,
     },
+    std::fs,
 };
 
 #[test]
@@ -23,6 +24,31 @@ fn special() {
 fn misc() {
     const MISC_TESTS: &str = include_str!("format/misc.R.test");
     run_test_groups(&parse_test_file(MISC_TESTS));
+}
+
+#[test]
+fn docs() {
+    // This tests all code examples in the formatter documentation.
+    // It updates the formatted output as needed to keep the
+    // documentation consistent with the formatter's behavior.
+    let markdown = fs::read_to_string("format/formatter.md").unwrap();
+
+    let result = text.split("```r\n# Before formatting")
+            .flat_map(|split: &str| {
+                let (code, other) = split.split_once("```").unwrap();
+                vec!["foo", other].into_iter();
+                //         let snapshot = format!("{}__{}", group.name, case.name);
+
+                // let code = format_str(case.code).unwrap();
+            // insta::assert_snapshot!(snapshot, code);
+            })
+            .collect::<Vec<_>>()
+            .join("-----------------------")
+            .replace(
+                "R CODE IN THIS FILE IS FORMATTED AND SAVED TO docs/content/formatter.md",
+                "THIS FILE IS GENERATED AUTOMATICALLY. MAKE CHANGES TO tests/format/formatter.template.md INSTEAD"
+            );
+    fs::write("../../../docs/content/formatter.md", result).unwrap();
 }
 
 #[test]

@@ -2,6 +2,7 @@
 title: Formatter
 description: Documentation for Roughly's R code formatter.
 ---
+<!-- R CODE IN THIS FILE IS FORMATTED AND SAVED TO docs/content/formatter.md -->
 
 Roughly includes a non-invasive R code formatter that emphasizes readability while respecting the existing structure of your code.
 
