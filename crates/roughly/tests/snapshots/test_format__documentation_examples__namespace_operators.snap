@@ -2,5 +2,5 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-package::public_function
-package:::private_function
+pkg::process
+pkg:::filter

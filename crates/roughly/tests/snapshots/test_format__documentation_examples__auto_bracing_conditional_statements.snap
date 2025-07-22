@@ -3,5 +3,5 @@ source: crates/roughly/tests/test_format.rs
 expression: code
 ---
 if (condition) {
-  single_statement
+  process()
 }
