@@ -1,0 +1,27 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+# Complex data manipulation with nested function calls and pipeline operators
+result <- raw_data %>%
+  filter(
+    !is.na(value) &
+      year >= 2020 &
+      category %in% c("A", "B", "C")
+  ) %>%
+  group_by(
+    region,
+    quarter = paste0("Q", ceiling(month(date) / 3))
+  ) %>%
+  summarise(
+    mean_value = mean(value, na.rm = TRUE),
+    count = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    status = case_when(
+      mean_value > 100 ~ "high",
+      mean_value > 50 ~ "medium",
+      TRUE ~ "low"
+    )
+  )

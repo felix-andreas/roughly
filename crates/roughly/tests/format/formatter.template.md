@@ -156,22 +156,22 @@ x<-1; print(x)
 
 ### Comments
 
-Comments are reformatted to ensure consistent spacing while preserving their content and meaning:
+In most cases, a space is added between the `#` and the comment text. For special comment types such as Roxygen (`#'`) and plumber (`#*`) comments, the space is inserted after the second character:
 
 ```r
 # comments : compare
+# comment with space
+#comment without space
+#'roxygen comment
+#*plumber comment
+#'string' <- commented out string
 #!/usr/bin/env Rscript
-#This is a comment
-#'This is roxygen
-##This is a header
 ```
 
-**Special comment types** are preserved:
+Exceptions to this rule include:
 
-- Roxygen comments (`#'`) maintain their structure
-- Header comments (`##`, `###`) keep their formatting
-- Shebangs (`[#!/usr/bin/env Rscript](http://roughly.dev/)`) remain unchanged
-- Comments with quotes (`#'quoted'`) are left as-is to avoid conflicts
+- Commented-out strings such as `#'string'` are left unchanged, since inserting a space (e.g., `#' string'`) would alter the content.
+- [Shebangs](https://en.wikipedia.org/wiki/Shebang_(Unix)), for example `#!/usr/bin/env Rscript`, remain unchanged.
 
 ### Line Spacing
 

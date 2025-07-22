@@ -235,28 +235,29 @@ fn traverse(
             let _ = chars.next(); // Skip the '#'
             // reformat comments like #foo to # foo but keep #' foo
             match chars.next() {
-                Some('\'' | '*' | ':') => match chars.next() {
-                    Some(' ') => out.push_str(raw),
-                    Some(other) => {
-                        let rest = chars.collect::<String>();
-                        // avoid formatting #'foo'
-                        if rest.contains('\'') {
+                Some(char @ ('\'' | '*' | ':')) => {
+                    match chars.next() {
+                        Some(' ') | None => out.push_str(raw),
+                        // avoid formatting #'string'
+                        Some(_) if char == '\'' && chars.clone().contains(&'\'') => {
                             out.push_str(raw);
-                        } else {
-                            out.push_str("#' ");
+                        }
+                        Some(other) => {
+                            out.push('#');
+                            out.push(char);
+                            out.push(' ');
                             out.push(other);
-                            out.push_str(&rest);
+                            out.extend(chars);
                         }
                     }
-                    None => out.push_str("#'"),
-                },
-                Some('#' | '!' | ' ') => out.push_str(raw),
+                }
+                // ! is for shebang (e.g. !#/usr/bin/env Rscript)
+                Some('#' | '!' | ' ') | None => out.push_str(raw),
                 Some(other) => {
                     out.push_str("# ");
                     out.push(other);
                     out.push_str(&chars.collect::<String>());
                 }
-                None => out.push('#'),
             }
         }
         kind::COMMA => out.push(','),

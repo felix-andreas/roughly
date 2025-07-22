@@ -29,7 +29,19 @@ x; y
 #'comment'
 #"comment"
 
-#---- coments_all_positions
+#---- comment_with_special_meaning
+# special comments should preserve format
+#' roxygen comment
+#* plumber comment
+#: roughly comment
+#'roxygen comment
+#*plumber comment
+#:roughly comment
+#'@param text
+#*@param text
+#:@param text
+
+#---- comments_all_positions
 # 1
 program # program
 # 2
@@ -46,6 +58,12 @@ NA_real_
 NA_character_
 NA_complex_
 
+#---- keywords
+return
+next
+break
+...
+
 #---- integers
 42L
 0L
@@ -59,6 +77,13 @@ NA_complex_
 1e-3
 1.8e10
 
+#---- complex
+1i
+1.5i
+1e2i
+1+2i
+1.5+2.5i
+
 #---- strings
 ""
 "x"
@@ -70,6 +95,7 @@ NA_complex_
 #---- strings_escaping
 '"x"'
 "\"x\""
+'\'x\''
 '\"x"'
 '\\"x\\"'
 "\\\"x\\\""
@@ -110,7 +136,7 @@ x.y
 - x
 ~x
 
-#---- coments_all_positions
+#---- comments_all_positions
 - # 1
 rhs
 
@@ -156,6 +182,13 @@ x %in% y
 x %>% y
 x |> y
 
+#---- spacing_special_operators
+# colon and caret should not have spacing
+x:y
+x^y
+x : y
+x ^ y
+
 #---- multiline
 x +
     y
@@ -177,7 +210,7 @@ x + {
     y
 }
 
-#---- coments_all_positions
+#---- comments_all_positions
 lhs + # 1
     rhs # 2
 
@@ -272,7 +305,7 @@ x; y
 { x; y +
     z }
 
-#---- coments_all_positions
+#---- comments_all_positions
 { # {
     # 1
     body # body
@@ -336,7 +369,6 @@ fn(
 fn(
 { body }
 )
-
 
 #---- hugging_multi_line_block
 fn({
@@ -454,7 +486,7 @@ lhs$
     )$
     fn(x,y)
 
-#---- coments_all_positions
+#---- comments_all_positions
 x$ # 1
     y # 2
 
@@ -537,7 +569,7 @@ in
 for (item in sequence) # 1
     body
 
-#---- coments_all_positions
+#---- comments_all_positions
 for
 # 1
 ( # (
@@ -756,7 +788,7 @@ if ({
 # 1
 ) {}
 
-#---- coments_all_positions
+#---- comments_all_positions
 # for some weird reason this is only parsed correctly if in a parentheses
 (
     # before
@@ -908,7 +940,7 @@ repeat # 1
 repeat # 1
 { body }
 
-#---- coments_all_positions
+#---- comments_all_positions
 repeat # repeat
 # 1
 {
@@ -945,7 +977,7 @@ x[, x, y + call(
     arg
 )]
 
-#---- coments_all_positions
+#---- comments_all_positions
 fn[ # [
     # 1
     argument # argument
@@ -983,7 +1015,7 @@ x[[, x, y + call(
     arg
 )]]
 
-#---- coments_all_positions
+#---- comments_all_positions
 fn[[ # [[
     # 1
     argument # argument
@@ -1054,7 +1086,7 @@ while ({
 # 1
 ) {}
 
-#---- coments_all_positions
+#---- comments_all_positions
 while # while
 # 1
 ( # (

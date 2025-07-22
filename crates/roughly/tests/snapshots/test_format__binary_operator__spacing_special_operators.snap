@@ -2,6 +2,8 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-for (item in collection) {
-  process(item)
-}
+# colon and caret should not have spacing
+x:y
+x^y
+x:y
+x^y
