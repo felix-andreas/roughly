@@ -32,3 +32,4 @@ tokio-util.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+regex.workspace = true

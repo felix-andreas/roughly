@@ -1108,6 +1108,7 @@ dependencies = [
  "indoc",
  "insta",
  "itertools 0.14.0",
+ "regex",
  "ropey",
  "serde",
  "serde_json",

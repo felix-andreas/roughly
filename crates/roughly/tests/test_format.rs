@@ -1,10 +1,12 @@
 use {
     indoc::indoc,
+    regex::{Captures, Regex},
     ropey::Rope,
     roughly::{
         format::{Config, FormatError, LineEnding, format},
         tree,
     },
+    std::fs,
 };
 
 #[test]
@@ -23,6 +25,50 @@ fn special() {
 fn misc() {
     const MISC_TESTS: &str = include_str!("format/misc.R.test");
     run_test_groups(&parse_test_file(MISC_TESTS));
+}
+
+#[test]
+fn docs() {
+    // This tests all code examples in the formatter documentation.
+    // It updates the formatted output as needed to keep the
+    // documentation consistent with the formatter's behavior.
+    let markdown = fs::read_to_string("tests/format/formatter.template.md").unwrap();
+
+    let regex = Regex::new(r#"(?m)```r\n([\s\S]*?)```"#).unwrap();
+
+    let formatted = regex
+        .replace_all(&markdown, |captures: &Captures| {
+            let text = captures.get(1).unwrap().as_str();
+            text.split_once('\n')
+                .and_then(|(first, rest)| first.strip_prefix("#").map(|comment| (comment, rest)))
+                .and_then(|(comment, text)| {
+                    comment
+                        .split_once(":")
+                        .map(|(name, directive)| ((name.trim(), directive.trim()), text))
+                })
+                .map(|((name, directive), text)| {
+                    let snapshot = format!("documentation_examples__{name}");
+                    let code = format_str(text).unwrap();
+                    insta::assert_snapshot!(snapshot, code);
+
+                    let content = match directive {
+                        "compare" => {
+                            format!("# Before formatting\n{text}\n# After formatting\n{code}")
+                        }
+                        "format" => code,
+                        _ => panic!(),
+                    };
+
+                    format!("```r\n{content}```")
+                })
+                .unwrap_or(text.into())
+        })
+        .replace(
+            "R CODE IN THIS FILE IS FORMATTED AND SAVED TO docs/content/formatter.md",
+        "THIS FILE IS GENERATED AUTOMATICALLY. MAKE CHANGES TO tests/format/formatter.template.md INSTEAD",
+        );
+
+    fs::write("../../docs/content/formatter.md", formatted).unwrap();
 }
 
 #[test]

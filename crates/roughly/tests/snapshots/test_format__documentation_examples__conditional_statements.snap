@@ -1,0 +1,12 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+if (condition) { action } else { alternative }
+
+if (
+  long_condition ||
+    other_condition
+) {
+  action()
+}
