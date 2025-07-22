@@ -46,6 +46,7 @@ extendr-engine = "0.8.0"
 
 # dev-dependencies
 insta = "1.43.1"
+regex = "1.11.1"
 
 # cfg(not(unix)) dependencies
 tokio-util = { version = "0.7.15", features = ["compat"] }

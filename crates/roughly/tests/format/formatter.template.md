@@ -47,41 +47,27 @@ Roughly applies specific formatting rules to different R code constructs. The fo
 **Assignment operators** always get spaces around them:
 
 ```r
-# Before formatting
+# assignment_operators : compare
 x<-1
 result<<-calculate()
-
-# After formatting
-x <- 1
-result <<- calculate()
 ```
 
 **Binary operators** get spaces around them, except for range (`:`) and power (`^`) operators:
 
 ```r
-# Before formatting
+# binary_operators : compare
 result=x+y*z
 power=base^exponent
 sequence=1:10
-
-# After formatting
-result = x + y * z
-power = base^exponent
-sequence = 1:10
 ```
 
 **Pipeline operators** maintain proper indentation when expressions span multiple lines:
 
 ```r
-# Before formatting
+# pipeline_operators : compare
 data %>%
 filter(condition) %>%
 summarize(mean_value=mean(value))
-
-# After formatting
-data %>%
-  filter(condition) %>%
-  summarize(mean_value = mean(value))
 ```
 
 ### Code Blocks and Braced Expressions
@@ -89,28 +75,18 @@ data %>%
 Code blocks receive smart formatting based on their content and structure. Single-line blocks remain compact, while multi-line blocks format each expression on its own line:
 
 ```r
-# Before formatting
+# braced_expression : compare
 {x<-1;print(x)}
 {
 x<-1; print(x)
-}
-
-# After formatting
-{ x <- 1; print(x) }
-{
-  x <- 1
-  print(x)
 }
 ```
 
 **Empty blocks** are consistently formatted:
 
 ```r
-# Before formatting
+# braced_expression_empty : compare
 {  }
-
-# After formatting
-{}
 ```
 
 ### Comments
@@ -118,14 +94,10 @@ x<-1; print(x)
 Comments are reformatted to ensure consistent spacing while preserving their content and meaning:
 
 ```r
+# comments : compare
 # Before formatting
 #This is a comment
 #'This is roxygen
-##This is a header
-
-# After formatting
-# This is a comment
-#' This is roxygen
 ##This is a header
 ```
 
@@ -141,17 +113,10 @@ Comments are reformatted to ensure consistent spacing while preserving their con
 The formatter normalizes line spacing between expressions, allowing at most one empty line:
 
 ```r
-# Before formatting
+# line_spacing : compare
 calculate_mean <- function(data) {
   clean_data <- data[!is.na(data)]
 
-
-  mean(clean_data)
-}
-
-# After formatting
-calculate_mean <- function(data) {
-  clean_data <- data[!is.na(data)]
 
   mean(clean_data)
 }
@@ -162,19 +127,11 @@ calculate_mean <- function(data) {
 Function calls receive consistent formatting with proper spacing around argument separators and assignment operators:
 
 ```r
-# Before formatting
+# function_calls : compare
 calculate(data=dataset,method="mean",na.rm=TRUE)
 complex_call(argument1,
     argument2=value,
         argument3)
-
-# After formatting
-calculate(data = dataset, method = "mean", na.rm = TRUE)
-complex_call(
-  argument1,
-  argument2 = value,
-  argument3
-)
 ```
 
 **Argument hugging**: When function arguments can fit on a single line and the last argument's value starts on the same line as the opening parenthesis, the formatter keeps a compact format. Otherwise, it expands to multiple lines with proper indentation.
@@ -372,6 +329,7 @@ formula = ~ response + predictor
 You can disable formatting for specific code sections using the `# fmt: skip` comment directive:
 
 ```r
+# 
 # fmt: skip
 matrix(
   c(

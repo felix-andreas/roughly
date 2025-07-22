@@ -1,5 +1,6 @@
 use {
     indoc::indoc,
+    regex::{Captures, Regex},
     ropey::Rope,
     roughly::{
         format::{Config, FormatError, LineEnding, format},
@@ -31,24 +32,36 @@ fn docs() {
     // This tests all code examples in the formatter documentation.
     // It updates the formatted output as needed to keep the
     // documentation consistent with the formatter's behavior.
-    let markdown = fs::read_to_string("format/formatter.md").unwrap();
+    let markdown = fs::read_to_string("tests/format/formatter.template.md").unwrap();
 
-    let result = text.split("```r\n# Before formatting")
-            .flat_map(|split: &str| {
-                let (code, other) = split.split_once("```").unwrap();
-                vec!["foo", other].into_iter();
-                //         let snapshot = format!("{}__{}", group.name, case.name);
+    let regex = Regex::new(r#"(?m)```r\n([\s\S]*?)```"#).unwrap();
 
-                // let code = format_str(case.code).unwrap();
-            // insta::assert_snapshot!(snapshot, code);
+    let result = regex.replace_all(&markdown, |captures: &Captures| {
+        let text = captures.get(1).unwrap().as_str();
+        text.split_once('\n')
+            .and_then(|(first, rest)| first.strip_prefix("#").map(|comment| (comment, rest)))
+            .and_then(|(comment, text)| {
+                comment
+                    .split_once(":")
+                    .map(|(name, directive)| ((name.trim(), directive.trim()), text))
             })
-            .collect::<Vec<_>>()
-            .join("-----------------------")
-            .replace(
-                "R CODE IN THIS FILE IS FORMATTED AND SAVED TO docs/content/formatter.md",
-                "THIS FILE IS GENERATED AUTOMATICALLY. MAKE CHANGES TO tests/format/formatter.template.md INSTEAD"
-            );
-    fs::write("../../../docs/content/formatter.md", result).unwrap();
+            .map(|((name, directive), text)| {
+                let snapshot = format!("documentation_examples__{name}");
+                let code = format_str(text).unwrap();
+                insta::assert_snapshot!(snapshot, code);
+
+                match dbg!(directive) {
+                    "compare" => format!("# Before formatting\n{text}\n# After formatting {code}"),
+                    "format" => code,
+                    _ => panic!(),
+                }
+            })
+            .unwrap_or(text.into())
+    });
+
+    dbg!("before");
+    fs::write("../../docs/content/formatter2.md", result.to_string()).unwrap();
+    dbg!("after");
 }
 
 #[test]
