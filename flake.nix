@@ -41,66 +41,63 @@
             devtools
           ];
       };
-      packages = self.lib.eachSystem (system: 
-        let
-          pkgs = self.lib.makePkgs system nixpkgs;
-          craneLib = crane.mkLib pkgs;
-          
-          # Filter source files to only include relevant files for the build
-          src = craneLib.cleanCargoSource ./.;
-          
-          # Build-time dependencies
-          nativeBuildInputs = with pkgs; [
-            pkg-config
-          ];
-          
-          # Runtime dependencies  
-          buildInputs = with pkgs; [
-            # Dependencies for tree-sitter
-            tree-sitter
-          ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-            # macOS specific dependencies
-            pkgs.libiconv
-            pkgs.darwin.apple_sdk.frameworks.Security
-            pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
-          ];
-          
-          # Common arguments for all crane builds
-          commonArgs = {
-            inherit src nativeBuildInputs buildInputs;
-            strictDeps = true;
+      packages = self.lib.eachSystem (system: {
+        default = 
+          let
+            pkgs = self.lib.makePkgs system nixpkgs;
+            craneLib = crane.mkLib pkgs;
             
-            pname = "roughly";
-            version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
+            # Filter source files to only include relevant files for the build
+            src = craneLib.cleanCargoSource ./.;
             
-            # Environment variables that might be needed
-            TREE_SITTER_STATIC_ANALYSIS = "1";
-          };
-          
-          # Build dependencies separately for better caching
-          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-          
-          # Build the actual package
-          roughly = craneLib.buildPackage (commonArgs // {
-            inherit cargoArtifacts;
+            # Build-time dependencies
+            nativeBuildInputs = with pkgs; [
+              pkg-config
+            ];
             
-            # Additional cargo build arguments for release
-            cargoExtraArgs = "--bin roughly";
+            # Runtime dependencies  
+            buildInputs = with pkgs; [
+              # Dependencies for tree-sitter
+              tree-sitter
+            ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+              # macOS specific dependencies
+              pkgs.libiconv
+              pkgs.darwin.apple_sdk.frameworks.Security
+              pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
+            ];
             
-            meta = with pkgs.lib; {
-              description = "An R language server, linter, and code formatter written in Rust";
-              homepage = "https://github.com/felix-andreas/roughly";
-              license = licenses.upl;
-              maintainers = [ ];
-              platforms = platforms.all;
+            # Common arguments for all crane builds
+            commonArgs = {
+              inherit src nativeBuildInputs buildInputs;
+              strictDeps = true;
+              
+              pname = "roughly";
+              version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
+              
+              # Environment variables that might be needed
+              TREE_SITTER_STATIC_ANALYSIS = "1";
             };
-          });
-        in
-        {
-          default = roughly;
-          roughly = roughly;
-        }
-      );
+            
+            # Build dependencies separately for better caching
+            cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+          in
+            # Build the actual package
+            craneLib.buildPackage (commonArgs // {
+              inherit cargoArtifacts;
+              
+              # Additional cargo build arguments for release
+              cargoExtraArgs = "--bin roughly";
+              
+              meta = with pkgs.lib; {
+                description = "An R language server, linter, and code formatter written in Rust";
+                homepage = "https://github.com/felix-andreas/roughly";
+                license = licenses.upl;
+                maintainers = [ ];
+                platforms = platforms.all;
+              };
+            });
+        roughly = self.packages.${system}.default;
+      });
       devShells = self.lib.eachSystem (system: {
         default =
           let
@@ -162,6 +159,7 @@
             #   }
             # ];
           };
+        }
       });
     };
 }
