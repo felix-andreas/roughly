@@ -3,11 +3,14 @@ source: crates/roughly/tests/test_format.rs
 expression: code
 ---
 # fmt: skip
-c(
-  1, 2,
-  3, 4
+matrix(
+  c(
+    1, 2,
+    3, 4
+  ),
+  nrow=2
 ) # This code won't be reformatted
 
 # fmt: skip
-c(1, 2,
-  3, 4) # The line above won't be reformatted
+matrix(c(1, 2,
+         3, 4), nrow=2) # The line above won't be reformatted

@@ -4,4 +4,4 @@ expression: code
 ---
 data %>%
   filter(condition) %>%
-  select(mean_value = mean(value))
+  select(value)

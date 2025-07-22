@@ -4,4 +4,4 @@ expression: code
 ---
 result = x + y * z
 power = base^exponent
-data = 1:10
+sequence = 1:10

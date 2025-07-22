@@ -2,11 +2,11 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-if (condition) { process() } else { filter() }
+if (condition) { action() } else { action() }
 
 if (
   condition ||
     other_condition
 ) {
-  process()
+  action()
 }

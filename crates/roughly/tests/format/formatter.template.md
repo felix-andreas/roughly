@@ -49,7 +49,7 @@ Roughly applies specific formatting rules to different R code constructs. The fo
 ```r
 # assignment_operators : compare
 x<-1
-data<<-process()
+data<<-compute()
 ```
 
 **Binary operators** get spaces around them, except for range (`:`) and power (`^`) operators:
@@ -58,7 +58,7 @@ data<<-process()
 # binary_operators : compare
 result=x+y*z
 power=base^exponent
-data=1:10
+sequence=1:10
 ```
 
 **Pipeline operators** maintain proper indentation when expressions span multiple lines:
@@ -67,7 +67,7 @@ data=1:10
 # pipeline_operators : compare
 data %>%
 filter(condition) %>%
-select(mean_value=mean(value))
+select(value)
 ```
 
 ### Code Blocks and Braced Expressions
@@ -114,12 +114,11 @@ The formatter normalizes line spacing between expressions, allowing at most one 
 
 ```r
 # line_spacing : compare
-process <- function(data) {
-  result <- filter(data)
+x <- 1
+y <- 2
 
 
-  result
-}
+z <- 3
 ```
 
 ### Function Calls and Arguments
@@ -170,12 +169,12 @@ lapply(data,\(x)x+1)
 
 ```r
 # conditional_statements : compare
-if(condition){process()} else{filter()}
+if(condition){action()} else{action()}
 
 if(
   condition ||
   other_condition){
-  process()
+  action()
 }
 ```
 
@@ -266,17 +265,20 @@ You can disable formatting for specific code sections using the `# fmt: skip` co
 ```r
 # format_suppression : format
 # fmt: skip
-c(
-  1, 2,
-  3, 4
+matrix(
+  c(
+    1, 2,
+    3, 4
+  ),
+  nrow=2
 ) # This code won't be reformatted
 
 # fmt: skip
-c(1, 2,
-  3, 4) # The line above won't be reformatted
+matrix(c(1, 2,
+         3, 4), nrow=2) # The line above won't be reformatted
 ```
 
-Without the `fmt: skip` directive, the `c(...)` expression would be formatted according to standard rules.
+Without the `fmt: skip` directive, the `matrix(...)` expression would be broken into multiple lines according to standard formatting rules.
 
 The `fmt: skip` directive can be placed:
 - Before a line to skip formatting that entire expression
@@ -354,7 +356,7 @@ process <- function(x)
 ```r
 # auto_bracing_conditional_statements : compare
 if (condition)
-  process()
+  action()
 ```
 
 **Loops**: All loop bodies are automatically braced for consistency:
