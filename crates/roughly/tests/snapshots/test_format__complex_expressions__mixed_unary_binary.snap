@@ -1,0 +1,6 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+1 + +1 - -1 * -1 / -2
+1 + +1 - -1 * -1 / -2

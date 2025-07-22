@@ -42,7 +42,6 @@ pub fn workspace(query: &str, workspace_symbols: &impl SymbolsMap) -> Vec<Worksp
 }
 
 pub fn to_document_symbol(item: &Item) -> DocumentSymbol {
-    #[allow(deprecated)]
     DocumentSymbol {
         name: item.display_name(),
         kind: to_symbol_kind(&item.info),
@@ -54,6 +53,7 @@ pub fn to_document_symbol(item: &Item) -> DocumentSymbol {
             .children
             .as_ref()
             .map(|children| children.iter().map(to_document_symbol).collect()),
+        #[allow(deprecated)]
         deprecated: None,
     }
 }
