@@ -1,0 +1,20 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+# Consistent formatting across all switch arms:
+result <- switch(
+  method,
+  "simple" = calculate_simple_stats(data),
+  "complex" = perform_advanced_statistical_analysis_with_multiple_parameters(data, alpha = 0.05, method = "robust"),
+  "default" = get_basic_summary(data)
+)
+
+# Rather than breaking only the longer arm:
+# result <- switch(method,
+#   "simple" = calculate_simple_stats(data),
+#   "complex" = perform_advanced_statistical_analysis_with_multiple_parameters(
+#     data, alpha = 0.05, method = "robust"
+#   ),
+#   "default" = get_basic_summary(data)
+# )

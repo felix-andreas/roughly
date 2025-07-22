@@ -30,12 +30,75 @@ The formatter follows these key principles:
 
 R is an expression-based language with a strong focus on numerical computing and data analysis. Unlike many other programming languages, R code is often written interactively and exploratively, where preserving the original intent and structure of expressions is crucial for readability and debugging.
 
-The non-invasive approach means roughly respects your existing line breaks and won't arbitrarily split expressions that you've chosen to keep on one line. This is particularly important in R because:
+The non-invasive approach means roughly respects your existing line breaks and won't arbitrarily split expressions that you've chosen to keep on one line. **Non-invasive formatting tries to minimize the amount of line-breaks not set by the programmer** by following these key principles:
+
+- **Single line expressions are never broken into multiple lines** (with the exception of loops like `for`, `while`, `repeat`, because they don't yield useful values and can only perform side effects, so they are not normal expressions in that sense)
+- **Both hugging and not hugging is allowed** for function calls and other constructs
+- **Preserves programmer intent** regarding line structure and formatting choices
+
+This is particularly important in R because:
 
 - **Data analysis workflows**: Short, expressive one-liners are common and meaningful
 - **Interactive development**: Code is often built incrementally, and forced line breaks can disrupt the flow
 - **Mathematical expressions**: Complex formulas are often more readable when kept compact
 - **Functional style**: R's functional nature benefits from preserving the structure of nested calls
+
+#### Why This Matters for Numerical Computing
+
+R is a numerical language, and numerical expressions tend to get ugly when broken up by line length limits. Consider this mathematical expression:
+
+```r
+# Without non-invasive formatting, this compact expression:
+n <- 1 + (length(replacement_id) - 1) * (vectorToSearch == valueTypeToReplace)
+
+# Might get broken up into this less readable form:
+# n <- 1 +
+#   (length(replacement_id) - 1) *
+#     (vectorToSearch == valueTypeToReplace)
+```
+
+This forced line breaking can lead to several problems:
+- People might use shorter, less descriptive variable names just to fit expressions on one line
+- Intermediate results might be stored in variables that have no meaningful purpose or don't correspond to established mathematical formulas
+- The mathematical relationship becomes harder to understand
+
+#### Consistency Between Related Lines
+
+Sometimes you want consistency between multiple consecutive lines, especially when they follow the same pattern but have slight variations. For example, if you have two lines that only differ by a prefix or suffix, it's better to keep them both on single lines for easy comparison:
+
+```r
+# This is easier to read and compare:
+start <- camera_origin_start - (focus_dist * forward_start) - 0.5 * view_width * right_start + 0.5 * view_height * up_start
+end <- camera_origin_end - (focus_dist * forward_end) - 0.5 * view_width * right_end + 0.5 * view_height * up_end
+
+# Than this inconsistent formatting where only one line is broken:
+# start <- camera_origin_start - (focus_dist * forward_start) - 0.5 * view_width * right_start
+#     + 0.5 * view_height * up_start
+# end <- camera_origin_end - (focus_dist * forward_end) - 0.5 * view_width * right_end + 0.5 * view_height * up_end
+```
+
+#### Switch Statement Example
+
+The same principle applies to switch statements where one arm might have a longer expression. Non-invasive formatting keeps consistency across all arms:
+
+```r
+# Consistent formatting across all switch arms:
+result <- switch(
+  method,
+  "simple" = calculate_simple_stats(data),
+  "complex" = perform_advanced_statistical_analysis_with_multiple_parameters(data, alpha = 0.05, method = "robust"),
+  "default" = get_basic_summary(data)
+)
+
+# Rather than breaking only the longer arm:
+# result <- switch(method,
+#   "simple" = calculate_simple_stats(data),
+#   "complex" = perform_advanced_statistical_analysis_with_multiple_parameters(
+#     data, alpha = 0.05, method = "robust"
+#   ),
+#   "default" = get_basic_summary(data)
+# )
+```
 
 ## Formatting Rules
 

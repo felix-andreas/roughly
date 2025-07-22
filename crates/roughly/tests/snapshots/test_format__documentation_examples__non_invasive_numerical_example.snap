@@ -1,0 +1,11 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+# Without non-invasive formatting, this compact expression:
+n <- 1 + (length(replacement_id) - 1) * (vectorToSearch == valueTypeToReplace)
+
+# Might get broken up into this less readable form:
+# n <- 1 +
+#   (length(replacement_id) - 1) *
+#     (vectorToSearch == valueTypeToReplace)
