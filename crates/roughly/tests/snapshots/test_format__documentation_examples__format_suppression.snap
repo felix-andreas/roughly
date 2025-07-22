@@ -11,6 +11,6 @@ matrix(
   nrow=2
 ) # This code won't be reformatted
 
+# fmt: skip
 matrix(c(1, 2,
-         3, 4), nrow=2) # fmt: skip
-# The line above won't be reformatted
+         3, 4), nrow=2) # The line above won't be reformatted

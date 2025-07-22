@@ -2,8 +2,7 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-calculate_mean <- function(data) {
-  clean_data <- data[!is.na(data)]
+x <- 1
+y <- 2
 
-  mean(clean_data)
-}
+z <- 3
