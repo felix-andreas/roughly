@@ -44,6 +44,10 @@ x+y
 
 
 #==== complex_expressions
+#---- mixed_unary_binary
+1 + +1 - -1 * -1 / -2
+1++1--1*-1/-2
+
 #---- chained_extract
 foo$
     bar(a)$

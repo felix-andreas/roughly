@@ -124,8 +124,8 @@ mod tests {
     #[test]
     fn backwards_compatability() {
         let toml = indoc! {r#"
-            case = "snake_case" # should override format.indent-width
-            spaces = 6          # should override lint.naming-style
+            case = "snake_case" # should override lint.naming-style
+            spaces = 6          # should override format.indent-width
 
             [format]
             indent-width = 4
