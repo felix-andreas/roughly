@@ -28,9 +28,7 @@ The formatter follows these key principles:
 
 ### Why Non-Invasive?
 
-R is an expression-based language with a strong focus on numerical computing and data analysis. Unlike many other programming languages, R code is often written interactively and exploratively, where preserving the original intent and structure of expressions is crucial for readability and debugging.
-
-The non-invasive approach means roughly respects your existing line breaks and won't arbitrarily split expressions that you've chosen to keep on one line. **Non-invasive formatting tries to minimize the amount of line-breaks not set by the programmer** by following these key principles:
+The non-invasive approach means Roughly respects your existing line breaks and won't arbitrarily split expressions that you've chosen to keep on one line. **Non-invasive formatting tries to minimize the amount of line-breaks not set by the programmer** by following these key principles:
 
 - **Single line expressions are never broken into multiple lines** (with the exception of loops like `for`, `while`, `repeat`, because they don't yield useful values and can only perform side effects, so they are not normal expressions in that sense)
 - **Both hugging and not hugging is allowed** for function calls and other constructs
@@ -39,9 +37,8 @@ The non-invasive approach means roughly respects your existing line breaks and w
 This is particularly important in R because:
 
 - **Data analysis workflows**: Short, expressive one-liners are common and meaningful
-- **Interactive development**: Code is often built incrementally, and forced line breaks can disrupt the flow
 - **Mathematical expressions**: Complex formulas are often more readable when kept compact
-- **Functional style**: R's functional nature benefits from preserving the structure of nested calls
+- **Functional style**: R's functional nature benefits from preserving the structure of nested expresions
 
 #### Why This Matters for Numerical Computing
 
@@ -285,7 +282,7 @@ if(
 
 ```r
 # for_loops : compare
-for(item in data) process(item)
+for(item in sequence) process(item)
 ```
 
 **While loops** follow similar block enforcement rules:
