@@ -221,3 +221,56 @@ library(purrr)
 map(\(df) lm(mpg~wt, data    = df)) |>
 map(summary  ) |>
 map_dbl("r.squared"  )
+
+#---- s4_classes
+setClass("Person",
+    slots = list(
+        name = "character",
+        age = "numeric"
+    ),
+    prototype = list(
+        name = character(0),
+        age = numeric(0)
+    )
+)
+
+setClass("Employee",
+    contains = "Person",
+    slots = list(
+        department = "character",
+        salary = "numeric"
+    ),
+    validity = function(object) {
+        if (object@salary < 0) "Salary must be non-negative"
+        else TRUE
+    }
+)
+
+#---- s4_generics
+setGeneric("show", function(object) standardGeneric("show"))
+
+setGeneric("getName", function(x) {
+    standardGeneric("getName")
+})
+
+setGeneric("setName<-",
+    function(x, value) standardGeneric("setName<-")
+)
+
+#---- s4_methods
+setMethod("show", "Person", function(object) {
+    cat("Person object:\n")
+    cat("  Name:", object@name, "\n")
+    cat("  Age:", object@age, "\n")
+})
+
+setMethod("getName", "Person", function(x) x@name)
+
+setMethod("setName<-", "Person",
+    function(x, value) {
+        x@name <- value
+        x
+    }
+)
+
+
