@@ -139,11 +139,8 @@ complex_call(argument1,
 **Nested function calls** are formatted with hugging when appropriate:
 
 ```r
-# Before formatting
+# nested_function_calls : compare
 result <- outer(inner(a,b),other(c,d))
-
-# After formatting  
-result <- outer(inner(a, b), other(c, d))
 ```
 
 ### Function Definitions
@@ -151,16 +148,10 @@ result <- outer(inner(a, b), other(c, d))
 Function definitions follow consistent formatting rules for parameters and body structure:
 
 ```r
-# Before formatting
+# function_definitions : compare
 calc<-function(x,y=1){x+y}
 stats<-function(data,method="mean"){
   result(data,method)
-}
-
-# After formatting
-calc <- function(x, y = 1) x + y
-stats <- function(data, method = "mean") {
-  result(data, method)
 }
 ```
 
@@ -169,11 +160,8 @@ stats <- function(data, method = "mean") {
 **Anonymous functions** (lambda expressions) are also properly formatted:
 
 ```r
-# Before formatting
+# anonymous_functions: compare
 lapply(data,\(x)x+1)
-
-# After formatting
-lapply(data, \(x) x + 1)
 ```
 
 **Body formatting**: If a function definition spans multiple lines or has a multiline condition, non-braced bodies are automatically wrapped in braces for consistency.
@@ -183,19 +171,11 @@ lapply(data, \(x) x + 1)
 **If statements** maintain compact formatting for simple conditions while ensuring readability for complex ones:
 
 ```r
-# Before formatting
+# conditional_statements : compare
 if(condition){action} else{alternative}
+
 if(long_condition ||
    other_condition){
-  action()
-}
-
-# After formatting
-if (condition) { action } else { alternative }
-if (
-  long_condition ||
-  other_condition
-) {
   action()
 }
 ```
@@ -209,37 +189,22 @@ if (
 **For loops** always enforce braced blocks for the body, ensuring consistency:
 
 ```r
-# Before formatting
+# for_loops : compare
 for(item in collection) process(item)
-
-# After formatting
-for (item in collection) {
-  process(item)
-}
 ```
 
 **While loops** follow similar block enforcement rules:
 
 ```r
-# Before formatting
+# for_loops : compare
 while(condition) action()
-
-# After formatting
-while (condition) {
-  action()
-}
 ```
 
 **Repeat loops** also enforce braced blocks:
 
 ```r
-# Before formatting
+# repeat_loops : compare
 repeat action()
-
-# After formatting
-repeat {
-  action()
-}
 ```
 
 **Loop condition formatting**: Complex conditions that span multiple lines receive proper indentation within the parentheses.
@@ -249,17 +214,10 @@ repeat {
 Parenthesized expressions maintain their layout with smart formatting for readability:
 
 ```r
-# Before formatting
+# parenthesized_expressions : compare
 (x+y*z)
 (long_expression+
  other_part)
-
-# After formatting
-(x + y * z)
-(
-  long_expression +
-  other_part
-)
 ```
 
 **Parenthesis hugging**: If the content fits on one line, parentheses hug the content. For multiline content, proper indentation is applied.
@@ -269,12 +227,8 @@ Parenthesized expressions maintain their layout with smart formatting for readab
 String literals receive intelligent quote normalization. The formatter prefers double quotes (`"`) unless the string contains unescaped double quotes:
 
 ```r
-# Before formatting
+# string_literals : compare
 message <- 'Hello world'
-quoted_content <- 'Say "hello"'
-
-# After formatting
-message <- "Hello world"
 quoted_content <- 'Say "hello"'
 ```
 
@@ -283,13 +237,8 @@ quoted_content <- 'Say "hello"'
 **Bracket subsetting** follows the same formatting rules as function calls:
 
 ```r
-# Before formatting
+# subsetting : compare
 data[row_index,column_index]
-environment[["variable_name"]]
-object$member_variable
-
-# After formatting
-data[row_index, column_index]
 environment[["variable_name"]]
 object$member_variable
 ```
@@ -297,11 +246,7 @@ object$member_variable
 **Namespace operators** (`::` and `:::`):
 
 ```r
-# Before formatting
-package::public_function
-package:::private_function
-
-# After formatting
+# namespace_operators : compare
 package::public_function
 package:::private_function
 ```
@@ -311,14 +256,9 @@ package:::private_function
 Unary operators receive appropriate spacing based on their type and context:
 
 ```r
-# Before formatting
+# unary_operators : compare
 result = ! condition
 number = - 42
-formula = ~ response + predictor
-
-# After formatting
-result = !condition
-number = -42
 formula = ~ response + predictor
 ```
 
@@ -329,7 +269,7 @@ formula = ~ response + predictor
 You can disable formatting for specific code sections using the `# fmt: skip` comment directive:
 
 ```r
-# 
+# format_suppression : format
 # fmt: skip
 matrix(
   c(
@@ -359,18 +299,11 @@ The formatter intelligently handles various R idioms and special patterns:
 When code blocks appear inside function calls or parenthesized expressions, the formatter applies smart indentation to avoid excessive nesting:
 
 ```r
-# Before formatting
+# nested_block_expressions : compare
 apply(data,1,function(row){
 if(condition(row)){
 transform(row)
 }
-})
-
-# After formatting
-apply(data, 1, function(row) {
-  if (condition(row)) {
-    transform(row)
-  }
 })
 ```
 
@@ -383,18 +316,15 @@ apply(data, 1, function(row) {
 Semicolon-separated expressions receive appropriate formatting:
 
 ```r
-# Before formatting
+# expression_sequences : compare
 {initialize();process();cleanup()}
-
-# After formatting
-{ initialize(); process(); cleanup() }
 ```
 
 ### R6 Class Definitions
 Class definitions with empty lines between methods are preserved:
 
 ```r
-# Formatting preserves intentional spacing in class definitions
+# r6_class_definitions : format
 PersonClass <- R6Class(
   "Person",
   public = list(
@@ -422,40 +352,26 @@ The formatter automatically adds braces to control flow structures when they imp
 **Function definitions**: Multi-line functions always receive braces, even when the body starts on the same line:
 
 ```r
-# Before formatting
+# auto_bracing_function_defintions : compare
 f <- function(x) 
   x + 1
-
-# After formatting  
-f <- function(x) {
-  x + 1
-}
 ```
 
 **Conditional statements**: Multi-line conditions or bodies are automatically braced:
 
 ```r
-# Before formatting
+# auto_bracing_conditional_statements : compare
 if (condition)
   single_statement
 
-# After formatting
-if (condition) {
-  single_statement
-}
 ```
 
 **Loops**: All loop bodies are automatically braced for consistency:
 
 ```r
-# Before formatting
+# auto_bracing_loops : compare
 for (i in 1:n)
   process(i)
-
-# After formatting
-for (i in 1:n) {
-  process(i)
-}
 ```
 
 ## Hugging Behavior
@@ -465,6 +381,7 @@ for (i in 1:n) {
 **Nested function calls** can be formatted in a hugged style:
 
 ```r
+# hugging_nested_function_calls : format
 # Hugged format - both functions start on the same line
 result <- outer(inner(
   arg
@@ -481,6 +398,7 @@ result <- outer(
 **Non-invasive multi-line formatting**: When expressions are already multi-line, roughly only adds necessary spacing but preserves the overall structure. However, if all arguments don't fit on their separate lines, they will be properly separated:
 
 ```r
+# non_invasive_multiline : format
 # Before formatting - mixed line breaks
 call(
   a=x,
@@ -497,6 +415,7 @@ call(
 **Mixed line formats** are allowed when the last argument starts on the same line:
 
 ```r
+# mixed_line_format : format
 # This format is preserved - last argument starts on same line
 call(a = x, b = y, c = inner(
   expr
@@ -506,6 +425,7 @@ call(a = x, b = y, c = inner(
 This behavior is particularly useful for testing frameworks and S4 method definitions:
 
 ```r
+# test_that_and_s4_example: format
 # testthat example
 test_that("description", {
   expect_equal(result, expected)
