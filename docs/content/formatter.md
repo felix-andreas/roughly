@@ -382,16 +382,6 @@ matrix(
   nrow=2
 ) # This code won't be reformatted
 
-matrix(
-  c(
-    1,
-    2,
-    3,
-    4
-  ),
-  nrow = 2
-) # This code will be formatted
-
 matrix(c(1, 2,
          3, 4), nrow=2) # fmt: skip
 # The line above won't be reformatted
