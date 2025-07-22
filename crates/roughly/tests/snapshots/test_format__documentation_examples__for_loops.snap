@@ -2,6 +2,6 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-for (item in data) {
+for (item in sequence) {
   process(item)
 }
