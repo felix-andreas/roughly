@@ -42,7 +42,7 @@ use {
     tree_sitter::{InputEdit, Parser, Point, Tree},
 };
 
-// #[tokio::main] # TODO: understand if this makes a difference???
+// Use single-threaded runtime for language server
 #[tokio::main(flavor = "current_thread")]
 pub async fn run(experimental_features: ExperimentalFeatures) {
     let (server, _) = async_lsp::MainLoop::new_server(|client| {
@@ -178,7 +178,7 @@ impl LanguageServer for ServerState {
     }
 
     fn initialized(&mut self, _: InitializedParams) -> ControlFlow<async_lsp::Result<()>> {
-        // TODO: consider to negotiate client capabilities
+        // TODO: implement proper client capability negotiation
         // see: https://github.com/oxalica/nil/blob/870a4b1b5f/crates/nil/src/capabilities.rs
         let params = RegistrationParams {
             registrations: vec![Registration {

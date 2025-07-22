@@ -118,7 +118,8 @@ pub fn get(
                     .iter()
                     .filter(|symbol| utils::starts_with_lowercase(&symbol.name, &query))
             },
-            // TODO: use CompletionResponse::List.is_incomplete and only limit for short queries?
+            // TODO: implement proper pagination using CompletionResponse::List.is_incomplete
+            // and only limit for short queries to improve performance
             1024,
         )
         .into_iter()

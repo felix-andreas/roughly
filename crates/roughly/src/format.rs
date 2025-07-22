@@ -62,16 +62,22 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
     let start = Instant::now();
 
     if node.has_error() {
-        let error = tree::find_next_error(node).unwrap();
+        if let Some(error) = tree::find_next_error(node) {
+            let line = error.start_position().row;
+            let col = error.start_position().column;
+            let kind = error.kind();
 
-        let line = error.start_position().row;
-        let col = error.start_position().column;
-        let kind = error.kind();
-
-        return Err(if error.is_missing() {
-            FormatError::Missing { kind, line, col }
-        } else {
-            FormatError::SyntaxError { kind, line, col }
+            return Err(if error.is_missing() {
+                FormatError::Missing { kind, line, col }
+            } else {
+                FormatError::SyntaxError { kind, line, col }
+            });
+        }
+        // If we can't find the specific error node, return a generic error
+        return Err(FormatError::SyntaxError {
+            kind: "unknown",
+            line: node.start_position().row,
+            col: node.start_position().column,
         });
     }
 
@@ -128,6 +134,59 @@ enum Directive {
     SkipFile,
     On,
     Off,
+}
+
+/// Format literal values (integers, floats, strings, etc.)
+fn format_literal(
+    out: &mut String,
+    node: Node,
+    context: Context,
+) -> Result<(), FormatError> {
+    match node.kind_id() {
+        kind::INTEGER | kind::COMPLEX | kind::FLOAT | kind::NA => {
+            out.push_str(get_raw(node, context.rope).trim_end_matches('\r'));
+        }
+        kind::STRING => {
+            if let Some(content) = field_optional(node, field::CONTENT) {
+                let raw = get_raw(content, context.rope);
+                let mut all_quotes_escaped = true;
+                let mut prev_was_escape = false;
+                for char in raw.chars() {
+                    if char == '"' {
+                        all_quotes_escaped &= prev_was_escape;
+                    }
+                    prev_was_escape = char == '\\' && !prev_was_escape;
+                }
+                let quote = if all_quotes_escaped { '"' } else { '\'' };
+                out.push(quote);
+                out.push_str(&raw);
+                out.push(quote);
+            } else {
+                out.push_str(r#""""#);
+            }
+        }
+        _ => return Err(FormatError::UnknownKind { 
+            kind: node.kind(), 
+            raw: get_raw(node, context.rope) 
+        }),
+    }
+    Ok(())
+}
+
+/// Format keywords (return, next, break, etc.)
+fn format_keyword(out: &mut String, node: Node, context: Context) -> Result<(), FormatError> {
+    match node.kind_id() {
+        kind::DOTS => out.push_str("..."),
+        kind::DOT_DOT_I => out.push_str(get_raw(node, context.rope).trim_end_matches('\r')),
+        kind::RETURN => out.push_str("return"),
+        kind::NEXT => out.push_str("next"),
+        kind::BREAK => out.push_str("break"),
+        _ => return Err(FormatError::UnknownKind { 
+            kind: node.kind(), 
+            raw: get_raw(node, context.rope) 
+        }),
+    }
+    Ok(())
 }
 
 fn traverse(
@@ -266,37 +325,15 @@ fn traverse(
         kind::NULL => out.push_str("NULL"),
         kind::INF => out.push_str("Inf"),
         kind::NAN => out.push_str("NaN"),
-        kind::INTEGER => fmt_raw(out, node)?,
-        kind::COMPLEX => fmt_raw(out, node)?,
-        kind::FLOAT => fmt_raw(out, node)?,
-        kind::STRING => {
-            if let Some(content) = field_optional(node, field::CONTENT) {
-                let raw = get_raw(content, context.rope);
-                let mut all_quotes_escaped = true;
-                let mut prev_was_escape = false;
-                for char in raw.chars() {
-                    if char == '"' {
-                        all_quotes_escaped &= prev_was_escape;
-                    }
-                    prev_was_escape = char == '\\' && !prev_was_escape;
-                }
-                let quote = if all_quotes_escaped { '"' } else { '\'' };
-                out.push(quote);
-                out.push_str(&raw);
-                out.push(quote);
-            } else {
-                out.push_str(r#""""#);
-            }
+        kind::INTEGER | kind::COMPLEX | kind::FLOAT | kind::STRING | kind::NA => {
+            format_literal(out, node, context)?
         }
-        kind::NA => fmt_raw(out, node)?,
         // both handled by STRING
         kind::ESCAPE_SEQUENCE | kind::STRING_CONTENT => unreachable!(),
         // KEYWORDS
-        kind::DOTS => out.push_str("..."),
-        kind::DOT_DOT_I => fmt_raw(out, node)?,
-        kind::RETURN => out.push_str("return"),
-        kind::NEXT => out.push_str("next"),
-        kind::BREAK => out.push_str("break"),
+        kind::DOTS | kind::DOT_DOT_I | kind::RETURN | kind::NEXT | kind::BREAK => {
+            format_keyword(out, node, context)?
+        }
         // COMPOUND EXPRESSIONS
         kind::ARGUMENT | kind::PARAMETER => {
             tree::for_each_child(cursor, |_, child, field_id, cursor| {
@@ -1145,8 +1182,8 @@ fn same_line(a: Node, b: Node) -> bool {
     end_position(a).row == b.start_position().row
 }
 
-// HACK: tree-sitter-r has wrong ending_position for extract with newlines before ths rhs:
-// it only includes the newline but not the rhs. this hack uses at least the correct end_position
+// WORKAROUND: tree-sitter-r has incorrect ending_position for extract with newlines before rhs:
+// it only includes the newline but not the rhs. This function uses the correct end_position
 // see: https://github.com/users/felix-andreas/projects/5?pane=issue&itemId=100962575
 fn end_position(node: Node) -> tree_sitter::Point {
     if node.kind_id() != kind::EXTRACT_OPERATOR {
