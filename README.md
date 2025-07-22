@@ -54,9 +54,27 @@ You can install the Roughly CLI by downloading a pre-built binary or by building
 
 Download the pre-built binary for your platform from the [releases page](https://github.com/felix-andreas/roughly/releases).
 
+### Build with Nix
+
+If you use Nix, you can build roughly directly:
+
+```sh
+nix build github:felix-andreas/roughly
+```
+
+Or clone the repository and build locally:
+
+```sh
+git clone https://github.com/felix-andreas/roughly.git
+cd roughly
+nix build
+```
+
+The binary will be available in `./result/bin/roughly`. See [docs/nix-build.md](docs/nix-build.md) for more details.
+
 ### Build from Source
 
-Alternatively, build from source:
+Alternatively, build from source with Cargo:
 
 ```sh
 cargo build --release
