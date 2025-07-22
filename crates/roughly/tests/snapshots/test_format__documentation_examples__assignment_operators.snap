@@ -3,4 +3,4 @@ source: crates/roughly/tests/test_format.rs
 expression: code
 ---
 x <- 1
-result <<- calculate()
+data <<- compute()
