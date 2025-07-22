@@ -40,9 +40,6 @@ thud <- NaN
 #==== complex_data_manipulation
 #---- nested_data_pipeline
 # Complex data manipulation with nested function calls and pipeline operators
-library(dplyr)
-library(tidyr)
-
 result <- raw_data %>%
     filter(
         !is.na(value) &
@@ -51,206 +48,81 @@ result <- raw_data %>%
     ) %>%
     group_by(
         region,
-        category,
         quarter = paste0("Q", ceiling(month(date) / 3))
     ) %>%
     summarise(
         mean_value = mean(value, na.rm = TRUE),
-        median_value = median(value, na.rm = TRUE),
         count = n(),
         .groups = "drop"
     ) %>%
-    pivot_wider(
-        names_from = quarter,
-        values_from = c(mean_value, median_value, count),
-        names_sep = "_"
-    ) %>%
     mutate(
-        total_mean = rowMeans(
-            select(., starts_with("mean_value")),
-            na.rm = TRUE
-        ),
-        variance_ratio = case_when(
-            total_mean > 100 ~ "high",
-            total_mean > 50 ~ "medium",
+        status = case_when(
+            mean_value > 100 ~ "high",
+            mean_value > 50 ~ "medium",
             TRUE ~ "low"
         )
-    ) %>%
-    arrange(desc(total_mean))
+    )
 
 #==== statistical_modeling
 #---- complex_regression_analysis
 # Advanced statistical modeling with complex nested expressions
-library(lme4)
-library(broom.mixed)
-
-# Complex mixed-effects model with nested grouping
 model <- lmer(
     response ~ 
         poly(time, 3) * treatment +
         I(log(baseline_measure + 1)) +
         scale(covariate1) +
-        I(covariate2^2) +
-        interaction_term +
         (1 + time | subject_id) +
         (1 | site_id/clinic_id),
     data = analysis_data,
-    weights = 1 / sqrt(variance_weights),
     control = lmerControl(
         optimizer = "bobyqa",
-        optCtrl = list(maxfun = 100000),
-        check.conv.singular = .makeCC(
-            action = "warning",
-            tol = 1e-4
-        )
+        optCtrl = list(maxfun = 100000)
     )
 )
-
-# Complex post-hoc analysis with nested comparisons
-contrasts_result <- emmeans(
-    model,
-    pairwise ~ treatment | time,
-    at = list(
-        time = c(0, 30, 60, 90),
-        baseline_measure = mean(analysis_data$baseline_measure, na.rm = TRUE)
-    ),
-    adjust = "tukey"
-) %>%
-    map_dfr(
-        ~ .x %>%
-            as_tibble() %>%
-            mutate(
-                effect_size = estimate / sqrt(
-                    sum(residuals(model)^2) / df.residual(model)
-                ),
-                significant = ifelse(
-                    p.value < 0.05,
-                    ifelse(p.value < 0.01, "**", "*"),
-                    "ns"
-                )
-            ),
-        .id = "comparison_type"
-    )
 
 #==== complex_control_flow
 #---- nested_error_handling_validation
 # Complex control flow with nested conditionals and error handling
-process_data_batch <- function(data_list, config = list()) {
+process_data <- function(data_list, strict = FALSE) {
     tryCatch({
-        # Validate inputs with nested conditions
         if (is.null(data_list) || length(data_list) == 0) {
-            stop("Input data_list cannot be NULL or empty")
+            stop("Input cannot be NULL or empty")
         }
         
         for (i in seq_along(data_list)) {
             current_data <- data_list[[i]]
             
-            # Nested validation with complex conditions
             if (!is.data.frame(current_data)) {
-                warning(paste("Element", i, "is not a data frame, skipping"))
-                next
-            }
-            
-            required_cols <- c("id", "timestamp", "value")
-            missing_cols <- setdiff(required_cols, names(current_data))
-            
-            if (length(missing_cols) > 0) {
-                if (config$strict_mode %||% FALSE) {
-                    stop(paste(
-                        "Missing required columns in element", i, ":",
-                        paste(missing_cols, collapse = ", ")
-                    ))
+                if (strict) {
+                    stop(paste("Element", i, "is not a data frame"))
                 } else {
-                    warning(paste(
-                        "Missing columns in element", i, ", filling with defaults:",
-                        paste(missing_cols, collapse = ", ")
-                    ))
-                    
-                    # Complex default value assignment
-                    for (col in missing_cols) {
-                        current_data[[col]] <- switch(col,
-                            "id" = paste0("auto_", seq_len(nrow(current_data))),
-                            "timestamp" = rep(Sys.time(), nrow(current_data)),
-                            "value" = rep(NA_real_, nrow(current_data)),
-                            rep(NA, nrow(current_data))
-                        )
-                    }
+                    warning(paste("Skipping element", i))
+                    next
                 }
             }
             
-            # Complex data transformation with nested operations
+            # Complex data transformation
             processed <- current_data %>%
                 filter(!is.na(value)) %>%
                 mutate(
-                    normalized_value = case_when(
-                        is.finite(value) && value >= 0 ~ 
-                            (value - min(value, na.rm = TRUE)) / 
-                            (max(value, na.rm = TRUE) - min(value, na.rm = TRUE)),
-                        is.finite(value) && value < 0 ~ 
-                            pmax(-1, pmin(0, value / abs(min(value, na.rm = TRUE)))),
+                    normalized = case_when(
+                        value >= 0 ~ (value - min(value)) / (max(value) - min(value)),
+                        value < 0 ~ pmax(-1, value / abs(min(value))),
                         TRUE ~ NA_real_
                     ),
-                    quality_flag = ifelse(
+                    quality = ifelse(
                         abs(scale(value)[, 1]) > 3,
                         "outlier",
-                        ifelse(
-                            is.na(value) || !is.finite(value),
-                            "invalid",
-                            "valid"
-                        )
+                        "valid"
                     )
-                ) %>%
-                arrange(timestamp, id)
+                )
             
             data_list[[i]] <- processed
         }
         
-        # Final aggregation with complex grouping
-        final_result <- bind_rows(data_list, .id = "batch_id") %>%
-            group_by(batch_id) %>%
-            summarise(
-                total_records = n(),
-                valid_records = sum(quality_flag == "valid", na.rm = TRUE),
-                mean_value = mean(normalized_value, na.rm = TRUE),
-                outlier_rate = mean(quality_flag == "outlier", na.rm = TRUE),
-                completeness = mean(!is.na(normalized_value)),
-                .groups = "drop"
-            ) %>%
-            mutate(
-                quality_score = (
-                    0.4 * completeness +
-                    0.3 * (1 - outlier_rate) +
-                    0.3 * pmin(1, valid_records / total_records)
-                ),
-                grade = case_when(
-                    quality_score >= 0.9 ~ "A",
-                    quality_score >= 0.8 ~ "B", 
-                    quality_score >= 0.7 ~ "C",
-                    quality_score >= 0.6 ~ "D",
-                    TRUE ~ "F"
-                )
-            )
-        
-        return(final_result)
+        return(data_list)
         
     }, error = function(e) {
-        if (config$debug_mode %||% FALSE) {
-            cat("Debug info - Error occurred at:",
-                format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n")
-            print(str(data_list))
-        }
-        
-        stop(paste("Error in process_data_batch:", e$message))
-        
-    }, warning = function(w) {
-        if (config$verbose %||% TRUE) {
-            message("Warning in process_data_batch: ", w$message)
-        }
-        invokeRestart("muffleWarning")
-        
-    }, finally = {
-        if (config$cleanup %||% TRUE) {
-            gc()  # Force garbage collection
-        }
+        stop(paste("Error in process_data:", e$message))
     })
 }

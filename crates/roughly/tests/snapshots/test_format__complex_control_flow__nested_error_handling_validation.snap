@@ -3,132 +3,48 @@ source: crates/roughly/tests/test_format.rs
 expression: code
 ---
 # Complex control flow with nested conditionals and error handling
-process_data_batch <- function(data_list, config = list()) {
+process_data <- function(data_list, strict = FALSE) {
   tryCatch(
     {
-      # Validate inputs with nested conditions
       if (is.null(data_list) || length(data_list) == 0) {
-        stop("Input data_list cannot be NULL or empty")
+        stop("Input cannot be NULL or empty")
       }
 
       for (i in seq_along(data_list)) {
         current_data <- data_list[[i]]
 
-        # Nested validation with complex conditions
         if (!is.data.frame(current_data)) {
-          warning(paste("Element", i, "is not a data frame, skipping"))
-          next
-        }
-
-        required_cols <- c("id", "timestamp", "value")
-        missing_cols <- setdiff(required_cols, names(current_data))
-
-        if (length(missing_cols) > 0) {
-          if (config$strict_mode %||% FALSE) {
-            stop(paste(
-              "Missing required columns in element",
-              i,
-              ":",
-              paste(missing_cols, collapse = ", ")
-            ))
+          if (strict) {
+            stop(paste("Element", i, "is not a data frame"))
           } else {
-            warning(paste(
-              "Missing columns in element",
-              i,
-              ", filling with defaults:",
-              paste(missing_cols, collapse = ", ")
-            ))
-
-            # Complex default value assignment
-            for (col in missing_cols) {
-              current_data[[col]] <- switch(
-                col,
-                "id" = paste0("auto_", seq_len(nrow(current_data))),
-                "timestamp" = rep(Sys.time(), nrow(current_data)),
-                "value" = rep(NA_real_, nrow(current_data)),
-                rep(NA, nrow(current_data))
-              )
-            }
+            warning(paste("Skipping element", i))
+            next
           }
         }
 
-        # Complex data transformation with nested operations
+        # Complex data transformation
         processed <- current_data %>%
           filter(!is.na(value)) %>%
           mutate(
-            normalized_value = case_when(
-              is.finite(value) && value >= 0 ~
-                (value - min(value, na.rm = TRUE)) /
-                  (max(value, na.rm = TRUE) - min(value, na.rm = TRUE)),
-              is.finite(value) && value < 0 ~
-                pmax(-1, pmin(0, value / abs(min(value, na.rm = TRUE)))),
+            normalized = case_when(
+              value >= 0 ~ (value - min(value)) / (max(value) - min(value)),
+              value < 0 ~ pmax(-1, value / abs(min(value))),
               TRUE ~ NA_real_
             ),
-            quality_flag = ifelse(
+            quality = ifelse(
               abs(scale(value)[, 1]) > 3,
               "outlier",
-              ifelse(
-                is.na(value) || !is.finite(value),
-                "invalid",
-                "valid"
-              )
+              "valid"
             )
-          ) %>%
-          arrange(timestamp, id)
+          )
 
         data_list[[i]] <- processed
       }
 
-      # Final aggregation with complex grouping
-      final_result <- bind_rows(data_list, .id = "batch_id") %>%
-        group_by(batch_id) %>%
-        summarise(
-          total_records = n(),
-          valid_records = sum(quality_flag == "valid", na.rm = TRUE),
-          mean_value = mean(normalized_value, na.rm = TRUE),
-          outlier_rate = mean(quality_flag == "outlier", na.rm = TRUE),
-          completeness = mean(!is.na(normalized_value)),
-          .groups = "drop"
-        ) %>%
-        mutate(
-          quality_score = (
-            0.4 * completeness +
-              0.3 * (1 - outlier_rate) +
-              0.3 * pmin(1, valid_records / total_records)
-          ),
-          grade = case_when(
-            quality_score >= 0.9 ~ "A",
-            quality_score >= 0.8 ~ "B",
-            quality_score >= 0.7 ~ "C",
-            quality_score >= 0.6 ~ "D",
-            TRUE ~ "F"
-          )
-        )
-
-      return(final_result)
+      return(data_list)
     },
     error = function(e) {
-      if (config$debug_mode %||% FALSE) {
-        cat(
-          "Debug info - Error occurred at:",
-          format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
-          "\n"
-        )
-        print(str(data_list))
-      }
-
-      stop(paste("Error in process_data_batch:", e$message))
-    },
-    warning = function(w) {
-      if (config$verbose %||% TRUE) {
-        message("Warning in process_data_batch: ", w$message)
-      }
-      invokeRestart("muffleWarning")
-    },
-    finally = {
-      if (config$cleanup %||% TRUE) {
-        gc() # Force garbage collection
-      }
+      stop(paste("Error in process_data:", e$message))
     }
   )
 }
