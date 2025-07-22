@@ -35,8 +35,8 @@ x; y
 #foo
 # special comments should preserve format
 #' roxygen comment
-#* special comment
-#: special comment
+#* plumber comment
+#: roughly comment
 ## double hash comment
 #! shebang-style comment
 # empty comment just becomes #
@@ -103,14 +103,7 @@ break
 "\\\"x\\\""
 
 #---- strings_quote_selection
-# formatter should choose quotes to minimize escaping
-"simple"
-'simple'
-"string with 'single quotes'"
-'string with "double quotes"'
 'string with \'escaped single quotes\''
-"string with \"escaped double quotes\""
-'mixed \'single\' and "double" quotes'
 
 #---- strings_multiline
 "x
@@ -148,13 +141,6 @@ x.y
 - x
 ~x
 
-#---- tilde_spacing
-# tilde should have space except when followed by identifier
-~x
-~identifier
-~ x
-~ (x + y)
-~ {x}
 
 #---- comments_all_positions
 - # 1

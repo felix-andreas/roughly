@@ -7,8 +7,8 @@ expression: code
 # foo
 # special comments should preserve format
 #' roxygen comment
-#* special comment
-#: special comment
+#* plumber comment
+#: roughly comment
 ## double hash comment
 #! shebang-style comment
 # empty comment just becomes #
