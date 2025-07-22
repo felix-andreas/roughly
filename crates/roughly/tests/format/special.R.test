@@ -247,9 +247,7 @@ setClass("Employee",
 )
 
 #---- s4_generics
-setGeneric("show",
-    function(object) standardGeneric("show")
-)
+setGeneric("show", function(object) standardGeneric("show"))
 
 setGeneric("getName", function(x) {
     standardGeneric("getName")
@@ -260,17 +258,13 @@ setGeneric("setName<-",
 )
 
 #---- s4_methods
-setMethod("show", "Person",
-    function(object) {
-        cat("Person object:\n")
-        cat("  Name:", object@name, "\n")
-        cat("  Age:", object@age, "\n")
-    }
-)
+setMethod("show", "Person", function(object) {
+    cat("Person object:\n")
+    cat("  Name:", object@name, "\n")
+    cat("  Age:", object@age, "\n")
+})
 
-setMethod("getName", "Person",
-    function(x) x@name
-)
+setMethod("getName", "Person", function(x) x@name)
 
 setMethod("setName<-", "Person",
     function(x, value) {
@@ -279,10 +273,4 @@ setMethod("setName<-", "Person",
     }
 )
 
-setMethod("show", "Employee",
-    function(object) {
-        callNextMethod()
-        cat("  Department:", object@department, "\n")
-        cat("  Salary:", object@salary, "\n")
-    }
-)
+

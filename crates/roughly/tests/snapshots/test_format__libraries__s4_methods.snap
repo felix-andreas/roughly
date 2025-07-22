@@ -2,21 +2,13 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-setMethod(
-  "show",
-  "Person",
-  function(object) {
-    cat("Person object:\n")
-    cat("  Name:", object@name, "\n")
-    cat("  Age:", object@age, "\n")
-  }
-)
+setMethod("show", "Person", function(object) {
+  cat("Person object:\n")
+  cat("  Name:", object@name, "\n")
+  cat("  Age:", object@age, "\n")
+})
 
-setMethod(
-  "getName",
-  "Person",
-  function(x) x@name
-)
+setMethod("getName", "Person", function(x) x@name)
 
 setMethod(
   "setName<-",
@@ -27,12 +19,4 @@ setMethod(
   }
 )
 
-setMethod(
-  "show",
-  "Employee",
-  function(object) {
-    callNextMethod()
-    cat("  Department:", object@department, "\n")
-    cat("  Salary:", object@salary, "\n")
-  }
-)
+
