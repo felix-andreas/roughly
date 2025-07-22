@@ -1,0 +1,55 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+# Advanced statistical modeling with complex nested expressions
+library(lme4)
+library(broom.mixed)
+
+# Complex mixed-effects model with nested grouping
+model <- lmer(
+  response ~
+    poly(time, 3) * treatment +
+      I(log(baseline_measure + 1)) +
+      scale(covariate1) +
+      I(covariate2^2) +
+      interaction_term +
+      (1 + time | subject_id) +
+      (1 | site_id / clinic_id),
+  data = analysis_data,
+  weights = 1 / sqrt(variance_weights),
+  control = lmerControl(
+    optimizer = "bobyqa",
+    optCtrl = list(maxfun = 100000),
+    check.conv.singular = .makeCC(
+      action = "warning",
+      tol = 1e-4
+    )
+  )
+)
+
+# Complex post-hoc analysis with nested comparisons
+contrasts_result <- emmeans(
+  model,
+  pairwise ~ treatment | time,
+  at = list(
+    time = c(0, 30, 60, 90),
+    baseline_measure = mean(analysis_data$baseline_measure, na.rm = TRUE)
+  ),
+  adjust = "tukey"
+) %>%
+  map_dfr(
+    ~ .x %>%
+      as_tibble() %>%
+      mutate(
+        effect_size = estimate / sqrt(
+          sum(residuals(model)^2) / df.residual(model)
+        ),
+        significant = ifelse(
+          p.value < 0.05,
+          ifelse(p.value < 0.01, "**", "*"),
+          "ns"
+        )
+      ),
+    .id = "comparison_type"
+  )
