@@ -95,7 +95,6 @@ Comments are reformatted to ensure consistent spacing while preserving their con
 
 ```r
 # comments : compare
-# Before formatting
 #This is a comment
 #'This is roxygen
 ##This is a header
@@ -174,8 +173,9 @@ lapply(data,\(x)x+1)
 # conditional_statements : compare
 if(condition){action} else{alternative}
 
-if(long_condition ||
-   other_condition){
+if(
+  long_condition ||
+  other_condition){
   action()
 }
 ```
@@ -196,7 +196,7 @@ for(item in collection) process(item)
 **While loops** follow similar block enforcement rules:
 
 ```r
-# for_loops : compare
+# while_loops : compare
 while(condition) action()
 ```
 
@@ -363,7 +363,6 @@ f <- function(x)
 # auto_bracing_conditional_statements : compare
 if (condition)
   single_statement
-
 ```
 
 **Loops**: All loop bodies are automatically braced for consistency:
@@ -398,18 +397,10 @@ result <- outer(
 **Non-invasive multi-line formatting**: When expressions are already multi-line, roughly only adds necessary spacing but preserves the overall structure. However, if all arguments don't fit on their separate lines, they will be properly separated:
 
 ```r
-# non_invasive_multiline : format
-# Before formatting - mixed line breaks
+# non_invasive_multiline : compare
 call(
   a=x,
   b=y, c=z)
-
-# After formatting - proper spacing and line breaks
-call(
-  a = x,
-  b = y,
-  c = z
-)
 ```
 
 **Mixed line formats** are allowed when the last argument starts on the same line:
@@ -426,12 +417,10 @@ This behavior is particularly useful for testing frameworks and S4 method defini
 
 ```r
 # test_that_and_s4_example: format
-# testthat example
 test_that("description", {
   expect_equal(result, expected)
 })
 
-# S4 setMethod example  
 setMethod("show", "MyClass", function(object) {
   cat("MyClass object\n")
 })

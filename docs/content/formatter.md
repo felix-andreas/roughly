@@ -2,6 +2,7 @@
 title: Formatter
 description: Documentation for Roughly's R code formatter.
 ---
+<!-- THIS FILE IS GENERATED AUTOMATICALLY. MAKE CHANGES TO tests/format/formatter.template.md INSTEAD -->
 
 Roughly includes a non-invasive R code formatter that emphasizes readability while respecting the existing structure of your code.
 
@@ -184,7 +185,7 @@ complex_call(
 # Before formatting
 result <- outer(inner(a,b),other(c,d))
 
-# After formatting  
+# After formatting
 result <- outer(inner(a, b), other(c, d))
 ```
 
@@ -200,7 +201,7 @@ stats<-function(data,method="mean"){
 }
 
 # After formatting
-calc <- function(x, y = 1) x + y
+calc <- function(x, y = 1) { x + y }
 stats <- function(data, method = "mean") {
   result(data, method)
 }
@@ -227,16 +228,19 @@ lapply(data, \(x) x + 1)
 ```r
 # Before formatting
 if(condition){action} else{alternative}
-if(long_condition ||
-   other_condition){
+
+if(
+  long_condition ||
+  other_condition){
   action()
 }
 
 # After formatting
 if (condition) { action } else { alternative }
+
 if (
   long_condition ||
-  other_condition
+    other_condition
 ) {
   action()
 }
@@ -298,10 +302,8 @@ Parenthesized expressions maintain their layout with smart formatting for readab
 
 # After formatting
 (x + y * z)
-(
-  long_expression +
-  other_part
-)
+(long_expression +
+  other_part)
 ```
 
 **Parenthesis hugging**: If the content fits on one line, parentheses hug the content. For multiline content, proper indentation is applied.
@@ -380,8 +382,15 @@ matrix(
   nrow=2
 ) # This code won't be reformatted
 
-matrix(c(1, 2,
-         3, 4), nrow = 2)  # This code will be formatted
+matrix(
+  c(
+    1,
+    2,
+    3,
+    4
+  ),
+  nrow = 2
+) # This code will be formatted
 
 matrix(c(1, 2,
          3, 4), nrow=2) # fmt: skip
@@ -435,7 +444,6 @@ Semicolon-separated expressions receive appropriate formatting:
 Class definitions with empty lines between methods are preserved:
 
 ```r
-# Formatting preserves intentional spacing in class definitions
 PersonClass <- R6Class(
   "Person",
   public = list(
@@ -467,7 +475,7 @@ The formatter automatically adds braces to control flow structures when they imp
 f <- function(x) 
   x + 1
 
-# After formatting  
+# After formatting
 f <- function(x) {
   x + 1
 }
@@ -522,12 +530,12 @@ result <- outer(
 **Non-invasive multi-line formatting**: When expressions are already multi-line, roughly only adds necessary spacing but preserves the overall structure. However, if all arguments don't fit on their separate lines, they will be properly separated:
 
 ```r
-# Before formatting - mixed line breaks
+# Before formatting
 call(
   a=x,
   b=y, c=z)
 
-# After formatting - proper spacing and line breaks
+# After formatting
 call(
   a = x,
   b = y,
@@ -547,12 +555,10 @@ call(a = x, b = y, c = inner(
 This behavior is particularly useful for testing frameworks and S4 method definitions:
 
 ```r
-# testthat example
 test_that("description", {
   expect_equal(result, expected)
 })
 
-# S4 setMethod example  
 setMethod("show", "MyClass", function(object) {
   cat("MyClass object\n")
 })

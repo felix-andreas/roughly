@@ -2,7 +2,6 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-# Before formatting
 # This is a comment
 #' This is roxygen
 ##This is a header

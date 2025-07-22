@@ -36,32 +36,39 @@ fn docs() {
 
     let regex = Regex::new(r#"(?m)```r\n([\s\S]*?)```"#).unwrap();
 
-    let result = regex.replace_all(&markdown, |captures: &Captures| {
-        let text = captures.get(1).unwrap().as_str();
-        text.split_once('\n')
-            .and_then(|(first, rest)| first.strip_prefix("#").map(|comment| (comment, rest)))
-            .and_then(|(comment, text)| {
-                comment
-                    .split_once(":")
-                    .map(|(name, directive)| ((name.trim(), directive.trim()), text))
-            })
-            .map(|((name, directive), text)| {
-                let snapshot = format!("documentation_examples__{name}");
-                let code = format_str(text).unwrap();
-                insta::assert_snapshot!(snapshot, code);
+    let formatted = regex
+        .replace_all(&markdown, |captures: &Captures| {
+            let text = captures.get(1).unwrap().as_str();
+            text.split_once('\n')
+                .and_then(|(first, rest)| first.strip_prefix("#").map(|comment| (comment, rest)))
+                .and_then(|(comment, text)| {
+                    comment
+                        .split_once(":")
+                        .map(|(name, directive)| ((name.trim(), directive.trim()), text))
+                })
+                .map(|((name, directive), text)| {
+                    let snapshot = format!("documentation_examples__{name}");
+                    let code = format_str(text).unwrap();
+                    insta::assert_snapshot!(snapshot, code);
 
-                match dbg!(directive) {
-                    "compare" => format!("# Before formatting\n{text}\n# After formatting {code}"),
-                    "format" => code,
-                    _ => panic!(),
-                }
-            })
-            .unwrap_or(text.into())
-    });
+                    let content = match directive {
+                        "compare" => {
+                            format!("# Before formatting\n{text}\n# After formatting\n{code}")
+                        }
+                        "format" => code,
+                        _ => panic!(),
+                    };
 
-    dbg!("before");
-    fs::write("../../docs/content/formatter2.md", result.to_string()).unwrap();
-    dbg!("after");
+                    format!("```r\n{content}```")
+                })
+                .unwrap_or(text.into())
+        })
+        .replace(
+            "R CODE IN THIS FILE IS FORMATTED AND SAVED TO docs/content/formatter.md",
+        "THIS FILE IS GENERATED AUTOMATICALLY. MAKE CHANGES TO tests/format/formatter.template.md INSTEAD",
+        );
+
+    fs::write("../../docs/content/formatter.md", formatted).unwrap();
 }
 
 #[test]

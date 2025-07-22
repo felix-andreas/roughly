@@ -4,7 +4,9 @@ expression: code
 ---
 if (condition) { action } else { alternative }
 
-if (long_condition ||
-  other_condition) {
+if (
+  long_condition ||
+    other_condition
+) {
   action()
 }
