@@ -95,6 +95,7 @@ Comments are reformatted to ensure consistent spacing while preserving their con
 
 ```r
 # comments : compare
+#!/usr/bin/env Rscript
 #This is a comment
 #'This is roxygen
 ##This is a header
@@ -104,7 +105,7 @@ Comments are reformatted to ensure consistent spacing while preserving their con
 
 - Roxygen comments (`#'`) maintain their structure
 - Header comments (`##`, `###`) keep their formatting
-- Shebangs (`#!/usr/bin/env Rscript`) remain unchanged
+- Shebangs (`[#!/usr/bin/env Rscript](http://roughly.dev/)`) remain unchanged
 - Comments with quotes (`#'quoted'`) are left as-is to avoid conflicts
 
 ### Line Spacing

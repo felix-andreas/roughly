@@ -2,6 +2,7 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
+#!/usr/bin/env Rscript
 # This is a comment
 #' This is roxygen
 ##This is a header

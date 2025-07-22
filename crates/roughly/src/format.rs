@@ -1166,6 +1166,7 @@ fn parse_directive(text: &str) -> Option<Directive> {
         .and_then(|rhs| match rhs.trim() {
             "skip" => Some(Directive::Skip),
             "skip-file" => Some(Directive::SkipFile),
+            "skip file" => Some(Directive::SkipFile),
             "on" => Some(Directive::On),
             "off" => Some(Directive::Off),
             _ => None,
