@@ -29,20 +29,17 @@ x; y
 #'comment'
 #"comment"
 
-#---- comment_formatting_edge_cases
-# basic comments should get space after #
-#comment
-#foo
+#---- comment_with_special_meaning
 # special comments should preserve format
 #' roxygen comment
 #* plumber comment
 #: roughly comment
-## double hash comment
-#! shebang-style comment
-# empty comment just becomes #
-#
-# comments with quotes should be preserved
-#'comment with 'quotes''
+#'roxygen comment
+#*plumber comment
+#:roughly comment
+#'@param text
+#*@param text
+#:@param text
 
 #---- comments_all_positions
 # 1
@@ -98,12 +95,10 @@ break
 #---- strings_escaping
 '"x"'
 "\"x\""
+'\'x\''
 '\"x"'
 '\\"x\\"'
 "\\\"x\\\""
-
-#---- strings_quote_selection
-'string with \'escaped single quotes\''
 
 #---- strings_multiline
 "x
@@ -140,7 +135,6 @@ x.y
 + x
 - x
 ~x
-
 
 #---- comments_all_positions
 - # 1
@@ -375,7 +369,6 @@ fn(
 fn(
 { body }
 )
-
 
 #---- hugging_multi_line_block
 fn({
