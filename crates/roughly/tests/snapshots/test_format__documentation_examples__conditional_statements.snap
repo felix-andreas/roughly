@@ -2,10 +2,10 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-if (condition) { action } else { alternative }
+if (condition) { action() } else { action() }
 
 if (
-  long_condition ||
+  condition ||
     other_condition
 ) {
   action()

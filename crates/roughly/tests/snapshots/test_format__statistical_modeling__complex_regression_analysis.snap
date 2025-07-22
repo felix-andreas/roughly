@@ -1,0 +1,18 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+# Advanced statistical modeling with complex nested expressions
+model <- lmer(
+  response ~
+    poly(time, 3) * treatment +
+      I(log(baseline_measure + 1)) +
+      scale(covariate1) +
+      (1 + time | subject_id) +
+      (1 | site_id / clinic_id),
+  data = analysis_data,
+  control = lmerControl(
+    optimizer = "bobyqa",
+    optCtrl = list(maxfun = 100000)
+  )
+)

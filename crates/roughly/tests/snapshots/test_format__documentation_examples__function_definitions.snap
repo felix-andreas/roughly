@@ -2,7 +2,7 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-calc <- function(x, y = 1) { x + y }
-stats <- function(data, method = "mean") {
-  result(data, method)
+process <- function(x, y = 1) { x + y }
+filter <- function(data, method = "simple") {
+  select(data, method)
 }

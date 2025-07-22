@@ -2,6 +2,6 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-f <- function(x) {
+process <- function(x) {
   x + 1
 }
