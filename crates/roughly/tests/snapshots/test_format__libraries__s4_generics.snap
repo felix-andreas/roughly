@@ -1,0 +1,17 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+setGeneric(
+  "show",
+  function(object) standardGeneric("show")
+)
+
+setGeneric("getName", function(x) {
+  standardGeneric("getName")
+})
+
+setGeneric(
+  "setName<-",
+  function(x, value) standardGeneric("setName<-")
+)
