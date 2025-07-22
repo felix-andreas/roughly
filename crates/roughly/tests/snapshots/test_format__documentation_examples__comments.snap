@@ -2,7 +2,9 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
+# comment with space
+# comment without space
+#' roxygen comment
+#* plumber comment
+#'string' <- commented out string
 #!/usr/bin/env Rscript
-# This is a comment
-#' This is roxygen
-##This is a header
