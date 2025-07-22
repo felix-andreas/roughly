@@ -1,9 +1,0 @@
----
-source: crates/roughly/tests/test_format.rs
-expression: code
----
-fn[[ # [[
-  # 1
-  argument # argument
-  # 2
-]] # ]]

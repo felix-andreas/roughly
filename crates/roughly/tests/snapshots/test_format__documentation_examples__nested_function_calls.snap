@@ -1,5 +1,0 @@
----
-source: crates/roughly/tests/test_format.rs
-expression: code
----
-result <- outer(inner(a, b), other(c, d))
