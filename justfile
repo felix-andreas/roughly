@@ -14,11 +14,14 @@ rofy *args:
 test *args:
 	cargo test -- --nocapture {{args}}
 
-docs:
-	cd docs && bun dev
-
 snapshot *args:
 	cargo insta test --review -- --nocapture {{args}}
+
+snapshot-delete-unreferenced:
+	cargo insta test --unreferenced delete
+
+docs:
+	cd docs && bun dev
 
 vsce *args:
 	@bun --cwd=editors/code run vsce -- {{args}}
