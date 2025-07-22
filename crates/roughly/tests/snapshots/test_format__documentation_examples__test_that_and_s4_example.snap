@@ -1,0 +1,13 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+# testthat example
+test_that("description", {
+  expect_equal(result, expected)
+})
+
+# S4 setMethod example
+setMethod("show", "MyClass", function(object) {
+  cat("MyClass object\n")
+})

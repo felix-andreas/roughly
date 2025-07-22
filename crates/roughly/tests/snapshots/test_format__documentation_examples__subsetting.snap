@@ -1,0 +1,7 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+data[row_index, column_index]
+environment[["variable_name"]]
+object$member_variable

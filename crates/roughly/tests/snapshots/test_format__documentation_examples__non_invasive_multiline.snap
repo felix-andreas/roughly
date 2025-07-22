@@ -1,0 +1,17 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+# Before formatting - mixed line breaks
+call(
+  a = x,
+  b = y,
+  c = z
+)
+
+# After formatting - proper spacing and line breaks
+call(
+  a = x,
+  b = y,
+  c = z
+)
