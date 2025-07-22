@@ -220,7 +220,7 @@ if(
 
 ```r
 # for_loops : compare
-for(item in collection) process(item)
+for(item in data) process(item)
 ```
 
 **While loops** follow similar block enforcement rules:
