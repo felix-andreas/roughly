@@ -133,12 +133,46 @@ call(arg1,
         arg3)
 ```
 
-**Nested function calls** are formatted with proper spacing:
+**Nested function calls** can be formatted in a hugged style:
 
 ```r
-# nested_function_calls : compare
-result <- outer(inner(a,b),other(c,d))
+# hugging_nested_function_calls : format
+# Hugged format - both functions start on the same line
+result <- outer(inner(
+  arg
+))
+
+# Expanded format - also valid
+result <- outer(
+  inner(
+    arg
+  )
+)
 ```
+
+**Mixed line formats** are allowed when the last argument starts on the same line:
+
+```r
+# mixed_line_format : format
+# This format is preserved - last argument starts on same line
+call(a = x, b = y, c = inner(
+  expr
+))
+```
+
+This behavior is particularly useful for testing frameworks and S4 method definitions:
+
+```r
+# test_that_and_s4_example: format
+test_that("description", {
+  expect_equal(result, expected)
+})
+
+setMethod("show", "MyClass", function(object) {
+  cat("MyClass object\n")
+})
+```
+
 
 ### Function Definitions
 
@@ -186,7 +220,7 @@ if(
 
 ```r
 # for_loops : compare
-for(item in data) process(item)
+for(item in collection) process(item)
 ```
 
 **While loops** follow similar block enforcement rules:
@@ -409,29 +443,6 @@ result <- outer(
 call(
   a=x,
   b=y, c=z)
-```
-
-**Mixed line formats** are allowed when the last argument starts on the same line:
-
-```r
-# mixed_line_format : format
-# This format is preserved - last argument starts on same line
-call(a = x, b = y, c = inner(
-  expr
-))
-```
-
-This behavior is particularly useful for testing frameworks and S4 method definitions:
-
-```r
-# test_that_and_s4_example: format
-test_that("description", {
-  expect_equal(result, expected)
-})
-
-setMethod("show", "MyClass", function(object) {
-  cat("MyClass object\n")
-})
 ```
 
 ## Line Endings
