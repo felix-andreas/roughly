@@ -195,7 +195,8 @@ pub fn index(root: Node, rope: &Rope, nested: bool, other: bool) -> Vec<Item> {
                         info,
                     ))
                 } else if nested {
-                    // TODO: recurse lhs and rhs in else case? (and nested == true)
+                    // TODO: implement recursive indexing for lhs and rhs in braced expressions
+                    // when nested=true to capture more complex symbol definitions
                 }
             }
             "braced_expression" => {

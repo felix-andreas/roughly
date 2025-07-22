@@ -189,6 +189,41 @@ fn format_keyword(out: &mut String, node: Node, context: Context) -> Result<(), 
     Ok(())
 }
 
+/// Format comment nodes with proper spacing and content normalization
+fn format_comment(out: &mut String, node: Node, context: Context) -> Result<(), FormatError> {
+    let raw = get_raw(node, context.rope);
+    let raw = raw.trim_end();
+
+    let mut chars = raw.chars();
+    let _ = chars.next(); // Skip the '#'
+    // reformat comments like #foo to # foo but keep #' foo
+    match chars.next() {
+        Some('\'' | '*' | ':') => match chars.next() {
+            Some(' ') => out.push_str(raw),
+            Some(other) => {
+                let rest = chars.collect::<String>();
+                // avoid formatting #'foo'
+                if rest.contains('\'') {
+                    out.push_str(raw);
+                } else {
+                    out.push_str("#' ");
+                    out.push(other);
+                    out.push_str(&rest);
+                }
+            }
+            None => out.push_str("#'"),
+        },
+        Some('#' | '!' | ' ') => out.push_str(raw),
+        Some(other) => {
+            out.push_str("# ");
+            out.push(other);
+            out.push_str(&chars.collect::<String>());
+        }
+        None => out.push('#'),
+    }
+    Ok(())
+}
+
 fn traverse(
     out: &mut String,
     cursor: &mut TreeCursor,
@@ -286,38 +321,7 @@ fn traverse(
     match kind_id {
         // SPECIAL
         kind::IDENTIFIER => fmt_raw(out, node)?,
-        kind::COMMENT => {
-            let raw = get_raw(node, context.rope);
-            let raw = raw.trim_end();
-
-            let mut chars = raw.chars();
-            let _ = chars.next(); // Skip the '#'
-            // reformat comments like #foo to # foo but keep #' foo
-            match chars.next() {
-                Some('\'' | '*' | ':') => match chars.next() {
-                    Some(' ') => out.push_str(raw),
-                    Some(other) => {
-                        let rest = chars.collect::<String>();
-                        // avoid formatting #'foo'
-                        if rest.contains('\'') {
-                            out.push_str(raw);
-                        } else {
-                            out.push_str("#' ");
-                            out.push(other);
-                            out.push_str(&rest);
-                        }
-                    }
-                    None => out.push_str("#'"),
-                },
-                Some('#' | '!' | ' ') => out.push_str(raw),
-                Some(other) => {
-                    out.push_str("# ");
-                    out.push(other);
-                    out.push_str(&chars.collect::<String>());
-                }
-                None => out.push('#'),
-            }
-        }
+        kind::COMMENT => format_comment(out, node, context)?,
         kind::COMMA => out.push(','),
         // LITERALS
         kind::TRUE => out.push_str("TRUE"),

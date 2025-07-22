@@ -11,6 +11,8 @@ pub fn document(items: &[Item]) -> Vec<DocumentSymbol> {
 pub fn workspace(query: &str, workspace_symbols: &impl SymbolsMap) -> Vec<WorkspaceSymbol> {
     workspace_symbols.filter_map(
         |path, symbols| {
+            // Use unwrap here as paths should be valid file paths
+            // TODO: Consider handling invalid paths more gracefully
             let uri = Uri::from_file_path(path).unwrap();
             symbols
                 .iter()
