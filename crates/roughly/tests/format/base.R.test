@@ -29,7 +29,22 @@ x; y
 #'comment'
 #"comment"
 
-#---- coments_all_positions
+#---- comment_formatting_edge_cases
+# basic comments should get space after #
+#comment
+#foo
+# special comments should preserve format
+#' roxygen comment
+#* special comment
+#: special comment
+## double hash comment
+#! shebang-style comment
+# empty comment just becomes #
+#
+# comments with quotes should be preserved
+#'comment with 'quotes''
+
+#---- comments_all_positions
 # 1
 program # program
 # 2
@@ -46,6 +61,12 @@ NA_real_
 NA_character_
 NA_complex_
 
+#---- keywords
+return
+next
+break
+...
+
 #---- integers
 42L
 0L
@@ -58,6 +79,13 @@ NA_complex_
 1e322
 1e-3
 1.8e10
+
+#---- complex
+1i
+1.5i
+1e2i
+1+2i
+1.5+2.5i
 
 #---- strings
 ""
@@ -73,6 +101,16 @@ NA_complex_
 '\"x"'
 '\\"x\\"'
 "\\\"x\\\""
+
+#---- strings_quote_selection
+# formatter should choose quotes to minimize escaping
+"simple"
+'simple'
+"string with 'single quotes'"
+'string with "double quotes"'
+'string with \'escaped single quotes\''
+"string with \"escaped double quotes\""
+'mixed \'single\' and "double" quotes'
 
 #---- strings_multiline
 "x
@@ -110,7 +148,15 @@ x.y
 - x
 ~x
 
-#---- coments_all_positions
+#---- tilde_spacing
+# tilde should have space except when followed by identifier
+~x
+~identifier
+~ x
+~ (x + y)
+~ {x}
+
+#---- comments_all_positions
 - # 1
 rhs
 
@@ -156,6 +202,13 @@ x %in% y
 x %>% y
 x |> y
 
+#---- spacing_special_operators
+# colon and caret should not have spacing
+x:y
+x^y
+x : y
+x ^ y
+
 #---- multiline
 x +
     y
@@ -177,7 +230,7 @@ x + {
     y
 }
 
-#---- coments_all_positions
+#---- comments_all_positions
 lhs + # 1
     rhs # 2
 
@@ -272,7 +325,7 @@ x; y
 { x; y +
     z }
 
-#---- coments_all_positions
+#---- comments_all_positions
 { # {
     # 1
     body # body
@@ -454,7 +507,7 @@ lhs$
     )$
     fn(x,y)
 
-#---- coments_all_positions
+#---- comments_all_positions
 x$ # 1
     y # 2
 
@@ -537,7 +590,7 @@ in
 for (item in sequence) # 1
     body
 
-#---- coments_all_positions
+#---- comments_all_positions
 for
 # 1
 ( # (
@@ -756,7 +809,7 @@ if ({
 # 1
 ) {}
 
-#---- coments_all_positions
+#---- comments_all_positions
 # for some weird reason this is only parsed correctly if in a parentheses
 (
     # before
@@ -908,7 +961,7 @@ repeat # 1
 repeat # 1
 { body }
 
-#---- coments_all_positions
+#---- comments_all_positions
 repeat # repeat
 # 1
 {
@@ -945,7 +998,7 @@ x[, x, y + call(
     arg
 )]
 
-#---- coments_all_positions
+#---- comments_all_positions
 fn[ # [
     # 1
     argument # argument
@@ -983,7 +1036,7 @@ x[[, x, y + call(
     arg
 )]]
 
-#---- coments_all_positions
+#---- comments_all_positions
 fn[[ # [[
     # 1
     argument # argument
@@ -1054,7 +1107,7 @@ while ({
 # 1
 ) {}
 
-#---- coments_all_positions
+#---- comments_all_positions
 while # while
 # 1
 ( # (

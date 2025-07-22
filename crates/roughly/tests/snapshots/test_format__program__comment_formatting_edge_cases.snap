@@ -1,0 +1,17 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+# basic comments should get space after #
+# comment
+# foo
+# special comments should preserve format
+#' roxygen comment
+#* special comment
+#: special comment
+## double hash comment
+#! shebang-style comment
+# empty comment just becomes #
+#
+# comments with quotes should be preserved
+#'comment with 'quotes''

@@ -1,0 +1,12 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+# formatter should choose quotes to minimize escaping
+"simple"
+"simple"
+"string with 'single quotes'"
+'string with "double quotes"'
+"string with \'escaped single quotes\'"
+"string with \"escaped double quotes\""
+'mixed \'single\' and "double" quotes'
