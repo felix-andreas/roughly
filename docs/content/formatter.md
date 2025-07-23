@@ -34,6 +34,8 @@ The non-invasive approach means Roughly respects your existing line breaks and w
 - **Both hugging and not hugging is allowed** for function calls and other constructs
 - **Preserves programmer intent** regarding line structure and formatting choices
 
+**The trade-off between readability from line breaks versus long lines should be in the hands of the author**, as this trade-off depends heavily on context. For numerical expressions, long lines are often more preferable because they preserve the mathematical structure and relationships that would be obscured by arbitrary line breaking.
+
 This is particularly important in R because:
 
 - **Data analysis workflows**: Short, expressive one-liners are common and meaningful
