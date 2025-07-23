@@ -11,10 +11,10 @@ Roughly includes a non-invasive R code formatter that emphasizes readability whi
 Format your R files using the command line:
 
 ```sh
-roughly fmt                # Format all files in the current directory
-roughly fmt <path>         # Format all files in <path>
-roughly fmt --check        # Only check if files would be formatted
-roughly fmt --diff         # Show diff of formatting changes without applying them
+roughly fmt          # Format all files in the current directory
+roughly fmt <path>   # Format all files in <path>
+roughly fmt --check  # Only check if files would be formatted
+roughly fmt --diff   # Show diff of formatting changes without applying them
 ```
 
 ## Philosophy
@@ -22,25 +22,19 @@ roughly fmt --diff         # Show diff of formatting changes without applying th
 The formatter follows these key principles:
 
 * **Non-invasive formatting**: The formatter only adds line breaks if expressions are already multi-line, and won't break one-liners unnecessarily. See [Why Non-Invasive?](#why-non-invasive) for more details.
-* **Comment preservation**: Maintains all comments while improving their formatting
-* **Smart indentation**: Uses context-aware indentation for complex expressions
 * **Auto-bracing and hugging**: Automatically adds braces when needed for clarity and applies intelligent spacing. See [Auto-Bracing](#auto-bracing) and [Hugging Behavior](#hugging-behavior) sections.
+* **Minimal configuration**: The formatter works out-of-the-box with sensible defaults, so you can use it without any setup.
 
 ### Why Non-Invasive?
 
-The non-invasive approach means Roughly respects your existing line breaks and won't arbitrarily split expressions that you've chosen to keep on one line. **Non-invasive formatting tries to minimize the amount of line-breaks not set by the programmer** by following these key principles:
+The non-invasive approach means Roughly respects your existing line breaks and won't arbitrarily split expressions that you've chosen to keep on one line. **Non-invasive formatting tries to minimize the amount of line-breaks not set by the programmer** by following these rules:
 
 - **Single line expressions are never broken into multiple lines** (with the exception of loops like `for`, `while`, `repeat`, because they don't yield useful values and can only perform side effects, so they are not normal expressions in that sense)
-- **Both hugging and not hugging is allowed** for function calls and other constructs
+- **Both hugging and not hugging is allowed** for function calls and other constructs. See [Auto-Bracing](#auto-bracing) and [Hugging Behavior](#hugging-behavior) sections.
 - **Preserves programmer intent** regarding line structure and formatting choices
 
 **The trade-off between readability from line breaks versus long lines should be in the hands of the author**, as this trade-off depends heavily on context. For numerical expressions, long lines are often more preferable because they preserve the mathematical structure and relationships that would be obscured by arbitrary line breaking.
 
-This is particularly important in R because:
-
-- **Data analysis workflows**: Short, expressive one-liners are common and meaningful
-- **Mathematical expressions**: Complex formulas are often more readable when kept compact
-- **Functional style**: R's functional nature benefits from preserving the structure of nested expresions
 
 #### Why This Matters for Numerical Computing
 
@@ -101,10 +95,9 @@ result <- switch(
 
 ## Formatting Rules
 
-Roughly applies specific formatting rules to different R code constructs. The formatter analyzes the abstract syntax tree to make intelligent decisions about spacing, line breaks, and indentation.
+Below is a comprehensive list of rules describing the behaviour of the formatter for different kinds of expressions including edge cases where special handling or nuanced behaviour is applied.
 
-
-### Assignment and Operators
+### Operators
 
 **Assignment operators** always get spaces around them:
 
@@ -146,7 +139,7 @@ data %>%
   select(value)
 ```
 
-### Code Blocks and Braced Expressions
+### Blocks
 
 Code blocks receive smart formatting based on their content and structure. Single-line blocks remain compact, while multi-line blocks format each expression on its own line:
 
@@ -221,7 +214,7 @@ y <- 2
 z <- 3
 ```
 
-### Function Calls and Arguments
+### Function Calls
 
 Function calls receive consistent formatting with proper spacing around argument separators and assignment operators:
 
@@ -455,38 +448,8 @@ formula = ~ x + y
 
 **Special spacing rule**: The `~` (formula) operator gets a space when followed by complex expressions, but not when followed by simple identifiers.
 
-## Format Suppression
-
-You can disable formatting for specific code sections using the `# fmt: skip` comment directive. This is useful when you want to preserve specific formatting for readability, such as aligned data structures.
-
-```r
-# fmt: skip
-matrix(
-  c(
-    1, 2,
-    3, 4
-  ),
-  nrow=2
-) # This code won't be reformatted
-
-# fmt: skip
-matrix(c(1, 2,
-         3, 4), nrow=2) # The line above won't be reformatted
-```
-
-Without the `fmt: skip` directive, the `matrix(...)` expression would be broken into multiple lines according to standard formatting rules.
-
-The `fmt: skip` directive can be placed:
-- Before a line to skip formatting that entire expression
-- At the end of a line to skip formatting just that line
-
-You can also skip formatting for an entire file by placing `# fmt: skip-file` at the top of the file. This directive must be placed at the very beginning of the file to take effect.
-
-## Advanced Formatting Features
-
-The formatter intelligently handles various R idioms and special patterns:
-
 ### Nested Block Expressions
+
 When code blocks appear inside function calls or parenthesized expressions, the formatter applies smart indentation to avoid excessive nesting:
 
 ```r
@@ -505,23 +468,8 @@ apply(data, 1, function(row) {
 })
 ```
 
-### Empty Constructs
-- **Empty blocks**: `{}` formatting is consistent
-- **Empty parameter lists**: `function() {}` maintains compact form
-- **Empty argument lists**: `call()` remains unchanged
-
-### Expression Sequences
-Semicolon-separated expressions receive appropriate formatting:
-
-```r
-# Before formatting
-{initialize();process();cleanup()}
-
-# After formatting
-{ initialize(); process(); cleanup() }
-```
-
 ### R6 Class Definitions
+
 Class definitions with empty lines between methods are preserved:
 
 ```r
@@ -540,9 +488,9 @@ PersonClass <- R6Class(
 ```
 
 ### Special Language Constructs
+
 - **Switch statements**: Fallthrough cases (`case = ,`) are handled correctly
 - **Multi-line strings**: String literal structure is preserved
-- **Formula objects**: Proper spacing around `~` operator based on complexity
 
 ## Auto-Bracing
 
@@ -635,6 +583,34 @@ call(
   c = z
 )
 ```
+
+## Format Suppression
+
+You can disable formatting for specific code sections using the `# fmt: skip` comment directive. This is useful when you want to preserve specific formatting for readability, such as aligned data structures.
+
+```r
+# fmt: skip
+matrix(
+  c(
+    1, 2,
+    3, 4
+  ),
+  nrow=2
+) # This code won't be reformatted
+
+# fmt: skip
+matrix(c(1, 2,
+         3, 4), nrow=2) # The line above won't be reformatted
+```
+
+Without the `fmt: skip` directive, the `matrix(...)` expression would be broken into multiple lines according to standard formatting rules.
+
+The `fmt: skip` directive can be placed:
+- Before a line to skip formatting that entire expression
+- At the end of a line to skip formatting just that line
+
+You can also skip formatting for an entire file by placing `# fmt: skip-file` at the top of the file. This directive must be placed at the very beginning of the file to take effect.
+
 
 ## Line Endings
 
