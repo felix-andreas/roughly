@@ -48,13 +48,23 @@ Roughly aims to support the following language server features (some are experim
 
 ## Roughly CLI
 
+### Installation
+
 You can install the Roughly CLI by downloading a pre-built binary or by building from source.
 
-### Download Binary (Recommended)
+#### Download Binary (Recommended)
 
 Download the pre-built binary for your platform from the [releases page](https://github.com/felix-andreas/roughly/releases).
 
-### Build from Source
+#### Install with Cargo
+
+If you have [Cargo](https://www.rust-lang.org/tools/install) installed, install Roughly with:
+
+```sh
+cargo install --git https://github.com/felix-andreas/roughly roughly
+```
+
+#### Build from Source
 
 Alternatively, build from source:
 

@@ -49,7 +49,10 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(FmtError) => ExitCode::FAILURE,
         },
-        Command::Server { stdio: _stdio } => {
+        Command::Server {
+            stdio: _,
+            verbose: _,
+        } => {
             cli::server(experimental_features);
             ExitCode::SUCCESS
         }
@@ -113,6 +116,9 @@ enum Command {
         /// Ignored ... here only to please VS Code
         #[clap(long, default_value_t = true)]
         stdio: bool,
+        /// Enable verbose logging (ignored for now)
+        #[clap(short, long, default_value_t = false)]
+        verbose: bool,
     },
     /// Debugging and development commands
     #[command(subcommand)]
