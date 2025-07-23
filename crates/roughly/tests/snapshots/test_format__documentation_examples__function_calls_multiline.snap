@@ -2,6 +2,8 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-while (condition) {
-  action()
-}
+call(
+  a = x,
+  b = y,
+  c = z
+)

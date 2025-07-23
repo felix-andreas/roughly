@@ -2,9 +2,4 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-process(data = dataset, method = "mean", na.rm = TRUE)
-call(
-  arg1,
-  arg2 = value,
-  arg3
-)
+call(a, b = 1, ...)

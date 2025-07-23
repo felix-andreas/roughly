@@ -2,6 +2,10 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-while (condition) {
-  action()
+if (a) {
+  x
+} else if (b) {
+  y
+} else {
+  z
 }
