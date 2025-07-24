@@ -11,10 +11,10 @@ Roughly includes a non-invasive R code formatter that emphasizes readability whi
 Format your R files using the command line:
 
 ```sh
-roughly fmt          # Format all files in the current directory
-roughly fmt <path>   # Format all files in <path>
-roughly fmt --check  # Only check if files would be formatted
-roughly fmt --diff   # Show diff of formatting changes without applying them
+roughly fmt           # Format all files in the current directory
+roughly fmt <path>    # Format all files in <path>
+roughly fmt --check   # Only check if files would be formatted
+roughly fmt --diff    # Show a diff of formatting changes without applying them
 ```
 
 ## Configuration
@@ -225,7 +225,7 @@ if (
 
 ### Loops
 
-Loops are the only construct that are **not allowed** on a single line.
+Loops are the only constructs that are **not allowed** on a single line.
 
 Because `for`, `while`, and `repeat` loops are used exclusively for their side effects and do not produce meaningful values, the formatter enforces that these statements are always written on multiple lines with explicit braces (see [auto-bracing](#auto-bracing)). This approach makes side effects visually clear and distinguishes loops from regular expressions.
 
@@ -277,7 +277,6 @@ for (
   in sequence
 ) {}
 ```
-
 
 ### Function Calls
 
@@ -414,7 +413,7 @@ data[row, col]
 data[["name"]]
 ```
 
-### Extract & Namespace operators
+### Extract & Namespace Operators
 
 **Extract and namespace operators** (`$`, `@`, `::`, `:::`) are formatted without spaces around them:
 
@@ -520,7 +519,6 @@ z <- 3
 
 The formatter automatically detects and preserves the line ending style (`LF` or `CRLF`) used in the original file.
 
-
 ### Comments
 
 In most cases, a space is added between the `#` and the comment text. For special comment types such as Roxygen (`#'`) and plumber (`#*`) comments, the space is inserted after the second character:
@@ -548,13 +546,52 @@ Exceptions to this rule include:
 - Commented-out strings such as `#'string'` are left unchanged, since inserting a space (e.g., `#' string'`) would alter the content.
 - [Shebangs](https://en.wikipedia.org/wiki/Shebang_(Unix)), for example `#!/usr/bin/env Rscript`, remain unchanged.
 
+## Format Suppression
 
+You can disable formatting for specific code sections using the `# fmt: skip` comment directive. This is useful when you want to preserve specific formatting for readability, such as aligned data structures.
 
-## Auto-Bracing
+```r
+# fmt: skip
+matrix(
+  c(
+    1, 2,
+    3, 4
+  ),
+  nrow=2
+) # This code won't be reformatted
 
-The formatter always adds braces to control flow structures like `for`, `while`, and `repeat` loops.
+# fmt: skip
+matrix(c(1, 2,
+         3, 4), nrow=2) # The line above won't be reformatted
+```
 
-**If expression**: Multi-line conditions or bodies are automatically braced:
+Without the `fmt: skip` directive, the `matrix(...)` expression would be broken into multiple lines according to standard formatting rules.
+
+The `fmt: skip` directive can be placed:
+- Before a line to skip formatting that entire expression
+- At the end of a line to skip formatting just that line
+
+You can also skip formatting for an entire file by placing `# fmt: skip-file` at the top of the file. This directive must be placed at the very beginning of the file to take effect.
+
+## Rationale
+
+### Auto-Bracing
+
+**Accidental bugs:** It's easy to accidentally introduce subtle bugs when omitting braces in function definitions or `if` expressions. For example, if you later add a line after an unbraced `if`, only the first line is controlled by the condition:
+
+```r
+# unbraced condition
+if (condition)
+  line1
+  line2 # <- is meant to be in body
+
+# how it is interpreted:
+if (condition)
+  line1
+line2 # <- gets executed unconditionally
+```
+
+Therefore, the formatter always adds braces to **`if` expressions** and function definitions, whenever the body spans multiple lines.
 
 ```r
 # Before formatting
@@ -566,37 +603,20 @@ if (condition) {
   action()
 }
 ```
-
-**Function definitions**: Multi-line functions always receive braces, even when the body starts on the same line:
+For control flow structures such as `for`, `while`, and `repeat` loops, the formatter always adds braces around the body—regardless of its length—since single-line loops are not allowed (see [Loops](#loops)).
 
 ```r
 # Before formatting
-process <- function(x)
-  x + 1
+for (item in sequence)
+  action()
 
 # After formatting
-process <- function(x) {
-  x + 1
+for (item in sequence) {
+  action()
 }
 ```
 
-This is done for two reasons:
-
-**2. Accidental bugs:** It's easy to accidentally introduce subtle bugs when omitting braces in function definitions or `if` expressions. For example, if you later add a line after an unbraced `if`, only the first line is controlled by the condition:
-
-```r
-# unbraced condition
-if (condition)
-  line1
-  line2 # <- is meant to be in body
-
-# how it it is interpreted:
-if (condition)
-  line1
-line2 # <- get's executed unconditionally
-```
-
-## Hugging Behavior
+### Hugging Behavior
 
 When code blocks appear inside function calls or parenthesized expressions, the formatter applies smart indentation to avoid excessive nesting:
 
@@ -647,34 +667,7 @@ result <- outer(
 )
 ```
 
-## Format Suppression
-
-You can disable formatting for specific code sections using the `# fmt: skip` comment directive. This is useful when you want to preserve specific formatting for readability, such as aligned data structures.
-
-```r
-# fmt: skip
-matrix(
-  c(
-    1, 2,
-    3, 4
-  ),
-  nrow=2
-) # This code won't be reformatted
-
-# fmt: skip
-matrix(c(1, 2,
-         3, 4), nrow=2) # The line above won't be reformatted
-```
-
-Without the `fmt: skip` directive, the `matrix(...)` expression would be broken into multiple lines according to standard formatting rules.
-
-The `fmt: skip` directive can be placed:
-- Before a line to skip formatting that entire expression
-- At the end of a line to skip formatting just that line
-
-You can also skip formatting for an entire file by placing `# fmt: skip-file` at the top of the file. This directive must be placed at the very beginning of the file to take effect.
-
-## Why Non-Invasive?
+### Why Non-Invasive?
 
 The non-invasive approach means Roughly respects your existing line breaks and won't arbitrarily split expressions that you've chosen to keep on one line. **Non-invasive formatting tries to minimize the amount of line-breaks not set by the programmer** by following these rules:
 

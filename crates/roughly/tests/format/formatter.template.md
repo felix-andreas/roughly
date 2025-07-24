@@ -176,7 +176,7 @@ if (
 
 Loops are the only constructs that are **not allowed** on a single line.
 
-Because `for`, `while`, and `repeat` loops are used exclusively for their side effects and do not produce meaningful values, the formatter enforces that these statements are always written on multiple lines with explicit braces (see [auto-bracing](#auto-bracing)). This approach makes side effects visually clear and distinguishes loops from regular expressions.
+Because `for`, `while`, and `repeat` loops are used exclusively for their side effects and do not produce meaningful values, the formatter enforces that these statements are always written on multiple lines with explicit braces (see [auto-bracing](#auto-bracing)). This approach makes side effects visually clear and distinguishes loops from other expressions.
 
 **For loops** always enforce braced blocks for the body, ensuring consistency:
 
@@ -434,25 +434,37 @@ Exceptions to this rule include:
 - Commented-out strings such as `#'string'` are left unchanged, since inserting a space (e.g., `#' string'`) would alter the content.
 - [Shebangs](https://en.wikipedia.org/wiki/Shebang_(Unix)), for example `#!/usr/bin/env Rscript`, remain unchanged.
 
-## Auto-Bracing
+## Format Suppression
 
-The formatter always adds braces to control flow structures like `for`, `while`, and `repeat` loops.
-
-**If expressions**: Multi-line conditions or bodies are automatically braced:
+You can disable formatting for specific code sections using the `# fmt: skip` comment directive. This is useful when you want to preserve specific formatting for readability, such as aligned data structures.
 
 ```r
-# auto_bracing_conditional_statements : compare
-if (condition)
-  action()
+# format_suppression : format
+# fmt: skip
+matrix(
+  c(
+    1, 2,
+    3, 4
+  ),
+  nrow=2
+) # This code won't be reformatted
+
+# fmt: skip
+matrix(c(1, 2,
+         3, 4), nrow=2) # The line above won't be reformatted
 ```
 
-**Function definitions**: Multi-line functions always receive braces, even when the body starts on the same line:
+Without the `fmt: skip` directive, the `matrix(...)` expression would be broken into multiple lines according to standard formatting rules.
 
-```r
-# auto_bracing_function_definitions : compare
-process <- function(x)
-  x + 1
-```
+The `fmt: skip` directive can be placed:
+- Before a line to skip formatting that entire expression
+- At the end of a line to skip formatting just that line
+
+You can also skip formatting for an entire file by placing `# fmt: skip-file` at the top of the file. This directive must be placed at the very beginning of the file to take effect.
+
+## Rationale
+
+### Auto-Bracing
 
 **Accidental bugs:** It's easy to accidentally introduce subtle bugs when omitting braces in function definitions or `if` expressions. For example, if you later add a line after an unbraced `if`, only the first line is controlled by the condition:
 
@@ -469,7 +481,23 @@ if (condition)
 line2 # <- gets executed unconditionally
 ```
 
-## Hugging Behavior
+Therefore, the formatter always adds braces to **`if` expressions** and function definitions, whenever the body spans multiple lines.
+
+```r
+# auto_bracing_conditional_statements : compare
+if (condition)
+  action()
+```
+
+For control flow structures such as `for`, `while`, and `repeat` loops, the formatter always adds braces around the body—regardless of its length—since single-line loops are not allowed (see [Loops](#loops)).
+
+```r
+# auto_bracing_for : compare
+for (item in sequence)
+  action()
+```
+
+### Hugging Behavior
 
 When code blocks appear inside function calls or parenthesized expressions, the formatter applies smart indentation to avoid excessive nesting:
 
@@ -515,35 +543,7 @@ result <- outer(
 )
 ```
 
-## Format Suppression
-
-You can disable formatting for specific code sections using the `# fmt: skip` comment directive. This is useful when you want to preserve specific formatting for readability, such as aligned data structures.
-
-```r
-# format_suppression : format
-# fmt: skip
-matrix(
-  c(
-    1, 2,
-    3, 4
-  ),
-  nrow=2
-) # This code won't be reformatted
-
-# fmt: skip
-matrix(c(1, 2,
-         3, 4), nrow=2) # The line above won't be reformatted
-```
-
-Without the `fmt: skip` directive, the `matrix(...)` expression would be broken into multiple lines according to standard formatting rules.
-
-The `fmt: skip` directive can be placed:
-- Before a line to skip formatting that entire expression
-- At the end of a line to skip formatting just that line
-
-You can also skip formatting for an entire file by placing `# fmt: skip-file` at the top of the file. This directive must be placed at the very beginning of the file to take effect.
-
-## Why Non-Invasive?
+### Why Non-Invasive?
 
 The non-invasive approach means Roughly respects your existing line breaks and won't arbitrarily split expressions that you've chosen to keep on one line. **Non-invasive formatting tries to minimize the amount of line-breaks not set by the programmer** by following these rules:
 
