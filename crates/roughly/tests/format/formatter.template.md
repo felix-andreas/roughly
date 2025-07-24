@@ -11,10 +11,10 @@ Roughly includes a non-invasive R code formatter that emphasizes readability whi
 Format your R files using the command line:
 
 ```sh
-roughly fmt          # Format all files in the current directory
-roughly fmt <path>   # Format all files in <path>
-roughly fmt --check  # Only check if files would be formatted
-roughly fmt --diff   # Show diff of formatting changes without applying them
+roughly fmt           # Format all files in the current directory
+roughly fmt <path>    # Format all files in <path>
+roughly fmt --check   # Only check if files would be formatted
+roughly fmt --diff    # Show a diff of formatting changes without applying them
 ```
 
 ## Configuration
@@ -174,7 +174,7 @@ if (
 
 ### Loops
 
-Loops are the only construct that are **not allowed** on a single line.
+Loops are the only constructs that are **not allowed** on a single line.
 
 Because `for`, `while`, and `repeat` loops are used exclusively for their side effects and do not produce meaningful values, the formatter enforces that these statements are always written on multiple lines with explicit braces (see [auto-bracing](#auto-bracing)). This approach makes side effects visually clear and distinguishes loops from regular expressions.
 
@@ -212,7 +212,6 @@ for (
     in sequence
 ) {}
 ```
-
 
 ### Function Calls
 
@@ -337,7 +336,7 @@ data[ row,col ]
 data[[ "name" ]]
 ```
 
-### Extract & Namespace operators
+### Extract & Namespace Operators
 
 **Extract and namespace operators** (`$`, `@`, `::`, `:::`) are formatted without spaces around them:
 
@@ -416,7 +415,6 @@ z <- 3
 
 The formatter automatically detects and preserves the line ending style (`LF` or `CRLF`) used in the original file.
 
-
 ### Comments
 
 In most cases, a space is added between the `#` and the comment text. For special comment types such as Roxygen (`#'`) and plumber (`#*`) comments, the space is inserted after the second character:
@@ -436,13 +434,11 @@ Exceptions to this rule include:
 - Commented-out strings such as `#'string'` are left unchanged, since inserting a space (e.g., `#' string'`) would alter the content.
 - [Shebangs](https://en.wikipedia.org/wiki/Shebang_(Unix)), for example `#!/usr/bin/env Rscript`, remain unchanged.
 
-
-
 ## Auto-Bracing
 
 The formatter always adds braces to control flow structures like `for`, `while`, and `repeat` loops.
 
-**If expression**: Multi-line conditions or bodies are automatically braced:
+**If expressions**: Multi-line conditions or bodies are automatically braced:
 
 ```r
 # auto_bracing_conditional_statements : compare
@@ -453,14 +449,12 @@ if (condition)
 **Function definitions**: Multi-line functions always receive braces, even when the body starts on the same line:
 
 ```r
-# auto_bracing_function_defintions : compare
+# auto_bracing_function_definitions : compare
 process <- function(x)
   x + 1
 ```
 
-This is done for two reasons:
-
-**2. Accidental bugs:** It's easy to accidentally introduce subtle bugs when omitting braces in function definitions or `if` expressions. For example, if you later add a line after an unbraced `if`, only the first line is controlled by the condition:
+**Accidental bugs:** It's easy to accidentally introduce subtle bugs when omitting braces in function definitions or `if` expressions. For example, if you later add a line after an unbraced `if`, only the first line is controlled by the condition:
 
 ```r
 # _ : skip
@@ -469,10 +463,10 @@ if (condition)
   line1
   line2 # <- is meant to be in body
 
-# how it it is interpreted:
+# how it is interpreted:
 if (condition)
   line1
-line2 # <- get's executed unconditionally
+line2 # <- gets executed unconditionally
 ```
 
 ## Hugging Behavior
