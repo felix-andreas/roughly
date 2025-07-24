@@ -26,7 +26,7 @@ For details on configuring the formatter, see the [Configuration](/configuration
 The formatter follows these key principles:
 
 * **Non-invasive formatting**: The formatter only adds line breaks if expressions are already multi-line, and won't break one-liners unnecessarily. See [Why Non-Invasive?](#why-non-invasive) for more details.
-* **Auto-bracing and hugging**: Automatically adds braces when needed for clarity and applies intelligent spacing. See [Auto-Bracing](#auto-bracing) and [Hugging Behavior](#hugging-behavior) sections.
+* **Auto-bracing and hugging**: Braces are added automatically when necessary for clarity, and the formatter applies smart spacing to nested expressions. For more details, see the [Auto-Bracing](#auto-bracing) and [Hugging Behavior](#hugging-behavior) sections.
 * **Minimal configuration**: The formatter works out-of-the-box with sensible defaults, so you can use it without any setup.
 
 ## Formatting Rules
@@ -227,7 +227,7 @@ if (
 
 Loops are the only constructs that are **not allowed** on a single line.
 
-Because `for`, `while`, and `repeat` loops are used exclusively for their side effects and do not produce meaningful values, the formatter enforces that these statements are always written on multiple lines with explicit braces (see [auto-bracing](#auto-bracing)). This approach makes side effects visually clear and distinguishes loops from regular expressions.
+Because `for`, `while`, and `repeat` loops are used exclusively for their side effects and do not produce meaningful values, the formatter enforces that these statements are always written on multiple lines with explicit braces (see [auto-bracing](#auto-bracing)). This approach makes side effects visually clear and distinguishes loops from other expressions.
 
 **For loops** always enforce braced blocks for the body, ensuring consistency:
 
@@ -550,26 +550,26 @@ Exceptions to this rule include:
 
 You can disable formatting for specific code sections using the `# fmt: skip` comment directive. This is useful when you want to preserve specific formatting for readability, such as aligned data structures.
 
+The `fmt: skip` directive can be placed before any expression to skip formatting for it:
+
 ```r
-# fmt: skip
 matrix(
+  # fmt: skip
   c(
     1, 2,
     3, 4
-  ),
-  nrow=2
-) # This code won't be reformatted
-
-# fmt: skip
-matrix(c(1, 2,
-         3, 4), nrow=2) # The line above won't be reformatted
+  ), # only the c(..) call won't be reformatted
+  nrow = 2
+)
 ```
 
-Without the `fmt: skip` directive, the `matrix(...)` expression would be broken into multiple lines according to standard formatting rules.
+Or, at the end of a line to skip the previous expression:
 
-The `fmt: skip` directive can be placed:
-- Before a line to skip formatting that entire expression
-- At the end of a line to skip formatting just that line
+```R
+# the entire matrix(..) call won't be reformatted
+matrix(c(1, 2,
+         3, 4), nrow=2) # fmt: skip
+```
 
 You can also skip formatting for an entire file by placing `# fmt: skip-file` at the top of the file. This directive must be placed at the very beginning of the file to take effect.
 
@@ -577,7 +577,7 @@ You can also skip formatting for an entire file by placing `# fmt: skip-file` at
 
 ### Auto-Bracing
 
-**Accidental bugs:** It's easy to accidentally introduce subtle bugs when omitting braces in function definitions or `if` expressions. For example, if you later add a line after an unbraced `if`, only the first line is controlled by the condition:
+**Accidental bugs:** It's easy to accidentally introduce subtle bugs when omitting braces in loops, function definitions or `if` expressions. For example, if you later add a line after an unbraced `if`, only the first line is controlled by the condition:
 
 ```r
 # unbraced condition
@@ -603,6 +603,7 @@ if (condition) {
   action()
 }
 ```
+
 For control flow structures such as `for`, `while`, and `repeat` loops, the formatter always adds braces around the body—regardless of its length—since single-line loops are not allowed (see [Loops](#loops)).
 
 ```r
@@ -618,25 +619,7 @@ for (item in sequence) {
 
 ### Hugging Behavior
 
-When code blocks appear inside function calls or parenthesized expressions, the formatter applies smart indentation to avoid excessive nesting:
-
-```r
-# Before formatting
-apply(data,1,function(row){
-if(condition(row)){
-transform(row)
-}
-})
-
-# After formatting
-apply(data, 1, function(row) {
-  if (condition(row)) {
-    transform(row)
-  }
-})
-```
-
-"Hugging" refers to how nested expressions are formatted in multiline contexts - keeping them compact by allowing inner expressions to start on the same line as the outer expression's opening delimiter. This is part of roughly's non-invasive approach: both hugged and expanded formats are allowed, but hugging only applies to multiline expressions.
+"Hugging" refers to how nested expressions are formatted in multiline contexts - keeping them compact by allowing inner expressions to start on the same line as the outer expression's opening delimiter. This is part of roughly's non-invasive approach: both hugged and expanded formats are allowed.
 
 **Nested function calls** can be formatted in a hugged style:
 
@@ -669,33 +652,29 @@ result <- outer(
 
 ### Why Non-Invasive?
 
-The non-invasive approach means Roughly respects your existing line breaks and won't arbitrarily split expressions that you've chosen to keep on one line. **Non-invasive formatting tries to minimize the amount of line-breaks not set by the programmer** by following these rules:
+The non-invasive approach means Roughly respects your existing line breaks and won't arbitrarily split expressions that you've chosen to keep on one line. The trade-off between readability from line breaks versus long lines should be in the hands of the author, as this trade-off depends heavily on context. **Non-invasive formatting tries to minimize the amount of line-breaks not set by the programmer** by following these rules:
 
-- **Single line expressions are never broken into multiple lines** (with the exception of loops like `for`, `while`, `repeat`, because they don't yield useful values and can only perform side effects, so they are not normal expressions in that sense)
+- **Single-line expressions are never split into multiple lines** (except for loops such as `for`, `while`, and `repeat`, which perform side effects and do not yield values; these should not be hidden on a single line)
 - **Both hugging and not hugging is allowed** for function calls and other constructs. See [Auto-Bracing](#auto-bracing) and [Hugging Behavior](#hugging-behavior) sections.
 - **Preserves programmer intent** regarding line structure and formatting choices
 
-**The trade-off between readability from line breaks versus long lines should be in the hands of the author**, as this trade-off depends heavily on context. For numerical expressions, long lines are often more preferable because they preserve the mathematical structure and relationships that would be obscured by arbitrary line breaking.
-
-
 #### Why This Matters for Numerical Computing
 
-R is a numerical language, and numerical expressions tend to get ugly when broken up by line length limits. Consider this mathematical expression:
+R is a numerical language, and numerical expressions tend to get ugly when broken up by line length limits. Consider this expression:
 
 ```r
 # Without non-invasive formatting, this compact expression:
 n <- 1 + (length(replacement_id) - 1) * (vectorToSearch == valueTypeToReplace)
 
 # Might get broken up into this less readable form:
-# n <- 1 +
-#   (length(replacement_id) - 1) *
-#     (vectorToSearch == valueTypeToReplace)
+n <- 1 +
+  (length(replacement_id) - 1) *
+    (vectorToSearch == valueTypeToReplace)
 ```
 
 This forced line breaking can lead to several problems:
 - People might use shorter, less descriptive variable names just to fit expressions on one line
-- Intermediate results might be stored in variables that have no meaningful purpose or don't correspond to established mathematical formulas
-- The mathematical relationship becomes harder to understand
+- People might try to break a complex expression up into shorter sub-results, storing intermediate values in variables that have no meaningful purpose or don't correspond to established mathematical formulas
 
 #### Consistency Between Related Lines
 
@@ -703,13 +682,13 @@ Sometimes you want consistency between multiple consecutive lines, especially wh
 
 ```r
 # This is easier to read and compare:
-start <- camera_origin_start - (focus_dist * forward_start) - 0.5 * view_width * right_start + 0.5 * view_height * up_start
-end <- camera_origin_end - (focus_dist * forward_end) - 0.5 * view_width * right_end + 0.5 * view_height * up_end
+start <- origin_start - (focus_dist * forward_start) - 0.5 * view_width * right_start + 0.5 * view_height * up_start
+end <- origin_end - (focus_dist * forward_end) - 0.5 * view_width * right_end + 0.5 * view_height * up_end
 
 # Than this inconsistent formatting where only one line is broken:
-# start <- camera_origin_start - (focus_dist * forward_start) - 0.5 * view_width * right_start
-#     + 0.5 * view_height * up_start
-# end <- camera_origin_end - (focus_dist * forward_end) - 0.5 * view_width * right_end + 0.5 * view_height * up_end
+start <- origin_start - (focus_dist * forward_start) - 0.5 * view_width * right_start +
+  0.5 * view_height * up_start
+end <- origin_end - (focus_dist * forward_end) - 0.5 * view_width * right_end + 0.5 * view_height * up_end
 ```
 
 #### Switch Statement Example
