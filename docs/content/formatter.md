@@ -23,11 +23,12 @@ For details on configuring the formatter, see the [Configuration](/configuration
 
 ## Philosophy
 
-The formatter follows these key principles:
+The non-invasive approach means Roughly respects your existing line breaks and won’t arbitrarily split expressions you’ve chosen to keep on one line. The formatter is guided by these principles:
 
-* **Non-invasive formatting**: The formatter only adds line breaks if expressions are already multi-line, and won't break one-liners unnecessarily. See [Why Non-Invasive?](#why-non-invasive) for more details.
-* **Auto-bracing and hugging**: Braces are added automatically when necessary for clarity, and the formatter applies smart spacing to nested expressions. For more details, see the [Auto-Bracing](#auto-bracing) and [Hugging Behavior](#hugging-behavior) sections.
-* **Minimal configuration**: The formatter works out-of-the-box with sensible defaults, so you can use it without any setup.
+* **Single-line expressions remain single-line:** The formatter only adds line breaks if the expression is already multi-line, and will never break single-line expressions into multiple lines (with [one exception](#loops)).
+* **Hugged and expanded styles supported:** The formatter preserves both compact ("hugged") and expanded forms for nested expressions. (See [Hugging Behavior](#hugging-behavior) for details.)
+* **Automatic bracing and smart spacing:** Braces are only added when necessary to prevent subtle bugs (see [Auto-Bracing](#auto-bracing)).
+* **Minimal configuration:** The formatter works out of the box with sensible defaults, so you can use it immediately without extra setup.
 
 ## Formatting Rules
 
@@ -649,67 +650,3 @@ result <- outer(
     other_part
 )
 ```
-
-### Why Non-Invasive?
-
-The non-invasive approach means Roughly respects your existing line breaks and won't arbitrarily split expressions that you've chosen to keep on one line. The trade-off between readability from line breaks versus long lines should be in the hands of the author, as this trade-off depends heavily on context. **Non-invasive formatting tries to minimize the amount of line-breaks not set by the programmer** by following these rules:
-
-- **Single-line expressions are never split into multiple lines** (except for loops such as `for`, `while`, and `repeat`, which perform side effects and do not yield values; these should not be hidden on a single line)
-- **Both hugging and not hugging is allowed** for function calls and other constructs. See [Auto-Bracing](#auto-bracing) and [Hugging Behavior](#hugging-behavior) sections.
-- **Preserves programmer intent** regarding line structure and formatting choices
-
-#### Why This Matters for Numerical Computing
-
-R is a numerical language, and numerical expressions tend to get ugly when broken up by line length limits. Consider this expression:
-
-```r
-# Without non-invasive formatting, this compact expression:
-n <- 1 + (length(replacement_id) - 1) * (vectorToSearch == valueTypeToReplace)
-
-# Might get broken up into this less readable form:
-n <- 1 +
-  (length(replacement_id) - 1) *
-    (vectorToSearch == valueTypeToReplace)
-```
-
-This forced line breaking can lead to several problems:
-- People might use shorter, less descriptive variable names just to fit expressions on one line
-- People might try to break a complex expression up into shorter sub-results, storing intermediate values in variables that have no meaningful purpose or don't correspond to established mathematical formulas
-
-#### Consistency Between Related Lines
-
-Sometimes you want consistency between multiple consecutive lines, especially when they follow the same pattern but have slight variations. For example, if you have two lines that only differ by a prefix or suffix, it's better to keep them both on single lines for easy comparison:
-
-```r
-# This is easier to read and compare:
-start <- origin_start - (focus_dist * forward_start) - 0.5 * view_width * right_start + 0.5 * view_height * up_start
-end <- origin_end - (focus_dist * forward_end) - 0.5 * view_width * right_end + 0.5 * view_height * up_end
-
-# Than this inconsistent formatting where only one line is broken:
-start <- origin_start - (focus_dist * forward_start) - 0.5 * view_width * right_start +
-  0.5 * view_height * up_start
-end <- origin_end - (focus_dist * forward_end) - 0.5 * view_width * right_end + 0.5 * view_height * up_end
-```
-
-#### Switch Statement Example
-
-The same principle applies to switch statements where one arm might have a longer expression. Non-invasive formatting keeps consistency across all arms:
-
-```r
-# Consistent formatting across all switch arms:
-result <- switch(method,
-  "simple" = calculate_simple_stats(data),
-  "complex" = perform_advanced_statistical_analysis_with_multiple_parameters(data, alpha = 0.05, method = "robust"),
-  "default" = get_basic_summary(data)
-)
-
-# Rather than breaking only the longer arm:
-result <- switch(method,
-  "simple" = calculate_simple_stats(data),
-  "complex" = perform_advanced_statistical_analysis_with_multiple_parameters(
-    data, alpha = 0.05, method = "robust"
-  ),
-  "default" = get_basic_summary(data)
-)
-```
-

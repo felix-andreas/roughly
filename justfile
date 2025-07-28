@@ -14,6 +14,9 @@ rofy *args:
 test *args:
 	cargo test -- --nocapture {{args}}
 
+test-docs:
+	cargo test --test test_format -- --no-capture docs
+
 snapshot *args:
 	cargo insta test --review -- --nocapture {{args}}
 
