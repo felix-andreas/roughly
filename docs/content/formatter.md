@@ -22,8 +22,8 @@ roughly fmt --diff    # Show a diff of formatting changes without applying them
 Roughly's non-invasive approach means it respects your existing line breaks and won’t arbitrarily split expressions you’ve chosen to keep on one line. The formatter is guided by these principles:
 
 * **Single-line expressions remain single-line:** The formatter only adds line breaks if the expression is already multi-line, and will never break single-line expressions into multiple lines (with [one exception](#loops)).
-* **Hugged and expanded styles supported:** The formatter preserves both compact ("hugged") and expanded forms for nested expressions (see [hugging behavior](#hugging-behavior)).
-* **Automatic bracing:** Braces are added when necessary to prevent subtle bugs (see [auto-bracing](#auto-bracing)).
+* **Flexible style preservation:** Both compact ("hugged") and expanded forms for nested expressions are supported, so your preferred style is respected (see [hugging behavior](#hugging-behavior)).
+* **Automatic braces only when needed:** Braces are added automatically only where they prevent subtle bugs (see [auto-bracing](#auto-bracing)).
 * **Minimal configuration:** The formatter works out of the box with sensible defaults, so you can use it immediately without extra setup (see [configuration](/configuration)).
 
 ## Formatting Rules
