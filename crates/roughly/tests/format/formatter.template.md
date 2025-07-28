@@ -414,7 +414,7 @@ The formatter automatically detects and preserves the line ending style (`LF` or
 
 ### Comments
 
-In most cases, a space is added between the `#` and the comment text. For special comment types such as Roxygen (`#'`) and plumber (`#*`) comments, the space is inserted after the second character:
+A space is added between the `#` and the comment text. For special comment types such as Roxygen (`#'`) and plumber (`#*`) comments, the space is inserted after the second character:
 
 ```r
 # comments : compare
@@ -426,9 +426,9 @@ In most cases, a space is added between the `#` and the comment text. For specia
 #!/usr/bin/env Rscript
 ```
 
-Exceptions to this rule include:
+Other exceptions to this rule include:
 
-- Commented-out strings such as `#'string'` are left unchanged, since inserting a space (e.g., `#' string'`) would alter the content.
+- Commented-out strings such as `#'string'` are left unchanged, since inserting a space (e.g., `#' string'`) would alter the content of the string.
 - [Shebangs](https://en.wikipedia.org/wiki/Shebang_(Unix)), for example `#!/usr/bin/env Rscript`, remain unchanged.
 
 ## Format Suppression
