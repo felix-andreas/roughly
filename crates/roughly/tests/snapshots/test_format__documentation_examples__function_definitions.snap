@@ -1,8 +1,0 @@
----
-source: crates/roughly/tests/test_format.rs
-expression: code
----
-process <- function(x, y = 1) { x + y }
-filter <- function(data, method = "simple") {
-  select(data, method)
-}
