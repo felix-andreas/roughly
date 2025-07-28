@@ -2,4 +2,7 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-{ initialize(); process(); cleanup() }
+fn <- function() call(
+  a = x,
+  b = y
+)

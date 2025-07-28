@@ -6,6 +6,6 @@ test_that("description", {
   expect_equal(result, expected)
 })
 
-setMethod("show", "MyClass", function(object) {
-  cat("MyClass object\n")
+setMethod("method", "Class", function(x) {
+  # ... implementation
 })

@@ -2,15 +2,11 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-# fmt: skip
 matrix(
+  # fmt: skip
   c(
     1, 2,
     3, 4
-  ),
-  nrow=2
-) # This code won't be reformatted
-
-# fmt: skip
-matrix(c(1, 2,
-         3, 4), nrow=2) # The line above won't be reformatted
+  ), # only the c(..) call won't be reformatted
+  nrow = 2
+)

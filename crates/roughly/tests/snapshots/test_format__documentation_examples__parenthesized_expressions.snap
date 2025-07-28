@@ -2,7 +2,4 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-(
-  expression +
-    other_part
-)
+(x + y)

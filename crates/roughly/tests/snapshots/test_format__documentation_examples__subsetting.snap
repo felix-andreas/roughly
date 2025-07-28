@@ -4,4 +4,3 @@ expression: code
 ---
 data[row, col]
 data[["name"]]
-object$value

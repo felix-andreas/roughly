@@ -77,23 +77,23 @@ cargo build --release
 Run Roughly as a formatter:
 
 ```
-roughly fmt             # Format all files in the current directory
-roughly fmt <path>      # Format all files in `<path>`
-roughly fmt --check     # Only check if files would be formatted
-roughly fmt --diff      # Only show the diff if files would be formatted
+roughly fmt           # Format all files in the current directory
+roughly fmt <path>    # Format all files in `<path>`
+roughly fmt --check   # Only check if files would be formatted
+roughly fmt --diff    # Only show the diff if files would be formatted
 ```
 
 To run Roughly as a linter:
 
 ```
-roughly check           # Check all files in the current directory
-roughly check <path>    # Check all files in `<path>`
+roughly check         # Check all files in the current directory
+roughly check <path>  # Check all files in `<path>`
 ```
 
 Or, to run Roughly as a language server:
 
 ```
-roughly server          # Usually started automatically by your editor
+roughly server        # Usually started automatically by your editor
 ```
 
 ## VS Code extension

@@ -2,6 +2,6 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-for (item in collection) {
-  process(item)
+for (item in sequence) {
+  run_effect(item)
 }

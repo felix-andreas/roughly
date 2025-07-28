@@ -2,6 +2,7 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-while (condition) {
-  action()
+if (condition) {
+  line1
 }
+line2 # <- this line gets added

@@ -2,6 +2,6 @@
 source: crates/roughly/tests/test_format.rs
 expression: code
 ---
-while (condition) {
-  action()
+process <- function(x) {
+  x + 1
 }
