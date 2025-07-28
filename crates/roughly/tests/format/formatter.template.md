@@ -17,26 +17,22 @@ roughly fmt --check   # Only check if files would be formatted
 roughly fmt --diff    # Show a diff of formatting changes without applying them
 ```
 
-## Configuration
-
-For details on configuring the formatter, see the [Configuration](/configuration) page.
-
 ## Philosophy
 
-The non-invasive approach means Roughly respects your existing line breaks and won’t arbitrarily split expressions you’ve chosen to keep on one line. The formatter is guided by these principles:
+Roughly's non-invasive approach means it respects your existing line breaks and won’t arbitrarily split expressions you’ve chosen to keep on one line. The formatter is guided by these principles:
 
 * **Single-line expressions remain single-line:** The formatter only adds line breaks if the expression is already multi-line, and will never break single-line expressions into multiple lines (with [one exception](#loops)).
-* **Hugged and expanded styles supported:** The formatter preserves both compact ("hugged") and expanded forms for nested expressions. (See [Hugging Behavior](#hugging-behavior) for details.)
-* **Automatic bracing and smart spacing:** Braces are only added when necessary to prevent subtle bugs (see [Auto-Bracing](#auto-bracing)).
-* **Minimal configuration:** The formatter works out of the box with sensible defaults, so you can use it immediately without extra setup.
+* **Hugged and expanded styles supported:** The formatter preserves both compact ("hugged") and expanded forms for nested expressions (see [hugging behavior](#hugging-behavior)).
+* **Automatic bracing:** Braces are added when necessary to prevent subtle bugs (see [auto-bracing](#auto-bracing)).
+* **Minimal configuration:** The formatter works out of the box with sensible defaults, so you can use it immediately without extra setup (see [configuration](/configuration)).
 
 ## Formatting Rules
 
-Below is a comprehensive list of rules describing the behaviour of the formatter for different kinds of expressions including edge cases where special handling is applied.
+Below is a comprehensive list of rules describing the behavior of the formatter for different kinds of expressions, including edge cases where special handling is applied.
 
 ### Binary Operators
 
-**Assignment operators** always get spaces around them:
+**Assignment operators** always have spaces around them:
 
 ```r
 # assignment_operators : compare
@@ -44,7 +40,7 @@ x<-1
 data<<-compute()
 ```
 
-**Binary operators** get spaces around them, except for range (`:`) and power (`^`) operators:
+**Binary operators** have spaces around them, except for the range (`:`) and power (`^`) operators:
 
 ```r
 # binary_operators : compare
@@ -73,7 +69,7 @@ value = - 42
 formula = ~x + y
 ```
 
-**Special spacing rule**: The `~` (formula) operator gets a space when followed by complex expressions, but not when followed by simple identifiers.
+**Special spacing rule:** The `~` (formula) operator gets a space when followed by complex expressions, but not when followed by simple identifiers.
 
 ### Blocks
 
@@ -133,16 +129,16 @@ Multiline parenthesized expressions can be formatted in either hugged or expande
     other_part)
 ```
 
-### If expressions
+### If Expressions
 
-**Single-line if-else**: Single-line `if-else` expressions are allowed and preserved, since `if` is an expression in R and can be used as a ternary operator:
+**Single-line if-else:** Single-line `if-else` expressions are allowed and preserved, since `if` is an expression in R and can be used as a ternary operator:
 
 ```r
 # conditional_statements_single_line : format
 x <-if (condition) consequence else alternative
 ```
 
-**Nested if-else**: Nested `if-else` chains are formatted so each `else if` and `else` starts on its own line, with all branches aligned at the same indentation level—no extra indentation for nested cases.
+**Nested if-else:** Nested `if-else` chains are formatted so each `else if` and `else` starts on its own line, with all branches aligned at the same indentation level—no extra indentation for nested cases.
 
 ```r
 # conditional_statements_nested : format
@@ -155,7 +151,7 @@ if (a) {
 }
 ```
 
-**Auto-Bracing for multiline if-else**: Whenever an `if-else` spans multiple lines, all branches are always wrapped in braces for clarity and consistency:
+**Auto-bracing for multiline if-else:** Whenever an `if-else` spans multiple lines, all branches are always wrapped in braces for clarity and consistency:
 
 ```r
 # conditional_statements_multiline : compare
@@ -164,7 +160,7 @@ if (condition) {
 } else alternative
 ```
 
-**Auto-Bracing for multiline conditions**: If an `if` expression has a multiline condition, the formatter ensures the body is wrapped in braces even if it's a single expression:
+**Auto-bracing for multiline conditions:** If an `if` expression has a multiline condition, the formatter ensures the body is wrapped in braces even if it's a single expression:
 
 ```r
 # if_statement_multiline_condition : compare
@@ -175,9 +171,9 @@ if (
 
 ### Loops
 
-Loops are the only constructs that are **not allowed** on a single line.
+Loops are the only expressions that are **not allowed** on a single line.
 
-Because `for`, `while`, and `repeat` loops are used exclusively for their side effects and do not produce meaningful values, the formatter enforces that these statements are always written on multiple lines with explicit braces (see [auto-bracing](#auto-bracing)). This approach makes side effects visually clear and distinguishes loops from other expressions.
+Because `for`, `while`, and `repeat` loops are used solely for their side effects and do not return meaningful values, the formatter always requires these loops to be written across multiple lines with explicit braces (see [auto-bracing](#auto-bracing)). This ensures that side-effecting code is visually distinct from pure expressions.
 
 **For loops** always enforce braced blocks for the body, ensuring consistency:
 
@@ -200,7 +196,7 @@ while(condition) action()
 repeat action()
 ```
 
-**Multiline for loop headers**: The formatter allows both of the following styles for multiline `for` loop headers, preserving your preferred structure:
+**Multiline for loop headers:** The formatter allows both of the following styles for multiline `for` loop headers, preserving your preferred structure:
 
 ```r
 # for_loops_multline_head: format
@@ -222,7 +218,7 @@ Function calls receive consistent formatting with proper spacing around argument
 # function_calls : compare
 call(a,b=1,...)
 ```
-**Multiline function calls**: Once two arguments appear on different lines, the call is treated as multiline, and each argument is formatted on its own line for clarity.
+**Multiline function calls:** Once two arguments appear on different lines, the call is treated as multiline, and each argument is formatted on its own line for clarity.
 
 ```r
 # function_calls_multiline : compare
@@ -274,7 +270,7 @@ setMethod("method", "Class", function(x) {
 
 ### Function Definitions
 
-**Single-line functions**: Functions with a simple, single-expression body can be written on one line, with or without braces.
+**Single-line functions:** Functions with a simple, single-expression body can be written on one line, with or without braces.
 
 ```r
 # function_definitions_single_line : format
@@ -282,7 +278,7 @@ add <- function(x, y) x + y
 double <- function(x) { x * 2 }
 ```
 
-**Multiline functions**: If the function body spans multiple lines, braces are always added—even if the body starts on the same line as the function declaration.
+**Multiline functions:** If the function body spans multiple lines, braces are always added—even if the body starts on the same line as the function declaration.
 
 ```r
 # function_definitions_multiline : compare
@@ -290,7 +286,7 @@ function()
     call(a = x, b = y)
 ```
 
-**Exception – multiline call on same line**: If the function body is a function call that starts on the same line and is itself multiline, braces are not required.
+**Exception – multiline call on same line:** If the function body is a function call that starts on the same line and is itself multiline, braces are not required.
 
 ```r
 # function_definitions_multiline_call : format
@@ -300,7 +296,7 @@ fn <- function() call(
   )
 ```
 
-**Anonymous functions (lambda expressions)**: Anonymous functions using `\` are formatted the same way as named functions, supporting both single-line and multiline bodies.
+**Anonymous functions (lambda expressions):** Anonymous functions using `\` are formatted the same way as named functions, supporting both single-line and multiline bodies.
 
 ```r
 # anonymous_functions_lambda : format
@@ -467,7 +463,7 @@ You can also skip formatting for an entire file by placing `# fmt: skip-file` at
 
 ### Auto-Bracing
 
-**Accidental bugs:** It's easy to accidentally introduce subtle bugs when omitting braces in loops, function definitions or `if` expressions. For example, if you later add a line after an unbraced `if`, only the first line is controlled by the condition:
+**Accidental bugs:** It's easy to accidentally introduce subtle bugs when omitting braces in loops, function definitions, or `if` expressions. For example, if you later add a line after an unbraced `if`, only the first line is controlled by the condition:
 
 ```r
 # _ : skip
@@ -482,7 +478,7 @@ if (condition)
 line2 # <- gets executed unconditionally
 ```
 
-Therefore, the formatter always adds braces to **`if` expressions** and function definitions, whenever the body spans multiple lines.
+Therefore, the formatter always adds braces to **`if` expressions** and **function definitions** whenever the body spans multiple lines.
 
 ```r
 # auto_bracing_conditional_statements : compare
@@ -500,7 +496,7 @@ for (item in sequence)
 
 ### Hugging Behavior
 
-"Hugging" refers to how nested expressions are formatted in multiline contexts - keeping them compact by allowing inner expressions to start on the same line as the outer expression's opening delimiter. This is part of roughly's non-invasive approach: both hugged and expanded formats are allowed.
+"Hugging" refers to how nested expressions are formatted in multiline contexts—keeping them compact by allowing inner expressions to start on the same line as the outer expression's opening delimiter. This is part of Roughly's non-invasive approach: both hugged and expanded formats are allowed.
 
 **Nested function calls** can be formatted in a hugged style:
 
@@ -532,3 +528,5 @@ result <- outer(
     other_part
 )
 ```
+
+See the [trailing argument hugging](#function-calls) section under Function Calls for more details. The formatter preserves this style, which is especially useful for S4 methods and testing frameworks.
