@@ -493,6 +493,33 @@ PersonClass <- R6Class(
 )
 ```
 
+### Comments
+
+The formatter ensures that a space is inserted after the `#` for standard comments. For special comment types like Roxygen (`#'`) and plumber (`#*`) comments, the space is placed after the initial two characters:
+
+```r
+# Before formatting
+# comment with space
+#comment without space
+#'roxygen comment
+#*plumber comment
+#'string' <- commented out string
+#!/usr/bin/env Rscript
+
+# After formatting
+# comment with space
+# comment without space
+#' roxygen comment
+#* plumber comment
+#'string' <- commented out string
+#!/usr/bin/env Rscript
+```
+
+Additional exceptions to this rule are:
+
+- Commented-out strings such as `#'string'` are left unchanged, since inserting a space (e.g., `#' string'`) would alter the content of the string.
+- [Shebangs](https://en.wikipedia.org/wiki/Shebang_(Unix)), for example `#!/usr/bin/env Rscript`, remain unchanged.
+
 ### Line Spacing
 
 The formatter normalizes line spacing between expressions, allowing at most one empty line:
@@ -515,33 +542,6 @@ z <- 3
 ### Line Endings
 
 The formatter automatically detects and preserves the line ending style (`LF` or `CRLF`) used in the original file.
-
-### Comments
-
-A space is added between the `#` and the comment text. For special comment types such as Roxygen (`#'`) and plumber (`#*`) comments, the space is inserted after the second character:
-
-```r
-# Before formatting
-# comment with space
-#comment without space
-#'roxygen comment
-#*plumber comment
-#'string' <- commented out string
-#!/usr/bin/env Rscript
-
-# After formatting
-# comment with space
-# comment without space
-#' roxygen comment
-#* plumber comment
-#'string' <- commented out string
-#!/usr/bin/env Rscript
-```
-
-Other exceptions to this rule include:
-
-- Commented-out strings such as `#'string'` are left unchanged, since inserting a space (e.g., `#' string'`) would alter the content of the string.
-- [Shebangs](https://en.wikipedia.org/wiki/Shebang_(Unix)), for example `#!/usr/bin/env Rscript`, remain unchanged.
 
 ## Format Suppression
 
@@ -571,6 +571,8 @@ matrix(c(1, 2,
 You can also skip formatting for an entire file by placing `# fmt: skip-file` at the top of the file. This directive must be placed at the very beginning of the file to take effect.
 
 ## Rationale
+
+This section explains the key design decisions that guided the formatter's implementation.
 
 ### Auto-Bracing
 
