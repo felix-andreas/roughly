@@ -35,12 +35,13 @@ fn docs() {
     let markdown = fs::read_to_string("tests/format/formatter.template.md").unwrap();
 
     let regex = Regex::new(r#"(?m)```r\n([\s\S]*?)```"#).unwrap();
-    const BEFORE: &str = "R CODE IN THIS FILE IS FORMATTED AND SAVED TO docs/content/formatter.md";
+    const BEFORE: &str =
+        "R CODE IN THIS FILE IS FORMATTED AND SAVED TO docs/src/content/docs/formatter.md";
     const AFTER: &str = "THIS FILE IS GENERATED AUTOMATICALLY.\
 MAKE CHANGES TO tests/format/formatter.template.md INSTEAD";
 
     fs::write(
-        "../../docs/content/formatter.md",
+        "../../docs/src/content/docs/formatter.md",
         regex
             .replace_all(&markdown, |captures: &Captures| {
                 let text = captures.get(1).unwrap().as_str();

@@ -37,25 +37,31 @@ roughly server             # Start the LSP server
 
 ## Editor Integrations
 
-### VS Code Extension
+### VS Code extension
 
-Roughly is available as a VS Code extension:
+Roughly can also be used as a VS Code extension.
 
-<Steps>
+#### From Marketplace (Recommended)
 
-1. Download the latest `roughly.vsix` from the [GitHub Releases](https://github.com/felix-andreas/roughly/releases) page
-2. Install in VS Code:
-   ```bash
-   code --install-extension roughly.vsix
-   ```
-3. Configure in VS Code settings:
-   ```json
-   {
-     "roughly.path": "/path/to/roughly"
-   }
-   ```
+[![](https://vsmarketplacebadges.dev/version-short/felix-andreas.roughly.svg)](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
 
-</Steps>
+Install the extension from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly).
+
+> The VS Code extension from the marketplace includes a bundled version of the Roughly CLI **only for Windows and Linux x64**. If you are using macOS or a different architecture, you will need to install the Roughly CLI manually.
+
+#### Manual Installation
+
+Alternatively, build the extension from source (or [download from releases](https://github.com/felix-andreas/roughly/releases)):
+
+```bash
+bun run package
+```
+
+Install the generated VSIX file:
+
+```bash
+code --install-extension roughly.vsix
+```
 
 ### RStudio (formatter only)
 
@@ -79,13 +85,6 @@ You can configure Roughly as an external formatter in RStudio:
 
 </Steps>
 
-## Project Configuration
-
-Create a `roughly.toml` file in your project root to customize Roughly's behavior:
-
-```toml
-case = "snake_case"  # or "camelCase"
-spaces = 2
-```
+## Configuration
 
 For detailed configuration options, see the [Configuration](/configuration) documentation.
