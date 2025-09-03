@@ -412,6 +412,15 @@ fn(arg1, arg2 = value, if(condition) {
     body
 })
 
+#---- hugging_last_argument_different_line
+fn(arg1, {
+    body
+}, arg2)
+
+fn(arg1 = value, function() {
+    body
+}, arg2 = value)
+
 #---- hugging_nested
 fn(fn(arg
 ))

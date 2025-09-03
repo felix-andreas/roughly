@@ -8,4 +8,4 @@ test_that("description", {
 
 setMethod("method", "Class", function(x) {
   # ... implementation
-})
+}, sealed = TRUE)

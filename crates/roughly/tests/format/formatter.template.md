@@ -245,11 +245,11 @@ result <- outer(
 )
 ```
 
-**Trailing argument hugging** is allowed when the last argument starts on the same line: this means the final argument of a function call can begin immediately after the opening parenthesis or previous argument, even if it itself is multiline.
+**Compact multiline calls:** When a call spans multiple lines solely because a single argument (often the final one) is itself multiline, the formatter keeps the other arguments on the original line rather than placing every argument on its own line, preserving a concise, compact layout:
 
 ```r
 # mixed_line_format : format
-# This format is preserved - last argument starts on same line
+# This format is preserved - only last argument spans multiple lines
 call(a = x, b = y, c = inner(
   expr
 ))
@@ -265,8 +265,12 @@ test_that("description", {
 
 setMethod("method", "Class", function(x) {
   # ... implementation
-})
+}, sealed = TRUE)
 ```
+
+In the `setMethod` example: Even though `sealed = TRUE` is on a different line than the other arguments, only the function body is multiline, so the formatter preserves this layout.
+
+**Note:** You can always opt in to the fully expanded multiline style: if you add a newline so that at least two arguments of a call are on different lines, the formatter treats it as multiline and will place every argument on its own line.
 
 ### Function Definitions
 
@@ -531,4 +535,4 @@ result <- outer(
 )
 ```
 
-See the [trailing argument hugging](#function-calls) section under Function Calls for more details. The formatter preserves this style, which is especially useful for S4 methods and testing frameworks.
+See the [compact multiline calls](#function-calls) section under Function Calls for more details. The formatter preserves this style, which is especially useful for S4 methods and testing frameworks.

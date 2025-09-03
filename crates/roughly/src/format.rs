@@ -6,7 +6,7 @@ use {
     itertools::Itertools,
     ropey::Rope,
     serde::Deserialize,
-    std::time::Instant,
+    std::{num::NonZero, time::Instant},
     thiserror::Error,
     tree_sitter::{Node, TreeCursor},
 };
@@ -340,19 +340,24 @@ fn traverse(
         kind::ARGUMENTS | kind::PARAMETERS => {
             let is_multiline = !same_line(node, node);
             let is_empty = node.child_count() == 2;
-            let mut trailing_space = false;
+            let trailing_space = field(node, field::CLOSE)?
+                .prev_sibling()
+                .is_none_or(|child| child.kind_id() == kind::COMMA);
 
-            let hug = (kind_id == kind::ARGUMENTS) && {
-                field(node, field::CLOSE)?
-                    .prev_sibling()
-                    .is_none_or(|child| {
-                        trailing_space = child.kind_id() == kind::COMMA;
-                        child.kind_id() != kind::COMMENT
-                            && child.child_by_field_id(field::VALUE).is_some_and(|value| {
-                                value.start_position().row == node.start_position().row
+            let hug = field(node, field::CLOSE)?
+                .prev_sibling()
+                .is_none_or(|child| {
+                    child.kind_id() != kind::COMMENT
+                        && node
+                            .children_by_field_id(
+                                NonZero::new(field::ARGUMENT).unwrap(),
+                                &mut node.walk(),
+                            )
+                            .any(|argument| {
+                                argument.start_position().row == node.start_position().row
+                                    && argument.end_position().row == child.end_position().row
                             })
-                    })
-            };
+                });
 
             tree::for_each_child(cursor, |i, child, field_id, cursor| {
                 let maybe_prev = child.prev_sibling();
