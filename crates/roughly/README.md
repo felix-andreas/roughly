@@ -4,7 +4,7 @@
 
 # Roughly
 
-*An R language server, linter, and code formatter, written in Rust.*
+*An extremely fast R language server and code formatter, written in Rust.*
 
 </div>
 

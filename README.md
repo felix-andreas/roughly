@@ -7,7 +7,7 @@
 
 <div align="center">
 
-An R language server, linter, and code formatter written in Rust.
+An extremely fast R language server and code formatter, written in Rust.
 <br />
 [Docs](https://roughly.felixandreas.me) · [Releases](https://github.com/felix-andreas/roughly/releases) · [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
 
@@ -15,6 +15,10 @@ An R language server, linter, and code formatter written in Rust.
 
 > [!NOTE]
 > Roughly can be used either as a standalone command-line tool or as an extension in supported editors like VS Code.
+
+## Why Roughly?
+
+This project was created to address the slow performance of the existing R language server on large codebases. Originally called *"The R(oughly good enough) language server"*, it began as a minimal but fast language server that supported only go-to-definition using regex-based indexing. Since then, the project has evolved into a full-featured language server with proper parsing, formatting, and linting, and the "good enough" part was eventually dropped from the name.
 
 ## Features
 

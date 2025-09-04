@@ -4,7 +4,7 @@
 
 # Rofy
 
-*An experimental R REPL written in Rust.*
+*An experimental R REPL, written in Rust.*
 
 </div>
 
