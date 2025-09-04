@@ -52,30 +52,6 @@ Roughly aims to support the following language server features (some are experim
 
 ## Roughly CLI
 
-### Installation
-
-You can install the Roughly CLI by downloading a pre-built binary or by building from source.
-
-#### Download Binary (Recommended)
-
-Download the pre-built binary for your platform from the [releases page](https://github.com/felix-andreas/roughly/releases).
-
-#### Install with Cargo
-
-If you have [Cargo](https://www.rust-lang.org/tools/install) installed, install Roughly with:
-
-```sh
-cargo install --git https://github.com/felix-andreas/roughly roughly
-```
-
-#### Build from Source
-
-Alternatively, build from source:
-
-```sh
-cargo build --release
-```
-
 ### Usage
 
 Run Roughly as a formatter:
@@ -100,11 +76,31 @@ Or, to run Roughly as a language server:
 roughly server        # Usually started automatically by your editor
 ```
 
+### Installation
+
+#### Download Binary (Recommended)
+
+Download the pre-built binary for your platform from the [releases page](https://github.com/felix-andreas/roughly/releases).
+
+#### Install with Cargo
+
+If you have [Cargo](https://www.rust-lang.org/tools/install) installed, install Roughly with:
+
+```sh
+cargo install --git https://github.com/felix-andreas/roughly roughly
+```
+
+#### Build from Source
+
+Alternatively, build from source:
+
+```sh
+cargo build --release
+```
+
 ## VS Code extension
 
-Roughly can also be used as a VS Code extension.
-
-### From Marketplace (Recommended)
+### Download from Marketplace (Recommended)
 
 [![](https://vsmarketplacebadges.dev/version-short/felix-andreas.roughly.svg)](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
 
