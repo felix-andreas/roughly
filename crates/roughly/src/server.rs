@@ -149,7 +149,7 @@ impl LanguageServer for ServerState {
                     trigger_characters: Some(vec!["$".into(), "@".into(), ":".into()]),
                     ..Default::default()
                 }),
-                definition_provider: Some(OneOf::Left(self.experimental_features.goto_definition)),
+                definition_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(
                     self.experimental_features.range_formatting,

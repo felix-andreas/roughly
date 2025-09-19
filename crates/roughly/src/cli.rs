@@ -488,19 +488,22 @@ pub fn parse_experimental_flags(flags: &[impl AsRef<str>]) -> ExperimentalFeatur
     for flag in flags.iter().flat_map(|flag| flag.as_ref().split(' ')) {
         match flag {
             "all" => {
-                features.goto_definition = true;
                 features.goto_references = true;
                 features.range_formatting = true;
                 features.rename = true;
                 features.unused = true;
             }
-            "goto_definition" => features.goto_definition = true,
             "goto_references" => features.goto_references = true,
             "range_formatting" => features.range_formatting = true,
             "rename" => features.rename = true,
             "unused" => features.unused = true,
+            "goto_definition" => {
+                warn(&format!(
+                    "The '{flag}' flag has been stabilized. You can remove it."
+                ));
+            }
             unknown => {
-                warn(&format!("unknown experimental feature: {unknown}"));
+                warn(&format!("unknown experimental feature: '{unknown}'"));
             }
         }
     }

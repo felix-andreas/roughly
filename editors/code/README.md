@@ -17,7 +17,7 @@ Roughly aims to support the following language server features (some are experim
   - Index global variables, S4 and R6 classes/methods
   - Search current document - <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> *in VS Code*
   - Search global workspace - <kbd>Ctrl</kbd> + <kbd>T</kbd> *in VS Code*
-  - Go to definition *(🧪 experimental)*
+  - Go to definition
   - Find all references *(🧪 experimental)*
 
 - **Diagnostics**
@@ -50,7 +50,7 @@ You can customize the Roughly extension in VS Code through the following setting
   // Pass custom arguments; defaults to ["server"]
   "roughly.args": ["server", "--verbose"],
   // Enable experimental features
-  "roughly.experimentalFeatures": ["goto_definition", "range_formatting"],
+  "roughly.experimentalFeatures": ["rename", "range_formatting"],
 }
 ```
 
