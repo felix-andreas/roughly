@@ -38,6 +38,9 @@ install-extension:
 # BUILD
 #
 
+build:
+	cargo build
+
 build-linux:
 	cargo build --release --target x86_64-unknown-linux-gnu
 
@@ -71,7 +74,7 @@ publish $version $kind:
 	set -euo pipefail
 
 	just bump-version $version
-	just build $version $kind
+	just release $version $kind
 	just publish-github $version
 	just publish-marketplace $version $kind
 
@@ -83,10 +86,10 @@ publish-commit $version="":
 		version=$(git rev-parse --short=6 HEAD)
 		echo "info: using git revision $version as version"
 	fi
-	just build $version pre-release
+	just release $version pre-release
 	just publish-github $version
 
-build $version $kind:
+release $version $kind:
 	#!/usr/bin/env bash
 	set -euo pipefail
 

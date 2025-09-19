@@ -1,8 +1,8 @@
 use {
-    crate::lsp_types::{Position, Range as LspRange},
+    crate::lsp_types::{Position, Range},
     ropey::Rope,
     std::{fs::File, io::BufReader, path::Path},
-    tree_sitter::Node,
+    tree_sitter::{Node, Point},
 };
 
 pub fn starts_with_lowercase(name: &str, query: &str) -> bool {
@@ -13,13 +13,16 @@ pub fn read_to_rope(path: impl AsRef<Path>) -> std::io::Result<Rope> {
     Rope::from_reader(BufReader::new(File::open(path)?))
 }
 
-pub fn node_range(node: Node) -> LspRange {
-    let start = node.start_position();
-    let end = node.end_position();
-    LspRange::new(
-        Position::new(start.row as u32, start.column as u32),
-        Position::new(end.row as u32, end.column as u32),
+pub fn node_range(node: Node) -> Range {
+    Range::new(
+        point_to_position(node.start_position()),
+        point_to_position(node.end_position()),
     )
+}
+
+#[inline(always)]
+pub fn point_to_position(point: Point) -> Position {
+    Position::new(point.row as u32, point.column as u32)
 }
 
 // adapted from https://doc.rust-lang.org/stable/nightly-rustc/src/clippy_utils/str_utils.rs.html

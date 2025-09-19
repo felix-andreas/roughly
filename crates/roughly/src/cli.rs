@@ -473,7 +473,7 @@ pub fn ast(path: &Path) -> Result<(), DebugError> {
     };
 
     let tree = tree::parse(&mut tree::new_parser(), &text, None);
-    eprintln!("{}", tree::format(tree.root_node()));
+    eprintln!("{}", tree::display_ast(tree.root_node()));
     Ok(())
 }
 

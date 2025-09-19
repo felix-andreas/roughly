@@ -69,7 +69,7 @@ impl Item {
 pub trait SymbolsMap {
     fn filter_map<'a, T, I>(
         &'a self,
-        key: impl Fn(&'a PathBuf, &'a [Item]) -> I,
+        key: impl Fn(&'a Path, &'a [Item]) -> I,
         limit: usize,
     ) -> Vec<T>
     where
@@ -79,7 +79,7 @@ pub trait SymbolsMap {
 impl SymbolsMap for HashMap<PathBuf, Vec<Item>> {
     fn filter_map<'a, T, I>(
         &'a self,
-        key: impl Fn(&'a PathBuf, &'a [Item]) -> I,
+        key: impl Fn(&'a Path, &'a [Item]) -> I,
         limit: usize,
     ) -> Vec<T>
     where
@@ -394,7 +394,7 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<Item> {
                 })
                 .unwrap_or_else(|| "Unknown".to_string());
 
-            Some(Item::new(
+            (!method_name.is_empty()).then_some(Item::new(
                 method_name,
                 None,
                 range,

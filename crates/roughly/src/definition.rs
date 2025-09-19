@@ -17,8 +17,11 @@ pub fn goto(
     tree: &Tree,
     symbols_map: &impl SymbolsMap,
 ) -> Option<GotoDefinitionResponse> {
-    let start = tree::try_get_identifier(tree, line, col)?;
-    let name = rope.byte_slice(start.byte_range()).to_string();
+    // note: R allows to call strings like "function_name"().
+    // also useful for S4:  e.g. to goto "Person" definition in
+    // setMethod("age", "Person", ...) or setClass("Employee", contains = "Person")
+    let (start, byte_range) = tree::try_get_identifier_or_string(tree, line, col)?;
+    let name = rope.byte_slice(byte_range).to_string();
 
     tracing::debug!(?name, start = start.kind(), "goto definition");
 
@@ -35,23 +38,26 @@ pub fn goto(
         )));
     }
 
-    let is_local_scope = tree::find_containing_function(start).is_some();
+    let is_global_scope = tree::find_containing_function(start).is_none();
 
     let globals = symbols_map.filter_map(
         |path, symbols| {
             let other_uri = Uri::from_file_path(path).unwrap();
-            // Only include locations from other files
-            (if is_local_scope || &other_uri != uri {
-                symbols
-            } else {
-                &[]
-            })
-            .iter()
-            .filter(|symbol| symbol.name == name)
-            .map(move |symbol| Location {
-                uri: other_uri.clone(),
-                range: symbol.range,
-            })
+            // note that s4 and r6 are not found by find_previous_definition.
+            // therefore if is same file and global scope we must ignore later defintions
+            let ignore_later = is_global_scope && *uri == other_uri;
+            let name = &name;
+            symbols
+                .iter()
+                .filter(move |symbol| {
+                    symbol.name == *name
+                        && (!ignore_later
+                            || symbol.range.end < utils::point_to_position(start.start_position()))
+                })
+                .map(move |symbol| Location {
+                    uri: other_uri.clone(),
+                    range: symbol.range,
+                })
         },
         128,
     );
@@ -115,10 +121,9 @@ mod tests {
 
     fn setup_a(src: &str, line: usize, col: usize) -> Option<(usize, usize)> {
         let rope = Rope::from_str(src);
-        let mut parser = tree::new_parser();
-        let tree = tree::parse(&mut parser, src, None);
-        let start = tree::try_get_identifier(&tree, line, col).unwrap();
-        let name = rope.byte_slice(start.byte_range()).to_string();
+        let tree = tree::parse(&mut tree::new_parser(), src, None);
+        let (start, byte_range) = tree::try_get_identifier_or_string(&tree, line, col)?;
+        let name = rope.byte_slice(byte_range).to_string();
         find_previous_definition(start, &rope, &name).map(|node| {
             let point = node.start_position();
             (point.row, point.column)
@@ -127,24 +132,25 @@ mod tests {
 
     fn setup_b(src: &str, line: usize, col: usize) -> Option<String> {
         let rope = Rope::from_str(src);
-        let mut parser = tree::new_parser();
-        let tree = tree::parse(&mut parser, src, None);
-        tree::try_get_identifier(&tree, line, col)
-            .map(|node| rope.byte_slice(node.byte_range()).to_string())
+        let tree = tree::parse(&mut tree::new_parser(), src, None);
+        tree::try_get_identifier_or_string(&tree, line, col)
+            .map(|(_, byte_range)| rope.byte_slice(byte_range).to_string())
     }
 
     #[test]
-    fn try_get_identifier_returns_none_for_non_identifier() {
+    fn try_get_identifier_base() {
         let src = indoc! {r#"
             123
-            "string"
             x <- 1
-             x
+                x
+            setMethod("age", "Person", \(x) x@age)
         "#};
         assert_eq!(setup_b(src, 0, 0), None);
-        assert_eq!(setup_b(src, 1, 0), None);
-        assert_eq!(setup_b(src, 2, 0), Some("x".to_string()));
-        assert_eq!(setup_b(src, 3, 0), None);
+        assert_eq!(setup_b(src, 1, 0), Some("x".into()));
+        assert_eq!(setup_b(src, 2, 0), None);
+        assert_eq!(setup_b(src, 3, 17), Some("Person".into()));
+        // assert_eq!(setup_b(src, 3, 18), Some("Person".into()));
+        assert_eq!(setup_b(src, 3, 24), Some("Person".into()));
     }
 
     #[test]

@@ -5,7 +5,11 @@ use crate::{
 };
 
 pub fn document(items: &[Item]) -> Vec<DocumentSymbol> {
-    items.iter().map(to_document_symbol).collect()
+    items
+        .iter()
+        .filter(|item| !item.name.is_empty()) // lsp: doens't allow empty names
+        .map(to_document_symbol)
+        .collect()
 }
 
 pub fn workspace(query: &str, workspace_symbols: &impl SymbolsMap) -> Vec<WorkspaceSymbol> {
