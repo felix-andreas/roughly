@@ -1,11 +1,10 @@
 use {
     crate::{
-        index::SymbolsMap,
+        index::{ItemInfo, SymbolsMap},
         lsp_types::{
             ParameterInformation, Position, SignatureHelp, SignatureInformation,
-            SymbolKind,
         },
-        tree::{self, field, kind},
+        tree::{field, kind},
     },
     ropey::Rope,
     tree_sitter::{Node, Point, Tree},
@@ -159,7 +158,7 @@ fn find_function_signature(function_name: &str, symbols_map: &impl SymbolsMap) -
         |_, symbols| {
             symbols
                 .iter()
-                .filter(|symbol| symbol.name == function_name && symbol.kind == SymbolKind::FUNCTION)
+                .filter(|symbol| symbol.name == function_name && symbol.info == ItemInfo::Function)
         },
         1, // We only need the first match
     );
