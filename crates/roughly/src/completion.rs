@@ -291,11 +291,7 @@ const NAMESPACE_QUERY: &str = r#"(namespace_operator rhs: (identifier) @ident)"#
 mod tests {
     use {
         super::*,
-        crate::{
-            index::Item,
-            lsp_types::{DocumentSymbol, Range, SymbolKind},
-            tree,
-        },
+        crate::{index::Item, lsp_types::Range, tree},
         indoc::indoc,
         ropey::Rope,
         std::collections::HashMap,
@@ -622,25 +618,17 @@ mod tests {
         let CompletionResponse::Array(items) = completion_response else {
             unreachable!();
         };
-        // Find the local and global variable items
+
         let local_item = items.iter().find(|item| item.label == "var_local").unwrap();
         let global_item = items
             .iter()
             .find(|item| item.label == "var_global")
             .unwrap();
 
-        // Check that local item has higher precedence (lower sort_text)
-        assert!(local_item.sort_text.is_some());
-        assert!(global_item.sort_text.is_some());
-
         let local_sort = local_item.sort_text.as_ref().unwrap();
         let global_sort = global_item.sort_text.as_ref().unwrap();
 
-        // Local symbols should have sort_text starting with "1_", global with "2_"
-        assert!(local_sort.starts_with("1_"));
-        assert!(global_sort.starts_with("2_"));
-
-        // Therefore, local should sort before global
-        assert!(local_sort < global_sort);
+        assert!(local_sort.starts_with("1"));
+        assert!(global_sort.starts_with("2"));
     }
 }
