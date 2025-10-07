@@ -9,6 +9,7 @@ use {
         utils,
     },
     ropey::Rope,
+    std::sync::OnceLock,
     tree_sitter::{Node, Point, Query, StreamingIterator},
 };
 
@@ -193,9 +194,44 @@ pub fn get(
             .unwrap_or_default()
     };
 
+    let base_symbols = {
+        static BASE_SYMBOLS: OnceLock<Vec<(String, Vec<String>)>> = OnceLock::new();
+        BASE_SYMBOLS
+            .get_or_init(|| {
+                #[cfg(debug_assertions)]
+                let content = "base\nlapply\nlength\n";
+                #[cfg(not(debug_assertions))]
+                let content = include_str!("../../../base-symbols.txt");
+
+                content
+                    .split("---")
+                    .flat_map(|section| {
+                        let mut lines = section.lines().map(str::trim).filter(|l| !l.is_empty());
+                        (
+                            lines.next().unwrap().to_string(),
+                            lines.map(str::to_string).collect::<Vec<_>>(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .iter()
+            .filter(|(item, _)| utils::starts_with_lowercase(item, &query))
+            .map(|(package, items)| CompletionItem {
+                label: item.clone(),
+                label_details: Some(CompletionItemLabelDetails {
+                    detail: None,
+                    description: Some(package.clone()),
+                }),
+                kind: Some(CompletionItemKind::FUNCTION),
+                sort_text: Some("1".into()),
+                ..Default::default()
+            })
+    };
+
     Some(CompletionResponse::Array(
         keyword_symbols
             .chain(local_symbols)
+            // .chain(base_symbols)
             .chain(workspace_symbols)
             .collect(),
     ))
