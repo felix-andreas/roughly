@@ -57,7 +57,8 @@ pub fn get(
                 completions
                     .into_iter()
                     .map(|item| CompletionItem {
-                        label: item,
+                        label: item.clone(),
+                        sort_text: Some("1".into()),
                         ..Default::default()
                     })
                     .collect(),
@@ -107,6 +108,7 @@ pub fn get(
                     description: Some("Keyword".into()),
                 }),
                 kind: Some(CompletionItemKind::KEYWORD),
+                sort_text: Some("0".into()),
                 ..Default::default()
             })
     };
@@ -129,55 +131,67 @@ pub fn get(
                 description: Some("Global".into()),
             }),
             kind: Some(to_completion_kind(&symbol.info)),
+            sort_text: Some("2".into()),
             ..Default::default()
         });
 
-    let local_symbols: Vec<CompletionItem> =
-        {
-            let point = Point::new(position.line as usize, position.character as usize);
-            tree.root_node()
-                .descendant_for_point_range(point, point)
-                .map(|node| {
-                    std::iter::successors(Some(node), |node| node.parent())
-                        // note: we just search functions, as global symbols are already included from workspace info
-                        .filter(|node| node.kind_id() == kind::FUNCTION_DEFINITION)
-                        .flat_map(|node| {
-                            let mut items = Vec::new();
+    let local_symbols: Vec<CompletionItem> = {
+        let point = Point::new(position.line as usize, position.character as usize);
+        tree.root_node()
+            .descendant_for_point_range(point, point)
+            .map(|node| {
+                std::iter::successors(Some(node), |node| node.parent())
+                    // note: we just search functions, as global symbols are already included from workspace info
+                    .filter(|node| node.kind_id() == kind::FUNCTION_DEFINITION)
+                    .flat_map(|node| {
+                        let mut items = Vec::new();
 
-                            if let Some(parameters) = node.child_by_field_id(field::PARAMETERS) {
-                                items.extend(
-                                    parameters
-                                        .children_by_field_name("parameter", &mut parameters.walk())
-                                        .filter_map(|parameter| {
-                                            parameter.child_by_field_id(field::NAME).map(|name| {
-                                                rope.byte_slice(name.byte_range()).to_string()
-                                            })
+                        if let Some(parameters) = node.child_by_field_id(field::PARAMETERS) {
+                            items.extend(
+                                parameters
+                                    .children_by_field_name("parameter", &mut parameters.walk())
+                                    .filter_map(|parameter| {
+                                        parameter.child_by_field_id(field::NAME).map(|name| {
+                                            rope.byte_slice(name.byte_range()).to_string()
                                         })
-                                        .filter(|name| utils::starts_with_lowercase(name, &query))
-                                        .map(|label| CompletionItem {
-                                            label,
-                                            label_details: Some(CompletionItemLabelDetails {
-                                                detail: None,
-                                                description: Some("Parameter".into()),
-                                            }),
-                                            kind: Some(CompletionItemKind::VARIABLE),
-                                            ..Default::default()
+                                    })
+                                    .filter(|name| utils::starts_with_lowercase(name, &query))
+                                    .map(|label| CompletionItem {
+                                        label: label.clone(),
+                                        label_details: Some(CompletionItemLabelDetails {
+                                            detail: None,
+                                            description: Some("Parameter".into()),
                                         }),
-                                );
-                            }
+                                        kind: Some(CompletionItemKind::VARIABLE),
+                                        sort_text: Some("1".into()),
+                                        ..Default::default()
+                                    }),
+                            );
+                        }
 
-                            if let Some(body) = node.child_by_field_id(field::BODY) {
-                                items.extend(locals_completion(body, rope).into_iter().filter(
-                                    |item| utils::starts_with_lowercase(&item.label, &query),
-                                ));
-                            }
+                        if let Some(body) = node.child_by_field_id(field::BODY) {
+                            items.extend(
+                                locals_completion(body, rope)
+                                    .into_iter()
+                                    .filter(|item| {
+                                        utils::starts_with_lowercase(&item.label, &query)
+                                    })
+                                    .map(|mut item| {
+                                        // Update sort_text for local variables to ensure consistent precedence
+                                        if let Some(sort_text) = &item.sort_text {
+                                            item.sort_text = Some(sort_text.clone());
+                                        }
+                                        item
+                                    }),
+                            );
+                        }
 
-                            items
-                        })
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
+                        items
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
 
     Some(CompletionResponse::Array(
         keyword_symbols
@@ -247,12 +261,13 @@ pub fn locals_completion(node: Node, rope: &Rope) -> Vec<CompletionItem> {
                 {
                     let label = rope.byte_slice(lhs.byte_range()).to_string();
                     symbols.push(CompletionItem {
-                        label,
+                        label: label.clone(),
                         label_details: Some(CompletionItemLabelDetails {
                             detail: None,
                             description: Some("Local".into()),
                         }),
                         kind: Some(CompletionItemKind::VARIABLE),
+                        sort_text: Some("1".into()),
                         ..Default::default()
                     })
                 }
@@ -274,7 +289,13 @@ const NAMESPACE_QUERY: &str = r#"(namespace_operator rhs: (identifier) @ident)"#
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::tree, indoc::indoc, ropey::Rope, std::collections::HashMap};
+    use {
+        super::*,
+        crate::{index::Item, lsp_types::Range, tree},
+        indoc::indoc,
+        ropey::Rope,
+        std::collections::HashMap,
+    };
 
     fn setup(
         text: &str,
@@ -566,5 +587,48 @@ mod tests {
         let _field = Query::new(&tree_sitter_r::LANGUAGE.into(), FIELD_QUERY).unwrap();
         let _item = Query::new(&tree_sitter_r::LANGUAGE.into(), ITEM_QUERY).unwrap();
         let _namespace = Query::new(&tree_sitter_r::LANGUAGE.into(), NAMESPACE_QUERY).unwrap();
+    }
+
+    #[test]
+    fn local_symbols_have_higher_precedence_than_global() {
+        let rope = Rope::from_str(indoc! {"
+            function(x) {
+                var_local <- 1
+                var_
+            }
+        "});
+
+        let tree = tree::parse(&mut tree::new_parser(), rope.to_string().as_str(), None);
+        let position = Position::new(2, 8);
+
+        let symbols_map = HashMap::from_iter([(
+            std::path::PathBuf::from("test.R"),
+            vec![Item {
+                name: "var_global".to_string(),
+                detail: None,
+                range: Range::new(Position::new(0, 0), Position::new(0, 10)),
+                selection_range: Range::new(Position::new(0, 0), Position::new(0, 10)),
+                children: None,
+                info: ItemInfo::Function,
+            }],
+        )]);
+
+        let completion_response = get(position, &rope, &tree, &symbols_map).unwrap();
+
+        let CompletionResponse::Array(items) = completion_response else {
+            unreachable!();
+        };
+
+        let local_item = items.iter().find(|item| item.label == "var_local").unwrap();
+        let global_item = items
+            .iter()
+            .find(|item| item.label == "var_global")
+            .unwrap();
+
+        let local_sort = local_item.sort_text.as_ref().unwrap();
+        let global_sort = global_item.sort_text.as_ref().unwrap();
+
+        assert!(local_sort.starts_with("1"));
+        assert!(global_sort.starts_with("2"));
     }
 }
