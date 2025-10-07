@@ -1,0 +1,39 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+# A simple comment
+x <- 1 + 2
+y <- x * 3
+z <- if (y > 5) {
+  "greater"
+} else {
+  "lesser"
+}
+result <- function(a, b = 2) {
+  return(a + b)
+}
+list <- list(a = 1, b = 2, c = 3)
+for (i in 1:10) {
+  print(i)
+}
+while (x < 10) {
+  x <- x + 1
+}
+repeat {
+  x <- x - 1
+  if (x == 0) break
+}
+foo <- function(x) x^2
+bar <- foo(3)
+baz <- c(1, 2, 3)
+qux <- baz[1]
+quux <- baz[[1]]
+corge <- list(a = 1, b = 2)
+grault <- corge$a
+garply <- corge[["b"]]
+waldo <- TRUE
+fred <- FALSE
+plugh <- NULL
+xyzzy <- Inf
+thud <- NaN

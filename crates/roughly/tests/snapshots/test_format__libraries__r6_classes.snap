@@ -1,0 +1,24 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+Person <- R6Class(
+  "Person",
+  public = list(
+    initialize = function(name, age = NA) {
+      private$name <- name
+      private$age <- age
+    },
+
+    print = function(...) {
+      cat("Person: \n")
+      cat("  Name: ", private$name, "\n", sep = "")
+      cat("  Age:  ", private$age, "\n", sep = "")
+    }
+  ),
+
+  private = list(
+    age = NA,
+    name = NULL
+  )
+)

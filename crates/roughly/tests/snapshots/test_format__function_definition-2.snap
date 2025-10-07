@@ -1,8 +1,0 @@
----
-source: src/format.rs
-expression: "fmt(indoc!\n{ r#\"\n            function(a,\n            b=  \"foo\") {}\n        \"# })"
----
-function(
-  a,
-  b = "foo"
-) {}

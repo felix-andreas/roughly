@@ -1,0 +1,9 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+x + y
+x - y
+x * y
+x / y
+x^y

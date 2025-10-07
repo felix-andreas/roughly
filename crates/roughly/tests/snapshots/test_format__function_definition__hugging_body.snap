@@ -1,0 +1,17 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+function() { body }
+
+function() {
+  body
+}
+
+function() {
+  body
+}
+
+function() {
+  body
+}

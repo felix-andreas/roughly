@@ -1,0 +1,16 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+x[[
+  x
+]]
+
+x[[
+  x,
+  y
+]]
+
+x[[, x, y + call(
+  arg
+)]]

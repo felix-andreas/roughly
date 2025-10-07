@@ -1,0 +1,8 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+c(
+    1, 2,
+    3, 4
+) # fmt: skip

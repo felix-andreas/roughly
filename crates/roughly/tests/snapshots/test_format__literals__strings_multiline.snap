@@ -1,0 +1,8 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+"x
+    x"
+call("x
+    y")

@@ -1,0 +1,7 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+result = !condition
+value = -42
+formula = ~ x + y

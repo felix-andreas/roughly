@@ -7,7 +7,7 @@
 
 <div align="center">
 
-An R language server, linter, and code formatter, written in Rust.
+An extremely fast R language server and code formatter, written in Rust.
 <br />
 [Docs](https://roughly.felixandreas.me) · [Releases](https://github.com/felix-andreas/roughly/releases) · [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
 
@@ -16,84 +16,95 @@ An R language server, linter, and code formatter, written in Rust.
 > [!NOTE]
 > Roughly can be used either as a standalone command-line tool or as an extension in supported editors like VS Code.
 
+## Why Roughly?
+
+This project was created to address the slow performance of the existing R language server on large codebases. Originally called *"The R(oughly good enough) language server"*, it began as a minimal but fast language server that supported only go-to-definition using regex-based indexing. Since then, the project has evolved into a full-featured language server with proper parsing, formatting, and linting, and the "good enough" part was eventually dropped from the name.
+
 ## Features
 
 Roughly aims to support the following language server features (some are experimental or in progress):
 
-- **Code Navigation**
-  - Goto definition (🧪 experimental)
-  - Search current document (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> *in VS Code*)
-  - Search global workspace (<kbd>Ctrl</kbd> + <kbd>T</kbd> *in VS Code*)
-  - Indexing of global symbols, S4 classes/generics/methods and R6 classes/methods
+- **Formatting**
+  - Format entire document
+  - Format selected code range *(🧪 experimental)*
+
+- **Navigation**
+  - Index global variables, S4 and R6 classes/methods
+  - Search current document - <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> *in VS Code*
+  - Search global workspace - <kbd>Ctrl</kbd> + <kbd>T</kbd> *in VS Code*
+  - Go to definition
+  - Find all references *(🧪 experimental)*
 
 - **Diagnostics**
-  - Syntax errors (including missing or trailing commas)
-  - Basic linting rules (e.g. `<-` assignment and variable naming)
-  - Unused variables (🧪 experimental)
+  - Syntax errors - *including missing or trailing commas*
+  - Basic linting rules - *[full list here](https://roughly.felixandreas.me/linter/#semantics-checks)*
+  - Warning for unused variables *(🧪 experimental)*
+  - Error for undefined variable *(⚠️ missing)*
+  - Argument validation for function calls *(⚠️ missing)*
+  - Type checking *([💡 early design phase](crates/typing/README.md))*
 
-- **Formatting**
-  - Entire documents
-  - Selected ranges (🧪 experimental)
+- **Editing**
+  - Autocomplete local and global variables
+  - Autocomplete variables from other packages *(⚠️ missing)*
+  - Rename local variables *(🧪 experimental)*
+  - Rename global variables *(⚠️ missing)*
+  - Signature help *(🔨 work in progress)*
 
-- **Code Completion**
-  - Local symbols
-  - Global symbols
-  - Package symbols (⚠️ missing)
-  - Signature help (⚠️ missing)
- 
 ## Roughly CLI
-
-You can install the Roughly CLI by downloading a pre-built binary or by building from source.
-
-### Download Binary (Recommended)
-
-Download the pre-built binary for your platform from the [releases page](https://github.com/felix-andreas/roughly/releases).
-
-### Build from Source
-
-Alternatively, build from source (requires the Rust nightly):
-
-```sh
-cargo build --release
-```
 
 ### Usage
 
-Run roughly as a formatter:
+Run Roughly as a formatter:
 
 ```
-roughly fmt             # Format all files in the current directory
-roughly fmt <path>      # Format all files in `<path>`
-roughly fmt --check     # Only check if files would be formatted
-roughly fmt --diff      # Only show diff if files would be formatted
+roughly fmt           # Format all files in the current directory
+roughly fmt <path>    # Format all files in `<path>`
+roughly fmt --check   # Only check if files would be formatted
+roughly fmt --diff    # Only show the diff if files would be formatted
 ```
 
 To run Roughly as a linter:
 
 ```
-roughly check           # Check all files in the current directory
-roughly check <path>    # Check all files in `<path>`
+roughly check         # Check all files in the current directory
+roughly check <path>  # Check all files in `<path>`
 ```
 
 Or, to run Roughly as a language server:
 
 ```
-roughly server          # Usually started automatically by your editor
+roughly server        # Usually started automatically by your editor
+```
+
+### Installation
+
+#### Download Binary (Recommended)
+
+Download the pre-built binary for your platform from the [releases page](https://github.com/felix-andreas/roughly/releases).
+
+#### Install with Cargo
+
+If you have [Cargo](https://www.rust-lang.org/tools/install) installed, install Roughly with:
+
+```sh
+cargo install --git https://github.com/felix-andreas/roughly roughly
+```
+
+#### Build from Source
+
+Alternatively, build from source:
+
+```sh
+cargo build --release
 ```
 
 ## VS Code extension
 
-Roughly can also be used as a VS Code extension.
+### Download from Marketplace (Recommended)
 
-### From Marketplace (Recommended)
+[![](https://vsmarketplacebadges.dev/version-short/felix-andreas.roughly.svg)](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
 
-Install directly from VS Code:
-- Open VS Code
-- Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>X</kbd> to open Extensions
-- Search for "roughly"
-- Click "Install" on the extension by `felix-andreas`
-
-Or, install using the [VS Code Marketplace website](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly).
+Install the extension from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly).
 
 > [!NOTE]
 > The VS Code extension from the marketplace includes a bundled version of the Roughly CLI **only for Windows and Linux x64**. If you are using macOS or a different architecture, you will need to install the Roughly CLI manually.
@@ -116,15 +127,14 @@ code --install-extension roughly.vsix
 
 You can customize the Roughly extension in VS Code through the following settings:
 
-
 ```jsonc
 {
   // Use a custom binary instead of the bundled one
   "roughly.path": "/path/to/roughly",
-  // Pass extra arguments to the language server
-  "roughly.args": ["server", "--extra", "arg"],
+  // Pass custom arguments; defaults to ["server"]
+  "roughly.args": ["server", "--verbose"],
   // Enable experimental features
-  "roughly.experimentalFeatures": ["goto_definition", "range_formatting"],
+  "roughly.experimentalFeatures": ["rename", "range_formatting"],
 }
 ```
 
@@ -135,8 +145,10 @@ You can customize the Roughly extension in VS Code through the following setting
 
 You can access Roughly-specific commands in VS Code via the Command Palette (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>):
 
-- **Roughly: Start/Stop/Restart Server**
 - **Roughly: Open logs**
+- **Roughly: Start/Stop/Restart Server**
+- **Roughly: Format workspace** (⚠️ missing)
+- **Roughly: Show syntax tree** (⚠️ missing)
 
 ## RStudio Integration
 
@@ -144,17 +156,17 @@ Roughly can be used as an external formatter in RStudio. See the [RStudio setup 
 
 ## Configuration
 
-You can configure roughly via a project-specific `roughly.toml` file:
+You can configure Roughly via a project-specific `roughly.toml` file:
 
 ```toml
 [format]
-# number of spaces per indentation level
+# Number of spaces per indentation level
 indent-width = 4
-# automatically detect the appropriate line ending
+# Automatically detect the appropriate line ending
 line-ending = "auto" # "lf" or "cr-lf"
 
 [lint]
-# control the naming convention for variables and parameters
+# Control the naming convention for variables and parameters
 naming-style = "snake_case" # or "camelCase", omit to disable this lint entirely
 ```
 
@@ -162,14 +174,13 @@ naming-style = "snake_case" # or "camelCase", omit to disable this lint entirely
 
 Roughly includes several experimental features that can be enabled in the VS Code extension settings or via the CLI:
 
-
-| Name               | Description                       |
-| ------------------ | --------------------------------- |
-| `all`              | Enables all experimental features |
-| `goto_definition`  | Jump to symbol definitions        |
-| `range_formatting` | Format selected code ranges       |
-| `rename`           | Rename symbols                    |
-| `unused`           | Detect unused variables           |
+| Name               | Description                      |
+| ------------------ | -------------------------------- |
+| `all`              | Enable all experimental features |
+| `goto_references`  | Find all references to a symbol  |
+| `range_formatting` | Format selected code ranges      |
+| `rename`           | Rename symbols                   |
+| `unused`           | Warn about unused variables      |
 
 ## Development
 

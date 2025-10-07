@@ -1,0 +1,16 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+PersonClass <- R6Class(
+  "Person",
+  public = list(
+    initialize = function(name) {
+      private$name <- name
+    },
+
+    get_name = function() {
+      return(private$name)
+    }
+  )
+)

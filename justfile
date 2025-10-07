@@ -14,11 +14,17 @@ rofy *args:
 test *args:
 	cargo test -- --nocapture {{args}}
 
-docs:
-	cd docs && bun dev
+test-docs:
+	cargo test --test test_format -- --no-capture docs
 
 snapshot *args:
 	cargo insta test --review -- --nocapture {{args}}
+
+snapshot-delete-unreferenced:
+	cargo insta test --unreferenced delete
+
+docs:
+	cd docs && bun dev
 
 vsce *args:
 	@bun --cwd=editors/code run vsce -- {{args}}
@@ -31,6 +37,9 @@ install-extension:
 #
 # BUILD
 #
+
+build:
+	cargo build
 
 build-linux:
 	cargo build --release --target x86_64-unknown-linux-gnu
@@ -65,7 +74,7 @@ publish $version $kind:
 	set -euo pipefail
 
 	just bump-version $version
-	just build $version $kind
+	just release $version $kind
 	just publish-github $version
 	just publish-marketplace $version $kind
 
@@ -77,10 +86,10 @@ publish-commit $version="":
 		version=$(git rev-parse --short=6 HEAD)
 		echo "info: using git revision $version as version"
 	fi
-	just build $version pre-release
+	just release $version pre-release
 	just publish-github $version
 
-build $version $kind:
+release $version $kind:
 	#!/usr/bin/env bash
 	set -euo pipefail
 

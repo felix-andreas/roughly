@@ -3,23 +3,23 @@ use {
         cli, completion,
         config::{Config, ExperimentalFeatures},
         definition, diagnostics, format,
-        index::{self, IndexError},
+        index::{self, IndexError, Item},
         lsp_types::{
             CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
             DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
             DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
             DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol,
             DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
-            GlobPattern, InitializeParams, InitializeResult, InitializedParams, MessageType, OneOf,
-            Position, PublishDiagnosticsParams, Range, Registration, RegistrationParams,
-            RelativePattern, RenameParams, SaveOptions, ServerCapabilities, ServerInfo,
-            ShowMessageParams, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-            TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-            TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceEdit, WorkspaceSymbolParams,
-            WorkspaceSymbolResponse,
+            GlobPattern, InitializeParams, InitializeResult, InitializedParams, Location,
+            MessageType, OneOf, Position, PublishDiagnosticsParams, Range, ReferenceParams,
+            Registration, RegistrationParams, RelativePattern, RenameParams, SaveOptions,
+            ServerCapabilities, ServerInfo, ShowMessageParams, SignatureHelp, SignatureHelpOptions, 
+            SignatureHelpParams, TextDocumentSyncCapability, TextDocumentSyncKind, 
+            TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceEdit, 
+            WorkspaceSymbolParams, WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
         },
-        rename, signature_help, tree, utils,
+        references, rename, signature_help, symbols, tree, utils,
     },
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
@@ -92,9 +92,9 @@ struct ServerState {
     base_path: PathBuf,
     document_map: HashMap<PathBuf, Document>,
     /// stores symbolds for all other files
-    document_symbols: HashMap<PathBuf, Vec<DocumentSymbol>>,
+    document_items: HashMap<PathBuf, Vec<Item>>,
     /// stores index for all files in R/ folder
-    workspace_symbols: HashMap<PathBuf, Vec<DocumentSymbol>>,
+    workspace_items: HashMap<PathBuf, Vec<Item>>,
     parser: Parser,
 }
 
@@ -115,8 +115,8 @@ impl ServerState {
             config,
             experimental_features,
             base_path: std::env::current_dir().unwrap().join("R"),
-            workspace_symbols: HashMap::new(),
-            document_symbols: HashMap::new(),
+            workspace_items: HashMap::new(),
+            document_items: HashMap::new(),
             document_map: HashMap::new(),
             parser: tree::new_parser(),
         })
@@ -134,7 +134,7 @@ impl LanguageServer for ServerState {
         tracing::info!(?self.experimental_features, "initialize");
 
         match index::index_dir(&self.base_path, &mut self.parser) {
-            Ok(symbols) => self.workspace_symbols.extend(symbols),
+            Ok(items) => self.workspace_items.extend(items),
             Err(IndexError) => self
                 .client
                 .show_message(ShowMessageParams {
@@ -150,12 +150,13 @@ impl LanguageServer for ServerState {
                     trigger_characters: Some(vec!["$".into(), "@".into(), ":".into()]),
                     ..Default::default()
                 }),
-                definition_provider: Some(OneOf::Left(self.experimental_features.goto_definition)),
+                definition_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(
                     self.experimental_features.range_formatting,
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(self.experimental_features.goto_references)),
                 rename_provider: Some(OneOf::Left(self.experimental_features.rename)),
                 signature_help_provider: Some(SignatureHelpOptions {
                     trigger_characters: Some(vec!["(".into(), ",".into()]),
@@ -241,12 +242,12 @@ impl LanguageServer for ServerState {
 
         let diagnostics = diagnostics::analyze_full(tree.root_node(), &rope, self.config.lint);
 
-        let symbols = index::index(tree.root_node(), &rope, false, false);
+        let items = index::index(tree.root_node(), &rope, false, false);
         if path.starts_with(&self.base_path) {
             // note: we need to insert into workspace in case a new file is created
-            self.workspace_symbols.insert(path.clone(), symbols);
+            self.workspace_items.insert(path.clone(), items);
         } else {
-            self.document_symbols.insert(path.clone(), symbols);
+            self.document_items.insert(path.clone(), items);
         }
 
         self.document_map.insert(path, Document { rope, tree });
@@ -335,14 +336,14 @@ impl LanguageServer for ServerState {
         // UPDATE DIAGNOSTICS
         let diagnostics = diagnostics::analyze_fast(tree.root_node(), rope, self.config.lint);
 
-        // UPDATE SYMBOLS
+        // UPDATE ITEMS
         // note: We must re-index on every change (not just on save)
         // because textDocument/documentSymbol is triggered before textDocument/didSave.
-        let symbols = index::index(tree.root_node(), rope, false, false);
+        let items = index::index(tree.root_node(), rope, false, false);
         if path.starts_with(&self.base_path) {
-            self.workspace_symbols.insert(path, symbols);
+            self.workspace_items.insert(path, items);
         } else {
-            self.document_symbols.insert(path, symbols);
+            self.document_items.insert(path, items);
         }
 
         if let Err(error) = self
@@ -408,11 +409,11 @@ impl LanguageServer for ServerState {
                 match change.typ {
                     FileChangeType::CREATED | FileChangeType::CHANGED => {
                         // note: potential race condition if the user already has the file open and begins editing immediately.
-                        let symbols = index::index_file(&path, &mut self.parser);
-                        self.workspace_symbols.insert(path.clone(), symbols);
+                        let items = index::index_file(&path, &mut self.parser);
+                        self.workspace_items.insert(path.clone(), items);
                     }
                     FileChangeType::DELETED => {
-                        self.workspace_symbols.remove(&path);
+                        self.workspace_items.remove(&path);
                     }
                     _ => unreachable!(),
                 }
@@ -445,7 +446,7 @@ impl LanguageServer for ServerState {
             position,
             &document.rope,
             &document.tree,
-            &self.workspace_symbols,
+            &self.workspace_items,
         );
 
         box_future(Ok(completions))
@@ -476,7 +477,7 @@ impl LanguageServer for ServerState {
             position.character as usize,
             &document.rope,
             &document.tree,
-            &self.workspace_symbols,
+            &self.workspace_items,
         );
 
         box_future(Ok(definitions))
@@ -505,7 +506,7 @@ impl LanguageServer for ServerState {
             position,
             &document.rope,
             &document.tree,
-            &self.workspace_symbols,
+            &self.workspace_items,
         );
 
         box_future(Ok(signature_help))
@@ -593,6 +594,39 @@ impl LanguageServer for ServerState {
     }
 
     //
+    // REFERENCES
+    //
+
+    fn references(
+        &mut self,
+        params: ReferenceParams,
+    ) -> BoxFuture<'static, Result<Option<Vec<Location>>, ResponseError>> {
+        let uri = params.text_document_position.text_document.uri;
+        let path = uri.to_file_path().unwrap();
+        let position = params.text_document_position.position;
+        let include_declaration = params.context.include_declaration;
+
+        tracing::debug!(?path, ?position, ?include_declaration, "find references");
+
+        let Some(document) = self.document_map.get(&path) else {
+            tracing::info!(?path, "document not found");
+            return box_future(Err(path_not_found_error(&path)));
+        };
+
+        let references = references::find_references(
+            &uri,
+            position.line as usize,
+            position.character as usize,
+            include_declaration,
+            &document.rope,
+            &document.tree,
+            &self.workspace_items,
+        );
+
+        box_future(Ok(references))
+    }
+
+    //
     // RENAME
     //
 
@@ -635,17 +669,17 @@ impl LanguageServer for ServerState {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
-        let symbols_map = if path.starts_with(&self.base_path) {
-            &self.workspace_symbols
+        let items_map = if path.starts_with(&self.base_path) {
+            &self.workspace_items
         } else {
-            &self.document_symbols
+            &self.document_items
         };
 
-        let Some(symbols) = symbols_map.get(&path) else {
+        let Some(items) = items_map.get(&path) else {
             tracing::error!(?path, "symbols not found");
             return box_future(Err(path_not_found_error(&path)));
         };
-        let symbols = symbols.clone();
+        let symbols: Vec<DocumentSymbol> = symbols::document(items);
 
         box_future(Ok(Some(DocumentSymbolResponse::Nested(symbols))))
     }
@@ -658,7 +692,7 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(?query);
 
-        let symbols = index::get_workspace_symbols(&query, &self.workspace_symbols);
+        let symbols = symbols::workspace(&query, &self.workspace_items);
 
         box_future(Ok(Some(WorkspaceSymbolResponse::Nested(symbols))))
     }

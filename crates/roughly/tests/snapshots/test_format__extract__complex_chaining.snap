@@ -1,0 +1,13 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+lhs$
+  fn(x)$
+  fn(x, y)
+
+({
+  expr
+})$
+  fn(x)$
+  fn(x, y)

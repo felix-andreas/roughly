@@ -1,0 +1,23 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+fn({
+  body
+})
+
+fn({
+  body
+})
+
+fn(
+  {
+    body
+  }
+)
+
+fn(
+  {
+    body
+  }
+)

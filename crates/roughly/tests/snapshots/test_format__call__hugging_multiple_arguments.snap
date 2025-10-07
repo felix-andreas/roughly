@@ -1,0 +1,23 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+fn(arg1, fn(
+  arg
+))
+
+fn(arg1, arg2 = fn(
+  arg
+))
+
+fn(arg1, {
+  body
+})
+
+fn(arg1, arg2 = value, function() {
+  body
+})
+
+fn(arg1, arg2 = value, if (condition) {
+  body
+})
