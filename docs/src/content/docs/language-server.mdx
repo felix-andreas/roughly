@@ -1,0 +1,120 @@
+---
+title: Language Server
+description: Documentation for Roughly's R language server
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+## Usage
+
+The easiest way to use Roughly is through its VS Code extension.
+
+If you want to integrate Roughly with another editor that supports the Language Server Protocol (LSP), you can start the language server directly:
+
+```sh
+roughly server
+```
+
+## Features
+
+Roughly aims to support the following language server features (some are experimental or in progress):
+
+- **Formatting**
+  - Format entire document
+  - Format selected code range *(🧪 experimental)*
+
+- **Navigation**
+  - Index global variables, S4 and R6 classes/methods
+  - Search current document - <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> *in VS Code*
+  - Search global workspace - <kbd>Ctrl</kbd> + <kbd>T</kbd> *in VS Code*
+  - Go to definition
+  - Find all references *(🧪 experimental)*
+
+- **Diagnostics**
+  - Syntax errors - *including missing or trailing commas*
+  - Basic linting rules - *[full list here](https://roughly.felixandreas.me/linter/#semantics-checks)*
+  - Warning for unused variables *(🧪 experimental)*
+  - Error for undefined variable *(⚠️ missing)*
+  - Argument validation for function calls *(⚠️ missing)*
+  - Type checking *([💡 early design phase](crates/typing/README.md))*
+
+- **Editing**
+  - Autocomplete local and global variables
+  - Autocomplete variables from other packages *(⚠️ missing)*
+  - Rename local variables *(🧪 experimental)*
+  - Rename global variables *(⚠️ missing)*
+  - Signature help *(🔨 work in progress)*
+
+
+## Roadmap
+
+Future language server improvements will include:
+
+- **Go to Definition**: Navigate to function and variable definitions
+- **Find References**: Find all references to a symbol
+- **Rename Symbol**: Safely rename variables and functions
+- **Type Information**: Show type information in tooltips
+- **Semantic Highlighting**: Enhanced syntax highlighting
+- **Code Actions**: Quick fixes for common issues
+
+## Supported Editors
+
+While Roughly is designed as a standard LSP implementation that should work with any editor supporting LSP:
+
+- **VS Code**: Full support via dedicated extension
+- **Other Editors**: May be configured to use Roughly's LSP implementation directly
+
+## VS Code Extension
+
+### Installation
+
+<Steps>
+
+1. Download the latest `roughly.vsix` from [GitHub Releases](https://github.com/felix-andreas/roughly/releases)
+2. Install the extension in VS Code:
+   ```sh
+   code --install-extension roughly.vsix
+   ```
+3. Configure the extension by setting the path to the Roughly binary in `settings.json`:
+   ```json
+   {
+     "roughly.path": "/path/to/roughly"
+   }
+   ```
+
+</Steps>
+
+### Building from Source
+
+If you prefer to build the extension yourself:
+
+```sh
+# From the repository root
+bun run package
+code --install-extension roughly.vsix
+```
+
+### Configuration
+
+You can customize the Roughly extension in VS Code through the following settings:
+
+```jsonc
+{
+  // Use a custom binary instead of the bundled one
+  "roughly.path": "/path/to/roughly",
+  // Pass custom arguments; defaults to ["server"]
+  "roughly.args": ["server", "--verbose"],
+  // Enable experimental features
+  "roughly.experimentalFeatures": ["rename", "range_formatting"],
+}
+```
+
+### VS Code Commands
+
+Roughly's VS Code extension provides several commands to manage the language server:
+
+- **Start Language Server**: Manually start the language server if it's not running
+- **Stop Language Server**: Manually stop the language server
+- **Restart Language Server**: Restart the language server (useful after configuration changes)
+- **Open Logs**: View the language server logs for troubleshooting
+- **Status Bar Integration**: Shows the current status of the language server and allows quick access to commands by clicking on the status indicator

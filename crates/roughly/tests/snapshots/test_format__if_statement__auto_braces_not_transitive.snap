@@ -1,0 +1,8 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+# fmt_multiline is not transitive (it doesn't break single line if-else)
+function() {
+  if (x) y else z
+}

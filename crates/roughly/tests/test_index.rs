@@ -1,22 +1,24 @@
 use {
-    async_lsp::lsp_types::DocumentSymbol,
     indoc::indoc,
     ropey::Rope,
-    roughly::{index, lsp_types::SymbolKind, tree},
+    roughly::{
+        index::{self, Item, ItemInfo},
+        tree,
+    },
     tree_sitter::Node,
 };
 
-fn setup(text: &str, nested: bool) -> Vec<DocumentSymbol> {
+fn setup(text: &str, nested: bool) -> Vec<Item> {
     let rope = Rope::from_str(text);
     let tree = tree::parse_rope(&mut tree::new_parser(), &rope, None);
     index::index(tree.root_node(), &rope, nested, false)
 }
 
-fn setup_nested(text: &str) -> Vec<DocumentSymbol> {
+fn setup_nested(text: &str) -> Vec<Item> {
     setup(text, true)
 }
 
-fn setup_flat(text: &str) -> Vec<DocumentSymbol> {
+fn setup_flat(text: &str) -> Vec<Item> {
     setup(text, false)
 }
 
@@ -39,27 +41,27 @@ fn assignments() {
         assert_eq!(symbols.len(), 3);
 
         assert_eq!(symbols[0].name, "foo");
-        assert_eq!(symbols[0].kind, SymbolKind::FUNCTION);
+        assert_eq!(symbols[0].info, ItemInfo::Function);
         {
             let children = symbols[0].children.as_ref().unwrap();
             assert_eq!(children[0].name, "a");
-            assert_eq!(children[0].kind, SymbolKind::BOOLEAN);
+            assert_eq!(children[0].info, ItemInfo::Bool);
             assert_eq!(children[1].name, "b");
-            assert_eq!(children[1].kind, SymbolKind::BOOLEAN);
+            assert_eq!(children[1].info, ItemInfo::Bool);
         }
 
         assert_eq!(symbols[1].name, "bar");
-        assert_eq!(symbols[1].kind, SymbolKind::FUNCTION);
+        assert_eq!(symbols[1].info, ItemInfo::Function);
         {
             let children = symbols[1].children.as_ref().unwrap();
             assert_eq!(children[0].name, "a");
-            assert_eq!(children[0].kind, SymbolKind::NUMBER);
+            assert_eq!(children[0].info, ItemInfo::Float);
             assert_eq!(children[1].name, "b");
-            assert_eq!(children[1].kind, SymbolKind::STRING);
+            assert_eq!(children[1].info, ItemInfo::String);
         }
 
         assert_eq!(symbols[2].name, "baz");
-        assert_eq!(symbols[2].kind, SymbolKind::VARIABLE);
+        assert_eq!(symbols[2].info, ItemInfo::Unknown);
     }
 
     {
@@ -67,16 +69,16 @@ fn assignments() {
         assert_eq!(symbols.len(), 3);
 
         assert_eq!(symbols[0].name, "foo");
-        assert_eq!(symbols[0].kind, SymbolKind::FUNCTION);
-        assert_eq!(symbols[0].children, None);
+        assert_eq!(symbols[0].info, ItemInfo::Function);
+        assert!(symbols[0].children.is_none());
 
         assert_eq!(symbols[1].name, "bar");
-        assert_eq!(symbols[1].kind, SymbolKind::FUNCTION);
-        assert_eq!(symbols[1].children, None);
+        assert_eq!(symbols[1].info, ItemInfo::Function);
+        assert!(symbols[1].children.is_none());
 
         assert_eq!(symbols[2].name, "baz");
-        assert_eq!(symbols[2].kind, SymbolKind::VARIABLE);
-        assert_eq!(symbols[2].children, None);
+        assert_eq!(symbols[2].info, ItemInfo::Unknown);
+        assert!(symbols[2].children.is_none());
     }
 }
 
@@ -101,7 +103,7 @@ fn s4_set_class() {
     assert_eq!(symbols.len(), 2);
 
     assert_eq!(symbols[0].name, "Person");
-    assert_eq!(symbols[0].kind, SymbolKind::CLASS);
+    assert_eq!(symbols[0].info, ItemInfo::S4Class);
     // {
     //     let children = symbols[0].children.as_ref().unwrap();
     //     assert_eq!(children[0].name, "name");
@@ -111,7 +113,7 @@ fn s4_set_class() {
     // }
 
     assert_eq!(symbols[1].name, "Car");
-    assert_eq!(symbols[1].kind, SymbolKind::CLASS);
+    assert_eq!(symbols[1].info, ItemInfo::S4Class);
     // {
     //     let children = symbols[1].children.as_ref().unwrap();
     //     assert_eq!(children[0].name, "name");
@@ -129,12 +131,10 @@ fn s4_set_generic() {
     assert_eq!(symbols.len(), 2);
 
     assert_eq!(symbols[0].name, "foo");
-    assert_eq!(symbols[0].kind, SymbolKind::INTERFACE);
+    assert_eq!(symbols[0].info, ItemInfo::S4Generic);
 
     assert_eq!(symbols[1].name, "bar<-");
-    assert_eq!(symbols[1].kind, SymbolKind::INTERFACE);
-
-    assert_eq!(symbols.len(), 2);
+    assert_eq!(symbols[1].info, ItemInfo::S4Generic);
 }
 
 #[test]
@@ -153,13 +153,21 @@ fn s4_set_method() {
 
     assert_eq!(symbols.len(), 2);
 
-    assert_eq!(symbols[0].name, "foo (Person)");
-    assert_eq!(symbols[0].kind, SymbolKind::METHOD);
+    assert_eq!(symbols[0].name, "foo");
+    assert_eq!(
+        symbols[0].info,
+        ItemInfo::S4Method {
+            signature: "Person".into()
+        }
+    );
 
-    assert_eq!(symbols[1].name, "bar<- (Person)");
-    assert_eq!(symbols[1].kind, SymbolKind::METHOD);
-
-    assert_eq!(symbols.len(), 2);
+    assert_eq!(symbols[1].name, "bar<-");
+    assert_eq!(
+        symbols[1].info,
+        ItemInfo::S4Method {
+            signature: "Person".into()
+        }
+    );
 }
 
 #[test]
@@ -174,9 +182,13 @@ fn s4_set_method_with_signature_arg() {
 
     assert_eq!(symbols.len(), 1);
 
-    assert_eq!(symbols[0].name, "baz (Person)");
-    assert_eq!(symbols[0].kind, SymbolKind::METHOD);
-    assert_eq!(symbols.len(), 1);
+    assert_eq!(symbols[0].name, "baz");
+    assert_eq!(
+        symbols[0].info,
+        ItemInfo::S4Method {
+            signature: "Person".into()
+        }
+    );
 }
 
 #[test]
@@ -191,9 +203,13 @@ fn s4_set_method_with_vector_signature() {
 
     assert_eq!(symbols.len(), 1);
 
-    assert_eq!(symbols[0].name, "qux (Person, Other)");
-    assert_eq!(symbols[0].kind, SymbolKind::METHOD);
-    assert_eq!(symbols.len(), 1);
+    assert_eq!(symbols[0].name, "qux");
+    assert_eq!(
+        symbols[0].info,
+        ItemInfo::S4Method {
+            signature: "Person, Other".into()
+        }
+    );
 }
 
 #[test]
@@ -208,9 +224,13 @@ fn s4_set_method_with_named_signature() {
 
     assert_eq!(symbols.len(), 1);
 
-    assert_eq!(symbols[0].name, "foo (Person, Other)");
-    assert_eq!(symbols[0].kind, SymbolKind::METHOD);
-    assert_eq!(symbols.len(), 1);
+    assert_eq!(symbols[0].name, "foo");
+    assert_eq!(
+        symbols[0].info,
+        ItemInfo::S4Method {
+            signature: "Person, Other".into()
+        }
+    );
 }
 
 #[test]
@@ -260,11 +280,11 @@ fn test_r6_class() {
         )
     "#});
 
-    let assert = |members: &[DocumentSymbol], name: &str, kind: SymbolKind| {
+    let assert = |members: &[Item], name: &str, info: &ItemInfo| {
         assert!(
             members
                 .iter()
-                .any(|member| member.name == name && member.kind == kind),
+                .any(|member| member.name == name && &member.info == info),
         );
     };
 
@@ -272,33 +292,33 @@ fn test_r6_class() {
 
     // Person
     assert_eq!(symbols[0].name, "Person");
-    assert_eq!(symbols[0].kind, SymbolKind::CLASS);
+    assert_eq!(symbols[0].info, ItemInfo::R6Class);
 
     let members = symbols[0].children.as_ref().unwrap();
 
     // Public properties and methods
-    assert(members, "name", SymbolKind::FIELD);
-    assert(members, "age", SymbolKind::FIELD);
-    assert(members, "initialize", SymbolKind::METHOD);
-    assert(members, "greet", SymbolKind::METHOD);
-    assert(members, "say_age", SymbolKind::METHOD);
-    assert(members, ".hidden", SymbolKind::FIELD);
+    assert(members, "name", &ItemInfo::R6Field);
+    assert(members, "age", &ItemInfo::R6Field);
+    assert(members, "initialize", &ItemInfo::R6Method);
+    assert(members, "greet", &ItemInfo::R6Method);
+    assert(members, "say_age", &ItemInfo::R6Method);
+    assert(members, ".hidden", &ItemInfo::R6Field);
 
     // Private properties and methods
-    assert(members, "secret", SymbolKind::FIELD);
-    assert(members, "password", SymbolKind::FIELD);
-    assert(members, "reveal_secret", SymbolKind::METHOD);
+    assert(members, "secret", &ItemInfo::R6Field);
+    assert(members, "password", &ItemInfo::R6Field);
+    assert(members, "reveal_secret", &ItemInfo::R6Method);
 
     // Active bindings
-    assert(members, "full_name", SymbolKind::PROPERTY);
+    assert(members, "full_name", &ItemInfo::R6Field);
 
     // Car
     assert_eq!(symbols[1].name, "Car");
-    assert_eq!(symbols[1].kind, SymbolKind::CLASS);
+    assert_eq!(symbols[1].info, ItemInfo::R6Class);
 
     let members = symbols[1].children.as_ref().unwrap();
-    assert(members, "length", SymbolKind::FIELD);
-    assert(members, "drive", SymbolKind::METHOD);
+    assert(members, "length", &ItemInfo::R6Field);
+    assert(members, "drive", &ItemInfo::R6Method);
 }
 
 #[test]

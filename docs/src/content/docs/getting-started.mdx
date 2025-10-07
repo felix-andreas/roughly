@@ -1,0 +1,90 @@
+---
+title: Getting Started
+description: Installation and basic setup for Roughly
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+
+This guide will walk you through installing and configuring Roughly for your R projects.
+
+## Roughly CLI
+
+### Installation
+
+<Steps>
+
+1. Download the pre-built binary for your platform from the [GitHub Releases](https://github.com/felix-andreas/roughly/releases) page
+2. Add the binary to your system PATH
+
+</Steps>
+
+### Usage
+
+Roughly provides several commands to format code, check for issues, and run a language server:
+
+```bash
+# Format R files
+roughly fmt                # Format files in current directory
+roughly fmt path/to/files  # Format files at the specific path
+
+# Check for issues
+roughly check              # Lint files in current directory
+
+# Run the language server
+roughly server             # Start the LSP server
+```
+
+## Editor Integrations
+
+### VS Code extension
+
+Roughly can also be used as a VS Code extension.
+
+#### From Marketplace (Recommended)
+
+[![](https://vsmarketplacebadges.dev/version-short/felix-andreas.roughly.svg)](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
+
+Install the extension from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly).
+
+> The VS Code extension from the marketplace includes a bundled version of the Roughly CLI **only for Windows and Linux x64**. If you are using macOS or a different architecture, you will need to install the Roughly CLI manually.
+
+#### Manual Installation
+
+Alternatively, build the extension from source (or [download from releases](https://github.com/felix-andreas/roughly/releases)):
+
+```bash
+bun run package
+```
+
+Install the generated VSIX file:
+
+```bash
+code --install-extension roughly.vsix
+```
+
+### RStudio (formatter only)
+
+You can configure Roughly as an external formatter in RStudio:
+
+<Steps>
+
+1. Open RStudio and navigate to:
+   ```
+   Options > Code > Formatting > Format with an External Tool
+   ```
+
+   Set the reformat command to: `path/to/roughly fmt`
+
+2. To enable **format-on-save**, go to:
+   ```
+   Options > Code > Saving > Format with an External Tool
+   ```
+
+   Check the `Reformat documents on save` option
+
+</Steps>
+
+## Configuration
+
+For detailed configuration options, see the [Configuration](/configuration) documentation.

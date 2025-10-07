@@ -1,0 +1,13 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+function(a, b) {}
+
+function(a, b = c) {}
+
+function(a, b = c) { body }
+
+function(a, b = c) {
+  body
+}

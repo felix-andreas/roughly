@@ -1,0 +1,7 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+data %>%
+  filter(condition) %>%
+  select(value)

@@ -1,0 +1,8 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+# This format is preserved - only last argument spans multiple lines
+call(a = x, b = y, c = inner(
+  expr
+))

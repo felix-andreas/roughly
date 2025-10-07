@@ -1,0 +1,22 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+setMethod("show", "Person", function(object) {
+  cat("Person object:\n")
+  cat("  Name:", object@name, "\n")
+  cat("  Age:", object@age, "\n")
+})
+
+setMethod("getName", "Person", function(x) x@name)
+
+setMethod(
+  "setName<-",
+  "Person",
+  function(x, value) {
+    x@name <- value
+    x
+  }
+)
+
+

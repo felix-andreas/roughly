@@ -2,7 +2,7 @@ use {
     crate::{
         config::{self, ExperimentalFeatures},
         diagnostics, format, index,
-        lsp_types::{self, DiagnosticSeverity},
+        lsp_types::DiagnosticSeverity,
         server, tree, utils,
     },
     console::style,
@@ -419,13 +419,21 @@ pub fn index(paths: Option<&[PathBuf]>, nested: bool, print_items: bool) -> Resu
                         symbol.range.start.line,
                         symbol.range.start.character,
                         style(&symbol.name).bold(),
-                        style(match symbol.kind {
-                            lsp_types::SymbolKind::FUNCTION => "function",
-                            lsp_types::SymbolKind::CLASS => "class",
-                            lsp_types::SymbolKind::INTERFACE => "generic",
-                            lsp_types::SymbolKind::METHOD => "method",
-                            lsp_types::SymbolKind::VARIABLE => "variable",
-                            _ => "other",
+                        style(match symbol.info {
+                            index::ItemInfo::Unknown => "unknown",
+                            index::ItemInfo::Integer => "integer",
+                            index::ItemInfo::Float => "float",
+                            index::ItemInfo::Complex => "complex",
+                            index::ItemInfo::Bool => "bool",
+                            index::ItemInfo::String => "string",
+                            index::ItemInfo::Null => "null",
+                            index::ItemInfo::Function => "function",
+                            index::ItemInfo::S4Class => "S4Class",
+                            index::ItemInfo::S4Generic => "S4Generic",
+                            index::ItemInfo::S4Method { .. } => "S4Method",
+                            index::ItemInfo::R6Class => "R6Class",
+                            index::ItemInfo::R6Method => "R6Method",
+                            index::ItemInfo::R6Field => "R6Field",
                         })
                         .italic()
                     );
@@ -465,7 +473,7 @@ pub fn ast(path: &Path) -> Result<(), DebugError> {
     };
 
     let tree = tree::parse(&mut tree::new_parser(), &text, None);
-    eprintln!("{}", tree::format(tree.root_node()));
+    eprintln!("{}", tree::display_ast(tree.root_node()));
     Ok(())
 }
 
@@ -480,17 +488,22 @@ pub fn parse_experimental_flags(flags: &[impl AsRef<str>]) -> ExperimentalFeatur
     for flag in flags.iter().flat_map(|flag| flag.as_ref().split(' ')) {
         match flag {
             "all" => {
-                features.unused = true;
+                features.goto_references = true;
                 features.range_formatting = true;
-                features.goto_definition = true;
                 features.rename = true;
+                features.unused = true;
             }
+            "goto_references" => features.goto_references = true,
             "range_formatting" => features.range_formatting = true,
-            "goto_definition" => features.goto_definition = true,
-            "unused" => features.unused = true,
             "rename" => features.rename = true,
+            "unused" => features.unused = true,
+            "goto_definition" => {
+                warn(&format!(
+                    "The '{flag}' flag has been stabilized. You can remove it."
+                ));
+            }
             unknown => {
-                warn(&format!("unknown experimental feature: {unknown}"));
+                warn(&format!("unknown experimental feature: '{unknown}'"));
             }
         }
     }

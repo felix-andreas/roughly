@@ -1,0 +1,11 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+if (a) {
+  x
+} else if (b) {
+  y
+} else {
+  z
+}

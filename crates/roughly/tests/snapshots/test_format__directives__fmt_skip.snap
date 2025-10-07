@@ -1,0 +1,6 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+# fmt: skip
+x+y

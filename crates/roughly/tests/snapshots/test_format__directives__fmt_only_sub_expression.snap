@@ -1,0 +1,12 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+call(
+  # fmt: skip
+  a = c(
+        1, 2,
+        3, 4
+    ),
+  b = 0
+)

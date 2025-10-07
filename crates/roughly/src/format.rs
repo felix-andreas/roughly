@@ -6,7 +6,7 @@ use {
     itertools::Itertools,
     ropey::Rope,
     serde::Deserialize,
-    std::time::Instant,
+    std::{num::NonZero, time::Instant},
     thiserror::Error,
     tree_sitter::{Node, TreeCursor},
 };
@@ -122,6 +122,14 @@ struct Context<'a> {
     line_ending: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Directive {
+    Skip,
+    SkipFile,
+    On,
+    Off,
+}
+
 fn traverse(
     out: &mut String,
     cursor: &mut TreeCursor,
@@ -164,53 +172,12 @@ fn traverse(
         out.push('}');
         Ok(())
     };
-
-    let get_raw = |node: Node| context.rope.byte_slice(node.byte_range()).to_string();
-    let fmt_raw = |node: Node, out: &mut String| {
+    let fmt_raw = |out: &mut String, node: Node| {
         // note: for CRLF documents, byte_range of comment node includes \r
-        out.push_str(get_raw(node).trim_end_matches('\r'));
+        // see here: https://github.com/r-lib/tree-sitter-r/pull/184
+        out.push_str(get_raw(node, context.rope).trim_end_matches('\r'));
         Ok(())
     };
-
-    fn field<'a>(node: Node<'a>, field_id: u16) -> Result<Node<'a>, FormatError> {
-        node.child_by_field_id(field_id)
-            .ok_or(FormatError::MissingField {
-                kind: node.kind(),
-                field: node
-                    .language()
-                    .field_name_for_id(field_id)
-                    .unwrap_or("unknown"),
-            })
-    }
-
-    fn field_optional<'a>(node: Node<'a>, field_id: u16) -> Option<Node<'a>> {
-        node.child_by_field_id(field_id)
-    }
-
-    let is_comment =
-        |maybe_node: Option<Node>| maybe_node.is_some_and(|next| next.kind_id() == kind::COMMENT);
-
-    // HACK: tree-sitter-r has wrong ending_position for extract with newlines before ths rhs:
-    // it only includes the newline but not the rhs. this hack uses at least the correct end_position
-    // see: https://github.com/users/felix-andreas/projects/5?pane=issue&itemId=100962575
-    let end_position = |node: Node| {
-        if node.kind_id() != kind::EXTRACT_OPERATOR {
-            return node.end_position();
-        }
-
-        field_optional(node, field::RHS)
-            .map(|rhs| rhs.end_position())
-            .or_else(|| {
-                field_optional(node, field::OPERATOR).map(|operator| operator.end_position())
-            })
-            // note: this case is unexpected
-            .unwrap_or_else(|| node.end_position())
-    };
-
-    let same_line = |a: Node, b: Node| end_position(a).row == b.start_position().row;
-
-    let is_fmt_skip_comment =
-        |node: Node| node.kind_id() == kind::COMMENT && get_raw(node).contains("fmt: skip");
 
     let node = cursor.node();
     let kind_id = node.kind_id();
@@ -231,8 +198,13 @@ fn traverse(
         });
     }
 
-    // check if prev or next node is fmt-skip directive
+    // handle skip directives
     {
+        let is_fmt_skip_comment = |node: Node| {
+            node.kind_id() == kind::COMMENT
+                && parse_directive(&get_raw(node, context.rope))
+                    .is_some_and(|directive| directive == Directive::Skip)
+        };
         let prev_is_fmt_skip = node.prev_sibling().is_some_and(|prev| {
             is_fmt_skip_comment(prev)
                 && prev
@@ -244,47 +216,48 @@ fn traverse(
             .is_some_and(|next| is_fmt_skip_comment(next) && same_line(node, next));
 
         if prev_is_fmt_skip || next_is_fmt_skip {
-            return fmt_raw(node, out);
+            return fmt_raw(out, node);
         }
     }
 
     if !node.is_named() {
-        return fmt_raw(node, out);
+        return fmt_raw(out, node);
     }
 
     match kind_id {
         // SPECIAL
-        kind::IDENTIFIER => fmt_raw(node, out)?,
+        kind::IDENTIFIER => fmt_raw(out, node)?,
         kind::COMMENT => {
-            let raw = get_raw(node);
+            let raw = get_raw(node, context.rope);
             let raw = raw.trim_end();
-            let mut chars = raw.chars();
 
+            let mut chars = raw.chars();
             let _ = chars.next(); // Skip the '#'
             // reformat comments like #foo to # foo but keep #' foo
             match chars.next() {
-                Some('\'' | '*' | ':') => match chars.next() {
-                    Some(' ') => out.push_str(raw),
-                    Some(other) => {
-                        let rest = chars.collect::<String>();
-                        // avoid formatting #'foo'
-                        if rest.contains('\'') {
+                Some(char @ ('\'' | '*' | ':')) => {
+                    match chars.next() {
+                        Some(' ') | None => out.push_str(raw),
+                        // avoid formatting #'string'
+                        Some(_) if char == '\'' && chars.clone().contains(&'\'') => {
                             out.push_str(raw);
-                        } else {
-                            out.push_str("#' ");
+                        }
+                        Some(other) => {
+                            out.push('#');
+                            out.push(char);
+                            out.push(' ');
                             out.push(other);
-                            out.push_str(&rest);
+                            out.extend(chars);
                         }
                     }
-                    None => out.push_str("#'"),
-                },
-                Some('#' | '!' | ' ') => out.push_str(raw),
+                }
+                // ! is for shebang (e.g. !#/usr/bin/env Rscript)
+                Some('#' | '!' | ' ') | None => out.push_str(raw),
                 Some(other) => {
                     out.push_str("# ");
                     out.push(other);
                     out.push_str(&chars.collect::<String>());
                 }
-                None => out.push('#'),
             }
         }
         kind::COMMA => out.push(','),
@@ -294,12 +267,12 @@ fn traverse(
         kind::NULL => out.push_str("NULL"),
         kind::INF => out.push_str("Inf"),
         kind::NAN => out.push_str("NaN"),
-        kind::INTEGER => fmt_raw(node, out)?,
-        kind::COMPLEX => fmt_raw(node, out)?,
-        kind::FLOAT => fmt_raw(node, out)?,
+        kind::INTEGER => fmt_raw(out, node)?,
+        kind::COMPLEX => fmt_raw(out, node)?,
+        kind::FLOAT => fmt_raw(out, node)?,
         kind::STRING => {
             if let Some(content) = field_optional(node, field::CONTENT) {
-                let raw = get_raw(content);
+                let raw = get_raw(content, context.rope);
                 let mut all_quotes_escaped = true;
                 let mut prev_was_escape = false;
                 for char in raw.chars() {
@@ -316,12 +289,12 @@ fn traverse(
                 out.push_str(r#""""#);
             }
         }
-        kind::NA => fmt_raw(node, out)?,
+        kind::NA => fmt_raw(out, node)?,
         // both handled by STRING
         kind::ESCAPE_SEQUENCE | kind::STRING_CONTENT => unreachable!(),
         // KEYWORDS
         kind::DOTS => out.push_str("..."),
-        kind::DOT_DOT_I => fmt_raw(node, out)?,
+        kind::DOT_DOT_I => fmt_raw(out, node)?,
         kind::RETURN => out.push_str("return"),
         kind::NEXT => out.push_str("next"),
         kind::BREAK => out.push_str("break"),
@@ -367,19 +340,24 @@ fn traverse(
         kind::ARGUMENTS | kind::PARAMETERS => {
             let is_multiline = !same_line(node, node);
             let is_empty = node.child_count() == 2;
-            let mut trailing_space = false;
+            let trailing_space = field(node, field::CLOSE)?
+                .prev_sibling()
+                .is_none_or(|child| child.kind_id() == kind::COMMA);
 
-            let hug = (kind_id == kind::ARGUMENTS) && {
-                field(node, field::CLOSE)?
-                    .prev_sibling()
-                    .is_none_or(|child| {
-                        trailing_space = child.kind_id() == kind::COMMA;
-                        child.kind_id() != kind::COMMENT
-                            && child.child_by_field_id(field::VALUE).is_some_and(|value| {
-                                value.start_position().row == node.start_position().row
+            let hug = field(node, field::CLOSE)?
+                .prev_sibling()
+                .is_none_or(|child| {
+                    child.kind_id() != kind::COMMENT
+                        && node
+                            .children_by_field_id(
+                                NonZero::new(field::ARGUMENT).unwrap(),
+                                &mut node.walk(),
+                            )
+                            .any(|argument| {
+                                argument.start_position().row == node.start_position().row
+                                    && argument.end_position().row == child.end_position().row
                             })
-                    })
-            };
+                });
 
             tree::for_each_child(cursor, |i, child, field_id, cursor| {
                 let maybe_prev = child.prev_sibling();
@@ -918,19 +896,62 @@ fn traverse(
             })?;
         }
         kind::PROGRAM => {
-            tree::for_each_child(cursor, |_, child, _, cursor| {
-                let maybe_prev = child.prev_sibling();
+            let mut enabled = true;
+            let mut maybe_directive = None;
+            if node.child(0).is_some_and(|child| {
+                child.kind_id() == kind::COMMENT
+                    && parse_directive(&get_raw(child, context.rope))
+                        .is_some_and(|directive| directive == Directive::SkipFile)
+            }) {
+                return fmt_raw(out, node);
+            }
 
-                match child.kind_id() {
-                    kind::COMMENT if maybe_prev.is_some_and(|prev| same_line(prev, child)) => {
-                        space(out);
+            tree::for_each_child(cursor, |_, child, _, cursor| {
+                // Delay toggling the `enabled` flag until after handling newlines.
+                // This ensures that any preceding newlines are attributed to the previous child
+                match maybe_directive {
+                    Some(Directive::On) => enabled = true,
+                    Some(Directive::Off) => enabled = false,
+                    _ => {}
+                }
+
+                maybe_directive = match child.kind_id() {
+                    kind::COMMENT => parse_directive(&get_raw(child, context.rope)),
+                    _ => None,
+                };
+
+                let maybe_prev = child.prev_sibling();
+                if enabled {
+                    match child.kind_id() {
+                        kind::COMMENT => {
+                            if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
+                                space(out);
+                            } else {
+                                newlines(out, child, maybe_prev);
+                            }
+                        }
+                        _ => {
+                            newlines(out, child, maybe_prev);
+                        }
                     }
-                    _ => {
-                        newlines(out, child, maybe_prev);
+                    fmt(out, cursor)
+                } else {
+                    if let Some(prev) = maybe_prev {
+                        out.push_str(
+                            &context
+                                .line_ending
+                                .repeat(child.start_position().row - prev.end_position().row),
+                        )
+                    }
+                    // we also want to format current directive comment
+                    if maybe_directive.is_some() {
+                        fmt(out, cursor)
+                    } else {
+                        fmt_raw(out, child)
                     }
                 }
-                fmt(out, cursor)
             })?;
+
             newline(out);
         }
         kind::REPEAT_STATEMENT => {
@@ -1095,10 +1116,94 @@ fn traverse(
 
             return Err(FormatError::UnknownKind {
                 kind: node.kind(),
-                raw: get_raw(node),
+                raw: get_raw(node, context.rope),
             });
         }
     };
 
     Ok(())
+}
+
+fn get_raw(node: Node, rope: &Rope) -> String {
+    rope.byte_slice(node.byte_range()).to_string()
+}
+
+fn field<'a>(node: Node<'a>, field_id: u16) -> Result<Node<'a>, FormatError> {
+    node.child_by_field_id(field_id)
+        .ok_or(FormatError::MissingField {
+            kind: node.kind(),
+            field: node
+                .language()
+                .field_name_for_id(field_id)
+                .unwrap_or("unknown"),
+        })
+}
+
+fn field_optional<'a>(node: Node<'a>, field_id: u16) -> Option<Node<'a>> {
+    node.child_by_field_id(field_id)
+}
+
+fn is_comment(maybe_node: Option<Node>) -> bool {
+    maybe_node.is_some_and(|node| node.kind_id() == kind::COMMENT)
+}
+
+fn same_line(a: Node, b: Node) -> bool {
+    end_position(a).row == b.start_position().row
+}
+
+// HACK: tree-sitter-r has wrong ending_position for extract with newlines before ths rhs:
+// it only includes the newline but not the rhs. this hack uses at least the correct end_position
+// see: https://github.com/users/felix-andreas/projects/5?pane=issue&itemId=100962575
+fn end_position(node: Node) -> tree_sitter::Point {
+    if node.kind_id() != kind::EXTRACT_OPERATOR {
+        return node.end_position();
+    }
+
+    field_optional(node, field::RHS)
+        .map(|rhs| rhs.end_position())
+        .or_else(|| field_optional(node, field::OPERATOR).map(|operator| operator.end_position()))
+        // note: this case is unexpected
+        .unwrap_or_else(|| node.end_position())
+}
+
+fn parse_directive(text: &str) -> Option<Directive> {
+    text.trim_start_matches(|c: char| c.is_whitespace() || c == '#')
+        .strip_prefix("fmt:")
+        .and_then(|rhs| match rhs.trim() {
+            "skip" => Some(Directive::Skip),
+            "skip-file" => Some(Directive::SkipFile),
+            "skip file" => Some(Directive::SkipFile),
+            "on" => Some(Directive::On),
+            "off" => Some(Directive::Off),
+            _ => None,
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_directive_skip() {
+        assert_eq!(parse_directive("# fmt: skip"), Some(Directive::Skip));
+        assert_eq!(
+            parse_directive("# fmt: skip-file"),
+            Some(Directive::SkipFile)
+        );
+        assert_eq!(parse_directive("# fmt: on"), Some(Directive::On));
+        assert_eq!(parse_directive("# fmt: off"), Some(Directive::Off));
+
+        // check whitespace variations
+        assert_eq!(parse_directive("#fmt:skip"), Some(Directive::Skip));
+        assert_eq!(parse_directive("# fmt:skip "), Some(Directive::Skip));
+        assert_eq!(parse_directive(" # fmt: skip "), Some(Directive::Skip));
+    }
+
+    #[test]
+    fn parse_directive_none() {
+        assert_eq!(parse_directive("# fmt:unknown"), None);
+        assert_eq!(parse_directive("# something else"), None);
+        assert_eq!(parse_directive(""), None);
+        assert_eq!(parse_directive(""), None);
+    }
 }

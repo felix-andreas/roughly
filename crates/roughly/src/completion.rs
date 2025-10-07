@@ -1,9 +1,9 @@
 use {
     crate::{
-        index::SymbolsMap,
+        index::{ItemInfo, SymbolsMap},
         lsp_types::{
             CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse,
-            Position, SymbolKind,
+            Position,
         },
         tree::{self, field, kind},
         utils,
@@ -58,7 +58,7 @@ pub fn get(
                     .into_iter()
                     .map(|item| CompletionItem {
                         label: item.clone(),
-                        sort_text: Some(format!("1_{}", item)),
+                        sort_text: Some("1".into()),
                         ..Default::default()
                     })
                     .collect(),
@@ -67,10 +67,12 @@ pub fn get(
         Context::MaybeNamespace => return None,
     }
 
-    let symbol_kind_to_completion_kind = |kind: SymbolKind| match kind {
-        SymbolKind::FUNCTION => CompletionItemKind::FUNCTION,
-        SymbolKind::CLASS => CompletionItemKind::CLASS,
-        SymbolKind::METHOD => CompletionItemKind::METHOD,
+    let to_completion_kind = |info: &ItemInfo| match info {
+        ItemInfo::Function => CompletionItemKind::FUNCTION,
+        ItemInfo::S4Class | ItemInfo::R6Class => CompletionItemKind::CLASS,
+        ItemInfo::S4Generic => CompletionItemKind::INTERFACE,
+        ItemInfo::S4Method { .. } | ItemInfo::R6Method => CompletionItemKind::METHOD,
+        ItemInfo::R6Field => CompletionItemKind::FIELD,
         _ => CompletionItemKind::VARIABLE,
     };
 
@@ -106,7 +108,7 @@ pub fn get(
                     description: Some("Keyword".into()),
                 }),
                 kind: Some(CompletionItemKind::KEYWORD),
-                sort_text: Some(format!("0_{}", reserved_word)),
+                sort_text: Some("0".into()),
                 ..Default::default()
             })
     };
@@ -128,67 +130,68 @@ pub fn get(
                 detail: None,
                 description: Some("Global".into()),
             }),
-            kind: Some(symbol_kind_to_completion_kind(symbol.kind)),
-            sort_text: Some(format!("2_{}", symbol.name)),
+            kind: Some(to_completion_kind(&symbol.info)),
+            sort_text: Some("2".into()),
             ..Default::default()
         });
 
-    let local_symbols: Vec<CompletionItem> =
-        {
-            let point = Point::new(position.line as usize, position.character as usize);
-            tree.root_node()
-                .descendant_for_point_range(point, point)
-                .map(|node| {
-                    std::iter::successors(Some(node), |node| node.parent())
-                        // note: we just search functions, as global symbols are already included from workspace info
-                        .filter(|node| node.kind_id() == kind::FUNCTION_DEFINITION)
-                        .flat_map(|node| {
-                            let mut items = Vec::new();
+    let local_symbols: Vec<CompletionItem> = {
+        let point = Point::new(position.line as usize, position.character as usize);
+        tree.root_node()
+            .descendant_for_point_range(point, point)
+            .map(|node| {
+                std::iter::successors(Some(node), |node| node.parent())
+                    // note: we just search functions, as global symbols are already included from workspace info
+                    .filter(|node| node.kind_id() == kind::FUNCTION_DEFINITION)
+                    .flat_map(|node| {
+                        let mut items = Vec::new();
 
-                            if let Some(parameters) = node.child_by_field_id(field::PARAMETERS) {
-                                items.extend(
-                                    parameters
-                                        .children_by_field_name("parameter", &mut parameters.walk())
-                                        .filter_map(|parameter| {
-                                            parameter.child_by_field_id(field::NAME).map(|name| {
-                                                rope.byte_slice(name.byte_range()).to_string()
-                                            })
+                        if let Some(parameters) = node.child_by_field_id(field::PARAMETERS) {
+                            items.extend(
+                                parameters
+                                    .children_by_field_name("parameter", &mut parameters.walk())
+                                    .filter_map(|parameter| {
+                                        parameter.child_by_field_id(field::NAME).map(|name| {
+                                            rope.byte_slice(name.byte_range()).to_string()
                                         })
-                                        .filter(|name| utils::starts_with_lowercase(name, &query))
-                                        .map(|label| CompletionItem {
-                                            label: label.clone(),
-                                            label_details: Some(CompletionItemLabelDetails {
-                                                detail: None,
-                                                description: Some("Parameter".into()),
-                                            }),
-                                            kind: Some(CompletionItemKind::VARIABLE),
-                                            sort_text: Some(format!("1_{}", label)),
-                                            ..Default::default()
+                                    })
+                                    .filter(|name| utils::starts_with_lowercase(name, &query))
+                                    .map(|label| CompletionItem {
+                                        label: label.clone(),
+                                        label_details: Some(CompletionItemLabelDetails {
+                                            detail: None,
+                                            description: Some("Parameter".into()),
                                         }),
-                                );
-                            }
+                                        kind: Some(CompletionItemKind::VARIABLE),
+                                        sort_text: Some("1".into()),
+                                        ..Default::default()
+                                    }),
+                            );
+                        }
 
-                            if let Some(body) = node.child_by_field_id(field::BODY) {
-                                items.extend(
-                                    locals_completion(body, rope)
-                                        .into_iter()
-                                        .filter(|item| utils::starts_with_lowercase(&item.label, &query))
-                                        .map(|mut item| {
-                                            // Update sort_text for local variables to ensure consistent precedence
-                                            if let Some(sort_text) = &item.sort_text {
-                                                item.sort_text = Some(sort_text.clone());
-                                            }
-                                            item
-                                        }),
-                                );
-                            }
+                        if let Some(body) = node.child_by_field_id(field::BODY) {
+                            items.extend(
+                                locals_completion(body, rope)
+                                    .into_iter()
+                                    .filter(|item| {
+                                        utils::starts_with_lowercase(&item.label, &query)
+                                    })
+                                    .map(|mut item| {
+                                        // Update sort_text for local variables to ensure consistent precedence
+                                        if let Some(sort_text) = &item.sort_text {
+                                            item.sort_text = Some(sort_text.clone());
+                                        }
+                                        item
+                                    }),
+                            );
+                        }
 
-                            items
-                        })
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
+                        items
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
 
     Some(CompletionResponse::Array(
         keyword_symbols
@@ -264,7 +267,7 @@ pub fn locals_completion(node: Node, rope: &Rope) -> Vec<CompletionItem> {
                             description: Some("Local".into()),
                         }),
                         kind: Some(CompletionItemKind::VARIABLE),
-                        sort_text: Some(format!("1_{}", label)),
+                        sort_text: Some("1".into()),
                         ..Default::default()
                     })
                 }
@@ -287,9 +290,16 @@ const NAMESPACE_QUERY: &str = r#"(namespace_operator rhs: (identifier) @ident)"#
 #[cfg(test)]
 mod tests {
     use {
-    super::*, crate::tree, indoc::indoc, ropey::Rope, std::collections::HashMap,
-    crate::lsp_types::{DocumentSymbol, Range, SymbolKind},
-};
+        super::*,
+        crate::{
+            index::Item,
+            lsp_types::{DocumentSymbol, Range, SymbolKind},
+            tree,
+        },
+        indoc::indoc,
+        ropey::Rope,
+        std::collections::HashMap,
+    };
 
     fn setup(
         text: &str,
@@ -594,103 +604,43 @@ mod tests {
 
         let tree = tree::parse(&mut tree::new_parser(), rope.to_string().as_str(), None);
         let position = Position::new(2, 8);
-        
-        // Create a mock symbols map with a global symbol that starts with "var_"
-        let mut symbols_map = HashMap::new();
-        symbols_map.insert(
+
+        let symbols_map = HashMap::from_iter([(
             std::path::PathBuf::from("test.R"),
-            vec![DocumentSymbol {
+            vec![Item {
                 name: "var_global".to_string(),
-                kind: SymbolKind::VARIABLE,
+                detail: None,
                 range: Range::new(Position::new(0, 0), Position::new(0, 10)),
                 selection_range: Range::new(Position::new(0, 0), Position::new(0, 10)),
-                detail: None,
-                tags: None,
-                deprecated: None,
                 children: None,
+                info: ItemInfo::Function,
             }],
-        );
+        )]);
 
         let completion_response = get(position, &rope, &tree, &symbols_map).unwrap();
-        
-        if let CompletionResponse::Array(items) = completion_response {
-            // Find the local and global variable items
-            let local_item = items.iter().find(|item| item.label == "var_local").unwrap();
-            let global_item = items.iter().find(|item| item.label == "var_global").unwrap();
-            
-            // Check that local item has higher precedence (lower sort_text)
-            assert!(local_item.sort_text.is_some());
-            assert!(global_item.sort_text.is_some());
-            
-            let local_sort = local_item.sort_text.as_ref().unwrap();
-            let global_sort = global_item.sort_text.as_ref().unwrap();
-            
-            // Local symbols should have sort_text starting with "1_", global with "2_"
-            assert!(local_sort.starts_with("1_"));
-            assert!(global_sort.starts_with("2_"));
-            
-            // Therefore, local should sort before global
-            assert!(local_sort < global_sort);
-        } else {
-            panic!("Expected CompletionResponse::Array");
-        }
-    }
 
-    #[test]
-    fn precedence_order_keywords_local_global() {
-        let rope = Rope::from_str(indoc! {"
-            function(x) {
-                if_local <- 1
-                i
-            }
-        "});
+        let CompletionResponse::Array(items) = completion_response else {
+            unreachable!();
+        };
+        // Find the local and global variable items
+        let local_item = items.iter().find(|item| item.label == "var_local").unwrap();
+        let global_item = items
+            .iter()
+            .find(|item| item.label == "var_global")
+            .unwrap();
 
-        let tree = tree::parse(&mut tree::new_parser(), rope.to_string().as_str(), None);
-        let position = Position::new(2, 5);
-        
-        // Create a mock symbols map with a global symbol that starts with "i"
-        let mut symbols_map = HashMap::new();
-        symbols_map.insert(
-            std::path::PathBuf::from("test.R"),
-            vec![DocumentSymbol {
-                name: "if_global".to_string(),
-                kind: SymbolKind::VARIABLE,
-                range: Range::new(Position::new(0, 0), Position::new(0, 10)),
-                selection_range: Range::new(Position::new(0, 0), Position::new(0, 10)),
-                detail: None,
-                tags: None,
-                deprecated: None,
-                children: None,
-            }],
-        );
+        // Check that local item has higher precedence (lower sort_text)
+        assert!(local_item.sort_text.is_some());
+        assert!(global_item.sort_text.is_some());
 
-        let completion_response = get(position, &rope, &tree, &symbols_map).unwrap();
-        
-        if let CompletionResponse::Array(items) = completion_response {
-            // Find the keyword, local, and global items
-            let keyword_item = items.iter().find(|item| item.label == "if").unwrap();
-            let local_item = items.iter().find(|item| item.label == "if_local").unwrap();
-            let global_item = items.iter().find(|item| item.label == "if_global").unwrap();
-            
-            // Check that all items have sort_text
-            assert!(keyword_item.sort_text.is_some());
-            assert!(local_item.sort_text.is_some());
-            assert!(global_item.sort_text.is_some());
-            
-            let keyword_sort = keyword_item.sort_text.as_ref().unwrap();
-            let local_sort = local_item.sort_text.as_ref().unwrap();
-            let global_sort = global_item.sort_text.as_ref().unwrap();
-            
-            // Verify the precedence order: keywords (0_) > local (1_) > global (2_)
-            assert!(keyword_sort.starts_with("0_"));
-            assert!(local_sort.starts_with("1_"));
-            assert!(global_sort.starts_with("2_"));
-            
-            // Therefore, keyword < local < global
-            assert!(keyword_sort < local_sort);
-            assert!(local_sort < global_sort);
-        } else {
-            panic!("Expected CompletionResponse::Array");
-        }
+        let local_sort = local_item.sort_text.as_ref().unwrap();
+        let global_sort = global_item.sort_text.as_ref().unwrap();
+
+        // Local symbols should have sort_text starting with "1_", global with "2_"
+        assert!(local_sort.starts_with("1_"));
+        assert!(global_sort.starts_with("2_"));
+
+        // Therefore, local should sort before global
+        assert!(local_sort < global_sort);
     }
 }

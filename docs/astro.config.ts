@@ -1,7 +1,7 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
-import tailwind from '@astrojs/tailwind';
+import tailwind from '@tailwindcss/vite';
 import starlightThemeBlack from 'starlight-theme-black'
 
 // https://astro.build/config
@@ -14,9 +14,10 @@ export default defineConfig({
 				replacesTitle: true,
 			},
 			favicon: '/favicon.svg',
-			social: {
-				github: 'https://github.com/felix-andreas/roughly',
-			},
+			social: [
+				{ label: "Visual Studio Marketplace", icon: "vscode", href: 'https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly' },
+				{ label: "GitHub", icon: "github", href: 'https://github.com/felix-andreas/roughly' },
+			],
 			sidebar: [
 				{
 					label: 'Roughly',
@@ -60,6 +61,8 @@ export default defineConfig({
 				})
 			],
 		}),
-		tailwind({ applyBaseStyles: false }),
 	],
+	vite: {
+		plugins: [tailwind()],
+	},
 });

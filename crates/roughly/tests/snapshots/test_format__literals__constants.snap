@@ -1,0 +1,13 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+TRUE
+FALSE
+NULL
+Inf
+NaN
+NA
+NA_real_
+NA_character_
+NA_complex_

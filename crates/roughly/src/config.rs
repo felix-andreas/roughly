@@ -90,10 +90,10 @@ impl ConfigToml {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ExperimentalFeatures {
-    pub goto_definition: bool,
+    pub goto_references: bool,
     pub range_formatting: bool,
-    pub unused: bool,
     pub rename: bool,
+    pub unused: bool,
 }
 
 #[cfg(test)]
@@ -123,8 +123,8 @@ mod tests {
     #[test]
     fn backwards_compatability() {
         let toml = indoc! {r#"
-            case = "snake_case" # should override format.indent-width
-            spaces = 6          # should override lint.naming-style
+            case = "snake_case" # should override lint.naming-style
+            spaces = 6          # should override format.indent-width
 
             [format]
             indent-width = 4

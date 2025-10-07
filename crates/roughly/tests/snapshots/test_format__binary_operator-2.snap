@@ -1,5 +1,0 @@
----
-source: src/format.rs
-expression: "fmt(indoc! { r#\"\n            1:10\n        \"# })"
----
-1:10

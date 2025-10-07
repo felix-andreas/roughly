@@ -1,7 +1,0 @@
----
-source: crates/roughly/tests/test_format.rs
-expression: "format_str(indoc! {r#\"\n        { expr # comment\n        }\n    \"#}).unwrap()"
----
-{
-  expr # comment
-}

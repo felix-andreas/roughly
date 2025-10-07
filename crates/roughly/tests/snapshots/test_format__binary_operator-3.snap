@@ -1,5 +1,0 @@
----
-source: src/format.rs
-expression: "fmt(indoc! { r#\"\n            x<-1\n        \"# })"
----
-x <- 1

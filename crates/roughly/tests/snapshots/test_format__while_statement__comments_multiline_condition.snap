@@ -1,0 +1,10 @@
+---
+source: crates/roughly/tests/test_format.rs
+expression: code
+---
+while (
+  # 1
+  x && # x
+    y # y
+  # 2
+) {}
