@@ -57,7 +57,7 @@ pub fn get(
                 completions
                     .into_iter()
                     .map(|item| CompletionItem {
-                        label: item.clone(),
+                        label: item,
                         sort_text: Some("1".into()),
                         ..Default::default()
                     })
@@ -157,7 +157,7 @@ pub fn get(
                                     })
                                     .filter(|name| utils::starts_with_lowercase(name, &query))
                                     .map(|label| CompletionItem {
-                                        label: label.clone(),
+                                        label,
                                         label_details: Some(CompletionItemLabelDetails {
                                             detail: None,
                                             description: Some("Parameter".into()),
@@ -175,13 +175,6 @@ pub fn get(
                                     .into_iter()
                                     .filter(|item| {
                                         utils::starts_with_lowercase(&item.label, &query)
-                                    })
-                                    .map(|mut item| {
-                                        // Update sort_text for local variables to ensure consistent precedence
-                                        if let Some(sort_text) = &item.sort_text {
-                                            item.sort_text = Some(sort_text.clone());
-                                        }
-                                        item
                                     }),
                             );
                         }
@@ -259,9 +252,8 @@ pub fn locals_completion(node: Node, rope: &Rope) -> Vec<CompletionItem> {
                     && maybe_op
                         .is_some_and(|op| [kind::EQUAL, kind::LEFT_ASSIGN].contains(&op.kind_id()))
                 {
-                    let label = rope.byte_slice(lhs.byte_range()).to_string();
                     symbols.push(CompletionItem {
-                        label: label.clone(),
+                        label: rope.byte_slice(lhs.byte_range()).to_string(),
                         label_details: Some(CompletionItemLabelDetails {
                             detail: None,
                             description: Some("Local".into()),
