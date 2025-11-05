@@ -265,7 +265,7 @@ fn traverse(
                     match chars.next() {
                         Some(' ') | None => out.push_str(raw),
                         // avoid formatting #'string'
-                        Some(_) if char == '\'' && chars.clone().contains(&'\'') => {
+                        Some(_) if char == '\'' && chars.clone().any(|c| c == '\'') => {
                             out.push_str(raw);
                         }
                         Some(other) => {
