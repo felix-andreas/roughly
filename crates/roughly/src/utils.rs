@@ -10,12 +10,27 @@ pub fn starts_with_lowercase(name: &str, query: &str) -> bool {
         return true;
     }
     
-    // Use case-insensitive comparison without allocating two strings
-    name.len() >= query.len()
-        && name
-            .chars()
-            .zip(query.chars())
-            .all(|(a, b)| a.to_lowercase().eq(b.to_lowercase()))
+    // Use case-insensitive comparison without allocating strings
+    // This handles Unicode correctly while being more efficient than allocating
+    let mut name_chars = name.chars();
+    let mut query_chars = query.chars();
+    
+    loop {
+        match (query_chars.next(), name_chars.next()) {
+            (None, _) => return true,  // Consumed all of query, so name starts with query
+            (Some(_), None) => return false,  // Query is longer than name
+            (Some(q), Some(n)) => {
+                // Use eq_ignore_ascii_case for ASCII fast path, fall back to Unicode for others
+                if q.is_ascii() && n.is_ascii() {
+                    if !q.eq_ignore_ascii_case(&n) {
+                        return false;
+                    }
+                } else if !q.to_lowercase().eq(n.to_lowercase()) {
+                    return false;
+                }
+            }
+        }
+    }
 }
 
 pub fn read_to_rope(path: impl AsRef<Path>) -> std::io::Result<Rope> {
