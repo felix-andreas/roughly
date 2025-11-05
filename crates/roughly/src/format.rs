@@ -91,15 +91,13 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
         LineEnding::CrLf => "\r\n",
     };
 
+    let base_indent = " ".repeat(config.indent_width);
     let mut buffer = String::with_capacity(rope.len_bytes() * 3 / 2);
+    let context = Context::new(rope, &base_indent, line_ending);
     traverse(
         &mut buffer,
         &mut node.walk(),
-        Context {
-            rope,
-            indent: &" ".repeat(config.indent_width),
-            line_ending,
-        },
+        &context,
         0,
         false,
     )?;
@@ -115,11 +113,39 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
     Ok(buffer)
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 struct Context<'a> {
     rope: &'a Rope,
     indent: &'a str,
     line_ending: &'static str,
+    // Pre-computed indentation strings for common nesting levels (0-10)
+    indent_cache: Vec<String>,
+}
+
+impl<'a> Context<'a> {
+    fn new(rope: &'a Rope, indent: &'a str, line_ending: &'static str) -> Self {
+        // Pre-compute indentation strings for levels 0 through 10
+        let mut indent_cache = vec![String::new()];
+        for i in 1..=10 {
+            indent_cache.push(indent.repeat(i));
+        }
+        
+        Context {
+            rope,
+            indent,
+            line_ending,
+            indent_cache,
+        }
+    }
+    
+    #[inline]
+    fn get_indent(&self, level: usize) -> String {
+        if level < self.indent_cache.len() {
+            self.indent_cache[level].clone()
+        } else {
+            self.indent.repeat(level)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,7 +159,7 @@ enum Directive {
 fn traverse(
     out: &mut String,
     cursor: &mut TreeCursor,
-    context: Context,
+    context: &Context,
     level: usize,
     make_multiline: bool,
 ) -> Result<(), FormatError> {
@@ -141,13 +167,13 @@ fn traverse(
     let indent = |out: &mut String| out.push_str(context.indent);
     let newline = |out: &mut String| {
         out.push_str(context.line_ending);
-        out.push_str(&context.indent.repeat(level));
+        out.push_str(&context.get_indent(level));
     };
     let newlines = |out: &mut String, node: Node, maybe_prev: Option<Node>| {
         out.push_str(&context.line_ending.repeat(maybe_prev.map_or(0, |prev| {
             usize::clamp(node.start_position().row - prev.end_position().row, 1, 2)
         })));
-        out.push_str(&context.indent.repeat(level));
+        out.push_str(&context.get_indent(level));
     };
 
     let fmt_with =
@@ -256,7 +282,7 @@ fn traverse(
                 Some(other) => {
                     out.push_str("# ");
                     out.push(other);
-                    out.push_str(&chars.collect::<String>());
+                    out.extend(chars);
                 }
             }
         }

@@ -194,7 +194,8 @@ fn traverse<'a>(
 
             let params = field(node, "parameters")?;
 
-            for param in params.children_by_field_name("parameter", &mut cursor.clone()) {
+            let mut param_cursor = params.walk();
+            for param in params.children_by_field_name("parameter", &mut param_cursor) {
                 let name = field(param, "name")?;
                 if name.kind() == "identifier" {
                     let raw = rope.byte_slice(name.byte_range()).to_string();
