@@ -24,7 +24,7 @@ use {
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
         client_monitor::ClientProcessMonitorLayer,
         concurrency::ConcurrencyLayer,
-        lsp_types::{GotoDefinitionParams, GotoDefinitionResponse},
+        lsp_types::{DidChangeConfigurationParams, GotoDefinitionParams, GotoDefinitionResponse},
         panic::CatchUnwindLayer,
         router::Router,
         server::LifecycleLayer,
@@ -414,6 +414,14 @@ impl LanguageServer for ServerState {
             }
         }
 
+        ControlFlow::Continue(())
+    }
+
+    fn did_change_configuration(
+        &mut self,
+        _params: DidChangeConfigurationParams,
+    ) -> ControlFlow<async_lsp::Result<()>> {
+        // only implemented for zed
         ControlFlow::Continue(())
     }
 

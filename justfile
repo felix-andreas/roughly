@@ -63,8 +63,9 @@ bump-version $version:
 	#!/usr/bin/env bash
 	set -euo pipefail
 
-	sed -i 's/"version": "[a-zA-Z0-9._-]*"/"version": "{{version}}"/' editors/code/package.json
 	sed -i 's/^version = "[a-zA-Z0-9._-]*"/version = "{{version}}"/' Cargo.toml
+	sed -i 's/"version": "[a-zA-Z0-9._-]*"/"version": "{{version}}"/' editors/code/package.json
+	sed -i 's/^version = "[a-zA-Z0-9._-]*"/version = "{{version}}"/' editors/zed/extension.toml
 	cargo check # bonus: also updates version in lock file
 	git add editors/code/package.json Cargo.toml Cargo.lock
 	git commit -m "chore: Release v{{version}}"
@@ -93,31 +94,39 @@ release $version $kind:
 	#!/usr/bin/env bash
 	set -euo pipefail
 
-	mkdir -p release
-	rm -rf release/$version
-	mkdir -p release/$version
+	dir=release/$version
 
-	# build server
+	mkdir -p release
+	rm -rf $dir
+	mkdir -p $dir
+
+	# build server (x86_64-unknown-linux-gnu)
 	just build-linux
+	mkdir -p $dir/roughly-x86_64-unknown-linux-gnu
+	cp target/x86_64-unknown-linux-gnu/release/roughly $dir/roughly-x86_64-unknown-linux-gnu/roughly
+	tar -czf $dir/roughly-x86_64-unknown-linux-gnu.tar.gz -C $dir/roughly-x86_64-unknown-linux-gnu roughly
+
+	# build server (x86_64-pc-windows-gnu)
 	just build-windows
-	cp target/x86_64-unknown-linux-gnu/release/roughly release/$version/roughly
-	cp target/x86_64-pc-windows-gnu/release/roughly.exe release/$version/roughly.exe
+	mkdir -p $dir/roughly-x86_64-pc-windows-gnu
+	cp target/x86_64-pc-windows-gnu/release/roughly.exe $dir/roughly-x86_64-pc-windows-gnu/roughly.exe
+	zip -j $dir/roughly-x86_64-pc-windows-gnu.zip $dir/roughly-x86_64-pc-windows-gnu/roughly.exe
 
 	# build vscode extension (client only)
 	rm -rf editors/code/bin
-	just build-extension $kind --out ../../release/$version/roughly.vsix
+	just build-extension $kind --out ../../$dir/roughly.vsix
 
 	# build vscode extension (linux-x64)
 	rm -rf editors/code/bin
 	mkdir -p editors/code/bin
-	cp release/$version/roughly editors/code/bin
-	just build-extension $kind --target linux-x64 --out ../../release/$version/roughly-linux-x64.vsix
+	cp $dir/roughly-x86_64-unknown-linux-gnu/roughly editors/code/bin
+	just build-extension $kind --target linux-x64 --out ../../$dir/roughly-linux-x64.vsix
 
 	# build vscode extension (win32-x64)
 	rm -rf editors/code/bin
 	mkdir -p editors/code/bin
-	cp release/$version/roughly.exe editors/code/bin
-	just build-extension $kind --target win32-x64 --out ../../release/$version/roughly-win32-x64.vsix
+	cp $dir/roughly.exe editors/code/bin
+	just build-extension $kind --target win32-x64 --out ../../$dir/roughly-win32-x64.vsix
 
 publish-github $version:
 	#!/usr/bin/env bash
@@ -125,18 +134,17 @@ publish-github $version:
 
 	git push
 	gh release create $version \
-		"release/$version/roughly#Roughly CLI (linux-x64)" \
-		"release/$version/roughly.exe#Roughly CLI (win32-x64)" \
+		"release/$version/roughly-x86_64-unknown-linux-gnu.tar.gz#Roughly CLI (linux-x64)" \
+		"release/$version/roughly-x86_64-pc-windows-gnu.zip#Roughly CLI (win32-x64)" \
 		"release/$version/roughly.vsix#VS Code extension (client only)" \
 		"release/$version/roughly-linux-x64.vsix#VS Code extension (linux-x64)" \
 		"release/$version/roughly-win32-x64.vsix#VS Code extension (win32-x64)" \
-		--notes "" \
-		--prerelease
+		--notes ""
 
 publish-github-update $version:
 	gh release upload $version \
-		"release/$version/roughly#Roughly CLI (linux-x64)" \
-		"release/$version/roughly.exe#Roughly CLI (win32-x64)" \
+		"release/$version/roughly-x86_64-unknown-linux-gnu.tar.gz#Roughly CLI (linux-x64)" \
+		"release/$version/roughly-x86_64-pc-windows-gnu.zip#Roughly CLI (win32-x64)" \
 		"release/$version/roughly.vsix#VS Code extension (client only)" \
 		"release/$version/roughly-linux-x64.vsix#VS Code extension (linux-x64)" \
 		"release/$version/roughly-win32-x64.vsix#VS Code extension (win32-x64)" \

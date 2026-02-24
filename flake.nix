@@ -33,7 +33,10 @@
         rpkgs =
           pkgs: with pkgs.rPackages; [
             renv
+            # pak
             devtools
+            # rextendr
+            # usethis
           ];
       };
       devShells = self.lib.eachSystem (system: {
@@ -49,7 +52,7 @@
             buildInputs = [ pkgs.bashInteractive ];
             depsBuildBuild = [
               pkgsWin64.stdenv.cc
-              pkgsWin64.windows.pthreads
+              # pkgsWin64.windows.pthreads # disabled because of nix error
             ];
             # TODO: we need to link R for rofy
             # nativeBuildInputs = [
@@ -83,8 +86,13 @@
               cargo-insta
               bun
               tree-sitter
+              # for releasing
+              zip
               # libs
               # pkg-config
+              # used for std
+              # openssl
+              # zlib
             ];
             # env = [
             #   {
