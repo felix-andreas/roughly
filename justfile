@@ -67,7 +67,7 @@ bump-version $version:
 	sed -i 's/"version": "[a-zA-Z0-9._-]*"/"version": "{{version}}"/' editors/code/package.json
 	sed -i 's/^version = "[a-zA-Z0-9._-]*"/version = "{{version}}"/' editors/zed/extension.toml
 	cargo check # bonus: also updates version in lock file
-	git add editors/code/package.json Cargo.toml Cargo.lock
+	git add editors/code/package.json editors/zed/extension.toml Cargo.toml Cargo.lock
 	git commit -m "chore: Release v{{version}}"
 
 publish $version $kind:
@@ -125,7 +125,7 @@ release $version $kind:
 	# build vscode extension (win32-x64)
 	rm -rf editors/code/bin
 	mkdir -p editors/code/bin
-	cp $dir/roughly.exe editors/code/bin
+	cp $dir/roughly-x86_64-pc-windows-gnu/roughly.exe editors/code/bin
 	just build-extension $kind --target win32-x64 --out ../../$dir/roughly-win32-x64.vsix
 
 publish-github $version:

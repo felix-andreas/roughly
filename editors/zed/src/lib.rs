@@ -83,7 +83,7 @@ impl Extension {
             os = match platform {
                 Os::Mac => "apple-darwin",
                 Os::Linux => "unknown-linux-gnu",
-                Os::Windows => "pc-windows-msvc",
+                Os::Windows => "pc-windows-gnu",
             },
             ext = match platform {
                 Os::Mac | Os::Linux => "tar.gz",

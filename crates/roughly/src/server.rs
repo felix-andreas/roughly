@@ -421,7 +421,7 @@ impl LanguageServer for ServerState {
         &mut self,
         _params: DidChangeConfigurationParams,
     ) -> ControlFlow<async_lsp::Result<()>> {
-        // only implemented for zed
+        // Stub implementation to satisfy Zed's requirements; does not apply any configuration changes.
         ControlFlow::Continue(())
     }
 
