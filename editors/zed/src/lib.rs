@@ -38,7 +38,7 @@ impl Extension {
             .ok()
             .and_then(|lsp_settings| lsp_settings.binary)
         {
-            args = dbg!(settings.arguments);
+            args = settings.arguments;
             if let Some(path) = settings.path {
                 return Ok(Binary { path, args });
             }
@@ -148,11 +148,9 @@ impl zed::Extension for Extension {
         let binary = self.language_server_binary(language_server_id, worktree)?;
         Ok(Command {
             command: binary.path,
-            args: dbg!(
-                binary
-                    .args
-                    .unwrap_or_else(|| vec!["server".to_string(), "--stdio".to_string()])
-            ),
+            args: binary
+                .args
+                .unwrap_or_else(|| vec!["server".to_string(), "--stdio".to_string()]),
             env: Default::default(),
         })
     }
