@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/roughly", "crates/rofy", "crates/typing"]
+members = ["crates/*", "editors/zed"]
 default-members = ["crates/roughly"]
 
 [workspace.package]

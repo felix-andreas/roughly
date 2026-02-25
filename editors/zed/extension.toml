@@ -1,0 +1,11 @@
+id = "roughly"
+name = "Roughly"
+version = "0.0.1"
+schema_version = 1
+authors = ["Felix Andreas"]
+description = "An R language server and code formatter, written in Rust."
+repository = "https://github.com/felix-andreas/roughly"
+
+[language_servers.roughly]
+name = "Roughly"
+language = "R"
