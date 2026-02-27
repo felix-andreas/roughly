@@ -9,7 +9,7 @@
 
 An extremely fast R language server and code formatter, written in Rust.
 <br />
-[Docs](https://roughly.felixandreas.me) · [Releases](https://github.com/felix-andreas/roughly/releases) · [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
+[Docs](https://roughly.felixandreas.me) · [Releases](https://github.com/felix-andreas/roughly/releases) · [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly) · [Zed Extension](https://zed.dev/extensions/roughly)
 
 </div>
 
@@ -149,6 +149,10 @@ You can access Roughly-specific commands in VS Code via the Command Palette (<kb
 - **Roughly: Start/Stop/Restart Server**
 - **Roughly: Format workspace** (⚠️ missing)
 - **Roughly: Show syntax tree** (⚠️ missing)
+
+## Zed Extension
+
+Install the extension from the [Zed Extension Gallery](https://zed.dev/extensions/roughly).
 
 ## RStudio Integration
 
