@@ -7,6 +7,7 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    crane.url = "github:ipetkov/crane";
   };
 
   outputs =
@@ -16,6 +17,7 @@
       nixpkgs,
       devshell,
       rust-overlay,
+      crane,
     }:
     {
       lib = {
@@ -38,7 +40,90 @@
             # rextendr
             # usethis
           ];
+        rustToolchain =
+          pkgs:
+          pkgs.rust-bin.selectLatestNightlyWith (
+            toolchain:
+            toolchain.default.override {
+              targets = [
+                "x86_64-unknown-linux-gnu"
+                "x86_64-pc-windows-gnu"
+              ];
+              extensions = [
+                "rust-src"
+                "rust-analyzer"
+              ];
+            }
+          );
       };
+
+      packages = self.lib.eachSystem (
+        system:
+        let
+          pkgs = self.lib.makePkgs system nixpkgs;
+          pkgsWin64 = pkgs.pkgsCross.mingwW64;
+          rustToolchain = self.lib.rustToolchain pkgs;
+
+          craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+          src = craneLib.cleanCargoSource ./.;
+
+          commonArgs = {
+            inherit src;
+            pname = "roughly";
+            strictDeps = true;
+            cargoExtraArgs = "-p roughly";
+          };
+
+          commonArgsLinux = commonArgs // {
+            CARGO_BUILD_TARGET = "x86_64-unknown-linux-gnu";
+          };
+
+          cargoArtifactsLinux = craneLib.buildDepsOnly commonArgsLinux;
+
+          commonArgsWindows = commonArgs // {
+            CARGO_BUILD_TARGET = "x86_64-pc-windows-gnu";
+
+            depsBuildBuild = [
+              pkgsWin64.stdenv.cc
+            ];
+
+            # C compiler for the `cc` crate (tree-sitter) and linker for
+            # the target triple.
+            TARGET_CC = "${pkgsWin64.stdenv.cc}/bin/${pkgsWin64.stdenv.cc.targetPrefix}cc";
+            CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "${pkgsWin64.stdenv.cc}/bin/${pkgsWin64.stdenv.cc.targetPrefix}cc";
+
+            # Make sure pthreads can be found when linking.
+            CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS = "-L native=${pkgsWin64.windows.pthreads}/lib";
+
+            # Host C compiler (needed by build scripts that run on the
+            # build machine).
+            HOST_CC = "${pkgs.stdenv.cc}/bin/cc";
+
+            # We can't execute Windows binaries on Linux.
+            doCheck = false;
+          };
+
+          cargoArtifactsWindows = craneLib.buildDepsOnly commonArgsWindows;
+        in
+        {
+          default = self.packages.${system}.roughly-linux-x86_64;
+
+          roughly-linux-x86_64 = craneLib.buildPackage (
+            commonArgsLinux
+            // {
+              cargoArtifacts = cargoArtifactsLinux;
+            }
+          );
+
+          roughly-windows-x86_64 = craneLib.buildPackage (
+            commonArgsWindows
+            // {
+              cargoArtifacts = cargoArtifactsWindows;
+            }
+          );
+        }
+      );
+
       devShells = self.lib.eachSystem (system: {
         default =
           let
@@ -74,16 +159,7 @@
               })
               gnumake
               evcxr
-              (pkgs.rust-bin.selectLatestNightlyWith (
-                toolchain:
-                toolchain.default.override {
-                  targets = [ "x86_64-pc-windows-gnu" ];
-                  extensions = [
-                    "rust-src"
-                    "rust-analyzer"
-                  ];
-                }
-              ))
+              (self.lib.rustToolchain pkgs)
               cargo-edit
               cargo-insta
               bun
