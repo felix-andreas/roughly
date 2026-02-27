@@ -52,7 +52,7 @@
             buildInputs = [ pkgs.bashInteractive ];
             depsBuildBuild = [
               pkgsWin64.stdenv.cc
-              # pkgsWin64.windows.pthreads # disabled because of nix error
+              # pkgsWin64.windows.mingw_w64_pthreads # disabled because of nix error
             ];
             # TODO: we need to link R for rofy
             # nativeBuildInputs = [
@@ -64,6 +64,8 @@
             # TODO: fixes issue undefined reference to `ts_node_end_byte' in tree-sitter
             # maybe we want a separate derivation to build for windows??
             TARGET_CC = "${pkgsWin64.stdenv.cc}/bin/${pkgsWin64.stdenv.cc.targetPrefix}cc";
+            # from here https://github.com/NixOS/nixpkgs/pull/457066/changes
+            RUSTFLAGS = "-L native=${pkgsWin64.windows.pthreads}/lib";
             packages = with pkgs; [
               just
               (radianWrapper.override {

@@ -67,7 +67,7 @@ bump-version $version:
 	sed -i 's/"version": "[a-zA-Z0-9._-]*"/"version": "{{version}}"/' editors/code/package.json
 	sed -i 's/^version = "[a-zA-Z0-9._-]*"/version = "{{version}}"/' editors/zed/extension.toml
 	cargo check # bonus: also updates version in lock file
-	git add editors/code/package.json editors/zed/extension.toml Cargo.toml Cargo.lock
+	git add Cargo.toml Cargo.lock editors/code/package.json editors/zed/extension.toml
 	git commit -m "chore: Release v{{version}}"
 
 publish $version $kind:
@@ -99,6 +99,9 @@ release $version $kind:
 	mkdir -p release
 	rm -rf $dir
 	mkdir -p $dir
+	
+	# check (e.g. to test if zed extension works)
+	cargo check
 
 	# build server (x86_64-unknown-linux-gnu)
 	just build-linux
