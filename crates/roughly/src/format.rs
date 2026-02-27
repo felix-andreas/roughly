@@ -93,11 +93,14 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
 
     let base_indent = " ".repeat(config.indent_width);
     let mut buffer = String::with_capacity(rope.len_bytes() * 3 / 2);
-    let context = Context::new(rope, &base_indent, line_ending);
     traverse(
         &mut buffer,
         &mut node.walk(),
-        &context,
+        &Context {
+            rope,
+            indent: &base_indent,
+            line_ending,
+        },
         0,
         false,
     )?;
@@ -113,39 +116,11 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
     Ok(buffer)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct Context<'a> {
     rope: &'a Rope,
     indent: &'a str,
     line_ending: &'static str,
-    // Pre-computed indentation strings for common nesting levels (0-10)
-    indent_cache: Vec<String>,
-}
-
-impl<'a> Context<'a> {
-    fn new(rope: &'a Rope, indent: &'a str, line_ending: &'static str) -> Self {
-        // Pre-compute indentation strings for levels 0 through 10
-        let mut indent_cache = vec![String::new()];
-        for i in 1..=10 {
-            indent_cache.push(indent.repeat(i));
-        }
-        
-        Context {
-            rope,
-            indent,
-            line_ending,
-            indent_cache,
-        }
-    }
-    
-    #[inline]
-    fn get_indent(&self, level: usize) -> String {
-        if level < self.indent_cache.len() {
-            self.indent_cache[level].clone()
-        } else {
-            self.indent.repeat(level)
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,13 +142,20 @@ fn traverse(
     let indent = |out: &mut String| out.push_str(context.indent);
     let newline = |out: &mut String| {
         out.push_str(context.line_ending);
-        out.push_str(&context.get_indent(level));
+        for _ in 0..level {
+            out.push_str(context.indent);
+        }
     };
     let newlines = |out: &mut String, node: Node, maybe_prev: Option<Node>| {
-        out.push_str(&context.line_ending.repeat(maybe_prev.map_or(0, |prev| {
+        let count = maybe_prev.map_or(0, |prev| {
             usize::clamp(node.start_position().row - prev.end_position().row, 1, 2)
-        })));
-        out.push_str(&context.get_indent(level));
+        });
+        for _ in 0..count {
+            out.push_str(context.line_ending);
+        }
+        for _ in 0..level {
+            out.push_str(context.indent);
+        }
     };
 
     let fmt_with =
@@ -963,11 +945,10 @@ fn traverse(
                     fmt(out, cursor)
                 } else {
                     if let Some(prev) = maybe_prev {
-                        out.push_str(
-                            &context
-                                .line_ending
-                                .repeat(child.start_position().row - prev.end_position().row),
-                        )
+                        let count = child.start_position().row - prev.end_position().row;
+                        for _ in 0..count {
+                            out.push_str(context.line_ending);
+                        }
                     }
                     // we also want to format current directive comment
                     if maybe_directive.is_some() {
