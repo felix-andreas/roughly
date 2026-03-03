@@ -41,11 +41,17 @@ install-extension:
 build:
     cargo build
 
+zigbuild $target *args:
+    cargo zigbuild --target {{ target }} {{ args }}
+
 build-linux:
-    cargo build --release --target x86_64-unknown-linux-gnu
+    nix build .#roughly-linux-x86_64 -o release/nix-x86_64-unknown-linux-gnu
+
+build-macos:
+    nix build .#roughly-macos-aarch64 -o release/nix-aarch64-apple-darwin
 
 build-windows:
-    cargo build --release --target x86_64-pc-windows-gnu
+    nix build .#roughly-windows-x86_64 -o release/nix-x86_64-pc-windows-gnu
 
 build-extension $kind *args:
     #!/usr/bin/env bash
@@ -101,19 +107,25 @@ release $version $kind:
     rm -rf $dir
     mkdir -p $dir
 
-    # check (e.g. to test if zed extension works)
+    # run check to test if zed extension works
     cargo check
 
     # build server (x86_64-unknown-linux-gnu)
     just build-linux
     mkdir -p $dir/roughly-x86_64-unknown-linux-gnu
-    cp target/x86_64-unknown-linux-gnu/release/roughly $dir/roughly-x86_64-unknown-linux-gnu/roughly
+    cp release/nix-x86_64-unknown-linux-gnu/bin/roughly $dir/roughly-x86_64-unknown-linux-gnu/roughly
     tar -czf $dir/roughly-x86_64-unknown-linux-gnu.tar.gz -C $dir/roughly-x86_64-unknown-linux-gnu roughly
+
+    # build server (aarch64-apple-darwin)
+    just build-macos
+    mkdir -p $dir/roughly-aarch64-apple-darwin
+    cp release/nix-aarch64-apple-darwin/bin/roughly $dir/roughly-aarch64-apple-darwin/roughly
+    tar -czf $dir/roughly-aarch64-apple-darwin.tar.gz -C $dir/roughly-aarch64-apple-darwin roughly
 
     # build server (x86_64-pc-windows-gnu)
     just build-windows
     mkdir -p $dir/roughly-x86_64-pc-windows-gnu
-    cp target/x86_64-pc-windows-gnu/release/roughly.exe $dir/roughly-x86_64-pc-windows-gnu/roughly.exe
+    cp release/nix-x86_64-pc-windows-gnu/bin/roughly.exe $dir/roughly-x86_64-pc-windows-gnu/roughly.exe
     zip -j $dir/roughly-x86_64-pc-windows-gnu.zip $dir/roughly-x86_64-pc-windows-gnu/roughly.exe
 
     # build vscode extension (client only)
@@ -125,6 +137,12 @@ release $version $kind:
     mkdir -p editors/code/bin
     cp $dir/roughly-x86_64-unknown-linux-gnu/roughly editors/code/bin
     just build-extension $kind --target linux-x64 --out ../../$dir/roughly-linux-x64.vsix
+
+    # build vscode extension (darwin-arm64)
+    rm -rf editors/code/bin
+    mkdir -p editors/code/bin
+    cp $dir/roughly-aarch64-apple-darwin/roughly editors/code/bin
+    just build-extension $kind --target darwin-arm64 --out ../../$dir/roughly-darwin-arm64.vsix
 
     # build vscode extension (win32-x64)
     rm -rf editors/code/bin
@@ -139,18 +157,22 @@ publish-github $version:
     git push
     gh release create $version \
     	"release/$version/roughly-x86_64-unknown-linux-gnu.tar.gz#Roughly CLI (linux-x64)" \
+    	"release/$version/roughly-aarch64-apple-darwin.tar.gz#Roughly CLI (darwin-arm64)" \
     	"release/$version/roughly-x86_64-pc-windows-gnu.zip#Roughly CLI (win32-x64)" \
     	"release/$version/roughly.vsix#VS Code extension (client only)" \
     	"release/$version/roughly-linux-x64.vsix#VS Code extension (linux-x64)" \
+    	"release/$version/roughly-darwin-arm64.vsix#VS Code extension (darwin-arm64)" \
     	"release/$version/roughly-win32-x64.vsix#VS Code extension (win32-x64)" \
     	--notes ""
 
 publish-github-update $version:
     gh release upload $version \
         "release/$version/roughly-x86_64-unknown-linux-gnu.tar.gz#Roughly CLI (linux-x64)" \
+        "release/$version/roughly-aarch64-apple-darwin.tar.gz#Roughly CLI (darwin-arm64)" \
         "release/$version/roughly-x86_64-pc-windows-gnu.zip#Roughly CLI (win32-x64)" \
         "release/$version/roughly.vsix#VS Code extension (client only)" \
         "release/$version/roughly-linux-x64.vsix#VS Code extension (linux-x64)" \
+        "release/$version/roughly-darwin-arm64.vsix#VS Code extension (darwin-arm64)" \
         "release/$version/roughly-win32-x64.vsix#VS Code extension (win32-x64)" \
         --clobber
 
@@ -161,6 +183,7 @@ publish-marketplace $version $kind:
     release_flag=$(just vsce-release-flag $kind)
 
     just vsce publish $release_flag --packagePath ../../release/$version/roughly-linux-x64.vsix
+    just vsce publish $release_flag --packagePath ../../release/$version/roughly-darwin-arm64.vsix
     just vsce publish $release_flag --packagePath ../../release/$version/roughly-win32-x64.vsix
     just vsce publish $release_flag --packagePath ../../release/$version/roughly.vsix
 
