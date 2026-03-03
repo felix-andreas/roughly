@@ -48,6 +48,7 @@
               targets = [
                 "x86_64-unknown-linux-gnu"
                 "x86_64-pc-windows-gnu"
+                "aarch64-apple-darwin"
               ];
               extensions = [
                 "rust-src"
@@ -65,7 +66,16 @@
           rustToolchain = self.lib.rustToolchain pkgs;
 
           craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-          src = craneLib.cleanCargoSource ./.;
+          unfilteredRoot = ./.;
+
+          src = pkgs.lib.fileset.toSource {
+            root = unfilteredRoot;
+            fileset = pkgs.lib.fileset.unions [
+              (craneLib.fileset.commonCargoSources unfilteredRoot)
+              ./crates/roughly/tests/format
+              ./crates/roughly/tests/snapshots
+            ];
+          };
 
           commonArgs = {
             inherit src;
@@ -104,6 +114,32 @@
           };
 
           cargoArtifactsWindows = craneLib.buildDepsOnly commonArgsWindows;
+
+          commonArgsMacOS = commonArgs // {
+            CARGO_BUILD_TARGET = "aarch64-apple-darwin";
+
+            nativeBuildInputs = [
+              pkgs.cargo-zigbuild
+              pkgs.zig
+            ];
+
+            HOST_CC = "${pkgs.stdenv.cc}/bin/cc";
+
+            preBuild = ''
+              export XDG_CACHE_HOME="$TMPDIR/.cache"
+            '';
+
+            # We can't execute macOS binaries on Linux.
+            doCheck = false;
+          };
+
+          cargoArtifactsMacOS = craneLib.buildDepsOnly (
+            commonArgsMacOS
+            // {
+              buildPhaseCargoCommand = "cargo zigbuild --release -p roughly";
+              checkPhaseCargoCommand = "true";
+            }
+          );
         in
         {
           default = self.packages.${system}.roughly-linux-x86_64;
@@ -119,6 +155,17 @@
             commonArgsWindows
             // {
               cargoArtifacts = cargoArtifactsWindows;
+            }
+          );
+
+          roughly-macos-aarch64 = craneLib.buildPackage (
+            commonArgsMacOS
+            // {
+              cargoArtifacts = cargoArtifactsMacOS;
+              buildPhaseCargoCommand = ''
+                cargoBuildLog=$(mktemp cargoBuildLogXXXX.json)
+                cargo zigbuild --release --message-format json-render-diagnostics -p roughly >"$cargoBuildLog"
+              '';
             }
           );
         }

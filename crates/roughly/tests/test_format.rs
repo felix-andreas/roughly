@@ -40,43 +40,43 @@ fn docs() {
     const AFTER: &str = "THIS FILE IS GENERATED AUTOMATICALLY.\
 MAKE CHANGES TO tests/format/formatter.template.md INSTEAD";
 
-    fs::write(
-        "../../docs/src/content/docs/formatter.md",
-        regex
-            .replace_all(&markdown, |captures: &Captures| {
-                let text = captures.get(1).unwrap().as_str();
-                text.split_once('\n')
-                    .and_then(|(first, rest)| {
-                        first.strip_prefix("#").map(|comment| (comment, rest))
-                    })
-                    .and_then(|(comment, text)| {
-                        comment
-                            .split_once(":")
-                            .map(|(name, directive)| ((name.trim(), directive.trim()), text))
-                    })
-                    .map(|((name, directive), text)| {
-                        if directive == "skip" {
-                            return text.into();
-                        }
+    let formatted = regex
+        .replace_all(&markdown, |captures: &Captures| {
+            let text = captures.get(1).unwrap().as_str();
+            text.split_once('\n')
+                .and_then(|(first, rest)| first.strip_prefix("#").map(|comment| (comment, rest)))
+                .and_then(|(comment, text)| {
+                    comment
+                        .split_once(":")
+                        .map(|(name, directive)| ((name.trim(), directive.trim()), text))
+                })
+                .map(|((name, directive), text)| {
+                    if directive == "skip" {
+                        return text.into();
+                    }
 
-                        let snapshot = format!("documentation_examples__{name}");
-                        let code = format_str(text).unwrap();
-                        insta::assert_snapshot!(snapshot, code);
+                    let snapshot = format!("documentation_examples__{name}");
+                    let code = format_str(text).unwrap();
+                    insta::assert_snapshot!(snapshot, code);
 
-                        match directive {
-                            "compare" => {
-                                format!("# Before formatting\n{text}\n# After formatting\n{code}")
-                            }
-                            "format" => code,
-                            _ => panic!(),
+                    match directive {
+                        "compare" => {
+                            format!("# Before formatting\n{text}\n# After formatting\n{code}")
                         }
-                    })
-                    .map(|content| format!("```r\n{content}```"))
-                    .unwrap_or(text.into())
-            })
-            .replace(BEFORE, AFTER),
-    )
-    .unwrap();
+                        "format" => code,
+                        _ => panic!(),
+                    }
+                })
+                .map(|content| format!("```r\n{content}```"))
+                .unwrap_or(text.into())
+        })
+        .replace(BEFORE, AFTER);
+
+    // note: we cannot write file during nix build
+    let path = "../../docs/src/content/docs/formatter.md";
+    if fs::metadata(path).is_ok() {
+        fs::write(path, formatted).unwrap();
+    }
 }
 
 #[test]
