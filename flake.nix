@@ -59,7 +59,6 @@
         system:
         let
           pkgs = self.lib.makePkgs system nixpkgs;
-          pkgsWin64 = pkgs.pkgsCross.mingwW64;
           rustToolchain = self.lib.rustToolchain pkgs;
 
           craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
@@ -78,90 +77,66 @@
             inherit src;
             pname = "roughly";
             strictDeps = true;
-            cargoExtraArgs = "-p roughly";
           };
 
           commonArgsLinux = commonArgs // {
+            cargoExtraArgs = "-p roughly";
             CARGO_BUILD_TARGET = "x86_64-unknown-linux-gnu";
           };
 
           cargoArtifactsLinux = craneLib.buildDepsOnly commonArgsLinux;
-
-          commonArgsWindows = commonArgs // {
-            CARGO_BUILD_TARGET = "x86_64-pc-windows-gnu";
-
-            depsBuildBuild = [
-              pkgsWin64.stdenv.cc
-            ];
-
-            # C compiler for the `cc` crate (tree-sitter) and linker for the target triple.
-            TARGET_CC = "${pkgsWin64.stdenv.cc}/bin/${pkgsWin64.stdenv.cc.targetPrefix}cc";
-            CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "${pkgsWin64.stdenv.cc}/bin/${pkgsWin64.stdenv.cc.targetPrefix}cc";
-
-            # Make sure pthreads can be found when linking.
-            CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS = "-L native=${pkgsWin64.windows.pthreads}/lib";
-
-            # Host C compiler (needed by build scripts that run on the
-            # build machine).
-            HOST_CC = "${pkgs.stdenv.cc}/bin/cc";
-
-            # We can't execute Windows binaries on Linux.
-            doCheck = false;
-          };
-
-          cargoArtifactsWindows = craneLib.buildDepsOnly commonArgsWindows;
-
-          commonArgsMacOS = commonArgs // {
-            CARGO_BUILD_TARGET = "aarch64-apple-darwin";
-
-            nativeBuildInputs = [
-              pkgs.cargo-zigbuild
-              pkgs.zig
-            ];
-
-            preBuild = ''
-              export XDG_CACHE_HOME="$TMPDIR/.cache"
-            '';
-
-            # We can't execute macOS binaries on Linux.
-            doCheck = false;
-          };
-
-          cargoArtifactsMacOS = craneLib.buildDepsOnly (
-            commonArgsMacOS
-            // {
-              buildPhaseCargoCommand = "cargo zigbuild --release -p roughly";
-              checkPhaseCargoCommand = "true";
-            }
-          );
-        in
-        {
-          default = self.packages.${system}.roughly-linux-x86_64;
-
-          roughly-linux-x86_64 = craneLib.buildPackage (
+          packageLinux = craneLib.buildPackage (
             commonArgsLinux
             // {
               cargoArtifacts = cargoArtifactsLinux;
             }
           );
 
-          roughly-windows-x86_64 = craneLib.buildPackage (
-            commonArgsWindows
+          makeCrossArgs =
+            target:
+            commonArgs
             // {
-              cargoArtifacts = cargoArtifactsWindows;
-            }
-          );
+              CARGO_BUILD_TARGET = target;
 
-          roughly-macos-aarch64 = craneLib.buildPackage (
-            commonArgsMacOS
-            // {
-              cargoArtifacts = cargoArtifactsMacOS;
-              buildPhaseCargoCommand = ''
-                cargoBuildLog=$(mktemp cargoBuildLogXXXX.json)
-                cargo zigbuild --release --message-format json-render-diagnostics -p roughly >"$cargoBuildLog"
+              nativeBuildInputs = [
+                pkgs.cargo-zigbuild
+                pkgs.zig
+              ];
+
+              preBuild = ''
+                export XDG_CACHE_HOME="$TMPDIR/.cache"
               '';
-            }
-          );
+
+              doCheck = false;
+            };
+
+          makeCrossArtifacts =
+            target:
+            craneLib.buildDepsOnly (
+              (makeCrossArgs target)
+              // {
+                buildPhaseCargoCommand = "cargo zigbuild --release -p roughly";
+                checkPhaseCargoCommand = "true";
+              }
+            );
+
+          buildCrossPackage =
+            target:
+            craneLib.buildPackage (
+              (makeCrossArgs target)
+              // {
+                cargoArtifacts = makeCrossArtifacts target;
+                buildPhaseCargoCommand = ''
+                  cargoBuildLog=$(mktemp cargoBuildLogXXXX.json)
+                  cargo zigbuild --release --message-format json-render-diagnostics -p roughly >"$cargoBuildLog"
+                '';
+              }
+            );
+        in
+        {
+          roughly-linux-x86_64 = packageLinux;
+          roughly-macos-aarch64 = buildCrossPackage "aarch64-apple-darwin";
+          roughly-windows-x86_64 = buildCrossPackage "x86_64-pc-windows-gnu";
         }
       );
 

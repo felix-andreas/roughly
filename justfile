@@ -44,14 +44,11 @@ build:
 zigbuild $target *args:
     cargo zigbuild --target {{ target }} {{ args }}
 
-build-linux:
-    nix build .#roughly-linux-x86_64 -o release/nix-x86_64-unknown-linux-gnu
-
-build-macos:
-    nix build .#roughly-macos-aarch64 -o release/nix-aarch64-apple-darwin
-
-build-windows:
-    nix build .#roughly-windows-x86_64 -o release/nix-x86_64-pc-windows-gnu
+build-platform-vsix target vscode-target binary-name dir kind:
+    rm -rf editors/code/bin
+    mkdir -p editors/code/bin
+    cp {{ dir }}/roughly-{{ target }}/{{ binary-name }} editors/code/bin
+    just build-extension {{ kind }} --target {{ vscode-target }} --out ../../{{ dir }}/roughly-{{ vscode-target }}.vsix
 
 build-extension $kind *args:
     #!/usr/bin/env bash
@@ -64,18 +61,6 @@ build-extension $kind *args:
 #
 # RELEASE
 #
-
-bump-version $version:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    sed -i 's/^version = "[a-zA-Z0-9._-]*"/version = "{{ version }}"/' Cargo.toml
-    sed -i 's/"version": "[a-zA-Z0-9._-]*"/"version": "{{ version }}"/' editors/code/package.json
-    sed -i 's/^version = "[a-zA-Z0-9._-]*"/version = "{{ version }}"/' editors/zed/extension.toml
-
-    cargo check # bonus: also updates version in lock file
-    git add Cargo.toml Cargo.lock editors/code/package.json editors/zed/extension.toml
-    git commit -m "chore: Release v{{ version }}"
 
 publish $version $kind:
     #!/usr/bin/env bash
@@ -97,6 +82,18 @@ publish-commit $version="":
     just release $version pre-release
     just publish-github $version
 
+bump-version $version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    sed -i 's/^version = "[a-zA-Z0-9._-]*"/version = "{{ version }}"/' Cargo.toml
+    sed -i 's/"version": "[a-zA-Z0-9._-]*"/"version": "{{ version }}"/' editors/code/package.json
+    sed -i 's/^version = "[a-zA-Z0-9._-]*"/version = "{{ version }}"/' editors/zed/extension.toml
+
+    cargo check # bonus: also updates version in lock file
+    git add Cargo.toml Cargo.lock editors/code/package.json editors/zed/extension.toml
+    git commit -m "chore: Release v{{ version }}"
+
 release $version $kind:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -104,51 +101,26 @@ release $version $kind:
     dir=release/$version
 
     mkdir -p release
-    rm -rf $dir
-    mkdir -p $dir
+    rm -rf $dir release/nix
+    mkdir -p $dir release/nix
 
-    # run check to test if zed extension works
     cargo check
 
-    # build server (x86_64-unknown-linux-gnu)
-    just build-linux
-    mkdir -p $dir/roughly-x86_64-unknown-linux-gnu
-    cp release/nix-x86_64-unknown-linux-gnu/bin/roughly $dir/roughly-x86_64-unknown-linux-gnu/roughly
-    tar -czf $dir/roughly-x86_64-unknown-linux-gnu.tar.gz -C $dir/roughly-x86_64-unknown-linux-gnu roughly
+    nix build .#roughly-linux-x86_64 -o release/nix/x86_64-unknown-linux-gnu
+    nix build .#roughly-macos-aarch64 -o release/nix/aarch64-apple-darwin
+    nix build .#roughly-windows-x86_64 -o release/nix/x86_64-pc-windows-gnu
 
-    # build server (aarch64-apple-darwin)
-    just build-macos
-    mkdir -p $dir/roughly-aarch64-apple-darwin
-    cp release/nix-aarch64-apple-darwin/bin/roughly $dir/roughly-aarch64-apple-darwin/roughly
-    tar -czf $dir/roughly-aarch64-apple-darwin.tar.gz -C $dir/roughly-aarch64-apple-darwin roughly
+    just package-tar x86_64-unknown-linux-gnu $dir
+    just package-tar aarch64-apple-darwin $dir
+    just package-zip x86_64-pc-windows-gnu $dir
 
-    # build server (x86_64-pc-windows-gnu)
-    just build-windows
-    mkdir -p $dir/roughly-x86_64-pc-windows-gnu
-    cp release/nix-x86_64-pc-windows-gnu/bin/roughly.exe $dir/roughly-x86_64-pc-windows-gnu/roughly.exe
-    zip -j $dir/roughly-x86_64-pc-windows-gnu.zip $dir/roughly-x86_64-pc-windows-gnu/roughly.exe
-
-    # build vscode extension (client only)
+    # vscode extension (client only)
     rm -rf editors/code/bin
     just build-extension $kind --out ../../$dir/roughly.vsix
 
-    # build vscode extension (linux-x64)
-    rm -rf editors/code/bin
-    mkdir -p editors/code/bin
-    cp $dir/roughly-x86_64-unknown-linux-gnu/roughly editors/code/bin
-    just build-extension $kind --target linux-x64 --out ../../$dir/roughly-linux-x64.vsix
-
-    # build vscode extension (darwin-arm64)
-    rm -rf editors/code/bin
-    mkdir -p editors/code/bin
-    cp $dir/roughly-aarch64-apple-darwin/roughly editors/code/bin
-    just build-extension $kind --target darwin-arm64 --out ../../$dir/roughly-darwin-arm64.vsix
-
-    # build vscode extension (win32-x64)
-    rm -rf editors/code/bin
-    mkdir -p editors/code/bin
-    cp $dir/roughly-x86_64-pc-windows-gnu/roughly.exe editors/code/bin
-    just build-extension $kind --target win32-x64 --out ../../$dir/roughly-win32-x64.vsix
+    just build-platform-vsix x86_64-unknown-linux-gnu linux-x64 roughly $dir $kind
+    just build-platform-vsix aarch64-apple-darwin darwin-arm64 roughly $dir $kind
+    just build-platform-vsix x86_64-pc-windows-gnu win32-x64 roughly.exe $dir $kind
 
 publish-github $version:
     #!/usr/bin/env bash
@@ -190,6 +162,16 @@ publish-marketplace $version $kind:
 #
 # UTILS
 #
+
+package-tar target dir:
+    mkdir -p {{ dir }}/roughly-{{ target }}
+    cp release/nix/{{ target }}/bin/roughly {{ dir }}/roughly-{{ target }}/roughly
+    tar -czf {{ dir }}/roughly-{{ target }}.tar.gz -C {{ dir }}/roughly-{{ target }} roughly
+
+package-zip target dir:
+    mkdir -p {{ dir }}/roughly-{{ target }}
+    cp release/nix/{{ target }}/bin/roughly.exe {{ dir }}/roughly-{{ target }}/roughly.exe
+    zip -j {{ dir }}/roughly-{{ target }}.zip {{ dir }}/roughly-{{ target }}/roughly.exe
 
 # use rlib repos to test formatting
 rlib-clone:
