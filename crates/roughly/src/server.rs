@@ -13,12 +13,13 @@ use {
             GlobPattern, InitializeParams, InitializeResult, InitializedParams, Location,
             MessageType, OneOf, Position, PublishDiagnosticsParams, Range, ReferenceParams,
             Registration, RegistrationParams, RelativePattern, RenameParams, SaveOptions,
-            ServerCapabilities, ServerInfo, ShowMessageParams, TextDocumentSyncCapability,
-            TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
-            Url, WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+            ServerCapabilities, ServerInfo, ShowMessageParams, SignatureHelpOptions,
+            SignatureHelpParams, TextDocumentSyncCapability, TextDocumentSyncKind,
+            TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceEdit,
+            WorkspaceSymbolParams, WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
         },
-        references, rename, symbols, tree, utils,
+        references, rename, signature_help, symbols, tree, utils,
     },
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
@@ -147,6 +148,11 @@ impl LanguageServer for ServerState {
             capabilities: ServerCapabilities {
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec!["$".into(), "@".into(), ":".into()]),
+                    ..Default::default()
+                }),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".into(), ",".into()]),
+                    retrigger_characters: Some(vec![",".into()]),
                     ..Default::default()
                 }),
                 definition_provider: Some(OneOf::Left(true)),
@@ -423,6 +429,35 @@ impl LanguageServer for ServerState {
     ) -> ControlFlow<async_lsp::Result<()>> {
         // Stub implementation to satisfy Zed's requirements; does not apply any configuration changes.
         ControlFlow::Continue(())
+    }
+
+    //
+    // SIGNATURE HELP
+    //
+
+    fn signature_help(
+        &mut self,
+        params: SignatureHelpParams,
+    ) -> BoxFuture<'static, Result<Option<crate::lsp_types::SignatureHelp>, ResponseError>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let path = uri.to_file_path().unwrap();
+        let position = params.text_document_position_params.position;
+
+        tracing::debug!(?path, "signature help");
+
+        let Some(document) = self.document_map.get(&path) else {
+            tracing::error!(?path, "document not found");
+            return box_future(Err(path_not_found_error(&path)));
+        };
+
+        let result = signature_help::get(
+            position,
+            &document.rope,
+            &document.tree,
+            &self.workspace_items,
+        );
+
+        box_future(Ok(result))
     }
 
     //

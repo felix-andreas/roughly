@@ -245,11 +245,18 @@ fn index_function(
             "fn({})",
             parameters
                 .children_by_field_name("parameter", &mut parameters.walk())
-                .map(|parameter| match parameter.child(0) {
-                    Some(name) => {
-                        rope.byte_slice(name.byte_range()).to_string()
+                .map(|parameter| {
+                    let name = match parameter.child(0) {
+                        Some(name) => rope.byte_slice(name.byte_range()).to_string(),
+                        None => "Unknown".into(),
+                    };
+                    match parameter.child_by_field_name("default") {
+                        Some(default) => {
+                            let default = rope.byte_slice(default.byte_range()).to_string();
+                            format!("{name} = {default}")
+                        }
+                        None => name,
                     }
-                    None => "Unknown".into(),
                 })
                 .collect::<Vec<String>>()
                 .join(", ")
