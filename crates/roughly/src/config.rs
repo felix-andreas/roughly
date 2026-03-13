@@ -13,20 +13,15 @@ pub struct Config {
 
 impl Config {
     pub fn from_path(
-        path: &Path,
+        path: impl AsRef<Path>,
         experimental: ExperimentalFeatures,
     ) -> Result<Config, ConfigError> {
-        let config_path = path
-            .ancestors()
-            .map(|path| path.join("roughly.toml"))
-            .find(|path| path.exists());
+        let path = path.as_ref();
 
-        Ok(match config_path {
-            Some(config_path) => {
-                let text = std::fs::read_to_string(config_path)?;
-                Config::from_str(&text, experimental)?
-            }
-            None => Config::default(),
+        Ok(match std::fs::read_to_string(path) {
+            Ok(text) => Config::from_str(&text, experimental)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Config::default(),
+            Err(error) => return Err(error.into()),
         })
     }
 

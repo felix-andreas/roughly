@@ -31,5 +31,11 @@ futures.workspace = true
 tokio-util.workspace = true
 
 [dev-dependencies]
+async-lsp.workspace = true
+futures.workspace = true
 insta.workspace = true
 regex.workspace = true
+tempfile = "3"
+tokio = { workspace = true, features = ["process"] }
+tokio-util.workspace = true
+tower.workspace = true

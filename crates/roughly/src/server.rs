@@ -42,13 +42,19 @@ use {
     tree_sitter::{InputEdit, Parser, Point, Tree},
 };
 
+const CONFIG_FILE_NAME: &str = "roughly.toml";
+
 // #[tokio::main] # TODO: understand if this makes a difference???
 #[tokio::main(flavor = "current_thread")]
 pub async fn run(experimental_features: ExperimentalFeatures) {
-    let (server, _) = async_lsp::MainLoop::new_server(|client| {
-        let config = match Config::from_path(Path::new("."), experimental_features) {
+    let (server, _) = async_lsp::MainLoop::new_server(|mut client| {
+        let config = match Config::from_path(Path::new(CONFIG_FILE_NAME), experimental_features) {
             Ok(config) => config,
             Err(err) => {
+                let _ = client.show_message(ShowMessageParams {
+                    typ: MessageType::ERROR,
+                    message: format!("failed to load config: {err}"),
+                });
                 cli::error(&err.to_string());
                 panic!("fixme");
             }
@@ -88,7 +94,7 @@ struct ServerState {
     client: ClientSocket,
     config: Config,
     experimental_features: ExperimentalFeatures,
-    base_path: PathBuf,
+    workspace_root: PathBuf,
     document_map: HashMap<PathBuf, Document>,
     /// stores symbolds for all other files
     document_items: HashMap<PathBuf, Vec<Item>>,
@@ -109,16 +115,38 @@ impl ServerState {
         config: Config,
         experimental_features: ExperimentalFeatures,
     ) -> Router<Self> {
+        let workspace_root = std::env::current_dir().unwrap();
+
         Router::from_language_server(Self {
             client,
             config,
             experimental_features,
-            base_path: std::env::current_dir().unwrap().join("R"),
+            workspace_root,
             workspace_items: HashMap::new(),
             document_items: HashMap::new(),
             document_map: HashMap::new(),
             parser: tree::new_parser(),
         })
+    }
+
+    fn workspace_r_path(&self) -> PathBuf {
+        self.workspace_root.join("R")
+    }
+
+    fn reload_config(&mut self, config_path: &Path) {
+        match Config::from_path(config_path, self.experimental_features) {
+            Ok(config) => {
+                self.config = config;
+            }
+            Err(error) => {
+                self.client
+                    .show_message(ShowMessageParams {
+                        typ: MessageType::ERROR,
+                        message: format!("failed to reload config: {error}"),
+                    })
+                    .unwrap();
+            }
+        }
     }
 }
 
@@ -132,15 +160,19 @@ impl LanguageServer for ServerState {
     ) -> BoxFuture<'static, Result<InitializeResult, ResponseError>> {
         tracing::info!(?self.experimental_features, "initialize");
 
-        match index::index_dir(&self.base_path, &mut self.parser) {
-            Ok(items) => self.workspace_items.extend(items),
-            Err(IndexError) => self
-                .client
-                .show_message(ShowMessageParams {
-                    typ: MessageType::ERROR,
-                    message: "failed to index files".into(),
-                })
-                .unwrap(),
+        let workspace_r_path = self.workspace_r_path();
+
+        if workspace_r_path.is_dir() {
+            match index::index_dir(&workspace_r_path, &mut self.parser) {
+                Ok(items) => self.workspace_items.extend(items),
+                Err(IndexError) => self
+                    .client
+                    .show_message(ShowMessageParams {
+                        typ: MessageType::ERROR,
+                        message: "failed to index files".into(),
+                    })
+                    .unwrap(),
+            }
         }
 
         box_future(Ok(InitializeResult {
@@ -180,21 +212,34 @@ impl LanguageServer for ServerState {
     fn initialized(&mut self, _: InitializedParams) -> ControlFlow<async_lsp::Result<()>> {
         // TODO: consider to negotiate client capabilities
         // see: https://github.com/oxalica/nil/blob/870a4b1b5f/crates/nil/src/capabilities.rs
+        let workspace_r_path = self.workspace_r_path();
+
         let params = RegistrationParams {
             registrations: vec![Registration {
                 id: DidChangeWatchedFiles::METHOD.into(),
                 method: DidChangeWatchedFiles::METHOD.into(),
                 register_options: Some(
                     serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
-                        watchers: vec![FileSystemWatcher {
-                            glob_pattern: GlobPattern::Relative(RelativePattern {
-                                base_uri: OneOf::Right(
-                                    Url::from_file_path(&self.base_path).unwrap(),
-                                ),
-                                pattern: "*.[rR]".into(),
-                            }),
-                            kind: None,
-                        }],
+                        watchers: vec![
+                            FileSystemWatcher {
+                                glob_pattern: GlobPattern::Relative(RelativePattern {
+                                    base_uri: OneOf::Right(
+                                        Url::from_file_path(&workspace_r_path).unwrap(),
+                                    ),
+                                    pattern: "*.[rR]".into(),
+                                }),
+                                kind: None,
+                            },
+                            FileSystemWatcher {
+                                glob_pattern: GlobPattern::Relative(RelativePattern {
+                                    base_uri: OneOf::Right(
+                                        Url::from_file_path(&self.workspace_root).unwrap(),
+                                    ),
+                                    pattern: CONFIG_FILE_NAME.into(),
+                                }),
+                                kind: None,
+                            },
+                        ],
                     })
                     .unwrap(),
                 ),
@@ -237,7 +282,7 @@ impl LanguageServer for ServerState {
         let diagnostics = diagnostics::analyze_full(tree.root_node(), &rope, self.config.lint);
 
         let items = index::index(tree.root_node(), &rope, false, false);
-        if path.starts_with(&self.base_path) {
+        if path.starts_with(self.workspace_r_path()) {
             // note: we need to insert into workspace in case a new file is created
             self.workspace_items.insert(path.clone(), items);
         } else {
@@ -334,7 +379,7 @@ impl LanguageServer for ServerState {
         // note: We must re-index on every change (not just on save)
         // because textDocument/documentSymbol is triggered before textDocument/didSave.
         let items = index::index(tree.root_node(), rope, false, false);
-        if path.starts_with(&self.base_path) {
+        if path.starts_with(self.workspace_r_path()) {
             self.workspace_items.insert(path, items);
         } else {
             self.document_items.insert(path, items);
@@ -392,6 +437,9 @@ impl LanguageServer for ServerState {
         &mut self,
         params: DidChangeWatchedFilesParams,
     ) -> ControlFlow<async_lsp::Result<()>> {
+        let config_path = self.workspace_root.join(CONFIG_FILE_NAME);
+        let workspace_r_path = self.workspace_r_path();
+
         for change in params.changes {
             let uri = change.uri;
             let typ = change.typ;
@@ -399,7 +447,12 @@ impl LanguageServer for ServerState {
 
             tracing::info!(?path, ?typ, "watched file changed");
 
-            if path.starts_with(&self.base_path) {
+            if path == config_path {
+                self.reload_config(&config_path);
+                continue;
+            }
+
+            if path.starts_with(&workspace_r_path) {
                 match change.typ {
                     FileChangeType::CREATED | FileChangeType::CHANGED => {
                         // note: potential race condition if the user already has the file open and begins editing immediately.
@@ -642,7 +695,7 @@ impl LanguageServer for ServerState {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
-        let items_map = if path.starts_with(&self.base_path) {
+        let items_map = if path.starts_with(self.workspace_r_path()) {
             &self.workspace_items
         } else {
             &self.document_items
