@@ -94,11 +94,16 @@ impl Diagnostic {
                     ),
                 )
             }
-            InferenceError::OccursCheckFailed { variable, in_type } => {
+            InferenceError::OccursCheckFailed {
+                variable,
+                in_type,
+                range,
+                expression_id: _,
+            } => {
                 let mut type_renderer = TypeRenderer::new(interner);
                 let variable_name = type_renderer.render_variable(*variable);
                 (
-                    fallback_range,
+                    range.unwrap_or(fallback_range),
                     format!(
                         "I cannot construct an infinite type: {variable_name} occurs inside `{}`.",
                         type_renderer.render(in_type)
