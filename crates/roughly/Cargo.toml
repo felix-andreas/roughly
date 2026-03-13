@@ -21,6 +21,7 @@ tracing-tree.workspace = true
 tree-sitter.workspace = true
 tree-sitter-r.workspace = true
 serde_json.workspace = true
+typing = { path = "../typing" }
 
 # async-lsp
 async-lsp.workspace = true

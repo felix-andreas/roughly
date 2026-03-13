@@ -492,11 +492,13 @@ pub fn parse_experimental_flags(flags: &[impl AsRef<str>]) -> ExperimentalFeatur
                 features.range_formatting = true;
                 features.rename = true;
                 features.unused = true;
+                features.typing_diagnostics = true;
             }
             "goto_references" => features.goto_references = true,
             "range_formatting" => features.range_formatting = true,
             "rename" => features.rename = true,
             "unused" => features.unused = true,
+            "typing_diagnostics" => features.typing_diagnostics = true,
             "goto_definition" => {
                 warn(&format!(
                     "The '{flag}' flag has been stabilized. You can remove it."

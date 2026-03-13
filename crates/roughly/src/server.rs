@@ -410,7 +410,7 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(?path, "did save");
 
-        let Some(document) = self.document_map.get_mut(&path) else {
+        let Some(document) = self.document_map.get(&path) else {
             tracing::error!(?path, "document not found");
             return ControlFlow::Continue(());
         };

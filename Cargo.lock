@@ -1216,6 +1216,7 @@ dependencies = [
  "tracing-tree",
  "tree-sitter",
  "tree-sitter-r",
+ "typing",
 ]
 
 [[package]]

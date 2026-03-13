@@ -6,7 +6,7 @@ use {
     crate::{
         config::Case,
         lsp_types::{Diagnostic, DiagnosticSeverity},
-        utils,
+        typing_diagnostics, utils,
     },
     ropey::Rope,
     serde::Deserialize,
@@ -19,6 +19,7 @@ use {
 pub struct Config {
     pub naming_style: Option<Case>,
     pub experimental_unused: bool,
+    pub typing_diagnostics: bool,
 }
 
 pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagnostic> {
@@ -34,6 +35,10 @@ pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagn
                 tracing::warn!("error while diagnostics {error}");
             }
         }
+    }
+
+    if config.typing_diagnostics && full {
+        diagnostics.extend(typing_diagnostics::analyze_rope(rope));
     }
 
     diagnostics
