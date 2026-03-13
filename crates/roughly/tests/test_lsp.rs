@@ -3,13 +3,15 @@ use {
         LanguageServer,
         concurrency::{Concurrency, ConcurrencyLayer},
         lsp_types::{
-            CompletionParams, CompletionResponse, DidOpenTextDocumentParams,
-            DocumentFormattingParams, DocumentSymbolParams, DocumentSymbolResponse,
-            FormattingOptions, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
-            InitializeResult, InitializedParams, PartialResultParams, Position,
-            PublishDiagnosticsParams, TextDocumentIdentifier, TextDocumentItem,
-            TextDocumentPositionParams, Url, WorkDoneProgressParams, WorkspaceFolder, notification,
-            request,
+            CompletionParams, CompletionResponse, DidChangeWatchedFilesParams,
+            DidOpenTextDocumentParams, DocumentFormattingParams, DocumentSymbolParams,
+            DocumentSymbolResponse, FileChangeType, FileEvent, FormattingOptions,
+            GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, InitializeResult,
+            InitializedParams, PartialResultParams, Position, PublishDiagnosticsParams,
+            TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
+            WorkDoneProgressParams, WorkspaceFolder,
+            notification::{PublishDiagnostics, ShowMessage},
+            request::RegisterCapability,
         },
         panic::{CatchUnwind, CatchUnwindLayer},
         router::Router,
@@ -39,7 +41,7 @@ fn build_test_client(
     async_lsp::MainLoop::new_client(|_server| {
         let mut router = Router::new(TestClientState { diagnostics_sender });
 
-        router.notification::<notification::PublishDiagnostics>(|state, params| {
+        router.notification::<PublishDiagnostics>(|state, params| {
             state
                 .diagnostics_sender
                 .send(params)
@@ -47,9 +49,9 @@ fn build_test_client(
             ControlFlow::Continue(())
         });
 
-        router.request::<request::RegisterCapability, _>(|_, _| std::future::ready(Ok(())));
+        router.request::<RegisterCapability, _>(|_, _| std::future::ready(Ok(())));
 
-        router.notification::<notification::ShowMessage>(|_, _| ControlFlow::Continue(()));
+        router.notification::<ShowMessage>(|_, _| ControlFlow::Continue(()));
 
         router.event(|_, _: Stop| ControlFlow::Break(Ok(())));
 
@@ -190,6 +192,17 @@ impl TestContext {
                 },
             })
             .expect("did_open failed");
+    }
+
+    fn notify_watched_file_changed(&mut self, relative_path: &str, change_type: FileChangeType) {
+        self.server
+            .did_change_watched_files(DidChangeWatchedFilesParams {
+                changes: vec![FileEvent {
+                    uri: self.file_uri(relative_path),
+                    typ: change_type,
+                }],
+            })
+            .expect("did_change_watched_files failed");
     }
 }
 
@@ -531,6 +544,73 @@ async fn config_indent_width() {
     assert!(
         formatted_text.contains("    x + 1"),
         "expected 4-space indentation in formatted output, got:\n{formatted_text}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn config_reload_on_change() {
+    let mut context = setup_test(&[("roughly.toml", "[format]\nindent-width = 2\n")]).await;
+
+    let file_uri = context.file_uri("R/reload.R");
+    let source = "f <- function(x) {\nx + 1\n}\n";
+    context.open_file(&file_uri, source).await;
+
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    let initial_edits = context
+        .server
+        .formatting(DocumentFormattingParams {
+            text_document: TextDocumentIdentifier {
+                uri: file_uri.clone(),
+            },
+            options: FormattingOptions {
+                tab_size: 2,
+                insert_spaces: true,
+                ..FormattingOptions::default()
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("initial formatting request failed")
+        .expect("expected initial formatting edits");
+
+    assert!(
+        initial_edits[0].new_text.contains("  x + 1"),
+        "expected 2-space indentation before config reload, got:\n{}",
+        initial_edits[0].new_text
+    );
+
+    std::fs::write(
+        context.workspace_dir.join("roughly.toml"),
+        "[format]\nindent-width = 4\n",
+    )
+    .expect("failed to update config");
+
+    context.notify_watched_file_changed("roughly.toml", FileChangeType::CHANGED);
+
+    let reloaded_edits = context
+        .server
+        .formatting(DocumentFormattingParams {
+            text_document: TextDocumentIdentifier {
+                uri: file_uri.clone(),
+            },
+            options: FormattingOptions {
+                tab_size: 2,
+                insert_spaces: true,
+                ..FormattingOptions::default()
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("formatting request after config reload failed")
+        .expect("expected formatting edits after config reload");
+
+    assert!(
+        reloaded_edits[0].new_text.contains("    x + 1"),
+        "expected 4-space indentation after config reload, got:\n{}",
+        reloaded_edits[0].new_text
     );
 
     context.shutdown().await;
