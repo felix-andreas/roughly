@@ -20,3 +20,7 @@ identity("oops")
 #---- calling_non_function
 value <- 1L
 value(2L)
+
+#---- call_arity_mismatch
+identity <- function(x) x
+identity(1L, 2L)

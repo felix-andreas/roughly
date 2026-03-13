@@ -24,6 +24,23 @@ It is important to keep all of these documents high signal and up to date:
 - prefer concise, actionable updates that help future sessions resume work quickly
 - whenever implementation meaningfully changes, update the affected documents in the same session
 
+For quick crate navigation, use this rough file-to-responsibility map:
+
+- `src/parse.rs`
+  - parser setup and syntax-tree creation
+- `src/lower.rs`
+  - lowering from Tree-sitter syntax into the semantic IR
+- `src/types.rs`
+  - type representations such as `SurfaceType`, `CoreType`, and `TypeScheme`
+- `src/infer.rs`
+  - inference state, unification, occurs checks, and inference errors
+- `src/diagnostics.rs`
+  - user-facing diagnostic rendering and type pretty-printing
+- `src/check.rs`
+  - end-to-end checking pipeline from source text to diagnostics
+- `tests/`
+  - end-to-end fixture and snapshot coverage for user-visible behavior
+
 ## Collaboration with the user
 
 This crate is developed collaboratively with the user.
@@ -82,8 +99,13 @@ Rules for this:
 - Keep changes test-driven.
 - Prefer end-to-end tests on R snippets for user-visible behavior.
 - Prefer snapshot tests for rendered diagnostics.
+- Prefer running focused crate tests while iterating.
+- `cargo test -p typing` is the default crate test command.
 - `cargo nextest run -p typing` is available, but use whichever Rust test runner is most appropriate for the task.
+- Use the repository `justfile` as the first place to look for shared development and snapshot commands.
 - Keep fixture-based snapshot names stable by treating `group__case` as the snapshot identity.
 - Reject duplicate fixture `group__case` names across the suite instead of silently shadowing one case with another.
+- When intentionally changing diagnostic output, use the repository snapshot review workflow rather than updating snapshots blindly.
 - Preserve or improve source-range fidelity when making inference or lowering changes.
 - Keep interning, lowering, and inference decisions consistent with `ARCHITECTURE.md`.
+- Do not reintroduce end-to-end named-argument mismatch fixtures until function-parameter lowering can represent the needed semantics.

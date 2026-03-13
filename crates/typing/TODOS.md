@@ -13,6 +13,7 @@ It is a living planning document and should be kept in sync with `crates/typing/
 - When work reaches a todo marked `(needs refinement)`, discuss it with the user before proceeding.
 - If implementation changes make this document or `ARCHITECTURE.md` inaccurate, update the documents in the same session.
 - During the scaffolding phase, it is fine to split functionality into different files when that establishes cleaner boundaries.
+- Keep common validation and snapshot workflows easy to discover from repo-level task runners and crate docs.
 
 ## Phase 0 — Planning and alignment
 
@@ -71,6 +72,7 @@ References:
 - [x] Add a small helper API for snippet-based tests.
 - [x] Add a fixture-based test harness for grouped R snippet cases with stable snapshot names from `group__case`.
 - [ ] Decide how much inferred type information should appear in snapshots `(needs refinement)`.
+- [ ] Document the preferred snapshot update/review workflow for this crate.
 
 ### Initial test coverage
 
@@ -81,6 +83,7 @@ References:
 - [x] Diagnostic rendering is stable enough to snapshot.
 - [x] Grouped fixture files can define multiple cases with stable snapshot names.
 - [x] Duplicate `group__case` snapshot names are rejected by the harness.
+- [x] Arity mismatch snapshots cover the actual argument count after lowering.
 
 ## Phase 3 — Parsing and lowering
 
@@ -98,6 +101,7 @@ References:
 - [x] Lower assignments.
 - [x] Lower function definitions.
 - [x] Lower function calls.
+- [x] Avoid double-counting call arguments during lowering.
 - [ ] Lower list-like constructions.
 - [ ] Decide whether to lower `if` in the first syntax slice or defer it `(needs refinement)`.
 
@@ -106,6 +110,7 @@ References:
 - [x] Parse and lower a literal assignment.
 - [x] Parse and lower a function definition.
 - [x] Parse and lower a function call.
+- [x] Regress call lowering so multi-argument calls do not duplicate wrapper nodes as extra arguments.
 - [ ] Parse and lower list-like constructions.
 - [x] Preserve source ranges needed for diagnostics.
 
@@ -130,6 +135,7 @@ References:
 - [x] Define the interner API and ownership model.
 - [ ] Define type environments.
 - [ ] Define internal type pretty-printing for diagnostics and debugging.
+- [ ] Add a short file-to-responsibility map so contributors know where to update types, lowering, inference, and diagnostics.
 - [ ] Decide how `Any` and `Unknown` participate in unification in detail `(needs refinement)`.
 
 ### Representation invariants
@@ -163,7 +169,7 @@ References:
 - [x] Implement inference for function definitions.
 - [x] Implement inference for function calls.
 - [x] Produce diagnostics for type mismatches.
-- [ ] Produce diagnostics for arity mismatches.
+- [x] Produce diagnostics for arity mismatches.
 - [x] Produce diagnostics for non-callable values used as functions.
 
 ### Monomorphic tests
@@ -175,6 +181,7 @@ References:
 - [x] Report type mismatches in calls.
 - [x] Report calling a non-function.
 - [x] Report unknown names.
+- [x] Report arity mismatches with the actual lowered argument count.
 - [x] Snapshot monomorphic diagnostics.
 
 ## Phase 6 — Let-polymorphism and internal generics

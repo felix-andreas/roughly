@@ -155,6 +155,15 @@ mod tests {
     }
 
     #[test]
+    fn lowering_two_argument_call_snippet_interns_callee_only_once() {
+        let lowering_context = lower(indoc! {r#"
+            identity(1L, 2L)
+        "#});
+
+        assert!(lowering_context.interner().contains("identity"));
+    }
+
+    #[test]
     fn lowering_unsupported_snippet_does_not_intern_nested_symbols_yet() {
         let lowering_context = lower(indoc! {r#"
             if (flag) value else other

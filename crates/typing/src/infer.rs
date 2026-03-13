@@ -985,6 +985,46 @@ mod tests {
     }
 
     #[test]
+    fn inferring_a_two_argument_call_reports_the_actual_arity() {
+        let mut inference_state = InferenceState::new();
+        let mut interner = Interner::new();
+        let function_name = interner.intern("identity");
+        let function_type = CoreType::Function(FunctionType::new(
+            vec![CoreType::Scalar(Atomic::Integer)],
+            Vec::new(),
+            CoreType::Scalar(Atomic::Integer),
+        ));
+        inference_state.bind_name(function_name, function_type, test_range());
+
+        let result = inference_state.infer_expression(&expression(
+            0,
+            ExpressionKind::Call {
+                callee: Box::new(expression(1, ExpressionKind::Symbol(function_name))),
+                arguments: vec![
+                    Argument {
+                        expression: expression(2, ExpressionKind::Integer("1L".to_owned())),
+                        name: None,
+                    },
+                    Argument {
+                        expression: expression(3, ExpressionKind::Integer("2L".to_owned())),
+                        name: None,
+                    },
+                ],
+            },
+        ));
+
+        assert_eq!(
+            result,
+            Err(InferenceError::FunctionArityMismatch {
+                expected: 1,
+                actual: 2,
+                range: Some(test_range()),
+                expression_id: Some(ExpressionId(0)),
+            })
+        );
+    }
+
+    #[test]
     fn inferring_a_module_processes_expressions_in_order() {
         let mut inference_state = InferenceState::new();
         let mut interner = Interner::new();

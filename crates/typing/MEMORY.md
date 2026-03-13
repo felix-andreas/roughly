@@ -63,19 +63,21 @@ Important current limitations:
 - nested names inside unsupported syntax are not recursively lowered yet
 - inference is still monomorphic
 - some type diagnostics still fall back to coarse ranges
-- some rendered types still expose internal inference variable names such as `t0`
+- function parameters with defaults are not yet represented in a way that supports named-argument mismatch diagnostics end-to-end
 
 ## Highest-value unfinished work
 
 ### 1. Finish the current diagnostics pass
 
-Recent work improved ranges and wording, but diagnostics are still not at the target quality bar.
+Recent work improved ranges and wording, and unresolved inference variables now render as user-facing placeholders like `type1` instead of `t0`.
+
+Recent diagnostics-related progress also fixed a lowering bug where call arguments could be double-counted in end-to-end arity diagnostics.
 
 Remaining focus:
 
 - extend precise source ranges to remaining inference failures
-- improve type rendering so diagnostics expose less internal machinery
-- refine wording for higher-order and arity-related failures
+- refine wording for higher-order failures
+- revisit named-argument diagnostics after function-parameter lowering can represent the relevant call shape
 
 ### 2. Implement let-polymorphism
 
@@ -104,11 +106,22 @@ Open design question:
 - should `if` be part of the next semantic slice,
   or should it wait until after diagnostics / polymorphism / annotations?
 
-### 5. Lists / tuples / records are not fully connected to R syntax yet
+### 5. Function parameter modeling is still intentionally minimal
+
+Current behavior:
+
+- function definitions lower parameters as a simple positional list
+- parameters with defaults are not yet modeled in a way that supports named-argument checking
+
+Consequence:
+
+- end-to-end named-argument mismatch fixtures were deferred rather than locking in misleading diagnostics
+
+### 6. Lists / tuples / records are not fully connected to R syntax yet
 
 The type model already includes them, but lowering and inference for the intended R syntax are still incomplete.
 
-### 6. Annotation parsing is not started
+### 7. Annotation parsing is not started
 
 Still pending:
 
@@ -133,7 +146,7 @@ These should not be reopened casually without discussion with the user:
 
 ## Recommended next step
 
-Continue improving diagnostic precision and rendering quality, then move to let-polymorphism.
+Continue improving diagnostic precision and rendering quality, especially source-range fidelity and higher-order wording, then move to let-polymorphism.
 
 ## Things to watch in the next session
 
@@ -141,3 +154,4 @@ Continue improving diagnostic precision and rendering quality, then move to let-
 - Do not treat current diagnostics as “done”.
 - Do not add broad new syntax support without checking whether it changes an important design decision.
 - Keep snapshot-based tests in sync with intentional diagnostic changes.
+- Do not reintroduce end-to-end named-argument mismatch fixtures until function-parameter lowering can represent the needed semantics.

@@ -250,6 +250,8 @@ This should include at least:
 - function parameter names
 - record field names
 
+The current implementation uses interned symbols already. Any future representation changes should preserve human-readable diagnostic rendering and should not blur the distinction between symbol identity and binding identity.
+
 Interning gives a stable canonical symbol identity for repeated text, which keeps nested environments and name lookup simpler and cheaper than repeatedly storing and comparing owned strings.
 
 Interned symbols are not the same as bindings. Two different bindings may share the same interned symbol if they use the same textual name in different lexical scopes. If binding identity becomes important later, it should be represented separately from the interned symbol.
@@ -286,6 +288,8 @@ That state should support:
 - unbound inference variables
 - variable-to-variable links
 - bindings from inference variables to concrete or structured types
+
+The current implementation already follows this shape. Alternative storage choices may be explored later, but representation changes should be justified by measured simplicity or performance improvements rather than adopted casually during feature work.
 
 Representative lookup should use path compression so chains of linked type variables collapse toward their final representative over time. This keeps repeated lookups efficient during inference.
 

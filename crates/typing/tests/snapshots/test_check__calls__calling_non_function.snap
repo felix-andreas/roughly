@@ -3,6 +3,6 @@ source: crates/typing/tests/test_check.rs
 assertion_line: 77
 expression: rendered
 ---
-error[type-error] This expression has type `fn(scalar integer) -> t0`, but it needs to be `scalar integer`.
+error[type-error] This expression has type `fn(scalar integer) -> type1`, but it needs to be `scalar integer`.
 --> 2:1-2:10
 | value(2L)

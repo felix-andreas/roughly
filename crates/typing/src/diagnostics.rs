@@ -2,9 +2,9 @@ use {
     crate::{
         infer::InferenceError,
         interner::{Interner, Symbol},
-        types::{Atomic, CoreType},
+        types::{Atomic, CoreType, InferenceVariableId},
     },
-    std::fmt,
+    std::{collections::BTreeMap, fmt},
     tree_sitter::{Point, Range},
 };
 
@@ -84,34 +84,43 @@ impl Diagnostic {
                 actual_type,
                 range,
                 expression_id: _,
-            } => (
-                *range,
-                format!(
-                    "This expression is being called like a function, but it has type `{}`.",
-                    render_core_type(actual_type, interner)
-                ),
-            ),
-            InferenceError::OccursCheckFailed { variable, in_type } => (
-                fallback_range,
-                format!(
-                    "I cannot construct an infinite type: t{} occurs inside `{}`.",
-                    variable.0,
-                    render_core_type(in_type, interner)
-                ),
-            ),
+            } => {
+                let mut type_renderer = TypeRenderer::new(interner);
+                (
+                    *range,
+                    format!(
+                        "This expression is being called like a function, but it has type `{}`.",
+                        type_renderer.render(actual_type)
+                    ),
+                )
+            }
+            InferenceError::OccursCheckFailed { variable, in_type } => {
+                let mut type_renderer = TypeRenderer::new(interner);
+                let variable_name = type_renderer.render_variable(*variable);
+                (
+                    fallback_range,
+                    format!(
+                        "I cannot construct an infinite type: {variable_name} occurs inside `{}`.",
+                        type_renderer.render(in_type)
+                    ),
+                )
+            }
             InferenceError::TypeMismatch {
                 expected,
                 actual,
                 range,
                 expression_id: _,
-            } => (
-                range.unwrap_or(fallback_range),
-                format!(
-                    "This expression has type `{}`, but it needs to be `{}`.",
-                    render_core_type(actual, interner),
-                    render_core_type(expected, interner)
-                ),
-            ),
+            } => {
+                let mut type_renderer = TypeRenderer::new(interner);
+                (
+                    range.unwrap_or(fallback_range),
+                    format!(
+                        "This expression has type `{}`, but it needs to be `{}`.",
+                        type_renderer.render(actual),
+                        type_renderer.render(expected)
+                    ),
+                )
+            }
             InferenceError::TupleLengthMismatch {
                 expected,
                 actual,
@@ -145,7 +154,7 @@ impl Diagnostic {
             } => (
                 range.unwrap_or(fallback_range),
                 format!(
-                    "This call passes {actual} argument(s), but the function expects {expected}."
+                    "This call passes {actual} positional argument(s), but the function accepts {expected}."
                 ),
             ),
             InferenceError::NamedParameterMismatch {
@@ -156,7 +165,7 @@ impl Diagnostic {
             } => (
                 range.unwrap_or(fallback_range),
                 format!(
-                    "This call uses named arguments `{}`, but the function expects `{}`.",
+                    "This call uses named argument(s) `{}`, but the function accepts named parameter(s) `{}`.",
                     render_symbols(actual_parameters, interner),
                     render_symbols(expected_parameters, interner)
                 ),
@@ -240,58 +249,95 @@ fn render_symbols(symbols: &[Symbol], interner: &Interner) -> String {
         .join(", ")
 }
 
-fn render_core_type(core_type: &CoreType, interner: &Interner) -> String {
-    match core_type {
-        CoreType::Any => "any".to_owned(),
-        CoreType::Unknown => "unknown".to_owned(),
-        CoreType::Null => "null".to_owned(),
-        CoreType::Scalar(atomic) => format!("scalar {}", render_atomic(*atomic)),
-        CoreType::Vector(atomic) => format!("vector {}", render_atomic(*atomic)),
-        CoreType::List(item_type) => {
-            format!("list[{}]", render_core_type(item_type, interner))
+struct TypeRenderer<'a> {
+    interner: &'a Interner,
+    variable_names: BTreeMap<InferenceVariableId, String>,
+    next_variable_index: usize,
+}
+
+impl<'a> TypeRenderer<'a> {
+    fn new(interner: &'a Interner) -> Self {
+        Self {
+            interner,
+            variable_names: BTreeMap::new(),
+            next_variable_index: 0,
         }
-        CoreType::Record(fields) => {
-            let rendered_fields = fields
-                .iter()
-                .map(|field| {
-                    let name = interner.resolve(field.name).unwrap_or("<unknown>");
-                    format!("{name}: {}", render_core_type(&field.value, interner))
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("record{{{rendered_fields}}}")
+    }
+
+    fn render(&mut self, core_type: &CoreType) -> String {
+        self.render_core_type(core_type)
+    }
+
+    fn render_variable(&mut self, variable: InferenceVariableId) -> String {
+        self.variable_name(variable).to_owned()
+    }
+
+    fn render_core_type(&mut self, core_type: &CoreType) -> String {
+        match core_type {
+            CoreType::Any => "any".to_owned(),
+            CoreType::Unknown => "unknown".to_owned(),
+            CoreType::Null => "null".to_owned(),
+            CoreType::Scalar(atomic) => format!("scalar {}", render_atomic(*atomic)),
+            CoreType::Vector(atomic) => format!("vector {}", render_atomic(*atomic)),
+            CoreType::List(item_type) => {
+                format!("list[{}]", self.render_core_type(item_type))
+            }
+            CoreType::Record(fields) => {
+                let rendered_fields = fields
+                    .iter()
+                    .map(|field| {
+                        let name = self.interner.resolve(field.name).unwrap_or("<unknown>");
+                        format!("{name}: {}", self.render_core_type(&field.value))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("record{{{rendered_fields}}}")
+            }
+            CoreType::Tuple(items) => {
+                let rendered_items = items
+                    .iter()
+                    .map(|item| self.render_core_type(item))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("tuple({rendered_items})")
+            }
+            CoreType::Function(function_type) => {
+                let rendered_parameters = function_type
+                    .parameters
+                    .iter()
+                    .map(|parameter| self.render_core_type(parameter))
+                    .collect::<Vec<_>>();
+                let rendered_named_parameters = function_type
+                    .named_parameters
+                    .iter()
+                    .map(|parameter| {
+                        let name = self.interner.resolve(parameter.name).unwrap_or("<unknown>");
+                        format!("{name}: {}", self.render_core_type(&parameter.value))
+                    })
+                    .collect::<Vec<_>>();
+                let mut rendered_parts = rendered_parameters;
+                rendered_parts.extend(rendered_named_parameters);
+                format!(
+                    "fn({}) -> {}",
+                    rendered_parts.join(", "),
+                    self.render_core_type(&function_type.return_type)
+                )
+            }
+            CoreType::Variable(variable) => self.variable_name(*variable).to_owned(),
         }
-        CoreType::Tuple(items) => {
-            let rendered_items = items
-                .iter()
-                .map(|item| render_core_type(item, interner))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("tuple({rendered_items})")
+    }
+
+    fn variable_name(&mut self, variable: InferenceVariableId) -> &str {
+        if !self.variable_names.contains_key(&variable) {
+            let name = format!("type{}", self.next_variable_index + 1);
+            self.next_variable_index += 1;
+            self.variable_names.insert(variable, name);
         }
-        CoreType::Function(function_type) => {
-            let rendered_parameters = function_type
-                .parameters
-                .iter()
-                .map(|parameter| render_core_type(parameter, interner))
-                .collect::<Vec<_>>();
-            let rendered_named_parameters = function_type
-                .named_parameters
-                .iter()
-                .map(|parameter| {
-                    let name = interner.resolve(parameter.name).unwrap_or("<unknown>");
-                    format!("{name}: {}", render_core_type(&parameter.value, interner))
-                })
-                .collect::<Vec<_>>();
-            let mut rendered_parts = rendered_parameters;
-            rendered_parts.extend(rendered_named_parameters);
-            format!(
-                "fn({}) -> {}",
-                rendered_parts.join(", "),
-                render_core_type(&function_type.return_type, interner)
-            )
-        }
-        CoreType::Variable(variable) => format!("t{}", variable.0),
+
+        self.variable_names
+            .get(&variable)
+            .map(String::as_str)
+            .unwrap_or("type")
     }
 }
 

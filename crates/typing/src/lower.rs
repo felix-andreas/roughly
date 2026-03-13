@@ -273,27 +273,23 @@ fn lower_arguments(
             continue;
         };
 
-        if child.kind() == "argument" {
-            let name = child
-                .child_by_field_name("name")
-                .filter(|name| name.kind() == "identifier")
-                .map(|name| intern_node_text(lowering_context, name, source));
-
-            let expression = child
-                .child_by_field_name("value")
-                .map(|value| lower_node(lowering_context, value, source))
-                .unwrap_or_else(|| {
-                    lowering_context.expression(child.range(), ExpressionKind::Unsupported)
-                });
-
-            lowered_arguments.push(Argument { expression, name });
+        if child.kind() != "argument" {
             continue;
         }
 
-        lowered_arguments.push(Argument {
-            expression: lower_node(lowering_context, child, source),
-            name: None,
-        });
+        let name = child
+            .child_by_field_name("name")
+            .filter(|name| name.kind() == "identifier")
+            .map(|name| intern_node_text(lowering_context, name, source));
+
+        let expression = child
+            .child_by_field_name("value")
+            .map(|value| lower_node(lowering_context, value, source))
+            .unwrap_or_else(|| {
+                lowering_context.expression(child.range(), ExpressionKind::Unsupported)
+            });
+
+        lowered_arguments.push(Argument { expression, name });
     }
 
     lowered_arguments
