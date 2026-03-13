@@ -111,10 +111,15 @@ struct TestContext {
     workspace_dir: PathBuf,
 }
 
-async fn setup_test(initial_files: &[(&str, &str)]) -> TestContext {
+async fn setup_test_with_r_dir(
+    create_r_directory: bool,
+    initial_files: &[(&str, &str)],
+) -> TestContext {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let workspace_dir = temp_dir.path().to_path_buf();
-    std::fs::create_dir_all(workspace_dir.join("R")).expect("failed to create R directory");
+    if create_r_directory {
+        std::fs::create_dir_all(workspace_dir.join("R")).expect("failed to create R directory");
+    }
 
     for (relative_path, text) in initial_files {
         let path = workspace_dir.join(relative_path);
@@ -167,6 +172,10 @@ async fn setup_test(initial_files: &[(&str, &str)]) -> TestContext {
         _temp_dir: temp_dir,
         workspace_dir,
     }
+}
+
+async fn setup_test(initial_files: &[(&str, &str)]) -> TestContext {
+    setup_test_with_r_dir(true, initial_files).await
 }
 
 impl TestContext {
@@ -253,6 +262,37 @@ async fn initialize_reports_capabilities() {
     assert!(
         matches!(doc_symbol, Some(async_lsp::lsp_types::OneOf::Left(true))),
         "expected document_symbol_provider to be true"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn initialize_without_r_directory() {
+    let mut context = setup_test_with_r_dir(false, &[]).await;
+
+    let capabilities = &context.init_result.capabilities;
+    assert!(
+        capabilities.text_document_sync.is_some(),
+        "expected initialize to succeed without an R directory"
+    );
+
+    std::fs::create_dir_all(context.workspace_dir.join("R")).expect("failed to create R directory");
+    std::fs::write(context.workspace_dir.join("R/created_later.R"), "x <- T\n")
+        .expect("failed to write test file");
+    context.notify_watched_file_changed("R/created_later.R", FileChangeType::CREATED);
+
+    let file_uri = context.file_uri("R/created_later.R");
+    context.open_file(&file_uri, "x <- T\n").await;
+
+    let diagnostics = recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
+    assert!(
+        diagnostics
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("TRUE")),
+        "expected diagnostics after creating R directory and file, got: {:?}",
+        diagnostics.diagnostics
     );
 
     context.shutdown().await;
