@@ -54,13 +54,10 @@ The crate currently has:
 - core type representations
 - `TypeScheme`-based bindings
 - inference state with path compression
-- let-polymorphism groundwork:
-  - free type variable computation
-  - generalization at assignment bindings
-  - instantiation at use sites
-  - fresh variables per instantiation
+- let-polymorphism for assignment bindings
 - end-to-end type diagnostics
 - grouped fixture-based end-to-end tests under `tests/`
+- optional integration into `roughly check` and full LSP diagnostics behind the `typing_diagnostics` experimental flag
 
 Important current limitations:
 
@@ -68,7 +65,7 @@ Important current limitations:
 - nested names inside unsupported syntax are not recursively lowered yet
 - some type diagnostics still fall back to coarse ranges
 - function parameters with defaults are not yet represented in a way that supports named-argument mismatch diagnostics end-to-end
-- some older end-to-end diagnostic fixtures became invalid once polymorphic bindings started generalizing correctly and must be replaced with post-polymorphism cases
+- typing diagnostics are intentionally excluded from the fast incremental diagnostics path
 
 ## Highest-value unfinished work
 
@@ -84,19 +81,15 @@ Remaining focus:
 - refine wording for higher-order failures
 - revisit named-argument diagnostics after function-parameter lowering can represent the relevant call shape
 
-### 2. Finish validating let-polymorphism end-to-end
+### 2. Continue expanding diagnostics and polymorphism coverage
 
-The groundwork is now implemented for assignment bindings:
-
-- free type variable computation
-- generalization at bindings
-- instantiation at use sites
+Recent work completed let-polymorphism for assignment bindings and refreshed the existing end-to-end fixtures to match post-polymorphism behavior.
 
 Current follow-up work:
 
-- add and maintain end-to-end R-snippet tests that reflect polymorphic behavior
-- replace stale diagnostics fixtures that previously depended on monomorphic behavior
-- expand higher-level polymorphism coverage beyond the current identity-style cases
+- improve diagnostic precision and wording
+- add more realistic end-to-end polymorphism cases beyond identity-style examples
+- keep `roughly` integration expectations aligned with intentional typing behavior changes
 
 ### 3. Unsupported syntax behavior is still minimal
 
@@ -154,12 +147,12 @@ These should not be reopened casually without discussion with the user:
 
 ## Recommended next step
 
-Continue improving diagnostic precision and rendering quality, especially source-range fidelity and higher-order wording, while refreshing end-to-end fixtures for post-polymorphism behavior.
+Continue improving diagnostic precision and rendering quality, especially source-range fidelity and higher-order wording, while expanding end-to-end coverage for polymorphism and unsupported syntax.
 
 ## Things to watch in the next session
 
 - Do not silently change semantics without updating the docs.
 - Do not treat current diagnostics as “done”.
 - Do not add broad new syntax support without checking whether it changes an important design decision.
-- Keep end-to-end fixture expectations in sync with intentional semantic changes such as polymorphic generalization.
+- Keep end-to-end fixture expectations in sync with intentional semantic changes.
 - Do not reintroduce end-to-end named-argument mismatch fixtures until function-parameter lowering can represent the needed semantics.

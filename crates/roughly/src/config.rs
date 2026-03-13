@@ -71,7 +71,7 @@ impl ConfigToml {
         }
 
         self.lint.experimental_unused |= experimental.unused;
-        self.lint.typing_diagnostics |= experimental.typing_diagnostics;
+        self.lint.typing_diagnostics |= experimental.typing;
 
         Config {
             format: self.format,
@@ -90,7 +90,7 @@ pub struct ExperimentalFeatures {
     pub range_formatting: bool,
     pub rename: bool,
     pub unused: bool,
-    pub typing_diagnostics: bool,
+    pub typing: bool,
 }
 
 #[cfg(test)]
