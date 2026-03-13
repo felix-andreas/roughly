@@ -25,6 +25,7 @@ Rules for planning:
 - If the exact implementation steps are not yet clear, mark the todo with `(needs refinement)`.
 - When work reaches a todo marked `(needs refinement)`, discuss it with the user before proceeding.
 - As implementation evolves, keep both this document and `TODOS.md` up to date.
+- During the scaffolding phase, it is fine to split functionality into different files in order to establish clean boundaries for the parser, lowering, diagnostics, tests, and inference work.
 
 ## Goals
 
@@ -79,10 +80,13 @@ The architecture should distinguish between:
 
 - parsed R syntax
 - parsed type annotation syntax
+- lowered semantic syntax
 - internal inference types
 - generalized type schemes
 
 User-facing types and internal inference types should not be conflated.
+
+The checker should keep access to the original source text and syntax tree for diagnostics, while lowering supported syntax into a simpler semantic representation for typing. Lowered nodes should preserve source ranges so diagnostics can refer back to the original code precisely.
 
 ### Value-like model for the supported subset
 
@@ -233,6 +237,22 @@ A type scheme contains:
 
 This is required for let-polymorphism.
 
+### Interned symbols
+
+The lowering and inference layers should use string interning for repeated identifiers and field names.
+
+This should include at least:
+
+- variable names
+- function parameter names
+- record field names
+
+Interning gives a stable canonical symbol identity for repeated text, which keeps nested environments and name lookup simpler and cheaper than repeatedly storing and comparing owned strings.
+
+Interned symbols are not the same as bindings. Two different bindings may share the same interned symbol if they use the same textual name in different lexical scopes. If binding identity becomes important later, it should be represented separately from the interned symbol.
+
+Diagnostics must still render human-readable names. Interning should therefore remain an internal representation detail, with diagnostics resolving symbols back to their source text.
+
 ## Hindley–Milner approach
 
 The checker should use a standard HM-style inference pipeline.
@@ -253,6 +273,20 @@ Once that is stable, the next step is let-polymorphism via:
 - instantiation at use sites
 
 This recommendation should be followed in the implementation plan.
+
+### Unification state and path compression
+
+The inference engine should use an explicit inference-variable state rather than relying only on repeatedly applied substitution maps.
+
+That state should support:
+
+- unbound inference variables
+- variable-to-variable links
+- bindings from inference variables to concrete or structured types
+
+Representative lookup should use path compression so chains of linked type variables collapse toward their final representative over time. This keeps repeated lookups efficient during inference.
+
+Path compression does not replace the occurs check. The occurs check is still required when binding a variable to a structured type in order to reject infinite types.
 
 ### Why let-polymorphism matters
 
@@ -307,6 +341,8 @@ Reasons for this separation:
 
 The internal lowered representation does not need to mirror all of R. It only needs to encode the supported subset cleanly.
 
+Lowering should not discard the syntax information needed for high-quality diagnostics. The checker should retain access to source text and the syntax tree, while lowered nodes keep precise source ranges and interned symbols where appropriate.
+
 ## Inference pipeline
 
 The planned pipeline is:
@@ -327,6 +363,8 @@ The checker will need an initial environment for builtins and operators.
 This should start small and grow only as required by tests.
 
 The initial builtin environment should contain only the symbols needed for the supported language subset and current test cases. It should not attempt to model all of base R up front.
+
+Builtin and lexical environments should be keyed by interned symbols rather than raw strings.
 
 If a builtin has semantics that are unclear or have important design consequences, discuss that with the user before implementing it.
 
@@ -388,6 +426,8 @@ This is especially valuable while the language subset and diagnostics are still 
 
 The implementation should remain modest in structure early on.
 
+During the current scaffolding phase, splitting functionality into different files is encouraged when it helps establish clear boundaries and avoids forcing unrelated concerns into one file too early.
+
 Do not over-fragment the crate before the abstractions stabilize. Prefer a small number of files with clear responsibilities, and split further only when needed.
 
 The likely conceptual areas are:
@@ -448,6 +488,14 @@ The current recommendation for the first implementation sequence is:
 8. Add list, tuple, and record inference.
 9. Add annotation parsing and enforcement.
 10. Expand supported syntax carefully from there.
+
+Current progress:
+
+- The crate has been reshaped toward a library-first structure.
+- A minimal binary wrapper exists only as a thin shell.
+- A first checker entry point exists for snippet-based checking.
+- Snapshot-based end-to-end tests exist for empty input, valid syntax, and syntax errors.
+- The next implementation focus should move from scaffolding into parsing/lowering boundaries and then the first inference slice.
 
 This ordering is intentional:
 

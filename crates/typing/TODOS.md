@@ -12,6 +12,7 @@ It is a living planning document and should be kept in sync with `crates/typing/
 - If the exact implementation steps are unclear, mark the todo with `(needs refinement)`.
 - When work reaches a todo marked `(needs refinement)`, discuss it with the user before proceeding.
 - If implementation changes make this document or `ARCHITECTURE.md` inaccurate, update the documents in the same session.
+- During the scaffolding phase, it is fine to split functionality into different files when that establishes cleaner boundaries.
 
 ## Phase 0 — Planning and alignment
 
@@ -36,6 +37,8 @@ It is a living planning document and should be kept in sync with `crates/typing/
 - [x] Do not add explicit generics syntax in v1.
 - [x] Use R snippets as the primary test input format.
 - [x] Prefer snapshot tests of rendered diagnostics.
+- [x] Use string interning for repeated identifiers and field names in lowering and inference.
+- [x] Use an explicit inference-variable state with path compression during unification.
 
 ## Phase 1 — Crate scaffolding
 
@@ -44,16 +47,16 @@ References:
 - `ARCHITECTURE.md` → File and module direction
 - `ARCHITECTURE.md` → Public API direction
 
-- [ ] Reshape the crate to be library-first.
+- [x] Reshape the crate to be library-first.
 - [ ] Decide whether to keep a tiny binary for local experiments `(needs refinement)`.
-- [ ] Add a narrow crate entry point for checking source text.
-- [ ] Add core result types for diagnostics and inferred type information.
-- [ ] Keep the early file layout modest and avoid over-fragmentation.
+- [x] Add a narrow crate entry point for checking source text.
+- [x] Add core result types for diagnostics and inferred type information.
+- [x] Keep the early file layout modest and avoid over-fragmentation.
 
 ### Initial crate structure
 
-- [ ] Add a library root.
-- [ ] Move placeholder executable code out of the way or reduce it to a thin wrapper.
+- [x] Add a library root.
+- [x] Move placeholder executable code out of the way or reduce it to a thin wrapper.
 - [ ] Add minimal internal modules only when they support a real abstraction boundary.
 
 ## Phase 2 — Test harness and snapshot workflow
@@ -62,19 +65,19 @@ References:
 - `ARCHITECTURE.md` → Testing strategy
 - `ARCHITECTURE.md` → Error handling and diagnostics
 
-- [ ] Set up end-to-end tests that operate on R snippets.
-- [ ] Set up snapshot testing for rendered diagnostics.
-- [ ] Establish a stable diagnostic rendering format suitable for snapshots.
-- [ ] Add a small helper API for snippet-based tests.
+- [x] Set up end-to-end tests that operate on R snippets.
+- [x] Set up snapshot testing for rendered diagnostics.
+- [x] Establish a stable diagnostic rendering format suitable for snapshots.
+- [x] Add a small helper API for snippet-based tests.
 - [ ] Decide how much inferred type information should appear in snapshots `(needs refinement)`.
 
 ### Initial test coverage
 
-- [ ] Empty input produces no diagnostics.
-- [ ] Simple scalar literals produce no diagnostics.
+- [x] Empty input produces no diagnostics.
+- [x] Simple scalar literals produce no diagnostics.
 - [ ] Undefined names produce diagnostics.
 - [ ] Unsupported syntax produces `Unknown` behavior and any intended diagnostics.
-- [ ] Diagnostic rendering is stable enough to snapshot.
+- [x] Diagnostic rendering is stable enough to snapshot.
 
 ## Phase 3 — Parsing and lowering
 
@@ -84,6 +87,8 @@ References:
 
 - [ ] Keep tree-sitter parsing separate from semantic lowering.
 - [ ] Define a lowered internal representation for the supported subset.
+- [ ] Define source-carrying lowered nodes so diagnostics can point back to original code.
+- [ ] Introduce interned symbols for names used in lowered syntax.
 - [ ] Lower top-level sequences.
 - [ ] Lower symbol references.
 - [ ] Lower scalar literals.
@@ -118,6 +123,8 @@ References:
 - [ ] Define `CoreType`.
 - [ ] Define `TypeScheme`.
 - [ ] Define inference variable identities.
+- [ ] Define interned symbol identities.
+- [ ] Define the interner API and ownership model.
 - [ ] Define type environments.
 - [ ] Define internal type pretty-printing for diagnostics and debugging.
 - [ ] Decide how `Any` and `Unknown` participate in unification in detail `(needs refinement)`.
@@ -138,7 +145,9 @@ References:
 - `ARCHITECTURE.md` → Inference pipeline
 
 - [ ] Implement fresh inference variable creation.
-- [ ] Implement substitutions or an equivalent unification state.
+- [ ] Implement an explicit inference-variable state.
+- [ ] Implement representative lookup for inference variables.
+- [ ] Implement path compression during representative lookup.
 - [ ] Implement occurs checks.
 - [ ] Implement unification for atomic types.
 - [ ] Implement unification for function types.
@@ -272,6 +281,7 @@ References:
 - `ARCHITECTURE.md` → Builtin environment
 
 - [ ] Start with a minimal builtin environment.
+- [ ] Key builtin and lexical environments by interned symbols.
 - [ ] Add builtins only when required by tests.
 - [ ] Discuss semantics with the user before adding nontrivial builtins.
 - [ ] Decide the first builtin set `(needs refinement)`.
@@ -315,7 +325,9 @@ References:
 
 ## Current next steps
 
-- [ ] Finalize this planning document.
-- [ ] Reshape the crate toward a library-first structure.
-- [ ] Add the initial snapshot-based test harness.
+- [x] Finalize this planning document.
+- [x] Reshape the crate toward a library-first structure.
+- [x] Add the initial snapshot-based test harness.
+- [ ] Define the lowered AST shape, including source ranges and interned symbols.
+- [ ] Define the interner boundary and how diagnostics resolve interned names back to text.
 - [ ] Discuss the first executable syntax slice if needed before implementation starts.

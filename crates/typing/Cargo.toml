@@ -3,4 +3,14 @@ name = "typing"
 edition = "2024"
 version.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
 [dependencies]
+thiserror.workspace = true
+tree-sitter.workspace = true
+tree-sitter-r.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+indoc.workspace = true

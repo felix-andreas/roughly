@@ -1783,6 +1783,13 @@ dependencies = [
 [[package]]
 name = "typing"
 version = "0.1.1"
+dependencies = [
+ "indoc",
+ "insta",
+ "thiserror",
+ "tree-sitter",
+ "tree-sitter-r",
+]
 
 [[package]]
 name = "unicode-ident"

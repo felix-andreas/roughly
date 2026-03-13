@@ -1,0 +1,8 @@
+---
+source: crates/typing/src/lib.rs
+assertion_line: 209
+expression: "render(indoc! {r#\"\n                value <-\n            \"#})"
+---
+error[syntax-error] Missing syntax near 2:1
+--> 2:1-2:1
+| <empty line>
