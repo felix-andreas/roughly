@@ -85,26 +85,26 @@ References:
 - `ARCHITECTURE.md` → Parsing and lowering
 - `ARCHITECTURE.md` → Scope of the supported language subset
 
-- [ ] Keep tree-sitter parsing separate from semantic lowering.
-- [ ] Define a lowered internal representation for the supported subset.
-- [ ] Define source-carrying lowered nodes so diagnostics can point back to original code.
-- [ ] Introduce interned symbols for names used in lowered syntax.
-- [ ] Lower top-level sequences.
-- [ ] Lower symbol references.
-- [ ] Lower scalar literals.
-- [ ] Lower assignments.
-- [ ] Lower function definitions.
-- [ ] Lower function calls.
+- [x] Keep tree-sitter parsing separate from semantic lowering.
+- [x] Define a lowered internal representation for the supported subset.
+- [x] Define source-carrying lowered nodes so diagnostics can point back to original code.
+- [x] Introduce interned symbols for names used in lowered syntax.
+- [x] Lower top-level sequences.
+- [x] Lower symbol references.
+- [x] Lower scalar literals.
+- [x] Lower assignments.
+- [x] Lower function definitions.
+- [x] Lower function calls.
 - [ ] Lower list-like constructions.
 - [ ] Decide whether to lower `if` in the first syntax slice or defer it `(needs refinement)`.
 
 ### Parser and lowering tests
 
-- [ ] Parse and lower a literal assignment.
-- [ ] Parse and lower a function definition.
-- [ ] Parse and lower a function call.
+- [x] Parse and lower a literal assignment.
+- [x] Parse and lower a function definition.
+- [x] Parse and lower a function call.
 - [ ] Parse and lower list-like constructions.
-- [ ] Preserve source ranges needed for diagnostics.
+- [x] Preserve source ranges needed for diagnostics.
 
 ## Phase 4 — Type representations
 
@@ -112,31 +112,31 @@ References:
 - `ARCHITECTURE.md` → Type model
 - `ARCHITECTURE.md` → Recommended internal representation split
 
-- [ ] Define `Atomic` categories:
-  - [ ] `logical`
-  - [ ] `integer`
-  - [ ] `double`
-  - [ ] `complex`
-  - [ ] `character`
-  - [ ] `raw`
-- [ ] Define `SurfaceType`.
-- [ ] Define `CoreType`.
-- [ ] Define `TypeScheme`.
-- [ ] Define inference variable identities.
-- [ ] Define interned symbol identities.
-- [ ] Define the interner API and ownership model.
+- [x] Define `Atomic` categories:
+  - [x] `logical`
+  - [x] `integer`
+  - [x] `double`
+  - [x] `complex`
+  - [x] `character`
+  - [x] `raw`
+- [x] Define `SurfaceType`.
+- [x] Define `CoreType`.
+- [x] Define `TypeScheme`.
+- [x] Define inference variable identities.
+- [x] Define interned symbol identities.
+- [x] Define the interner API and ownership model.
 - [ ] Define type environments.
 - [ ] Define internal type pretty-printing for diagnostics and debugging.
 - [ ] Decide how `Any` and `Unknown` participate in unification in detail `(needs refinement)`.
 
 ### Representation invariants
 
-- [ ] Distinguish surface annotation syntax from inference internals.
-- [ ] Support scalar atomics and atomic vectors distinctly.
-- [ ] Support `List`, `Tuple`, and `Record`.
-- [ ] Support function types.
-- [ ] Support inference variables in `CoreType`.
-- [ ] Support quantified variables in `TypeScheme`.
+- [x] Distinguish surface annotation syntax from inference internals.
+- [x] Support scalar atomics and atomic vectors distinctly.
+- [x] Support `List`, `Tuple`, and `Record`.
+- [x] Support function types.
+- [x] Support inference variables in `CoreType`.
+- [x] Support quantified variables in `TypeScheme`.
 
 ## Phase 5 — Monomorphic inference core
 
@@ -144,16 +144,16 @@ References:
 - `ARCHITECTURE.md` → Hindley–Milner approach
 - `ARCHITECTURE.md` → Inference pipeline
 
-- [ ] Implement fresh inference variable creation.
-- [ ] Implement an explicit inference-variable state.
-- [ ] Implement representative lookup for inference variables.
-- [ ] Implement path compression during representative lookup.
-- [ ] Implement occurs checks.
-- [ ] Implement unification for atomic types.
-- [ ] Implement unification for function types.
-- [ ] Implement unification for `List`.
-- [ ] Implement unification for `Tuple`.
-- [ ] Implement unification for `Record`.
+- [x] Implement fresh inference variable creation.
+- [x] Implement an explicit inference-variable state.
+- [x] Implement representative lookup for inference variables.
+- [x] Implement path compression during representative lookup.
+- [x] Implement occurs checks.
+- [x] Implement unification for atomic types.
+- [x] Implement unification for function types.
+- [x] Implement unification for `List`.
+- [x] Implement unification for `Tuple`.
+- [x] Implement unification for `Record`.
 - [ ] Implement inference for literals.
 - [ ] Implement inference for symbol references.
 - [ ] Implement inference for assignments.
@@ -169,7 +169,7 @@ References:
 - [ ] Infer double literal types.
 - [ ] Infer character literal types.
 - [ ] Infer function parameter and return constraints from usage.
-- [ ] Report type mismatches in calls.
+- [x] Report type mismatches in calls.
 - [ ] Report calling a non-function.
 - [ ] Report unknown names.
 - [ ] Snapshot monomorphic diagnostics.
@@ -328,6 +328,7 @@ References:
 - [x] Finalize this planning document.
 - [x] Reshape the crate toward a library-first structure.
 - [x] Add the initial snapshot-based test harness.
-- [ ] Define the lowered AST shape, including source ranges and interned symbols.
-- [ ] Define the interner boundary and how diagnostics resolve interned names back to text.
-- [ ] Discuss the first executable syntax slice if needed before implementation starts.
+- [x] Define the lowered AST shape, including source ranges and interned symbols.
+- [x] Define the interner boundary and how diagnostics resolve interned names back to text.
+- [ ] Implement expression inference over the lowered AST for literals, names, assignments, functions, and calls.
+- [ ] Connect inference errors to rendered diagnostics.

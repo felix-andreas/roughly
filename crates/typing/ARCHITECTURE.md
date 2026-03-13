@@ -38,6 +38,7 @@ The initial goals are:
 - Develop the checker test-first.
 - Use R snippets as the primary test input format.
 - Prefer snapshot tests of rendered diagnostics for end-to-end behavior.
+- Aim for Elm- and Rust-like diagnostic quality, with clear, precise, and actionable error messages.
 - Support later integration into `roughly` without redesigning the core engine.
 
 ## Non-goals for v1
@@ -371,6 +372,8 @@ If a builtin has semantics that are unclear or have important design consequence
 ## Error handling and diagnostics
 
 Diagnostics are part of the product, not an afterthought.
+
+A core product goal is to aim for Elm- and Rust-like diagnostic quality. Error messages should be clear, precise, and actionable, and should help the user understand both what went wrong and what part of the code caused the problem.
 
 Each diagnostic should aim to include:
 

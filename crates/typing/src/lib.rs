@@ -1,5 +1,6 @@
 pub mod check;
 pub mod diagnostics;
+pub mod infer;
 pub mod interner;
 pub mod lower;
 pub mod parse;
