@@ -1,0 +1,8 @@
+---
+source: crates/typing/src/lib.rs
+assertion_line: 86
+expression: "render(indoc! {r#\"\n                value\n            \"#})"
+---
+error[type-error] Unknown name. This value is used before it has a known type.
+--> 1:1-1:6
+| value

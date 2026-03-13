@@ -154,25 +154,25 @@ References:
 - [x] Implement unification for `List`.
 - [x] Implement unification for `Tuple`.
 - [x] Implement unification for `Record`.
-- [ ] Implement inference for literals.
-- [ ] Implement inference for symbol references.
-- [ ] Implement inference for assignments.
-- [ ] Implement inference for function definitions.
-- [ ] Implement inference for function calls.
-- [ ] Produce diagnostics for type mismatches.
+- [x] Implement inference for literals.
+- [x] Implement inference for symbol references.
+- [x] Implement inference for assignments.
+- [x] Implement inference for function definitions.
+- [x] Implement inference for function calls.
+- [x] Produce diagnostics for type mismatches.
 - [ ] Produce diagnostics for arity mismatches.
-- [ ] Produce diagnostics for non-callable values used as functions.
+- [x] Produce diagnostics for non-callable values used as functions.
 
 ### Monomorphic tests
 
-- [ ] Infer integer literal types.
+- [x] Infer integer literal types.
 - [ ] Infer double literal types.
 - [ ] Infer character literal types.
-- [ ] Infer function parameter and return constraints from usage.
+- [x] Infer function parameter and return constraints from usage.
 - [x] Report type mismatches in calls.
-- [ ] Report calling a non-function.
-- [ ] Report unknown names.
-- [ ] Snapshot monomorphic diagnostics.
+- [x] Report calling a non-function.
+- [x] Report unknown names.
+- [x] Snapshot monomorphic diagnostics.
 
 ## Phase 6 — Let-polymorphism and internal generics
 
@@ -330,5 +330,8 @@ References:
 - [x] Add the initial snapshot-based test harness.
 - [x] Define the lowered AST shape, including source ranges and interned symbols.
 - [x] Define the interner boundary and how diagnostics resolve interned names back to text.
-- [ ] Implement expression inference over the lowered AST for literals, names, assignments, functions, and calls.
-- [ ] Connect inference errors to rendered diagnostics.
+- [x] Implement expression inference over the lowered AST for literals, names, assignments, functions, and calls.
+- [x] Connect inference errors to rendered diagnostics.
+- [ ] Improve diagnostic precision so type errors point at the failing expression instead of a fallback range.
+- [ ] Improve type rendering so diagnostics read like Elm/Rust style messages instead of debug output.
+- [ ] Add a persistent `MEMORY.md` document for cross-session context and open design loose ends.

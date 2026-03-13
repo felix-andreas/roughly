@@ -1,4 +1,9 @@
 use {
+    crate::{
+        infer::InferenceError,
+        interner::Interner,
+        types::{Atomic, CoreType},
+    },
     std::fmt,
     tree_sitter::{Point, Range},
 };
@@ -45,6 +50,82 @@ impl Diagnostic {
         }
     }
 
+    pub fn type_error(range: Range, message: impl Into<String>) -> Self {
+        Self {
+            severity: Severity::Error,
+            code: DiagnosticCode::TypeError,
+            message: message.into(),
+            range,
+        }
+    }
+
+    pub fn from_inference_error(error: &InferenceError, range: Range, interner: &Interner) -> Self {
+        let message = match error {
+            InferenceError::UnknownInferenceVariable(variable) => {
+                format!(
+                    "The type checker lost track of inference variable t{}.",
+                    variable.0
+                )
+            }
+            InferenceError::UnknownName(symbol) => {
+                let name = interner.resolve(*symbol).unwrap_or("<unknown>");
+                format!("I could not find a binding for `{name}`.")
+            }
+            InferenceError::ExpectedFunction(actual_type) => {
+                format!(
+                    "This expression is being called like a function, but it has type `{}`.",
+                    render_core_type(actual_type, interner)
+                )
+            }
+            InferenceError::OccursCheckFailed { variable, in_type } => {
+                format!(
+                    "I cannot construct an infinite type: t{} occurs inside `{}`.",
+                    variable.0,
+                    render_core_type(in_type, interner)
+                )
+            }
+            InferenceError::TypeMismatch { expected, actual } => {
+                format!(
+                    "Type mismatch: expected `{}`, but found `{}`.",
+                    render_core_type(expected, interner),
+                    render_core_type(actual, interner)
+                )
+            }
+            InferenceError::TupleLengthMismatch { expected, actual } => {
+                format!(
+                    "Tuple length mismatch: expected {expected} item(s), but found {actual} item(s)."
+                )
+            }
+            InferenceError::RecordFieldMismatch {
+                expected_fields,
+                actual_fields,
+            } => {
+                format!(
+                    "Record fields do not match: expected `{}`, but found `{}`.",
+                    render_symbols(expected_fields, interner),
+                    render_symbols(actual_fields, interner)
+                )
+            }
+            InferenceError::FunctionArityMismatch { expected, actual } => {
+                format!(
+                    "Function arity mismatch: expected {expected} argument(s), but found {actual} argument(s)."
+                )
+            }
+            InferenceError::NamedParameterMismatch {
+                expected_parameters,
+                actual_parameters,
+            } => {
+                format!(
+                    "Named parameters do not match: expected `{}`, but found `{}`.",
+                    render_symbols(expected_parameters, interner),
+                    render_symbols(actual_parameters, interner)
+                )
+            }
+        };
+
+        Self::type_error(range, message)
+    }
+
     pub fn render(&self, source: &str) -> String {
         let start = self.range.start_point;
         let end = self.range.end_point;
@@ -80,12 +161,14 @@ impl fmt::Display for Severity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticCode {
     SyntaxError,
+    TypeError,
 }
 
 impl fmt::Display for DiagnosticCode {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::SyntaxError => formatter.write_str("syntax-error"),
+            Self::TypeError => formatter.write_str("type-error"),
         }
     }
 }
@@ -103,4 +186,82 @@ fn excerpt_for_range(source: &str, range: Range) -> String {
     }
 
     format!("| {line}")
+}
+
+fn render_symbols(symbols: &[crate::interner::Symbol], interner: &Interner) -> String {
+    if symbols.is_empty() {
+        return "<none>".to_owned();
+    }
+
+    symbols
+        .iter()
+        .map(|symbol| interner.resolve(*symbol).unwrap_or("<unknown>").to_owned())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn render_core_type(core_type: &CoreType, interner: &Interner) -> String {
+    match core_type {
+        CoreType::Any => "any".to_owned(),
+        CoreType::Unknown => "unknown".to_owned(),
+        CoreType::Null => "null".to_owned(),
+        CoreType::Scalar(atomic) => format!("scalar {}", render_atomic(*atomic)),
+        CoreType::Vector(atomic) => format!("vector {}", render_atomic(*atomic)),
+        CoreType::List(item_type) => {
+            format!("list[{}]", render_core_type(item_type, interner))
+        }
+        CoreType::Record(fields) => {
+            let rendered_fields = fields
+                .iter()
+                .map(|field| {
+                    let name = interner.resolve(field.name).unwrap_or("<unknown>");
+                    format!("{name}: {}", render_core_type(&field.value, interner))
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("record{{{rendered_fields}}}")
+        }
+        CoreType::Tuple(items) => {
+            let rendered_items = items
+                .iter()
+                .map(|item| render_core_type(item, interner))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("tuple({rendered_items})")
+        }
+        CoreType::Function(function_type) => {
+            let rendered_parameters = function_type
+                .parameters
+                .iter()
+                .map(|parameter| render_core_type(parameter, interner))
+                .collect::<Vec<_>>();
+            let rendered_named_parameters = function_type
+                .named_parameters
+                .iter()
+                .map(|parameter| {
+                    let name = interner.resolve(parameter.name).unwrap_or("<unknown>");
+                    format!("{name}: {}", render_core_type(&parameter.value, interner))
+                })
+                .collect::<Vec<_>>();
+            let mut rendered_parts = rendered_parameters;
+            rendered_parts.extend(rendered_named_parameters);
+            format!(
+                "fn({}) -> {}",
+                rendered_parts.join(", "),
+                render_core_type(&function_type.return_type, interner)
+            )
+        }
+        CoreType::Variable(variable) => format!("t{}", variable.0),
+    }
+}
+
+fn render_atomic(atomic: Atomic) -> &'static str {
+    match atomic {
+        Atomic::Logical => "logical",
+        Atomic::Integer => "integer",
+        Atomic::Double => "double",
+        Atomic::Complex => "complex",
+        Atomic::Character => "character",
+        Atomic::Raw => "raw",
+    }
 }

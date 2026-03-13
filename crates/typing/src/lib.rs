@@ -82,6 +82,39 @@ mod tests {
     }
 
     #[test]
+    fn unknown_name_type_error_snapshot() {
+        assert_snapshot!(
+            "unknown_name_type_error",
+            render(indoc! {r#"
+                value
+            "#})
+        );
+    }
+
+    #[test]
+    fn call_argument_type_error_snapshot() {
+        assert_snapshot!(
+            "call_argument_type_error",
+            render(indoc! {r#"
+                identity <- function(x) x
+                identity(1)
+                identity("oops")
+            "#})
+        );
+    }
+
+    #[test]
+    fn calling_non_function_type_error_snapshot() {
+        assert_snapshot!(
+            "calling_non_function_type_error",
+            render(indoc! {r#"
+                value <- 1L
+                value(2L)
+            "#})
+        );
+    }
+
+    #[test]
     fn lowering_context_interns_repeated_names() {
         let mut lowering_context = LoweringContext::new();
 

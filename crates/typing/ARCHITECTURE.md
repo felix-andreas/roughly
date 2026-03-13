@@ -18,13 +18,15 @@ Important design decisions must be discussed with the user before implementation
 
 Project planning is tracked separately in `crates/typing/TODOS.md`.
 
+Cross-session memory is tracked in `crates/typing/MEMORY.md`.
+
 Rules for planning:
 
 - Hierarchical todos are preferred.
 - Todos may reference sections of this document.
 - If the exact implementation steps are not yet clear, mark the todo with `(needs refinement)`.
 - When work reaches a todo marked `(needs refinement)`, discuss it with the user before proceeding.
-- As implementation evolves, keep both this document and `TODOS.md` up to date.
+- As implementation evolves, keep this document, `TODOS.md`, and `MEMORY.md` up to date.
 - During the scaffolding phase, it is fine to split functionality into different files in order to establish clean boundaries for the parser, lowering, diagnostics, tests, and inference work.
 
 ## Goals
@@ -355,6 +357,22 @@ The planned pipeline is:
 5. Apply annotation constraints where present.
 6. Render diagnostics and inferred results.
 
+Current implemented pipeline status:
+
+1. Parsing is implemented for the current tree-sitter based checker entry point.
+2. Annotation extraction is not implemented yet.
+3. Lowering is implemented for the current small subset:
+   - top-level sequences
+   - symbol references
+   - scalar literals
+   - assignments
+   - function definitions
+   - function calls
+   - unsupported fallback nodes
+4. Monomorphic inference is implemented for the same subset.
+5. Annotation constraints are not implemented yet.
+6. Rendered syntax and type diagnostics are implemented and snapshot-tested.
+
 Each stage should have its own tests where practical.
 
 ## Builtin environment
@@ -383,6 +401,14 @@ Each diagnostic should aim to include:
 - stable rendering suitable for snapshot tests
 
 The rendered form of diagnostics should be treated as an interface used by tests.
+
+Current diagnostic status:
+
+- syntax diagnostics are implemented
+- monomorphic type diagnostics are implemented for a small subset
+- type diagnostics are still early and need better precision
+- some current type diagnostics still rely on fallback ranges instead of the most specific expression range
+- some current type messages still expose internal type structure too directly and need refinement toward the intended Elm/Rust-like quality bar
 
 As a result:
 
@@ -497,8 +523,13 @@ Current progress:
 - The crate has been reshaped toward a library-first structure.
 - A minimal binary wrapper exists only as a thin shell.
 - A first checker entry point exists for snippet-based checking.
-- Snapshot-based end-to-end tests exist for empty input, valid syntax, and syntax errors.
-- The next implementation focus should move from scaffolding into parsing/lowering boundaries and then the first inference slice.
+- Snapshot-based end-to-end tests exist for syntax diagnostics and the first type diagnostics.
+- Lowering exists for the initial expression subset.
+- Interning exists and is already used in lowering and type representations.
+- Core type representations exist.
+- Monomorphic inference state, path compression, occurs checks, and first unification logic exist.
+- Expression inference exists for literals, names, assignments, functions, and calls.
+- The next implementation focus should move toward better diagnostic quality, more precise ranges, and later let-polymorphism plus annotations.
 
 This ordering is intentional:
 
@@ -506,3 +537,25 @@ This ordering is intentional:
 - it keeps the HM core small
 - it introduces polymorphism in v1 without requiring explicit generic syntax
 - it leaves room to discuss important semantic choices before they harden into implementation
+
+## Memory file
+
+`crates/typing/MEMORY.md` should be used to store cross-session memory for this crate.
+
+Its role is to preserve high-signal context between sessions, especially when the active conversation is approaching its context limit or when work is paused before the next implementation step.
+
+`MEMORY.md` should store things such as:
+
+- active loose ends
+- known diagnostic shortcomings
+- current implementation limitations that are easy to forget
+- recent decisions that are not yet fully reflected in code
+- the most likely next steps if work resumes later
+
+`MEMORY.md` should not replace `ARCHITECTURE.md` or `TODOS.md`.
+
+Use the files as follows:
+
+- `ARCHITECTURE.md` for the intended design and implementation contract
+- `TODOS.md` for the planned work breakdown and progress tracking
+- `MEMORY.md` for session-to-session memory and open thoughts that should survive context loss
