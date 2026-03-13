@@ -6,14 +6,20 @@ use {
             CompletionParams, CompletionResponse, DidOpenTextDocumentParams,
             DocumentFormattingParams, DocumentSymbolParams, DocumentSymbolResponse,
             FormattingOptions, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams,
-            InitializedParams, PartialResultParams, Position, PublishDiagnosticsParams,
-            TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
-            WorkDoneProgressParams, WorkspaceFolder, notification, request,
+            InitializeResult, InitializedParams, PartialResultParams, Position,
+            PublishDiagnosticsParams, TextDocumentIdentifier, TextDocumentItem,
+            TextDocumentPositionParams, Url, WorkDoneProgressParams, WorkspaceFolder, notification,
+            request,
         },
         panic::{CatchUnwind, CatchUnwindLayer},
         router::Router,
     },
-    std::{ops::ControlFlow, path::Path, process::Stdio, time::Duration},
+    std::{
+        ops::ControlFlow,
+        path::{Path, PathBuf},
+        process::Stdio,
+        time::Duration,
+    },
     tokio::sync::mpsc,
     tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt},
     tower::ServiceBuilder,
@@ -98,13 +104,28 @@ struct TestContext {
     server: async_lsp::ServerSocket,
     diagnostics_receiver: mpsc::UnboundedReceiver<PublishDiagnosticsParams>,
     mainloop_handle: tokio::task::JoinHandle<()>,
+    init_result: InitializeResult,
+    _temp_dir: tempfile::TempDir,
+    workspace_dir: PathBuf,
 }
 
-async fn setup_test(workspace_dir: &Path) -> TestContext {
+async fn setup_test(initial_files: &[(&str, &str)]) -> TestContext {
+    let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+    let workspace_dir = temp_dir.path().to_path_buf();
+    std::fs::create_dir_all(workspace_dir.join("R")).expect("failed to create R directory");
+
+    for (relative_path, text) in initial_files {
+        let path = workspace_dir.join(relative_path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("failed to create parent directory");
+        }
+        std::fs::write(path, text).expect("failed to write initial test file");
+    }
+
     let (diagnostics_sender, diagnostics_receiver) = mpsc::unbounded_channel();
     let (mainloop, mut server) = build_test_client(diagnostics_sender);
 
-    let mut child = spawn_server(workspace_dir);
+    let mut child = spawn_server(&workspace_dir);
     let stdout = child.stdout.take().expect("missing stdout").compat();
     let stdin = child.stdin.take().expect("missing stdin").compat_write();
 
@@ -115,9 +136,9 @@ async fn setup_test(workspace_dir: &Path) -> TestContext {
         drop(child);
     });
 
-    let root_uri = Url::from_file_path(workspace_dir).expect("invalid workspace path");
+    let root_uri = Url::from_file_path(&workspace_dir).expect("invalid workspace path");
 
-    let _init_result = server
+    let init_result = server
         .initialize(InitializeParams {
             workspace_folders: Some(vec![WorkspaceFolder {
                 uri: root_uri,
@@ -140,6 +161,9 @@ async fn setup_test(workspace_dir: &Path) -> TestContext {
         server,
         diagnostics_receiver,
         mainloop_handle,
+        init_result,
+        _temp_dir: temp_dir,
+        workspace_dir,
     }
 }
 
@@ -151,8 +175,8 @@ impl TestContext {
         let _ = tokio::time::timeout(Duration::from_secs(3), self.mainloop_handle).await;
     }
 
-    fn file_uri(workspace_dir: &Path, relative_path: &str) -> Url {
-        Url::from_file_path(workspace_dir.join(relative_path)).expect("invalid file path")
+    fn file_uri(&self, relative_path: &str) -> Url {
+        Url::from_file_path(self.workspace_dir.join(relative_path)).expect("invalid file path")
     }
 
     async fn open_file(&mut self, uri: &Url, text: &str) {
@@ -171,38 +195,13 @@ impl TestContext {
 
 #[tokio::test]
 async fn initialize_reports_capabilities() {
-    let workspace_dir = tempfile::tempdir().expect("failed to create temp dir");
-    std::fs::create_dir_all(workspace_dir.path().join("R")).expect("failed to create R directory");
+    let context = setup_test(&[]).await;
 
-    let (diagnostics_sender, _diagnostics_receiver) = mpsc::unbounded_channel();
-    let (mainloop, mut server) = build_test_client(diagnostics_sender);
-
-    let mut child = spawn_server(workspace_dir.path());
-    let stdout = child.stdout.take().expect("missing stdout").compat();
-    let stdin = child.stdin.take().expect("missing stdin").compat_write();
-
-    let mainloop_handle = tokio::spawn(async move {
-        let _ = mainloop.run_buffered(stdout, stdin).await;
-        drop(child);
-    });
-
-    let root_uri = Url::from_file_path(workspace_dir.path()).expect("invalid path");
-
-    let init_result = server
-        .initialize(InitializeParams {
-            workspace_folders: Some(vec![WorkspaceFolder {
-                uri: root_uri,
-                name: "root".into(),
-            }]),
-            ..InitializeParams::default()
-        })
-        .await
-        .expect("initialize failed");
-
-    let capabilities = init_result.capabilities;
+    let capabilities = &context.init_result.capabilities;
 
     let sync = capabilities
         .text_document_sync
+        .as_ref()
         .expect("missing text_document_sync");
     let sync_options = match sync {
         async_lsp::lsp_types::TextDocumentSyncCapability::Options(options) => options,
@@ -213,13 +212,13 @@ async fn initialize_reports_capabilities() {
         Some(async_lsp::lsp_types::TextDocumentSyncKind::INCREMENTAL)
     );
 
-    let formatting = capabilities.document_formatting_provider;
+    let formatting = &capabilities.document_formatting_provider;
     assert!(
         matches!(formatting, Some(async_lsp::lsp_types::OneOf::Left(true))),
         "expected document_formatting_provider to be true"
     );
 
-    let definition = capabilities.definition_provider;
+    let definition = &capabilities.definition_provider;
     assert!(
         matches!(definition, Some(async_lsp::lsp_types::OneOf::Left(true))),
         "expected definition_provider to be true"
@@ -227,38 +226,33 @@ async fn initialize_reports_capabilities() {
 
     let completion = capabilities
         .completion_provider
+        .as_ref()
         .expect("missing completion_provider");
     let trigger_chars = completion
         .trigger_characters
+        .as_ref()
         .expect("missing trigger_characters");
     assert!(trigger_chars.contains(&"$".into()));
     assert!(trigger_chars.contains(&"@".into()));
     assert!(trigger_chars.contains(&":".into()));
 
-    let doc_symbol = capabilities.document_symbol_provider;
+    let doc_symbol = &capabilities.document_symbol_provider;
     assert!(
         matches!(doc_symbol, Some(async_lsp::lsp_types::OneOf::Left(true))),
         "expected document_symbol_provider to be true"
     );
 
-    server.shutdown(()).await.expect("shutdown failed");
-    server.exit(()).expect("exit failed");
-    server.emit(Stop).expect("emit Stop failed");
-    let _ = tokio::time::timeout(Duration::from_secs(3), mainloop_handle).await;
+    context.shutdown().await;
 }
 
 #[tokio::test]
 async fn diagnostics_on_open() {
-    let workspace_dir = tempfile::tempdir().expect("failed to create temp dir");
-    let r_dir = workspace_dir.path().join("R");
-    std::fs::create_dir_all(&r_dir).expect("failed to create R directory");
+    let mut context = setup_test(&[]).await;
 
-    let file_path = r_dir.join("test.R");
+    let file_path = context.workspace_dir.join("R/test.R");
     std::fs::write(&file_path, "x <- T\ny = 1\n").expect("failed to write test file");
 
-    let mut context = setup_test(workspace_dir.path()).await;
-
-    let file_uri = TestContext::file_uri(workspace_dir.path(), "R/test.R");
+    let file_uri = context.file_uri("R/test.R");
     context.open_file(&file_uri, "x <- T\ny = 1\n").await;
 
     let diagnostics = recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
@@ -283,13 +277,9 @@ async fn diagnostics_on_open() {
 
 #[tokio::test]
 async fn no_diagnostics_for_clean_file() {
-    let workspace_dir = tempfile::tempdir().expect("failed to create temp dir");
-    let r_dir = workspace_dir.path().join("R");
-    std::fs::create_dir_all(&r_dir).expect("failed to create R directory");
+    let mut context = setup_test(&[]).await;
 
-    let mut context = setup_test(workspace_dir.path()).await;
-
-    let file_uri = TestContext::file_uri(workspace_dir.path(), "R/clean.R");
+    let file_uri = context.file_uri("R/clean.R");
     context.open_file(&file_uri, "x <- 1\ny <- x + 2\n").await;
 
     let diagnostics = recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
@@ -305,13 +295,9 @@ async fn no_diagnostics_for_clean_file() {
 
 #[tokio::test]
 async fn diagnostics_on_syntax_error() {
-    let workspace_dir = tempfile::tempdir().expect("failed to create temp dir");
-    let r_dir = workspace_dir.path().join("R");
-    std::fs::create_dir_all(&r_dir).expect("failed to create R directory");
+    let mut context = setup_test(&[]).await;
 
-    let mut context = setup_test(workspace_dir.path()).await;
-
-    let file_uri = TestContext::file_uri(workspace_dir.path(), "R/broken.R");
+    let file_uri = context.file_uri("R/broken.R");
     context.open_file(&file_uri, "f(\n").await;
 
     let diagnostics = recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
@@ -332,13 +318,9 @@ async fn diagnostics_on_syntax_error() {
 
 #[tokio::test]
 async fn formatting() {
-    let workspace_dir = tempfile::tempdir().expect("failed to create temp dir");
-    let r_dir = workspace_dir.path().join("R");
-    std::fs::create_dir_all(&r_dir).expect("failed to create R directory");
+    let mut context = setup_test(&[]).await;
 
-    let mut context = setup_test(workspace_dir.path()).await;
-
-    let file_uri = TestContext::file_uri(workspace_dir.path(), "R/fmt.R");
+    let file_uri = context.file_uri("R/fmt.R");
     let unformatted = "x<-1\ny  <-  2\n";
     context.open_file(&file_uri, unformatted).await;
 
@@ -378,13 +360,9 @@ async fn formatting() {
 
 #[tokio::test]
 async fn goto_definition() {
-    let workspace_dir = tempfile::tempdir().expect("failed to create temp dir");
-    let r_dir = workspace_dir.path().join("R");
-    std::fs::create_dir_all(&r_dir).expect("failed to create R directory");
+    let mut context = setup_test(&[]).await;
 
-    let mut context = setup_test(workspace_dir.path()).await;
-
-    let file_uri = TestContext::file_uri(workspace_dir.path(), "R/defn.R");
+    let file_uri = context.file_uri("R/defn.R");
     let source = "foo <- function(x) x\nbar <- foo(1)\n";
     context.open_file(&file_uri, source).await;
 
@@ -430,13 +408,9 @@ async fn goto_definition() {
 
 #[tokio::test]
 async fn completion() {
-    let workspace_dir = tempfile::tempdir().expect("failed to create temp dir");
-    let r_dir = workspace_dir.path().join("R");
-    std::fs::create_dir_all(&r_dir).expect("failed to create R directory");
+    let mut context = setup_test(&[]).await;
 
-    let mut context = setup_test(workspace_dir.path()).await;
-
-    let file_uri = TestContext::file_uri(workspace_dir.path(), "R/comp.R");
+    let file_uri = context.file_uri("R/comp.R");
     let source = "my_function <- function(x) x\nmy_f\n";
     context.open_file(&file_uri, source).await;
 
@@ -475,13 +449,9 @@ async fn completion() {
 
 #[tokio::test]
 async fn document_symbols() {
-    let workspace_dir = tempfile::tempdir().expect("failed to create temp dir");
-    let r_dir = workspace_dir.path().join("R");
-    std::fs::create_dir_all(&r_dir).expect("failed to create R directory");
+    let mut context = setup_test(&[]).await;
 
-    let mut context = setup_test(workspace_dir.path()).await;
-
-    let file_uri = TestContext::file_uri(workspace_dir.path(), "R/syms.R");
+    let file_uri = context.file_uri("R/syms.R");
     let source = "add <- function(x, y) x + y\nmultiply <- function(a, b) a * b\n";
     context.open_file(&file_uri, source).await;
 
@@ -530,19 +500,9 @@ async fn document_symbols() {
 
 #[tokio::test]
 async fn config_indent_width() {
-    let workspace_dir = tempfile::tempdir().expect("failed to create temp dir");
-    let r_dir = workspace_dir.path().join("R");
-    std::fs::create_dir_all(&r_dir).expect("failed to create R directory");
+    let mut context = setup_test(&[("roughly.toml", "[format]\nindent-width = 4\n")]).await;
 
-    std::fs::write(
-        workspace_dir.path().join("roughly.toml"),
-        "[format]\nindent-width = 4\n",
-    )
-    .expect("failed to write config");
-
-    let mut context = setup_test(workspace_dir.path()).await;
-
-    let file_uri = TestContext::file_uri(workspace_dir.path(), "R/indent.R");
+    let file_uri = context.file_uri("R/indent.R");
     let source = "f <- function(x) {\nx + 1\n}\n";
     context.open_file(&file_uri, source).await;
 

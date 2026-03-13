@@ -160,6 +160,7 @@
               gnumake
               cargo-edit
               cargo-insta
+              cargo-nextest
               # cross compilation
               cargo-zigbuild
               zig
