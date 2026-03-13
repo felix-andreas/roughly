@@ -1,6 +1,6 @@
 use crate::interner::Symbol;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct InferenceVariableId(pub u32);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
