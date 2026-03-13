@@ -373,7 +373,7 @@ Current implemented pipeline status:
    - function definitions
    - function calls
    - unsupported fallback nodes
-4. Monomorphic inference is implemented for the same subset.
+4. Inference is implemented for the same subset, including generalized bindings at assignments and instantiation at use sites.
 5. Annotation constraints are not implemented yet.
 6. Rendered syntax and type diagnostics are implemented and snapshot-tested.
 
@@ -409,7 +409,7 @@ The rendered form of diagnostics should be treated as an interface used by tests
 Current diagnostic status:
 
 - syntax diagnostics are implemented
-- monomorphic type diagnostics are implemented for a small subset
+- type diagnostics are implemented for a small subset, including end-to-end behavior after let-polymorphism groundwork
 - type diagnostics are still early and need better precision
 - some current type diagnostics still rely on fallback ranges instead of the most specific expression range
 - some current type messages still expose internal type structure too directly and need refinement toward the intended Elm/Rust-like quality bar
@@ -531,9 +531,10 @@ Current progress:
 - Lowering exists for the initial expression subset.
 - Interning exists and is already used in lowering and type representations.
 - Core type representations exist.
-- Monomorphic inference state, path compression, occurs checks, and first unification logic exist.
+- Inference state, path compression, occurs checks, and first unification logic exist.
 - Expression inference exists for literals, names, assignments, functions, and calls.
-- The next implementation focus should move toward better diagnostic quality, more precise ranges, and later let-polymorphism plus annotations.
+- Let-polymorphism groundwork now exists through free type variable computation, generalization at assignment bindings, and instantiation at use sites.
+- The next implementation focus should move toward better diagnostic quality, more precise ranges, stronger end-to-end polymorphism coverage, and later annotations.
 
 This ordering is intentional:
 

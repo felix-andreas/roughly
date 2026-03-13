@@ -1,8 +1,8 @@
 use {
     tree_sitter::{Point, Range},
     typing::{
-        interner::Interner,
         infer::{InferenceEntry, InferenceError, InferenceState},
+        interner::Interner,
         lower::{Argument, Expression, ExpressionId, ExpressionKind, Module, Parameter},
         types::{Atomic, CoreType, FunctionType, InferenceVariableId, RecordField},
     },
@@ -27,7 +27,10 @@ fn fresh_variables_start_unbound() {
 
     let variable = inference_state.fresh_variable();
 
-    assert_eq!(inference_state.entry(variable), Some(&InferenceEntry::Unbound));
+    assert_eq!(
+        inference_state.entry(variable),
+        Some(&InferenceEntry::Unbound)
+    );
 }
 
 #[test]
@@ -41,7 +44,10 @@ fn unifying_two_variables_creates_a_redirect() {
         .expect("variables should unify");
 
     assert_eq!(unified_type, CoreType::Variable(right));
-    assert_eq!(inference_state.entry(left), Some(&InferenceEntry::Redirect(right)));
+    assert_eq!(
+        inference_state.entry(left),
+        Some(&InferenceEntry::Redirect(right))
+    );
 }
 
 #[test]
@@ -242,6 +248,31 @@ fn inferring_an_integer_literal_returns_integer_scalar() {
 }
 
 #[test]
+fn inferring_a_double_literal_returns_double_scalar() {
+    let mut inference_state = InferenceState::new();
+
+    let inferred_type = inference_state
+        .infer_expression(&expression(0, ExpressionKind::Double("1.5".to_owned())))
+        .expect("double literal should infer");
+
+    assert_eq!(inferred_type, CoreType::Scalar(Atomic::Double));
+}
+
+#[test]
+fn inferring_a_character_literal_returns_character_scalar() {
+    let mut inference_state = InferenceState::new();
+
+    let inferred_type = inference_state
+        .infer_expression(&expression(
+            0,
+            ExpressionKind::Character("\"hello\"".to_owned()),
+        ))
+        .expect("character literal should infer");
+
+    assert_eq!(inferred_type, CoreType::Scalar(Atomic::Character));
+}
+
+#[test]
 fn inferring_a_known_symbol_uses_the_environment() {
     let mut inference_state = InferenceState::new();
     let mut interner = Interner::new();
@@ -293,7 +324,7 @@ fn inferring_an_assignment_binds_the_name() {
     assert_eq!(
         inference_state.lookup_name(target),
         Some(&typing::infer::Binding {
-            core_type: CoreType::Scalar(Atomic::Integer),
+            type_scheme: typing::TypeScheme::monomorphic(CoreType::Scalar(Atomic::Integer)),
             range: test_range(),
         })
     );
@@ -325,7 +356,10 @@ fn inferring_a_function_produces_a_function_type() {
                 function_type.parameters[0],
                 CoreType::Variable(InferenceVariableId(_))
             ));
-            assert_eq!(*function_type.return_type, function_type.parameters[0].clone());
+            assert_eq!(
+                *function_type.return_type,
+                function_type.parameters[0].clone()
+            );
         }
         other_type => panic!("expected function type, got {other_type:?}"),
     }
@@ -429,6 +463,90 @@ fn inferring_a_module_processes_expressions_in_order() {
 }
 
 #[test]
+fn looking_up_a_monomorphic_binding_returns_the_bound_type() {
+    let mut inference_state = InferenceState::new();
+    let mut interner = Interner::new();
+    let name = interner.intern("value");
+    inference_state.bind_name(name, CoreType::Scalar(Atomic::Double), test_range());
+
+    let inferred_type = inference_state
+        .infer_expression(&expression(0, ExpressionKind::Symbol(name)))
+        .expect("monomorphic binding should infer");
+
+    assert_eq!(inferred_type, CoreType::Scalar(Atomic::Double));
+}
+
+#[test]
+fn generalized_assignments_can_be_instantiated_at_multiple_types() {
+    let mut inference_state = InferenceState::new();
+    let mut interner = Interner::new();
+    let identity_name = interner.intern("identity");
+    let first_name = interner.intern("first");
+    let second_name = interner.intern("second");
+    let parameter_name = interner.intern("x");
+
+    let inferred_types = inference_state
+        .infer_module(&Module::new(vec![
+            expression(
+                0,
+                ExpressionKind::Assign {
+                    target: identity_name,
+                    value: Box::new(expression(
+                        1,
+                        ExpressionKind::Function {
+                            parameters: vec![Parameter {
+                                symbol: parameter_name,
+                                range: test_range(),
+                            }],
+                            body: Box::new(expression(2, ExpressionKind::Symbol(parameter_name))),
+                        },
+                    )),
+                },
+            ),
+            expression(
+                3,
+                ExpressionKind::Assign {
+                    target: first_name,
+                    value: Box::new(expression(
+                        4,
+                        ExpressionKind::Call {
+                            callee: Box::new(expression(5, ExpressionKind::Symbol(identity_name))),
+                            arguments: vec![Argument {
+                                expression: expression(6, ExpressionKind::Integer("1L".to_owned())),
+                                name: None,
+                            }],
+                        },
+                    )),
+                },
+            ),
+            expression(
+                7,
+                ExpressionKind::Assign {
+                    target: second_name,
+                    value: Box::new(expression(
+                        8,
+                        ExpressionKind::Call {
+                            callee: Box::new(expression(9, ExpressionKind::Symbol(identity_name))),
+                            arguments: vec![Argument {
+                                expression: expression(
+                                    10,
+                                    ExpressionKind::Character("\"hello\"".to_owned()),
+                                ),
+                                name: None,
+                            }],
+                        },
+                    )),
+                },
+            ),
+        ]))
+        .expect("generalized assignment should instantiate independently per use");
+
+    assert_eq!(inferred_types.len(), 3);
+    assert_eq!(inferred_types[1], CoreType::Scalar(Atomic::Integer));
+    assert_eq!(inferred_types[2], CoreType::Scalar(Atomic::Character));
+}
+
+#[test]
 fn unknown_inference_variables_are_reported() {
     let mut inference_state = InferenceState::new();
 
@@ -436,8 +554,8 @@ fn unknown_inference_variables_are_reported() {
 
     assert_eq!(
         result,
-        Err(InferenceError::UnknownInferenceVariable(InferenceVariableId(
-            99
-        )))
+        Err(InferenceError::UnknownInferenceVariable(
+            InferenceVariableId(99)
+        ))
     );
 }

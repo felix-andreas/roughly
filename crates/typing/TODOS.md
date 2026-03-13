@@ -175,8 +175,8 @@ References:
 ### Monomorphic tests
 
 - [x] Infer integer literal types.
-- [ ] Infer double literal types.
-- [ ] Infer character literal types.
+- [x] Infer double literal types.
+- [x] Infer character literal types.
 - [x] Infer function parameter and return constraints from usage.
 - [x] Report type mismatches in calls.
 - [x] Report calling a non-function.
@@ -190,10 +190,10 @@ References:
 - `ARCHITECTURE.md` → Hindley–Milner approach
 - `ARCHITECTURE.md` → No explicit generics syntax in v1
 
-- [ ] Implement free type variable computation.
-- [ ] Implement generalization at bindings.
-- [ ] Implement instantiation at use sites.
-- [ ] Ensure generalized bindings get fresh variables per use.
+- [x] Implement free type variable computation.
+- [x] Implement generalization at bindings.
+- [x] Implement instantiation at use sites.
+- [x] Ensure generalized bindings get fresh variables per use.
 - [ ] Verify that polymorphic bindings work across repeated calls.
 - [ ] Keep explicit generic annotation syntax deferred.
 

@@ -52,8 +52,13 @@ The crate currently has:
   - simple wrapped expressions
 - string interning
 - core type representations
+- `TypeScheme`-based bindings
 - inference state with path compression
-- monomorphic expression inference
+- let-polymorphism groundwork:
+  - free type variable computation
+  - generalization at assignment bindings
+  - instantiation at use sites
+  - fresh variables per instantiation
 - end-to-end type diagnostics
 - grouped fixture-based end-to-end tests under `tests/`
 
@@ -61,9 +66,9 @@ Important current limitations:
 
 - unsupported syntax still lowers to `Unsupported`
 - nested names inside unsupported syntax are not recursively lowered yet
-- inference is still monomorphic
 - some type diagnostics still fall back to coarse ranges
 - function parameters with defaults are not yet represented in a way that supports named-argument mismatch diagnostics end-to-end
+- some older end-to-end diagnostic fixtures became invalid once polymorphic bindings started generalizing correctly and must be replaced with post-polymorphism cases
 
 ## Highest-value unfinished work
 
@@ -79,16 +84,19 @@ Remaining focus:
 - refine wording for higher-order failures
 - revisit named-argument diagnostics after function-parameter lowering can represent the relevant call shape
 
-### 2. Implement let-polymorphism
+### 2. Finish validating let-polymorphism end-to-end
 
-This is still the next major semantic step after the current monomorphic foundation.
-
-Needed work:
+The groundwork is now implemented for assignment bindings:
 
 - free type variable computation
 - generalization at bindings
 - instantiation at use sites
-- polymorphism tests on R snippets
+
+Current follow-up work:
+
+- add and maintain end-to-end R-snippet tests that reflect polymorphic behavior
+- replace stale diagnostics fixtures that previously depended on monomorphic behavior
+- expand higher-level polymorphism coverage beyond the current identity-style cases
 
 ### 3. Unsupported syntax behavior is still minimal
 
@@ -146,12 +154,12 @@ These should not be reopened casually without discussion with the user:
 
 ## Recommended next step
 
-Continue improving diagnostic precision and rendering quality, especially source-range fidelity and higher-order wording, then move to let-polymorphism.
+Continue improving diagnostic precision and rendering quality, especially source-range fidelity and higher-order wording, while refreshing end-to-end fixtures for post-polymorphism behavior.
 
 ## Things to watch in the next session
 
 - Do not silently change semantics without updating the docs.
 - Do not treat current diagnostics as “done”.
 - Do not add broad new syntax support without checking whether it changes an important design decision.
-- Keep snapshot-based tests in sync with intentional diagnostic changes.
+- Keep end-to-end fixture expectations in sync with intentional semantic changes such as polymorphic generalization.
 - Do not reintroduce end-to-end named-argument mismatch fixtures until function-parameter lowering can represent the needed semantics.

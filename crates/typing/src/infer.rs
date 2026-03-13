@@ -2,7 +2,7 @@ use {
     crate::{
         interner::Symbol,
         lower::{Expression, ExpressionId, ExpressionKind, Module},
-        types::{Atomic, CoreType, FunctionType, InferenceVariableId, RecordField},
+        types::{Atomic, CoreType, FunctionType, InferenceVariableId, RecordField, TypeScheme},
     },
     std::collections::{BTreeMap, BTreeSet},
     tree_sitter::Range,
@@ -49,8 +49,12 @@ impl InferenceState {
     }
 
     pub fn bind_name(&mut self, symbol: Symbol, core_type: CoreType, range: Range) {
+        self.bind_scheme(symbol, TypeScheme::monomorphic(core_type), range);
+    }
+
+    pub fn bind_scheme(&mut self, symbol: Symbol, type_scheme: TypeScheme, range: Range) {
         self.environment
-            .insert(symbol, Binding { core_type, range });
+            .insert(symbol, Binding { type_scheme, range });
     }
 
     pub fn lookup_name(&self, symbol: Symbol) -> Option<&Binding> {
@@ -79,7 +83,9 @@ impl InferenceState {
             ExpressionKind::Character(_) => Ok(CoreType::Scalar(Atomic::Character)),
             ExpressionKind::Symbol(symbol) => self
                 .lookup_name(*symbol)
-                .map(|binding| binding.core_type.clone())
+                .cloned()
+                .map(|binding| self.instantiate_type_scheme(&binding.type_scheme))
+                .transpose()?
                 .ok_or_else(|| InferenceError::UnknownName {
                     symbol: *symbol,
                     range: expression.range,
@@ -87,7 +93,8 @@ impl InferenceState {
                 }),
             ExpressionKind::Assign { target, value } => {
                 let inferred_value = self.infer_expression(value)?;
-                self.bind_name(*target, inferred_value.clone(), expression.range);
+                let generalized_scheme = self.generalize(inferred_value.clone())?;
+                self.bind_scheme(*target, generalized_scheme, expression.range);
                 Ok(inferred_value)
             }
             ExpressionKind::Function { parameters, body } => {
@@ -171,6 +178,13 @@ impl InferenceState {
             }
             other_type => Ok(other_type),
         }
+    }
+
+    pub fn free_type_variables(
+        &mut self,
+        core_type: &CoreType,
+    ) -> Result<BTreeSet<InferenceVariableId>, InferenceError> {
+        self.free_type_variables_in_core_type(core_type)
     }
 
     pub fn unify(&mut self, left: CoreType, right: CoreType) -> Result<CoreType, InferenceError> {
@@ -383,6 +397,177 @@ impl InferenceState {
         *entry = InferenceEntry::Redirect(right);
 
         Ok(CoreType::Variable(right))
+    }
+
+    fn instantiate_type_scheme(
+        &mut self,
+        type_scheme: &TypeScheme,
+    ) -> Result<CoreType, InferenceError> {
+        let mut substitutions = BTreeMap::new();
+
+        for variable in &type_scheme.quantified_variables {
+            substitutions.insert(*variable, self.fresh_variable());
+        }
+
+        self.instantiate_core_type(&type_scheme.body, &substitutions)
+    }
+
+    fn instantiate_core_type(
+        &mut self,
+        core_type: &CoreType,
+        substitutions: &BTreeMap<InferenceVariableId, InferenceVariableId>,
+    ) -> Result<CoreType, InferenceError> {
+        match core_type {
+            CoreType::Any => Ok(CoreType::Any),
+            CoreType::Unknown => Ok(CoreType::Unknown),
+            CoreType::Null => Ok(CoreType::Null),
+            CoreType::Scalar(atomic) => Ok(CoreType::Scalar(*atomic)),
+            CoreType::Vector(atomic) => Ok(CoreType::Vector(*atomic)),
+            CoreType::List(item_type) => Ok(CoreType::List(Box::new(
+                self.instantiate_core_type(item_type, substitutions)?,
+            ))),
+            CoreType::Record(fields) => {
+                let mut instantiated_fields = Vec::with_capacity(fields.len());
+                for field in fields {
+                    instantiated_fields.push(RecordField::new(
+                        field.name,
+                        self.instantiate_core_type(&field.value, substitutions)?,
+                    ));
+                }
+                Ok(CoreType::Record(instantiated_fields))
+            }
+            CoreType::Tuple(items) => {
+                let mut instantiated_items = Vec::with_capacity(items.len());
+                for item in items {
+                    instantiated_items.push(self.instantiate_core_type(item, substitutions)?);
+                }
+                Ok(CoreType::Tuple(instantiated_items))
+            }
+            CoreType::Function(function_type) => {
+                let mut instantiated_parameters =
+                    Vec::with_capacity(function_type.parameters.len());
+                for parameter in &function_type.parameters {
+                    instantiated_parameters
+                        .push(self.instantiate_core_type(parameter, substitutions)?);
+                }
+
+                let mut instantiated_named_parameters =
+                    Vec::with_capacity(function_type.named_parameters.len());
+                for named_parameter in &function_type.named_parameters {
+                    instantiated_named_parameters.push(RecordField::new(
+                        named_parameter.name,
+                        self.instantiate_core_type(&named_parameter.value, substitutions)?,
+                    ));
+                }
+
+                let instantiated_return_type =
+                    self.instantiate_core_type(&function_type.return_type, substitutions)?;
+
+                Ok(CoreType::Function(FunctionType::new(
+                    instantiated_parameters,
+                    instantiated_named_parameters,
+                    instantiated_return_type,
+                )))
+            }
+            CoreType::Variable(variable) => Ok(substitutions
+                .get(variable)
+                .copied()
+                .map(CoreType::Variable)
+                .unwrap_or(CoreType::Variable(*variable))),
+        }
+    }
+
+    fn generalize(&mut self, core_type: CoreType) -> Result<TypeScheme, InferenceError> {
+        let resolved_type = self.resolve(core_type)?;
+        let type_variables = self.free_type_variables_in_core_type(&resolved_type)?;
+        let environment_variables = self.free_type_variables_in_environment()?;
+
+        let quantified_variables = type_variables
+            .difference(&environment_variables)
+            .copied()
+            .collect();
+
+        Ok(TypeScheme {
+            quantified_variables,
+            body: resolved_type,
+        })
+    }
+
+    fn free_type_variables_in_environment(
+        &mut self,
+    ) -> Result<BTreeSet<InferenceVariableId>, InferenceError> {
+        let type_schemes = self
+            .environment
+            .values()
+            .map(|binding| binding.type_scheme.clone())
+            .collect::<Vec<_>>();
+        let mut free_variables = BTreeSet::new();
+
+        for type_scheme in type_schemes {
+            let scheme_variables = self.free_type_variables_in_type_scheme(&type_scheme)?;
+            free_variables.extend(scheme_variables);
+        }
+
+        Ok(free_variables)
+    }
+
+    fn free_type_variables_in_type_scheme(
+        &mut self,
+        type_scheme: &TypeScheme,
+    ) -> Result<BTreeSet<InferenceVariableId>, InferenceError> {
+        let mut free_variables = self.free_type_variables_in_core_type(&type_scheme.body)?;
+
+        for quantified_variable in &type_scheme.quantified_variables {
+            free_variables.remove(quantified_variable);
+        }
+
+        Ok(free_variables)
+    }
+
+    fn free_type_variables_in_core_type(
+        &mut self,
+        core_type: &CoreType,
+    ) -> Result<BTreeSet<InferenceVariableId>, InferenceError> {
+        match self.resolve(core_type.clone())? {
+            CoreType::Any
+            | CoreType::Unknown
+            | CoreType::Null
+            | CoreType::Scalar(_)
+            | CoreType::Vector(_) => Ok(BTreeSet::new()),
+            CoreType::Variable(variable) => Ok(BTreeSet::from([variable])),
+            CoreType::List(item_type) => self.free_type_variables_in_core_type(&item_type),
+            CoreType::Record(fields) => {
+                let mut free_variables = BTreeSet::new();
+                for field in fields {
+                    free_variables.extend(self.free_type_variables_in_core_type(&field.value)?);
+                }
+                Ok(free_variables)
+            }
+            CoreType::Tuple(items) => {
+                let mut free_variables = BTreeSet::new();
+                for item in items {
+                    free_variables.extend(self.free_type_variables_in_core_type(&item)?);
+                }
+                Ok(free_variables)
+            }
+            CoreType::Function(function_type) => {
+                let mut free_variables = BTreeSet::new();
+
+                for parameter in function_type.parameters {
+                    free_variables.extend(self.free_type_variables_in_core_type(&parameter)?);
+                }
+
+                for named_parameter in function_type.named_parameters {
+                    free_variables
+                        .extend(self.free_type_variables_in_core_type(&named_parameter.value)?);
+                }
+
+                free_variables
+                    .extend(self.free_type_variables_in_core_type(&function_type.return_type)?);
+
+                Ok(free_variables)
+            }
+        }
     }
 
     fn resolve_function_type(
@@ -615,6 +800,6 @@ pub enum InferenceError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Binding {
-    pub core_type: CoreType,
+    pub type_scheme: TypeScheme,
     pub range: Range,
 }
