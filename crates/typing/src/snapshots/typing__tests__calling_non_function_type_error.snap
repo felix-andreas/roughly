@@ -3,6 +3,6 @@ source: crates/typing/src/lib.rs
 assertion_line: 108
 expression: "render(indoc!\n{r#\"\n                value <- 1L\n                value(2L)\n            \"#})"
 ---
-error[type-error] Type mismatch. Expected Scalar(Integer), but found Function(FunctionType { parameters: [Scalar(Integer)], named_parameters: [], return_type: Variable(InferenceVariableId(0)) }).
---> 1:1-1:12
-| value <- 1L
+error[type-error] This expression has type `fn(scalar integer) -> t0`, but it needs to be `scalar integer`.
+--> 2:1-2:10
+| value(2L)

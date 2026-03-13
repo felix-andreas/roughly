@@ -1,10 +1,11 @@
 use {
     crate::{
         interner::Symbol,
-        lower::{Expression, ExpressionKind, Module},
+        lower::{Expression, ExpressionId, ExpressionKind, Module},
         types::{Atomic, CoreType, FunctionType, InferenceVariableId, RecordField},
     },
     std::collections::{BTreeMap, BTreeSet},
+    tree_sitter::Range,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,7 +19,7 @@ pub enum InferenceEntry {
 pub struct InferenceState {
     next_variable_id: u32,
     entries: BTreeMap<InferenceVariableId, InferenceEntry>,
-    environment: BTreeMap<Symbol, CoreType>,
+    environment: BTreeMap<Symbol, Binding>,
 }
 
 impl Default for InferenceState {
@@ -47,11 +48,12 @@ impl InferenceState {
         self.entries.get(&variable)
     }
 
-    pub fn bind_name(&mut self, symbol: Symbol, core_type: CoreType) {
-        self.environment.insert(symbol, core_type);
+    pub fn bind_name(&mut self, symbol: Symbol, core_type: CoreType, range: Range) {
+        self.environment
+            .insert(symbol, Binding { core_type, range });
     }
 
-    pub fn lookup_name(&self, symbol: Symbol) -> Option<&CoreType> {
+    pub fn lookup_name(&self, symbol: Symbol) -> Option<&Binding> {
         self.environment.get(&symbol)
     }
 
@@ -77,11 +79,15 @@ impl InferenceState {
             ExpressionKind::Character(_) => Ok(CoreType::Scalar(Atomic::Character)),
             ExpressionKind::Symbol(symbol) => self
                 .lookup_name(*symbol)
-                .cloned()
-                .ok_or(InferenceError::UnknownName(*symbol)),
+                .map(|binding| binding.core_type.clone())
+                .ok_or_else(|| InferenceError::UnknownName {
+                    symbol: *symbol,
+                    range: expression.range,
+                    expression_id: expression.id,
+                }),
             ExpressionKind::Assign { target, value } => {
                 let inferred_value = self.infer_expression(value)?;
-                self.bind_name(*target, inferred_value.clone());
+                self.bind_name(*target, inferred_value.clone(), expression.range);
                 Ok(inferred_value)
             }
             ExpressionKind::Function { parameters, body } => {
@@ -91,7 +97,7 @@ impl InferenceState {
                 for parameter in parameters {
                     let variable = self.fresh_variable();
                     let parameter_type = CoreType::Variable(variable);
-                    self.bind_name(parameter.symbol, parameter_type.clone());
+                    self.bind_name(parameter.symbol, parameter_type.clone(), parameter.range);
                     parameter_types.push(parameter_type);
                 }
 
@@ -123,10 +129,15 @@ impl InferenceState {
                     CoreType::Variable(return_variable),
                 ));
 
-                let unified_function = self.unify(inferred_callee, expected_function)?;
+                let unified_function =
+                    self.unify_with_context(inferred_callee, expected_function, expression)?;
                 match self.resolve(unified_function)? {
                     CoreType::Function(function_type) => Ok(*function_type.return_type),
-                    other_type => Err(InferenceError::ExpectedFunction(other_type)),
+                    other_type => Err(InferenceError::ExpectedFunction {
+                        actual_type: other_type,
+                        range: callee.range,
+                        expression_id: callee.id,
+                    }),
                 }
             }
             ExpressionKind::Unsupported => Ok(CoreType::Unknown),
@@ -163,6 +174,24 @@ impl InferenceState {
     }
 
     pub fn unify(&mut self, left: CoreType, right: CoreType) -> Result<CoreType, InferenceError> {
+        self.unify_internal(left, right, None)
+    }
+
+    pub fn unify_with_context(
+        &mut self,
+        left: CoreType,
+        right: CoreType,
+        expression: &Expression,
+    ) -> Result<CoreType, InferenceError> {
+        self.unify_internal(left, right, Some(expression))
+    }
+
+    fn unify_internal(
+        &mut self,
+        left: CoreType,
+        right: CoreType,
+        expression: Option<&Expression>,
+    ) -> Result<CoreType, InferenceError> {
         let resolved_left = self.resolve(left)?;
         let resolved_right = self.resolve(right)?;
 
@@ -189,22 +218,26 @@ impl InferenceState {
                 Ok(CoreType::Vector(left_atomic))
             }
             (CoreType::List(left_item_type), CoreType::List(right_item_type)) => {
-                let unified_item_type = self.unify(*left_item_type, *right_item_type)?;
+                let unified_item_type =
+                    self.unify_internal(*left_item_type, *right_item_type, expression)?;
                 Ok(CoreType::List(Box::new(unified_item_type)))
             }
             (CoreType::Tuple(left_items), CoreType::Tuple(right_items)) => {
-                self.unify_tuples(left_items, right_items)
+                self.unify_tuples(left_items, right_items, expression)
             }
             (CoreType::Record(left_fields), CoreType::Record(right_fields)) => {
-                self.unify_records(left_fields, right_fields)
+                self.unify_records(left_fields, right_fields, expression)
             }
             (CoreType::Function(left_function), CoreType::Function(right_function)) => {
-                let unified_function = self.unify_functions(left_function, right_function)?;
+                let unified_function =
+                    self.unify_functions(left_function, right_function, expression)?;
                 Ok(CoreType::Function(unified_function))
             }
             (left_type, right_type) => Err(InferenceError::TypeMismatch {
                 expected: left_type,
                 actual: right_type,
+                range: expression.map(|current_expression| current_expression.range),
+                expression_id: expression.map(|current_expression| current_expression.id),
             }),
         }
     }
@@ -380,17 +413,20 @@ impl InferenceState {
         &mut self,
         left_items: Vec<CoreType>,
         right_items: Vec<CoreType>,
+        expression: Option<&Expression>,
     ) -> Result<CoreType, InferenceError> {
         if left_items.len() != right_items.len() {
             return Err(InferenceError::TupleLengthMismatch {
                 expected: left_items.len(),
                 actual: right_items.len(),
+                range: expression.map(|current_expression| current_expression.range),
+                expression_id: expression.map(|current_expression| current_expression.id),
             });
         }
 
         let mut unified_items = Vec::with_capacity(left_items.len());
         for (left_item, right_item) in left_items.into_iter().zip(right_items) {
-            unified_items.push(self.unify(left_item, right_item)?);
+            unified_items.push(self.unify_internal(left_item, right_item, expression)?);
         }
 
         Ok(CoreType::Tuple(unified_items))
@@ -400,6 +436,7 @@ impl InferenceState {
         &mut self,
         left_fields: Vec<RecordField<CoreType>>,
         right_fields: Vec<RecordField<CoreType>>,
+        expression: Option<&Expression>,
     ) -> Result<CoreType, InferenceError> {
         let left_names: BTreeSet<_> = left_fields.iter().map(|field| field.name).collect();
         let right_names: BTreeSet<_> = right_fields.iter().map(|field| field.name).collect();
@@ -408,6 +445,8 @@ impl InferenceState {
             return Err(InferenceError::RecordFieldMismatch {
                 expected_fields: left_names.into_iter().collect(),
                 actual_fields: right_names.into_iter().collect(),
+                range: expression.map(|current_expression| current_expression.range),
+                expression_id: expression.map(|current_expression| current_expression.id),
             });
         }
 
@@ -422,10 +461,12 @@ impl InferenceState {
                 return Err(InferenceError::RecordFieldMismatch {
                     expected_fields: vec![left_field.name],
                     actual_fields: Vec::new(),
+                    range: expression.map(|current_expression| current_expression.range),
+                    expression_id: expression.map(|current_expression| current_expression.id),
                 });
             };
 
-            let unified_value = self.unify(left_field.value, right_value)?;
+            let unified_value = self.unify_internal(left_field.value, right_value, expression)?;
             unified_fields.push(RecordField::new(left_field.name, unified_value));
         }
 
@@ -436,11 +477,14 @@ impl InferenceState {
         &mut self,
         left_function: FunctionType<CoreType>,
         right_function: FunctionType<CoreType>,
+        expression: Option<&Expression>,
     ) -> Result<FunctionType<CoreType>, InferenceError> {
         if left_function.parameters.len() != right_function.parameters.len() {
             return Err(InferenceError::FunctionArityMismatch {
                 expected: left_function.parameters.len(),
                 actual: right_function.parameters.len(),
+                range: expression.map(|current_expression| current_expression.range),
+                expression_id: expression.map(|current_expression| current_expression.id),
             });
         }
 
@@ -459,6 +503,8 @@ impl InferenceState {
             return Err(InferenceError::NamedParameterMismatch {
                 expected_parameters: left_named_names.into_iter().collect(),
                 actual_parameters: right_named_names.into_iter().collect(),
+                range: expression.map(|current_expression| current_expression.range),
+                expression_id: expression.map(|current_expression| current_expression.id),
             });
         }
 
@@ -468,7 +514,11 @@ impl InferenceState {
             .into_iter()
             .zip(right_function.parameters)
         {
-            unified_parameters.push(self.unify(left_parameter, right_parameter)?);
+            unified_parameters.push(self.unify_internal(
+                left_parameter,
+                right_parameter,
+                expression,
+            )?);
         }
 
         let right_named_by_name: BTreeMap<_, _> = right_function
@@ -484,16 +534,22 @@ impl InferenceState {
                 return Err(InferenceError::NamedParameterMismatch {
                     expected_parameters: vec![left_named_parameter.name],
                     actual_parameters: Vec::new(),
+                    range: expression.map(|current_expression| current_expression.range),
+                    expression_id: expression.map(|current_expression| current_expression.id),
                 });
             };
 
-            let unified_value = self.unify(left_named_parameter.value, right_value)?;
+            let unified_value =
+                self.unify_internal(left_named_parameter.value, right_value, expression)?;
             unified_named_parameters
                 .push(RecordField::new(left_named_parameter.name, unified_value));
         }
 
-        let unified_return_type =
-            self.unify(*left_function.return_type, *right_function.return_type)?;
+        let unified_return_type = self.unify_internal(
+            *left_function.return_type,
+            *right_function.return_type,
+            expression,
+        )?;
 
         Ok(FunctionType::new(
             unified_parameters,
@@ -506,8 +562,16 @@ impl InferenceState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InferenceError {
     UnknownInferenceVariable(InferenceVariableId),
-    UnknownName(Symbol),
-    ExpectedFunction(CoreType),
+    UnknownName {
+        symbol: Symbol,
+        range: Range,
+        expression_id: ExpressionId,
+    },
+    ExpectedFunction {
+        actual_type: CoreType,
+        range: Range,
+        expression_id: ExpressionId,
+    },
     OccursCheckFailed {
         variable: InferenceVariableId,
         in_type: CoreType,
@@ -515,23 +579,39 @@ pub enum InferenceError {
     TypeMismatch {
         expected: CoreType,
         actual: CoreType,
+        range: Option<Range>,
+        expression_id: Option<ExpressionId>,
     },
     TupleLengthMismatch {
         expected: usize,
         actual: usize,
+        range: Option<Range>,
+        expression_id: Option<ExpressionId>,
     },
     RecordFieldMismatch {
         expected_fields: Vec<Symbol>,
         actual_fields: Vec<Symbol>,
+        range: Option<Range>,
+        expression_id: Option<ExpressionId>,
     },
     FunctionArityMismatch {
         expected: usize,
         actual: usize,
+        range: Option<Range>,
+        expression_id: Option<ExpressionId>,
     },
     NamedParameterMismatch {
         expected_parameters: Vec<Symbol>,
         actual_parameters: Vec<Symbol>,
+        range: Option<Range>,
+        expression_id: Option<ExpressionId>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Binding {
+    pub core_type: CoreType,
+    pub range: Range,
 }
 
 #[cfg(test)]
@@ -649,6 +729,8 @@ mod tests {
             Err(InferenceError::TypeMismatch {
                 expected: CoreType::Scalar(Atomic::Integer),
                 actual: CoreType::Scalar(Atomic::Double),
+                range: None,
+                expression_id: None,
             })
         );
     }
@@ -704,6 +786,8 @@ mod tests {
             Err(InferenceError::RecordFieldMismatch {
                 expected_fields: vec![left_name],
                 actual_fields: vec![right_name],
+                range: None,
+                expression_id: None,
             })
         );
     }
@@ -725,6 +809,8 @@ mod tests {
             Err(InferenceError::TupleLengthMismatch {
                 expected: 1,
                 actual: 2,
+                range: None,
+                expression_id: None,
             })
         );
     }
@@ -760,6 +846,8 @@ mod tests {
             Err(InferenceError::NamedParameterMismatch {
                 expected_parameters: vec![left_name],
                 actual_parameters: vec![right_name],
+                range: None,
+                expression_id: None,
             })
         );
     }
@@ -780,7 +868,7 @@ mod tests {
         let mut inference_state = InferenceState::new();
         let mut interner = Interner::new();
         let name = interner.intern("value");
-        inference_state.bind_name(name, CoreType::Scalar(Atomic::Double));
+        inference_state.bind_name(name, CoreType::Scalar(Atomic::Double), test_range());
 
         let inferred_type = inference_state
             .infer_expression(&expression(0, ExpressionKind::Symbol(name)))
@@ -797,7 +885,14 @@ mod tests {
 
         let result = inference_state.infer_expression(&expression(0, ExpressionKind::Symbol(name)));
 
-        assert_eq!(result, Err(InferenceError::UnknownName(name)));
+        assert_eq!(
+            result,
+            Err(InferenceError::UnknownName {
+                symbol: name,
+                range: test_range(),
+                expression_id: ExpressionId(0),
+            })
+        );
     }
 
     #[test]
@@ -819,7 +914,10 @@ mod tests {
         assert_eq!(inferred_type, CoreType::Scalar(Atomic::Integer));
         assert_eq!(
             inference_state.lookup_name(target),
-            Some(&CoreType::Scalar(Atomic::Integer))
+            Some(&super::Binding {
+                core_type: CoreType::Scalar(Atomic::Integer),
+                range: test_range(),
+            })
         );
     }
 
@@ -868,7 +966,7 @@ mod tests {
             Vec::new(),
             CoreType::Scalar(Atomic::Integer),
         ));
-        inference_state.bind_name(function_name, function_type);
+        inference_state.bind_name(function_name, function_type, test_range());
 
         let inferred_type = inference_state
             .infer_expression(&expression(

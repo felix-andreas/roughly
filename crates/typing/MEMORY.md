@@ -162,35 +162,42 @@ Implemented:
 
 Important limitation:
 
-- diagnostic ranges for type errors are still coarse
-- current type diagnostics may still expose implementation-oriented type rendering in some cases
-- the present messages are a baseline, not the final Elm/Rust-quality target
+- type diagnostics now use more relevant expression ranges for unknown names and call-related mismatches, but some failures still fall back to coarse ranges
+- some diagnostics still expose internal inference variable names such as `t0`
+- the present messages are improved, but they are not yet at the final Elm/Rust-quality target
 
 ## Known loose ends
 
-### 1. Type error ranges are not yet precise
+### 1. Type error ranges are improved but still incomplete
 
 Current behavior:
 
-- type diagnostics use a fallback range instead of the most relevant expression range
+- unknown-name diagnostics point at the missing symbol use
+- call-related mismatches now point at the failing call expression instead of the first line fallback
+- some failures still use a fallback range because not every inference error carries precise source context yet
 
 Desired direction:
 
-- carry precise failure ranges through inference errors
-- report the exact call expression / symbol / argument / body region that caused the problem
+- carry precise failure ranges through all inference errors
+- refine range selection so diagnostics can point at the most relevant subexpression when possible
 
-This is likely the highest-value next improvement for diagnostic quality.
+This remains high-value work for diagnostic quality.
 
 ### 2. Diagnostic wording still needs refinement
 
-Current diagnostics are usable but not yet at the target quality bar.
+Current diagnostics are better than before, with less debug-style rendering and more direct user-facing phrasing.
+
+Recent improvements:
+
+- unknown-name diagnostics now mention the missing name directly
+- mismatch diagnostics now describe the actual and needed types in user-facing terms
+- call-related diagnostics now report the location of the failing call
 
 Needs work:
 
-- reduce raw debug-style type output
-- make mismatch messages more explanatory
-- refer to source constructs more directly
-- prefer user-facing language over internal terminology
+- reduce exposure of internal inference variable names in rendered types
+- make mismatch messages more explanatory in higher-order cases
+- refer to more specific source constructs when that helps the user fix the problem
 
 ### 3. Let-polymorphism is not implemented yet
 
@@ -268,23 +275,22 @@ These should not be reopened casually without discussing with the user:
 
 The best next step is:
 
-1. improve type diagnostic precision and quality
+1. continue improving type diagnostic precision and quality
 
 Concretely:
 
-- attach precise source ranges to inference failures
-- stop using the fallback-first-line range for type errors
-- improve error wording for:
-  - unknown names
-  - type mismatches
+- extend precise source ranges to the remaining inference failures that still use fallback locations
+- improve rendering so diagnostics do not expose internal inference variables like `t0` unless necessary
+- refine wording for:
   - calling non-functions
   - arity mismatches
+  - higher-order mismatch cases
 
 Why this is the best next step:
 
 - the type-checking pipeline now exists end to end
 - the user explicitly cares about high-quality error messages
-- improving range fidelity and message quality will pay off before expanding semantics further
+- recent improvements already paid off, and finishing this pass will pay off before expanding semantics further
 
 ## Recommended step after that
 
@@ -328,6 +334,6 @@ At the end of this session, the `typing` crate has:
 
 The most important unfinished work is now:
 
-- better type diagnostic ranges and wording
+- finish the remaining type diagnostic range and wording improvements
 - then let-polymorphism
 - then annotations and richer R data forms

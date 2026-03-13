@@ -75,7 +75,7 @@ References:
 
 - [x] Empty input produces no diagnostics.
 - [x] Simple scalar literals produce no diagnostics.
-- [ ] Undefined names produce diagnostics.
+- [x] Undefined names produce diagnostics.
 - [ ] Unsupported syntax produces `Unknown` behavior and any intended diagnostics.
 - [x] Diagnostic rendering is stable enough to snapshot.
 

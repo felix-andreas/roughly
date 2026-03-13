@@ -1,7 +1,7 @@
 use {
     crate::{
         infer::InferenceError,
-        interner::Interner,
+        interner::{Interner, Symbol},
         types::{Atomic, CoreType},
     },
     std::fmt,
@@ -59,68 +59,108 @@ impl Diagnostic {
         }
     }
 
-    pub fn from_inference_error(error: &InferenceError, range: Range, interner: &Interner) -> Self {
-        let message = match error {
-            InferenceError::UnknownInferenceVariable(variable) => {
+    pub fn from_inference_error(
+        error: &InferenceError,
+        fallback_range: Range,
+        interner: &Interner,
+    ) -> Self {
+        let (range, message) = match error {
+            InferenceError::UnknownInferenceVariable(variable) => (
+                fallback_range,
                 format!(
                     "The type checker lost track of inference variable t{}.",
                     variable.0
-                )
-            }
-            InferenceError::UnknownName(symbol) => {
+                ),
+            ),
+            InferenceError::UnknownName {
+                symbol,
+                range,
+                expression_id: _,
+            } => {
                 let name = interner.resolve(*symbol).unwrap_or("<unknown>");
-                format!("I could not find a binding for `{name}`.")
+                (*range, format!("I could not find `{name}` in scope."))
             }
-            InferenceError::ExpectedFunction(actual_type) => {
+            InferenceError::ExpectedFunction {
+                actual_type,
+                range,
+                expression_id: _,
+            } => (
+                *range,
                 format!(
                     "This expression is being called like a function, but it has type `{}`.",
                     render_core_type(actual_type, interner)
-                )
-            }
-            InferenceError::OccursCheckFailed { variable, in_type } => {
+                ),
+            ),
+            InferenceError::OccursCheckFailed { variable, in_type } => (
+                fallback_range,
                 format!(
                     "I cannot construct an infinite type: t{} occurs inside `{}`.",
                     variable.0,
                     render_core_type(in_type, interner)
-                )
-            }
-            InferenceError::TypeMismatch { expected, actual } => {
+                ),
+            ),
+            InferenceError::TypeMismatch {
+                expected,
+                actual,
+                range,
+                expression_id: _,
+            } => (
+                range.unwrap_or(fallback_range),
                 format!(
-                    "Type mismatch: expected `{}`, but found `{}`.",
-                    render_core_type(expected, interner),
-                    render_core_type(actual, interner)
-                )
-            }
-            InferenceError::TupleLengthMismatch { expected, actual } => {
+                    "This expression has type `{}`, but it needs to be `{}`.",
+                    render_core_type(actual, interner),
+                    render_core_type(expected, interner)
+                ),
+            ),
+            InferenceError::TupleLengthMismatch {
+                expected,
+                actual,
+                range,
+                expression_id: _,
+            } => (
+                range.unwrap_or(fallback_range),
                 format!(
-                    "Tuple length mismatch: expected {expected} item(s), but found {actual} item(s)."
-                )
-            }
+                    "This tuple has {} item(s), but {} item(s) were expected.",
+                    actual, expected
+                ),
+            ),
             InferenceError::RecordFieldMismatch {
                 expected_fields,
                 actual_fields,
-            } => {
+                range,
+                expression_id: _,
+            } => (
+                range.unwrap_or(fallback_range),
                 format!(
-                    "Record fields do not match: expected `{}`, but found `{}`.",
-                    render_symbols(expected_fields, interner),
-                    render_symbols(actual_fields, interner)
-                )
-            }
-            InferenceError::FunctionArityMismatch { expected, actual } => {
+                    "This record has fields `{}`, but fields `{}` were expected.",
+                    render_symbols(actual_fields, interner),
+                    render_symbols(expected_fields, interner)
+                ),
+            ),
+            InferenceError::FunctionArityMismatch {
+                expected,
+                actual,
+                range,
+                expression_id: _,
+            } => (
+                range.unwrap_or(fallback_range),
                 format!(
-                    "Function arity mismatch: expected {expected} argument(s), but found {actual} argument(s)."
-                )
-            }
+                    "This call passes {actual} argument(s), but the function expects {expected}."
+                ),
+            ),
             InferenceError::NamedParameterMismatch {
                 expected_parameters,
                 actual_parameters,
-            } => {
+                range,
+                expression_id: _,
+            } => (
+                range.unwrap_or(fallback_range),
                 format!(
-                    "Named parameters do not match: expected `{}`, but found `{}`.",
-                    render_symbols(expected_parameters, interner),
-                    render_symbols(actual_parameters, interner)
-                )
-            }
+                    "This call uses named arguments `{}`, but the function expects `{}`.",
+                    render_symbols(actual_parameters, interner),
+                    render_symbols(expected_parameters, interner)
+                ),
+            ),
         };
 
         Self::type_error(range, message)
@@ -188,14 +228,14 @@ fn excerpt_for_range(source: &str, range: Range) -> String {
     format!("| {line}")
 }
 
-fn render_symbols(symbols: &[crate::interner::Symbol], interner: &Interner) -> String {
+fn render_symbols(symbols: &[Symbol], interner: &Interner) -> String {
     if symbols.is_empty() {
         return "<none>".to_owned();
     }
 
     symbols
         .iter()
-        .map(|symbol| interner.resolve(*symbol).unwrap_or("<unknown>").to_owned())
+        .map(|symbol| format!("`{}`", interner.resolve(*symbol).unwrap_or("<unknown>")))
         .collect::<Vec<_>>()
         .join(", ")
 }

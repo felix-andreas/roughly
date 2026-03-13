@@ -3,6 +3,6 @@ source: crates/typing/src/lib.rs
 assertion_line: 96
 expression: "render(indoc!\n{r#\"\n                identity <- function(x) x\n                identity(1)\n                identity(\"oops\")\n            \"#})"
 ---
-error[type-error] Type mismatch. Expected Scalar(Double), but found Scalar(Character).
---> 1:1-1:26
-| identity <- function(x) x
+error[type-error] This expression has type `scalar character`, but it needs to be `scalar double`.
+--> 3:1-3:17
+| identity("oops")
