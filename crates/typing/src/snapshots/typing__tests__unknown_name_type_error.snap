@@ -1,8 +1,0 @@
----
-source: crates/typing/src/lib.rs
-assertion_line: 86
-expression: "render(indoc! {r#\"\n                value\n            \"#})"
----
-error[type-error] I could not find `value` in scope.
---> 1:1-1:6
-| value

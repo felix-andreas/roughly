@@ -1,0 +1,22 @@
+#==== general
+#---- empty_input
+
+#---- valid_assignment
+value <- 1L
+
+#---- invalid_syntax
+value <-
+
+#==== names
+#---- unknown_name
+value
+
+#==== calls
+#---- call_argument_type_error
+identity <- function(x) x
+identity(1)
+identity("oops")
+
+#---- calling_non_function
+value <- 1L
+value(2L)

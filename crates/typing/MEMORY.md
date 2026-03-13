@@ -2,6 +2,9 @@
 
 This document stores cross-session context for the `typing` crate.
 
+Keep this file compact and aggressively pruned. It should preserve only high-value continuity that is likely to matter in a later session.
+
+<!-- Do not remove this purpose section unless the user explicitly asks for it. New items added here should also be preserved unless the user explicitly asks to remove or rewrite them. -->
 Its purpose is to preserve important implementation state, open questions, and loose ends between agentic sessions, especially when the active context window is too small to carry the full design and implementation history forward.
 
 Use this document to record:
@@ -13,241 +16,99 @@ Use this document to record:
 - next recommended steps
 - any subtle decisions that should not be rediscovered from scratch
 
-This is not a replacement for `ARCHITECTURE.md` or `TODOS.md`.
+If the user says "cleanup memory", prune resolved or low-value session-specific details aggressively, but keep this purpose section and preserve any still-useful continuity.
 
+This is not a replacement for `AGENTS.md`, `ARCHITECTURE.md`, or `TODOS.md`.
+
+- `AGENTS.md` contains crate-specific working rules and workflow expectations.
 - `ARCHITECTURE.md` is the maintained design contract.
 - `TODOS.md` is the maintained execution plan.
 - `MEMORY.md` is a compact continuity document for session-to-session handoff.
 
-If code changes make this document inaccurate, it should be updated in the same session.
+If code changes make this document inaccurate, update it in the same session.
 
-## Collaboration rules to remember
+## Collaboration reminders
 
+- Review `AGENTS.md` before making significant changes in this crate.
 - Important design decisions must be discussed with the user before implementation.
 - If a todo is marked `(needs refinement)`, stop and discuss it before proceeding.
-- Keep `ARCHITECTURE.md`, `TODOS.md`, and this file aligned when implementation meaningfully changes.
-- Diagnostic quality is a core product goal. We want Elm- and Rust-like error messages: clear, precise, actionable, and user-centered.
+- Keep `AGENTS.md`, `ARCHITECTURE.md`, `TODOS.md`, and this file aligned when implementation meaningfully changes.
+- Diagnostic quality is a core goal. We want Elm- and Rust-like error messages: clear, precise, actionable, and user-centered.
 
-## Current implementation status
+## Current status
 
-The crate already has the following pieces in place:
+The crate currently has:
 
-### Crate structure
+- parsing and syntax diagnostics
+- lowering for:
+  - top-level sequences
+  - identifiers
+  - `NULL`
+  - `TRUE` / `FALSE`
+  - integer, float, and string literals
+  - assignments
+  - function definitions
+  - calls
+  - simple wrapped expressions
+- string interning
+- core type representations
+- inference state with path compression
+- monomorphic expression inference
+- end-to-end type diagnostics
+- grouped fixture-based end-to-end tests under `tests/`
 
-Current modules:
+Important current limitations:
 
-- `check`
-- `diagnostics`
-- `infer`
-- `interner`
-- `lower`
-- `parse`
-- `types`
+- unsupported syntax still lowers to `Unsupported`
+- nested names inside unsupported syntax are not recursively lowered yet
+- inference is still monomorphic
+- some type diagnostics still fall back to coarse ranges
+- some rendered types still expose internal inference variable names such as `t0`
 
-The crate is library-first, with a minimal binary wrapper still present.
+## Highest-value unfinished work
 
-### Parser and syntax diagnostics
+### 1. Finish the current diagnostics pass
 
-Implemented:
+Recent work improved ranges and wording, but diagnostics are still not at the target quality bar.
 
-- tree-sitter R parser setup
-- syntax parsing entry points
-- syntax diagnostics rendering
-- snapshot tests for syntax errors
+Remaining focus:
 
-### Lowering
+- extend precise source ranges to remaining inference failures
+- improve type rendering so diagnostics expose less internal machinery
+- refine wording for higher-order and arity-related failures
 
-Implemented lowering support for:
+### 2. Implement let-polymorphism
 
-- top-level sequences
-- identifiers
-- `NULL`
-- `TRUE` / `FALSE`
-- integer literals
-- float literals
-- string literals
-- assignments via `<-` and `=`
-- function definitions
-- calls
-- simple wrapped expressions:
-  - parenthesized expressions
-  - braced expressions
-- unsupported fallback nodes
+This is still the next major semantic step after the current monomorphic foundation.
 
-Important current limitation:
+Needed work:
 
-- unsupported constructs currently lower to `Unsupported`
-- nested names inside unsupported constructs are not yet recursively interned or lowered
+- free type variable computation
+- generalization at bindings
+- instantiation at use sites
+- polymorphism tests on R snippets
 
-### Interning
-
-Implemented:
-
-- `Symbol`
-- `Interner`
-- string interning for repeated names
-- resolving symbols back to source text
-
-Current intended uses:
-
-- variable names
-- function parameter names
-- record field names
-- later builtin and lexical environments
-
-### Type representations
-
-Implemented:
-
-- `Atomic`
-- `SurfaceType`
-- `CoreType`
-- `TypeScheme`
-- `InferenceVariableId`
-- `RecordField<T>`
-- `FunctionType<T>`
-
-Important type decisions already made:
-
-- distinguish `integer` and `double`
-- no subtyping in v1
-- no variance in v1
-- no union types in v1
-- internal generics/polymorphism are part of v1
-- no explicit generic syntax in v1
-
-### Inference engine foundation
-
-Implemented:
-
-- inference-variable state
-- fresh variable creation
-- representative lookup
-- path compression
-- occurs check
-- unification for:
-  - atomic scalar/vector equality
-  - `List`
-  - `Tuple`
-  - `Record`
-  - `Function`
-- simple lexical environment keyed by `Symbol`
-
-### Monomorphic expression inference
-
-Implemented expression inference for:
-
-- literals
-- symbol lookup
-- assignment
-- function expressions
-- calls
-- unsupported expressions -> `Unknown`
-
-Important limitation:
-
-- this is currently monomorphic usage inference only
-- no let-generalization / instantiation yet
-
-### End-to-end type diagnostics
-
-Implemented:
-
-- lowering + inference are now run from `check()`
-- inference failures are converted into user-facing diagnostics
-- snapshot tests exist for:
-  - unknown name
-  - call argument type mismatch
-  - calling a non-function
-
-Important limitation:
-
-- type diagnostics now use more relevant expression ranges for unknown names and call-related mismatches, but some failures still fall back to coarse ranges
-- some diagnostics still expose internal inference variable names such as `t0`
-- the present messages are improved, but they are not yet at the final Elm/Rust-quality target
-
-## Known loose ends
-
-### 1. Type error ranges are improved but still incomplete
-
-Current behavior:
-
-- unknown-name diagnostics point at the missing symbol use
-- call-related mismatches now point at the failing call expression instead of the first line fallback
-- some failures still use a fallback range because not every inference error carries precise source context yet
-
-Desired direction:
-
-- carry precise failure ranges through all inference errors
-- refine range selection so diagnostics can point at the most relevant subexpression when possible
-
-This remains high-value work for diagnostic quality.
-
-### 2. Diagnostic wording still needs refinement
-
-Current diagnostics are better than before, with less debug-style rendering and more direct user-facing phrasing.
-
-Recent improvements:
-
-- unknown-name diagnostics now mention the missing name directly
-- mismatch diagnostics now describe the actual and needed types in user-facing terms
-- call-related diagnostics now report the location of the failing call
-
-Needs work:
-
-- reduce exposure of internal inference variable names in rendered types
-- make mismatch messages more explanatory in higher-order cases
-- refer to more specific source constructs when that helps the user fix the problem
-
-### 3. Let-polymorphism is not implemented yet
-
-Architecture says:
-
-- monomorphic inference first
-- then let-polymorphism
-
-Current state:
-
-- monomorphic inference exists
-- generalization and instantiation do not yet exist
-
-Important consequence:
-
-- identity-style reuse across unrelated call sites is not yet truly HM-polymorphic
-
-### 4. Unsupported syntax behavior is still minimal
+### 3. Unsupported syntax behavior is still minimal
 
 Current behavior:
 
 - unsupported expressions become `Unknown`
 - nested names inside unsupported syntax are not processed
 
-This may affect:
-- diagnostics
-- future type flow
-- user expectations
+This may affect diagnostics and future type flow. Broader behavior here should be discussed before implementation.
 
-Needs discussion before broadening behavior.
-
-### 5. `if` is still unresolved
+### 4. `if` is still unresolved
 
 Open design question:
 
-- should `if` be in the first serious semantic slice after the current foundation,
-  or should it wait until after better diagnostics / polymorphism / annotations?
+- should `if` be part of the next semantic slice,
+  or should it wait until after diagnostics / polymorphism / annotations?
 
-### 6. Lists / tuples / records are in the type model but not yet fully lowered/inferred from R syntax
+### 5. Lists / tuples / records are not fully connected to R syntax yet
 
-The semantic rules are already decided:
+The type model already includes them, but lowering and inference for the intended R syntax are still incomplete.
 
-- homogeneous positional => `List`
-- heterogeneous positional => `Tuple`
-- named => `Record`
-- mixed named + unnamed => type error
-
-But the full syntax-to-lowered support for these forms is not yet finished.
-
-### 7. Annotation parsing is not started
+### 6. Annotation parsing is not started
 
 Still pending:
 
@@ -255,11 +116,11 @@ Still pending:
 - attaching them to assignments/functions
 - converting `SurfaceType` annotations into `CoreType` constraints
 
-## Important design decisions already settled
+## Settled decisions worth preserving
 
-These should not be reopened casually without discussing with the user:
+These should not be reopened casually without discussion with the user:
 
-- separate `integer` and `double`
+- distinguish `integer` and `double`
 - unsupported syntax infers `Unknown`
 - internal generics are part of v1
 - no explicit generic syntax in v1
@@ -269,71 +130,14 @@ These should not be reopened casually without discussing with the user:
 - development should be test-driven
 - end-to-end tests should use R snippets
 - rendered diagnostics should be snapshot-tested
-- important design decisions must be discussed with the user first
 
 ## Recommended next step
 
-The best next step is:
+Continue improving diagnostic precision and rendering quality, then move to let-polymorphism.
 
-1. continue improving type diagnostic precision and quality
+## Things to watch in the next session
 
-Concretely:
-
-- extend precise source ranges to the remaining inference failures that still use fallback locations
-- improve rendering so diagnostics do not expose internal inference variables like `t0` unless necessary
-- refine wording for:
-  - calling non-functions
-  - arity mismatches
-  - higher-order mismatch cases
-
-Why this is the best next step:
-
-- the type-checking pipeline now exists end to end
-- the user explicitly cares about high-quality error messages
-- recent improvements already paid off, and finishing this pass will pay off before expanding semantics further
-
-## Recommended step after that
-
-After better diagnostics:
-
-2. implement let-polymorphism
-
-Concretely:
-
-- free type variable computation
-- generalization at bindings
-- instantiation at use sites
-- polymorphism tests on R snippets
-
-That will move the checker from “monomorphic typed subset” toward actual HM behavior.
-
-## Things to be careful about in the next session
-
-- Do not silently change semantic behavior without updating `ARCHITECTURE.md` and `TODOS.md`.
-- Do not add broad new syntax support without checking whether it is a meaningful design decision.
-- Do not accept rough diagnostics as “good enough”; the explicit quality goal is high.
-- Keep using snapshot tests when diagnostic wording or ranges change.
-- Preserve the distinction between:
-  - syntax layer
-  - lowering layer
-  - inference layer
-  - diagnostic rendering layer
-
-## Session handoff summary
-
-At the end of this session, the `typing` crate has:
-
-- parsing
-- syntax diagnostics
-- lowering
-- interning
-- type representations
-- inference state with path compression
-- monomorphic expression inference
-- first end-to-end type diagnostics
-
-The most important unfinished work is now:
-
-- finish the remaining type diagnostic range and wording improvements
-- then let-polymorphism
-- then annotations and richer R data forms
+- Do not silently change semantics without updating the docs.
+- Do not treat current diagnostics as “done”.
+- Do not add broad new syntax support without checking whether it changes an important design decision.
+- Keep snapshot-based tests in sync with intentional diagnostic changes.

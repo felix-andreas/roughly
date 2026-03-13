@@ -1,6 +1,0 @@
----
-source: crates/typing/src/lib.rs
-assertion_line: 199
-expression: "render(indoc! {r#\"\n                value <- 1L\n            \"#})"
----
-No diagnostics.

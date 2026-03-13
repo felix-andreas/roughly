@@ -1,8 +1,0 @@
----
-source: crates/typing/src/lib.rs
-assertion_line: 108
-expression: "render(indoc!\n{r#\"\n                value <- 1L\n                value(2L)\n            \"#})"
----
-error[type-error] This expression has type `fn(scalar integer) -> t0`, but it needs to be `scalar integer`.
---> 2:1-2:10
-| value(2L)

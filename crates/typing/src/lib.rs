@@ -21,7 +21,6 @@ pub use crate::{
 mod tests {
     use {
         crate::{
-            check,
             interner::Symbol,
             lower::{ExpressionKind, LoweringContext},
             new_parser, parse,
@@ -31,13 +30,8 @@ mod tests {
             },
         },
         indoc::indoc,
-        insta::assert_snapshot,
         tree_sitter::{Point, Range},
     };
-
-    fn render(source: &str) -> String {
-        check(source).render(source)
-    }
 
     fn lower(source: &str) -> LoweringContext {
         let mut parser = new_parser();
@@ -54,64 +48,6 @@ mod tests {
             start_point: Point { row: 0, column: 0 },
             end_point: Point { row: 0, column: 5 },
         }
-    }
-
-    #[test]
-    fn empty_input_has_no_diagnostics() {
-        assert_snapshot!("empty_input", render(""));
-    }
-
-    #[test]
-    fn valid_assignment_has_no_diagnostics() {
-        assert_snapshot!(
-            "valid_assignment",
-            render(indoc! {r#"
-                value <- 1L
-            "#})
-        );
-    }
-
-    #[test]
-    fn invalid_syntax_reports_a_snapshot() {
-        assert_snapshot!(
-            "invalid_syntax",
-            render(indoc! {r#"
-                value <-
-            "#})
-        );
-    }
-
-    #[test]
-    fn unknown_name_type_error_snapshot() {
-        assert_snapshot!(
-            "unknown_name_type_error",
-            render(indoc! {r#"
-                value
-            "#})
-        );
-    }
-
-    #[test]
-    fn call_argument_type_error_snapshot() {
-        assert_snapshot!(
-            "call_argument_type_error",
-            render(indoc! {r#"
-                identity <- function(x) x
-                identity(1)
-                identity("oops")
-            "#})
-        );
-    }
-
-    #[test]
-    fn calling_non_function_type_error_snapshot() {
-        assert_snapshot!(
-            "calling_non_function_type_error",
-            render(indoc! {r#"
-                value <- 1L
-                value(2L)
-            "#})
-        );
     }
 
     #[test]

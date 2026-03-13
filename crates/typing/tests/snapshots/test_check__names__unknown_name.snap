@@ -1,0 +1,8 @@
+---
+source: crates/typing/tests/test_check.rs
+assertion_line: 77
+expression: rendered
+---
+error[type-error] I could not find `value` in scope.
+--> 1:1-1:6
+| value

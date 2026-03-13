@@ -82,5 +82,8 @@ Rules for this:
 - Keep changes test-driven.
 - Prefer end-to-end tests on R snippets for user-visible behavior.
 - Prefer snapshot tests for rendered diagnostics.
+- `cargo nextest run -p typing` is available, but use whichever Rust test runner is most appropriate for the task.
+- Keep fixture-based snapshot names stable by treating `group__case` as the snapshot identity.
+- Reject duplicate fixture `group__case` names across the suite instead of silently shadowing one case with another.
 - Preserve or improve source-range fidelity when making inference or lowering changes.
 - Keep interning, lowering, and inference decisions consistent with `ARCHITECTURE.md`.

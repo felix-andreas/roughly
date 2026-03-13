@@ -69,6 +69,7 @@ References:
 - [x] Set up snapshot testing for rendered diagnostics.
 - [x] Establish a stable diagnostic rendering format suitable for snapshots.
 - [x] Add a small helper API for snippet-based tests.
+- [x] Add a fixture-based test harness for grouped R snippet cases with stable snapshot names from `group__case`.
 - [ ] Decide how much inferred type information should appear in snapshots `(needs refinement)`.
 
 ### Initial test coverage
@@ -78,6 +79,8 @@ References:
 - [x] Undefined names produce diagnostics.
 - [ ] Unsupported syntax produces `Unknown` behavior and any intended diagnostics.
 - [x] Diagnostic rendering is stable enough to snapshot.
+- [x] Grouped fixture files can define multiple cases with stable snapshot names.
+- [x] Duplicate `group__case` snapshot names are rejected by the harness.
 
 ## Phase 3 — Parsing and lowering
 
@@ -328,6 +331,7 @@ References:
 - [x] Finalize this planning document.
 - [x] Reshape the crate toward a library-first structure.
 - [x] Add the initial snapshot-based test harness.
+- [x] Migrate end-to-end snapshot cases to a grouped fixture-based harness with stable `group__case` naming.
 - [x] Define the lowered AST shape, including source ranges and interned symbols.
 - [x] Define the interner boundary and how diagnostics resolve interned names back to text.
 - [x] Implement expression inference over the lowered AST for literals, names, assignments, functions, and calls.

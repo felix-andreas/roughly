@@ -1,6 +1,0 @@
----
-source: crates/typing/src/lib.rs
-assertion_line: 194
-expression: "render(\"\")"
----
-No diagnostics.
