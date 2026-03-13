@@ -16,6 +16,7 @@ struct TestGroup {
 struct TestCase {
     name: &'static str,
     code: &'static str,
+    expected: &'static str,
 }
 
 fn parse_test_file(text: &'static str) -> Vec<TestGroup> {
@@ -38,13 +39,21 @@ fn parse_test_file(text: &'static str) -> Vec<TestGroup> {
                             return None;
                         }
 
-                        let (name, code) = case.split_once('\n').unwrap_or_else(|| {
-                            panic!("each test case must have a name line followed by code")
+                        let (name, body) = case.split_once('\n').unwrap_or_else(|| {
+                            panic!("each test case must have a name line followed by content")
                         });
+
+                        let (code, expected_block) =
+                            body.split_once("#++++\n").unwrap_or_else(|| {
+                                panic!(
+                                    "each test case must include a `#++++` separator before the expected diagnostics"
+                                )
+                            });
 
                         Some(TestCase {
                             name: name.trim(),
                             code,
+                            expected: expected_block.trim_end(),
                         })
                     })
                     .collect(),
@@ -74,7 +83,11 @@ fn run_test_groups(groups: &[TestGroup]) {
             }
 
             let rendered = check(case.code).render(case.code);
-            insta::assert_snapshot!(snapshot_name, rendered);
+            assert_eq!(
+                rendered.trim_end(),
+                case.expected,
+                "fixture `{snapshot_name}`"
+            );
         }
     }
 }

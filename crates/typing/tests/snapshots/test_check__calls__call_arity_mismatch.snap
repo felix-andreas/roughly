@@ -1,8 +1,0 @@
----
-source: crates/typing/tests/test_check.rs
-assertion_line: 77
-expression: rendered
----
-error[type-error] This call passes 2 positional argument(s), but the function accepts 1.
---> 2:1-2:17
-| identity(1L, 2L)
