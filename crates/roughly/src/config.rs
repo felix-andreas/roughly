@@ -71,7 +71,7 @@ impl ConfigToml {
         }
 
         self.lint.experimental_unused |= experimental.unused;
-        self.lint.typing_diagnostics |= experimental.typing;
+        self.lint.experimental_typing |= experimental.typing;
 
         Config {
             format: self.format,

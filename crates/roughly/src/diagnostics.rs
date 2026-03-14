@@ -19,7 +19,7 @@ use {
 pub struct Config {
     pub naming_style: Option<Case>,
     pub experimental_unused: bool,
-    pub typing_diagnostics: bool,
+    pub experimental_typing: bool,
 }
 
 pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagnostic> {
@@ -37,7 +37,7 @@ pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagn
         }
     }
 
-    if config.typing_diagnostics && full {
+    if config.experimental_typing && full {
         diagnostics.extend(typing_diagnostics::analyze_rope(rope));
     }
 
