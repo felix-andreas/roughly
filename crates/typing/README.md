@@ -5,6 +5,18 @@ This document aims to serve as a design specification for the semantics of a sta
 > [!WARNING]
 > This project is currently in the conceptual and planning phase. This is a design document only—there is no working implementation yet, and all details are subject to change.
 
+## Development workflow
+
+User-visible diagnostics in `crates/typing` are currently tested with fixture files rather than external snapshot files.
+
+Recommended flow:
+- run focused `typing` tests while iterating, usually `cargo test -p typing`
+- update expected output in `tests/check/diagnostics.R.test` only when behavior or wording intentionally changes
+- review fixture diffs deliberately instead of treating them as routine churn
+- keep `group__case` names stable so fixture identities remain easy to track
+
+The `tests/test_check.rs` harness reads `tests/check/diagnostics.R.test` directly and compares rendered diagnostics with the expected blocks in that file.
+
 ## Motivation & Challenges
 
 Adding static type checking to R is inherently difficult due to its dynamic nature and extensive metaprogramming features. Only a subset of R code can be statically checked. For code that cannot be checked, type assertions are required, and it is the programmer's responsibility to ensure correctness.

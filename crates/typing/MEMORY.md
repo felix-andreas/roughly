@@ -16,8 +16,6 @@ Use this document to record:
 - next recommended steps
 - any subtle decisions that should not be rediscovered from scratch
 
-If the user says "cleanup memory", prune resolved or low-value session-specific details aggressively, but keep this purpose section and preserve any still-useful continuity.
-
 This is not a replacement for `AGENTS.md`, `ARCHITECTURE.md`, or `TODOS.md`.
 
 - `AGENTS.md` contains crate-specific working rules and workflow expectations.
@@ -27,143 +25,22 @@ This is not a replacement for `AGENTS.md`, `ARCHITECTURE.md`, or `TODOS.md`.
 
 If code changes make this document inaccurate, update it in the same session.
 
-## Collaboration reminders
+## Document hygiene
 
-- Review `AGENTS.md` before making significant changes in this crate.
-- Important design decisions must be discussed with the user before implementation.
-- If a todo is marked `(needs refinement)`, stop and discuss it before proceeding.
-- Keep `AGENTS.md`, `ARCHITECTURE.md`, `TODOS.md`, and this file aligned when implementation meaningfully changes.
-- Diagnostic quality is a core goal. We want Elm- and Rust-like error messages: clear, precise, actionable, and user-centered.
+Keep this file handoff-oriented and aggressively pruned.
 
-## Current status
+- Keep durable design rules in `ARCHITECTURE.md`.
+- Keep planned work and completion state in `TODOS.md`.
+- Keep crate workflow guidance in `AGENTS.md`.
+- Keep `MEMORY.md` only for continuity that is easy to lose between sessions.
+- Remove resolved items once they stop being useful for resuming work.
+- Avoid repeating broad implementation summaries that can be recovered from the code or other crate documents.
 
-The crate currently has:
+## Active continuity
 
-- parsing and syntax diagnostics
-- lowering for:
-  - top-level sequences
-  - identifiers
-  - `NULL`
-  - `TRUE` / `FALSE`
-  - integer, float, and string literals
-  - assignments
-  - function definitions
-  - calls
-  - simple wrapped expressions
-  - `+`, lowered as a builtin-style call
-- string interning
-- core type representations
-- `TypeScheme`-based bindings
-- inference state with path compression
-- let-polymorphism for assignment bindings
-- end-to-end type diagnostics
-- grouped fixture-based end-to-end tests under `tests/`
-- builtin arithmetic support for `+`
-  - numeric operands only
-  - scalar/scalar, vector/scalar, scalar/vector, and vector/vector are supported
-  - `double` wins over `integer`
-  - vector shape wins over scalar shape
-- minimal builtin support for `c(...)` in order to construct numeric vectors for arithmetic checks
-- optional integration into `roughly check` and full LSP diagnostics behind the `typing_diagnostics` experimental flag
-
-Important current limitations:
-
-- unsupported syntax still lowers to `Unsupported`
-- nested names inside unsupported syntax are not recursively lowered yet
-- arithmetic diagnostics still use a generic type-mismatch message rather than an operator-specific message like `cannot add ... to ...`
-- function parameters with defaults are not yet represented in a way that supports named-argument mismatch diagnostics end-to-end
-- typing diagnostics are intentionally excluded from the fast incremental diagnostics path
-
-## Highest-value unfinished work
-
-### 1. Finish the current diagnostics pass
-
-Recent work improved ranges and wording, unresolved inference variables now render as user-facing placeholders like `type1` instead of `t0`, and arithmetic now has end-to-end coverage for builtin `+`.
-
-Remaining focus:
-
-- replace generic arithmetic mismatch rendering with a more direct operator-specific message such as `cannot add ... to ...`
-- extend precise source ranges to remaining inference failures
-- refine wording for higher-order failures
-- revisit named-argument diagnostics after function-parameter lowering can represent the relevant call shape
-
-### 2. Continue expanding diagnostics and polymorphism coverage
-
-Recent work completed let-polymorphism for assignment bindings and refreshed the existing end-to-end fixtures to match post-polymorphism behavior.
-
-Current follow-up work:
-
-- improve diagnostic precision and wording
-- add more realistic end-to-end polymorphism cases beyond identity-style examples
-- keep `roughly` integration expectations aligned with intentional typing behavior changes
-
-### 3. Unsupported syntax behavior is still minimal
-
-Current behavior:
-
-- unsupported expressions become `Unknown`
-- nested names inside unsupported syntax are not processed
-
-This may affect diagnostics and future type flow. Broader behavior here should be discussed before implementation.
-
-### 4. `if` is still unresolved
-
-Open design question:
-
-- should `if` be part of the next semantic slice,
-  or should it wait until after diagnostics / polymorphism / annotations?
-
-### 5. Function parameter modeling is still intentionally minimal
-
-Current behavior:
-
-- function definitions lower parameters as a simple positional list
-- parameters with defaults are not yet modeled in a way that supports named-argument checking
-
-Consequence:
-
-- end-to-end named-argument mismatch fixtures were deferred rather than locking in misleading diagnostics
-
-### 6. Lists / tuples / records are not fully connected to R syntax yet
-
-The type model already includes them, but lowering and inference for the intended R syntax are still incomplete.
-
-The current minimal `c(...)` support is only enough to build numeric vectors for arithmetic checks. It should not be treated as the settled general container story.
-
-### 7. Annotation parsing is not started
-
-Still pending:
-
-- parsing `#:` comment annotations
-- attaching them to assignments/functions
-- converting `SurfaceType` annotations into `CoreType` constraints
-
-## Settled decisions worth preserving
-
-These should not be reopened casually without discussion with the user:
-
-- distinguish `integer` and `double`
-- unsupported syntax infers `Unknown`
-- internal generics are part of v1
-- no explicit generic syntax in v1
-- string interning should be used in lowering/inference
-- inference-variable state should use path compression
-- diagnostics should aim for Elm/Rust quality
-- development should be test-driven
-- end-to-end tests should use R snippets
-- rendered diagnostics should be snapshot-tested
-- `+` is a builtin at the lowered-language boundary and uses special inference logic rather than ordinary HM unification alone
-- current arithmetic support treats only `integer` and `double` as numeric
-
-## Recommended next step
-
-Improve diagnostic rendering quality, especially operator-specific wording for arithmetic, while continuing to expand polymorphism coverage and preserving source-range fidelity.
-
-## Things to watch in the next session
-
-- Do not silently change semantics without updating the docs.
-- Do not treat current diagnostics as “done”.
-- Do not treat the current `c(...)` support as a settled container design.
-- Do not add broad new syntax support without checking whether it changes an important design decision.
-- Keep end-to-end fixture expectations in sync with intentional semantic changes.
-- Do not reintroduce end-to-end named-argument mismatch fixtures until function-parameter lowering can represent the needed semantics.
+- Higher-order mismatch diagnostics still tend to report the constraint-introducing site and may render unresolved placeholders like `type1` instead of the eventual call-site type. Do not “fix” fixture expectations without deciding whether to improve diagnostic precision.
+- Unsupported syntax still lowers to `Unsupported`, and nested names inside unsupported syntax are not recursively lowered.
+- Function parameters with defaults are still too minimal for end-to-end named-argument mismatch diagnostics. Do not reintroduce those fixtures yet.
+- The current `c(...)` support is only a narrow arithmetic helper, not the settled list/tuple/record story.
+- `if` remains an open sequencing question. If work reaches it, discuss whether it belongs before or after further diagnostics / annotations work.
+- Recommended next step: improve diagnostic precision and wording, especially for higher-order failures, while preserving current polymorphism behavior.

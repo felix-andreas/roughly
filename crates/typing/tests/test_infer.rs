@@ -350,7 +350,10 @@ fn builtin_plus_rejects_character_plus_integer() {
 
     let result = inference_state.infer_expression(&expression);
 
-    assert!(matches!(result, Err(InferenceError::TypeMismatch { .. })));
+    assert!(matches!(
+        result,
+        Err(InferenceError::InvalidPlusOperand { .. })
+    ));
 }
 
 #[test]
@@ -792,6 +795,97 @@ fn generalized_assignments_can_be_instantiated_at_multiple_types() {
     assert_eq!(inferred_types.len(), 3);
     assert_eq!(inferred_types[1], CoreType::Scalar(Atomic::Integer));
     assert_eq!(inferred_types[2], CoreType::Scalar(Atomic::Character));
+}
+
+#[test]
+fn repeated_polymorphic_instantiations_do_not_leak_constraints() {
+    let mut inference_state = InferenceState::new();
+    let mut interner = Interner::new();
+    let identity_name = interner.intern("identity");
+    let first_name = interner.intern("first");
+    let second_name = interner.intern("second");
+    let third_name = interner.intern("third");
+    let parameter_name = interner.intern("x");
+
+    let inferred_types = inference_state
+        .infer_module(&Module::new(vec![
+            expression(
+                0,
+                ExpressionKind::Assign {
+                    target: identity_name,
+                    value: Box::new(expression(
+                        1,
+                        ExpressionKind::Function {
+                            parameters: vec![Parameter {
+                                symbol: parameter_name,
+                                range: test_range(),
+                            }],
+                            body: Box::new(expression(2, ExpressionKind::Symbol(parameter_name))),
+                        },
+                    )),
+                },
+            ),
+            expression(
+                3,
+                ExpressionKind::Assign {
+                    target: first_name,
+                    value: Box::new(expression(
+                        4,
+                        ExpressionKind::Call {
+                            callee: Box::new(expression(5, ExpressionKind::Symbol(identity_name))),
+                            arguments: vec![Argument {
+                                expression: expression(6, ExpressionKind::Integer("1L".to_owned())),
+                                name: None,
+                            }],
+                        },
+                    )),
+                },
+            ),
+            expression(
+                7,
+                ExpressionKind::Assign {
+                    target: second_name,
+                    value: Box::new(expression(
+                        8,
+                        ExpressionKind::Call {
+                            callee: Box::new(expression(9, ExpressionKind::Symbol(identity_name))),
+                            arguments: vec![Argument {
+                                expression: expression(
+                                    10,
+                                    ExpressionKind::Character("\"hello\"".to_owned()),
+                                ),
+                                name: None,
+                            }],
+                        },
+                    )),
+                },
+            ),
+            expression(
+                11,
+                ExpressionKind::Assign {
+                    target: third_name,
+                    value: Box::new(expression(
+                        12,
+                        ExpressionKind::Call {
+                            callee: Box::new(expression(13, ExpressionKind::Symbol(identity_name))),
+                            arguments: vec![Argument {
+                                expression: expression(
+                                    14,
+                                    ExpressionKind::Integer("2L".to_owned()),
+                                ),
+                                name: None,
+                            }],
+                        },
+                    )),
+                },
+            ),
+        ]))
+        .expect("repeated polymorphic instantiations should remain independent");
+
+    assert_eq!(inferred_types.len(), 4);
+    assert_eq!(inferred_types[1], CoreType::Scalar(Atomic::Integer));
+    assert_eq!(inferred_types[2], CoreType::Scalar(Atomic::Character));
+    assert_eq!(inferred_types[3], CoreType::Scalar(Atomic::Integer));
 }
 
 #[test]

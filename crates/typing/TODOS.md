@@ -2,18 +2,26 @@
 
 This document tracks the implementation plan for the `typing` crate.
 
-It is a living planning document and should be kept in sync with `crates/typing/ARCHITECTURE.md`.
+Keep it aligned with `crates/typing/ARCHITECTURE.md`.
+
+## Document hygiene
+
+Keep this document high signal.
+
+- Prefer concise, actionable todos over status narration.
+- Remove or rewrite stale items when implementation changes.
+- Keep durable design rules in `ARCHITECTURE.md`, not here.
+- Keep cross-session handoff details in `MEMORY.md`, not here.
+- When a task is done, either check it off or delete it if it no longer helps future work.
 
 ## Planning rules
 
 - Important design decisions must be discussed with the user before implementation.
 - Todos may reference sections of `ARCHITECTURE.md`.
-- Hierarchical todos are preferred.
+- Prefer hierarchical todos.
 - If the exact implementation steps are unclear, mark the todo with `(needs refinement)`.
 - When work reaches a todo marked `(needs refinement)`, discuss it with the user before proceeding.
-- If implementation changes make this document or `ARCHITECTURE.md` inaccurate, update the documents in the same session.
-- During the scaffolding phase, it is fine to split functionality into different files when that establishes cleaner boundaries.
-- Keep common validation and snapshot workflows easy to discover from repo-level task runners and crate docs.
+- If implementation changes make this document or `ARCHITECTURE.md` inaccurate, update both in the same session.
 
 ## Phase 0 — Planning and alignment
 
@@ -37,7 +45,7 @@ It is a living planning document and should be kept in sync with `crates/typing/
 - [x] Support internal generics in v1.
 - [x] Do not add explicit generics syntax in v1.
 - [x] Use R snippets as the primary test input format.
-- [x] Prefer snapshot tests of rendered diagnostics.
+- [x] Prefer fixture-based tests of rendered diagnostics.
 - [x] Use string interning for repeated identifiers and field names in lowering and inference.
 - [x] Use an explicit inference-variable state with path compression during unification.
 
@@ -60,19 +68,19 @@ References:
 - [x] Move placeholder executable code out of the way or reduce it to a thin wrapper.
 - [ ] Add minimal internal modules only when they support a real abstraction boundary.
 
-## Phase 2 — Test harness and snapshot workflow
+## Phase 2 — Test harness and diagnostic fixtures
 
 References:
 - `ARCHITECTURE.md` → Testing strategy
 - `ARCHITECTURE.md` → Error handling and diagnostics
 
 - [x] Set up end-to-end tests that operate on R snippets.
-- [x] Set up snapshot testing for rendered diagnostics.
-- [x] Establish a stable diagnostic rendering format suitable for snapshots.
+- [x] Set up fixture-based testing for rendered diagnostics.
+- [x] Establish a stable diagnostic rendering format suitable for fixture expectations.
 - [x] Add a small helper API for snippet-based tests.
-- [x] Add a fixture-based test harness for grouped R snippet cases with stable snapshot names from `group__case`.
-- [ ] Decide how much inferred type information should appear in snapshots `(needs refinement)`.
-- [ ] Document the preferred snapshot update/review workflow for this crate.
+- [x] Add a fixture-based test harness for grouped R snippet cases with stable `group__case` identities.
+- [ ] Decide how much inferred type information should appear in rendered diagnostic fixtures `(needs refinement)`.
+- [x] Document the preferred fixture update/review workflow for this crate.
 
 ### Initial test coverage
 
@@ -81,11 +89,11 @@ References:
 - [x] Undefined names produce diagnostics.
 - [ ] Unsupported syntax produces `Unknown` behavior and any intended diagnostics.
 - [x] Builtin arithmetic diagnostics cover `+` rejecting non-numeric operands.
-- [x] Builtin arithmetic snapshots cover scalar/vector combinations for `+`.
-- [x] Diagnostic rendering is stable enough to snapshot.
-- [x] Grouped fixture files can define multiple cases with stable snapshot names.
-- [x] Duplicate `group__case` snapshot names are rejected by the harness.
-- [x] Arity mismatch snapshots cover the actual argument count after lowering.
+- [x] Builtin arithmetic fixture expectations cover scalar/vector combinations for `+`.
+- [x] Diagnostic rendering is stable enough for fixture expectations.
+- [x] Grouped fixture files can define multiple cases with stable `group__case` identities.
+- [x] Duplicate `group__case` identities are rejected by the harness.
+- [x] Arity mismatch fixture expectations cover the actual argument count after lowering.
 
 ## Phase 3 — Parsing and lowering
 
@@ -185,7 +193,7 @@ References:
 - [x] Report calling a non-function.
 - [x] Report unknown names.
 - [x] Report arity mismatches with the actual lowered argument count.
-- [x] Snapshot monomorphic diagnostics.
+- [x] Fixture-based monomorphic diagnostics.
 
 ## Phase 6 — Let-polymorphism and internal generics
 
@@ -197,16 +205,16 @@ References:
 - [x] Implement generalization at bindings.
 - [x] Implement instantiation at use sites.
 - [x] Ensure generalized bindings get fresh variables per use.
-- [ ] Verify that polymorphic bindings work across repeated calls.
+- [x] Verify that polymorphic bindings work across repeated calls.
 - [x] Add initial builtin support for `+` arithmetic and `c(...)` vector construction used by arithmetic tests.
 - [ ] Keep explicit generic annotation syntax deferred.
 
 ### Polymorphism tests
 
-- [ ] `identity` works at `integer` and `character` in one snippet.
-- [ ] Higher-order apply-style examples infer correctly.
-- [ ] Repeated instantiations do not leak constraints across use sites.
-- [ ] Snapshot polymorphism diagnostics for failure cases.
+- [x] `identity` works at `integer` and `character` in one snippet.
+- [x] Higher-order apply-style examples infer correctly.
+- [x] Repeated instantiations do not leak constraints across use sites.
+- [x] Fixture-based polymorphism diagnostics for failure cases.
 
 ## Phase 7 — Lists, tuples, and records
 
@@ -226,7 +234,7 @@ References:
 - [ ] Heterogeneous positional example infers as `Tuple`.
 - [ ] Named example infers as `Record`.
 - [ ] Mixed named and unnamed example reports a type error.
-- [ ] Snapshot diagnostics for malformed container expressions.
+- [ ] Fixture-based diagnostics for malformed container expressions.
 
 ## Phase 8 — Annotation parsing
 
@@ -252,7 +260,7 @@ References:
 - [ ] Variable annotation mismatch reports a diagnostic.
 - [ ] Parameter annotation constrains function inputs.
 - [ ] Return annotation constrains function outputs.
-- [ ] Snapshot diagnostics for malformed annotations.
+- [ ] Fixture-based diagnostics for malformed annotations.
 
 ## Phase 9 — Applying annotations during inference
 
@@ -287,7 +295,7 @@ References:
 
 - [ ] Unsupported expression yields stable behavior.
 - [ ] Downstream inference continues after unsupported syntax.
-- [ ] Snapshot diagnostics for unsupported syntax cases.
+- [ ] Fixture-based diagnostics for unsupported syntax cases.
 
 ## Phase 11 — Builtin environment
 
@@ -339,15 +347,7 @@ References:
 
 ## Current next steps
 
-- [x] Finalize this planning document.
-- [x] Reshape the crate toward a library-first structure.
-- [x] Add the initial snapshot-based test harness.
-- [x] Migrate end-to-end snapshot cases to a grouped fixture-based harness with stable `group__case` naming.
-- [x] Define the lowered AST shape, including source ranges and interned symbols.
-- [x] Define the interner boundary and how diagnostics resolve interned names back to text.
-- [x] Implement expression inference over the lowered AST for literals, names, assignments, functions, and calls.
-- [x] Connect inference errors to rendered diagnostics.
-- [ ] Improve operator-specific diagnostics so builtin arithmetic failures read like high-signal Rust-style messages.
 - [ ] Improve diagnostic precision so type errors point at the failing expression instead of a fallback range.
 - [ ] Improve type rendering so diagnostics read like Elm/Rust style messages instead of debug output.
-- [ ] Add a persistent `MEMORY.md` document for cross-session context and open design loose ends.
+- [ ] Unsupported syntax produces `Unknown` behavior and any intended diagnostics.
+- [ ] Lower list-like constructions.

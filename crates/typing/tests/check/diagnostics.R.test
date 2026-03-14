@@ -88,11 +88,38 @@ error[type-error] This call passes 2 positional argument(s), but the function ac
 --> 3:1-3:24
 | identity("ok", "extra")
 
+#---- polymorphic_repeated_independent_uses
+identity <- function(x) x
+first <- identity(1L)
+second <- identity("ok")
+third <- identity(2L)
+#++++
+No diagnostics.
+
+#---- polymorphic_higher_order_apply
+apply <- function(f) function(x) f(x)
+identity <- function(x) x
+int_apply <- apply(identity)
+first <- int_apply(1L)
+second <- int_apply("ok")
+#++++
+No diagnostics.
+
+#---- polymorphic_higher_order_conflict
+apply <- function(f) function(x) f(x + 1L)
+identity <- function(x) x
+mixed_apply <- apply(identity)
+mixed_apply("ok")
+#++++
+error[type-error] expected `numeric`, found `type1`
+--> 1:36-1:37
+| apply <- function(f) function(x) f(x + 1L)
+
 #==== arithmetic
 #---- string_plus_integer
 "foo" + 4L
 #++++
-error[type-error] expected `integer`, found `character`
+error[type-error] expected `numeric`, found `character`
 --> 1:1-1:6
 | "foo" + 4L
 

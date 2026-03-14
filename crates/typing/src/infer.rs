@@ -347,19 +347,20 @@ impl InferenceState {
         let resolved_left = self.resolve(left_type)?;
         let resolved_right = self.resolve(right_type)?;
 
-        let (left_shape, left_atomic) =
-            numeric_operand_parts(&resolved_left).ok_or_else(|| InferenceError::TypeMismatch {
-                expected: CoreType::Scalar(Atomic::Integer),
+        let (left_shape, left_atomic) = numeric_operand_parts(&resolved_left).ok_or_else(|| {
+            InferenceError::InvalidPlusOperand {
                 actual: resolved_left.clone(),
-                range: Some(arguments[0].expression.range),
-                expression_id: Some(arguments[0].expression.id),
-            })?;
+                range: arguments[0].expression.range,
+                expression_id: arguments[0].expression.id,
+            }
+        })?;
         let (right_shape, right_atomic) =
-            numeric_operand_parts(&resolved_right).ok_or_else(|| InferenceError::TypeMismatch {
-                expected: CoreType::Scalar(Atomic::Integer),
-                actual: resolved_right.clone(),
-                range: Some(arguments[1].expression.range),
-                expression_id: Some(arguments[1].expression.id),
+            numeric_operand_parts(&resolved_right).ok_or_else(|| {
+                InferenceError::InvalidPlusOperand {
+                    actual: resolved_right.clone(),
+                    range: arguments[1].expression.range,
+                    expression_id: arguments[1].expression.id,
+                }
             })?;
 
         let result_atomic = promote_numeric_atomic(left_atomic, right_atomic);
@@ -944,6 +945,11 @@ pub enum InferenceError {
         actual: CoreType,
         range: Option<Range>,
         expression_id: Option<ExpressionId>,
+    },
+    InvalidPlusOperand {
+        actual: CoreType,
+        range: Range,
+        expression_id: ExpressionId,
     },
     TupleLengthMismatch {
         expected: usize,

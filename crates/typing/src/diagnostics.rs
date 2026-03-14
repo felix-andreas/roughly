@@ -126,6 +126,20 @@ impl Diagnostic {
                     ),
                 )
             }
+            InferenceError::InvalidPlusOperand {
+                actual,
+                range,
+                expression_id: _,
+            } => {
+                let mut type_renderer = TypeRenderer::new(interner);
+                (
+                    *range,
+                    format!(
+                        "expected `numeric`, found `{}`",
+                        type_renderer.render(actual)
+                    ),
+                )
+            }
             InferenceError::TupleLengthMismatch {
                 expected,
                 actual,

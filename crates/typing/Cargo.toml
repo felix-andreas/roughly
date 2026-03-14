@@ -12,5 +12,4 @@ tree-sitter.workspace = true
 tree-sitter-r.workspace = true
 
 [dev-dependencies]
-insta.workspace = true
 indoc.workspace = true

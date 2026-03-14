@@ -2,27 +2,55 @@
 
 This file contains crate-local rules and working conventions for `crates/typing`.
 
-## Document map
+## Skills
+
+If the user says:
+
+- `cleanup memory`: aggressively remove resolved, stale, or low-value session-specific details, while preserving this purpose section and any continuity that will still matter next session.
+- `get-started`: read the relevant crate documents, then continue with the next actionable item in `TODOS.md` (assume fresh context unless the documents indicate otherwise).
+
+## Document roles
 
 Before making significant changes in this crate, review these files and keep them aligned:
 
 - `README.md`
-  - high-level semantics and intended type-system behavior
+  - user-facing semantics and workflow
 - `ARCHITECTURE.md`
-  - the maintained design contract and implementation direction
+  - contract
 - `TODOS.md`
-  - the maintained work breakdown and progress tracker
+  - plan
 - `MEMORY.md`
-  - cross-session continuity, loose ends, and current implementation caveats
+  - handoff-only
 
 When implementation meaningfully changes, update the relevant documents in the same session.
 
-It is important to keep all of these documents high signal and up to date:
-- avoid stale status notes
-- avoid vague process language
-- avoid dumping low-value session chatter into them
-- prefer concise, actionable updates that help future sessions resume work quickly
-- whenever implementation meaningfully changes, update the affected documents in the same session
+## Document hygiene
+
+Keep all crate documents extremely high signal:
+
+- remove stale status notes
+- remove vague process language
+- remove low-value session chatter
+- prefer concise, actionable updates
+- do not duplicate the same information across documents
+
+More specifically:
+
+- `README.md`
+  - explain user-facing semantics and workflow
+  - avoid implementation-status churn
+- `ARCHITECTURE.md`
+  - keep only durable design decisions and architectural constraints
+  - do not use it as a changelog, progress log, or session diary
+- `TODOS.md`
+  - keep only actionable planned work
+  - prefer concrete unfinished tasks over narrative status
+  - remove completed “next steps” once they stop helping planning
+- `MEMORY.md`
+  - keep only continuity that is easy to lose between sessions
+  - do not repeat stable design, finished work, or obvious current code state
+
+When in doubt, delete weak context instead of preserving it.
 
 For quick crate navigation, use this rough file-to-responsibility map:
 
@@ -39,7 +67,7 @@ For quick crate navigation, use this rough file-to-responsibility map:
 - `src/check.rs`
   - end-to-end checking pipeline from source text to diagnostics
 - `tests/`
-  - end-to-end fixture and snapshot coverage for user-visible behavior
+  - end-to-end fixture-based diagnostic coverage for user-visible behavior
 
 ## Collaboration with the user
 
@@ -58,7 +86,7 @@ When changing diagnostics:
 
 - prefer clear, precise, actionable wording
 - avoid overly internal or theory-heavy language when user-facing wording would be clearer
-- keep snapshot tests updated only when wording or behavior intentionally improves
+- keep fixture expectations updated only when wording or behavior intentionally improves
 - prefer precise source ranges over coarse fallback ranges whenever possible
 
 ## Architecture expectations
@@ -98,14 +126,13 @@ Rules for this:
 
 - Keep changes test-driven.
 - Prefer end-to-end tests on R snippets for user-visible behavior.
-- Prefer snapshot tests for rendered diagnostics.
+- Prefer fixture-based tests for rendered diagnostics.
 - Prefer running focused crate tests while iterating.
 - `cargo test -p typing` is the default crate test command.
 - `cargo nextest run -p typing` is available, but use whichever Rust test runner is most appropriate for the task.
-- Use the repository `justfile` as the first place to look for shared development and snapshot commands.
-- Keep fixture-based snapshot names stable by treating `group__case` as the snapshot identity.
+- Keep fixture `group__case` names stable as the test identity.
 - Reject duplicate fixture `group__case` names across the suite instead of silently shadowing one case with another.
-- When intentionally changing diagnostic output, use the repository snapshot review workflow rather than updating snapshots blindly.
+- Review fixture expectation changes deliberately when diagnostic output changes.
 - Preserve or improve source-range fidelity when making inference or lowering changes.
 - Keep interning, lowering, and inference decisions consistent with `ARCHITECTURE.md`.
 - Do not reintroduce end-to-end named-argument mismatch fixtures until function-parameter lowering can represent the needed semantics.

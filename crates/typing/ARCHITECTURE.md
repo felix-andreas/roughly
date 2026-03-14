@@ -1,33 +1,26 @@
 # `typing` Architecture
 
-This document describes the planned architecture for the `typing` crate.
+This document is the design contract for the `typing` crate.
 
-The crate starts as a standalone library for static type checking of a subset of R. Later it should be integrated into `roughly`, but the standalone library remains the primary implementation boundary while the type checker is still evolving.
+The crate is a standalone library for static type checking of a subset of R. Later it may be integrated into `roughly`, but the standalone library remains the primary implementation boundary while the type checker is still evolving.
 
-## Status
+If implementation changes make this document inaccurate, update it in the same session. If implementation and this document disagree, that mismatch is work to do.
 
-This document is a living design document.
+Project planning is tracked in `crates/typing/TODOS.md`.
 
-If implementation changes make this document inaccurate, it should be updated in the same session as the code change. If the implementation and this document disagree, that mismatch should be treated as work to do, not as an acceptable state.
-
-## Collaboration process
-
-This crate is developed collaboratively with the user.
+Cross-session continuity is tracked in `crates/typing/MEMORY.md`.
 
 Important design decisions must be discussed with the user before implementation. If a planned step is ambiguous, under-specified, or introduces a meaningful semantic tradeoff, stop and discuss it first.
 
-Project planning is tracked separately in `crates/typing/TODOS.md`.
+## Document hygiene
 
-Cross-session memory is tracked in `crates/typing/MEMORY.md`.
+Keep this file high signal.
 
-Rules for planning:
-
-- Hierarchical todos are preferred.
-- Todos may reference sections of this document.
-- If the exact implementation steps are not yet clear, mark the todo with `(needs refinement)`.
-- When work reaches a todo marked `(needs refinement)`, discuss it with the user before proceeding.
-- As implementation evolves, keep this document, `TODOS.md`, and `MEMORY.md` up to date.
-- During the scaffolding phase, it is fine to split functionality into different files in order to establish clean boundaries for the parser, lowering, diagnostics, tests, and inference work.
+- Keep it focused on durable design decisions and architectural constraints.
+- Do not use it as a changelog, status report, or session diary.
+- Put task tracking in `TODOS.md`.
+- Put cross-session handoff notes in `MEMORY.md`.
+- When implementation meaningfully changes the design contract, update this file in the same session.
 
 ## Goals
 
@@ -39,7 +32,7 @@ The initial goals are:
 - Do not require explicit generics syntax in v1.
 - Develop the checker test-first.
 - Use R snippets as the primary test input format.
-- Prefer snapshot tests of rendered diagnostics for end-to-end behavior.
+- Prefer fixture-based tests of rendered diagnostics for end-to-end behavior.
 - Aim for Elm- and Rust-like diagnostic quality, with clear, precise, and actionable error messages.
 - Support later integration into `roughly` without redesigning the core engine.
 
@@ -314,30 +307,20 @@ That means generic behavior exists in inference and schemes, but users do not ye
 
 The checker may model a small set of builtins before broader R builtin coverage is attempted.
 
-These builtins should still enter the system through ordinary lowering as symbol references and calls where practical, so they remain visible in diagnostics and fit the existing lowering/inference boundaries.
+Builtins should still enter the system through ordinary lowering as symbol references and calls where practical, so they remain visible in diagnostics and fit the lowering/inference boundaries.
 
-### Builtins may use dedicated inference rules
+Some builtins have typing behavior that is awkward to express as an ordinary equality-based HM function type. In those cases, it is acceptable for inference to recognize a builtin binding and apply a dedicated rule instead of relying only on generic function unification.
 
-Some builtins have typing behavior that is awkward to express as an ordinary equality-based HM function type.
-
-In those cases, it is acceptable for the inference layer to recognize a builtin binding and apply a dedicated rule instead of relying only on generic function unification.
-
-This should be reserved for cases where the builtin's typing depends on operand shape or promotion behavior rather than only simple parameter equality.
-
-### Current builtin slice
-
-The current implemented builtin slice is intentionally small:
+The current builtin slice is intentionally small:
 
 - `+`
 - `c(...)`
 
-`+` is lowered as a call to the builtin symbol `+` and then typed with a dedicated inference rule.
+`+` is lowered as a call to the builtin symbol `+` and typed with a dedicated inference rule.
 
-`c(...)` is currently supported as a minimal builtin needed to express vector-producing test cases for arithmetic. It should be treated as a narrow implementation slice, not as a commitment to full R `c(...)` semantics.
+`c(...)` is currently supported only as a minimal builtin needed to express vector-producing test cases for arithmetic. It should not be treated as a commitment to full R `c(...)` semantics.
 
-### Arithmetic builtin semantics in the current slice
-
-For `+`, the current agreed semantics are:
+For `+`, the current semantics are:
 
 - operands must be numeric
 - numeric currently means `integer` or `double`
@@ -349,10 +332,6 @@ For `+`, the current agreed semantics are:
 - otherwise the result is `integer`
 - if either operand is a vector, the result is a vector
 - otherwise the result is a scalar
-
-This arithmetic behavior is implemented as a builtin-specific inference rule rather than as a normal user-definable function type.
-
-Operator diagnostics for this path should keep improving toward concise, high-signal wording in the style of Rust.
 
 ## Annotation model
 
@@ -397,87 +376,41 @@ Lowering should not discard the syntax information needed for high-quality diagn
 
 ## Inference pipeline
 
-The planned pipeline is:
+The checker pipeline is:
 
 1. Parse R source.
 2. Extract and parse adjacent `#:` annotations.
-3. Lower supported syntax into an internal expression/module representation.
+3. Lower supported syntax into an internal expression or module representation.
 4. Infer types over the lowered representation.
 5. Apply annotation constraints where present.
 6. Render diagnostics and inferred results.
 
-Current implemented pipeline status:
+The checker should not perform inference directly over raw parser nodes.
 
-1. Parsing is implemented for the current tree-sitter based checker entry point.
-2. Annotation extraction is not implemented yet.
-3. Lowering is implemented for the current small subset:
-   - top-level sequences
-   - symbol references
-   - scalar literals
-   - assignments
-   - function definitions
-   - function calls
-   - unsupported fallback nodes
-4. Inference is implemented for the same subset, including generalized bindings at assignments and instantiation at use sites.
-5. Annotation constraints are not implemented yet.
-6. Rendered syntax and type diagnostics are implemented and snapshot-tested.
-
-Each stage should have its own tests where practical.
-
-## Builtin environment
-
-The checker will need an initial environment for builtins and operators.
-
-This should start small and grow only as required by tests.
-
-The initial builtin environment should contain only the symbols needed for the supported language subset and current test cases. It should not attempt to model all of base R up front.
-
-Builtin and lexical environments should be keyed by interned symbols rather than raw strings.
-
-If a builtin has semantics that are unclear or have important design consequences, discuss that with the user before implementing it.
+Builtin and lexical environments should be keyed by interned symbols rather than raw strings. The builtin environment should start small and grow only as required by tests.
 
 ## Error handling and diagnostics
 
-Diagnostics are part of the product, not an afterthought.
+Diagnostics are part of the product.
 
-A core product goal is to aim for Elm- and Rust-like diagnostic quality. Error messages should be clear, precise, and actionable, and should help the user understand both what went wrong and what part of the code caused the problem.
+A core goal is Elm- and Rust-like diagnostic quality. Error messages should be clear, precise, and actionable, and should help the user understand what went wrong and where.
 
 Each diagnostic should aim to include:
 
 - a source range
 - a short summary
 - enough type detail to explain the mismatch
-- stable rendering suitable for snapshot tests
+- stable rendering suitable for fixture-based end-to-end tests
 
-The rendered form of diagnostics should be treated as an interface used by tests.
+The rendered form of diagnostics is part of the test interface.
 
-Current diagnostic status:
-
-- syntax diagnostics are implemented
-- type diagnostics are implemented for a small subset, including end-to-end behavior after let-polymorphism groundwork
-- type diagnostics are still early and need better precision
-- some current type diagnostics still rely on fallback ranges instead of the most specific expression range
-- some current type messages still expose internal type structure too directly and need refinement toward the intended Elm/Rust-like quality bar
-
-As a result:
-
-- changes to wording should be intentional
-- snapshot tests should be updated only when the new wording is better or semantics changed
-- diagnostics should prefer clarity over theory-heavy terminology
+Diagnostic wording changes should be intentional. Fixture expectations should be updated only when wording improves or semantics change. Diagnostics should prefer clarity over theory-heavy terminology.
 
 ## Testing strategy
 
 This crate should be developed test-first.
 
-### Primary test style
-
-The primary end-to-end tests should operate on R snippets.
-
-Rendered diagnostics should be snapshot-tested.
-
-This keeps tests close to the user-facing behavior and makes the system easier to evolve collaboratively.
-
-### Secondary test style
+The primary end-to-end tests should operate on R snippets and assert rendered diagnostics through fixture-based expectations.
 
 Focused unit tests are still useful for internal pieces such as:
 
@@ -488,17 +421,6 @@ Focused unit tests are still useful for internal pieces such as:
 - annotation parsing
 
 These tests are secondary to the snippet-based end-to-end tests, not a replacement for them.
-
-### Why snapshots
-
-Snapshot tests are a good fit because they capture:
-
-- the presence or absence of errors
-- source ranges
-- diagnostic wording
-- behavior shifts across refactors
-
-This is especially valuable while the language subset and diagnostics are still being designed.
 
 ## File and module direction
 
@@ -544,68 +466,7 @@ That should make integration safer and reduce churn while the checker is still e
 
 The following areas are intentionally left open and should be revisited with the user when relevant:
 
-- Exact supported syntax in the first executable milestone
 - Whether unsupported constructs always emit diagnostics or sometimes only infer `Unknown`
-- The first builtin environment contents
-- The exact lowering representation
-- Whether `if` belongs in the first inference milestone or the second
+- Whether `if` belongs in the next supported slice
 - How much annotation syntax should be supported in the first implementation slice
 - When to introduce vector-specific constructors and coercion-sensitive functions
-
-## Current implementation recommendation
-
-The current recommendation for the first implementation sequence is:
-
-1. Write this architecture document.
-2. Write `crates/typing/TODOS.md`.
-3. Reshape the crate toward a library-first structure.
-4. Add a test harness centered on R snippets and snapshot diagnostics.
-5. Implement the minimum parsing and lowering needed for literal values, names, assignments, functions, and calls.
-6. Implement monomorphic inference and unification.
-7. Add let-polymorphism through generalization and instantiation.
-8. Add list, tuple, and record inference.
-9. Add annotation parsing and enforcement.
-10. Expand supported syntax carefully from there.
-
-Current progress:
-
-- The crate has been reshaped toward a library-first structure.
-- A minimal binary wrapper exists only as a thin shell.
-- A first checker entry point exists for snippet-based checking.
-- Snapshot-based end-to-end tests exist for syntax diagnostics and the first type diagnostics.
-- Lowering exists for the initial expression subset.
-- Interning exists and is already used in lowering and type representations.
-- Core type representations exist.
-- Inference state, path compression, occurs checks, and first unification logic exist.
-- Expression inference exists for literals, names, assignments, functions, and calls.
-- Let-polymorphism groundwork now exists through free type variable computation, generalization at assignment bindings, and instantiation at use sites.
-- The next implementation focus should move toward better diagnostic quality, more precise ranges, stronger end-to-end polymorphism coverage, and later annotations.
-
-This ordering is intentional:
-
-- it gives early testable progress
-- it keeps the HM core small
-- it introduces polymorphism in v1 without requiring explicit generic syntax
-- it leaves room to discuss important semantic choices before they harden into implementation
-
-## Memory file
-
-`crates/typing/MEMORY.md` should be used to store cross-session memory for this crate.
-
-Its role is to preserve high-signal context between sessions, especially when the active conversation is approaching its context limit or when work is paused before the next implementation step.
-
-`MEMORY.md` should store things such as:
-
-- active loose ends
-- known diagnostic shortcomings
-- current implementation limitations that are easy to forget
-- recent decisions that are not yet fully reflected in code
-- the most likely next steps if work resumes later
-
-`MEMORY.md` should not replace `ARCHITECTURE.md` or `TODOS.md`.
-
-Use the files as follows:
-
-- `ARCHITECTURE.md` for the intended design and implementation contract
-- `TODOS.md` for the planned work breakdown and progress tracking
-- `MEMORY.md` for session-to-session memory and open thoughts that should survive context loss
