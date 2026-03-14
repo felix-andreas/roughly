@@ -48,6 +48,14 @@ pub fn check(source: &str) -> CheckResult {
     let module = lowering_context.lower_tree(&tree, source);
 
     let mut inference_state = InferenceState::new();
+    let plus_symbol = lowering_context.intern("+");
+    let combine_symbol = lowering_context.intern("c");
+    inference_state.bind_name(plus_symbol, typing_builtin_plus_type(), builtin_range());
+    inference_state.bind_name(
+        combine_symbol,
+        typing_builtin_combine_type(),
+        builtin_range(),
+    );
     if let Err(error) = inference_state.infer_module(&module) {
         diagnostics.push(Diagnostic::from_inference_error(
             &error,
@@ -115,4 +123,32 @@ fn fallback_range(source: &str) -> tree_sitter::Range {
             column: line.len(),
         },
     }
+}
+
+fn builtin_range() -> tree_sitter::Range {
+    tree_sitter::Range {
+        start_byte: 0,
+        end_byte: 0,
+        start_point: tree_sitter::Point { row: 0, column: 0 },
+        end_point: tree_sitter::Point { row: 0, column: 0 },
+    }
+}
+
+fn typing_builtin_plus_type() -> crate::types::CoreType {
+    crate::types::CoreType::Function(crate::types::FunctionType::new(
+        vec![
+            crate::types::CoreType::Unknown,
+            crate::types::CoreType::Unknown,
+        ],
+        Vec::new(),
+        crate::types::CoreType::Unknown,
+    ))
+}
+
+fn typing_builtin_combine_type() -> crate::types::CoreType {
+    crate::types::CoreType::Function(crate::types::FunctionType::new(
+        vec![crate::types::CoreType::Unknown],
+        Vec::new(),
+        crate::types::CoreType::Unknown,
+    ))
 }

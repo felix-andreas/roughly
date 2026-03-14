@@ -168,20 +168,40 @@ fn lower_binary_operator(
         return ExpressionKind::Unsupported;
     };
 
-    if !matches!(operator.kind(), "<-" | "=") {
-        return ExpressionKind::Unsupported;
-    }
+    match operator.kind() {
+        "<-" | "=" => {
+            if lhs.kind() != "identifier" {
+                return ExpressionKind::Unsupported;
+            }
 
-    if lhs.kind() != "identifier" {
-        return ExpressionKind::Unsupported;
-    }
+            let target = intern_node_text(lowering_context, lhs, source);
+            let value = lower_node(lowering_context, rhs, source);
 
-    let target = intern_node_text(lowering_context, lhs, source);
-    let value = lower_node(lowering_context, rhs, source);
+            ExpressionKind::Assign {
+                target,
+                value: Box::new(value),
+            }
+        }
+        "+" => {
+            let operator_symbol = intern_node_text(lowering_context, operator, source);
+            let callee = Box::new(
+                lowering_context
+                    .expression(operator.range(), ExpressionKind::Symbol(operator_symbol)),
+            );
+            let arguments = vec![
+                Argument {
+                    expression: lower_node(lowering_context, lhs, source),
+                    name: None,
+                },
+                Argument {
+                    expression: lower_node(lowering_context, rhs, source),
+                    name: None,
+                },
+            ];
 
-    ExpressionKind::Assign {
-        target,
-        value: Box::new(value),
+            ExpressionKind::Call { callee, arguments }
+        }
+        _ => ExpressionKind::Unsupported,
     }
 }
 

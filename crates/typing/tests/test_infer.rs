@@ -276,6 +276,26 @@ fn inferring_a_character_literal_returns_character_scalar() {
 fn inferring_a_known_symbol_uses_the_environment() {
     let mut inference_state = InferenceState::new();
     let mut interner = Interner::new();
+    let plus = interner.intern("+");
+    let combine = interner.intern("c");
+    inference_state.bind_name(
+        plus,
+        CoreType::Function(FunctionType::new(
+            vec![CoreType::Unknown, CoreType::Unknown],
+            Vec::new(),
+            CoreType::Unknown,
+        )),
+        test_range(),
+    );
+    inference_state.bind_name(
+        combine,
+        CoreType::Function(FunctionType::new(
+            vec![CoreType::Unknown],
+            Vec::new(),
+            CoreType::Unknown,
+        )),
+        test_range(),
+    );
     let name = interner.intern("value");
     inference_state.bind_name(name, CoreType::Scalar(Atomic::Double), test_range());
 
@@ -284,6 +304,234 @@ fn inferring_a_known_symbol_uses_the_environment() {
         .expect("known symbol should infer");
 
     assert_eq!(inferred_type, CoreType::Scalar(Atomic::Double));
+}
+
+#[test]
+fn builtin_plus_rejects_character_plus_integer() {
+    let mut inference_state = InferenceState::new();
+    let mut interner = Interner::new();
+    let plus = interner.intern("+");
+    let combine = interner.intern("c");
+    inference_state.bind_name(
+        plus,
+        CoreType::Function(FunctionType::new(
+            vec![CoreType::Unknown, CoreType::Unknown],
+            Vec::new(),
+            CoreType::Unknown,
+        )),
+        test_range(),
+    );
+    inference_state.bind_name(
+        combine,
+        CoreType::Function(FunctionType::new(
+            vec![CoreType::Unknown],
+            Vec::new(),
+            CoreType::Unknown,
+        )),
+        test_range(),
+    );
+
+    let expression = expression(
+        0,
+        ExpressionKind::Call {
+            callee: Box::new(expression(1, ExpressionKind::Symbol(plus))),
+            arguments: vec![
+                Argument {
+                    expression: expression(2, ExpressionKind::Character("\"foo\"".to_owned())),
+                    name: None,
+                },
+                Argument {
+                    expression: expression(3, ExpressionKind::Integer("4L".to_owned())),
+                    name: None,
+                },
+            ],
+        },
+    );
+
+    let result = inference_state.infer_expression(&expression);
+
+    assert!(matches!(result, Err(InferenceError::TypeMismatch { .. })));
+}
+
+#[test]
+fn builtin_plus_accepts_integer_plus_double() {
+    let mut inference_state = InferenceState::new();
+    let mut interner = Interner::new();
+    let plus = interner.intern("+");
+    let combine = interner.intern("c");
+    inference_state.bind_name(
+        plus,
+        CoreType::Function(FunctionType::new(
+            vec![CoreType::Unknown, CoreType::Unknown],
+            Vec::new(),
+            CoreType::Unknown,
+        )),
+        test_range(),
+    );
+    inference_state.bind_name(
+        combine,
+        CoreType::Function(FunctionType::new(
+            vec![CoreType::Unknown],
+            Vec::new(),
+            CoreType::Unknown,
+        )),
+        test_range(),
+    );
+
+    let expression = expression(
+        0,
+        ExpressionKind::Call {
+            callee: Box::new(expression(1, ExpressionKind::Symbol(plus))),
+            arguments: vec![
+                Argument {
+                    expression: expression(2, ExpressionKind::Integer("1L".to_owned())),
+                    name: None,
+                },
+                Argument {
+                    expression: expression(3, ExpressionKind::Double("2.5".to_owned())),
+                    name: None,
+                },
+            ],
+        },
+    );
+
+    let inferred_type = inference_state
+        .infer_expression(&expression)
+        .expect("builtin `+` should accept numeric operands");
+
+    assert_eq!(inferred_type, CoreType::Scalar(Atomic::Double));
+}
+
+#[test]
+fn builtin_plus_accepts_vector_plus_scalar() {
+    let mut inference_state = InferenceState::new();
+    let mut interner = Interner::new();
+    let plus = interner.intern("+");
+    let combine = interner.intern("c");
+    inference_state.bind_name(
+        plus,
+        CoreType::Function(FunctionType::new(
+            vec![CoreType::Unknown, CoreType::Unknown],
+            Vec::new(),
+            CoreType::Unknown,
+        )),
+        test_range(),
+    );
+    inference_state.bind_name(
+        combine,
+        CoreType::Function(FunctionType::new(
+            vec![CoreType::Unknown],
+            Vec::new(),
+            CoreType::Unknown,
+        )),
+        test_range(),
+    );
+
+    let vector_expression = expression(
+        1,
+        ExpressionKind::Call {
+            callee: Box::new(expression(2, ExpressionKind::Symbol(combine))),
+            arguments: vec![
+                Argument {
+                    expression: expression(3, ExpressionKind::Integer("1L".to_owned())),
+                    name: None,
+                },
+                Argument {
+                    expression: expression(4, ExpressionKind::Integer("2L".to_owned())),
+                    name: None,
+                },
+            ],
+        },
+    );
+
+    let expression = expression(
+        0,
+        ExpressionKind::Call {
+            callee: Box::new(expression(5, ExpressionKind::Symbol(plus))),
+            arguments: vec![
+                Argument {
+                    expression: vector_expression,
+                    name: None,
+                },
+                Argument {
+                    expression: expression(6, ExpressionKind::Integer("4L".to_owned())),
+                    name: None,
+                },
+            ],
+        },
+    );
+
+    let inferred_type = inference_state
+        .infer_expression(&expression)
+        .expect("builtin `+` should accept vector plus scalar");
+
+    assert_eq!(inferred_type, CoreType::Vector(Atomic::Integer));
+}
+
+#[test]
+fn builtin_plus_accepts_scalar_plus_vector() {
+    let mut inference_state = InferenceState::new();
+    let mut interner = Interner::new();
+    let plus = interner.intern("+");
+    let combine = interner.intern("c");
+    inference_state.bind_name(
+        plus,
+        CoreType::Function(FunctionType::new(
+            vec![CoreType::Unknown, CoreType::Unknown],
+            Vec::new(),
+            CoreType::Unknown,
+        )),
+        test_range(),
+    );
+    inference_state.bind_name(
+        combine,
+        CoreType::Function(FunctionType::new(
+            vec![CoreType::Unknown],
+            Vec::new(),
+            CoreType::Unknown,
+        )),
+        test_range(),
+    );
+
+    let vector_expression = expression(
+        1,
+        ExpressionKind::Call {
+            callee: Box::new(expression(2, ExpressionKind::Symbol(combine))),
+            arguments: vec![
+                Argument {
+                    expression: expression(3, ExpressionKind::Integer("1L".to_owned())),
+                    name: None,
+                },
+                Argument {
+                    expression: expression(4, ExpressionKind::Double("2.5".to_owned())),
+                    name: None,
+                },
+            ],
+        },
+    );
+
+    let expression = expression(
+        0,
+        ExpressionKind::Call {
+            callee: Box::new(expression(5, ExpressionKind::Symbol(plus))),
+            arguments: vec![
+                Argument {
+                    expression: expression(6, ExpressionKind::Integer("4L".to_owned())),
+                    name: None,
+                },
+                Argument {
+                    expression: vector_expression,
+                    name: None,
+                },
+            ],
+        },
+    );
+
+    let inferred_type = inference_state
+        .infer_expression(&expression)
+        .expect("builtin `+` should accept scalar plus vector");
+
+    assert_eq!(inferred_type, CoreType::Vector(Atomic::Double));
 }
 
 #[test]

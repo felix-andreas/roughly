@@ -26,9 +26,8 @@ impl Interner {
         }
 
         let symbol_index = self.text_by_symbol.len();
-        let symbol = Symbol(
-            u32::try_from(symbol_index).expect("symbol interner exceeded u32 capacity"),
-        );
+        let symbol =
+            Symbol(u32::try_from(symbol_index).expect("symbol interner exceeded u32 capacity"));
 
         let owned_text = text.to_owned();
         self.symbols_by_text.insert(owned_text.clone(), symbol);

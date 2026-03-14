@@ -143,6 +143,15 @@ fn lowering_two_argument_call_snippet_interns_callee_only_once() {
 }
 
 #[test]
+fn lowering_plus_operator_snippet_interns_the_builtin_symbol() {
+    let lowering_context = lower(indoc! {r#"
+        "foo" + 4
+    "#});
+
+    assert!(lowering_context.interner().contains("+"));
+}
+
+#[test]
 fn lowering_unsupported_snippet_does_not_intern_nested_symbols_yet() {
     let lowering_context = lower(indoc! {r#"
         if (flag) value else other

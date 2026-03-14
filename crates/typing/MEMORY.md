@@ -50,6 +50,7 @@ The crate currently has:
   - function definitions
   - calls
   - simple wrapped expressions
+  - `+`, lowered as a builtin-style call
 - string interning
 - core type representations
 - `TypeScheme`-based bindings
@@ -57,13 +58,19 @@ The crate currently has:
 - let-polymorphism for assignment bindings
 - end-to-end type diagnostics
 - grouped fixture-based end-to-end tests under `tests/`
+- builtin arithmetic support for `+`
+  - numeric operands only
+  - scalar/scalar, vector/scalar, scalar/vector, and vector/vector are supported
+  - `double` wins over `integer`
+  - vector shape wins over scalar shape
+- minimal builtin support for `c(...)` in order to construct numeric vectors for arithmetic checks
 - optional integration into `roughly check` and full LSP diagnostics behind the `typing_diagnostics` experimental flag
 
 Important current limitations:
 
 - unsupported syntax still lowers to `Unsupported`
 - nested names inside unsupported syntax are not recursively lowered yet
-- some type diagnostics still fall back to coarse ranges
+- arithmetic diagnostics still use a generic type-mismatch message rather than an operator-specific message like `cannot add ... to ...`
 - function parameters with defaults are not yet represented in a way that supports named-argument mismatch diagnostics end-to-end
 - typing diagnostics are intentionally excluded from the fast incremental diagnostics path
 
@@ -71,12 +78,11 @@ Important current limitations:
 
 ### 1. Finish the current diagnostics pass
 
-Recent work improved ranges and wording, and unresolved inference variables now render as user-facing placeholders like `type1` instead of `t0`.
-
-Recent diagnostics-related progress also fixed a lowering bug where call arguments could be double-counted in end-to-end arity diagnostics.
+Recent work improved ranges and wording, unresolved inference variables now render as user-facing placeholders like `type1` instead of `t0`, and arithmetic now has end-to-end coverage for builtin `+`.
 
 Remaining focus:
 
+- replace generic arithmetic mismatch rendering with a more direct operator-specific message such as `cannot add ... to ...`
 - extend precise source ranges to remaining inference failures
 - refine wording for higher-order failures
 - revisit named-argument diagnostics after function-parameter lowering can represent the relevant call shape
@@ -122,6 +128,8 @@ Consequence:
 
 The type model already includes them, but lowering and inference for the intended R syntax are still incomplete.
 
+The current minimal `c(...)` support is only enough to build numeric vectors for arithmetic checks. It should not be treated as the settled general container story.
+
 ### 7. Annotation parsing is not started
 
 Still pending:
@@ -144,15 +152,18 @@ These should not be reopened casually without discussion with the user:
 - development should be test-driven
 - end-to-end tests should use R snippets
 - rendered diagnostics should be snapshot-tested
+- `+` is a builtin at the lowered-language boundary and uses special inference logic rather than ordinary HM unification alone
+- current arithmetic support treats only `integer` and `double` as numeric
 
 ## Recommended next step
 
-Continue improving diagnostic precision and rendering quality, especially source-range fidelity and higher-order wording, while expanding end-to-end coverage for polymorphism and unsupported syntax.
+Improve diagnostic rendering quality, especially operator-specific wording for arithmetic, while continuing to expand polymorphism coverage and preserving source-range fidelity.
 
 ## Things to watch in the next session
 
 - Do not silently change semantics without updating the docs.
 - Do not treat current diagnostics as “done”.
+- Do not treat the current `c(...)` support as a settled container design.
 - Do not add broad new syntax support without checking whether it changes an important design decision.
 - Keep end-to-end fixture expectations in sync with intentional semantic changes.
 - Do not reintroduce end-to-end named-argument mismatch fixtures until function-parameter lowering can represent the needed semantics.

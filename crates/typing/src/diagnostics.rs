@@ -89,7 +89,7 @@ impl Diagnostic {
                 (
                     *range,
                     format!(
-                        "This expression is being called like a function, but it has type `{}`.",
+                        "expected function, found `{}`",
                         type_renderer.render(actual_type)
                     ),
                 )
@@ -120,9 +120,9 @@ impl Diagnostic {
                 (
                     range.unwrap_or(fallback_range),
                     format!(
-                        "This expression has type `{}`, but it needs to be `{}`.",
-                        type_renderer.render(actual),
-                        type_renderer.render(expected)
+                        "expected `{}`, found `{}`",
+                        type_renderer.render(expected),
+                        type_renderer.render(actual)
                     ),
                 )
             }
@@ -282,8 +282,8 @@ impl<'a> TypeRenderer<'a> {
             CoreType::Any => "any".to_owned(),
             CoreType::Unknown => "unknown".to_owned(),
             CoreType::Null => "null".to_owned(),
-            CoreType::Scalar(atomic) => format!("scalar {}", render_atomic(*atomic)),
-            CoreType::Vector(atomic) => format!("vector {}", render_atomic(*atomic)),
+            CoreType::Scalar(atomic) => render_atomic(*atomic).to_owned(),
+            CoreType::Vector(atomic) => format!("{}[]", render_atomic(*atomic)),
             CoreType::List(item_type) => {
                 format!("list[{}]", self.render_core_type(item_type))
             }

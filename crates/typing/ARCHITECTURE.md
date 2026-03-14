@@ -121,13 +121,14 @@ Planned early support:
 - function definitions
 - function calls
 - top-level sequences
+- simple builtins needed for tests
 - list-like constructions with the rules described below
 
 Likely early follow-up support:
 
 - `if` expressions or statements
 - blocks
-- simple builtins needed for tests
+- broader builtin coverage beyond the small tested subset
 
 Deferred until later:
 
@@ -308,6 +309,50 @@ That behavior is central to the planned HM design and is part of v1.
 Even though v1 supports internal polymorphism, explicit generic syntax in annotations is deferred.
 
 That means generic behavior exists in inference and schemes, but users do not yet write parameterized type syntax directly.
+
+## Builtin functions and operators
+
+The checker may model a small set of builtins before broader R builtin coverage is attempted.
+
+These builtins should still enter the system through ordinary lowering as symbol references and calls where practical, so they remain visible in diagnostics and fit the existing lowering/inference boundaries.
+
+### Builtins may use dedicated inference rules
+
+Some builtins have typing behavior that is awkward to express as an ordinary equality-based HM function type.
+
+In those cases, it is acceptable for the inference layer to recognize a builtin binding and apply a dedicated rule instead of relying only on generic function unification.
+
+This should be reserved for cases where the builtin's typing depends on operand shape or promotion behavior rather than only simple parameter equality.
+
+### Current builtin slice
+
+The current implemented builtin slice is intentionally small:
+
+- `+`
+- `c(...)`
+
+`+` is lowered as a call to the builtin symbol `+` and then typed with a dedicated inference rule.
+
+`c(...)` is currently supported as a minimal builtin needed to express vector-producing test cases for arithmetic. It should be treated as a narrow implementation slice, not as a commitment to full R `c(...)` semantics.
+
+### Arithmetic builtin semantics in the current slice
+
+For `+`, the current agreed semantics are:
+
+- operands must be numeric
+- numeric currently means `integer` or `double`
+- scalar + scalar is allowed
+- vector + scalar is allowed
+- scalar + vector is allowed
+- vector + vector is allowed
+- if either operand is `double`, the result is `double`
+- otherwise the result is `integer`
+- if either operand is a vector, the result is a vector
+- otherwise the result is a scalar
+
+This arithmetic behavior is implemented as a builtin-specific inference rule rather than as a normal user-definable function type.
+
+Operator diagnostics for this path should keep improving toward concise, high-signal wording in the style of Rust.
 
 ## Annotation model
 

@@ -80,6 +80,8 @@ References:
 - [x] Simple scalar literals produce no diagnostics.
 - [x] Undefined names produce diagnostics.
 - [ ] Unsupported syntax produces `Unknown` behavior and any intended diagnostics.
+- [x] Builtin arithmetic diagnostics cover `+` rejecting non-numeric operands.
+- [x] Builtin arithmetic snapshots cover scalar/vector combinations for `+`.
 - [x] Diagnostic rendering is stable enough to snapshot.
 - [x] Grouped fixture files can define multiple cases with stable snapshot names.
 - [x] Duplicate `group__case` snapshot names are rejected by the harness.
@@ -102,6 +104,7 @@ References:
 - [x] Lower function definitions.
 - [x] Lower function calls.
 - [x] Avoid double-counting call arguments during lowering.
+- [x] Lower `+` into builtin call form.
 - [ ] Lower list-like constructions.
 - [ ] Decide whether to lower `if` in the first syntax slice or defer it `(needs refinement)`.
 
@@ -195,6 +198,7 @@ References:
 - [x] Implement instantiation at use sites.
 - [x] Ensure generalized bindings get fresh variables per use.
 - [ ] Verify that polymorphic bindings work across repeated calls.
+- [x] Add initial builtin support for `+` arithmetic and `c(...)` vector construction used by arithmetic tests.
 - [ ] Keep explicit generic annotation syntax deferred.
 
 ### Polymorphism tests
@@ -298,9 +302,9 @@ References:
 
 ### Candidate early builtins
 
-- [ ] Arithmetic operators `(needs refinement)`
+- [x] `+`
+- [x] `c(...)` for numeric vector construction in arithmetic tests
 - [ ] Comparison operators `(needs refinement)`
-- [ ] `c(...)` `(needs refinement)`
 - [ ] `list(...)` `(needs refinement)`
 - [ ] `length(...)` `(needs refinement)`
 
@@ -343,6 +347,7 @@ References:
 - [x] Define the interner boundary and how diagnostics resolve interned names back to text.
 - [x] Implement expression inference over the lowered AST for literals, names, assignments, functions, and calls.
 - [x] Connect inference errors to rendered diagnostics.
+- [ ] Improve operator-specific diagnostics so builtin arithmetic failures read like high-signal Rust-style messages.
 - [ ] Improve diagnostic precision so type errors point at the failing expression instead of a fallback range.
 - [ ] Improve type rendering so diagnostics read like Elm/Rust style messages instead of debug output.
 - [ ] Add a persistent `MEMORY.md` document for cross-session context and open design loose ends.
