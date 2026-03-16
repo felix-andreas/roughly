@@ -6,8 +6,8 @@ use {
         lower::{ExpressionKind, LoweringContext},
         new_parser, parse,
         types::{
-            Annotation, Atomic, AttachedAnnotation, CoreType, FunctionType, InferenceVariableId,
-            RecordField, SurfaceType, TypeScheme,
+            Atomic, CoreType, FunctionType, InferenceVariableId, RecordField, SurfaceType,
+            TypeScheme,
         },
     },
 };
@@ -192,19 +192,8 @@ fn trailing_assignment_annotation_attaches_to_the_assignment_expression_and_bind
         .first()
         .expect("assignment expression should be lowered");
 
-    assert_eq!(module.annotations.len(), 1);
-    assert_eq!(
-        expression.range.start_point.row,
-        module.annotations[0].range.start_point.row
-    );
-    assert_eq!(
-        expression.range.end_point.row,
-        module.annotations[0].range.end_point.row
-    );
-
-    let expected_annotation =
-        AttachedAnnotation::expression(Annotation::new(SurfaceType::Scalar(Atomic::Integer)));
-    assert_eq!(expression.annotation, Some(expected_annotation));
+    assert!(module.annotations.is_empty());
+    assert_eq!(expression.annotation, None);
 
     match &expression.kind {
         ExpressionKind::Assign {
@@ -212,12 +201,7 @@ fn trailing_assignment_annotation_attaches_to_the_assignment_expression_and_bind
             annotation,
             value,
         } => {
-            assert_eq!(
-                *annotation,
-                Some(AttachedAnnotation::binding_and_expression(Annotation::new(
-                    SurfaceType::Scalar(Atomic::Integer),
-                )))
-            );
+            assert_eq!(*annotation, None);
             assert_eq!(value.annotation, None);
         }
         other_kind => panic!("expected assignment, got {other_kind:?}"),

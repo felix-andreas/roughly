@@ -1,0 +1,20 @@
+#==== functions
+#---- polymorphic_assignment_multiple_types
+identity <- function(x) x
+first <- identity(1L)
+second <- identity("hello")
+#++++
+fn(type1) -> type1
+integer
+character
+
+#---- repeated_polymorphic_instantiations
+identity <- function(x) x
+first <- identity(1L)
+second <- identity("hello")
+third <- identity(2L)
+#++++
+fn(type1) -> type1
+integer
+character
+integer

@@ -25,7 +25,7 @@ Keep this document high signal.
 
 ## Phase 0 — Planning and alignment
 
-- [ ] Review `README.md`, `ARCHITECTURE.md`, and this document together before each major implementation phase.
+- [ ] Review `README.md`, `SEMANTICS.md`, `ARCHITECTURE.md`, and this document together before each major implementation phase.
 - [ ] Keep the scope aligned with the current v1 goals in `ARCHITECTURE.md`.
 - [ ] Discuss any important semantic change with the user before implementation.
 - [ ] Keep open questions visible until they are resolved or deliberately deferred.
@@ -57,7 +57,7 @@ References:
 - `ARCHITECTURE.md` → Public API direction
 
 - [x] Reshape the crate to be library-first.
-- [ ] Decide whether to keep a tiny binary for local experiments `(needs refinement)`.
+- [x] Do not keep a tiny binary for local experiments.
 - [x] Add a narrow crate entry point for checking source text.
 - [x] Add core result types for diagnostics and inferred type information.
 - [x] Keep the early file layout modest and avoid over-fragmentation.
@@ -87,7 +87,7 @@ References:
 - [x] Empty input produces no diagnostics.
 - [x] Simple scalar literals produce no diagnostics.
 - [x] Undefined names produce diagnostics.
-- [ ] Unsupported syntax produces `Unknown` behavior and any intended diagnostics.
+- [x] Rely on the existing syntax checker to reject invalid syntax before typing runs.
 - [x] Builtin arithmetic diagnostics cover `+` rejecting non-numeric operands.
 - [x] Builtin arithmetic fixture expectations cover scalar/vector combinations for `+`.
 - [x] Diagnostic rendering is stable enough for fixture expectations.
@@ -98,6 +98,7 @@ References:
 ## Phase 3 — Parsing and lowering
 
 References:
+- `SEMANTICS.md` → Types
 - `ARCHITECTURE.md` → Parsing and lowering
 - `ARCHITECTURE.md` → Scope of the supported language subset
 
@@ -113,8 +114,9 @@ References:
 - [x] Lower function calls.
 - [x] Avoid double-counting call arguments during lowering.
 - [x] Lower `+` into builtin call form.
-- [ ] Lower list-like constructions.
+- [ ] Lower list-like constructions in line with `SEMANTICS.md`.
 - [ ] Decide whether to lower `if` in the first syntax slice or defer it `(needs refinement)`.
+- [ ] Keep `SEMANTICS.md` in sync with list-related fixture tests; both are part of the contract.
 
 ### Parser and lowering tests
 
@@ -219,22 +221,25 @@ References:
 ## Phase 7 — Lists, tuples, and records
 
 References:
+- `SEMANTICS.md` → Types
 - `ARCHITECTURE.md` → Lists, tuples, and records
 
-- [ ] Infer homogeneous positional list-like expressions as `List`.
-- [ ] Infer heterogeneous positional list-like expressions as `Tuple`.
-- [ ] Infer named entries as `Record`.
+- [ ] Infer positional `list(...)` expressions as tuple-like values, including `list()` as the empty tuple-like case.
+- [ ] Infer named `list(...)` expressions as map-like values.
 - [ ] Emit a type error for mixed named and unnamed entries.
-- [ ] Decide how empty list-like constructs should be typed `(needs refinement)`.
-- [ ] Decide which R syntax maps to these constructions in the first implementation slice `(needs refinement)`.
+- [ ] Add coercion from tuple-like `list(...)` values into array-like `list[...]` targets.
+- [ ] Add coercion from map-like `list(...)` values into homogeneous map-like `list[key: value]` targets.
+- [ ] Reject coercion from array-like values into tuple-like targets.
+- [ ] Reject coercion from map-like values into fixed-shape record-like targets.
 
 ### Container tests
 
-- [ ] Homogeneous positional example infers as `List`.
-- [ ] Heterogeneous positional example infers as `Tuple`.
-- [ ] Named example infers as `Record`.
-- [ ] Mixed named and unnamed example reports a type error.
-- [ ] Fixture-based diagnostics for malformed container expressions.
+- [ ] `list()` infers as the empty tuple-like case.
+- [ ] Positional `list(1L, 2L, 3L)` infers as a tuple-like value.
+- [ ] Named `list(foo = 1L, bar = "foo")` infers as a map-like value.
+- [ ] Mixed `list(1L, bar = "foo")` reports a type error.
+- [ ] `#: list[integer]` accepts tuple-like `list(1L, 2L, 3L)`.
+- [ ] `#: list[character: integer]` accepts named `list(foo = 1L, bar = 2L)`.
 
 ## Phase 8 — Annotation parsing
 
@@ -285,17 +290,14 @@ References:
 References:
 - `ARCHITECTURE.md` → Unsupported constructs degrade to `Unknown`
 
-- [ ] Define which unsupported constructs only infer `Unknown`.
-- [ ] Define which unsupported constructs also emit diagnostics `(needs refinement)`.
-- [ ] Ensure unsupported constructs do not cause inference to abort.
+- [ ] Keep unsupported lowered forms from aborting inference when they appear inside otherwise valid syntax.
 - [ ] Ensure `Unknown` reduces cascading diagnostics.
-- [ ] Keep the behavior consistent and snapshot-tested.
+- [ ] Keep the behavior consistent and snapshot-tested where supported syntax can still lower to `Unsupported`.
 
 ### Unsupported syntax tests
 
-- [ ] Unsupported expression yields stable behavior.
-- [ ] Downstream inference continues after unsupported syntax.
-- [ ] Fixture-based diagnostics for unsupported syntax cases.
+- [ ] Downstream inference continues after lowered unsupported constructs.
+- [ ] Fixture coverage pins the current `Unknown` behavior for lowered unsupported constructs that can still arise from syntactically valid input.
 
 ## Phase 11 — Builtin environment
 
@@ -317,6 +319,8 @@ References:
 - [ ] `length(...)` `(needs refinement)`
 
 ## Phase 12 — Public API shaping
+
+- [ ] Unify `typing` diagnostics with the current syntax-checking pipeline in `roughly` so syntax errors still come from the existing checker and type checking runs only on syntactically valid input.
 
 References:
 - `ARCHITECTURE.md` → Public API direction
@@ -349,5 +353,5 @@ References:
 
 - [ ] Improve diagnostic precision so type errors point at the failing expression instead of a fallback range.
 - [ ] Improve type rendering so diagnostics read like Elm/Rust style messages instead of debug output.
-- [ ] Unsupported syntax produces `Unknown` behavior and any intended diagnostics.
+- [ ] Improve `Unknown` behavior coverage for lowered unsupported constructs that can still arise from syntactically valid input.
 - [ ] Lower list-like constructions.

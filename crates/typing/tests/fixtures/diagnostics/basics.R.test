@@ -1,0 +1,24 @@
+#==== general
+#---- empty_input
+#++++
+No diagnostics.
+
+#---- valid_assignment
+value <- 1L
+#++++
+No diagnostics.
+
+#---- invalid_syntax
+value <-
+#++++
+error[syntax-error] Missing syntax near 2:1
+--> 2:1-2:1
+| <empty line>
+
+#==== names
+#---- unknown_name
+value
+#++++
+error[type-error] I could not find `value` in scope.
+--> 1:1-1:6
+| value

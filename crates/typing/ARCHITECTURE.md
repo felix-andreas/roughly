@@ -2,15 +2,17 @@
 
 This document is the design contract for the `typing` crate.
 
-The crate is a standalone library for static type checking of a subset of R. Later it may be integrated into `roughly`, but the standalone library remains the primary implementation boundary while the type checker is still evolving.
+The crate is a standalone library for static type checking of a subset of R. Later it may be integrated into `roughly`, but the standalone library remains the primary implementation boundary while the type checker is still evolving. In integrated use, syntax validity should still be decided by `roughly`'s existing syntax-checking pipeline before type checking runs.
 
 If implementation changes make this document inaccurate, update it in the same session. If implementation and this document disagree, that mismatch is work to do.
 
 Project planning is tracked in `crates/typing/TODOS.md`.
 
+User-facing typing semantics are tracked in `crates/typing/SEMANTICS.md`.
+
 Cross-session continuity is tracked in `crates/typing/MEMORY.md`.
 
-Important design decisions must be discussed with the user before implementation. If a planned step is ambiguous, under-specified, or introduces a meaningful semantic tradeoff, stop and discuss it first.
+Important design decisions must be discussed with the user before implementation. If a planned step is ambiguous, under-specified, or introduces a meaningful semantic tradeoff, stop and discuss it first. Changes to `crates/typing/SEMANTICS.md` must always be discussed with the user first.
 
 ## Document hygiene
 
@@ -19,7 +21,9 @@ Keep this file high signal.
 - Keep it focused on durable design decisions and architectural constraints.
 - Do not use it as a changelog, status report, or session diary.
 - Put task tracking in `TODOS.md`.
+- Put user-facing typing semantics in `SEMANTICS.md`.
 - Put cross-session handoff notes in `MEMORY.md`.
+- Keep `SEMANTICS.md` and the fixture suites in sync; both are part of the contract.
 - When implementation meaningfully changes the design contract, update this file in the same session.
 
 ## Goals
@@ -33,6 +37,8 @@ The initial goals are:
 - Develop the checker test-first.
 - Use R snippets as the primary test input format.
 - Prefer fixture-based tests of rendered diagnostics for end-to-end behavior.
+- Treat fixture expectations as part of the testing contract, not as disposable snapshots.
+- Keep `SEMANTICS.md` and the fixture suites aligned as the user-facing contract.
 - Aim for Elm- and Rust-like diagnostic quality, with clear, precise, and actionable error messages.
 - Support later integration into `roughly` without redesigning the core engine.
 
@@ -96,11 +102,13 @@ The first implementation should use equality-based unification, not subtyping.
 
 This keeps the inference engine simpler and preserves principal typing more naturally than mixing HM with structural subtyping from the start.
 
-### Unsupported constructs degrade to `Unknown`
+### Unsupported lowered constructs degrade to `Unknown`
 
-When the checker encounters unsupported syntax, it should infer `Unknown` rather than failing catastrophically.
+When the checker encounters a construct from syntactically valid input that lowering or inference does not yet support, it should infer `Unknown` rather than failing catastrophically.
 
-Whether every unsupported construct also emits a diagnostic can be refined over time, but the default behavior is to preserve forward progress and avoid cascades.
+In standalone crate tests, syntax errors may still be reported locally. In integrated use, syntax diagnostics should come from `roughly`'s existing syntax checker, and `typing` should focus on type checking syntactically valid input.
+
+The default behavior for lowered unsupported constructs is to preserve forward progress and avoid cascades.
 
 ## Scope of the supported language subset
 
@@ -135,9 +143,13 @@ Deferred until later:
 - dispatch-heavy builtins
 - advanced control flow
 
+These deferred constructs may still lower to `Unknown` when they appear inside otherwise valid syntax before dedicated support exists.
+
 ## Type model
 
-The checker needs to model both R-shaped types and HM inference variables.
+The checker needs to model both user-facing semantic shapes and HM inference variables.
+
+User-facing type semantics are defined in `SEMANTICS.md`. This document should only keep the implementation-facing constraints that follow from those semantics.
 
 ### Base categories
 
@@ -147,10 +159,8 @@ The initial type space should include:
 - `Unknown`
 - `Null`
 - scalar atomics
-- atomic vectors
-- homogeneous lists
-- records
-- tuples
+- atomic vector shapes
+- list-like structural shapes
 - function types
 - inference variables
 
@@ -167,25 +177,11 @@ The initial atomic categories should be kept distinct:
 
 This crate should distinguish `integer` and `double` from the start.
 
-### Scalars and vectors
+### User-facing shape semantics
 
-The type system should distinguish between:
+Scalar-like, array-like, map-like, tuple-like, and other user-facing shape rules belong in `SEMANTICS.md`.
 
-- scalar atomic values
-- atomic vectors
-
-This follows the design in `README.md` and matches an important practical distinction in R.
-
-### Lists, tuples, and records
-
-The current intended rules are:
-
-- homogeneous positional list-like values infer as `List`
-- heterogeneous positional list-like values infer as `Tuple`
-- named entries infer as `Record`
-- mixed named and unnamed entries are a type error
-
-This rule should be documented in diagnostics and tested explicitly.
+Architecture work should preserve those semantics, not redefine them here.
 
 ### `Any`
 
@@ -207,15 +203,7 @@ The implementation should use at least three layers of type representation.
 
 This is the type syntax parsed from comments and annotations.
 
-Examples include:
-
-- `integer`
-- `double`
-- `character[]`
-- `list[integer]`
-- `list{name: character, age: integer}`
-- `list(character, integer)`
-- `fn(character, age: integer)`
+The user-facing notation and examples are defined in `SEMANTICS.md`. `SurfaceType` should be able to represent the semantic forms described there.
 
 ### `CoreType`
 
@@ -412,6 +400,21 @@ This crate should be developed test-first.
 
 The primary end-to-end tests should operate on R snippets and assert rendered diagnostics through fixture-based expectations.
 
+The testing contract should follow these rules:
+
+- `SEMANTICS.md` and the fixture suites together define the user-facing contract
+- diagnostics fixtures are the primary user-facing contract for rendered errors
+- diagnostics fixture assertions should stay strict
+- inference fixtures should use normalized rendered types and should also be treated as contractual
+- fixture files may be split by feature for readability
+- fixture identity should come only from `group__case`, not from the filename
+- duplicate `group__case` names across the whole fixture suite should be rejected
+- fixture expectations should be updated only when behavior, wording, source ranges, or normalized rendering intentionally change
+- when fixture-visible semantics change, update `SEMANTICS.md` in the same session
+- if user-facing semantics are still unclear, discuss them with the user first and then record the resolved rule in `SEMANTICS.md`
+
+Prefer fixture-authored tests over Rust-authored tests when the behavior is naturally expressed as an R snippet.
+
 Focused unit tests are still useful for internal pieces such as:
 
 - unification
@@ -419,6 +422,7 @@ Focused unit tests are still useful for internal pieces such as:
 - instantiation
 - generalization
 - annotation parsing
+- lowering details that would be awkward to express in fixture form
 
 These tests are secondary to the snippet-based end-to-end tests, not a replacement for them.
 

@@ -16,10 +16,11 @@ Use this document to record:
 - next recommended steps
 - any subtle decisions that should not be rediscovered from scratch
 
-This is not a replacement for `AGENTS.md`, `ARCHITECTURE.md`, or `TODOS.md`.
+This is not a replacement for `AGENTS.md`, `ARCHITECTURE.md`, `SEMANTICS.md`, or `TODOS.md`.
 
 - `AGENTS.md` contains crate-specific working rules and workflow expectations.
 - `ARCHITECTURE.md` is the maintained design contract.
+- `SEMANTICS.md` is the user-facing semantics contract and must stay in sync with fixture expectations.
 - `TODOS.md` is the maintained execution plan.
 - `MEMORY.md` is a compact continuity document for session-to-session handoff.
 
@@ -30,6 +31,7 @@ If code changes make this document inaccurate, update it in the same session.
 Keep this file handoff-oriented and aggressively pruned.
 
 - Keep durable design rules in `ARCHITECTURE.md`.
+- Keep user-facing semantics in `SEMANTICS.md`.
 - Keep planned work and completion state in `TODOS.md`.
 - Keep crate workflow guidance in `AGENTS.md`.
 - Keep `MEMORY.md` only for continuity that is easy to lose between sessions.
@@ -38,13 +40,21 @@ Keep this file handoff-oriented and aggressively pruned.
 
 ## Active continuity
 
-- Diagnostics and inference fixtures now live together under `tests/fixtures/`:
-  - `diagnostics.R.test`
-  - `inference.R.test`
-- `tests/test_infer.rs` now uses source-driven fixture cases for ordinary inference behavior and keeps only a small set of low-level inference-engine unit tests for algorithm details like unification and occurs checks.
+- Fixture suites are now split by feature under `tests/fixtures/diagnostics/` and `tests/fixtures/inference/`. Fixture identity still comes only from `group__case`, and duplicate identities are rejected across the whole suite.
+- `SEMANTICS.md` is now intended to become the user-facing semantics contract over time. Changes to it must be discussed with the user first, and it must be kept in sync with fixture expectations. Both are part of the contract.
+- Agreed list semantics to preserve:
+  - `list(...)` with only unnamed entries is tuple-like
+  - `list()` is the empty tuple-like case
+  - `list(...)` with only named entries is map-like
+  - mixed named and unnamed entries are an error
+  - tuple-like values can be coerced to homogeneous `list[...]`
+  - map-like values can be coerced to homogeneous `list[character: T]`
+  - the reverse coercions should remain disallowed
+  - use original R type names such as `integer`, `double`, and `character`
+  - use `{}` rendering for tuples and records in user-facing semantics
 - Higher-order mismatch diagnostics still tend to report the constraint-introducing site and may render unresolved placeholders like `type1` instead of the eventual call-site type. Do not “fix” fixture expectations without deciding whether to improve diagnostic precision.
-- Unsupported syntax still lowers to `Unsupported`, and nested names inside unsupported syntax are not recursively lowered.
+- Some constructs from otherwise valid input still lower to `Unsupported`, and nested names inside those lowered unsupported forms are not recursively lowered.
 - Function parameters with defaults are still too minimal for end-to-end named-argument mismatch diagnostics. Do not reintroduce those fixtures yet.
-- The current `c(...)` support is only a narrow arithmetic helper, not the settled list/tuple/record story.
 - Annotation work is not finished. The lowered representation now has annotation storage, but attachment semantics are not settled. For now, treat trailing assignment annotations as the intended near-term scope and do not assume preceding `#:` attachment works.
+- In integrated use, syntax errors should come from `roughly`'s existing syntax checker before `typing` runs. Keep `typing` focused on syntactically valid input and on lowered unsupported constructs that can still arise within that input.
 - `if` remains an open sequencing question. If work reaches it, discuss whether it belongs before or after further diagnostics / annotations work.

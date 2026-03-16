@@ -1,0 +1,28 @@
+#==== basics
+#---- integer_literal
+1L
+#++++
+integer
+
+#---- double_literal
+1.5
+#++++
+double
+
+#---- character_literal
+"hello"
+#++++
+character
+
+#==== names
+#---- known_name_after_assignment
+value <- 1L
+value
+#++++
+integer
+integer
+
+#---- unknown_name
+missing_value
+#++++
+error: unknown name

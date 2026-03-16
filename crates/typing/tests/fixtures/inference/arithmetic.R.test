@@ -1,0 +1,20 @@
+#==== arithmetic
+#---- integer_plus_double
+1L + 2.5
+#++++
+double
+
+#---- vector_plus_scalar
+c(1L, 2L) + 4L
+#++++
+integer[]
+
+#---- scalar_plus_vector
+4L + c(1L, 2.5)
+#++++
+double[]
+
+#---- string_plus_integer
+"foo" + 4L
+#++++
+error: invalid plus operand

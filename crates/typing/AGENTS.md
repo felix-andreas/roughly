@@ -14,9 +14,13 @@ If the user says:
 Before making significant changes in this crate, review these files and keep them aligned:
 
 - `README.md`
-  - user-facing semantics and workflow
+  - user-facing workflow and pointers
+- `SEMANTICS.md`
+  - user-facing typing semantics contract
+- `DRAFT.md`
+  - non-authoritative design draft and starting point for future semantics discussions
 - `ARCHITECTURE.md`
-  - contract
+  - implementation contract
 - `TODOS.md`
   - plan
 - `MEMORY.md`
@@ -37,8 +41,16 @@ Keep all crate documents extremely high signal:
 More specifically:
 
 - `README.md`
-  - explain user-facing semantics and workflow
+  - explain user-facing workflow and testing expectations
   - avoid implementation-status churn
+- `SEMANTICS.md`
+  - keep the user-facing typing semantics concise and explicit
+  - keep it in sync with fixture tests; both are part of the crate contract
+  - all changes must be discussed with the user first
+- `DRAFT.md`
+  - keep only non-authoritative semantics ideas, early drafts, and future discussion starting points
+  - move semantics from here into `SEMANTICS.md` only after discussing them with the user
+  - do not treat it as implementation authority
 - `ARCHITECTURE.md`
   - keep only durable design decisions and architectural constraints
   - do not use it as a changelog, progress log, or session diary
@@ -76,6 +88,7 @@ This crate is developed collaboratively with the user.
 - Important design decisions must be discussed with the user before implementation.
 - If a task in `TODOS.md` is marked `(needs refinement)`, stop and discuss it before proceeding.
 - Do not silently lock in semantics for difficult language-design questions.
+- If user-facing semantics are unclear, discuss them with the user first and then write the resolved semantics down in `SEMANTICS.md`.
 - Prefer making uncertainty explicit over guessing.
 
 ## Diagnostic quality
@@ -126,7 +139,10 @@ Rules for this:
 
 - Keep changes test-driven.
 - Prefer end-to-end tests on R snippets for user-visible behavior.
-- Prefer fixture-based tests for rendered diagnostics.
+- Prefer fixture-based tests for rendered diagnostics and normalized inference behavior.
+- Treat `SEMANTICS.md` and the fixture suite as contract documents; keep them in sync.
+- Do not change `SEMANTICS.md` without discussing it with the user first.
+- Treat `DRAFT.md` as non-authoritative; use it as a discussion starting point, not as permission to implement semantics silently.
 - Prefer running focused crate tests while iterating.
 - `cargo test -p typing` is the default crate test command.
 - `cargo nextest run -p typing` is available, but use whichever Rust test runner is most appropriate for the task.

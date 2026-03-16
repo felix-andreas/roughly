@@ -1,5 +1,5 @@
 use {
-    std::collections::BTreeSet,
+    std::{collections::BTreeSet, fs, path::Path},
     tree_sitter::{Point, Range},
     typing::{
         infer::{InferenceEntry, InferenceError, InferenceState},
@@ -12,24 +12,86 @@ use {
 
 #[test]
 fn inference_cases() {
-    const INFERENCE_TESTS: &str = include_str!("fixtures/inference.R.test");
-    run_test_groups(&parse_test_file(INFERENCE_TESTS));
+    run_fixture_suite("tests/fixtures/inference");
 }
 
 #[derive(Debug)]
 struct TestGroup {
-    name: &'static str,
+    name: String,
     cases: Vec<TestCase>,
 }
 
 #[derive(Debug)]
 struct TestCase {
-    name: &'static str,
-    code: &'static str,
-    expected: &'static str,
+    name: String,
+    code: String,
+    expected: String,
 }
 
-fn parse_test_file(text: &'static str) -> Vec<TestGroup> {
+fn run_fixture_suite(directory_path: &str) {
+    let fixture_paths = collect_fixture_paths(directory_path);
+    let mut groups = Vec::new();
+
+    for fixture_path in fixture_paths {
+        let fixture_text = fs::read_to_string(&fixture_path).unwrap_or_else(|error| {
+            panic!(
+                "failed to read inference fixture file `{}`: {error}",
+                fixture_path.display()
+            )
+        });
+        groups.extend(parse_test_file(&fixture_text));
+    }
+
+    run_test_groups(&groups);
+}
+
+fn collect_fixture_paths(directory_path: &str) -> Vec<std::path::PathBuf> {
+    let mut fixture_paths = Vec::new();
+    collect_fixture_paths_recursively(Path::new(directory_path), &mut fixture_paths);
+    fixture_paths.sort();
+    fixture_paths
+}
+
+fn collect_fixture_paths_recursively(
+    directory_path: &Path,
+    fixture_paths: &mut Vec<std::path::PathBuf>,
+) {
+    let entries = fs::read_dir(directory_path).unwrap_or_else(|error| {
+        panic!(
+            "failed to read inference fixture directory `{}`: {error}",
+            directory_path.display()
+        )
+    });
+
+    let mut entry_paths = entries
+        .map(|entry| {
+            entry.unwrap_or_else(|error| {
+                panic!(
+                    "failed to read entry in inference fixture directory `{}`: {error}",
+                    directory_path.display()
+                )
+            })
+        })
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
+    entry_paths.sort();
+
+    for entry_path in entry_paths {
+        if entry_path.is_dir() {
+            collect_fixture_paths_recursively(&entry_path, fixture_paths);
+            continue;
+        }
+
+        if entry_path
+            .extension()
+            .is_some_and(|extension| extension == "test")
+        {
+            fixture_paths.push(entry_path);
+        }
+    }
+}
+
+fn parse_test_file(text: &str) -> Vec<TestGroup> {
     text.split("#====")
         .filter_map(|block| {
             if block.trim().is_empty() {
@@ -41,7 +103,7 @@ fn parse_test_file(text: &'static str) -> Vec<TestGroup> {
             });
 
             Some(TestGroup {
-                name: name.trim(),
+                name: name.trim().to_owned(),
                 cases: cases
                     .split("#----")
                     .filter_map(|case| {
@@ -61,9 +123,9 @@ fn parse_test_file(text: &'static str) -> Vec<TestGroup> {
                             });
 
                         Some(TestCase {
-                            name: name.trim(),
-                            code,
-                            expected: expected_block.trim_end(),
+                            name: name.trim().to_owned(),
+                            code: code.to_owned(),
+                            expected: expected_block.trim_end().to_owned(),
                         })
                     })
                     .collect(),
@@ -92,7 +154,7 @@ fn run_test_groups(groups: &[TestGroup]) {
                 continue;
             }
 
-            let rendered = render_inference_result(case.code);
+            let rendered = render_inference_result(&case.code);
             assert_eq!(
                 rendered.trim_end(),
                 case.expected,

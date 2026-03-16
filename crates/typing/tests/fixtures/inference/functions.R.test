@@ -1,0 +1,32 @@
+#==== functions
+#---- identity_function
+identity <- function(x) x
+#++++
+fn(type1) -> type1
+
+#---- call_identity_with_integer
+identity <- function(x) x
+identity(1L)
+#++++
+fn(type1) -> type1
+integer
+
+#---- call_identity_with_character
+identity <- function(x) x
+identity("hello")
+#++++
+fn(type1) -> type1
+character
+
+#==== calls
+#---- arity_mismatch
+identity <- function(x) x
+identity(1L, 2L)
+#++++
+error: function arity mismatch
+
+#---- calling_non_function
+value <- 1L
+value(2L)
+#++++
+error: type mismatch

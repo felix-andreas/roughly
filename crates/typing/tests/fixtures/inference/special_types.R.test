@@ -1,0 +1,86 @@
+#==== special_types
+#---- null_literal
+NULL
+#++++
+NULL
+
+#---- empty_block
+{ }
+#++++
+NULL
+
+#---- nullable_union_annotation_accepts_integer
+#: integer | NULL
+value <- 1L
+value
+#++++
+integer | NULL
+integer | NULL
+
+#---- nullable_union_annotation_accepts_null
+#: integer | NULL
+value <- NULL
+value
+#++++
+integer | NULL
+integer | NULL
+
+#---- any_annotation_accepts_integer
+#: Any
+value <- 1L
+value
+#++++
+Any
+Any
+
+#---- any_annotation_accepts_null
+#: Any
+value <- NULL
+value
+#++++
+Any
+Any
+
+#---- unknown_annotation_is_preserved
+#: Unknown
+value <- mystery
+value
+#++++
+Unknown
+Unknown
+
+#==== if_expressions
+#---- if_without_else_integer_branch
+if (flag) 1L
+#++++
+integer | NULL
+
+#---- if_without_else_empty_block
+if (flag) { }
+#++++
+NULL
+
+#---- if_else_matching_integer_branches
+if (flag) 1L else 2L
+#++++
+integer
+
+#---- if_else_integer_and_null
+if (flag) 1L else NULL
+#++++
+integer | NULL
+
+#---- if_else_null_and_integer
+if (flag) NULL else 2L
+#++++
+integer | NULL
+
+#---- if_else_both_empty_blocks
+if (flag) { } else { }
+#++++
+NULL
+
+#---- function_without_explicit_return_defaults_to_null
+log_count <- function(count) { }
+#++++
+fn(count: type1) -> NULL

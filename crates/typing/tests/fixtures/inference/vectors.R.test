@@ -1,0 +1,45 @@
+#==== vectors
+#---- integer_scalar
+1L
+#++++
+integer
+
+#---- double_scalar
+1.5
+#++++
+double
+
+#---- character_scalar
+"hello"
+#++++
+character
+
+#---- integer_array
+c(1L, 2L, 3L)
+#++++
+integer[]
+
+#---- double_array
+c(1.5, 2.5)
+#++++
+double[]
+
+#---- character_array
+c("foo", "bar")
+#++++
+character[]
+
+#---- integer_named_map
+c(foo = 1L, bar = 2L)
+#++++
+integer[named]
+
+#---- double_named_map
+c(foo = 1.5, bar = 2.5)
+#++++
+double[named]
+
+#---- character_named_map
+c(x = "foo", y = "bar")
+#++++
+character[named]
