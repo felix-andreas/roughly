@@ -9,7 +9,7 @@ pub enum SurfaceType {
     Unknown,
     Null,
     Scalar(Atomic),
-    Vector(Atomic),
+    Vector(Box<SurfaceType>),
     List(Box<SurfaceType>),
     Record(Vec<RecordField<SurfaceType>>),
     Tuple(Vec<SurfaceType>),
@@ -84,6 +84,42 @@ impl<Type> FunctionType<Type> {
             parameters,
             named_parameters,
             return_type: Box::new(return_type),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Annotation {
+    pub surface_type: SurfaceType,
+}
+
+impl Annotation {
+    pub fn new(surface_type: SurfaceType) -> Self {
+        Self { surface_type }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachedAnnotation {
+    pub annotation: Annotation,
+    pub applies_to_binding: bool,
+    pub applies_to_expression: bool,
+}
+
+impl AttachedAnnotation {
+    pub fn expression(annotation: Annotation) -> Self {
+        Self {
+            annotation,
+            applies_to_binding: false,
+            applies_to_expression: true,
+        }
+    }
+
+    pub fn binding_and_expression(annotation: Annotation) -> Self {
+        Self {
+            annotation,
+            applies_to_binding: true,
+            applies_to_expression: true,
         }
     }
 }

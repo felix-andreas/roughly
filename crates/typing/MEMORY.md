@@ -38,9 +38,13 @@ Keep this file handoff-oriented and aggressively pruned.
 
 ## Active continuity
 
+- Diagnostics and inference fixtures now live together under `tests/fixtures/`:
+  - `diagnostics.R.test`
+  - `inference.R.test`
+- `tests/test_infer.rs` now uses source-driven fixture cases for ordinary inference behavior and keeps only a small set of low-level inference-engine unit tests for algorithm details like unification and occurs checks.
 - Higher-order mismatch diagnostics still tend to report the constraint-introducing site and may render unresolved placeholders like `type1` instead of the eventual call-site type. Do not “fix” fixture expectations without deciding whether to improve diagnostic precision.
 - Unsupported syntax still lowers to `Unsupported`, and nested names inside unsupported syntax are not recursively lowered.
 - Function parameters with defaults are still too minimal for end-to-end named-argument mismatch diagnostics. Do not reintroduce those fixtures yet.
 - The current `c(...)` support is only a narrow arithmetic helper, not the settled list/tuple/record story.
+- Annotation work is not finished. The lowered representation now has annotation storage, but attachment semantics are not settled. For now, treat trailing assignment annotations as the intended near-term scope and do not assume preceding `#:` attachment works.
 - `if` remains an open sequencing question. If work reaches it, discuss whether it belongs before or after further diagnostics / annotations work.
-- Recommended next step: improve diagnostic precision and wording, especially for higher-order failures, while preserving current polymorphism behavior.

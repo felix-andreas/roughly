@@ -2,7 +2,7 @@ use {std::collections::BTreeSet, typing::check};
 
 #[test]
 fn diagnostics() {
-    const DIAGNOSTICS_TESTS: &str = include_str!("check/diagnostics.R.test");
+    const DIAGNOSTICS_TESTS: &str = include_str!("fixtures/diagnostics.R.test");
     run_test_groups(&parse_test_file(DIAGNOSTICS_TESTS));
 }
 

@@ -1,5 +1,8 @@
 use {
-    crate::interner::{Interner, Symbol},
+    crate::{
+        interner::{Interner, Symbol},
+        types::{Annotation, Atomic, AttachedAnnotation, SurfaceType},
+    },
     tree_sitter::{Node, Range, Tree},
 };
 
@@ -9,11 +12,15 @@ pub struct ExpressionId(pub u32);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Module {
     pub expressions: Vec<Expression>,
+    pub annotations: Vec<PendingAnnotation>,
 }
 
 impl Module {
-    pub fn new(expressions: Vec<Expression>) -> Self {
-        Self { expressions }
+    pub fn new(expressions: Vec<Expression>, annotations: Vec<PendingAnnotation>) -> Self {
+        Self {
+            expressions,
+            annotations,
+        }
     }
 }
 
@@ -21,12 +28,23 @@ impl Module {
 pub struct Expression {
     pub id: ExpressionId,
     pub range: Range,
+    pub annotation: Option<AttachedAnnotation>,
     pub kind: ExpressionKind,
 }
 
 impl Expression {
-    pub fn new(id: ExpressionId, range: Range, kind: ExpressionKind) -> Self {
-        Self { id, range, kind }
+    pub fn new(
+        id: ExpressionId,
+        range: Range,
+        annotation: Option<AttachedAnnotation>,
+        kind: ExpressionKind,
+    ) -> Self {
+        Self {
+            id,
+            range,
+            annotation,
+            kind,
+        }
     }
 }
 
@@ -40,6 +58,7 @@ pub enum ExpressionKind {
     Symbol(Symbol),
     Assign {
         target: Symbol,
+        annotation: Option<AttachedAnnotation>,
         value: Box<Expression>,
     },
     Function {
@@ -70,6 +89,11 @@ pub struct LoweringContext {
     next_expression_id: u32,
     interner: Interner,
 }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingAnnotation {
+    pub range: Range,
+    pub annotation: Annotation,
+}
 
 impl LoweringContext {
     pub fn new() -> Self {
@@ -99,7 +123,16 @@ impl LoweringContext {
     }
 
     pub fn expression(&mut self, range: Range, kind: ExpressionKind) -> Expression {
-        Expression::new(self.fresh_expression_id(), range, kind)
+        self.annotated_expression(range, None, kind)
+    }
+
+    pub fn annotated_expression(
+        &mut self,
+        range: Range,
+        annotation: Option<AttachedAnnotation>,
+        kind: ExpressionKind,
+    ) -> Expression {
+        Expression::new(self.fresh_expression_id(), range, annotation, kind)
     }
 
     pub fn lower_tree(&mut self, tree: &Tree, source: &str) -> Module {
@@ -122,7 +155,11 @@ pub fn lower_tree(lowering_context: &mut LoweringContext, tree: &Tree, source: &
         }
     }
 
-    Module::new(expressions)
+    let annotations = collect_pending_annotations(source);
+
+    attach_annotations_to_expressions(&annotations, &mut expressions);
+
+    Module::new(expressions, annotations)
 }
 
 pub fn lower_node(
@@ -146,7 +183,7 @@ pub fn lower_node(
         _ => ExpressionKind::Unsupported,
     };
 
-    lowering_context.expression(node.range(), kind)
+    lowering_context.annotated_expression(node.range(), None, kind)
 }
 
 fn lower_binary_operator(
@@ -179,6 +216,7 @@ fn lower_binary_operator(
 
             ExpressionKind::Assign {
                 target,
+                annotation: None,
                 value: Box::new(value),
             }
         }
@@ -349,4 +387,101 @@ fn intern_node_text(
     source: &str,
 ) -> Symbol {
     lowering_context.intern(node_text(node, source))
+}
+
+fn collect_pending_annotations(source: &str) -> Vec<PendingAnnotation> {
+    let mut annotations = Vec::new();
+
+    for (row, line) in source.lines().enumerate() {
+        if let Some(comment_index) = line.find("#:") {
+            let annotation_text = line[comment_index + 2..].trim();
+            let Some(annotation) = parse_annotation(annotation_text) else {
+                continue;
+            };
+
+            let prefix = &line[..comment_index];
+            let suffix = line
+                [comment_index + 2 + (line[comment_index + 2..].len() - annotation_text.len())..]
+                .trim();
+            let has_code_before = prefix.chars().any(|character| !character.is_whitespace());
+            let has_code_after = !suffix.is_empty();
+
+            if !has_code_before || has_code_after {
+                continue;
+            }
+
+            let start_column = comment_index;
+            let end_column = line.len();
+
+            annotations.push(PendingAnnotation {
+                range: Range {
+                    start_byte: 0,
+                    end_byte: 0,
+                    start_point: tree_sitter::Point {
+                        row,
+                        column: start_column,
+                    },
+                    end_point: tree_sitter::Point {
+                        row,
+                        column: end_column,
+                    },
+                },
+                annotation,
+            });
+        }
+    }
+
+    annotations
+}
+
+fn parse_annotation(text: &str) -> Option<Annotation> {
+    let surface_type = match text {
+        "logical" => SurfaceType::Scalar(Atomic::Logical),
+        "integer" => SurfaceType::Scalar(Atomic::Integer),
+        "double" => SurfaceType::Scalar(Atomic::Double),
+        "character" => SurfaceType::Scalar(Atomic::Character),
+        "raw" => SurfaceType::Scalar(Atomic::Raw),
+        "null" => SurfaceType::Null,
+        "unknown" => SurfaceType::Unknown,
+        "any" => SurfaceType::Any,
+        _ => return None,
+    };
+
+    Some(Annotation::new(surface_type))
+}
+
+fn attach_annotations_to_expressions(
+    annotations: &[PendingAnnotation],
+    expressions: &mut [Expression],
+) {
+    for pending_annotation in annotations {
+        if let Some(expression) = trailing_top_level_expression(expressions, pending_annotation) {
+            attach_annotation_to_expression(expression, &pending_annotation.annotation);
+        }
+    }
+}
+
+fn trailing_top_level_expression<'a>(
+    expressions: &'a mut [Expression],
+    pending_annotation: &PendingAnnotation,
+) -> Option<&'a mut Expression> {
+    let annotation_row = pending_annotation.range.start_point.row;
+
+    expressions
+        .iter_mut()
+        .find(|expression| expression.range.start_point.row == annotation_row)
+}
+
+fn attach_annotation_to_expression(expression: &mut Expression, annotation: &Annotation) {
+    expression.annotation = Some(AttachedAnnotation::expression(annotation.clone()));
+
+    if let ExpressionKind::Assign {
+        annotation: assignment_annotation,
+        ..
+    } = &mut expression.kind
+    {
+        *assignment_annotation = Some(AttachedAnnotation::binding_and_expression(
+            annotation.clone(),
+        ));
+    }
 }

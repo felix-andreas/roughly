@@ -91,7 +91,7 @@ impl InferenceState {
                     range: expression.range,
                     expression_id: expression.id,
                 }),
-            ExpressionKind::Assign { target, value } => {
+            ExpressionKind::Assign { target, value, .. } => {
                 let inferred_value = self.infer_expression(value)?;
                 let generalized_scheme = self.generalize(inferred_value.clone())?;
                 self.bind_scheme(*target, generalized_scheme, expression.range);
@@ -144,8 +144,12 @@ impl InferenceState {
                     CoreType::Variable(return_variable),
                 ));
 
-                let unified_function =
-                    self.unify_with_context(inferred_callee, expected_function, expression)?;
+                let unified_function = self.unify_call_with_context(
+                    inferred_callee,
+                    expected_function,
+                    callee,
+                    expression,
+                )?;
                 match self.resolve(unified_function)? {
                     CoreType::Function(function_type) => Ok(*function_type.return_type),
                     other_type => Err(InferenceError::ExpectedFunction {
@@ -206,6 +210,40 @@ impl InferenceState {
         expression: &Expression,
     ) -> Result<CoreType, InferenceError> {
         self.unify_internal(left, right, Some(expression))
+    }
+
+    pub fn unify_call_with_context(
+        &mut self,
+        left: CoreType,
+        right: CoreType,
+        callee: &Expression,
+        expression: &Expression,
+    ) -> Result<CoreType, InferenceError> {
+        match self.unify_internal(left, right, Some(expression)) {
+            Err(InferenceError::TypeMismatch {
+                expected,
+                actual,
+                range,
+                expression_id,
+            }) if matches!(actual, CoreType::Function(_)) => Err(InferenceError::TypeMismatch {
+                expected,
+                actual,
+                range,
+                expression_id,
+            }),
+            Err(InferenceError::TypeMismatch {
+                expected,
+                actual,
+                range: _,
+                expression_id: _,
+            }) => Err(InferenceError::TypeMismatch {
+                expected,
+                actual,
+                range: Some(callee.range),
+                expression_id: Some(callee.id),
+            }),
+            other_result => other_result,
+        }
     }
 
     fn unify_internal(

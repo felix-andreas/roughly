@@ -6,13 +6,20 @@ use {
         lower::{ExpressionKind, LoweringContext},
         new_parser, parse,
         types::{
-            Atomic, CoreType, FunctionType, InferenceVariableId, RecordField, SurfaceType,
-            TypeScheme,
+            Annotation, Atomic, AttachedAnnotation, CoreType, FunctionType, InferenceVariableId,
+            RecordField, SurfaceType, TypeScheme,
         },
     },
 };
 
-fn lower(source: &str) -> LoweringContext {
+fn lower(source: &str) -> typing::Module {
+    let mut parser = new_parser();
+    let tree = parse(&mut parser, source, None);
+    let mut lowering_context = LoweringContext::new();
+    lowering_context.lower_tree(&tree, source)
+}
+
+fn lower_context(source: &str) -> LoweringContext {
     let mut parser = new_parser();
     let tree = parse(&mut parser, source, None);
     let mut lowering_context = LoweringContext::new();
@@ -60,6 +67,7 @@ fn lowered_symbol_expression_preserves_range_and_symbol() {
     let expression = lowering_context.expression(range, ExpressionKind::Symbol(symbol));
 
     assert_eq!(expression.range, range);
+    assert_eq!(expression.annotation, None);
     assert_eq!(expression.kind, ExpressionKind::Symbol(symbol));
     assert_eq!(lowering_context.resolve(symbol), Some("identity"));
 }
@@ -75,6 +83,7 @@ fn lowered_assignment_uses_interned_target_symbol() {
         range,
         ExpressionKind::Assign {
             target,
+            annotation: None,
             value: Box::new(value),
         },
     );
@@ -82,6 +91,7 @@ fn lowered_assignment_uses_interned_target_symbol() {
     match assignment.kind {
         ExpressionKind::Assign {
             target: assigned_target,
+            annotation: None,
             ..
         } => {
             assert_eq!(assigned_target, target);
@@ -101,21 +111,28 @@ fn symbol_reexports_remain_public() {
 
 #[test]
 fn lowering_assignment_snippet_interns_the_assigned_name() {
-    let lowering_context = lower(indoc! {r#"
+    let module = lower(indoc! {r#"
         value <- 1L
     "#});
 
-    let symbol = lowering_context
-        .interner()
-        .contains("value")
-        .then(|| lowering_context.interner());
+    let expression = module
+        .expressions
+        .first()
+        .expect("assignment expression should be lowered");
 
-    assert!(symbol.is_some());
+    match &expression.kind {
+        ExpressionKind::Assign { target, .. } => {
+            let mut lowering_context = LoweringContext::new();
+            let expected_symbol = lowering_context.intern("value");
+            assert_eq!(*target, expected_symbol);
+        }
+        other_kind => panic!("expected assignment, got {other_kind:?}"),
+    }
 }
 
 #[test]
 fn lowering_function_snippet_interns_function_parameters() {
-    let lowering_context = lower(indoc! {r#"
+    let lowering_context = lower_context(indoc! {r#"
         identity <- function(x) x
     "#});
 
@@ -125,7 +142,7 @@ fn lowering_function_snippet_interns_function_parameters() {
 
 #[test]
 fn lowering_call_snippet_interns_callee_and_named_argument() {
-    let lowering_context = lower(indoc! {r#"
+    let lowering_context = lower_context(indoc! {r#"
         compute(value = 1L)
     "#});
 
@@ -135,7 +152,7 @@ fn lowering_call_snippet_interns_callee_and_named_argument() {
 
 #[test]
 fn lowering_two_argument_call_snippet_interns_callee_only_once() {
-    let lowering_context = lower(indoc! {r#"
+    let lowering_context = lower_context(indoc! {r#"
         identity(1L, 2L)
     "#});
 
@@ -144,7 +161,7 @@ fn lowering_two_argument_call_snippet_interns_callee_only_once() {
 
 #[test]
 fn lowering_plus_operator_snippet_interns_the_builtin_symbol() {
-    let lowering_context = lower(indoc! {r#"
+    let lowering_context = lower_context(indoc! {r#"
         "foo" + 4
     "#});
 
@@ -152,14 +169,59 @@ fn lowering_plus_operator_snippet_interns_the_builtin_symbol() {
 }
 
 #[test]
-fn lowering_unsupported_snippet_does_not_intern_nested_symbols_yet() {
-    let lowering_context = lower(indoc! {r#"
+fn lowering_unsupported_snippet_produces_an_unsupported_expression() {
+    let module = lower(indoc! {r#"
         if (flag) value else other
     "#});
 
-    assert!(!lowering_context.interner().contains("flag"));
-    assert!(!lowering_context.interner().contains("value"));
-    assert!(!lowering_context.interner().contains("other"));
+    let expression = module
+        .expressions
+        .first()
+        .expect("unsupported expression should be lowered");
+
+    assert_eq!(expression.annotation, None);
+    assert!(matches!(expression.kind, ExpressionKind::Unsupported));
+}
+
+#[test]
+fn trailing_assignment_annotation_attaches_to_the_assignment_expression_and_binding() {
+    let module = lower("value <- 1L #: integer\n");
+
+    let expression = module
+        .expressions
+        .first()
+        .expect("assignment expression should be lowered");
+
+    assert_eq!(module.annotations.len(), 1);
+    assert_eq!(
+        expression.range.start_point.row,
+        module.annotations[0].range.start_point.row
+    );
+    assert_eq!(
+        expression.range.end_point.row,
+        module.annotations[0].range.end_point.row
+    );
+
+    let expected_annotation =
+        AttachedAnnotation::expression(Annotation::new(SurfaceType::Scalar(Atomic::Integer)));
+    assert_eq!(expression.annotation, Some(expected_annotation));
+
+    match &expression.kind {
+        ExpressionKind::Assign {
+            target: _,
+            annotation,
+            value,
+        } => {
+            assert_eq!(
+                *annotation,
+                Some(AttachedAnnotation::binding_and_expression(Annotation::new(
+                    SurfaceType::Scalar(Atomic::Integer),
+                )))
+            );
+            assert_eq!(value.annotation, None);
+        }
+        other_kind => panic!("expected assignment, got {other_kind:?}"),
+    }
 }
 
 #[test]

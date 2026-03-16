@@ -1,24 +1,280 @@
 use {
+    std::collections::BTreeSet,
     tree_sitter::{Point, Range},
     typing::{
         infer::{InferenceEntry, InferenceError, InferenceState},
         interner::Interner,
-        lower::{Argument, Expression, ExpressionId, ExpressionKind, Module, Parameter},
+        lower::LoweringContext,
+        new_parser, parse,
         types::{Atomic, CoreType, FunctionType, InferenceVariableId, RecordField},
     },
 };
 
-fn test_range() -> Range {
-    Range {
-        start_byte: 0,
-        end_byte: 1,
-        start_point: Point { row: 0, column: 0 },
-        end_point: Point { row: 0, column: 1 },
+#[test]
+fn inference_cases() {
+    const INFERENCE_TESTS: &str = include_str!("fixtures/inference.R.test");
+    run_test_groups(&parse_test_file(INFERENCE_TESTS));
+}
+
+#[derive(Debug)]
+struct TestGroup {
+    name: &'static str,
+    cases: Vec<TestCase>,
+}
+
+#[derive(Debug)]
+struct TestCase {
+    name: &'static str,
+    code: &'static str,
+    expected: &'static str,
+}
+
+fn parse_test_file(text: &'static str) -> Vec<TestGroup> {
+    text.split("#====")
+        .filter_map(|block| {
+            if block.trim().is_empty() {
+                return None;
+            }
+
+            let (name, cases) = block.split_once('\n').unwrap_or_else(|| {
+                panic!("each test group must have a name line followed by content")
+            });
+
+            Some(TestGroup {
+                name: name.trim(),
+                cases: cases
+                    .split("#----")
+                    .filter_map(|case| {
+                        if case.trim().is_empty() {
+                            return None;
+                        }
+
+                        let (name, body) = case.split_once('\n').unwrap_or_else(|| {
+                            panic!("each test case must have a name line followed by content")
+                        });
+
+                        let (code, expected_block) =
+                            body.split_once("#++++\n").unwrap_or_else(|| {
+                                panic!(
+                                    "each test case must include a `#++++` separator before the expected inference result"
+                                )
+                            });
+
+                        Some(TestCase {
+                            name: name.trim(),
+                            code,
+                            expected: expected_block.trim_end(),
+                        })
+                    })
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
+fn run_test_groups(groups: &[TestGroup]) {
+    let maybe_filter = std::env::var("TYPING_FILTER").ok();
+    let mut snapshot_names = BTreeSet::new();
+
+    for group in groups {
+        for case in &group.cases {
+            let snapshot_name = format!("{}__{}", group.name, case.name);
+
+            assert!(
+                snapshot_names.insert(snapshot_name.clone()),
+                "duplicate typing inference test snapshot name `{snapshot_name}`"
+            );
+
+            if maybe_filter
+                .as_ref()
+                .is_some_and(|filter| !snapshot_name.contains(filter))
+            {
+                continue;
+            }
+
+            let rendered = render_inference_result(case.code);
+            assert_eq!(
+                rendered.trim_end(),
+                case.expected,
+                "fixture `{snapshot_name}`"
+            );
+        }
     }
 }
 
-fn expression(id: u32, kind: ExpressionKind) -> Expression {
-    Expression::new(ExpressionId(id), test_range(), kind)
+fn render_inference_result(source: &str) -> String {
+    let mut parser = new_parser();
+    let tree = parse(&mut parser, source, None);
+
+    let mut lowering_context = LoweringContext::new();
+    let module = lowering_context.lower_tree(&tree, source);
+
+    let mut inference_state = InferenceState::new();
+    let plus_symbol = lowering_context.intern("+");
+    let combine_symbol = lowering_context.intern("c");
+
+    inference_state.bind_name(plus_symbol, builtin_plus_type(), builtin_range());
+    inference_state.bind_name(combine_symbol, builtin_combine_type(), builtin_range());
+
+    match inference_state.infer_module(&module) {
+        Ok(inferred_types) => {
+            render_inferred_types(&mut inference_state, &lowering_context, &inferred_types)
+        }
+        Err(error) => render_inference_error_kind(&error).to_owned(),
+    }
+}
+
+fn render_inferred_types(
+    inference_state: &mut InferenceState,
+    lowering_context: &LoweringContext,
+    inferred_types: &[CoreType],
+) -> String {
+    let mut renderer = SimpleTypeRenderer::new(lowering_context.interner());
+    let mut lines = Vec::with_capacity(inferred_types.len());
+
+    for inferred_type in inferred_types {
+        let resolved_type = inference_state
+            .resolve(inferred_type.clone())
+            .unwrap_or_else(|error| {
+                panic!("inference result should resolve for rendering: {error:?}")
+            });
+        lines.push(renderer.render(&resolved_type));
+    }
+
+    lines.join("\n")
+}
+
+fn render_inference_error_kind(error: &InferenceError) -> &'static str {
+    match error {
+        InferenceError::UnknownInferenceVariable(_) => "error: unknown inference variable",
+        InferenceError::UnknownName { .. } => "error: unknown name",
+        InferenceError::ExpectedFunction { .. } => "error: expected function",
+        InferenceError::OccursCheckFailed { .. } => "error: occurs check failed",
+        InferenceError::TypeMismatch { .. } => "error: type mismatch",
+        InferenceError::InvalidPlusOperand { .. } => "error: invalid plus operand",
+        InferenceError::TupleLengthMismatch { .. } => "error: tuple length mismatch",
+        InferenceError::RecordFieldMismatch { .. } => "error: record field mismatch",
+        InferenceError::FunctionArityMismatch { .. } => "error: function arity mismatch",
+        InferenceError::NamedParameterMismatch { .. } => "error: named parameter mismatch",
+    }
+}
+
+fn builtin_plus_type() -> CoreType {
+    CoreType::Function(FunctionType::new(
+        vec![CoreType::Unknown, CoreType::Unknown],
+        Vec::new(),
+        CoreType::Unknown,
+    ))
+}
+
+fn builtin_combine_type() -> CoreType {
+    CoreType::Function(FunctionType::new(
+        vec![CoreType::Unknown],
+        Vec::new(),
+        CoreType::Unknown,
+    ))
+}
+
+fn builtin_range() -> Range {
+    Range {
+        start_byte: 0,
+        end_byte: 0,
+        start_point: Point { row: 0, column: 0 },
+        end_point: Point { row: 0, column: 0 },
+    }
+}
+
+struct SimpleTypeRenderer<'a> {
+    interner: &'a Interner,
+    variable_names: std::collections::BTreeMap<InferenceVariableId, String>,
+    next_variable_index: usize,
+}
+
+impl<'a> SimpleTypeRenderer<'a> {
+    fn new(interner: &'a Interner) -> Self {
+        Self {
+            interner,
+            variable_names: std::collections::BTreeMap::new(),
+            next_variable_index: 0,
+        }
+    }
+
+    fn render(&mut self, core_type: &CoreType) -> String {
+        match core_type {
+            CoreType::Any => "any".to_owned(),
+            CoreType::Unknown => "unknown".to_owned(),
+            CoreType::Null => "null".to_owned(),
+            CoreType::Scalar(atomic) => render_atomic(*atomic).to_owned(),
+            CoreType::Vector(atomic) => format!("{}[]", render_atomic(*atomic)),
+            CoreType::List(item_type) => format!("list[{}]", self.render(item_type)),
+            CoreType::Record(fields) => {
+                let rendered_fields = fields
+                    .iter()
+                    .map(|field| {
+                        let name = self.interner.resolve(field.name).unwrap_or("<unknown>");
+                        format!("{name}: {}", self.render(&field.value))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("record{{{rendered_fields}}}")
+            }
+            CoreType::Tuple(items) => {
+                let rendered_items = items
+                    .iter()
+                    .map(|item| self.render(item))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("tuple({rendered_items})")
+            }
+            CoreType::Function(function_type) => {
+                let rendered_parameters = function_type
+                    .parameters
+                    .iter()
+                    .map(|parameter| self.render(parameter))
+                    .collect::<Vec<_>>();
+                let rendered_named_parameters = function_type
+                    .named_parameters
+                    .iter()
+                    .map(|parameter| {
+                        let name = self.interner.resolve(parameter.name).unwrap_or("<unknown>");
+                        format!("{name}: {}", self.render(&parameter.value))
+                    })
+                    .collect::<Vec<_>>();
+                let mut rendered_parts = rendered_parameters;
+                rendered_parts.extend(rendered_named_parameters);
+                format!(
+                    "fn({}) -> {}",
+                    rendered_parts.join(", "),
+                    self.render(&function_type.return_type)
+                )
+            }
+            CoreType::Variable(variable) => self.variable_name(*variable).to_owned(),
+        }
+    }
+
+    fn variable_name(&mut self, variable: InferenceVariableId) -> &str {
+        if !self.variable_names.contains_key(&variable) {
+            let name = format!("type{}", self.next_variable_index + 1);
+            self.next_variable_index += 1;
+            self.variable_names.insert(variable, name);
+        }
+
+        self.variable_names
+            .get(&variable)
+            .map(String::as_str)
+            .unwrap_or("type")
+    }
+}
+
+fn render_atomic(atomic: Atomic) -> &'static str {
+    match atomic {
+        Atomic::Logical => "logical",
+        Atomic::Integer => "integer",
+        Atomic::Double => "double",
+        Atomic::Complex => "complex",
+        Atomic::Character => "character",
+        Atomic::Raw => "raw",
+    }
 }
 
 #[test]
@@ -233,671 +489,5 @@ fn named_function_parameters_require_the_same_names() {
             range: None,
             expression_id: None,
         })
-    );
-}
-
-#[test]
-fn inferring_an_integer_literal_returns_integer_scalar() {
-    let mut inference_state = InferenceState::new();
-
-    let inferred_type = inference_state
-        .infer_expression(&expression(0, ExpressionKind::Integer("1L".to_owned())))
-        .expect("integer literal should infer");
-
-    assert_eq!(inferred_type, CoreType::Scalar(Atomic::Integer));
-}
-
-#[test]
-fn inferring_a_double_literal_returns_double_scalar() {
-    let mut inference_state = InferenceState::new();
-
-    let inferred_type = inference_state
-        .infer_expression(&expression(0, ExpressionKind::Double("1.5".to_owned())))
-        .expect("double literal should infer");
-
-    assert_eq!(inferred_type, CoreType::Scalar(Atomic::Double));
-}
-
-#[test]
-fn inferring_a_character_literal_returns_character_scalar() {
-    let mut inference_state = InferenceState::new();
-
-    let inferred_type = inference_state
-        .infer_expression(&expression(
-            0,
-            ExpressionKind::Character("\"hello\"".to_owned()),
-        ))
-        .expect("character literal should infer");
-
-    assert_eq!(inferred_type, CoreType::Scalar(Atomic::Character));
-}
-
-#[test]
-fn inferring_a_known_symbol_uses_the_environment() {
-    let mut inference_state = InferenceState::new();
-    let mut interner = Interner::new();
-    let plus = interner.intern("+");
-    let combine = interner.intern("c");
-    inference_state.bind_name(
-        plus,
-        CoreType::Function(FunctionType::new(
-            vec![CoreType::Unknown, CoreType::Unknown],
-            Vec::new(),
-            CoreType::Unknown,
-        )),
-        test_range(),
-    );
-    inference_state.bind_name(
-        combine,
-        CoreType::Function(FunctionType::new(
-            vec![CoreType::Unknown],
-            Vec::new(),
-            CoreType::Unknown,
-        )),
-        test_range(),
-    );
-    let name = interner.intern("value");
-    inference_state.bind_name(name, CoreType::Scalar(Atomic::Double), test_range());
-
-    let inferred_type = inference_state
-        .infer_expression(&expression(0, ExpressionKind::Symbol(name)))
-        .expect("known symbol should infer");
-
-    assert_eq!(inferred_type, CoreType::Scalar(Atomic::Double));
-}
-
-#[test]
-fn builtin_plus_rejects_character_plus_integer() {
-    let mut inference_state = InferenceState::new();
-    let mut interner = Interner::new();
-    let plus = interner.intern("+");
-    let combine = interner.intern("c");
-    inference_state.bind_name(
-        plus,
-        CoreType::Function(FunctionType::new(
-            vec![CoreType::Unknown, CoreType::Unknown],
-            Vec::new(),
-            CoreType::Unknown,
-        )),
-        test_range(),
-    );
-    inference_state.bind_name(
-        combine,
-        CoreType::Function(FunctionType::new(
-            vec![CoreType::Unknown],
-            Vec::new(),
-            CoreType::Unknown,
-        )),
-        test_range(),
-    );
-
-    let expression = expression(
-        0,
-        ExpressionKind::Call {
-            callee: Box::new(expression(1, ExpressionKind::Symbol(plus))),
-            arguments: vec![
-                Argument {
-                    expression: expression(2, ExpressionKind::Character("\"foo\"".to_owned())),
-                    name: None,
-                },
-                Argument {
-                    expression: expression(3, ExpressionKind::Integer("4L".to_owned())),
-                    name: None,
-                },
-            ],
-        },
-    );
-
-    let result = inference_state.infer_expression(&expression);
-
-    assert!(matches!(
-        result,
-        Err(InferenceError::InvalidPlusOperand { .. })
-    ));
-}
-
-#[test]
-fn builtin_plus_accepts_integer_plus_double() {
-    let mut inference_state = InferenceState::new();
-    let mut interner = Interner::new();
-    let plus = interner.intern("+");
-    let combine = interner.intern("c");
-    inference_state.bind_name(
-        plus,
-        CoreType::Function(FunctionType::new(
-            vec![CoreType::Unknown, CoreType::Unknown],
-            Vec::new(),
-            CoreType::Unknown,
-        )),
-        test_range(),
-    );
-    inference_state.bind_name(
-        combine,
-        CoreType::Function(FunctionType::new(
-            vec![CoreType::Unknown],
-            Vec::new(),
-            CoreType::Unknown,
-        )),
-        test_range(),
-    );
-
-    let expression = expression(
-        0,
-        ExpressionKind::Call {
-            callee: Box::new(expression(1, ExpressionKind::Symbol(plus))),
-            arguments: vec![
-                Argument {
-                    expression: expression(2, ExpressionKind::Integer("1L".to_owned())),
-                    name: None,
-                },
-                Argument {
-                    expression: expression(3, ExpressionKind::Double("2.5".to_owned())),
-                    name: None,
-                },
-            ],
-        },
-    );
-
-    let inferred_type = inference_state
-        .infer_expression(&expression)
-        .expect("builtin `+` should accept numeric operands");
-
-    assert_eq!(inferred_type, CoreType::Scalar(Atomic::Double));
-}
-
-#[test]
-fn builtin_plus_accepts_vector_plus_scalar() {
-    let mut inference_state = InferenceState::new();
-    let mut interner = Interner::new();
-    let plus = interner.intern("+");
-    let combine = interner.intern("c");
-    inference_state.bind_name(
-        plus,
-        CoreType::Function(FunctionType::new(
-            vec![CoreType::Unknown, CoreType::Unknown],
-            Vec::new(),
-            CoreType::Unknown,
-        )),
-        test_range(),
-    );
-    inference_state.bind_name(
-        combine,
-        CoreType::Function(FunctionType::new(
-            vec![CoreType::Unknown],
-            Vec::new(),
-            CoreType::Unknown,
-        )),
-        test_range(),
-    );
-
-    let vector_expression = expression(
-        1,
-        ExpressionKind::Call {
-            callee: Box::new(expression(2, ExpressionKind::Symbol(combine))),
-            arguments: vec![
-                Argument {
-                    expression: expression(3, ExpressionKind::Integer("1L".to_owned())),
-                    name: None,
-                },
-                Argument {
-                    expression: expression(4, ExpressionKind::Integer("2L".to_owned())),
-                    name: None,
-                },
-            ],
-        },
-    );
-
-    let expression = expression(
-        0,
-        ExpressionKind::Call {
-            callee: Box::new(expression(5, ExpressionKind::Symbol(plus))),
-            arguments: vec![
-                Argument {
-                    expression: vector_expression,
-                    name: None,
-                },
-                Argument {
-                    expression: expression(6, ExpressionKind::Integer("4L".to_owned())),
-                    name: None,
-                },
-            ],
-        },
-    );
-
-    let inferred_type = inference_state
-        .infer_expression(&expression)
-        .expect("builtin `+` should accept vector plus scalar");
-
-    assert_eq!(inferred_type, CoreType::Vector(Atomic::Integer));
-}
-
-#[test]
-fn builtin_plus_accepts_scalar_plus_vector() {
-    let mut inference_state = InferenceState::new();
-    let mut interner = Interner::new();
-    let plus = interner.intern("+");
-    let combine = interner.intern("c");
-    inference_state.bind_name(
-        plus,
-        CoreType::Function(FunctionType::new(
-            vec![CoreType::Unknown, CoreType::Unknown],
-            Vec::new(),
-            CoreType::Unknown,
-        )),
-        test_range(),
-    );
-    inference_state.bind_name(
-        combine,
-        CoreType::Function(FunctionType::new(
-            vec![CoreType::Unknown],
-            Vec::new(),
-            CoreType::Unknown,
-        )),
-        test_range(),
-    );
-
-    let vector_expression = expression(
-        1,
-        ExpressionKind::Call {
-            callee: Box::new(expression(2, ExpressionKind::Symbol(combine))),
-            arguments: vec![
-                Argument {
-                    expression: expression(3, ExpressionKind::Integer("1L".to_owned())),
-                    name: None,
-                },
-                Argument {
-                    expression: expression(4, ExpressionKind::Double("2.5".to_owned())),
-                    name: None,
-                },
-            ],
-        },
-    );
-
-    let expression = expression(
-        0,
-        ExpressionKind::Call {
-            callee: Box::new(expression(5, ExpressionKind::Symbol(plus))),
-            arguments: vec![
-                Argument {
-                    expression: expression(6, ExpressionKind::Integer("4L".to_owned())),
-                    name: None,
-                },
-                Argument {
-                    expression: vector_expression,
-                    name: None,
-                },
-            ],
-        },
-    );
-
-    let inferred_type = inference_state
-        .infer_expression(&expression)
-        .expect("builtin `+` should accept scalar plus vector");
-
-    assert_eq!(inferred_type, CoreType::Vector(Atomic::Double));
-}
-
-#[test]
-fn inferring_an_unknown_symbol_reports_an_error() {
-    let mut inference_state = InferenceState::new();
-    let mut interner = Interner::new();
-    let name = interner.intern("missing");
-
-    let result = inference_state.infer_expression(&expression(0, ExpressionKind::Symbol(name)));
-
-    assert_eq!(
-        result,
-        Err(InferenceError::UnknownName {
-            symbol: name,
-            range: test_range(),
-            expression_id: ExpressionId(0),
-        })
-    );
-}
-
-#[test]
-fn inferring_an_assignment_binds_the_name() {
-    let mut inference_state = InferenceState::new();
-    let mut interner = Interner::new();
-    let target = interner.intern("answer");
-
-    let inferred_type = inference_state
-        .infer_expression(&expression(
-            0,
-            ExpressionKind::Assign {
-                target,
-                value: Box::new(expression(1, ExpressionKind::Integer("1L".to_owned()))),
-            },
-        ))
-        .expect("assignment should infer");
-
-    assert_eq!(inferred_type, CoreType::Scalar(Atomic::Integer));
-    assert_eq!(
-        inference_state.lookup_name(target),
-        Some(&typing::infer::Binding {
-            type_scheme: typing::TypeScheme::monomorphic(CoreType::Scalar(Atomic::Integer)),
-            range: test_range(),
-        })
-    );
-}
-
-#[test]
-fn inferring_a_function_produces_a_function_type() {
-    let mut inference_state = InferenceState::new();
-    let mut interner = Interner::new();
-    let parameter_name = interner.intern("x");
-
-    let inferred_type = inference_state
-        .infer_expression(&expression(
-            0,
-            ExpressionKind::Function {
-                parameters: vec![Parameter {
-                    symbol: parameter_name,
-                    range: test_range(),
-                }],
-                body: Box::new(expression(1, ExpressionKind::Symbol(parameter_name))),
-            },
-        ))
-        .expect("function should infer");
-
-    match inferred_type {
-        CoreType::Function(function_type) => {
-            assert_eq!(function_type.parameters.len(), 1);
-            assert!(matches!(
-                function_type.parameters[0],
-                CoreType::Variable(InferenceVariableId(_))
-            ));
-            assert_eq!(
-                *function_type.return_type,
-                function_type.parameters[0].clone()
-            );
-        }
-        other_type => panic!("expected function type, got {other_type:?}"),
-    }
-}
-
-#[test]
-fn inferring_a_call_checks_argument_types() {
-    let mut inference_state = InferenceState::new();
-    let mut interner = Interner::new();
-    let function_name = interner.intern("identity");
-    let function_type = CoreType::Function(FunctionType::new(
-        vec![CoreType::Scalar(Atomic::Integer)],
-        Vec::new(),
-        CoreType::Scalar(Atomic::Integer),
-    ));
-    inference_state.bind_name(function_name, function_type, test_range());
-
-    let inferred_type = inference_state
-        .infer_expression(&expression(
-            0,
-            ExpressionKind::Call {
-                callee: Box::new(expression(1, ExpressionKind::Symbol(function_name))),
-                arguments: vec![Argument {
-                    expression: expression(2, ExpressionKind::Integer("1L".to_owned())),
-                    name: None,
-                }],
-            },
-        ))
-        .expect("call should infer");
-
-    assert_eq!(inferred_type, CoreType::Scalar(Atomic::Integer));
-}
-
-#[test]
-fn inferring_a_two_argument_call_reports_the_actual_arity() {
-    let mut inference_state = InferenceState::new();
-    let mut interner = Interner::new();
-    let function_name = interner.intern("identity");
-    let function_type = CoreType::Function(FunctionType::new(
-        vec![CoreType::Scalar(Atomic::Integer)],
-        Vec::new(),
-        CoreType::Scalar(Atomic::Integer),
-    ));
-    inference_state.bind_name(function_name, function_type, test_range());
-
-    let result = inference_state.infer_expression(&expression(
-        0,
-        ExpressionKind::Call {
-            callee: Box::new(expression(1, ExpressionKind::Symbol(function_name))),
-            arguments: vec![
-                Argument {
-                    expression: expression(2, ExpressionKind::Integer("1L".to_owned())),
-                    name: None,
-                },
-                Argument {
-                    expression: expression(3, ExpressionKind::Integer("2L".to_owned())),
-                    name: None,
-                },
-            ],
-        },
-    ));
-
-    assert_eq!(
-        result,
-        Err(InferenceError::FunctionArityMismatch {
-            expected: 1,
-            actual: 2,
-            range: Some(test_range()),
-            expression_id: Some(ExpressionId(0)),
-        })
-    );
-}
-
-#[test]
-fn inferring_a_module_processes_expressions_in_order() {
-    let mut inference_state = InferenceState::new();
-    let mut interner = Interner::new();
-    let name = interner.intern("value");
-    let module = Module::new(vec![
-        expression(
-            0,
-            ExpressionKind::Assign {
-                target: name,
-                value: Box::new(expression(1, ExpressionKind::Integer("1L".to_owned()))),
-            },
-        ),
-        expression(2, ExpressionKind::Symbol(name)),
-    ]);
-
-    let inferred_types = inference_state
-        .infer_module(&module)
-        .expect("module should infer");
-
-    assert_eq!(
-        inferred_types,
-        vec![
-            CoreType::Scalar(Atomic::Integer),
-            CoreType::Scalar(Atomic::Integer),
-        ]
-    );
-}
-
-#[test]
-fn looking_up_a_monomorphic_binding_returns_the_bound_type() {
-    let mut inference_state = InferenceState::new();
-    let mut interner = Interner::new();
-    let name = interner.intern("value");
-    inference_state.bind_name(name, CoreType::Scalar(Atomic::Double), test_range());
-
-    let inferred_type = inference_state
-        .infer_expression(&expression(0, ExpressionKind::Symbol(name)))
-        .expect("monomorphic binding should infer");
-
-    assert_eq!(inferred_type, CoreType::Scalar(Atomic::Double));
-}
-
-#[test]
-fn generalized_assignments_can_be_instantiated_at_multiple_types() {
-    let mut inference_state = InferenceState::new();
-    let mut interner = Interner::new();
-    let identity_name = interner.intern("identity");
-    let first_name = interner.intern("first");
-    let second_name = interner.intern("second");
-    let parameter_name = interner.intern("x");
-
-    let inferred_types = inference_state
-        .infer_module(&Module::new(vec![
-            expression(
-                0,
-                ExpressionKind::Assign {
-                    target: identity_name,
-                    value: Box::new(expression(
-                        1,
-                        ExpressionKind::Function {
-                            parameters: vec![Parameter {
-                                symbol: parameter_name,
-                                range: test_range(),
-                            }],
-                            body: Box::new(expression(2, ExpressionKind::Symbol(parameter_name))),
-                        },
-                    )),
-                },
-            ),
-            expression(
-                3,
-                ExpressionKind::Assign {
-                    target: first_name,
-                    value: Box::new(expression(
-                        4,
-                        ExpressionKind::Call {
-                            callee: Box::new(expression(5, ExpressionKind::Symbol(identity_name))),
-                            arguments: vec![Argument {
-                                expression: expression(6, ExpressionKind::Integer("1L".to_owned())),
-                                name: None,
-                            }],
-                        },
-                    )),
-                },
-            ),
-            expression(
-                7,
-                ExpressionKind::Assign {
-                    target: second_name,
-                    value: Box::new(expression(
-                        8,
-                        ExpressionKind::Call {
-                            callee: Box::new(expression(9, ExpressionKind::Symbol(identity_name))),
-                            arguments: vec![Argument {
-                                expression: expression(
-                                    10,
-                                    ExpressionKind::Character("\"hello\"".to_owned()),
-                                ),
-                                name: None,
-                            }],
-                        },
-                    )),
-                },
-            ),
-        ]))
-        .expect("generalized assignment should instantiate independently per use");
-
-    assert_eq!(inferred_types.len(), 3);
-    assert_eq!(inferred_types[1], CoreType::Scalar(Atomic::Integer));
-    assert_eq!(inferred_types[2], CoreType::Scalar(Atomic::Character));
-}
-
-#[test]
-fn repeated_polymorphic_instantiations_do_not_leak_constraints() {
-    let mut inference_state = InferenceState::new();
-    let mut interner = Interner::new();
-    let identity_name = interner.intern("identity");
-    let first_name = interner.intern("first");
-    let second_name = interner.intern("second");
-    let third_name = interner.intern("third");
-    let parameter_name = interner.intern("x");
-
-    let inferred_types = inference_state
-        .infer_module(&Module::new(vec![
-            expression(
-                0,
-                ExpressionKind::Assign {
-                    target: identity_name,
-                    value: Box::new(expression(
-                        1,
-                        ExpressionKind::Function {
-                            parameters: vec![Parameter {
-                                symbol: parameter_name,
-                                range: test_range(),
-                            }],
-                            body: Box::new(expression(2, ExpressionKind::Symbol(parameter_name))),
-                        },
-                    )),
-                },
-            ),
-            expression(
-                3,
-                ExpressionKind::Assign {
-                    target: first_name,
-                    value: Box::new(expression(
-                        4,
-                        ExpressionKind::Call {
-                            callee: Box::new(expression(5, ExpressionKind::Symbol(identity_name))),
-                            arguments: vec![Argument {
-                                expression: expression(6, ExpressionKind::Integer("1L".to_owned())),
-                                name: None,
-                            }],
-                        },
-                    )),
-                },
-            ),
-            expression(
-                7,
-                ExpressionKind::Assign {
-                    target: second_name,
-                    value: Box::new(expression(
-                        8,
-                        ExpressionKind::Call {
-                            callee: Box::new(expression(9, ExpressionKind::Symbol(identity_name))),
-                            arguments: vec![Argument {
-                                expression: expression(
-                                    10,
-                                    ExpressionKind::Character("\"hello\"".to_owned()),
-                                ),
-                                name: None,
-                            }],
-                        },
-                    )),
-                },
-            ),
-            expression(
-                11,
-                ExpressionKind::Assign {
-                    target: third_name,
-                    value: Box::new(expression(
-                        12,
-                        ExpressionKind::Call {
-                            callee: Box::new(expression(13, ExpressionKind::Symbol(identity_name))),
-                            arguments: vec![Argument {
-                                expression: expression(
-                                    14,
-                                    ExpressionKind::Integer("2L".to_owned()),
-                                ),
-                                name: None,
-                            }],
-                        },
-                    )),
-                },
-            ),
-        ]))
-        .expect("repeated polymorphic instantiations should remain independent");
-
-    assert_eq!(inferred_types.len(), 4);
-    assert_eq!(inferred_types[1], CoreType::Scalar(Atomic::Integer));
-    assert_eq!(inferred_types[2], CoreType::Scalar(Atomic::Character));
-    assert_eq!(inferred_types[3], CoreType::Scalar(Atomic::Integer));
-}
-
-#[test]
-fn unknown_inference_variables_are_reported() {
-    let mut inference_state = InferenceState::new();
-
-    let result = inference_state.resolve(CoreType::Variable(InferenceVariableId(99)));
-
-    assert_eq!(
-        result,
-        Err(InferenceError::UnknownInferenceVariable(
-            InferenceVariableId(99)
-        ))
     );
 }

@@ -7,15 +7,18 @@ This document aims to serve as a design specification for the semantics of a sta
 
 ## Development workflow
 
-User-visible diagnostics in `crates/typing` are currently tested with fixture files rather than external snapshot files.
+User-visible diagnostics and source-driven inference behavior in `crates/typing` are currently tested with fixture files rather than external snapshot files.
 
 Recommended flow:
 - run focused `typing` tests while iterating, usually `cargo test -p typing`
-- update expected output in `tests/check/diagnostics.R.test` only when behavior or wording intentionally changes
+- update expected output in `tests/fixtures/diagnostics.R.test` only when behavior or wording intentionally changes
+- update expected inference output in `tests/fixtures/inference.R.test` only when behavior intentionally changes
 - review fixture diffs deliberately instead of treating them as routine churn
 - keep `group__case` names stable so fixture identities remain easy to track
 
-The `tests/test_check.rs` harness reads `tests/check/diagnostics.R.test` directly and compares rendered diagnostics with the expected blocks in that file.
+The `tests/test_check.rs` harness reads `tests/fixtures/diagnostics.R.test` directly and compares rendered diagnostics with the expected blocks in that file.
+
+The `tests/test_infer.rs` harness reads `tests/fixtures/inference.R.test` directly and compares normalized inference results with the expected blocks in that file.
 
 ## Motivation & Challenges
 
