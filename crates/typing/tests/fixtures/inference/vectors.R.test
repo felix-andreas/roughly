@@ -1,18 +1,8 @@
-#==== vectors
-#---- integer_scalar
-1L
+#==== vector_shapes
+#---- logical_array
+c(TRUE, FALSE)
 #++++
-integer
-
-#---- double_scalar
-1.5
-#++++
-double
-
-#---- character_scalar
-"hello"
-#++++
-character
+logical[]
 
 #---- integer_array
 c(1L, 2L, 3L)
@@ -24,22 +14,56 @@ c(1.5, 2.5)
 #++++
 double[]
 
+#---- integer_and_double_array_promotes_to_double
+c(1L, 2.5)
+#++++
+double[]
+
 #---- character_array
 c("foo", "bar")
 #++++
 character[]
+
+#---- logical_named_map
+c(yes = TRUE, no = FALSE)
+#++++
+logical[named]
 
 #---- integer_named_map
 c(foo = 1L, bar = 2L)
 #++++
 integer[named]
 
-#---- double_named_map
-c(foo = 1.5, bar = 2.5)
-#++++
-double[named]
-
 #---- character_named_map
 c(x = "foo", y = "bar")
 #++++
 character[named]
+
+#==== vector_annotations
+#---- scalar_checked_annotation_coerces_to_array
+#: integer[]
+value <- 1L
+value
+#++++
+integer[]
+integer[]
+
+#---- named_map_checked_annotation_coerces_to_array
+#: integer[]
+value <- c(foo = 1L, bar = 2L)
+value
+#++++
+integer[]
+integer[]
+
+#---- reverse_array_to_scalar_annotation_is_rejected
+#: integer
+value <- c(1L, 2L)
+#++++
+error: type mismatch
+
+#---- reverse_array_to_named_map_annotation_is_rejected
+#: integer[named]
+value <- c(1L, 2L)
+#++++
+error: type mismatch

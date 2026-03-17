@@ -1,0 +1,51 @@
+#==== shadowing
+#---- global_access
+x <- 1L
+f <- function() {
+  x
+}
+#++++
+integer
+fn() -> integer
+
+#---- local_shadows_global
+x <- 1L
+f <- function() {
+  x <- "s"
+  x
+}
+#++++
+integer
+fn() -> character
+
+#---- argument_shadows_global
+x <- 1L
+f <- function(x) {
+  x
+}
+#++++
+integer
+fn(type1) -> type1
+
+#---- nested_function_access
+f <- function() {
+  x <- 1L
+  g <- function() {
+    x
+  }
+  g()
+}
+#++++
+fn() -> integer
+
+#---- nested_shadowing
+f <- function() {
+  x <- 1L
+  g <- function() {
+    x <- "s"
+    x
+  }
+  g()
+}
+#++++
+fn() -> character

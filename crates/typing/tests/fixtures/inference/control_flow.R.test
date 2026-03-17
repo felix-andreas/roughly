@@ -1,0 +1,86 @@
+#==== if_expressions
+#---- if_without_else_integer_branch
+if (TRUE) 1L
+#++++
+integer | NULL
+
+#---- if_without_else_empty_block
+if (TRUE) { }
+#++++
+NULL
+
+#---- if_else_matching_integer_branches
+if (TRUE) 1L else 2L
+#++++
+integer
+
+#---- if_else_integer_and_null
+if (TRUE) 1L else NULL
+#++++
+integer | NULL
+
+#---- if_else_null_and_integer
+if (TRUE) NULL else 2L
+#++++
+integer | NULL
+
+#---- if_else_both_empty_blocks
+if (TRUE) { } else { }
+#++++
+NULL
+
+#---- if_else_branch_mismatch
+if (TRUE) 1L else "foo"
+#++++
+error: type mismatch
+
+#---- if_condition_must_be_scalar_logical
+if (c(TRUE, FALSE)) 1L else 2L
+#++++
+error: type mismatch
+
+#==== boolean_operators
+#---- scalar_logical_and
+TRUE && FALSE
+#++++
+logical
+
+#---- scalar_logical_or
+flag <- TRUE
+other_flag <- FALSE
+flag || other_flag
+#++++
+logical
+logical
+logical
+
+#---- vector_logical_and_is_rejected
+c(TRUE, FALSE) && TRUE
+#++++
+error: type mismatch
+
+#==== loops
+#---- for_over_scalar_vector_returns_null
+for (item in 1L) item
+#++++
+NULL
+
+#---- for_over_tuple_like_list_returns_null
+for (item in list(1L, 2L)) item
+#++++
+NULL
+
+#---- while_returns_null
+while (TRUE) { }
+#++++
+NULL
+
+#---- while_condition_must_be_scalar_logical
+while (c(TRUE, FALSE)) { }
+#++++
+error: type mismatch
+
+#---- repeat_returns_null
+repeat { }
+#++++
+NULL

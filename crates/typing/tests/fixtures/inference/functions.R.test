@@ -1,32 +1,93 @@
-#==== functions
+#==== inferred_functions
 #---- identity_function
 identity <- function(x) x
 #++++
 fn(type1) -> type1
 
-#---- call_identity_with_integer
-identity <- function(x) x
-identity(1L)
+#---- two_parameter_function_returns_first_argument_type
+first <- function(x, y) x
 #++++
-fn(type1) -> type1
+fn(type1, type2) -> type1
+
+#==== annotated_functions
+#---- compact_annotation_named_parameter_and_return
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+double_count
+#++++
+fn(count: integer) -> integer
+fn(count: integer) -> integer
+
+#---- compact_annotation_without_return_defaults_to_null
+#: fn(count: integer)
+log_count <- function(count) { }
+log_count
+#++++
+fn(count: integer) -> NULL
+fn(count: integer) -> NULL
+
+#---- expanded_annotation_with_optional_parameter
+#: @param {integer} count
+#: @param {character} [label]
+#: @return {integer}
+double_count <- function(count, label = NULL) count + count
+double_count(1L)
+double_count(1L, "units")
+#++++
+fn(count: integer, [label]: character) -> integer
+integer
 integer
 
-#---- call_identity_with_character
-identity <- function(x) x
-identity("hello")
+#---- higher_order_function_annotation
+#: @param {fn(integer) -> character} render_count
+#: @param {integer} count
+#: @return {character}
+apply_renderer <- function(render_count, count) { render_count(count) }
+#: fn(integer) -> character
+render_count <- function(count) "ok"
+apply_renderer(render_count, 1L)
 #++++
-fn(type1) -> type1
+fn(render_count: fn(integer) -> character, count: integer) -> character
+fn(integer) -> character
 character
 
 #==== calls
-#---- arity_mismatch
+#---- annotated_named_parameter_accepts_named_argument
+#: fn(count: integer) -> integer
+identity <- function(count) count
+identity(count = 1L)
+#++++
+fn(count: integer) -> integer
+integer
+
+#---- positional_only_function_rejects_named_argument
+#: fn(integer) -> integer
+identity <- function(value) value
+identity(value = 1L)
+#++++
+error: named parameter mismatch
+
+#---- missing_required_argument
+identity <- function(x) x
+identity()
+#++++
+error: function arity mismatch
+
+#---- extra_argument
 identity <- function(x) x
 identity(1L, 2L)
 #++++
 error: function arity mismatch
 
+#---- call_argument_type_mismatch
+#: fn(integer) -> integer
+identity <- function(value) value
+identity("hello")
+#++++
+error: type mismatch
+
 #---- calling_non_function
 value <- 1L
 value(2L)
 #++++
-error: type mismatch
+error: expected function

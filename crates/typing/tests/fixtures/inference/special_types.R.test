@@ -1,30 +1,4 @@
-#==== special_types
-#---- null_literal
-NULL
-#++++
-NULL
-
-#---- empty_block
-{ }
-#++++
-NULL
-
-#---- nullable_union_annotation_accepts_integer
-#: integer | NULL
-value <- 1L
-value
-#++++
-integer | NULL
-integer | NULL
-
-#---- nullable_union_annotation_accepts_null
-#: integer | NULL
-value <- NULL
-value
-#++++
-integer | NULL
-integer | NULL
-
+#==== explicit_special_types
 #---- any_annotation_accepts_integer
 #: Any
 value <- 1L
@@ -41,46 +15,66 @@ value
 Any
 Any
 
-#---- unknown_annotation_is_preserved
-#: Unknown
-value <- mystery
+#---- any_annotation_accepts_unknown
+#: Any
+value <- 2L ^ 3L
 value
 #++++
-Unknown
-Unknown
+Any
+Any
 
-#==== if_expressions
-#---- if_without_else_integer_branch
-if (flag) 1L
+#---- unsupported_construct_infers_unknown
+2L ^ 3L
 #++++
-integer | NULL
+Unknown
 
-#---- if_without_else_empty_block
-if (flag) { }
-#++++
-NULL
-
-#---- if_else_matching_integer_branches
-if (flag) 1L else 2L
+#---- unknown_only_assertion_accepts_unknown
+#:? integer
+value <- 2L ^ 3L
+value
 #++++
 integer
+integer
 
-#---- if_else_integer_and_null
-if (flag) 1L else NULL
+#---- unknown_only_assertion_rejects_known_type
+#:? integer
+value <- 1L
+#++++
+error: type mismatch
+
+#---- trusted_assertion_overrides_incompatible_source
+#:! integer
+value <- "hello"
+value
+#++++
+integer
+integer
+
+#---- checked_annotation_rejects_unknown
+#: integer
+value <- 2L ^ 3L
+#++++
+error: type mismatch
+
+#==== nullable_unions
+#---- nullable_union_annotation_accepts_integer
+#: integer | NULL
+value <- 1L
+value
 #++++
 integer | NULL
-
-#---- if_else_null_and_integer
-if (flag) NULL else 2L
-#++++
 integer | NULL
 
-#---- if_else_both_empty_blocks
-if (flag) { } else { }
+#---- nullable_union_annotation_accepts_null
+#: integer | NULL
+value <- NULL
+value
 #++++
-NULL
+integer | NULL
+integer | NULL
 
-#---- function_without_explicit_return_defaults_to_null
-log_count <- function(count) { }
+#---- nullable_union_not_assignable_to_plain_integer
+#: integer
+value <- if (TRUE) 1L
 #++++
-fn(count: type1) -> NULL
+error: type mismatch

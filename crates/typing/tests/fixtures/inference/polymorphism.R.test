@@ -1,5 +1,5 @@
-#==== functions
-#---- polymorphic_assignment_multiple_types
+#==== let_polymorphism
+#---- identity_instantiates_at_multiple_types
 identity <- function(x) x
 first <- identity(1L)
 second <- identity("hello")
@@ -8,7 +8,7 @@ fn(type1) -> type1
 integer
 character
 
-#---- repeated_polymorphic_instantiations
+#---- repeated_polymorphic_instantiations_remain_independent
 identity <- function(x) x
 first <- identity(1L)
 second <- identity("hello")
@@ -18,3 +18,25 @@ fn(type1) -> type1
 integer
 character
 integer
+
+#---- aliased_polymorphic_function_remains_polymorphic
+identity <- function(x) x
+alias <- identity
+first <- alias(1L)
+second <- alias("hello")
+#++++
+fn(type1) -> type1
+fn(type1) -> type1
+integer
+character
+
+#---- higher_order_polymorphic_identity
+identity <- function(x) x
+apply_once <- function(f, value) f(value)
+first <- apply_once(identity, 1L)
+second <- apply_once(identity, "hello")
+#++++
+fn(type1) -> type1
+fn(fn(type1) -> type2, type1) -> type2
+integer
+character

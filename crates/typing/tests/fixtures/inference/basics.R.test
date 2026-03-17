@@ -1,4 +1,14 @@
-#==== basics
+#==== literals
+#---- logical_literal_true
+TRUE
+#++++
+logical
+
+#---- logical_literal_false
+FALSE
+#++++
+logical
+
 #---- integer_literal
 1L
 #++++
@@ -14,7 +24,12 @@ double
 #++++
 character
 
-#==== names
+#---- null_literal
+NULL
+#++++
+NULL
+
+#==== names_and_assignments
 #---- known_name_after_assignment
 value <- 1L
 value
@@ -22,7 +37,54 @@ value
 integer
 integer
 
+#---- assignment_expression_returns_assigned_type
+other <- (value <- 1L)
+value
+other
+#++++
+integer
+integer
+integer
+
+#---- rebinding_updates_name_type
+value <- 1L
+value <- "hello"
+value
+#++++
+integer
+character
+character
+
 #---- unknown_name
 missing_value
 #++++
 error: unknown name
+
+#==== blocks
+#---- empty_block
+{ }
+#++++
+NULL
+
+#---- block_returns_last_expression_type
+{
+  1L
+  2L
+}
+#++++
+integer
+
+#---- block_with_trailing_semicolon_returns_null
+{
+  1L;
+}
+#++++
+NULL
+
+#---- block_returns_unknown_when_last_expression_is_unknown
+{
+  1L
+  2L ^ 3L
+}
+#++++
+Unknown
