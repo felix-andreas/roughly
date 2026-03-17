@@ -1,7 +1,7 @@
 use {
     crate::{
         diagnostics::Diagnostic,
-        infer::InferenceState,
+        infer::{BuiltinKind, InferenceState},
         lower::LoweringContext,
         parse::{new_parser, parse},
     },
@@ -49,13 +49,17 @@ pub fn check(source: &str) -> CheckResult {
 
     let mut inference_state = InferenceState::new();
     let plus_symbol = lowering_context.intern("+");
+    let minus_symbol = lowering_context.intern("-");
+    let multiply_symbol = lowering_context.intern("*");
+    let divide_symbol = lowering_context.intern("/");
+    let power_symbol = lowering_context.intern("**");
     let combine_symbol = lowering_context.intern("c");
-    inference_state.bind_name(plus_symbol, typing_builtin_plus_type(), builtin_range());
-    inference_state.bind_name(
-        combine_symbol,
-        typing_builtin_combine_type(),
-        builtin_range(),
-    );
+    inference_state.bind_builtin(plus_symbol, BuiltinKind::Plus);
+    inference_state.bind_builtin(minus_symbol, BuiltinKind::Minus);
+    inference_state.bind_builtin(multiply_symbol, BuiltinKind::Multiply);
+    inference_state.bind_builtin(divide_symbol, BuiltinKind::Divide);
+    inference_state.bind_builtin(power_symbol, BuiltinKind::Power);
+    inference_state.bind_builtin(combine_symbol, BuiltinKind::Combine);
     if let Err(error) = inference_state.infer_module(&module) {
         diagnostics.push(Diagnostic::from_inference_error(
             &error,
@@ -123,32 +127,4 @@ fn fallback_range(source: &str) -> tree_sitter::Range {
             column: line.len(),
         },
     }
-}
-
-fn builtin_range() -> tree_sitter::Range {
-    tree_sitter::Range {
-        start_byte: 0,
-        end_byte: 0,
-        start_point: tree_sitter::Point { row: 0, column: 0 },
-        end_point: tree_sitter::Point { row: 0, column: 0 },
-    }
-}
-
-fn typing_builtin_plus_type() -> crate::types::CoreType {
-    crate::types::CoreType::Function(crate::types::FunctionType::new(
-        vec![
-            crate::types::CoreType::Unknown,
-            crate::types::CoreType::Unknown,
-        ],
-        Vec::new(),
-        crate::types::CoreType::Unknown,
-    ))
-}
-
-fn typing_builtin_combine_type() -> crate::types::CoreType {
-    crate::types::CoreType::Function(crate::types::FunctionType::new(
-        vec![crate::types::CoreType::Unknown],
-        Vec::new(),
-        crate::types::CoreType::Unknown,
-    ))
 }

@@ -65,6 +65,9 @@ pub enum ExpressionKind {
         parameters: Vec<Parameter>,
         body: Box<Expression>,
     },
+    UnaryMinus {
+        value: Box<Expression>,
+    },
     Call {
         callee: Box<Expression>,
         arguments: Vec<Argument>,
@@ -176,6 +179,7 @@ pub fn lower_node(
         "float" => ExpressionKind::Double(node_text(node, source).to_owned()),
         "string" => ExpressionKind::Character(node_text(node, source).to_owned()),
         "binary_operator" => lower_binary_operator(lowering_context, node, source),
+        "unary_operator" => lower_unary_operator(lowering_context, node, source),
         "function_definition" => lower_function_definition(lowering_context, node, source),
         "call" => lower_call(lowering_context, node, source),
         "parenthesized_expression" => lower_wrapped_expression_kind(lowering_context, node, source),
@@ -220,7 +224,7 @@ fn lower_binary_operator(
                 value: Box::new(value),
             }
         }
-        "+" => {
+        "+" | "-" | "*" | "/" | "**" => {
             let operator_symbol = intern_node_text(lowering_context, operator, source);
             let callee = Box::new(
                 lowering_context
@@ -239,6 +243,26 @@ fn lower_binary_operator(
 
             ExpressionKind::Call { callee, arguments }
         }
+        _ => ExpressionKind::Unsupported,
+    }
+}
+
+fn lower_unary_operator(
+    lowering_context: &mut LoweringContext,
+    node: Node<'_>,
+    source: &str,
+) -> ExpressionKind {
+    let Some(operator) = node.child_by_field_name("operator") else {
+        return ExpressionKind::Unsupported;
+    };
+    let Some(value) = node.child_by_field_name("rhs") else {
+        return ExpressionKind::Unsupported;
+    };
+
+    match operator.kind() {
+        "-" => ExpressionKind::UnaryMinus {
+            value: Box::new(lower_node(lowering_context, value, source)),
+        },
         _ => ExpressionKind::Unsupported,
     }
 }

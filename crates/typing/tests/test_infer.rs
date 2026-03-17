@@ -1,8 +1,7 @@
 use {
     std::{collections::BTreeSet, fs, path::Path},
-    tree_sitter::{Point, Range},
     typing::{
-        infer::{InferenceEntry, InferenceError, InferenceState},
+        infer::{BuiltinKind, InferenceEntry, InferenceError, InferenceState},
         interner::Interner,
         lower::LoweringContext,
         new_parser, parse,
@@ -173,10 +172,18 @@ fn render_inference_result(source: &str) -> String {
 
     let mut inference_state = InferenceState::new();
     let plus_symbol = lowering_context.intern("+");
+    let minus_symbol = lowering_context.intern("-");
+    let multiply_symbol = lowering_context.intern("*");
+    let divide_symbol = lowering_context.intern("/");
+    let power_symbol = lowering_context.intern("**");
     let combine_symbol = lowering_context.intern("c");
 
-    inference_state.bind_name(plus_symbol, builtin_plus_type(), builtin_range());
-    inference_state.bind_name(combine_symbol, builtin_combine_type(), builtin_range());
+    inference_state.bind_builtin(plus_symbol, BuiltinKind::Plus);
+    inference_state.bind_builtin(minus_symbol, BuiltinKind::Minus);
+    inference_state.bind_builtin(multiply_symbol, BuiltinKind::Multiply);
+    inference_state.bind_builtin(divide_symbol, BuiltinKind::Divide);
+    inference_state.bind_builtin(power_symbol, BuiltinKind::Power);
+    inference_state.bind_builtin(combine_symbol, BuiltinKind::Combine);
 
     match inference_state.infer_module(&module) {
         Ok(inferred_types) => {
@@ -191,7 +198,6 @@ fn render_inferred_types(
     lowering_context: &LoweringContext,
     inferred_types: &[CoreType],
 ) -> String {
-    let mut renderer = SimpleTypeRenderer::new(lowering_context.interner());
     let mut lines = Vec::with_capacity(inferred_types.len());
 
     for inferred_type in inferred_types {
@@ -200,6 +206,7 @@ fn render_inferred_types(
             .unwrap_or_else(|error| {
                 panic!("inference result should resolve for rendering: {error:?}")
             });
+        let mut renderer = SimpleTypeRenderer::new(lowering_context.interner());
         lines.push(renderer.render(&resolved_type));
     }
 
@@ -218,31 +225,6 @@ fn render_inference_error_kind(error: &InferenceError) -> &'static str {
         InferenceError::RecordFieldMismatch { .. } => "error: record field mismatch",
         InferenceError::FunctionArityMismatch { .. } => "error: function arity mismatch",
         InferenceError::NamedParameterMismatch { .. } => "error: named parameter mismatch",
-    }
-}
-
-fn builtin_plus_type() -> CoreType {
-    CoreType::Function(FunctionType::new(
-        vec![CoreType::Unknown, CoreType::Unknown],
-        Vec::new(),
-        CoreType::Unknown,
-    ))
-}
-
-fn builtin_combine_type() -> CoreType {
-    CoreType::Function(FunctionType::new(
-        vec![CoreType::Unknown],
-        Vec::new(),
-        CoreType::Unknown,
-    ))
-}
-
-fn builtin_range() -> Range {
-    Range {
-        start_byte: 0,
-        end_byte: 0,
-        start_point: Point { row: 0, column: 0 },
-        end_point: Point { row: 0, column: 0 },
     }
 }
 
@@ -268,6 +250,7 @@ impl<'a> SimpleTypeRenderer<'a> {
             CoreType::Null => "NULL".to_owned(),
             CoreType::Scalar(atomic) => render_atomic(*atomic).to_owned(),
             CoreType::Vector(atomic) => format!("{}[]", render_atomic(*atomic)),
+            CoreType::NamedVector(atomic) => format!("{}[named]", render_atomic(*atomic)),
             CoreType::List(item_type) => format!("list[{}]", self.render(item_type)),
             CoreType::Record(fields) => {
                 let rendered_fields = fields

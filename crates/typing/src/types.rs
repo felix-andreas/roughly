@@ -23,6 +23,7 @@ pub enum CoreType {
     Null,
     Scalar(Atomic),
     Vector(Atomic),
+    NamedVector(Atomic),
     List(Box<CoreType>),
     Record(Vec<RecordField<CoreType>>),
     Tuple(Vec<CoreType>),

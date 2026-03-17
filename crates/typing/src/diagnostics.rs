@@ -298,6 +298,7 @@ impl<'a> TypeRenderer<'a> {
             CoreType::Null => "null".to_owned(),
             CoreType::Scalar(atomic) => render_atomic(*atomic).to_owned(),
             CoreType::Vector(atomic) => format!("{}[]", render_atomic(*atomic)),
+            CoreType::NamedVector(atomic) => format!("{}[named]", render_atomic(*atomic)),
             CoreType::List(item_type) => {
                 format!("list[{}]", self.render_core_type(item_type))
             }

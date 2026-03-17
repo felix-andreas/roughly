@@ -20,6 +20,7 @@ pub struct InferenceState {
     next_variable_id: u32,
     entries: BTreeMap<InferenceVariableId, InferenceEntry>,
     environment: BTreeMap<Symbol, Binding>,
+    builtins: BTreeMap<Symbol, BuiltinKind>,
 }
 
 impl Default for InferenceState {
@@ -28,6 +29,7 @@ impl Default for InferenceState {
             next_variable_id: 0,
             entries: BTreeMap::new(),
             environment: BTreeMap::new(),
+            builtins: BTreeMap::new(),
         }
     }
 }
@@ -55,6 +57,10 @@ impl InferenceState {
     pub fn bind_scheme(&mut self, symbol: Symbol, type_scheme: TypeScheme, range: Range) {
         self.environment
             .insert(symbol, Binding { type_scheme, range });
+    }
+
+    pub fn bind_builtin(&mut self, symbol: Symbol, builtin_kind: BuiltinKind) {
+        self.builtins.insert(symbol, builtin_kind);
     }
 
     pub fn lookup_name(&self, symbol: Symbol) -> Option<&Binding> {
@@ -115,6 +121,7 @@ impl InferenceState {
                 self.environment = parent_environment;
                 Ok(function_type)
             }
+            ExpressionKind::UnaryMinus { value } => self.infer_unary_minus(value),
             ExpressionKind::Call { callee, arguments } => {
                 if let ExpressionKind::Symbol(symbol) = &callee.kind {
                     if let Some(inferred_type) =
@@ -277,6 +284,11 @@ impl InferenceState {
             {
                 Ok(CoreType::Vector(left_atomic))
             }
+            (CoreType::NamedVector(left_atomic), CoreType::NamedVector(right_atomic))
+                if left_atomic == right_atomic =>
+            {
+                Ok(CoreType::NamedVector(left_atomic))
+            }
             (CoreType::List(left_item_type), CoreType::List(right_item_type)) => {
                 let unified_item_type =
                     self.unify_internal(*left_item_type, *right_item_type, expression)?;
@@ -351,17 +363,17 @@ impl InferenceState {
         arguments: &[crate::lower::Argument],
         expression: &Expression,
     ) -> Result<Option<CoreType>, InferenceError> {
-        let Some(binding) = self.lookup_name(symbol) else {
+        let Some(builtin_kind) = self.builtins.get(&symbol).copied() else {
             return Ok(None);
         };
 
-        let builtin_kind = builtin_kind(&binding.type_scheme.body);
         match builtin_kind {
-            Some(BuiltinKind::Plus) => self.infer_builtin_plus(arguments, expression).map(Some),
-            Some(BuiltinKind::Combine) => {
-                self.infer_builtin_combine(arguments, expression).map(Some)
-            }
-            None => Ok(None),
+            BuiltinKind::Plus => self.infer_builtin_plus(arguments, expression).map(Some),
+            BuiltinKind::Minus => self.infer_builtin_minus(arguments, expression).map(Some),
+            BuiltinKind::Multiply => self.infer_builtin_multiply(arguments, expression).map(Some),
+            BuiltinKind::Divide => self.infer_builtin_divide(arguments, expression).map(Some),
+            BuiltinKind::Power => self.infer_builtin_power(arguments, expression).map(Some),
+            BuiltinKind::Combine => self.infer_builtin_combine(arguments, expression).map(Some),
         }
     }
 
@@ -369,6 +381,47 @@ impl InferenceState {
         &mut self,
         arguments: &[crate::lower::Argument],
         expression: &Expression,
+    ) -> Result<CoreType, InferenceError> {
+        self.infer_binary_numeric(arguments, expression, NumericResultAtomic::Promote)
+    }
+
+    fn infer_builtin_minus(
+        &mut self,
+        arguments: &[crate::lower::Argument],
+        expression: &Expression,
+    ) -> Result<CoreType, InferenceError> {
+        self.infer_binary_numeric(arguments, expression, NumericResultAtomic::Promote)
+    }
+
+    fn infer_builtin_multiply(
+        &mut self,
+        arguments: &[crate::lower::Argument],
+        expression: &Expression,
+    ) -> Result<CoreType, InferenceError> {
+        self.infer_binary_numeric(arguments, expression, NumericResultAtomic::Promote)
+    }
+
+    fn infer_builtin_divide(
+        &mut self,
+        arguments: &[crate::lower::Argument],
+        expression: &Expression,
+    ) -> Result<CoreType, InferenceError> {
+        self.infer_binary_numeric(arguments, expression, NumericResultAtomic::AlwaysDouble)
+    }
+
+    fn infer_builtin_power(
+        &mut self,
+        arguments: &[crate::lower::Argument],
+        expression: &Expression,
+    ) -> Result<CoreType, InferenceError> {
+        self.infer_binary_numeric(arguments, expression, NumericResultAtomic::AlwaysDouble)
+    }
+
+    fn infer_binary_numeric(
+        &mut self,
+        arguments: &[crate::lower::Argument],
+        expression: &Expression,
+        numeric_result_atomic: NumericResultAtomic,
     ) -> Result<CoreType, InferenceError> {
         if arguments.len() != 2 {
             return Err(InferenceError::FunctionArityMismatch {
@@ -401,7 +454,10 @@ impl InferenceState {
                 }
             })?;
 
-        let result_atomic = promote_numeric_atomic(left_atomic, right_atomic);
+        let result_atomic = match numeric_result_atomic {
+            NumericResultAtomic::Promote => promote_numeric_atomic(left_atomic, right_atomic),
+            NumericResultAtomic::AlwaysDouble => Atomic::Double,
+        };
         let result_shape = if matches!(left_shape, OperandShape::Vector)
             || matches!(right_shape, OperandShape::Vector)
         {
@@ -411,6 +467,20 @@ impl InferenceState {
         };
 
         Ok(core_type_for_shape(result_shape, result_atomic))
+    }
+
+    fn infer_unary_minus(&mut self, value: &Expression) -> Result<CoreType, InferenceError> {
+        let inferred_type = self.infer_expression(value)?;
+        let resolved_type = self.resolve(inferred_type)?;
+        let (shape, atomic) = numeric_operand_parts(&resolved_type).ok_or_else(|| {
+            InferenceError::InvalidPlusOperand {
+                actual: resolved_type.clone(),
+                range: value.range,
+                expression_id: value.id,
+            }
+        })?;
+
+        Ok(core_type_for_shape(shape, atomic))
     }
 
     fn infer_builtin_combine(
@@ -423,37 +493,41 @@ impl InferenceState {
         }
 
         let mut item_atomic = None;
+        let mut all_arguments_are_named = true;
 
         for argument in arguments {
-            if argument.name.is_some() {
-                return Err(InferenceError::NamedParameterMismatch {
-                    expected_parameters: Vec::new(),
-                    actual_parameters: vec![symbol_for_named_argument(argument)],
-                    range: Some(argument.expression.range),
-                    expression_id: Some(argument.expression.id),
-                });
-            }
+            all_arguments_are_named &= argument.name.is_some();
 
             let inferred_argument = self.infer_expression(&argument.expression)?;
             let resolved_argument = self.resolve(inferred_argument)?;
 
-            let (_, current_atomic) =
-                numeric_operand_parts(&resolved_argument).ok_or_else(|| {
-                    InferenceError::TypeMismatch {
-                        expected: CoreType::Scalar(Atomic::Integer),
+            let Some(current_atomic) = combine_operand_atomic(&resolved_argument) else {
+                return Err(InferenceError::TypeMismatch {
+                    expected: CoreType::Scalar(Atomic::Integer),
+                    actual: resolved_argument.clone(),
+                    range: Some(argument.expression.range),
+                    expression_id: Some(argument.expression.id),
+                });
+            };
+
+            item_atomic = Some(match item_atomic {
+                Some(previous_atomic) => promote_combine_atomic(previous_atomic, current_atomic)
+                    .ok_or_else(|| InferenceError::TypeMismatch {
+                        expected: CoreType::Scalar(previous_atomic),
                         actual: resolved_argument.clone(),
                         range: Some(argument.expression.range),
                         expression_id: Some(argument.expression.id),
-                    }
-                })?;
-
-            item_atomic = Some(match item_atomic {
-                Some(previous_atomic) => promote_numeric_atomic(previous_atomic, current_atomic),
+                    })?,
                 None => current_atomic,
             });
         }
 
-        Ok(CoreType::Vector(item_atomic.unwrap_or(Atomic::Integer)))
+        let combined_atomic = item_atomic.unwrap_or(Atomic::Integer);
+        if all_arguments_are_named {
+            Ok(CoreType::NamedVector(combined_atomic))
+        } else {
+            Ok(CoreType::Vector(combined_atomic))
+        }
     }
 
     fn resolve_variable(
@@ -580,6 +654,7 @@ impl InferenceState {
             CoreType::Null => Ok(CoreType::Null),
             CoreType::Scalar(atomic) => Ok(CoreType::Scalar(*atomic)),
             CoreType::Vector(atomic) => Ok(CoreType::Vector(*atomic)),
+            CoreType::NamedVector(atomic) => Ok(CoreType::NamedVector(*atomic)),
             CoreType::List(item_type) => Ok(CoreType::List(Box::new(
                 self.instantiate_core_type(item_type, substitutions)?,
             ))),
@@ -690,7 +765,8 @@ impl InferenceState {
             | CoreType::Unknown
             | CoreType::Null
             | CoreType::Scalar(_)
-            | CoreType::Vector(_) => Ok(BTreeSet::new()),
+            | CoreType::Vector(_)
+            | CoreType::NamedVector(_) => Ok(BTreeSet::new()),
             CoreType::Variable(variable) => Ok(BTreeSet::from([variable])),
             CoreType::List(item_type) => self.free_type_variables_in_core_type(&item_type),
             CoreType::Record(fields) => {
@@ -911,8 +987,18 @@ enum OperandShape {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BuiltinKind {
+enum NumericResultAtomic {
+    Promote,
+    AlwaysDouble,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinKind {
     Plus,
+    Minus,
+    Multiply,
+    Divide,
+    Power,
     Combine,
 }
 
@@ -922,6 +1008,30 @@ fn numeric_operand_parts(core_type: &CoreType) -> Option<(OperandShape, Atomic)>
         CoreType::Scalar(Atomic::Double) => Some((OperandShape::Scalar, Atomic::Double)),
         CoreType::Vector(Atomic::Integer) => Some((OperandShape::Vector, Atomic::Integer)),
         CoreType::Vector(Atomic::Double) => Some((OperandShape::Vector, Atomic::Double)),
+        CoreType::NamedVector(Atomic::Integer) => Some((OperandShape::Vector, Atomic::Integer)),
+        CoreType::NamedVector(Atomic::Double) => Some((OperandShape::Vector, Atomic::Double)),
+        _ => None,
+    }
+}
+
+fn combine_operand_atomic(core_type: &CoreType) -> Option<Atomic> {
+    match core_type {
+        CoreType::Scalar(atomic) | CoreType::Vector(atomic) | CoreType::NamedVector(atomic) => {
+            Some(*atomic)
+        }
+        _ => None,
+    }
+}
+
+fn promote_combine_atomic(left: Atomic, right: Atomic) -> Option<Atomic> {
+    if left == right {
+        return Some(left);
+    }
+
+    match (left, right) {
+        (Atomic::Integer, Atomic::Double) | (Atomic::Double, Atomic::Integer) => {
+            Some(Atomic::Double)
+        }
         _ => None,
     }
 }
@@ -939,24 +1049,6 @@ fn core_type_for_shape(shape: OperandShape, atomic: Atomic) -> CoreType {
         OperandShape::Scalar => CoreType::Scalar(atomic),
         OperandShape::Vector => CoreType::Vector(atomic),
     }
-}
-
-fn builtin_kind(core_type: &CoreType) -> Option<BuiltinKind> {
-    let CoreType::Function(function_type) = core_type else {
-        return None;
-    };
-
-    match function_type.parameters.len() {
-        2 => Some(BuiltinKind::Plus),
-        1 if matches!(*function_type.return_type, CoreType::Unknown) => Some(BuiltinKind::Combine),
-        _ => None,
-    }
-}
-
-fn symbol_for_named_argument(argument: &crate::lower::Argument) -> Symbol {
-    argument
-        .name
-        .expect("named argument mismatch should only be constructed for named arguments")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
