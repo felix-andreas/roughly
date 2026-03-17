@@ -1,4 +1,4 @@
-# `typing` Semantics
+# Semantics
 
 This document is the user-facing semantics contract for the `typing` crate.
 
@@ -84,7 +84,7 @@ Example:
 value <- list(1L, 2L, 3L)
 ```
 
-This is valid because `{integer, integer, integer}` is compatible with `list[integer]`.
+This is valid because `list{integer, integer, integer}` is compatible with `list[integer]`.
 
 ### Unknown-only assertions
 
@@ -92,6 +92,7 @@ This is valid because `{integer, integer, integer}` is compatible with `list[int
 
 - it is allowed only when the inferred type is `Unknown`
 - if the checker already knows the source type, using `#:?` is an error, even if the asserted type matches that known type
+- if the assertion is allowed, the annotated binding or expression is then treated as having type `TYPE`
 
 Examples:
 
@@ -109,7 +110,7 @@ value <- 1L
 
 This is an error because the checker already knows the type.
 
-`#:? TYPE` is intended for filling in inference gaps without overriding known information.
+`#:? TYPE` is intended for filling in inference gaps without overriding known information when the checker has no better type than `Unknown`.
 
 ### Trusted assertions
 
@@ -200,34 +201,52 @@ Whether a coercion changes the resulting type depends on the construct using it.
 
 List types currently appear in four user-facing forms:
 
-- tuple-like, rendered as `{T1, T2, ...}`
-- record-like, rendered as `{name: T, ...}`
+- tuple-like, rendered as `list{T1, T2, ...}`
+- record-like, rendered as `list{name: T, ...}`
 - array-like, rendered as `list[T]`
-- map-like, rendered as `list[key: value]`
+- map-like, rendered as `list[named: T]`
 
-`list(...)` expressions infer only structural shapes:
+R uses `list(...)` for several different collection meanings, and the type system needs to distinguish them.
+
+Tuple-like and record-like lists are fixed-shape collections where positions or field names are part of the type. Array-like and map-like lists are homogeneous collections where every element has the same type, and the specific position or name is not part of the type.
+
+| Shape | Fixed size | Homogeneous | Names or positions meaningful in the type |
+| --- | --- | --- | --- |
+| `list{T1, T2, ...}` | yes | no | positions |
+| `list{name: T, ...}` | yes | no | names |
+| `list[T]` | no | yes | no |
+| `list[named: T]` | no | yes | no |
+
+`list(...)` expressions may correspond to any of these meanings. For now, the checker defaults to the fixed-shape forms when it has enough information:
 
 - tuple-like: when all elements are unnamed
-- record-like: when all elements are named and their names are statically known
-- array-like: when all elements are unnamed and their types are the same
-- map-like: when all elements are named but their names are not statically known
+- record-like: when all elements are named
+- Mixing named and unnamed elements is a type error.
 
 Array-like and map-like list types are primarily produced by annotations or by coercing structural list shapes.
 
-Mixing named and unnamed elements is a type error.
 
-Whether unnamed `list(...)` should infer directly as array-like is undecided. Currently, unnamed `list(...)` infers as tuple-like even when all element types are identical; this can be inconvenient for expressions such as `list(1L, 2L, 3L)[1 + 1]`.
+#### Current default and open design question
+
+For now, `list(...)` defaults to tuple-like or record-like inference where possible, even when a homogeneous array-like or map-like interpretation might also make sense.
+
+Examples:
+
+- `list(1L, 2L, 3L)` currently infers as `list{integer, integer, integer}`, not `list[integer]`
+- `list(foo = 1L, bar = 2L)` currently infers as `list{foo: integer, bar: integer}`, not `list[named: integer]`
+
+This is not set in stone. If this default turns out to be awkward in practice, it may be reasonable to introduce distinct tuple and record constructors later, even if they remain runtime aliases of R lists.
 
 #### List coercions
 
 - tuple-like lists can coerce to array-like `list[T]` when each tuple element is compatible with `T`
 - record-like lists can coerce to array-like `list[T]` when each field value is compatible with `T`
 - map-like lists can coerce to array-like `list[T]` when each field value is compatible with `T`
-- record-like lists can coerce to map-like `list[key: value]` when each field value is compatible with `value`
-- map-like lists can coerce to map-like `list[key: value]` when each field value is compatible with `value`
+- record-like lists can coerce to map-like `list[named: T]` when each field value is compatible with `T`
+- map-like lists can coerce to map-like `list[named: T]` when each field value is compatible with `T`
 - reverse coercions are not allowed:
   - array-like `list[T]` values do not coerce back into tuple-like, record-like, or map-like values
-  - map-like `list[key: value]` values do not coerce back into fixed-shape record-like values
+  - map-like `list[named: T]` values do not coerce back into fixed-shape record-like values
 
 #### Tuple-like lists
 
@@ -235,11 +254,9 @@ A `list(...)` expression with only unnamed elements infers as tuple-like, even w
 
 Examples:
 
-- `list()` infers as `{}`
+- `list()` infers as `list{}`
 - `list(1L, 2L, 3L)` infers as `list{integer, integer, integer}`
 - `list(1L, "foo")` infers as `list{integer, character}`
-
-This caveat does not change the current semantics. It marks an area that still needs refinement.
 
 #### Record-like lists
 
@@ -255,9 +272,7 @@ An array-like list `list[T]` represents a list whose elements all share a common
 
 #### Map-like lists
 
-A map-like list `list[key: value]` represents a name-keyed collection whose values all share a common value type `value`. Map-like lists do not require the set of names to be statically known and are typically produced by annotations or by coercion from structural list shapes whose element names are not statically available.
-
-A `list(...)` expression with only named elements infers as map-like when the element names are not known statically.
+A map-like list `list[named: T]` represents a name-keyed collection whose values all share a common value type `T`. Map-like lists do not require the set of names to be statically known and are typically produced by annotations or by coercion from structural list shapes whose element names are not statically available.
 
 #### Mixed named and unnamed lists
 
@@ -317,7 +332,7 @@ For now, the only supported union form is a nullable union with `NULL`.
   - function returns
   - compact function type annotations
   - nested function types
-  - list and keyed-list annotations
+  - list and map-like list annotations
 - only nullable unions are allowed for now
 
 Examples:
@@ -380,7 +395,7 @@ It is a type error when the branches do not match and neither branch is `NULL`.
 Examples:
 
 - `if (flag) 1L else \"foo\"` is a type error
-- `if (flag) c(TRUE, FALSE) else 1L` is invalid because the condition is not scalar `logical`
+- `if (c(TRUE, FALSE)) 1L else 2L` is invalid because the condition is not scalar `logical`
 
 ### Blocks
 
@@ -433,7 +448,7 @@ Runtime indexing failures are not modeled by the type system.
 `[[` is allowed on lists.
 
 - for array-like `list[T]`, `[[` returns `T`
-- for map-like `list[key: value]`, name-based `[[` returns `value | NULL`
+- for map-like `list[named: T]`, name-based `[[` returns `T | NULL`
 
 For tuple-like lists, positional `[[` is allowed only when the index is known statically as a literal position.
 
@@ -463,7 +478,7 @@ Use `[[` for supported vector indexing instead.
 Tuple-like, record-like, or map-like list values may be used with `[` only when they can coerce to an array-like or map-like list shape.
 
 - for array-like `list[T]`, `[` returns `list[T]`
-- for map-like `list[key: value]`, `[` returns `list[key: value]`
+- for map-like `list[named: T]`, `[` returns `list[named: T]`
 
 When `[` accepts a tuple-like, record-like, or map-like list through coercion, the resulting type is the array-like or map-like list type produced by that coercion.
 
@@ -594,7 +609,7 @@ Function annotations use only `#:` comments.
 A function may be annotated in exactly one of these two styles:
 
 - expanded style with `@param` and `@return` or `@returns`
-- compact style with a single `fn(...) -> ...` annotation
+- compact style with a single `fn(...)` annotation, with an optional `-> RETURN_TYPE`
 
 It is not allowed to mix these two styles for the same function.
 
@@ -637,7 +652,7 @@ Compact function annotations use a single function type:
 
 Additional rule:
 
-- if no return type is specified, the function type defaults to returning `NULL`
+- if the return type is omitted, it is implicitly `NULL`
 
 Examples:
 
