@@ -1,12 +1,14 @@
 # `typing` Architecture
 
-This document is the design contract for the `typing` crate.
+This document describes the intended implementation architecture for the `typing` crate.
+
+It is currently somewhat stale while the semantics are being refined. During this phase, `SEMANTICS.md` is the authoritative document for user-facing behavior, type forms, and compatibility rules. If this document and `SEMANTICS.md` disagree, follow `SEMANTICS.md`.
 
 The crate is a standalone library for static type checking of a subset of R. Later it may be integrated into `roughly`, but the standalone library remains the primary implementation boundary while the type checker is still evolving. In integrated use, syntax validity should still be decided by `roughly`'s existing syntax-checking pipeline before type checking runs.
 
-If implementation changes make this document inaccurate, update it in the same session. If implementation and this document disagree, that mismatch is work to do.
+As semantics stabilize, this document should be brought back into tighter alignment with the implementation and the semantics contract.
 
-Project planning is tracked in `crates/typing/TODOS.md`.
+Project planning is tracked in `crates/typing/TODOS.md`, though that plan is also somewhat stale while semantics are being refined.
 
 User-facing typing semantics are tracked in `crates/typing/SEMANTICS.md`.
 
@@ -24,6 +26,7 @@ Keep this file high signal.
 - Put user-facing typing semantics in `SEMANTICS.md`.
 - Put cross-session handoff notes in `MEMORY.md`.
 - Keep `SEMANTICS.md` and the fixture suites in sync; both are part of the contract.
+- While semantics are still being refined, prefer making this document explicitly incomplete over silently restating stale assumptions.
 - When implementation meaningfully changes the design contract, update this file in the same session.
 
 ## Goals
@@ -53,7 +56,7 @@ Explicit non-goals for v1:
 - S4 dispatch modeling
 - NSE and metaprogramming completeness
 - Environment and reference semantics
-- Union types
+- General union types beyond the nullable `T | NULL` form described in `SEMANTICS.md`
 - Subtyping
 - Variance
 - Nominal typing
@@ -149,7 +152,7 @@ These deferred constructs may still lower to `Unknown` when they appear inside o
 
 The checker needs to model both user-facing semantic shapes and HM inference variables.
 
-User-facing type semantics are defined in `SEMANTICS.md`. This document should only keep the implementation-facing constraints that follow from those semantics.
+User-facing type semantics are defined in `SEMANTICS.md` and are currently more up to date than this document. This file should only keep the implementation-facing constraints that follow from those semantics.
 
 ### Base categories
 
@@ -327,9 +330,11 @@ The current plan is to use comment-based annotations rather than extending R syn
 
 The annotation mechanism should remain based on `#:` comments.
 
+The exact supported annotation forms and their meaning are defined in `SEMANTICS.md`. In particular, user-facing behavior should follow `SEMANTICS.md` for checked annotations, unknown-only assertions, trusted assertions, and function annotation forms.
+
 Planned annotation support:
 
-- variable type hints
+- variable annotations
 - function parameter annotations
 - function return annotations
 
@@ -338,7 +343,6 @@ Deferred annotation support:
 - explicit generics syntax
 - nominal type declarations
 - advanced type aliases
-- union syntax
 
 The annotation parser should remain separate from the HM inference engine.
 

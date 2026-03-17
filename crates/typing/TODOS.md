@@ -2,7 +2,9 @@
 
 This document tracks the implementation plan for the `typing` crate.
 
-Keep it aligned with `crates/typing/ARCHITECTURE.md`.
+While `SEMANTICS.md` is being refined into the authoritative user-facing contract, parts of this plan are somewhat stale and should be treated carefully until they are rewritten to match the current semantics.
+
+Keep it aligned with `crates/typing/SEMANTICS.md` first and `crates/typing/ARCHITECTURE.md` second while that refinement is in progress.
 
 ## Document hygiene
 
@@ -17,6 +19,7 @@ Keep this document high signal.
 ## Planning rules
 
 - Important design decisions must be discussed with the user before implementation.
+- During semantics refinement, treat `SEMANTICS.md` as the authority when this file and `ARCHITECTURE.md` lag behind it.
 - Todos may reference sections of `ARCHITECTURE.md`.
 - Prefer hierarchical todos.
 - If the exact implementation steps are unclear, mark the todo with `(needs refinement)`.

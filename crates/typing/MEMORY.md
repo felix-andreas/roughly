@@ -40,21 +40,50 @@ Keep this file handoff-oriented and aggressively pruned.
 
 ## Active continuity
 
-- Fixture suites are now split by feature under `tests/fixtures/diagnostics/` and `tests/fixtures/inference/`. Fixture identity still comes only from `group__case`, and duplicate identities are rejected across the whole suite.
-- `SEMANTICS.md` is now intended to become the user-facing semantics contract over time. Changes to it must be discussed with the user first, and it must be kept in sync with fixture expectations. Both are part of the contract.
-- Agreed list semantics to preserve:
-  - `list(...)` with only unnamed entries is tuple-like
+- `SEMANTICS.md` is now the single source of truth for user-facing typing semantics. Changes to it must be discussed with the user first. Fixture expectations and `SEMANTICS.md` are both contract documents and must stay aligned.
+- `DRAFT.md` holds older, non-authoritative semantics ideas. Do not implement from it directly. Use it only as a discussion starting point.
+- Fixture suites are split by feature under `tests/fixtures/diagnostics/` and `tests/fixtures/inference/`. Fixture identity still comes only from `group__case`, and duplicate identities are rejected across the whole suite.
+- Agreed list semantics:
+  - unnamed `list(...)` is tuple-like
   - `list()` is the empty tuple-like case
-  - `list(...)` with only named entries is map-like
+  - named `list(...)` is map-like
   - mixed named and unnamed entries are an error
-  - tuple-like values can be coerced to homogeneous `list[...]`
-  - map-like values can be coerced to homogeneous `list[character: T]`
-  - the reverse coercions should remain disallowed
-  - use original R type names such as `integer`, `double`, and `character`
-  - use `{}` rendering for tuples and records in user-facing semantics
+  - tuple-like lists can coerce to `list[...]`
+  - map-like lists can coerce to `list[key: value]`
+  - reverse coercions are disallowed
+  - tuple/map-like rendered forms use `{}` in user-facing semantics
+- Agreed vector semantics:
+  - scalar-like: `T`
+  - array-like: `T[]`
+  - map-like: `T[named]`
+- Agreed special-type semantics:
+  - `NULL` is the unit type and is incompatible with every other type
+  - `Any` is compatible with everything
+  - `Unknown` is only compatible with `Any`
+- Agreed annotation forms:
+  - `#: T` checked compatibility-based annotation
+  - `#:? T` only allowed when inferred type is `Unknown`
+  - `#:! T` trusted assertion / “trust me bro” cast
+  - annotations are preceding `#:` comments attached to the following binding or expression
+- Agreed function-type semantics:
+  - only `#:` comments
+  - either expanded `@param` / `@return(s)` form or compact `fn(...) -> ...` form, never both
+  - optional parameters use `[...]`
+  - unnamed function-type parameters are positional-only; named calls are an error in that case
+  - omitted return annotations default to `NULL`
+  - higher-order function types are allowed
+- Agreed nullable-union semantics:
+  - only `T | NULL` / `NULL | T` are allowed for now
+  - nullable unions are allowed anywhere a type can appear
+  - nested nullable unions collapse internally
+  - main motivation is `if` without `else`
+- Agreed `if` semantics:
+  - condition must be scalar `logical`
+  - `if` without `else` returns `T | NULL`
+  - `if ... else` requires equal branch types unless one branch is `NULL`
+  - `T` with `NULL` yields `T | NULL`
 - Higher-order mismatch diagnostics still tend to report the constraint-introducing site and may render unresolved placeholders like `type1` instead of the eventual call-site type. Do not “fix” fixture expectations without deciding whether to improve diagnostic precision.
 - Some constructs from otherwise valid input still lower to `Unsupported`, and nested names inside those lowered unsupported forms are not recursively lowered.
+- Annotation implementation is still incomplete. The semantics contract is ahead of the code in several areas, including lists, unions, `if`, `Any` / `Unknown`, and assertion forms.
+- In integrated use, syntax errors should come from `roughly`'s existing syntax checker before `typing` runs.
 - Function parameters with defaults are still too minimal for end-to-end named-argument mismatch diagnostics. Do not reintroduce those fixtures yet.
-- Annotation work is not finished. The lowered representation now has annotation storage, but attachment semantics are not settled. For now, treat trailing assignment annotations as the intended near-term scope and do not assume preceding `#:` attachment works.
-- In integrated use, syntax errors should come from `roughly`'s existing syntax checker before `typing` runs. Keep `typing` focused on syntactically valid input and on lowered unsupported constructs that can still arise within that input.
-- `if` remains an open sequencing question. If work reaches it, discuss whether it belongs before or after further diagnostics / annotations work.

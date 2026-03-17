@@ -76,6 +76,8 @@ The annotated value must be compatible with `TYPE`.
 
 This is compatibility-based, not exact-equality-based. Checked annotations may therefore allow widening where the semantics explicitly define it.
 
+If the annotation succeeds, the value is accepted through coercion when needed, and the annotated binding or expression is then treated as having type `TYPE`.
+
 Example:
 
 ```r
@@ -189,6 +191,14 @@ Examples:
 - `integer[named]`
 - `double[named]`
 
+Vector coercions:
+
+- scalar-like vectors `T` can coerce to array-like vectors `T[]`
+- map-like vectors `T[named]` can coerce to array-like vectors `T[]`
+- reverse coercions are not allowed unless explicitly stated by another rule
+
+Whether a coercion changes the resulting type depends on the construct using it.
+
 ## `NULL`
 
 The R literal `NULL` has type `NULL`.
@@ -226,12 +236,34 @@ Every type is compatible with `Any`, and `Any` is compatible with every type.
 
 ## List shapes
 
-`list(...)` has two supported structural shapes in the current design:
+List types currently appear in four user-facing forms:
+
+- tuple-like, rendered as `{T1, T2, ...}`
+- named, rendered as `{name: T, ...}`
+- homogeneous, rendered as `list[T]`
+- homogeneous named, rendered as `list[key: value]`
+
+`list(...)` expressions infer only the first two structural shapes:
 
 - tuple-like, when all elements are unnamed
-- map-like, when all elements are named
+- named, when all elements are named
+
+Homogeneous and homogeneous named list types are mainly reached through annotations and coercions rather than direct inference from `list(...)`.
 
 Mixed named and unnamed elements are a type error.
+
+The default inferred type for homogeneous unnamed `list(...)` still needs a deliberate decision.
+
+For now, unnamed `list(...)` continues to infer as tuple-like, even when all element types are the same. This may be awkward for expressions such as `list(1L, 2L, 3L)[1 + 1]`.
+
+List coercions:
+
+- tuple-like lists can coerce to homogeneous `list[T]` when each tuple element is compatible with `T`
+- named lists can coerce to homogeneous `list[T]` when each field value is compatible with `T`
+- named lists can coerce to homogeneous named `list[key: value]` when each field value is compatible with `value`
+- reverse coercions are not allowed:
+  - homogeneous `list[T]` values do not coerce back into tuple-like or named values
+  - homogeneous named `list[key: value]` values do not coerce back into fixed-shape named values
 
 ### Tuple-like lists
 
@@ -243,13 +275,11 @@ Examples:
 - `list(1L, 2L, 3L)` infers as `{integer, integer, integer}`
 - `list(1L, "foo")` infers as `{integer, character}`
 
-The empty list is tuple-like:
+This caveat does not change the current semantics. It marks an area that still needs refinement.
 
-- `list()` infers as `{}`
+### Named lists
 
-### Map-like lists
-
-A `list(...)` expression with only named elements infers as map-like.
+A `list(...)` expression with only named elements infers as named.
 
 Examples:
 
@@ -308,9 +338,11 @@ The compatibility rules are:
 
 Nested nullable unions collapse internally. For example, `(T | NULL) | NULL` normalizes to `T | NULL`, and `NULL | NULL` normalizes internally to `NULL`.
 
-## `if` expressions
+## Operators
 
-### `if` without `else`
+### `if` expressions
+
+#### `if` without `else`
 
 An `if` expression without an `else` branch:
 
@@ -325,7 +357,7 @@ Examples:
 
 If the branch body already has type `NULL`, the result normalizes to `NULL`.
 
-### `if ... else`
+#### `if ... else`
 
 An `if ... else` expression:
 
@@ -341,6 +373,8 @@ Examples:
 - `if (flag) NULL else 2L` infers as `integer | NULL`
 - `if (flag) { } else { }` infers as `NULL`
 
+This construct does not use any additional coercion beyond the nullable-union rule above.
+
 It is a type error when the branches do not match and neither branch is `NULL`.
 
 Examples:
@@ -348,37 +382,194 @@ Examples:
 - `if (flag) 1L else "foo"` is a type error
 - `if (flag) c(TRUE, FALSE) else 1L` is invalid because the condition is not scalar `logical`
 
-## Coercions
+### Indexing
 
-### Tuple-like to homogeneous list
+`[[` is single-element extraction.
 
-Tuple-like lists can be coerced into homogeneous `list[...]` types when each tuple element is compatible with the target item type.
+`[` is the general subsetting operator in R. In the current supported semantics, it is defined only for certain list forms.
 
-Example:
+`$name` is syntactic sugar for `[[\"name\"]]`.
 
-```r
-#: list[integer]
-list(1L, 2L, 3L)
-```
+Backtick-quoted names follow the same rule.
 
-This is valid because `{integer, integer, integer}` can be coerced to `list[integer]`.
+#### `[[` on vectors
 
-Homogeneous list values do not coerce back into tuple-like values.
+`[[` is allowed on scalar-like, array-like, and map-like vectors and extracts a single element.
 
-### Map-like list to homogeneous keyed list
+- for a scalar-like vector `T`, `[[` returns `T`
+- for an array-like vector `T[]`, `[[` returns `T`
+- for a map-like vector `T[named]`, name-based `[[` returns `T | NULL`
 
-Map-like lists can be coerced into homogeneous keyed `list[key: value]` types when each field value is compatible with the target value type.
+Runtime indexing failures are not modeled by the type system.
 
-Example:
+#### `[[` on lists
 
-```r
-#: list[character: integer]
-list(foo = 1L, bar = 2L)
-```
+`[[` is allowed on lists.
 
-This is valid because `{foo: integer, bar: integer}` can be coerced to `list[character: integer]`.
+- for homogeneous `list[T]`, `[[` returns `T`
+- for homogeneous keyed `list[key: value]`, name-based `[[` returns `value | NULL`
 
-Homogeneous keyed list values do not coerce back into fixed-shape map-like values.
+For tuple-like lists, positional `[[` is allowed only when the index is known statically as a literal position.
+
+- if the literal position exists, the result is that element's type
+- if the position is not known statically as a literal, the access is a type error
+
+For map-like fixed-shape lists, name-based `[[` is allowed only when the field name is known statically as a literal name.
+
+- if the literal field exists, the result is that field's type
+- if the field name is not known statically as a literal, the access is a type error
+- if a literal field name is known statically and does not exist, the access is a type error
+
+Runtime indexing failures are not modeled by the type system.
+
+#### `[` on vectors
+
+`[` on vectors is not currently part of the supported operator semantics.
+
+In particular, this document does not currently define `[` for scalar-like, array-like, or map-like vectors.
+
+Use `[[` for supported vector indexing instead.
+
+#### `[` on lists
+
+`[` is currently defined only for homogeneous list shapes.
+
+Tuple-like or map-like fixed-shape list values may be used with `[` only when they can coerce to a homogeneous list shape.
+
+- for homogeneous `list[T]`, `[` returns `list[T]`
+- for homogeneous keyed `list[key: value]`, `[` returns `list[key: value]`
+
+When `[` accepts a tuple-like or fixed map-like list through coercion, the resulting type is the homogeneous list type produced by that coercion.
+
+Some indexing forms remain unsupported for now. In particular, this document does not currently define `[` on vectors, and tuple-like or fixed map-like `[[` access requires statically known literal indices or names.
+
+### Arithmetic operators
+
+For now, arithmetic operators are defined only for numeric operands:
+
+- `integer`
+- `double`
+
+Map-like vectors may participate via compatibility with array-like vectors.
+
+Arithmetic does not preserve map-likeness.
+
+#### Binary `+`, `-`, and `*`
+
+Binary `+`, `-`, and `*` use these rules:
+
+- atomic result:
+  - `integer op integer` returns `integer`
+  - if either operand is `double`, the result is `double`
+- shape result:
+  - if both operands are scalar-like, the result is scalar-like
+  - otherwise, the result is array-like
+
+Examples:
+
+- `integer + integer` returns `integer`
+- `integer - double` returns `double`
+- `double * integer[]` returns `double[]`
+- `integer[named] + integer` returns `integer[]`
+
+#### Binary `/` and `**`
+
+Binary `/` and `**` use these rules:
+
+- atomic result:
+  - always `double`
+- shape result:
+  - if both operands are scalar-like, the result is scalar-like
+  - otherwise, the result is array-like
+
+Examples:
+
+- `integer / integer` returns `double`
+- `double ** integer` returns `double`
+- `integer[] / integer` returns `double[]`
+
+#### Unary `-`
+
+Unary `-` accepts `integer` and `double`.
+
+Its result rules are:
+
+- atomic result:
+  - `-integer` returns `integer`
+  - `-double` returns `double`
+- shape result:
+  - scalar-like and array-like operands keep their shape
+  - map-like vectors may participate via compatibility with array-like vectors, and the result is array-like
+
+Examples:
+
+- `-1L` returns `integer`
+- `-c(1L, 2L)` returns `integer[]`
+- `-c(foo = 1L, bar = 2L)` returns `integer[]`
+
+### Assignment operator `<-`
+
+`name <- expr` binds `name` to the type of `expr` in the current scope.
+
+If the assignment has an attached typing annotation, the assigned expression is checked using the annotation rules from this document.
+
+The assignment expression itself has the type of the assigned expression.
+
+Later assignments in the same scope rebind the name. The new binding uses the new assigned type.
+
+Examples:
+
+- after `x <- 1L`, `x` has type `integer`
+- after `x <- 1L; x <- "foo"`, later uses of `x` have type `character`
+- `y <- (x <- 1L)` gives both `x` and `y` type `integer`
+
+### Boolean operators `&&` and `||`
+
+`&&` and `||` are defined only for scalar `logical` operands.
+
+Both operands must have type `logical`.
+
+The result type is scalar `logical`.
+
+Array-like and map-like logical vectors are not accepted.
+
+Examples:
+
+- `TRUE && FALSE` returns `logical`
+- `flag || other_flag` returns `logical`
+- `c(TRUE, FALSE) && TRUE` is a type error
+- `TRUE || c(FALSE, TRUE)` is a type error
+
+
+
+## Loops
+
+`for`, `while`, and `repeat` all evaluate to `NULL`.
+
+### `for`
+
+A `for` loop has the form `for (name in value) body`.
+
+The iteration source must be coercible to array-like iteration. This includes:
+
+- values that can coerce to array-like vectors `T[]`
+- tuple-like or map-like lists that can coerce to homogeneous `list[T]`
+
+`for` only checks whether the iteration source can be coerced to the required shape. It does not itself change the type of the iterated value outside the loop.
+
+Inside the loop body, the bound name has the iterated element type `T`.
+
+### `while`
+
+A `while` loop requires a scalar `logical` condition.
+
+The whole `while` expression evaluates to `NULL`.
+
+### `repeat`
+
+A `repeat` loop has no condition.
+
+The whole `repeat` expression evaluates to `NULL`.
 
 ## Function types
 

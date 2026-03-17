@@ -14,15 +14,13 @@ If the user says:
 Before making significant changes in this crate, review these files and keep them aligned:
 
 - `README.md`
-  - user-facing workflow and pointers
+  - human-facing crate overview and pointers
 - `SEMANTICS.md`
-  - user-facing typing semantics contract
-- `DRAFT.md`
-  - non-authoritative design draft and starting point for future semantics discussions
+  - authoritative user-facing typing semantics contract
 - `ARCHITECTURE.md`
-  - implementation contract
+  - implementation contract; currently somewhat stale while semantics are being refined
 - `TODOS.md`
-  - plan
+  - actionable plan; currently somewhat stale while semantics are being refined
 - `MEMORY.md`
   - handoff-only
 
@@ -41,10 +39,11 @@ Keep all crate documents extremely high signal:
 More specifically:
 
 - `README.md`
-  - explain user-facing workflow and testing expectations
-  - avoid implementation-status churn
+  - explain the crate to human readers and point to the authoritative documents
+  - avoid agent workflow details and implementation-status churn
 - `SEMANTICS.md`
   - keep the user-facing typing semantics concise and explicit
+  - treat it as the authoritative crate document while semantics are being refined
   - keep it in sync with fixture tests; both are part of the crate contract
   - all changes must be discussed with the user first
 - `DRAFT.md`
@@ -53,9 +52,11 @@ More specifically:
   - do not treat it as implementation authority
 - `ARCHITECTURE.md`
   - keep only durable design decisions and architectural constraints
+  - while semantics are still being refined, treat it as secondary to `SEMANTICS.md` and expect some stale sections
   - do not use it as a changelog, progress log, or session diary
 - `TODOS.md`
   - keep only actionable planned work
+  - while semantics are still being refined, expect some stale tasks and terminology until they are reconciled
   - prefer concrete unfinished tasks over narrative status
   - remove completed “next steps” once they stop helping planning
 - `MEMORY.md`
@@ -86,7 +87,7 @@ For quick crate navigation, use this rough file-to-responsibility map:
 This crate is developed collaboratively with the user.
 
 - Important design decisions must be discussed with the user before implementation.
-- If a task in `TODOS.md` is marked `(needs refinement)`, stop and discuss it before proceeding.
+- If a task in `TODOS.md` is marked `(needs refinement)`, or if a task appears stale because semantics have moved on, stop and discuss it before proceeding.
 - Do not silently lock in semantics for difficult language-design questions.
 - If user-facing semantics are unclear, discuss them with the user first and then write the resolved semantics down in `SEMANTICS.md`.
 - Prefer making uncertainty explicit over guessing.
@@ -141,6 +142,7 @@ Rules for this:
 - Prefer end-to-end tests on R snippets for user-visible behavior.
 - Prefer fixture-based tests for rendered diagnostics and normalized inference behavior.
 - Treat `SEMANTICS.md` and the fixture suite as contract documents; keep them in sync.
+- While semantics are being refined, treat `SEMANTICS.md` as the authoritative crate document over `ARCHITECTURE.md` and `TODOS.md`.
 - Do not change `SEMANTICS.md` without discussing it with the user first.
 - Treat `DRAFT.md` as non-authoritative; use it as a discussion starting point, not as permission to implement semantics silently.
 - Prefer running focused crate tests while iterating.
