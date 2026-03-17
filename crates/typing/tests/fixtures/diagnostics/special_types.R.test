@@ -45,7 +45,7 @@ error[type-error] expected `integer`, found `NULL`
 #: integer
 value <- if (flag) unsupported_value
 #++++
-error[type-error] expected `integer`, found `unknown`
+error[type-error] expected `integer`, found `Unknown`
 --> 2:1-2:34
 | value <- if (flag) unsupported_value
 

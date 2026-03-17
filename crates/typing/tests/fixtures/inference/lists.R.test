@@ -2,22 +2,22 @@
 #---- empty_list_is_empty_tuple
 list()
 #++++
-{}
+list{}
 
 #---- positional_list_is_tuple_like_even_when_homogeneous
 list(1L, 2L, 3L)
 #++++
-{integer, integer, integer}
+list{integer, integer, integer}
 
 #---- positional_list_preserves_heterogeneous_shape
 list(1L, "foo")
 #++++
-{integer, character}
+list{integer, character}
 
-#---- named_list_is_map_like
+#---- named_list_is_record_like
 list(foo = 1L, bar = "foo")
 #++++
-{foo: integer, bar: character}
+list{foo: integer, bar: character}
 
 #---- tuple_like_list_coerces_to_homogeneous_list_annotation
 #: list[integer]
@@ -27,10 +27,10 @@ value
 list[integer]
 list[integer]
 
-#---- map_like_list_coerces_to_homogeneous_keyed_list_annotation
-#: list[character: integer]
+#---- record_like_list_coerces_to_homogeneous_map_like_annotation
+#: list[named: integer]
 value <- list(foo = 1L, bar = 2L)
 value
 #++++
-list[character: integer]
-list[character: integer]
+list[named: integer]
+list[named: integer]
