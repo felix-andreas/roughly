@@ -198,48 +198,46 @@ Whether a coercion changes the resulting type depends on the construct using it.
 
 ### List shapes
 
-List types currently appear in five user-facing forms:
+List types currently appear in four user-facing forms:
 
 - tuple-like, rendered as `{T1, T2, ...}`
 - record-like, rendered as `{name: T, ...}`
+- array-like, rendered as `list[T]`
 - map-like, rendered as `list[key: value]`
-- homogeneous, rendered as `list[T]`
-- homogeneous named, rendered as `list[key: value]`
 
 `list(...)` expressions infer only structural shapes:
 
-- tuple-like, when all elements are unnamed
-- record-like, when all elements are named and their names are known statically
-- map-like, when all elements are named but their names are not known statically
+- tuple-like: when all elements are unnamed
+- record-like: when all elements are named and their names are statically known
+- array-like: when all elements are unnamed and their types are the same
+- map-like: when all elements are named but their names are not statically known
 
-Homogeneous and homogeneous named list types are mainly reached through annotations and coercions rather than direct inference from `list(...)`.
+Array-like and map-like list types are primarily produced by annotations or by coercing structural list shapes.
 
-Mixed named and unnamed elements are a type error.
+Mixing named and unnamed elements is a type error.
 
-The default inferred type for homogeneous unnamed `list(...)` still needs a deliberate decision.
-
-For now, unnamed `list(...)` continues to infer as tuple-like, even when all element types are the same. This may be awkward for expressions such as `list(1L, 2L, 3L)[1 + 1]`.
+Whether unnamed `list(...)` should infer directly as array-like is undecided. Currently, unnamed `list(...)` infers as tuple-like even when all element types are identical; this can be inconvenient for expressions such as `list(1L, 2L, 3L)[1 + 1]`.
 
 #### List coercions
 
-- tuple-like lists can coerce to homogeneous `list[T]` when each tuple element is compatible with `T`
-- record-like lists can coerce to homogeneous `list[T]` when each field value is compatible with `T`
-- map-like lists can coerce to homogeneous `list[T]` when each field value is compatible with `T`
-- record-like lists can coerce to homogeneous named `list[key: value]` when each field value is compatible with `value`
-- map-like lists can coerce to homogeneous named `list[key: value]` when each field value is compatible with `value`
+- tuple-like lists can coerce to array-like `list[T]` when each tuple element is compatible with `T`
+- record-like lists can coerce to array-like `list[T]` when each field value is compatible with `T`
+- map-like lists can coerce to array-like `list[T]` when each field value is compatible with `T`
+- record-like lists can coerce to map-like `list[key: value]` when each field value is compatible with `value`
+- map-like lists can coerce to map-like `list[key: value]` when each field value is compatible with `value`
 - reverse coercions are not allowed:
-  - homogeneous `list[T]` values do not coerce back into tuple-like, record-like, or map-like values
-  - homogeneous named `list[key: value]` values do not coerce back into fixed-shape record-like values
+  - array-like `list[T]` values do not coerce back into tuple-like, record-like, or map-like values
+  - map-like `list[key: value]` values do not coerce back into fixed-shape record-like values
 
 #### Tuple-like lists
 
-A `list(...)` expression with only unnamed elements always infers as tuple-like, even when all element types are the same.
+A `list(...)` expression with only unnamed elements infers as tuple-like, even when all element types are the same.
 
 Examples:
 
 - `list()` infers as `{}`
-- `list(1L, 2L, 3L)` infers as `{integer, integer, integer}`
-- `list(1L, "foo")` infers as `{integer, character}`
+- `list(1L, 2L, 3L)` infers as `list{integer, integer, integer}`
+- `list(1L, "foo")` infers as `list{integer, character}`
 
 This caveat does not change the current semantics. It marks an area that still needs refinement.
 
@@ -249,9 +247,15 @@ A `list(...)` expression with only named elements infers as record-like when the
 
 Examples:
 
-- `list(foo = 1L, bar = "foo")` infers as `{foo: integer, bar: character}`
+- `list(foo = 1L, bar = "foo")` infers as `list{foo: integer, bar: character}`
+
+#### Array-like lists
+
+An array-like list `list[T]` represents a list whose elements all share a common element type `T`. Array-like lists do not have fixed positional semantics and do not require element names to be statically known. They are normally introduced via annotations or by coercion from tuple-like, record-like, or map-like shapes when all values are compatible with `T`.
 
 #### Map-like lists
+
+A map-like list `list[key: value]` represents a name-keyed collection whose values all share a common value type `value`. Map-like lists do not require the set of names to be statically known and are typically produced by annotations or by coercion from structural list shapes whose element names are not statically available.
 
 A `list(...)` expression with only named elements infers as map-like when the element names are not known statically.
 
@@ -428,8 +432,8 @@ Runtime indexing failures are not modeled by the type system.
 
 `[[` is allowed on lists.
 
-- for homogeneous `list[T]`, `[[` returns `T`
-- for homogeneous keyed `list[key: value]`, name-based `[[` returns `value | NULL`
+- for array-like `list[T]`, `[[` returns `T`
+- for map-like `list[key: value]`, name-based `[[` returns `value | NULL`
 
 For tuple-like lists, positional `[[` is allowed only when the index is known statically as a literal position.
 
@@ -454,14 +458,14 @@ Use `[[` for supported vector indexing instead.
 
 #### `[` on lists
 
-`[` is currently defined only for homogeneous list shapes.
+`[` is currently defined only for array-like and map-like list shapes.
 
-Tuple-like, record-like, or map-like list values may be used with `[` only when they can coerce to a homogeneous list shape.
+Tuple-like, record-like, or map-like list values may be used with `[` only when they can coerce to an array-like or map-like list shape.
 
-- for homogeneous `list[T]`, `[` returns `list[T]`
-- for homogeneous keyed `list[key: value]`, `[` returns `list[key: value]`
+- for array-like `list[T]`, `[` returns `list[T]`
+- for map-like `list[key: value]`, `[` returns `list[key: value]`
 
-When `[` accepts a tuple-like, record-like, or map-like list through coercion, the resulting type is the homogeneous list type produced by that coercion.
+When `[` accepts a tuple-like, record-like, or map-like list through coercion, the resulting type is the array-like or map-like list type produced by that coercion.
 
 Some indexing forms remain unsupported for now. In particular, this document does not currently define `[` on vectors, and tuple-like or fixed-shape record-like `[[` access requires statically known literal indices or names.
 
@@ -567,7 +571,7 @@ Examples:
 - requires an iteration source coercible to array-like iteration
 - accepted iteration sources include:
   - values that can coerce to array-like vectors `T[]`
-  - tuple-like, record-like, or map-like lists that can coerce to homogeneous `list[T]`
+  - tuple-like, record-like, or map-like lists that can coerce to array-like `list[T]`
 - only checks whether the iteration source can be coerced to the required shape
 - does not itself change the type of the iterated value outside the loop
 - inside the loop body, the bound name has the iterated element type `T`
@@ -694,4 +698,3 @@ apply_renderer <- function(render_count, count) { render_count(count) }
 - when the checker encounters a syntactically valid construct that is not yet supported, the construct may infer as `Unknown`
 - this allows checking to continue even when the checker cannot model the construct precisely
 - whether an unsupported construct also produces a diagnostic is a construct-specific decision
-
