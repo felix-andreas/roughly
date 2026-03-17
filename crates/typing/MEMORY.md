@@ -60,6 +60,7 @@ Keep this file handoff-oriented and aggressively pruned.
   - `NULL` is the unit type and is incompatible with every other type
   - `Any` is compatible with everything
   - `Unknown` is only compatible with `Any`
+  - `Never` has no values and is compatible with everything, but implementing it is not important for v1
 - Agreed annotation forms:
   - `#: T` checked compatibility-based annotation
   - `#:? T` only allowed when inferred type is `Unknown`
@@ -82,6 +83,10 @@ Keep this file handoff-oriented and aggressively pruned.
   - `if` without `else` returns `T | NULL`
   - `if ... else` requires equal branch types unless one branch is `NULL`
   - `T` with `NULL` yields `T | NULL`
+- Open decision: unknown names should still let checking continue without cascades, but the exact semantics are unresolved. Current options to decide between are:
+  - a single user-facing `Unknown` type for unknown names, unsupported constructs, and inference gaps, with only diagnostics differing
+  - one user-facing `Unknown` type with distinct internal causes such as unresolved name vs unsupported construct to guide diagnostics and cascade control
+  - distinct user-facing unknown-like types for unresolved names and other inference gaps
 - Higher-order mismatch diagnostics still tend to report the constraint-introducing site and may render unresolved placeholders like `type1` instead of the eventual call-site type. Do not “fix” fixture expectations without deciding whether to improve diagnostic precision.
 - Some constructs from otherwise valid input still lower to `Unsupported`, and nested names inside those lowered unsupported forms are not recursively lowered.
 - Annotation implementation is still incomplete. The semantics contract is ahead of the code in several areas, including lists, unions, `if`, `Any` / `Unknown`, and assertion forms.

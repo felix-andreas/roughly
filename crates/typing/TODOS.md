@@ -32,6 +32,12 @@ Keep this document high signal.
 - [ ] Keep the scope aligned with the current v1 goals in `ARCHITECTURE.md`.
 - [ ] Discuss any important semantic change with the user before implementation.
 - [ ] Keep open questions visible until they are resolved or deliberately deferred.
+- [ ] Decide unknown-name and `Unknown` cascade semantics:
+  - [ ] Option A: unbound names produce a diagnostic and the reference expression has user-facing type `Unknown`
+  - [ ] Option B: unbound names produce a distinct internal kind of unknown for cascade control, but still render as user-facing `Unknown`
+  - [ ] Option C: separate unsupported-construct `Unknown` from unbound-name `Unknown` semantically instead of only internally
+  - [ ] Decide whether unsupported but syntactically valid constructs should explicitly infer as `Unknown` in `SEMANTICS.md`
+  - [ ] Clarify whether the function-call section should explicitly restate named / positional / optional argument rules or only rely on the function-type section
 
 ### Decision log checkpoints
 

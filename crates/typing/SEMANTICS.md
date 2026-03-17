@@ -72,11 +72,10 @@ double_count <- function(count) count + count
 
 `#: TYPE` is a checked annotation.
 
-The annotated value must be compatible with `TYPE`.
-
-This is compatibility-based, not exact-equality-based. Checked annotations may therefore allow widening where the semantics explicitly define it.
-
-If the annotation succeeds, the value is accepted through coercion when needed, and the annotated binding or expression is then treated as having type `TYPE`.
+- the annotated value must be compatible with `TYPE`
+- checking is compatibility-based, not exact-equality-based
+- checked annotations may therefore allow widening where the semantics explicitly define it
+- if the annotation succeeds, the value is accepted through coercion when needed, and the annotated binding or expression is then treated as having type `TYPE`
 
 Example:
 
@@ -91,9 +90,8 @@ This is valid because `{integer, integer, integer}` is compatible with `list[int
 
 `#:? TYPE` is an unknown-only assertion.
 
-It is allowed only when the inferred type is `Unknown`.
-
-If the checker already knows the source type, using `#:?` is an error, even if the asserted type matches that known type.
+- it is allowed only when the inferred type is `Unknown`
+- if the checker already knows the source type, using `#:?` is an error, even if the asserted type matches that known type
 
 Examples:
 
@@ -117,11 +115,10 @@ This is an error because the checker already knows the type.
 
 `#:! TYPE` is a trusted type assertion.
 
-It tells the checker to treat the annotated value as `TYPE` without requiring ordinary compatibility at that annotation site.
-
-This is the “trust me bro” escape hatch. It is similar in spirit to TypeScript’s `as`.
-
-Conceptually, `#:! TYPE` is like asserting through `Any` and then to `TYPE`, but written directly because that is more ergonomic.
+- it tells the checker to treat the annotated value as `TYPE` without requiring ordinary compatibility at that annotation site
+- this is the “trust me bro” escape hatch
+- it is similar in spirit to TypeScript’s `as`
+- conceptually, `#:! TYPE` is like asserting through `Any` and then to `TYPE`, but written directly because that is more ergonomic
 
 Examples:
 
@@ -191,7 +188,7 @@ Examples:
 - `integer[named]`
 - `double[named]`
 
-Vector coercions:
+#### Vector coercions
 
 - scalar-like vectors `T` can coerce to array-like vectors `T[]`
 - map-like vectors `T[named]` can coerce to array-like vectors `T[]`
@@ -199,54 +196,21 @@ Vector coercions:
 
 Whether a coercion changes the resulting type depends on the construct using it.
 
-## `NULL`
+### List shapes
 
-The R literal `NULL` has type `NULL`.
-
-`NULL` is the default unit type in this type system.
-
-Examples:
-
-- `NULL` infers as `NULL`
-- empty blocks infer as `NULL`
-
-`NULL` is incompatible with every other type.
-
-## `Any` and `Unknown`
-
-### `Any`
-
-`Any` is the explicit escape hatch from static type checking.
-
-Every type is compatible with `Any`, and `Any` is compatible with every type.
-
-`Any` should appear only because the user explicitly wrote it.
-
-### `Unknown`
-
-`Unknown` means the checker could not infer a more specific type.
-
-`Unknown` may arise from unsupported constructs, partially supported constructs, or insufficient type information.
-
-`Unknown` is only compatible with `Any`.
-
-`Unknown` is not compatible with ordinary concrete types, and it is not an explicit escape hatch.
-
-`Unknown` should remain visible in user-facing output and fixture expectations.
-
-## List shapes
-
-List types currently appear in four user-facing forms:
+List types currently appear in five user-facing forms:
 
 - tuple-like, rendered as `{T1, T2, ...}`
-- named, rendered as `{name: T, ...}`
+- record-like, rendered as `{name: T, ...}`
+- map-like, rendered as `list[key: value]`
 - homogeneous, rendered as `list[T]`
 - homogeneous named, rendered as `list[key: value]`
 
-`list(...)` expressions infer only the first two structural shapes:
+`list(...)` expressions infer only structural shapes:
 
 - tuple-like, when all elements are unnamed
-- named, when all elements are named
+- record-like, when all elements are named and their names are known statically
+- map-like, when all elements are named but their names are not known statically
 
 Homogeneous and homogeneous named list types are mainly reached through annotations and coercions rather than direct inference from `list(...)`.
 
@@ -256,16 +220,18 @@ The default inferred type for homogeneous unnamed `list(...)` still needs a deli
 
 For now, unnamed `list(...)` continues to infer as tuple-like, even when all element types are the same. This may be awkward for expressions such as `list(1L, 2L, 3L)[1 + 1]`.
 
-List coercions:
+#### List coercions
 
 - tuple-like lists can coerce to homogeneous `list[T]` when each tuple element is compatible with `T`
-- named lists can coerce to homogeneous `list[T]` when each field value is compatible with `T`
-- named lists can coerce to homogeneous named `list[key: value]` when each field value is compatible with `value`
+- record-like lists can coerce to homogeneous `list[T]` when each field value is compatible with `T`
+- map-like lists can coerce to homogeneous `list[T]` when each field value is compatible with `T`
+- record-like lists can coerce to homogeneous named `list[key: value]` when each field value is compatible with `value`
+- map-like lists can coerce to homogeneous named `list[key: value]` when each field value is compatible with `value`
 - reverse coercions are not allowed:
-  - homogeneous `list[T]` values do not coerce back into tuple-like or named values
-  - homogeneous named `list[key: value]` values do not coerce back into fixed-shape named values
+  - homogeneous `list[T]` values do not coerce back into tuple-like, record-like, or map-like values
+  - homogeneous named `list[key: value]` values do not coerce back into fixed-shape record-like values
 
-### Tuple-like lists
+#### Tuple-like lists
 
 A `list(...)` expression with only unnamed elements always infers as tuple-like, even when all element types are the same.
 
@@ -277,15 +243,19 @@ Examples:
 
 This caveat does not change the current semantics. It marks an area that still needs refinement.
 
-### Named lists
+#### Record-like lists
 
-A `list(...)` expression with only named elements infers as named.
+A `list(...)` expression with only named elements infers as record-like when the element names are known statically.
 
 Examples:
 
 - `list(foo = 1L, bar = "foo")` infers as `{foo: integer, bar: character}`
 
-### Mixed named and unnamed lists
+#### Map-like lists
+
+A `list(...)` expression with only named elements infers as map-like when the element names are not known statically.
+
+#### Mixed named and unnamed lists
 
 All elements in `list(...)` must be either all named or all unnamed.
 
@@ -293,9 +263,58 @@ Example:
 
 - `list(1L, bar = "foo")` is a type error
 
-## Union types
+### `NULL`
+
+- the R literal `NULL` has type `NULL`
+- `NULL` is the default unit type in this type system
+- `NULL` is incompatible with every other type
+
+Examples:
+
+- `NULL` infers as `NULL`
+- empty blocks infer as `NULL`
+
+### `Any` and `Unknown`
+
+#### `Any`
+
+- `Any` is the explicit escape hatch from static type checking
+- every type is compatible with `Any`
+- `Any` is compatible with every type
+- `Any` should appear only because the user explicitly wrote it
+
+#### `Unknown`
+
+- `Unknown` means the checker could not infer a more specific type
+- `Unknown` may arise from unsupported constructs, unresolved names, partially supported constructs, or insufficient type information
+- `Unknown` is only compatible with `Any`
+- `Unknown` is not compatible with ordinary concrete types
+- `Unknown` is not an explicit escape hatch
+- `Unknown` should remain visible in user-facing output and fixture expectations
+- `Unknown` is used to preserve progress and reduce cascading secondary diagnostics
+
+### `Never`
+
+- `Never` has no values
+- it represents expressions that do not return normally
+- `Never` is compatible with every type
+- it is useful for non-returning constructs and calls
+- it is not important to implement `Never` in v1
+
+### Union types
 
 For now, the only supported union form is a nullable union with `NULL`.
+
+- `T | NULL` and `NULL | T` mean the same thing
+- this is the nullable form of `T`, but for now it remains explicit in the surface syntax rather than being treated as implicit nullability
+- nullable union syntax is allowed anywhere a type can appear, including:
+  - variable annotations
+  - function parameters
+  - function returns
+  - compact function type annotations
+  - nested function types
+  - list and keyed-list annotations
+- only nullable unions are allowed for now
 
 Examples:
 
@@ -303,21 +322,6 @@ Examples:
 - `NULL | integer`
 - `character[] | NULL`
 - `fn(count: integer | NULL) -> character | NULL`
-
-`T | NULL` and `NULL | T` mean the same thing.
-
-This is the nullable form of `T`, but for now it remains explicit in the surface syntax rather than being treated as implicit nullability.
-
-Nullable union syntax is allowed anywhere a type can appear, including:
-
-- variable annotations
-- function parameters
-- function returns
-- compact function type annotations
-- nested function types
-- list and keyed-list annotations
-
-Only nullable unions are allowed for now.
 
 Not allowed:
 
@@ -330,13 +334,11 @@ Not allowed:
 
 ### Nullable union compatibility
 
-The compatibility rules are:
-
 - `T` is compatible with `T | NULL`
 - `NULL` is compatible with `T | NULL`
 - `T | NULL` is not compatible with plain `T`
-
-Nested nullable unions collapse internally. For example, `(T | NULL) | NULL` normalizes to `T | NULL`, and `NULL | NULL` normalizes internally to `NULL`.
+- nested nullable unions collapse internally
+- for example, `(T | NULL) | NULL` normalizes to `T | NULL`, and `NULL | NULL` normalizes internally to `NULL`
 
 ## Operators
 
@@ -344,27 +346,23 @@ Nested nullable unions collapse internally. For example, `(T | NULL) | NULL` nor
 
 #### `if` without `else`
 
-An `if` expression without an `else` branch:
-
 - requires a scalar `logical` condition
 - infers the branch body as type `T`
 - produces the result type `T | NULL`
+- if the branch body already has type `NULL`, the result normalizes to `NULL`
 
 Examples:
 
 - `if (flag) 1L` infers as `integer | NULL`
 - `if (flag) { }` infers as `NULL`
 
-If the branch body already has type `NULL`, the result normalizes to `NULL`.
-
 #### `if ... else`
-
-An `if ... else` expression:
 
 - requires a scalar `logical` condition
 - requires both branches to have the same type, unless one branch is `NULL`
 - returns the shared branch type when both branches match exactly
 - returns `T | NULL` when one branch has type `T` and the other has type `NULL`
+- does not use any additional coercion beyond the nullable-union rule above
 
 Examples:
 
@@ -373,14 +371,38 @@ Examples:
 - `if (flag) NULL else 2L` infers as `integer | NULL`
 - `if (flag) { } else { }` infers as `NULL`
 
-This construct does not use any additional coercion beyond the nullable-union rule above.
-
 It is a type error when the branches do not match and neither branch is `NULL`.
 
 Examples:
 
-- `if (flag) 1L else "foo"` is a type error
+- `if (flag) 1L else \"foo\"` is a type error
 - `if (flag) c(TRUE, FALSE) else 1L` is invalid because the condition is not scalar `logical`
+
+### Blocks
+
+- a block evaluates to the type of its last expression
+- if a block has no contents, it evaluates to `NULL`
+- if the last expression is terminated with `;`, the block evaluates to `NULL`
+- if the last expression has type `Unknown`, the block evaluates to `Unknown`
+
+### Name references
+
+- a name reference evaluates to the type currently bound to that name
+- if the name is not bound, the checker reports an unknown-name diagnostic
+- after an unknown-name diagnostic, the reference expression is treated as `Unknown` so checking can continue without cascading secondary type errors
+
+### Function calls
+
+- a function call evaluates to the callee's return type
+- if the callee expression is `Unknown`, the call evaluates to `Unknown`
+- if the callee's return type is `Unknown`, the call evaluates to `Unknown`
+- function calls also follow the named, positional, and optional parameter rules defined under `Function types`
+
+A function call is a type error when:
+
+- required arguments are missing
+- too many arguments are provided
+- an argument value is incompatible with the corresponding parameter type
 
 ### Indexing
 
@@ -414,7 +436,7 @@ For tuple-like lists, positional `[[` is allowed only when the index is known st
 - if the literal position exists, the result is that element's type
 - if the position is not known statically as a literal, the access is a type error
 
-For map-like fixed-shape lists, name-based `[[` is allowed only when the field name is known statically as a literal name.
+For fixed-shape record-like lists, name-based `[[` is allowed only when the field name is known statically as a literal name.
 
 - if the literal field exists, the result is that field's type
 - if the field name is not known statically as a literal, the access is a type error
@@ -434,14 +456,14 @@ Use `[[` for supported vector indexing instead.
 
 `[` is currently defined only for homogeneous list shapes.
 
-Tuple-like or map-like fixed-shape list values may be used with `[` only when they can coerce to a homogeneous list shape.
+Tuple-like, record-like, or map-like list values may be used with `[` only when they can coerce to a homogeneous list shape.
 
 - for homogeneous `list[T]`, `[` returns `list[T]`
 - for homogeneous keyed `list[key: value]`, `[` returns `list[key: value]`
 
-When `[` accepts a tuple-like or fixed map-like list through coercion, the resulting type is the homogeneous list type produced by that coercion.
+When `[` accepts a tuple-like, record-like, or map-like list through coercion, the resulting type is the homogeneous list type produced by that coercion.
 
-Some indexing forms remain unsupported for now. In particular, this document does not currently define `[` on vectors, and tuple-like or fixed map-like `[[` access requires statically known literal indices or names.
+Some indexing forms remain unsupported for now. In particular, this document does not currently define `[` on vectors, and tuple-like or fixed-shape record-like `[[` access requires statically known literal indices or names.
 
 ### Arithmetic operators
 
@@ -509,13 +531,11 @@ Examples:
 
 ### Assignment operator `<-`
 
-`name <- expr` binds `name` to the type of `expr` in the current scope.
-
-If the assignment has an attached typing annotation, the assigned expression is checked using the annotation rules from this document.
-
-The assignment expression itself has the type of the assigned expression.
-
-Later assignments in the same scope rebind the name. The new binding uses the new assigned type.
+- `name <- expr` binds `name` to the type of `expr` in the current scope
+- if the assignment has an attached typing annotation, the assigned expression is checked using the annotation rules from this document
+- the assignment expression itself has the type of the assigned expression
+- later assignments in the same scope rebind the name
+- the new binding uses the new assigned type
 
 Examples:
 
@@ -525,13 +545,10 @@ Examples:
 
 ### Boolean operators `&&` and `||`
 
-`&&` and `||` are defined only for scalar `logical` operands.
-
-Both operands must have type `logical`.
-
-The result type is scalar `logical`.
-
-Array-like and map-like logical vectors are not accepted.
+- `&&` and `||` are defined only for scalar `logical` operands
+- both operands must have type `logical`
+- the result type is scalar `logical`
+- array-like and map-like logical vectors are not accepted
 
 Examples:
 
@@ -540,36 +557,31 @@ Examples:
 - `c(TRUE, FALSE) && TRUE` is a type error
 - `TRUE || c(FALSE, TRUE)` is a type error
 
-
-
 ## Loops
 
 `for`, `while`, and `repeat` all evaluate to `NULL`.
 
 ### `for`
 
-A `for` loop has the form `for (name in value) body`.
-
-The iteration source must be coercible to array-like iteration. This includes:
-
-- values that can coerce to array-like vectors `T[]`
-- tuple-like or map-like lists that can coerce to homogeneous `list[T]`
-
-`for` only checks whether the iteration source can be coerced to the required shape. It does not itself change the type of the iterated value outside the loop.
-
-Inside the loop body, the bound name has the iterated element type `T`.
+- has the form `for (name in value) body`
+- requires an iteration source coercible to array-like iteration
+- accepted iteration sources include:
+  - values that can coerce to array-like vectors `T[]`
+  - tuple-like, record-like, or map-like lists that can coerce to homogeneous `list[T]`
+- only checks whether the iteration source can be coerced to the required shape
+- does not itself change the type of the iterated value outside the loop
+- inside the loop body, the bound name has the iterated element type `T`
 
 ### `while`
 
-A `while` loop requires a scalar `logical` condition.
-
-The whole `while` expression evaluates to `NULL`.
+- requires a scalar `logical` condition
+- the whole `while` expression evaluates to `NULL`
 
 ### `repeat`
 
-A `repeat` loop has no condition.
-
-The whole `repeat` expression evaluates to `NULL`.
+- has no condition
+- currently evaluates to `NULL`
+- in the future, it may infer as `Never` when the checker can infer that the loop body does not contain a `break`
 
 ## Function types
 
@@ -591,9 +603,10 @@ Expanded function annotations use these forms:
 - `@return {TYPE}`
 - `@returns {TYPE}`
 
-The bracket syntax for optional parameters follows JSDoc-style notation.
+Additional rules:
 
-If no `@return` or `@returns` annotation is provided, the function type defaults to returning `NULL`.
+- the bracket syntax for optional parameters follows JSDoc-style notation
+- if no `@return` or `@returns` annotation is provided, the function type defaults to returning `NULL`
 
 Examples:
 
@@ -618,7 +631,9 @@ Compact function annotations use a single function type:
 - `fn(name: TYPE, [optional_name]: TYPE) -> RETURN_TYPE`
 - `fn(TYPE, [TYPE]) -> RETURN_TYPE`
 
-If no return type is specified, the function type defaults to returning `NULL`.
+Additional rule:
+
+- if no return type is specified, the function type defaults to returning `NULL`
 
 Examples:
 
@@ -656,7 +671,7 @@ Optional parameters follow the same rule:
 
 ### Higher-order function types
 
-Function types may appear inside other function types.
+- function types may appear inside other function types
 
 Examples:
 
@@ -673,4 +688,10 @@ Example:
 #: @return {character}
 apply_renderer <- function(render_count, count) { render_count(count) }
 ```
+
+## Unsupported constructs
+
+- when the checker encounters a syntactically valid construct that is not yet supported, the construct may infer as `Unknown`
+- this allows checking to continue even when the checker cannot model the construct precisely
+- whether an unsupported construct also produces a diagnostic is a construct-specific decision
 
