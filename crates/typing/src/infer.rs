@@ -2,7 +2,10 @@ use {
     crate::{
         interner::Symbol,
         lower::{Expression, ExpressionId, ExpressionKind, Module},
-        types::{Atomic, CoreType, FunctionType, InferenceVariableId, RecordField, TypeScheme},
+        types::{
+            AnnotationKind, Atomic, AttachedAnnotation, CoreType, FunctionType,
+            InferenceVariableId, RecordField, SurfaceType, TypeScheme,
+        },
     },
     std::collections::{BTreeMap, BTreeSet},
     tree_sitter::Range,
@@ -97,11 +100,24 @@ impl InferenceState {
                     range: expression.range,
                     expression_id: expression.id,
                 }),
-            ExpressionKind::Assign { target, value, .. } => {
+            ExpressionKind::Block {
+                expressions,
+                has_trailing_semicolon,
+            } => self.infer_block(expressions, *has_trailing_semicolon),
+            ExpressionKind::Assign {
+                target,
+                annotation,
+                value,
+            } => {
                 let inferred_value = self.infer_expression(value)?;
-                let generalized_scheme = self.generalize(inferred_value.clone())?;
+                let binding_type = if let Some(annotation) = annotation {
+                    self.apply_annotation(annotation, inferred_value, expression)?
+                } else {
+                    inferred_value
+                };
+                let generalized_scheme = self.generalize(binding_type.clone())?;
                 self.bind_scheme(*target, generalized_scheme, expression.range);
-                Ok(inferred_value)
+                Ok(binding_type)
             }
             ExpressionKind::Function { parameters, body } => {
                 let parent_environment = self.environment.clone();
@@ -121,6 +137,22 @@ impl InferenceState {
                 self.environment = parent_environment;
                 Ok(function_type)
             }
+            ExpressionKind::If {
+                condition,
+                consequence,
+                alternative,
+            } => {
+                self.infer_if_expression(condition, consequence, alternative.as_deref(), expression)
+            }
+            ExpressionKind::For {
+                variable,
+                sequence,
+                body,
+            } => self.infer_for_expression(*variable, sequence, body, expression.range),
+            ExpressionKind::While { condition, body } => {
+                self.infer_while_expression(condition, body)
+            }
+            ExpressionKind::Repeat { body } => self.infer_repeat_expression(body),
             ExpressionKind::UnaryMinus { value } => self.infer_unary_minus(value),
             ExpressionKind::Call { callee, arguments } => {
                 if let ExpressionKind::Symbol(symbol) = &callee.kind {
@@ -170,12 +202,173 @@ impl InferenceState {
         }
     }
 
+    fn infer_block(
+        &mut self,
+        expressions: &[Expression],
+        has_trailing_semicolon: bool,
+    ) -> Result<CoreType, InferenceError> {
+        if expressions.is_empty() || has_trailing_semicolon {
+            for expression in expressions {
+                self.infer_expression(expression)?;
+            }
+            return Ok(CoreType::Null);
+        }
+
+        let mut last_type = CoreType::Null;
+        for expression in expressions {
+            last_type = self.infer_expression(expression)?;
+        }
+
+        Ok(last_type)
+    }
+
+    fn infer_if_expression(
+        &mut self,
+        condition: &Expression,
+        consequence: &Expression,
+        alternative: Option<&Expression>,
+        expression: &Expression,
+    ) -> Result<CoreType, InferenceError> {
+        self.expect_scalar_logical(condition)?;
+
+        let inferred_consequence = self.infer_expression(consequence)?;
+        let consequence_type = self.resolve(inferred_consequence)?;
+        let Some(alternative) = alternative else {
+            return Ok(nullable_type(consequence_type));
+        };
+
+        let inferred_alternative = self.infer_expression(alternative)?;
+        let alternative_type = self.resolve(inferred_alternative)?;
+        if consequence_type == alternative_type {
+            return Ok(consequence_type);
+        }
+
+        match (consequence_type, alternative_type) {
+            (CoreType::Null, other_type) | (other_type, CoreType::Null) => {
+                Ok(nullable_type(other_type))
+            }
+            (expected, actual) => Err(InferenceError::TypeMismatch {
+                expected,
+                actual,
+                range: Some(expression.range),
+                expression_id: Some(expression.id),
+            }),
+        }
+    }
+
+    fn infer_for_expression(
+        &mut self,
+        variable: Symbol,
+        sequence: &Expression,
+        body: &Expression,
+        range: Range,
+    ) -> Result<CoreType, InferenceError> {
+        let inferred_sequence = self.infer_expression(sequence)?;
+        let sequence_type = self.resolve(inferred_sequence)?;
+        let Some(item_type) = iterable_item_type(&sequence_type) else {
+            return Err(InferenceError::TypeMismatch {
+                expected: CoreType::Vector(Atomic::Integer),
+                actual: sequence_type,
+                range: Some(range),
+                expression_id: Some(sequence.id),
+            });
+        };
+
+        let previous_binding = self.environment.get(&variable).cloned();
+        self.bind_name(variable, item_type, range);
+        self.infer_expression(body)?;
+
+        if let Some(previous_binding) = previous_binding {
+            self.environment.insert(variable, previous_binding);
+        } else {
+            self.environment.remove(&variable);
+        }
+
+        Ok(CoreType::Null)
+    }
+
+    fn infer_while_expression(
+        &mut self,
+        condition: &Expression,
+        body: &Expression,
+    ) -> Result<CoreType, InferenceError> {
+        self.expect_scalar_logical(condition)?;
+        self.infer_expression(body)?;
+        Ok(CoreType::Null)
+    }
+
+    fn infer_repeat_expression(&mut self, body: &Expression) -> Result<CoreType, InferenceError> {
+        self.infer_expression(body)?;
+        Ok(CoreType::Null)
+    }
+
+    fn expect_scalar_logical(&mut self, expression: &Expression) -> Result<(), InferenceError> {
+        let inferred_type = self.infer_expression(expression)?;
+        let actual = self.resolve(inferred_type)?;
+        if actual == CoreType::Scalar(Atomic::Logical) {
+            Ok(())
+        } else {
+            Err(InferenceError::TypeMismatch {
+                expected: CoreType::Scalar(Atomic::Logical),
+                actual,
+                range: Some(expression.range),
+                expression_id: Some(expression.id),
+            })
+        }
+    }
+
+    fn apply_annotation(
+        &mut self,
+        annotation: &AttachedAnnotation,
+        inferred_type: CoreType,
+        expression: &Expression,
+    ) -> Result<CoreType, InferenceError> {
+        let expected_type = core_type_from_surface_type(&annotation.annotation.surface_type);
+        let actual_type = self.resolve(inferred_type)?;
+
+        match annotation.annotation.kind {
+            AnnotationKind::Checked => {
+                if is_compatible_with_annotation(&actual_type, &expected_type) {
+                    Ok(expected_type)
+                } else {
+                    Err(InferenceError::TypeMismatch {
+                        expected: expected_type,
+                        actual: actual_type,
+                        range: Some(expression.range),
+                        expression_id: Some(expression.id),
+                    })
+                }
+            }
+            AnnotationKind::UnknownOnly => {
+                if actual_type == CoreType::Unknown {
+                    Ok(expected_type)
+                } else {
+                    Err(InferenceError::TypeMismatch {
+                        expected: CoreType::Unknown,
+                        actual: actual_type,
+                        range: Some(expression.range),
+                        expression_id: Some(expression.id),
+                    })
+                }
+            }
+            AnnotationKind::Trusted => Ok(expected_type),
+        }
+    }
+
     pub fn resolve(&mut self, core_type: CoreType) -> Result<CoreType, InferenceError> {
         match core_type {
             CoreType::Variable(variable) => self.resolve_variable(variable),
+            CoreType::Nullable(inner_type) => {
+                let resolved_inner_type = self.resolve(*inner_type)?;
+                Ok(nullable_type(resolved_inner_type))
+            }
             CoreType::List(item_type) => {
                 let resolved_item_type = self.resolve(*item_type)?;
                 Ok(CoreType::List(Box::new(resolved_item_type)))
+            }
+            CoreType::NamedList(item_type) => {
+                let resolved_item_type = self.resolve(*item_type)?;
+                Ok(CoreType::NamedList(Box::new(resolved_item_type)))
             }
             CoreType::Record(fields) => {
                 let mut resolved_fields = Vec::with_capacity(fields.len());
@@ -274,6 +467,14 @@ impl InferenceState {
             (CoreType::Any, other_type) | (other_type, CoreType::Any) => Ok(other_type),
             (CoreType::Unknown, other_type) | (other_type, CoreType::Unknown) => Ok(other_type),
             (CoreType::Null, CoreType::Null) => Ok(CoreType::Null),
+            (CoreType::Nullable(left_type), CoreType::Nullable(right_type)) => {
+                let unified_type = self.unify_internal(*left_type, *right_type, expression)?;
+                Ok(nullable_type(unified_type))
+            }
+            (CoreType::Nullable(inner_type), CoreType::Null)
+            | (CoreType::Null, CoreType::Nullable(inner_type)) => {
+                Ok(CoreType::Nullable(inner_type))
+            }
             (CoreType::Scalar(left_atomic), CoreType::Scalar(right_atomic))
                 if left_atomic == right_atomic =>
             {
@@ -293,6 +494,11 @@ impl InferenceState {
                 let unified_item_type =
                     self.unify_internal(*left_item_type, *right_item_type, expression)?;
                 Ok(CoreType::List(Box::new(unified_item_type)))
+            }
+            (CoreType::NamedList(left_item_type), CoreType::NamedList(right_item_type)) => {
+                let unified_item_type =
+                    self.unify_internal(*left_item_type, *right_item_type, expression)?;
+                Ok(CoreType::NamedList(Box::new(unified_item_type)))
             }
             (CoreType::Tuple(left_items), CoreType::Tuple(right_items)) => {
                 self.unify_tuples(left_items, right_items, expression)
@@ -321,7 +527,9 @@ impl InferenceState {
     ) -> Result<bool, InferenceError> {
         match self.resolve(core_type.clone())? {
             CoreType::Variable(other_variable) => Ok(variable == other_variable),
+            CoreType::Nullable(inner_type) => self.occurs_in(variable, &inner_type),
             CoreType::List(item_type) => self.occurs_in(variable, &item_type),
+            CoreType::NamedList(item_type) => self.occurs_in(variable, &item_type),
             CoreType::Record(fields) => {
                 for field in fields {
                     if self.occurs_in(variable, &field.value)? {
@@ -373,7 +581,14 @@ impl InferenceState {
             BuiltinKind::Multiply => self.infer_builtin_multiply(arguments, expression).map(Some),
             BuiltinKind::Divide => self.infer_builtin_divide(arguments, expression).map(Some),
             BuiltinKind::Power => self.infer_builtin_power(arguments, expression).map(Some),
+            BuiltinKind::And => self
+                .infer_builtin_boolean_binary(arguments, expression)
+                .map(Some),
+            BuiltinKind::Or => self
+                .infer_builtin_boolean_binary(arguments, expression)
+                .map(Some),
             BuiltinKind::Combine => self.infer_builtin_combine(arguments, expression).map(Some),
+            BuiltinKind::List => self.infer_builtin_list(arguments).map(Some),
         }
     }
 
@@ -483,6 +698,25 @@ impl InferenceState {
         Ok(core_type_for_shape(shape, atomic))
     }
 
+    fn infer_builtin_boolean_binary(
+        &mut self,
+        arguments: &[crate::lower::Argument],
+        expression: &Expression,
+    ) -> Result<CoreType, InferenceError> {
+        if arguments.len() != 2 {
+            return Err(InferenceError::FunctionArityMismatch {
+                expected: 2,
+                actual: arguments.len(),
+                range: Some(expression.range),
+                expression_id: Some(expression.id),
+            });
+        }
+
+        self.expect_scalar_logical(&arguments[0].expression)?;
+        self.expect_scalar_logical(&arguments[1].expression)?;
+        Ok(CoreType::Scalar(Atomic::Logical))
+    }
+
     fn infer_builtin_combine(
         &mut self,
         arguments: &[crate::lower::Argument],
@@ -527,6 +761,49 @@ impl InferenceState {
             Ok(CoreType::NamedVector(combined_atomic))
         } else {
             Ok(CoreType::Vector(combined_atomic))
+        }
+    }
+
+    fn infer_builtin_list(
+        &mut self,
+        arguments: &[crate::lower::Argument],
+    ) -> Result<CoreType, InferenceError> {
+        if arguments.is_empty() {
+            return Ok(CoreType::Tuple(Vec::new()));
+        }
+
+        let all_arguments_are_named = arguments.iter().all(|argument| argument.name.is_some());
+        let all_arguments_are_unnamed = arguments.iter().all(|argument| argument.name.is_none());
+
+        if !(all_arguments_are_named || all_arguments_are_unnamed) {
+            return Err(InferenceError::TypeMismatch {
+                expected: CoreType::Tuple(Vec::new()),
+                actual: CoreType::Record(Vec::new()),
+                range: Some(arguments[0].expression.range),
+                expression_id: Some(arguments[0].expression.id),
+            });
+        }
+
+        if all_arguments_are_named {
+            let mut fields = Vec::with_capacity(arguments.len());
+            for argument in arguments {
+                let inferred_type = self.infer_expression(&argument.expression)?;
+                let inferred_type = self.resolve(inferred_type)?;
+                fields.push(RecordField::new(
+                    argument
+                        .name
+                        .expect("named list arguments should have names"),
+                    inferred_type,
+                ));
+            }
+            Ok(CoreType::Record(fields))
+        } else {
+            let mut items = Vec::with_capacity(arguments.len());
+            for argument in arguments {
+                let inferred_type = self.infer_expression(&argument.expression)?;
+                items.push(self.resolve(inferred_type)?);
+            }
+            Ok(CoreType::Tuple(items))
         }
     }
 
@@ -652,10 +929,16 @@ impl InferenceState {
             CoreType::Any => Ok(CoreType::Any),
             CoreType::Unknown => Ok(CoreType::Unknown),
             CoreType::Null => Ok(CoreType::Null),
+            CoreType::Nullable(inner_type) => Ok(nullable_type(
+                self.instantiate_core_type(inner_type, substitutions)?,
+            )),
             CoreType::Scalar(atomic) => Ok(CoreType::Scalar(*atomic)),
             CoreType::Vector(atomic) => Ok(CoreType::Vector(*atomic)),
             CoreType::NamedVector(atomic) => Ok(CoreType::NamedVector(*atomic)),
             CoreType::List(item_type) => Ok(CoreType::List(Box::new(
+                self.instantiate_core_type(item_type, substitutions)?,
+            ))),
+            CoreType::NamedList(item_type) => Ok(CoreType::NamedList(Box::new(
                 self.instantiate_core_type(item_type, substitutions)?,
             ))),
             CoreType::Record(fields) => {
@@ -767,8 +1050,10 @@ impl InferenceState {
             | CoreType::Scalar(_)
             | CoreType::Vector(_)
             | CoreType::NamedVector(_) => Ok(BTreeSet::new()),
+            CoreType::Nullable(inner_type) => self.free_type_variables_in_core_type(&inner_type),
             CoreType::Variable(variable) => Ok(BTreeSet::from([variable])),
             CoreType::List(item_type) => self.free_type_variables_in_core_type(&item_type),
+            CoreType::NamedList(item_type) => self.free_type_variables_in_core_type(&item_type),
             CoreType::Record(fields) => {
                 let mut free_variables = BTreeSet::new();
                 for field in fields {
@@ -999,7 +1284,10 @@ pub enum BuiltinKind {
     Multiply,
     Divide,
     Power,
+    And,
+    Or,
     Combine,
+    List,
 }
 
 fn numeric_operand_parts(core_type: &CoreType) -> Option<(OperandShape, Atomic)> {
@@ -1048,6 +1336,133 @@ fn core_type_for_shape(shape: OperandShape, atomic: Atomic) -> CoreType {
     match shape {
         OperandShape::Scalar => CoreType::Scalar(atomic),
         OperandShape::Vector => CoreType::Vector(atomic),
+    }
+}
+
+fn nullable_type(core_type: CoreType) -> CoreType {
+    match core_type {
+        CoreType::Null => CoreType::Null,
+        CoreType::Nullable(inner_type) => CoreType::Nullable(inner_type),
+        other_type => CoreType::Nullable(Box::new(other_type)),
+    }
+}
+
+fn iterable_item_type(core_type: &CoreType) -> Option<CoreType> {
+    match core_type {
+        CoreType::Scalar(atomic) | CoreType::Vector(atomic) | CoreType::NamedVector(atomic) => {
+            Some(CoreType::Scalar(*atomic))
+        }
+        CoreType::List(item_type) | CoreType::NamedList(item_type) => Some((**item_type).clone()),
+        CoreType::Tuple(items) => homogeneous_structural_item_type(items),
+        CoreType::Record(fields) => homogeneous_structural_item_type(
+            &fields
+                .iter()
+                .map(|field| field.value.clone())
+                .collect::<Vec<_>>(),
+        ),
+        _ => None,
+    }
+}
+
+fn homogeneous_structural_item_type(items: &[CoreType]) -> Option<CoreType> {
+    let first_item = items.first()?.clone();
+    if items.iter().skip(1).all(|item| *item == first_item) {
+        Some(first_item)
+    } else {
+        None
+    }
+}
+
+fn core_type_from_surface_type(surface_type: &SurfaceType) -> CoreType {
+    match surface_type {
+        SurfaceType::Any => CoreType::Any,
+        SurfaceType::Unknown => CoreType::Unknown,
+        SurfaceType::Null => CoreType::Null,
+        SurfaceType::Nullable(inner_type) => nullable_type(core_type_from_surface_type(inner_type)),
+        SurfaceType::Scalar(atomic) => CoreType::Scalar(*atomic),
+        SurfaceType::Vector(inner_type) => match core_type_from_surface_type(inner_type) {
+            CoreType::Scalar(atomic) => CoreType::Vector(atomic),
+            other_type => CoreType::List(Box::new(other_type)),
+        },
+        SurfaceType::NamedVector(inner_type) => match core_type_from_surface_type(inner_type) {
+            CoreType::Scalar(atomic) => CoreType::NamedVector(atomic),
+            other_type => CoreType::NamedList(Box::new(other_type)),
+        },
+        SurfaceType::List(item_type) => {
+            CoreType::List(Box::new(core_type_from_surface_type(item_type)))
+        }
+        SurfaceType::NamedList(item_type) => {
+            CoreType::NamedList(Box::new(core_type_from_surface_type(item_type)))
+        }
+        SurfaceType::Record(fields) => CoreType::Record(
+            fields
+                .iter()
+                .map(|field| {
+                    RecordField::new(field.name, core_type_from_surface_type(&field.value))
+                })
+                .collect(),
+        ),
+        SurfaceType::Tuple(items) => {
+            CoreType::Tuple(items.iter().map(core_type_from_surface_type).collect())
+        }
+        SurfaceType::Function(function_type) => CoreType::Function(FunctionType::new(
+            function_type
+                .parameters
+                .iter()
+                .map(core_type_from_surface_type)
+                .collect(),
+            function_type
+                .named_parameters
+                .iter()
+                .map(|parameter| {
+                    RecordField::new(
+                        parameter.name,
+                        core_type_from_surface_type(&parameter.value),
+                    )
+                })
+                .collect(),
+            core_type_from_surface_type(&function_type.return_type),
+        )),
+    }
+}
+
+fn is_compatible_with_annotation(actual_type: &CoreType, expected_type: &CoreType) -> bool {
+    if expected_type == &CoreType::Any || actual_type == &CoreType::Any {
+        return true;
+    }
+
+    if actual_type == expected_type {
+        return true;
+    }
+
+    match (actual_type, expected_type) {
+        (CoreType::Unknown, CoreType::Any) => true,
+        (CoreType::Null, CoreType::Nullable(_)) => true,
+        (other_type, CoreType::Nullable(inner_type)) => {
+            is_compatible_with_annotation(other_type, inner_type)
+        }
+        (CoreType::Scalar(actual_atomic), CoreType::Vector(expected_atomic)) => {
+            actual_atomic == expected_atomic
+        }
+        (CoreType::NamedVector(actual_atomic), CoreType::Vector(expected_atomic)) => {
+            actual_atomic == expected_atomic
+        }
+        (CoreType::Tuple(items), CoreType::List(item_type)) => items
+            .iter()
+            .all(|item| is_compatible_with_annotation(item, item_type)),
+        (CoreType::Record(fields), CoreType::List(item_type))
+        | (CoreType::Record(fields), CoreType::NamedList(item_type)) => fields
+            .iter()
+            .all(|field| is_compatible_with_annotation(&field.value, item_type)),
+        (CoreType::NamedList(actual_item_type), CoreType::List(expected_item_type))
+        | (CoreType::NamedList(actual_item_type), CoreType::NamedList(expected_item_type))
+        | (CoreType::List(actual_item_type), CoreType::List(expected_item_type)) => {
+            is_compatible_with_annotation(actual_item_type, expected_item_type)
+        }
+        (CoreType::Function(actual_function), CoreType::Function(expected_function)) => {
+            actual_function == expected_function
+        }
+        _ => false,
     }
 }
 

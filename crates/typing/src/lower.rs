@@ -1,7 +1,10 @@
 use {
     crate::{
         interner::{Interner, Symbol},
-        types::{Annotation, Atomic, AttachedAnnotation, SurfaceType},
+        types::{
+            Annotation, AnnotationKind, Atomic, AttachedAnnotation, FunctionType, RecordField,
+            SurfaceType,
+        },
     },
     tree_sitter::{Node, Range, Tree},
 };
@@ -56,6 +59,10 @@ pub enum ExpressionKind {
     Double(String),
     Character(String),
     Symbol(Symbol),
+    Block {
+        expressions: Vec<Expression>,
+        has_trailing_semicolon: bool,
+    },
     Assign {
         target: Symbol,
         annotation: Option<AttachedAnnotation>,
@@ -63,6 +70,23 @@ pub enum ExpressionKind {
     },
     Function {
         parameters: Vec<Parameter>,
+        body: Box<Expression>,
+    },
+    If {
+        condition: Box<Expression>,
+        consequence: Box<Expression>,
+        alternative: Option<Box<Expression>>,
+    },
+    For {
+        variable: Symbol,
+        sequence: Box<Expression>,
+        body: Box<Expression>,
+    },
+    While {
+        condition: Box<Expression>,
+        body: Box<Expression>,
+    },
+    Repeat {
         body: Box<Expression>,
     },
     UnaryMinus {
@@ -154,11 +178,14 @@ pub fn lower_tree(lowering_context: &mut LoweringContext, tree: &Tree, source: &
     let child_count = root.named_child_count();
     for child_index in 0..child_count {
         if let Some(child) = root.named_child(child_index) {
+            if child.kind() == "comment" {
+                continue;
+            }
             expressions.push(lower_node(lowering_context, child, source));
         }
     }
 
-    let annotations = collect_pending_annotations(source);
+    let annotations = collect_pending_annotations(lowering_context, source);
 
     attach_annotations_to_expressions(&annotations, &mut expressions);
 
@@ -178,12 +205,16 @@ pub fn lower_node(
         "integer" => ExpressionKind::Integer(node_text(node, source).to_owned()),
         "float" => ExpressionKind::Double(node_text(node, source).to_owned()),
         "string" => ExpressionKind::Character(node_text(node, source).to_owned()),
+        "braced_expression" => lower_block(lowering_context, node, source),
         "binary_operator" => lower_binary_operator(lowering_context, node, source),
         "unary_operator" => lower_unary_operator(lowering_context, node, source),
         "function_definition" => lower_function_definition(lowering_context, node, source),
+        "if_statement" => lower_if_statement(lowering_context, node, source),
+        "for_statement" => lower_for_statement(lowering_context, node, source),
+        "while_statement" => lower_while_statement(lowering_context, node, source),
+        "repeat_statement" => lower_repeat_statement(lowering_context, node, source),
         "call" => lower_call(lowering_context, node, source),
         "parenthesized_expression" => lower_wrapped_expression_kind(lowering_context, node, source),
-        "braced_expression" => lower_wrapped_expression_kind(lowering_context, node, source),
         _ => ExpressionKind::Unsupported,
     };
 
@@ -224,7 +255,7 @@ fn lower_binary_operator(
                 value: Box::new(value),
             }
         }
-        "+" | "-" | "*" | "/" | "**" => {
+        "+" | "-" | "*" | "/" | "**" | "&&" | "||" => {
             let operator_symbol = intern_node_text(lowering_context, operator, source);
             let callee = Box::new(
                 lowering_context
@@ -244,6 +275,31 @@ fn lower_binary_operator(
             ExpressionKind::Call { callee, arguments }
         }
         _ => ExpressionKind::Unsupported,
+    }
+}
+
+fn lower_block(
+    lowering_context: &mut LoweringContext,
+    node: Node<'_>,
+    source: &str,
+) -> ExpressionKind {
+    let mut expressions = Vec::new();
+
+    for child_index in 0..node.named_child_count() {
+        let Some(child) = node.named_child(child_index) else {
+            continue;
+        };
+        expressions.push(lower_node(lowering_context, child, source));
+    }
+
+    let has_trailing_semicolon = node_text(node, source)
+        .trim()
+        .strip_suffix('}')
+        .is_some_and(|prefix| prefix.trim_end().ends_with(';'));
+
+    ExpressionKind::Block {
+        expressions,
+        has_trailing_semicolon,
     }
 }
 
@@ -285,6 +341,84 @@ fn lower_function_definition(
         });
 
     ExpressionKind::Function { parameters, body }
+}
+
+fn lower_if_statement(
+    lowering_context: &mut LoweringContext,
+    node: Node<'_>,
+    source: &str,
+) -> ExpressionKind {
+    let Some(condition) = node.child_by_field_name("condition") else {
+        return ExpressionKind::Unsupported;
+    };
+    let Some(consequence) = node.child_by_field_name("consequence") else {
+        return ExpressionKind::Unsupported;
+    };
+
+    ExpressionKind::If {
+        condition: Box::new(lower_node(lowering_context, condition, source)),
+        consequence: Box::new(lower_node(lowering_context, consequence, source)),
+        alternative: node
+            .child_by_field_name("alternative")
+            .map(|alternative| Box::new(lower_node(lowering_context, alternative, source))),
+    }
+}
+
+fn lower_for_statement(
+    lowering_context: &mut LoweringContext,
+    node: Node<'_>,
+    source: &str,
+) -> ExpressionKind {
+    let Some(variable) = node.child_by_field_name("variable") else {
+        return ExpressionKind::Unsupported;
+    };
+    if variable.kind() != "identifier" {
+        return ExpressionKind::Unsupported;
+    }
+    let Some(sequence) = node.child_by_field_name("sequence") else {
+        return ExpressionKind::Unsupported;
+    };
+    let Some(body) = node.child_by_field_name("body") else {
+        return ExpressionKind::Unsupported;
+    };
+
+    ExpressionKind::For {
+        variable: intern_node_text(lowering_context, variable, source),
+        sequence: Box::new(lower_node(lowering_context, sequence, source)),
+        body: Box::new(lower_node(lowering_context, body, source)),
+    }
+}
+
+fn lower_while_statement(
+    lowering_context: &mut LoweringContext,
+    node: Node<'_>,
+    source: &str,
+) -> ExpressionKind {
+    let Some(condition) = node.child_by_field_name("condition") else {
+        return ExpressionKind::Unsupported;
+    };
+    let Some(body) = node.child_by_field_name("body") else {
+        return ExpressionKind::Unsupported;
+    };
+
+    ExpressionKind::While {
+        condition: Box::new(lower_node(lowering_context, condition, source)),
+        body: Box::new(lower_node(lowering_context, body, source)),
+    }
+}
+
+fn lower_repeat_statement(
+    lowering_context: &mut LoweringContext,
+    node: Node<'_>,
+    source: &str,
+) -> ExpressionKind {
+    let Some(body) = node.child_by_field_name("body") else {
+        return ExpressionKind::Unsupported;
+    };
+
+    ExpressionKind::Repeat {
+        body: Box::new(lower_node(lowering_context, body, source)),
+    }
 }
 
 fn lower_parameters(
@@ -413,65 +547,244 @@ fn intern_node_text(
     lowering_context.intern(node_text(node, source))
 }
 
-fn collect_pending_annotations(source: &str) -> Vec<PendingAnnotation> {
+fn collect_pending_annotations(
+    lowering_context: &mut LoweringContext,
+    source: &str,
+) -> Vec<PendingAnnotation> {
     let mut annotations = Vec::new();
 
     for (row, line) in source.lines().enumerate() {
-        if let Some(comment_index) = line.find("#:") {
-            let annotation_text = line[comment_index + 2..].trim();
-            let Some(annotation) = parse_annotation(annotation_text) else {
-                continue;
-            };
+        let trimmed_line = line.trim_start();
+        let Some(annotation_text) = trimmed_line.strip_prefix("#:") else {
+            continue;
+        };
+        let Some(annotation) = parse_annotation(lowering_context, annotation_text.trim()) else {
+            continue;
+        };
 
-            let prefix = &line[..comment_index];
-            let suffix = line
-                [comment_index + 2 + (line[comment_index + 2..].len() - annotation_text.len())..]
-                .trim();
-            let has_code_before = prefix.chars().any(|character| !character.is_whitespace());
-            let has_code_after = !suffix.is_empty();
+        let start_column = line.len() - trimmed_line.len();
+        let end_column = line.len();
 
-            if !has_code_before || has_code_after {
-                continue;
-            }
-
-            let start_column = comment_index;
-            let end_column = line.len();
-
-            annotations.push(PendingAnnotation {
-                range: Range {
-                    start_byte: 0,
-                    end_byte: 0,
-                    start_point: tree_sitter::Point {
-                        row,
-                        column: start_column,
-                    },
-                    end_point: tree_sitter::Point {
-                        row,
-                        column: end_column,
-                    },
+        annotations.push(PendingAnnotation {
+            range: Range {
+                start_byte: 0,
+                end_byte: 0,
+                start_point: tree_sitter::Point {
+                    row,
+                    column: start_column,
                 },
-                annotation,
-            });
-        }
+                end_point: tree_sitter::Point {
+                    row,
+                    column: end_column,
+                },
+            },
+            annotation,
+        });
     }
 
     annotations
 }
 
-fn parse_annotation(text: &str) -> Option<Annotation> {
-    let surface_type = match text {
-        "logical" => SurfaceType::Scalar(Atomic::Logical),
-        "integer" => SurfaceType::Scalar(Atomic::Integer),
-        "double" => SurfaceType::Scalar(Atomic::Double),
-        "character" => SurfaceType::Scalar(Atomic::Character),
-        "raw" => SurfaceType::Scalar(Atomic::Raw),
-        "null" => SurfaceType::Null,
-        "unknown" => SurfaceType::Unknown,
-        "any" => SurfaceType::Any,
-        _ => return None,
+fn parse_annotation(lowering_context: &mut LoweringContext, text: &str) -> Option<Annotation> {
+    let (kind, surface_text) = if let Some(surface_text) = text.strip_prefix('?') {
+        (AnnotationKind::UnknownOnly, surface_text.trim())
+    } else if let Some(surface_text) = text.strip_prefix('!') {
+        (AnnotationKind::Trusted, surface_text.trim())
+    } else {
+        (AnnotationKind::Checked, text.trim())
     };
 
-    Some(Annotation::new(surface_type))
+    Some(Annotation::new(
+        kind,
+        parse_surface_type(lowering_context, surface_text)?,
+    ))
+}
+
+fn parse_surface_type(lowering_context: &mut LoweringContext, text: &str) -> Option<SurfaceType> {
+    let trimmed_text = text.trim();
+
+    if let Some((left_text, right_text)) = split_once_top_level(trimmed_text, '|') {
+        let left_type = parse_surface_type(lowering_context, left_text)?;
+        let right_type = parse_surface_type(lowering_context, right_text)?;
+        return match (left_type, right_type) {
+            (SurfaceType::Null, other_type) | (other_type, SurfaceType::Null) => {
+                Some(SurfaceType::Nullable(Box::new(other_type)))
+            }
+            _ => None,
+        };
+    }
+
+    if let Some(parameters_and_return) = trimmed_text.strip_prefix("fn(") {
+        let closing_index = find_matching_closer(parameters_and_return, '(', ')')?;
+        let parameters_text = &parameters_and_return[..closing_index];
+        let trailing_text = parameters_and_return[closing_index + 1..].trim();
+        let return_type = if let Some(return_text) = trailing_text.strip_prefix("->") {
+            parse_surface_type(lowering_context, return_text.trim())?
+        } else if trailing_text.is_empty() {
+            SurfaceType::Null
+        } else {
+            return None;
+        };
+
+        let mut parameters = Vec::new();
+        let mut named_parameters = Vec::new();
+        for parameter_text in split_top_level(parameters_text, ',') {
+            if parameter_text.is_empty() {
+                continue;
+            }
+
+            if let Some((name_text, type_text)) = split_once_top_level(parameter_text, ':') {
+                let name = lowering_context.intern(name_text.trim());
+                named_parameters.push(RecordField::new(
+                    name,
+                    parse_surface_type(lowering_context, type_text)?,
+                ));
+            } else {
+                parameters.push(parse_surface_type(lowering_context, parameter_text)?);
+            }
+        }
+
+        return Some(SurfaceType::Function(FunctionType::new(
+            parameters,
+            named_parameters,
+            return_type,
+        )));
+    }
+
+    if let Some(inner_text) = trimmed_text.strip_suffix("[]") {
+        return Some(SurfaceType::Vector(Box::new(parse_surface_type(
+            lowering_context,
+            inner_text,
+        )?)));
+    }
+
+    if let Some(inner_text) = trimmed_text.strip_suffix("[named]") {
+        return Some(SurfaceType::NamedVector(Box::new(parse_surface_type(
+            lowering_context,
+            inner_text,
+        )?)));
+    }
+
+    if let Some(inner_text) = trimmed_text
+        .strip_prefix("list[")
+        .and_then(|inner_text| inner_text.strip_suffix(']'))
+    {
+        if let Some(value_text) = inner_text.strip_prefix("named:") {
+            return Some(SurfaceType::NamedList(Box::new(parse_surface_type(
+                lowering_context,
+                value_text.trim(),
+            )?)));
+        }
+        return Some(SurfaceType::List(Box::new(parse_surface_type(
+            lowering_context,
+            inner_text,
+        )?)));
+    }
+
+    if let Some(inner_text) = trimmed_text
+        .strip_prefix("list{")
+        .and_then(|inner_text| inner_text.strip_suffix('}'))
+    {
+        let mut items = Vec::new();
+        let mut fields = Vec::new();
+        let mut all_fields_are_named = true;
+
+        for item_text in split_top_level(inner_text, ',') {
+            if item_text.is_empty() {
+                continue;
+            }
+            if let Some((name_text, value_text)) = split_once_top_level(item_text, ':') {
+                let name = lowering_context.intern(name_text.trim());
+                fields.push(RecordField::new(
+                    name,
+                    parse_surface_type(lowering_context, value_text)?,
+                ));
+            } else {
+                all_fields_are_named = false;
+                items.push(parse_surface_type(lowering_context, item_text)?);
+            }
+        }
+
+        if all_fields_are_named && !fields.is_empty() {
+            return Some(SurfaceType::Record(fields));
+        }
+        if fields.is_empty() {
+            return Some(SurfaceType::Tuple(items));
+        }
+        return None;
+    }
+
+    match trimmed_text {
+        "logical" => Some(SurfaceType::Scalar(Atomic::Logical)),
+        "integer" => Some(SurfaceType::Scalar(Atomic::Integer)),
+        "double" => Some(SurfaceType::Scalar(Atomic::Double)),
+        "character" => Some(SurfaceType::Scalar(Atomic::Character)),
+        "raw" => Some(SurfaceType::Scalar(Atomic::Raw)),
+        "NULL" | "null" => Some(SurfaceType::Null),
+        "Unknown" | "unknown" => Some(SurfaceType::Unknown),
+        "Any" | "any" => Some(SurfaceType::Any),
+        _ => None,
+    }
+}
+
+fn split_top_level(text: &str, separator: char) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start_index = 0;
+    let mut depth = 0;
+
+    for (index, character) in text.char_indices() {
+        match character {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            _ => {}
+        }
+
+        if character == separator && depth == 0 {
+            parts.push(text[start_index..index].trim());
+            start_index = index + character.len_utf8();
+        }
+    }
+
+    parts.push(text[start_index..].trim());
+    parts
+}
+
+fn split_once_top_level(text: &str, separator: char) -> Option<(&str, &str)> {
+    let mut depth = 0;
+
+    for (index, character) in text.char_indices() {
+        match character {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            _ => {}
+        }
+
+        if character == separator && depth == 0 {
+            return Some((
+                text[..index].trim(),
+                text[index + character.len_utf8()..].trim(),
+            ));
+        }
+    }
+
+    None
+}
+
+fn find_matching_closer(text: &str, opener: char, closer: char) -> Option<usize> {
+    let mut depth = 1;
+
+    for (index, character) in text.char_indices() {
+        if character == opener {
+            depth += 1;
+        } else if character == closer {
+            depth -= 1;
+            if depth == 0 {
+                return Some(index);
+            }
+        }
+    }
+
+    None
 }
 
 fn attach_annotations_to_expressions(
@@ -493,7 +806,7 @@ fn trailing_top_level_expression<'a>(
 
     expressions
         .iter_mut()
-        .find(|expression| expression.range.start_point.row == annotation_row)
+        .find(|expression| expression.range.start_point.row > annotation_row)
 }
 
 fn attach_annotation_to_expression(expression: &mut Expression, annotation: &Annotation) {

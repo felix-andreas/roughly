@@ -296,11 +296,17 @@ impl<'a> TypeRenderer<'a> {
             CoreType::Any => "any".to_owned(),
             CoreType::Unknown => "unknown".to_owned(),
             CoreType::Null => "null".to_owned(),
+            CoreType::Nullable(inner_type) => {
+                format!("{} | null", self.render_core_type(inner_type))
+            }
             CoreType::Scalar(atomic) => render_atomic(*atomic).to_owned(),
             CoreType::Vector(atomic) => format!("{}[]", render_atomic(*atomic)),
             CoreType::NamedVector(atomic) => format!("{}[named]", render_atomic(*atomic)),
             CoreType::List(item_type) => {
                 format!("list[{}]", self.render_core_type(item_type))
+            }
+            CoreType::NamedList(item_type) => {
+                format!("list[named: {}]", self.render_core_type(item_type))
             }
             CoreType::Record(fields) => {
                 let rendered_fields = fields

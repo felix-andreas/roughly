@@ -176,14 +176,20 @@ fn render_inference_result(source: &str) -> String {
     let multiply_symbol = lowering_context.intern("*");
     let divide_symbol = lowering_context.intern("/");
     let power_symbol = lowering_context.intern("**");
+    let and_symbol = lowering_context.intern("&&");
+    let or_symbol = lowering_context.intern("||");
     let combine_symbol = lowering_context.intern("c");
+    let list_symbol = lowering_context.intern("list");
 
     inference_state.bind_builtin(plus_symbol, BuiltinKind::Plus);
     inference_state.bind_builtin(minus_symbol, BuiltinKind::Minus);
     inference_state.bind_builtin(multiply_symbol, BuiltinKind::Multiply);
     inference_state.bind_builtin(divide_symbol, BuiltinKind::Divide);
     inference_state.bind_builtin(power_symbol, BuiltinKind::Power);
+    inference_state.bind_builtin(and_symbol, BuiltinKind::And);
+    inference_state.bind_builtin(or_symbol, BuiltinKind::Or);
     inference_state.bind_builtin(combine_symbol, BuiltinKind::Combine);
+    inference_state.bind_builtin(list_symbol, BuiltinKind::List);
 
     match inference_state.infer_module(&module) {
         Ok(inferred_types) => {
@@ -248,10 +254,12 @@ impl<'a> SimpleTypeRenderer<'a> {
             CoreType::Any => "Any".to_owned(),
             CoreType::Unknown => "Unknown".to_owned(),
             CoreType::Null => "NULL".to_owned(),
+            CoreType::Nullable(inner_type) => format!("{} | NULL", self.render(inner_type)),
             CoreType::Scalar(atomic) => render_atomic(*atomic).to_owned(),
             CoreType::Vector(atomic) => format!("{}[]", render_atomic(*atomic)),
             CoreType::NamedVector(atomic) => format!("{}[named]", render_atomic(*atomic)),
             CoreType::List(item_type) => format!("list[{}]", self.render(item_type)),
+            CoreType::NamedList(item_type) => format!("list[named: {}]", self.render(item_type)),
             CoreType::Record(fields) => {
                 let rendered_fields = fields
                     .iter()

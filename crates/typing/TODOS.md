@@ -13,15 +13,6 @@ This document tracks actionable planned work for the `typing` crate.
 
 ## Current priorities
 
-### Semantics follow-through
-
-- [ ] Reconcile the remaining `SEMANTICS.md` gaps introduced during the recent rewrite:
-  - [ ] make the list-inference summary explicitly cover tuple-like, record-like, and map-like cases without ambiguity
-  - [ ] record the function-only scope rule explicitly if it is still missing from the semantics contract
-  - [ ] record the agreed operational behavior of `Any` where it matters for user-visible behavior, including indexing
-  - [ ] reconcile `if ... else` branch compatibility wording with the agreed widening behavior
-- [ ] Review fixture expectations after the next semantics-driven implementation changes instead of treating them as disposable snapshots.
-
 ### Lowering and representations
 
 - [ ] Lower `list(...)` in line with current semantics:

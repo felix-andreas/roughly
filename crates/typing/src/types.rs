@@ -8,9 +8,12 @@ pub enum SurfaceType {
     Any,
     Unknown,
     Null,
+    Nullable(Box<SurfaceType>),
     Scalar(Atomic),
     Vector(Box<SurfaceType>),
+    NamedVector(Box<SurfaceType>),
     List(Box<SurfaceType>),
+    NamedList(Box<SurfaceType>),
     Record(Vec<RecordField<SurfaceType>>),
     Tuple(Vec<SurfaceType>),
     Function(FunctionType<SurfaceType>),
@@ -21,10 +24,12 @@ pub enum CoreType {
     Any,
     Unknown,
     Null,
+    Nullable(Box<CoreType>),
     Scalar(Atomic),
     Vector(Atomic),
     NamedVector(Atomic),
     List(Box<CoreType>),
+    NamedList(Box<CoreType>),
     Record(Vec<RecordField<CoreType>>),
     Tuple(Vec<CoreType>),
     Function(FunctionType<CoreType>),
@@ -91,13 +96,21 @@ impl<Type> FunctionType<Type> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Annotation {
+    pub kind: AnnotationKind,
     pub surface_type: SurfaceType,
 }
 
 impl Annotation {
-    pub fn new(surface_type: SurfaceType) -> Self {
-        Self { surface_type }
+    pub fn new(kind: AnnotationKind, surface_type: SurfaceType) -> Self {
+        Self { kind, surface_type }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnnotationKind {
+    Checked,
+    UnknownOnly,
+    Trusted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
