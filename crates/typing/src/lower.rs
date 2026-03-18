@@ -58,6 +58,7 @@ pub enum ExpressionKind {
     Integer(String),
     Double(String),
     Character(String),
+    StringLiteralName(Symbol),
     Symbol(Symbol),
     Block {
         expressions: Vec<Expression>,
@@ -95,6 +96,18 @@ pub enum ExpressionKind {
     Call {
         callee: Box<Expression>,
         arguments: Vec<Argument>,
+    },
+    Subset {
+        value: Box<Expression>,
+        arguments: Vec<Argument>,
+    },
+    Subset2 {
+        value: Box<Expression>,
+        arguments: Vec<Argument>,
+    },
+    Dollar {
+        value: Box<Expression>,
+        name: Symbol,
     },
     Unsupported,
 }
@@ -214,6 +227,9 @@ pub fn lower_node(
         "while_statement" => lower_while_statement(lowering_context, node, source),
         "repeat_statement" => lower_repeat_statement(lowering_context, node, source),
         "call" => lower_call(lowering_context, node, source),
+        "subset" => lower_subset(lowering_context, node, source),
+        "subset2" => lower_subset2(lowering_context, node, source),
+        "extract_operator" => lower_extract_operator(lowering_context, node, source),
         "parenthesized_expression" => lower_wrapped_expression_kind(lowering_context, node, source),
         _ => ExpressionKind::Unsupported,
     };
@@ -476,6 +492,72 @@ fn lower_call(
     ExpressionKind::Call { callee, arguments }
 }
 
+fn lower_subset(
+    lowering_context: &mut LoweringContext,
+    node: Node<'_>,
+    source: &str,
+) -> ExpressionKind {
+    let Some(function) = node.child_by_field_name("function") else {
+        return ExpressionKind::Unsupported;
+    };
+
+    let value = Box::new(lower_node(lowering_context, function, source));
+    let arguments = node
+        .child_by_field_name("arguments")
+        .map(|arguments| lower_index_arguments(lowering_context, arguments, source))
+        .unwrap_or_default();
+
+    ExpressionKind::Subset { value, arguments }
+}
+
+fn lower_subset2(
+    lowering_context: &mut LoweringContext,
+    node: Node<'_>,
+    source: &str,
+) -> ExpressionKind {
+    let Some(function) = node.child_by_field_name("function") else {
+        return ExpressionKind::Unsupported;
+    };
+
+    let value = Box::new(lower_node(lowering_context, function, source));
+    let arguments = node
+        .child_by_field_name("arguments")
+        .map(|arguments| lower_index_arguments(lowering_context, arguments, source))
+        .unwrap_or_default();
+
+    ExpressionKind::Subset2 { value, arguments }
+}
+
+fn lower_extract_operator(
+    lowering_context: &mut LoweringContext,
+    node: Node<'_>,
+    source: &str,
+) -> ExpressionKind {
+    let Some(operator) = node.child_by_field_name("operator") else {
+        return ExpressionKind::Unsupported;
+    };
+    if operator.kind() != "$" {
+        return ExpressionKind::Unsupported;
+    }
+
+    let Some(lhs) = node.child_by_field_name("lhs") else {
+        return ExpressionKind::Unsupported;
+    };
+    let Some(rhs) = node.child_by_field_name("rhs") else {
+        return ExpressionKind::Unsupported;
+    };
+    let name = match rhs.kind() {
+        "identifier" => intern_node_text(lowering_context, rhs, source),
+        "string" => intern_string_node_content(lowering_context, rhs, source),
+        _ => return ExpressionKind::Unsupported,
+    };
+
+    ExpressionKind::Dollar {
+        value: Box::new(lower_node(lowering_context, lhs, source)),
+        name,
+    }
+}
+
 fn lower_arguments(
     lowering_context: &mut LoweringContext,
     arguments: Node<'_>,
@@ -511,6 +593,44 @@ fn lower_arguments(
     lowered_arguments
 }
 
+fn lower_index_arguments(
+    lowering_context: &mut LoweringContext,
+    arguments: Node<'_>,
+    source: &str,
+) -> Vec<Argument> {
+    let mut lowered_arguments = Vec::new();
+    let child_count = arguments.named_child_count();
+
+    for child_index in 0..child_count {
+        let Some(child) = arguments.named_child(child_index) else {
+            continue;
+        };
+
+        if child.kind() != "argument" {
+            continue;
+        }
+
+        let name = child
+            .child_by_field_name("name")
+            .filter(|name| name.kind() == "identifier")
+            .map(|name| intern_node_text(lowering_context, name, source));
+
+        let expression = match child.child_by_field_name("value") {
+            None => lowering_context.expression(child.range(), ExpressionKind::Unsupported),
+            Some(value) if value.kind() == "string" => {
+                let symbol = intern_string_node_content(lowering_context, value, source);
+                lowering_context
+                    .expression(value.range(), ExpressionKind::StringLiteralName(symbol))
+            }
+            Some(value) => lower_node(lowering_context, value, source),
+        };
+
+        lowered_arguments.push(Argument { expression, name });
+    }
+
+    lowered_arguments
+}
+
 fn lower_wrapped_expression_kind(
     lowering_context: &mut LoweringContext,
     node: Node<'_>,
@@ -539,6 +659,25 @@ fn node_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
     node.utf8_text(source.as_bytes()).unwrap_or("")
 }
 
+fn intern_string_node_content(
+    lowering_context: &mut LoweringContext,
+    node: Node<'_>,
+    source: &str,
+) -> Symbol {
+    if let Some(content) = node.child_by_field_name("content") {
+        return intern_node_text(lowering_context, content, source);
+    }
+
+    let text = node_text(node, source);
+    let Some(content) = text.strip_prefix(text.chars().next().unwrap_or('"')) else {
+        return lowering_context.intern(text);
+    };
+    let content = content
+        .strip_suffix(text.chars().last().unwrap_or('"'))
+        .unwrap_or(content);
+    lowering_context.intern(content)
+}
+
 fn intern_node_text(
     lowering_context: &mut LoweringContext,
     node: Node<'_>,
@@ -552,37 +691,158 @@ fn collect_pending_annotations(
     source: &str,
 ) -> Vec<PendingAnnotation> {
     let mut annotations = Vec::new();
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut row = 0;
 
-    for (row, line) in source.lines().enumerate() {
+    while row < lines.len() {
+        let line = lines[row];
         let trimmed_line = line.trim_start();
         let Some(annotation_text) = trimmed_line.strip_prefix("#:") else {
+            row += 1;
             continue;
         };
-        let Some(annotation) = parse_annotation(lowering_context, annotation_text.trim()) else {
-            continue;
-        };
-
+        let annotation_text = annotation_text.trim();
         let start_column = line.len() - trimmed_line.len();
-        let end_column = line.len();
 
-        annotations.push(PendingAnnotation {
-            range: Range {
-                start_byte: 0,
-                end_byte: 0,
-                start_point: tree_sitter::Point {
-                    row,
-                    column: start_column,
+        if is_expanded_function_annotation_line(annotation_text) {
+            if let Some((annotation, last_row)) =
+                parse_expanded_function_annotation(lowering_context, &lines, row)
+            {
+                annotations.push(PendingAnnotation {
+                    range: Range {
+                        start_byte: 0,
+                        end_byte: 0,
+                        start_point: tree_sitter::Point {
+                            row,
+                            column: start_column,
+                        },
+                        end_point: tree_sitter::Point {
+                            row: last_row,
+                            column: lines[last_row].len(),
+                        },
+                    },
+                    annotation,
+                });
+                row = last_row + 1;
+                continue;
+            }
+        }
+
+        if let Some(annotation) = parse_annotation(lowering_context, annotation_text) {
+            annotations.push(PendingAnnotation {
+                range: Range {
+                    start_byte: 0,
+                    end_byte: 0,
+                    start_point: tree_sitter::Point {
+                        row,
+                        column: start_column,
+                    },
+                    end_point: tree_sitter::Point {
+                        row,
+                        column: line.len(),
+                    },
                 },
-                end_point: tree_sitter::Point {
-                    row,
-                    column: end_column,
-                },
-            },
-            annotation,
-        });
+                annotation,
+            });
+        }
+
+        row += 1;
     }
 
     annotations
+}
+
+fn is_expanded_function_annotation_line(text: &str) -> bool {
+    text.starts_with("@param ") || text.starts_with("@return ") || text.starts_with("@returns ")
+}
+
+fn parse_expanded_function_annotation(
+    lowering_context: &mut LoweringContext,
+    lines: &[&str],
+    start_row: usize,
+) -> Option<(Annotation, usize)> {
+    let mut row = start_row;
+    let mut parameters = Vec::new();
+    let mut named_parameters = Vec::new();
+    let mut return_type = SurfaceType::Null;
+
+    while row < lines.len() {
+        let line = lines[row];
+        let trimmed_line = line.trim_start();
+        let Some(annotation_text) = trimmed_line.strip_prefix("#:") else {
+            break;
+        };
+        let annotation_text = annotation_text.trim();
+        if !is_expanded_function_annotation_line(annotation_text) {
+            break;
+        }
+
+        if let Some((surface_type, name_text)) =
+            parse_expanded_param_annotation(lowering_context, annotation_text)
+        {
+            let name = lowering_context.intern(&name_text);
+            named_parameters.push(RecordField::new(name, surface_type));
+        } else if let Some(surface_type) =
+            parse_expanded_return_annotation(lowering_context, annotation_text)
+        {
+            return_type = surface_type;
+        } else {
+            return None;
+        }
+
+        row += 1;
+    }
+
+    if row == start_row {
+        return None;
+    }
+
+    Some((
+        Annotation::new(
+            AnnotationKind::Checked,
+            SurfaceType::Function(FunctionType::new(
+                std::mem::take(&mut parameters),
+                named_parameters,
+                return_type,
+            )),
+        ),
+        row - 1,
+    ))
+}
+
+fn parse_expanded_param_annotation(
+    lowering_context: &mut LoweringContext,
+    text: &str,
+) -> Option<(SurfaceType, String)> {
+    let parameter_text = text.strip_prefix("@param")?.trim_start();
+    let (type_text, name_text) = parse_braced_type_and_tail(parameter_text)?;
+    Some((
+        parse_surface_type(lowering_context, type_text)?,
+        name_text.trim().to_owned(),
+    ))
+}
+
+fn parse_expanded_return_annotation(
+    lowering_context: &mut LoweringContext,
+    text: &str,
+) -> Option<SurfaceType> {
+    let return_text = text
+        .strip_prefix("@return")
+        .or_else(|| text.strip_prefix("@returns"))?
+        .trim_start();
+    let (type_text, trailing_text) = parse_braced_type_and_tail(return_text)?;
+    if !trailing_text.trim().is_empty() {
+        return None;
+    }
+    parse_surface_type(lowering_context, type_text)
+}
+
+fn parse_braced_type_and_tail(text: &str) -> Option<(&str, &str)> {
+    let inner_text = text.strip_prefix('{')?;
+    let closing_index = find_matching_closer(inner_text, '{', '}')?;
+    let type_text = &inner_text[..closing_index];
+    let trailing_text = &inner_text[closing_index + 1..];
+    Some((type_text.trim(), trailing_text))
 }
 
 fn parse_annotation(lowering_context: &mut LoweringContext, text: &str) -> Option<Annotation> {

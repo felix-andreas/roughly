@@ -1,0 +1,32 @@
+#==== scalar_types
+#---- scalar_annotation
+#: integer
+value <- 1L
+#++++
+integer
+
+#---- nullable_union_annotation
+#: integer | NULL
+value <- if (TRUE) 1L
+#++++
+integer | NULL
+
+#==== structured_types
+#---- record_like_list_annotation
+#: list{foo: integer, bar: character}
+value <- list(foo = 1L, bar = "ok")
+#++++
+list{foo: integer, bar: character}
+
+#---- compact_function_annotation
+#: fn(count: integer, label: character) -> integer
+value <- function(count, label) count
+#++++
+fn(count: integer, label: character) -> integer
+
+#---- expanded_function_annotation
+#: @param {integer} count
+#: @return {character}
+render_count <- function(count) "ok"
+#++++
+fn(count: integer) -> character

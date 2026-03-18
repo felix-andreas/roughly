@@ -1,0 +1,5 @@
+- open records?
+- scoping rules?
+- inlay hints
+- hovering
+- show error if syntax or error in type syntax

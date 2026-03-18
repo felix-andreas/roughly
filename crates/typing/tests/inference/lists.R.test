@@ -22,7 +22,7 @@ list{foo: integer, bar: character}
 #---- mixed_named_and_unnamed_list_is_rejected
 list(1L, bar = "foo")
 #++++
-error: type mismatch
+error: mixed list elements
 
 #==== list_coercions
 #---- tuple_like_list_coerces_to_array_like_annotation

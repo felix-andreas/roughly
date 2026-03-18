@@ -152,6 +152,13 @@ impl Diagnostic {
                     actual, expected
                 ),
             ),
+            InferenceError::MixedListElements {
+                range,
+                expression_id: _,
+            } => (
+                range.unwrap_or(fallback_range),
+                "All elements in `list(...)` must be either all named or all unnamed.".to_owned(),
+            ),
             InferenceError::RecordFieldMismatch {
                 expected_fields,
                 actual_fields,
@@ -293,11 +300,11 @@ impl<'a> TypeRenderer<'a> {
 
     fn render_core_type(&mut self, core_type: &CoreType) -> String {
         match core_type {
-            CoreType::Any => "any".to_owned(),
-            CoreType::Unknown => "unknown".to_owned(),
-            CoreType::Null => "null".to_owned(),
+            CoreType::Any => "Any".to_owned(),
+            CoreType::Unknown => "Unknown".to_owned(),
+            CoreType::Null => "NULL".to_owned(),
             CoreType::Nullable(inner_type) => {
-                format!("{} | null", self.render_core_type(inner_type))
+                format!("{} | NULL", self.render_core_type(inner_type))
             }
             CoreType::Scalar(atomic) => render_atomic(*atomic).to_owned(),
             CoreType::Vector(atomic) => format!("{}[]", render_atomic(*atomic)),
@@ -317,7 +324,7 @@ impl<'a> TypeRenderer<'a> {
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("record{{{rendered_fields}}}")
+                format!("list{{{rendered_fields}}}")
             }
             CoreType::Tuple(items) => {
                 let rendered_items = items
@@ -325,7 +332,7 @@ impl<'a> TypeRenderer<'a> {
                     .map(|item| self.render_core_type(item))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("tuple({rendered_items})")
+                format!("list{{{rendered_items}}}")
             }
             CoreType::Function(function_type) => {
                 let rendered_parameters = function_type

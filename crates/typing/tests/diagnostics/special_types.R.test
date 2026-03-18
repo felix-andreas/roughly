@@ -1,29 +1,29 @@
 #==== special_types
 #---- nullable_if_else_branch_mismatch
-if (flag) 1L else "foo"
+if (TRUE) 1L else "foo"
 #++++
 error[type-error] expected `integer`, found `character`
---> 1:18-1:23
-| if (flag) 1L else "foo"
+--> 1:1-1:24
+| if (TRUE) 1L else "foo"
 
 #---- nullable_if_condition_must_be_scalar_logical
 if (c(TRUE, FALSE)) 1L
 #++++
 error[type-error] expected `logical`, found `logical[]`
---> 1:5-1:20
+--> 1:5-1:19
 | if (c(TRUE, FALSE)) 1L
 
 #---- nullable_union_not_assignable_to_plain_type
 #: integer
-value <- if (flag) 1L
+value <- if (TRUE) 1L
 #++++
 error[type-error] expected `integer`, found `integer | NULL`
---> 2:1-2:23
-| value <- if (flag) 1L
+--> 2:1-2:22
+| value <- if (TRUE) 1L
 
 #---- nullable_union_allows_null_branch
 #: integer | NULL
-value <- if (flag) 1L else NULL
+value <- if (TRUE) 1L else NULL
 #++++
 No diagnostics.
 
@@ -43,11 +43,11 @@ error[type-error] expected `integer`, found `NULL`
 
 #---- unknown_not_assignable_to_plain_type
 #: integer
-value <- if (flag) unsupported_value
+value <- if (TRUE) break
 #++++
-error[type-error] expected `integer`, found `Unknown`
---> 2:1-2:34
-| value <- if (flag) unsupported_value
+error[type-error] expected `integer`, found `Unknown | NULL`
+--> 2:1-2:25
+| value <- if (TRUE) break
 
 #---- any_accepts_null
 #: Any
@@ -57,6 +57,6 @@ No diagnostics.
 
 #---- any_accepts_unknown
 #: Any
-value <- if (flag) unsupported_value
+value <- if (TRUE) break
 #++++
 No diagnostics.
