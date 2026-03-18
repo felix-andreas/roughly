@@ -17,6 +17,9 @@ test *args:
 test-docs:
     cargo test --test test_format -- --no-capture docs
 
+test-typing filter="":
+    TYPING_FILTER={{ filter }} cargo test -p typing --test test_fixtures -- --nocapture
+
 snapshot *args:
     cargo insta test --review -- --nocapture {{ args }}
 

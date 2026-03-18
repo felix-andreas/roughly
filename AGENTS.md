@@ -11,6 +11,10 @@
 * Use full words for variable names (no abbreviations like "q" for "queue")
 * Prefer importing types directly. For functions, prefer at least one module-level import instead of fully qualifying every call; fully qualified paths are still fine when needed to avoid ambiguity.
 
+# Additional Guidlines
+
+When working on the `typing` crate also read the `crates/typing/AGENTS.md` file.
+
 # Rules Hygiene
 
 The `AGENTS.md` file is read by every agent session. Keep them high-signal.
