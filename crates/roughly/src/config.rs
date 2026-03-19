@@ -86,6 +86,8 @@ impl ConfigToml {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ExperimentalFeatures {
     pub goto_references: bool,
+    pub hovering: bool,
+    pub debug: bool,
     pub range_formatting: bool,
     pub rename: bool,
     pub unused: bool,
