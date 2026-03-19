@@ -4,6 +4,7 @@ pub mod config;
 pub mod definition;
 pub mod diagnostics;
 pub mod format;
+pub mod hover;
 pub mod index;
 pub mod references;
 pub mod rename;
