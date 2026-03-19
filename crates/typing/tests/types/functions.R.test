@@ -1,0 +1,100 @@
+#==== basic_functions
+#---- null_return_by_default
+fn(integer)
+#++++
+fn(integer) -> NULL
+
+#---- positional_parameters
+fn(integer,character)->logical
+#++++
+fn(integer, character) -> logical
+
+#---- named_parameters
+fn(count:integer,label:character)->integer
+#++++
+fn(count: integer, label: character) -> integer
+
+#---- mixed_positional_and_named_parameters
+fn(integer,label:character,verbose:logical)->character
+#++++
+fn(integer, label: character, verbose: logical) -> character
+
+#---- nullable_parameter_and_return
+fn(integer | NULL)->character | NULL
+#++++
+fn(integer | NULL) -> character | NULL
+
+#==== higher_order_functions
+#---- function_parameter
+fn(fn(integer)->character)->logical
+#++++
+fn(fn(integer) -> character) -> logical
+
+#---- function_return
+fn(integer)->fn(character)->logical
+#++++
+fn(integer) -> fn(character) -> logical
+
+#---- function_parameter_and_named_parameter
+fn(fn(integer)->character,formatter:fn(character)->raw)->logical
+#++++
+fn(fn(integer) -> character, formatter: fn(character) -> raw) -> logical
+
+#---- nested_higher_order_function
+fn(fn(integer)->fn(character)->logical)->fn(raw)->double
+#++++
+fn(fn(integer) -> fn(character) -> logical) -> fn(raw) -> double
+
+#==== structured_function_types
+#---- record_parameter
+fn(list{count:integer,label:character})->logical
+#++++
+fn(list{count: integer, label: character}) -> logical
+
+#---- list_parameter_and_record_return
+fn(list[integer])->list{sum:integer,mean:double}
+#++++
+fn(list[integer]) -> list{sum: integer, mean: double}
+
+#---- named_list_parameter
+fn(payload:list[named:character])->integer
+#++++
+fn(payload: list[named: character]) -> integer
+
+#---- tuple_parameter
+fn(list{integer,character,logical})->raw
+#++++
+fn(list{integer, character, logical}) -> raw
+
+#==== expanded_annotations
+#---- expanded_single_parameter
+@param {integer} count
+@return {character}
+#++++
+fn(count: integer) -> character
+
+#---- expanded_multiple_parameters
+@param {integer} count
+@param {character} label
+@return {logical}
+#++++
+fn(count: integer, label: character) -> logical
+
+#---- expanded_returns_alias
+@param {double} value
+@returns {integer}
+#++++
+fn(value: double) -> integer
+
+#---- expanded_higher_order_parameter
+@param {fn(integer) -> character} formatter
+@param {integer} count
+@return {character}
+#++++
+fn(formatter: fn(integer) -> character, count: integer) -> character
+
+#---- expanded_structured_return
+@param {integer} count
+@return {list{value: integer, ok: logical}}
+#++++
+fn(count: integer) -> list{value: integer, ok: logical}

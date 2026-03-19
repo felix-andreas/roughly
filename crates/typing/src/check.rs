@@ -4,6 +4,7 @@ use {
         infer::{BuiltinKind, InferenceState},
         lower::LoweringContext,
         parse::{new_parser, parse},
+        surface_types::{TypeParseError, parse_annotation},
     },
     tree_sitter::Node,
 };
@@ -44,6 +45,12 @@ pub fn check(source: &str) -> CheckResult {
         return CheckResult { diagnostics };
     }
 
+    collect_annotation_diagnostics(source, &mut diagnostics);
+
+    if !diagnostics.is_empty() {
+        return CheckResult { diagnostics };
+    }
+
     let mut lowering_context = LoweringContext::new();
     let module = lowering_context.lower_tree(&tree, source);
 
@@ -66,6 +73,7 @@ pub fn check(source: &str) -> CheckResult {
     inference_state.bind_builtin(or_symbol, BuiltinKind::Or);
     inference_state.bind_builtin(combine_symbol, BuiltinKind::Combine);
     inference_state.bind_builtin(list_symbol, BuiltinKind::List);
+
     if let Err(error) = inference_state.infer_module(&module) {
         diagnostics.push(Diagnostic::from_inference_error(
             &error,
@@ -75,6 +83,124 @@ pub fn check(source: &str) -> CheckResult {
     }
 
     CheckResult { diagnostics }
+}
+
+fn collect_annotation_diagnostics(source: &str, diagnostics: &mut Vec<Diagnostic>) {
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut row = 0;
+
+    while row < lines.len() {
+        let line = lines[row];
+        let trimmed_line = line.trim_start();
+        let Some(annotation_text) = trimmed_line.strip_prefix("#:") else {
+            row += 1;
+            continue;
+        };
+
+        let annotation_text = annotation_text.trim();
+        let start_column = line.len() - trimmed_line.len();
+        let annotation_range = tree_sitter::Range {
+            start_byte: 0,
+            end_byte: 0,
+            start_point: tree_sitter::Point {
+                row,
+                column: start_column,
+            },
+            end_point: tree_sitter::Point {
+                row,
+                column: line.len(),
+            },
+        };
+
+        if annotation_text.is_empty() {
+            diagnostics.push(Diagnostic::syntax_error(
+                annotation_range,
+                "A `#:` typing comment must include a type expression.",
+            ));
+            row += 1;
+            continue;
+        }
+
+        let annotation_is_expanded = is_expanded_function_annotation_line(annotation_text);
+        let next_row = row + 1;
+        if next_row >= lines.len() {
+            diagnostics.push(Diagnostic::syntax_error(
+                annotation_range,
+                "A `#:` typing comment must be followed immediately by an expression.",
+            ));
+            row += 1;
+            continue;
+        }
+
+        let next_line = lines[next_row];
+        let next_trimmed = next_line.trim_start();
+
+        if next_trimmed.is_empty() {
+            diagnostics.push(Diagnostic::syntax_error(
+                annotation_range,
+                "A `#:` typing comment cannot be separated from its expression by an empty line.",
+            ));
+            row += 1;
+            continue;
+        }
+
+        if let Some(next_annotation_text) = next_trimmed.strip_prefix("#:") {
+            let next_annotation_text = next_annotation_text.trim();
+            let next_annotation_is_expanded =
+                is_expanded_function_annotation_line(next_annotation_text);
+
+            if !annotation_is_expanded
+                || !next_annotation_is_expanded
+                || next_annotation_text.is_empty()
+            {
+                diagnostics.push(Diagnostic::syntax_error(
+                    annotation_range,
+                    "A `#:` typing comment must be followed by an expression, not another `#:` typing comment.",
+                ));
+
+                row += 1;
+                while row < lines.len() {
+                    let skipped_line = lines[row];
+                    let skipped_trimmed_line = skipped_line.trim_start();
+                    let Some(skipped_annotation_text) = skipped_trimmed_line.strip_prefix("#:")
+                    else {
+                        break;
+                    };
+
+                    if !is_expanded_function_annotation_line(skipped_annotation_text.trim()) {
+                        break;
+                    }
+
+                    row += 1;
+                }
+
+                continue;
+            }
+        }
+
+        let mut interner = crate::Interner::new();
+        match parse_annotation(&mut interner, annotation_text) {
+            Ok(_annotation) => {}
+            Err(TypeParseError::InvalidSyntax) => {
+                diagnostics.push(Diagnostic::syntax_error(
+                    annotation_range,
+                    "Invalid type syntax in `#:` typing comment.",
+                ));
+            }
+            Err(TypeParseError::UnknownType { name }) => {
+                diagnostics.push(Diagnostic::type_error(
+                    annotation_range,
+                    format!("I could not resolve type `{name}`."),
+                ));
+            }
+        }
+
+        row += 1;
+    }
+}
+
+fn is_expanded_function_annotation_line(text: &str) -> bool {
+    text.starts_with("@param ") || text.starts_with("@return ") || text.starts_with("@returns ")
 }
 
 fn collect_syntax_errors(node: Node<'_>, source: &str, diagnostics: &mut Vec<Diagnostic>) {

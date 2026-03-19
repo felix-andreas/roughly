@@ -112,7 +112,11 @@ impl InferenceState {
             } => {
                 let inferred_value = self.infer_expression(value)?;
                 let binding_type = if let Some(annotation) = annotation {
-                    self.apply_annotation(annotation, inferred_value, expression)?
+                    if annotation.applies_to_binding {
+                        self.apply_annotation(annotation, inferred_value, expression)?
+                    } else {
+                        inferred_value
+                    }
                 } else {
                     inferred_value
                 };
@@ -337,30 +341,56 @@ impl InferenceState {
                 self.check_compatibility(*actual_item_type, *expected_item_type)
             }
             (CoreType::Function(actual_function), CoreType::Function(expected_function)) => {
-                let actual_parameters = actual_function
-                    .parameters
-                    .into_iter()
-                    .chain(
-                        actual_function
-                            .named_parameters
-                            .into_iter()
-                            .map(|parameter| parameter.value),
-                    )
-                    .collect::<Vec<_>>();
-                let expected_parameters = expected_function
-                    .parameters
-                    .into_iter()
-                    .chain(
-                        expected_function
-                            .named_parameters
-                            .into_iter()
-                            .map(|parameter| parameter.value),
-                    )
-                    .collect::<Vec<_>>();
+                let actual_positional_parameters = actual_function.parameters;
+                let actual_named_parameters = actual_function.named_parameters;
+                let expected_positional_parameters = expected_function.parameters;
+                let expected_named_parameters = expected_function.named_parameters;
 
-                if actual_parameters.len() != expected_parameters.len() {
+                if actual_named_parameters.is_empty() && expected_named_parameters.is_empty() {
+                    if actual_positional_parameters.len() != expected_positional_parameters.len() {
+                        return false;
+                    }
+
+                    for (actual_param, expected_param) in actual_positional_parameters
+                        .into_iter()
+                        .zip(expected_positional_parameters)
+                    {
+                        if !self.check_compatibility(actual_param, expected_param) {
+                            return false;
+                        }
+                    }
+
+                    return self.check_compatibility(
+                        *actual_function.return_type,
+                        *expected_function.return_type,
+                    );
+                }
+
+                let actual_parameter_count =
+                    actual_positional_parameters.len() + actual_named_parameters.len();
+                let expected_parameter_count =
+                    expected_positional_parameters.len() + expected_named_parameters.len();
+
+                if actual_parameter_count != expected_parameter_count {
                     return false;
                 }
+
+                let mut actual_parameters = Vec::with_capacity(actual_parameter_count);
+                for actual_parameter in actual_positional_parameters {
+                    actual_parameters.push(actual_parameter);
+                }
+                for actual_parameter in actual_named_parameters {
+                    actual_parameters.push(actual_parameter.value);
+                }
+
+                let mut expected_parameters = Vec::with_capacity(expected_parameter_count);
+                for expected_parameter in expected_positional_parameters {
+                    expected_parameters.push(expected_parameter);
+                }
+                for expected_parameter in expected_named_parameters {
+                    expected_parameters.push(expected_parameter.value);
+                }
+
                 for (actual_param, expected_param) in
                     actual_parameters.into_iter().zip(expected_parameters)
                 {
@@ -368,6 +398,7 @@ impl InferenceState {
                         return false;
                     }
                 }
+
                 self.check_compatibility(
                     *actual_function.return_type,
                     *expected_function.return_type,

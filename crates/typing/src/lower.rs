@@ -1,9 +1,9 @@
 use {
     crate::{
         interner::{Interner, Symbol},
+        surface_types::parse_annotation,
         types::{
-            Annotation, AnnotationKind, Atomic, AttachedAnnotation, FunctionType, RecordField,
-            SurfaceType,
+            Annotation, AnnotationKind, AttachedAnnotation, FunctionType, RecordField, SurfaceType,
         },
     },
     tree_sitter::{Node, Range, Tree},
@@ -728,7 +728,7 @@ fn collect_pending_annotations(
             }
         }
 
-        if let Some(annotation) = parse_annotation(lowering_context, annotation_text) {
+        if let Ok(annotation) = parse_annotation(lowering_context.interner_mut(), annotation_text) {
             annotations.push(PendingAnnotation {
                 range: Range {
                     start_byte: 0,
@@ -813,19 +813,26 @@ fn parse_expanded_function_annotation(
 fn parse_expanded_param_annotation(
     lowering_context: &mut LoweringContext,
     text: &str,
-) -> Option<(SurfaceType, String)> {
+) -> Option<(crate::types::SurfaceType, String)> {
     let parameter_text = text.strip_prefix("@param")?.trim_start();
     let (type_text, name_text) = parse_braced_type_and_tail(parameter_text)?;
+    let normalized_name = name_text
+        .trim()
+        .strip_prefix('[')
+        .and_then(|name| name.strip_suffix(']'))
+        .unwrap_or_else(|| name_text.trim())
+        .to_owned();
     Some((
-        parse_surface_type(lowering_context, type_text)?,
-        name_text.trim().to_owned(),
+        crate::surface_types::parse_surface_type(lowering_context.interner_mut(), type_text)
+            .ok()?,
+        normalized_name,
     ))
 }
 
 fn parse_expanded_return_annotation(
     lowering_context: &mut LoweringContext,
     text: &str,
-) -> Option<SurfaceType> {
+) -> Option<crate::types::SurfaceType> {
     let return_text = text
         .strip_prefix("@return")
         .or_else(|| text.strip_prefix("@returns"))?
@@ -834,7 +841,7 @@ fn parse_expanded_return_annotation(
     if !trailing_text.trim().is_empty() {
         return None;
     }
-    parse_surface_type(lowering_context, type_text)
+    crate::surface_types::parse_surface_type(lowering_context.interner_mut(), type_text).ok()
 }
 
 fn parse_braced_type_and_tail(text: &str) -> Option<(&str, &str)> {
@@ -843,191 +850,6 @@ fn parse_braced_type_and_tail(text: &str) -> Option<(&str, &str)> {
     let type_text = &inner_text[..closing_index];
     let trailing_text = &inner_text[closing_index + 1..];
     Some((type_text.trim(), trailing_text))
-}
-
-fn parse_annotation(lowering_context: &mut LoweringContext, text: &str) -> Option<Annotation> {
-    let (kind, surface_text) = if let Some(surface_text) = text.strip_prefix('?') {
-        (AnnotationKind::UnknownOnly, surface_text.trim())
-    } else if let Some(surface_text) = text.strip_prefix('!') {
-        (AnnotationKind::Trusted, surface_text.trim())
-    } else {
-        (AnnotationKind::Checked, text.trim())
-    };
-
-    Some(Annotation::new(
-        kind,
-        parse_surface_type(lowering_context, surface_text)?,
-    ))
-}
-
-fn parse_surface_type(lowering_context: &mut LoweringContext, text: &str) -> Option<SurfaceType> {
-    let trimmed_text = text.trim();
-
-    if let Some((left_text, right_text)) = split_once_top_level(trimmed_text, '|') {
-        let left_type = parse_surface_type(lowering_context, left_text)?;
-        let right_type = parse_surface_type(lowering_context, right_text)?;
-        return match (left_type, right_type) {
-            (SurfaceType::Null, other_type) | (other_type, SurfaceType::Null) => {
-                Some(SurfaceType::Nullable(Box::new(other_type)))
-            }
-            _ => None,
-        };
-    }
-
-    if let Some(parameters_and_return) = trimmed_text.strip_prefix("fn(") {
-        let closing_index = find_matching_closer(parameters_and_return, '(', ')')?;
-        let parameters_text = &parameters_and_return[..closing_index];
-        let trailing_text = parameters_and_return[closing_index + 1..].trim();
-        let return_type = if let Some(return_text) = trailing_text.strip_prefix("->") {
-            parse_surface_type(lowering_context, return_text.trim())?
-        } else if trailing_text.is_empty() {
-            SurfaceType::Null
-        } else {
-            return None;
-        };
-
-        let mut parameters = Vec::new();
-        let mut named_parameters = Vec::new();
-        for parameter_text in split_top_level(parameters_text, ',') {
-            if parameter_text.is_empty() {
-                continue;
-            }
-
-            if let Some((name_text, type_text)) = split_once_top_level(parameter_text, ':') {
-                let name = lowering_context.intern(name_text.trim());
-                named_parameters.push(RecordField::new(
-                    name,
-                    parse_surface_type(lowering_context, type_text)?,
-                ));
-            } else {
-                parameters.push(parse_surface_type(lowering_context, parameter_text)?);
-            }
-        }
-
-        return Some(SurfaceType::Function(FunctionType::new(
-            parameters,
-            named_parameters,
-            return_type,
-        )));
-    }
-
-    if let Some(inner_text) = trimmed_text.strip_suffix("[]") {
-        return Some(SurfaceType::Vector(Box::new(parse_surface_type(
-            lowering_context,
-            inner_text,
-        )?)));
-    }
-
-    if let Some(inner_text) = trimmed_text.strip_suffix("[named]") {
-        return Some(SurfaceType::NamedVector(Box::new(parse_surface_type(
-            lowering_context,
-            inner_text,
-        )?)));
-    }
-
-    if let Some(inner_text) = trimmed_text
-        .strip_prefix("list[")
-        .and_then(|inner_text| inner_text.strip_suffix(']'))
-    {
-        if let Some(value_text) = inner_text.strip_prefix("named:") {
-            return Some(SurfaceType::NamedList(Box::new(parse_surface_type(
-                lowering_context,
-                value_text.trim(),
-            )?)));
-        }
-        return Some(SurfaceType::List(Box::new(parse_surface_type(
-            lowering_context,
-            inner_text,
-        )?)));
-    }
-
-    if let Some(inner_text) = trimmed_text
-        .strip_prefix("list{")
-        .and_then(|inner_text| inner_text.strip_suffix('}'))
-    {
-        let mut items = Vec::new();
-        let mut fields = Vec::new();
-        let mut all_fields_are_named = true;
-
-        for item_text in split_top_level(inner_text, ',') {
-            if item_text.is_empty() {
-                continue;
-            }
-            if let Some((name_text, value_text)) = split_once_top_level(item_text, ':') {
-                let name = lowering_context.intern(name_text.trim());
-                fields.push(RecordField::new(
-                    name,
-                    parse_surface_type(lowering_context, value_text)?,
-                ));
-            } else {
-                all_fields_are_named = false;
-                items.push(parse_surface_type(lowering_context, item_text)?);
-            }
-        }
-
-        if all_fields_are_named && !fields.is_empty() {
-            return Some(SurfaceType::Record(fields));
-        }
-        if fields.is_empty() {
-            return Some(SurfaceType::Tuple(items));
-        }
-        return None;
-    }
-
-    match trimmed_text {
-        "logical" => Some(SurfaceType::Scalar(Atomic::Logical)),
-        "integer" => Some(SurfaceType::Scalar(Atomic::Integer)),
-        "double" => Some(SurfaceType::Scalar(Atomic::Double)),
-        "character" => Some(SurfaceType::Scalar(Atomic::Character)),
-        "raw" => Some(SurfaceType::Scalar(Atomic::Raw)),
-        "NULL" | "null" => Some(SurfaceType::Null),
-        "Unknown" | "unknown" => Some(SurfaceType::Unknown),
-        "Any" | "any" => Some(SurfaceType::Any),
-        _ => None,
-    }
-}
-
-fn split_top_level(text: &str, separator: char) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut start_index = 0;
-    let mut depth = 0;
-
-    for (index, character) in text.char_indices() {
-        match character {
-            '(' | '[' | '{' => depth += 1,
-            ')' | ']' | '}' => depth -= 1,
-            _ => {}
-        }
-
-        if character == separator && depth == 0 {
-            parts.push(text[start_index..index].trim());
-            start_index = index + character.len_utf8();
-        }
-    }
-
-    parts.push(text[start_index..].trim());
-    parts
-}
-
-fn split_once_top_level(text: &str, separator: char) -> Option<(&str, &str)> {
-    let mut depth = 0;
-
-    for (index, character) in text.char_indices() {
-        match character {
-            '(' | '[' | '{' => depth += 1,
-            ')' | ']' | '}' => depth -= 1,
-            _ => {}
-        }
-
-        if character == separator && depth == 0 {
-            return Some((
-                text[..index].trim(),
-                text[index + character.len_utf8()..].trim(),
-            ));
-        }
-    }
-
-    None
 }
 
 fn find_matching_closer(text: &str, opener: char, closer: char) -> Option<usize> {

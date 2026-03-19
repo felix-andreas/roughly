@@ -59,6 +59,41 @@ impl Diagnostic {
         }
     }
 
+    pub fn annotation_error(range: Range, message: impl Into<String>) -> Self {
+        Self {
+            severity: Severity::Error,
+            code: DiagnosticCode::AnnotationError,
+            message: message.into(),
+            range,
+        }
+    }
+
+    pub fn missing_annotation_target(range: Range) -> Self {
+        Self::annotation_error(
+            range,
+            "This `#:` type comment must be followed immediately by an expression.",
+        )
+    }
+
+    pub fn invalid_annotation_syntax(range: Range) -> Self {
+        Self::annotation_error(
+            range,
+            "This `#:` type comment contains invalid type syntax.",
+        )
+    }
+
+    pub fn unknown_annotation_type(range: Range, name: impl Into<String>) -> Self {
+        let name = name.into();
+        Self::annotation_error(range, format!("I could not resolve type `{name}`."))
+    }
+
+    pub fn duplicate_annotation(range: Range) -> Self {
+        Self::annotation_error(
+            range,
+            "This `#:` type comment cannot be followed by another `#:` type comment.",
+        )
+    }
+
     pub fn from_inference_error(
         error: &InferenceError,
         fallback_range: Range,
@@ -237,6 +272,7 @@ impl fmt::Display for Severity {
 pub enum DiagnosticCode {
     SyntaxError,
     TypeError,
+    AnnotationError,
 }
 
 impl fmt::Display for DiagnosticCode {
@@ -244,6 +280,7 @@ impl fmt::Display for DiagnosticCode {
         match self {
             Self::SyntaxError => formatter.write_str("syntax-error"),
             Self::TypeError => formatter.write_str("type-error"),
+            Self::AnnotationError => formatter.write_str("annotation-error"),
         }
     }
 }

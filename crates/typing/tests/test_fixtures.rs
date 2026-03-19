@@ -1,12 +1,12 @@
 use {
     std::{collections::BTreeSet, fs, path::Path},
     typing::{
-        check,
+        Interner, check,
         infer::{BuiltinKind, InferenceError, InferenceState},
-        interner::Interner,
         lower::LoweringContext,
-        new_parser, parse,
-        types::{Atomic, CoreType, InferenceVariableId, SurfaceType},
+        new_parser, parse, render_surface_type,
+        surface_types::parse_annotation,
+        types::{Atomic, CoreType, InferenceVariableId},
     },
 };
 
@@ -231,17 +231,54 @@ fn render_inference_result(source: &str) -> String {
 }
 
 fn render_type_result(source: &str) -> String {
-    let mut parser = new_parser();
-    let tree = parse(&mut parser, source, None);
+    let mut interner = Interner::new();
+    let trimmed_source = source.trim();
 
-    let mut lowering_context = LoweringContext::new();
-    let module = lowering_context.lower_tree(&tree, source);
-    let mut renderer = SurfaceTypeRenderer::new(lowering_context.interner());
+    if trimmed_source.is_empty() {
+        return String::new();
+    }
 
-    module
-        .annotations
-        .iter()
-        .map(|annotation| renderer.render(&annotation.annotation.surface_type))
+    if trimmed_source.lines().all(|line| {
+        let trimmed_line = line.trim();
+        trimmed_line.is_empty()
+            || trimmed_line.starts_with("@param ")
+            || trimmed_line.starts_with("@return ")
+            || trimmed_line.starts_with("@returns ")
+    }) {
+        let rendered_lines = trimmed_source
+            .lines()
+            .filter_map(|line| {
+                let trimmed_line = line.trim();
+                if trimmed_line.is_empty() {
+                    None
+                } else {
+                    Some(format!("#: {trimmed_line}"))
+                }
+            })
+            .collect::<Vec<_>>();
+        let annotation_text = rendered_lines.join("\n");
+        let annotation =
+            parse_annotation(&mut interner, annotation_text.as_str()).unwrap_or_else(|error| {
+                panic!("expanded type fixture should parse successfully: {error:?}")
+            });
+        return render_surface_type(&interner, &annotation.surface_type);
+    }
+
+    trimmed_source
+        .lines()
+        .filter_map(|line| {
+            let trimmed_line = line.trim();
+            if trimmed_line.is_empty() {
+                return None;
+            }
+
+            let surface_type = typing::parse_surface_type(&mut interner, trimmed_line)
+                .unwrap_or_else(|error| {
+                    panic!("type fixture should parse successfully: {error:?}")
+                });
+
+            Some(render_surface_type(&interner, &surface_type))
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -364,73 +401,6 @@ impl<'a> SimpleTypeRenderer<'a> {
             .get(&variable)
             .map(String::as_str)
             .unwrap_or("type")
-    }
-}
-
-struct SurfaceTypeRenderer<'a> {
-    interner: &'a Interner,
-}
-
-impl<'a> SurfaceTypeRenderer<'a> {
-    fn new(interner: &'a Interner) -> Self {
-        Self { interner }
-    }
-
-    fn render(&mut self, surface_type: &SurfaceType) -> String {
-        match surface_type {
-            SurfaceType::Any => "Any".to_owned(),
-            SurfaceType::Unknown => "Unknown".to_owned(),
-            SurfaceType::Null => "NULL".to_owned(),
-            SurfaceType::Nullable(inner_type) => format!("{} | NULL", self.render(inner_type)),
-            SurfaceType::Scalar(atomic) => render_atomic(*atomic).to_owned(),
-            SurfaceType::Vector(inner_type) => format!("{}[]", self.render(inner_type)),
-            SurfaceType::NamedVector(inner_type) => format!("{}[named]", self.render(inner_type)),
-            SurfaceType::List(item_type) => format!("list[{}]", self.render(item_type)),
-            SurfaceType::NamedList(item_type) => {
-                format!("list[named: {}]", self.render(item_type))
-            }
-            SurfaceType::Record(fields) => {
-                let rendered_fields = fields
-                    .iter()
-                    .map(|field| {
-                        let name = self.interner.resolve(field.name).unwrap_or("<unknown>");
-                        format!("{name}: {}", self.render(&field.value))
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("list{{{rendered_fields}}}")
-            }
-            SurfaceType::Tuple(items) => {
-                let rendered_items = items
-                    .iter()
-                    .map(|item| self.render(item))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("list{{{rendered_items}}}")
-            }
-            SurfaceType::Function(function_type) => {
-                let rendered_parameters = function_type
-                    .parameters
-                    .iter()
-                    .map(|parameter| self.render(parameter))
-                    .collect::<Vec<_>>();
-                let rendered_named_parameters = function_type
-                    .named_parameters
-                    .iter()
-                    .map(|parameter| {
-                        let name = self.interner.resolve(parameter.name).unwrap_or("<unknown>");
-                        format!("{name}: {}", self.render(&parameter.value))
-                    })
-                    .collect::<Vec<_>>();
-                let mut rendered_parts = rendered_parameters;
-                rendered_parts.extend(rendered_named_parameters);
-                format!(
-                    "fn({}) -> {}",
-                    rendered_parts.join(", "),
-                    self.render(&function_type.return_type)
-                )
-            }
-        }
     }
 }
 
