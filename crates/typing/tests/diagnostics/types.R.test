@@ -36,9 +36,33 @@ error[syntax-error] A `#:` typing comment must be followed by an expression, not
 #: list{length:
 value <- list(length = 1L)
 #++++
-error[syntax-error] Invalid type syntax in `#:` typing comment.
+error[syntax-error] invalid syntax in type expression
 --> 1:1-1:16
 | #: list{length:
+
+#---- missing_closing_paren
+#: fn(integer
+value <- function(x) x
+#++++
+error[syntax-error] missing closing delimiter )
+--> 1:1-1:14
+| #: fn(integer
+
+#---- missing_closing_bracket
+#: list[integer
+value <- list(1L)
+#++++
+error[syntax-error] invalid syntax in type expression
+--> 1:1-1:16
+| #: list[integer
+
+#---- missing_closing_brace
+#: list{value: integer
+value <- list(value = 1L)
+#++++
+error[syntax-error] invalid syntax in type expression
+--> 1:1-1:23
+| #: list{value: integer
 
 #---- unknown_type
 #: user_id
@@ -69,15 +93,23 @@ error[syntax-error] A `#:` typing comment cannot be separated from its expressio
 #: @param {list{length:} count
 render <- function(count) count
 #++++
-error[syntax-error] Invalid type syntax in `#:` typing comment.
+error[syntax-error] invalid syntax in type expression
 --> 1:1-1:31
 | #: @param {list{length:} count
+
+#---- expanded_missing_closing_brace
+#: @param {list{length: integer} count
+render <- function(count) count
+#++++
+error[syntax-error] invalid syntax in type expression
+--> 1:1-1:39
+| #: @param {list{length: integer} count
 
 #---- expanded_unknown_type
 #: @param {user_id} count
 render <- function(count) count
 #++++
-error[syntax-error] Invalid type syntax in `#:` typing comment.
+error[syntax-error] invalid syntax in type expression
 --> 1:1-1:26
 | #: @param {user_id} count
 

@@ -178,8 +178,8 @@ where
             let rendered_trimmed = rendered.trim_end();
             if rendered_trimmed != case.expected {
                 failures.push(format!(
-                    "fixture `{}` failed:\n{}\n",
-                    snapshot_name, rendered_trimmed
+                    "fixture `{snapshot_name}` failed\nexpected:\n{}\n\nactual:\n{}\n",
+                    case.expected, rendered_trimmed
                 ));
             }
         }
@@ -238,25 +238,53 @@ fn render_type_result(source: &str) -> String {
         return String::new();
     }
 
+    if let Some(expected_parse_error) = trimmed_source.strip_prefix("error:") {
+        let normalized_source = expected_parse_error
+            .lines()
+            .skip(1)
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if normalized_source.is_empty() {
+            return "fixture error: type fixture parse-error case must include source after `error:`"
+                .to_owned();
+        }
+
+        return match parse_surface_type(&mut interner, &normalized_source) {
+            Ok(surface_type) => format!(
+                "fixture error: expected parse error\nsource:\n{normalized_source}\nparsed as: {}",
+                render_surface_type(&interner, &surface_type)
+            ),
+            Err(error) => format!("{error:?}"),
+        };
+    }
+
     if trimmed_source.lines().any(|line| {
         let trimmed_line = line.trim();
         trimmed_line.starts_with("@param ")
             || trimmed_line.starts_with("@return ")
             || trimmed_line.starts_with("@returns ")
     }) {
-        let surface_type = parse_expanded_block_surface_type(&mut interner, trimmed_source)
-            .unwrap_or_else(|error| {
-                panic!("expanded type fixture should parse successfully: {error:?}")
-            });
-        return render_surface_type(&interner, &surface_type);
+        return match parse_expanded_block_surface_type(&mut interner, trimmed_source) {
+            Ok(surface_type) => render_surface_type(&interner, &surface_type),
+            Err(error) => {
+                format!("parse error: {error:?}\nsource:\n{trimmed_source}")
+            }
+        };
     }
 
-    let surface_type = parse_surface_type(&mut interner, trimmed_source).unwrap_or_else(|error| {
-        panic!(
-            "type fixture should parse successfully for source:\n{trimmed_source}\nerror: {error:?}"
-        )
-    });
-    render_surface_type(&interner, &surface_type)
+    let normalized_source = trimmed_source
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    match parse_surface_type(&mut interner, &normalized_source) {
+        Ok(surface_type) => render_surface_type(&interner, &surface_type),
+        Err(error) => format!("parse error: {error:?}\nsource:\n{trimmed_source}"),
+    }
 }
 
 fn render_inferred_types(

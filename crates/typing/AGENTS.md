@@ -140,7 +140,11 @@ Rules for this:
 
 - Keep changes test-driven.
 - Prefer end-to-end tests on R snippets for user-visible behavior.
-- Prefer fixture-based tests for rendered diagnostics and normalized inference behavior.
+- Prefer fixture-based tests for rendered diagnostics, normalized inference behavior, and type-syntax contract coverage whenever the behavior can be expressed as a fixture.
+- For parser and type-syntax debugging, prefer focused `tests/types/*.R.test` cases as the default loop.
+- Prefer adding or narrowing fixtures before parser-local unit tests unless the behavior is parser machinery that is awkward to express through fixture syntax.
+- Use the lightest fixture change that captures the failing shape.
+- Run focused fixture cases with `TYPING_FILTER=group__case cargo test -p typing --test test_fixtures types -- --nocapture`.
 - Treat `SEMANTICS.md` and the fixture suite as contract documents; keep them in sync.
 - While semantics are being refined, treat `SEMANTICS.md` as the authoritative crate document over `ARCHITECTURE.md` and `TODOS.md`.
 - Do not change `SEMANTICS.md` without discussing it with the user first.

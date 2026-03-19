@@ -181,11 +181,8 @@ fn collect_annotation_diagnostics(source: &str, diagnostics: &mut Vec<Diagnostic
         let mut interner = crate::Interner::new();
         match parse_annotation(&mut interner, annotation_text) {
             Ok(_annotation) => {}
-            Err(TypeParseError::InvalidSyntax) => {
-                diagnostics.push(Diagnostic::syntax_error(
-                    annotation_range,
-                    "Invalid type syntax in `#:` typing comment.",
-                ));
+            Err(TypeParseError::InvalidSyntax { message }) => {
+                diagnostics.push(Diagnostic::syntax_error(annotation_range, message));
             }
             Err(TypeParseError::UnknownType { name }) => {
                 diagnostics.push(Diagnostic::type_error(

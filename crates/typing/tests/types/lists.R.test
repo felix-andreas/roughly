@@ -86,6 +86,11 @@ list[named:list{integer,character}]
 #++++
 list[named: list{integer, character}]
 
+#---- standalone_named_list_of_tuple_like_lists_subexpression
+list[named:list{integer,character}]
+#++++
+list[named: list{integer, character}]
+
 #---- named_list_of_record_like_lists
 list[named:list{length:integer,label:character}]
 #++++
@@ -95,6 +100,36 @@ list[named: list{length: integer, label: character}]
 list[named:fn(integer)->character]
 #++++
 list[named: fn(integer) -> character]
+
+#---- nested_named_list_inside_record_field_shape
+list{items:list[named:list{integer,character}]}
+#++++
+list{items: list[named: list{integer, character}]}
+
+#---- sibling_record_field_after_named_list_field_shape
+list{items:list[named:list{integer,character}],render:fn(integer)->list{label:character}}
+#++++
+list{items: list[named: list{integer, character}], render: fn(integer) -> list{label: character}}
+
+#---- nested_render_field_shape
+list{meta:list{render:fn(integer)->list{label:character}}}
+#++++
+list{meta: list{render: fn(integer) -> list{label: character}}}
+
+#---- named_list_field_before_sibling_inside_nested_record_shape
+list{meta:list{items:list[named:list{integer,character}],render:character}}
+#++++
+list{meta: list{items: list[named: list{integer, character}], render: character}}
+
+#---- named_list_field_before_function_sibling_inside_nested_record_shape
+list{meta:list{items:list[named:list{integer,character}],render:fn(integer)->character}}
+#++++
+list{meta: list{items: list[named: list{integer, character}], render: fn(integer) -> character}}
+
+#---- named_list_with_nullable_element_before_sibling_inside_nested_record_shape
+list{meta:list{items:list[named:character|NULL],render:character}}
+#++++
+list{meta: list{items: list[named: character | NULL], render: character}}
 
 #==== record_like_lists
 #---- simple_record_like_list
@@ -142,7 +177,23 @@ list{meta:list{items:list[named:list{integer,character}},render:fn(integer)->lis
 #++++
 list{meta: list{items: list[named: list{integer, character}], render: fn(integer) -> list{label: character}}}
 
+#---- deeply_nested_record_like_list_without_function_sibling
+list{meta:list{items:list[named:list{integer,character}],render:character}}
+#++++
+list{meta: list{items: list[named: list{integer, character}], render: character}}
+
+#---- deeply_nested_record_like_list_with_tuple_like_inner_value
+list{meta:list{items:list[named:list{integer,character}}}}
+#++++
+list{meta: list{items: list[named: list{integer, character}]}}
+
 #---- function_returning_record_inside_record_field
 list{render:fn(integer)->list{label:character}}
 #++++
 list{render: fn(integer) -> list{label: character}}
+
+#---- malformed_missing_inner_named_list_closing_bracket_before_sibling
+error:
+list{meta:list{items:list[named:list{integer,character},render:character}}
+#++++
+InvalidSyntax { message: "missing closing delimiter ] (while parsing field `items`) (while parsing field `meta`)" }
