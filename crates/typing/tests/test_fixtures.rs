@@ -5,10 +5,22 @@ use {
         infer::{BuiltinKind, InferenceError, InferenceState},
         lower::LoweringContext,
         new_parser, parse, render_surface_type,
-        surface_types::parse_annotation,
+        type_syntax::{parse_expanded_block_surface_type, parse_surface_type},
         types::{Atomic, CoreType, InferenceVariableId},
     },
 };
+
+#[test]
+fn type_fixture_harness_handles_compact_nested_record_and_function_syntax() {
+    let rendered = render_type_result(
+        "list{meta:list{items:list[named:list{integer,character}},render:fn(integer)->list{label:character}}}",
+    );
+
+    assert_eq!(
+        rendered,
+        "list{meta: list{items: list[named: list{integer, character}], render: fn(integer) -> list{label: character}}}"
+    );
+}
 
 #[test]
 fn diagnostics() {
@@ -238,30 +250,17 @@ fn render_type_result(source: &str) -> String {
         return String::new();
     }
 
-    if trimmed_source.lines().all(|line| {
+    if trimmed_source.lines().any(|line| {
         let trimmed_line = line.trim();
-        trimmed_line.is_empty()
-            || trimmed_line.starts_with("@param ")
+        trimmed_line.starts_with("@param ")
             || trimmed_line.starts_with("@return ")
             || trimmed_line.starts_with("@returns ")
     }) {
-        let rendered_lines = trimmed_source
-            .lines()
-            .filter_map(|line| {
-                let trimmed_line = line.trim();
-                if trimmed_line.is_empty() {
-                    None
-                } else {
-                    Some(format!("#: {trimmed_line}"))
-                }
-            })
-            .collect::<Vec<_>>();
-        let annotation_text = rendered_lines.join("\n");
-        let annotation =
-            parse_annotation(&mut interner, annotation_text.as_str()).unwrap_or_else(|error| {
+        let surface_type = parse_expanded_block_surface_type(&mut interner, trimmed_source)
+            .unwrap_or_else(|error| {
                 panic!("expanded type fixture should parse successfully: {error:?}")
             });
-        return render_surface_type(&interner, &annotation.surface_type);
+        return render_surface_type(&interner, &surface_type);
     }
 
     trimmed_source
@@ -272,10 +271,13 @@ fn render_type_result(source: &str) -> String {
                 return None;
             }
 
-            let surface_type = typing::parse_surface_type(&mut interner, trimmed_line)
-                .unwrap_or_else(|error| {
-                    panic!("type fixture should parse successfully: {error:?}")
-                });
+            let surface_type = parse_surface_type(&mut interner, trimmed_line).unwrap_or_else(
+                |error| {
+                    panic!(
+                        "type fixture should parse successfully for line `{trimmed_line}`: {error:?}"
+                    )
+                },
+            );
 
             Some(render_surface_type(&interner, &surface_type))
         })

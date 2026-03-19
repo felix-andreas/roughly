@@ -46,69 +46,14 @@ pub fn parse_annotation(
         return Err(TypeParseError::InvalidSyntax);
     }
 
-    // Expanded-block form: multiple lines each prefixed with "#:"
-    // Example:
-    // "#: @param {integer} count\n#: @return {character}"
-    if trimmed_text.lines().all(|l| l.trim().starts_with("#:")) {
-        // Debug: print expanded annotation blocks to help diagnose test failures
-        // Raw block dump to make it easy to copy/paste into debugging output
-        eprintln!(
-            "parse_annotation received expanded block (raw):\n<START>\n{}\n<END>",
-            trimmed_text
-        );
-        // Print each line with its index and trimmed content for detailed inspection
-        for (i, l) in trimmed_text.lines().enumerate() {
-            eprintln!("expanded line {}: {:?}", i, l.trim());
-        }
-        // Provide a short hint about the next parsing step so logs are more actionable
-        eprintln!("attempting to parse expanded @param/@return entries from the block");
-
-        let mut named_parameters = Vec::new();
-        let mut return_type = SurfaceType::Null;
-
-        for line in trimmed_text.lines() {
-            let trimmed_line = line.trim();
-            let Some(content) = trimmed_line.strip_prefix("#:") else {
-                return Err(TypeParseError::InvalidSyntax);
-            };
-            let content = content.trim();
-
-            if let Some(param_text) = content.strip_prefix("@param") {
-                // parse "@param {type} name"
-                let (type_text, name_text) = parse_braced_type_and_tail(param_text.trim())
-                    .ok_or(TypeParseError::InvalidSyntax)?;
-                let normalized_name = name_text
-                    .trim()
-                    .strip_prefix('[')
-                    .and_then(|s| s.strip_suffix(']'))
-                    .unwrap_or(name_text.trim());
-                let name = interner.intern(normalized_name);
-                let surface_type = parse_surface_type(interner, type_text)?;
-                named_parameters.push(RecordField::new(name, surface_type));
-            } else if content.starts_with("@return") || content.starts_with("@returns") {
-                // parse "@return {type}" or "@returns {type}"
-                let return_text = if let Some(r) = content.strip_prefix("@return") {
-                    r.trim()
-                } else {
-                    content.trim_start_matches("@returns").trim()
-                };
-                let (type_text, trailing_text) =
-                    parse_braced_type_and_tail(return_text).ok_or(TypeParseError::InvalidSyntax)?;
-                if !trailing_text.trim().is_empty() {
-                    return Err(TypeParseError::InvalidSyntax);
-                }
-                return_type = parse_surface_type(interner, type_text)?;
-            } else {
-                return Err(TypeParseError::InvalidSyntax);
-            }
-        }
-
-        let function_surface =
-            SurfaceType::Function(FunctionType::new(Vec::new(), named_parameters, return_type));
-
+    if trimmed_text
+        .lines()
+        .all(|line| line.trim().is_empty() || line.trim().starts_with("#:"))
+    {
+        let surface_type = parse_expanded_block_surface_type(interner, trimmed_text)?;
         return Ok(crate::types::Annotation::new(
             AnnotationKind::Checked,
-            function_surface,
+            surface_type,
         ));
     }
 
@@ -122,16 +67,6 @@ pub fn parse_annotation(
 
     let surface_type = parse_surface_type_inner(interner, surface_text)?;
     Ok(crate::types::Annotation::new(kind, surface_type))
-}
-
-// Helper used to parse forms like "{integer} name" returning (type_text, tail)
-// Mirrors the behaviour expected by expanded annotation parsing elsewhere.
-fn parse_braced_type_and_tail(text: &str) -> Option<(&str, &str)> {
-    let inner_text = text.strip_prefix('{')?;
-    let closing_index = find_matching_closer(inner_text, '{', '}')?;
-    let type_text = &inner_text[..closing_index];
-    let trailing_text = &inner_text[closing_index + 1..];
-    Some((type_text.trim(), trailing_text))
 }
 
 pub fn render_surface_type(interner: &Interner, surface_type: &SurfaceType) -> String {
@@ -149,7 +84,7 @@ fn annotation_surface_text(text: &str) -> Option<&str> {
     }
 }
 
-fn parse_surface_type_inner(
+pub fn parse_expanded_block_surface_type(
     interner: &mut Interner,
     text: &str,
 ) -> Result<SurfaceType, TypeParseError> {
@@ -159,15 +94,63 @@ fn parse_surface_type_inner(
         return Err(TypeParseError::InvalidSyntax);
     }
 
-    if let Some((left_text, right_text)) = split_once_top_level(trimmed_text, '|') {
-        let left_type = parse_surface_type_inner(interner, left_text)?;
-        let right_type = parse_surface_type_inner(interner, right_text)?;
-        return match (left_type, right_type) {
-            (SurfaceType::Null, other_type) | (other_type, SurfaceType::Null) => {
-                Ok(SurfaceType::Nullable(Box::new(other_type)))
-            }
-            _ => Err(TypeParseError::InvalidSyntax),
+    let mut named_parameters = Vec::new();
+    let mut return_type = SurfaceType::Null;
+
+    for line in trimmed_text.lines() {
+        let trimmed_line = line.trim();
+        if trimmed_line.is_empty() {
+            continue;
+        }
+        let content = if let Some(content) = trimmed_line.strip_prefix("#:") {
+            content.trim()
+        } else {
+            trimmed_line
         };
+
+        if let Some(parameter_text) = content.strip_prefix("@param") {
+            let (type_text, name_text) = parse_braced_type_and_tail(parameter_text.trim())
+                .ok_or(TypeParseError::InvalidSyntax)?;
+            let normalized_name = name_text
+                .trim()
+                .strip_prefix('[')
+                .and_then(|name| name.strip_suffix(']'))
+                .unwrap_or(name_text.trim());
+            let name = interner.intern(normalized_name);
+            let surface_type = parse_surface_type(interner, type_text)?;
+            named_parameters.push(RecordField::new(name, surface_type));
+        } else if content.starts_with("@returns") || content.starts_with("@return") {
+            let return_text = if let Some(return_text) = content.strip_prefix("@returns") {
+                return_text.trim()
+            } else {
+                content.trim_start_matches("@return").trim()
+            };
+            let (type_text, trailing_text) =
+                parse_braced_type_and_tail(return_text).ok_or(TypeParseError::InvalidSyntax)?;
+            if !trailing_text.trim().is_empty() {
+                return Err(TypeParseError::InvalidSyntax);
+            }
+            return_type = parse_surface_type(interner, type_text)?;
+        } else {
+            return Err(TypeParseError::InvalidSyntax);
+        }
+    }
+
+    Ok(SurfaceType::Function(FunctionType::new(
+        Vec::new(),
+        named_parameters,
+        return_type,
+    )))
+}
+
+fn parse_surface_type_inner(
+    interner: &mut Interner,
+    text: &str,
+) -> Result<SurfaceType, TypeParseError> {
+    let trimmed_text = text.trim();
+
+    if trimmed_text.is_empty() {
+        return Err(TypeParseError::InvalidSyntax);
     }
 
     if let Some(parameters_and_return) = trimmed_text.strip_prefix("fn(") {
@@ -269,6 +252,17 @@ fn parse_surface_type_inner(
         }
 
         return Ok(SurfaceType::Tuple(items));
+    }
+
+    if let Some((left_text, right_text)) = split_once_top_level(trimmed_text, '|') {
+        let left_type = parse_surface_type_inner(interner, left_text)?;
+        let right_type = parse_surface_type_inner(interner, right_text)?;
+        return match (left_type, right_type) {
+            (SurfaceType::Null, other_type) | (other_type, SurfaceType::Null) => {
+                Ok(SurfaceType::Nullable(Box::new(other_type)))
+            }
+            _ => Err(TypeParseError::InvalidSyntax),
+        };
     }
 
     if let Some(inner_text) = trimmed_text.strip_suffix("[named]") {
@@ -391,6 +385,14 @@ fn find_matching_closer(text: &str, opener: char, closer: char) -> Option<usize>
     None
 }
 
+fn parse_braced_type_and_tail(text: &str) -> Option<(&str, &str)> {
+    let inner_text = text.strip_prefix('{')?;
+    let closing_index = find_matching_closer(inner_text, '{', '}')?;
+    let type_text = &inner_text[..closing_index];
+    let trailing_text = &inner_text[closing_index + 1..];
+    Some((type_text.trim(), trailing_text))
+}
+
 struct SurfaceTypeRenderer<'a> {
     interner: &'a Interner,
 }
@@ -466,5 +468,52 @@ fn render_atomic(atomic: Atomic) -> &'static str {
         Atomic::Complex => "complex",
         Atomic::Character => "character",
         Atomic::Raw => "raw",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::{parse_surface_type, render_surface_type},
+        crate::interner::Interner,
+    };
+
+    #[test]
+    fn parses_named_list_of_tuple_like_lists() {
+        let mut interner = Interner::new();
+        let surface_type =
+            parse_surface_type(&mut interner, "list[named:list{integer,character}]").unwrap();
+        assert_eq!(
+            render_surface_type(&interner, &surface_type),
+            "list[named: list{integer, character}]"
+        );
+    }
+
+    #[test]
+    fn parses_function_returning_record_inside_record_field() {
+        let mut interner = Interner::new();
+        let surface_type = parse_surface_type(
+            &mut interner,
+            "list{render:fn(integer)->list{label:character}}",
+        )
+        .unwrap();
+        assert_eq!(
+            render_surface_type(&interner, &surface_type),
+            "list{render: fn(integer) -> list{label: character}}"
+        );
+    }
+
+    #[test]
+    fn parses_nested_named_list_and_function_record_case() {
+        let mut interner = Interner::new();
+        let surface_type = parse_surface_type(
+            &mut interner,
+            "list{meta:list{items:list[named:list{integer,character}],render:fn(integer)->list{label:character}}}",
+        )
+        .unwrap();
+        assert_eq!(
+            render_surface_type(&interner, &surface_type),
+            "list{meta: list{items: list[named: list{integer, character}], render: fn(integer) -> list{label: character}}}"
+        );
     }
 }

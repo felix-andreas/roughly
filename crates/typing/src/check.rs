@@ -4,7 +4,7 @@ use {
         infer::{BuiltinKind, InferenceState},
         lower::LoweringContext,
         parse::{new_parser, parse},
-        surface_types::{TypeParseError, parse_annotation},
+        type_syntax::{TypeParseError, parse_annotation},
     },
     tree_sitter::Node,
 };

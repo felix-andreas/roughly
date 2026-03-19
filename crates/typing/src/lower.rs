@@ -1,7 +1,7 @@
 use {
     crate::{
         interner::{Interner, Symbol},
-        surface_types::parse_annotation,
+        type_syntax::parse_annotation,
         types::{
             Annotation, AnnotationKind, AttachedAnnotation, FunctionType, RecordField, SurfaceType,
         },
@@ -823,8 +823,7 @@ fn parse_expanded_param_annotation(
         .unwrap_or_else(|| name_text.trim())
         .to_owned();
     Some((
-        crate::surface_types::parse_surface_type(lowering_context.interner_mut(), type_text)
-            .ok()?,
+        crate::type_syntax::parse_surface_type(lowering_context.interner_mut(), type_text).ok()?,
         normalized_name,
     ))
 }
@@ -841,7 +840,7 @@ fn parse_expanded_return_annotation(
     if !trailing_text.trim().is_empty() {
         return None;
     }
-    crate::surface_types::parse_surface_type(lowering_context.interner_mut(), type_text).ok()
+    crate::type_syntax::parse_surface_type(lowering_context.interner_mut(), type_text).ok()
 }
 
 fn parse_braced_type_and_tail(text: &str) -> Option<(&str, &str)> {
