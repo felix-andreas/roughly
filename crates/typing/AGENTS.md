@@ -125,17 +125,6 @@ Use `MEMORY.md` to preserve important continuity between sessions, especially wh
 
 `MEMORY.md` is for handoff memory, not for replacing the design contract or task tracker.
 
-## External sparring partner
-
-If there is a difficult design decision to make, or after a large amount of implementation churn, it can be useful to use Gemini CLI as a sparring partner for reflection or comparison.
-
-Rules for this:
-
-- ask the user for permission first
-- do not use Gemini CLI without explicit user approval
-- use it as a discussion/sanity-check aid, not as a replacement for the crate's documented design process
-- after using it, fold any relevant conclusions back into `ARCHITECTURE.md`, `TODOS.md`, or `MEMORY.md` as appropriate
-
 ## Practical workflow reminders
 
 - Keep changes test-driven.

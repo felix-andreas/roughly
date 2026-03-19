@@ -2,9 +2,11 @@ use {
     indoc::indoc,
     tree_sitter::{Point, Range},
     typing::{
+        Interner,
         interner::Symbol,
         lower::{ExpressionKind, LoweringContext},
         new_parser, parse,
+        type_syntax::parse_surface_type,
         types::{
             Atomic, CoreType, FunctionType, InferenceVariableId, RecordField, SurfaceType,
             TypeScheme,
@@ -221,6 +223,115 @@ fn core_type_can_store_an_inference_variable() {
     let core_type = CoreType::Variable(InferenceVariableId(7));
 
     assert_eq!(core_type, CoreType::Variable(InferenceVariableId(7)));
+}
+
+#[test]
+fn parse_surface_type_supports_named_list_with_tuple_like_inner_value() {
+    let mut interner = Interner::new();
+
+    let surface_type = parse_surface_type(&mut interner, "list[named:list{integer,character}]")
+        .expect("nested named list type should parse");
+
+    assert_eq!(
+        surface_type,
+        SurfaceType::NamedList(Box::new(SurfaceType::Tuple(vec![
+            SurfaceType::Scalar(Atomic::Integer),
+            SurfaceType::Scalar(Atomic::Character),
+        ])))
+    );
+}
+
+#[test]
+fn parse_surface_type_supports_named_list_inside_record_field() {
+    let mut interner = Interner::new();
+    let items = interner.intern("items");
+
+    let surface_type = parse_surface_type(
+        &mut interner,
+        "list{items:list[named:list{integer,character}]}",
+    )
+    .expect("record containing nested named list type should parse");
+
+    assert_eq!(
+        surface_type,
+        SurfaceType::Record(vec![RecordField::new(
+            items,
+            SurfaceType::NamedList(Box::new(SurfaceType::Tuple(vec![
+                SurfaceType::Scalar(Atomic::Integer),
+                SurfaceType::Scalar(Atomic::Character),
+            ]))),
+        )])
+    );
+}
+
+#[test]
+fn parse_surface_type_supports_exact_failing_deeply_nested_record_like_list() {
+    let mut interner = Interner::new();
+    let meta = interner.intern("meta");
+    let items = interner.intern("items");
+    let render = interner.intern("render");
+    let label = interner.intern("label");
+
+    let surface_type = parse_surface_type(
+        &mut interner,
+        "list{meta:list{items:list[named:list{integer,character}],render:fn(integer)->list{label:character}}}",
+    )
+    .expect("deeply nested named list type should parse");
+
+    assert_eq!(
+        surface_type,
+        SurfaceType::Record(vec![RecordField::new(
+            meta,
+            SurfaceType::Record(vec![
+                RecordField::new(
+                    items,
+                    SurfaceType::NamedList(Box::new(SurfaceType::Tuple(vec![
+                        SurfaceType::Scalar(Atomic::Integer),
+                        SurfaceType::Scalar(Atomic::Character),
+                    ]))),
+                ),
+                RecordField::new(
+                    render,
+                    SurfaceType::Function(FunctionType::new(
+                        vec![SurfaceType::Scalar(Atomic::Integer)],
+                        Vec::new(),
+                        SurfaceType::Record(vec![RecordField::new(
+                            label,
+                            SurfaceType::Scalar(Atomic::Character),
+                        )]),
+                    )),
+                ),
+            ]),
+        )])
+    );
+}
+
+#[test]
+fn parse_surface_type_supports_exact_failing_deeply_nested_record_like_list_with_tuple_like_inner_value()
+ {
+    let mut interner = Interner::new();
+    let meta = interner.intern("meta");
+    let items = interner.intern("items");
+
+    let surface_type = parse_surface_type(
+        &mut interner,
+        "list{meta:list{items:list[named:list{integer,character}}}}",
+    )
+    .expect("deeply nested named list with tuple-like inner value should parse");
+
+    assert_eq!(
+        surface_type,
+        SurfaceType::Record(vec![RecordField::new(
+            meta,
+            SurfaceType::Record(vec![RecordField::new(
+                items,
+                SurfaceType::NamedList(Box::new(SurfaceType::Tuple(vec![
+                    SurfaceType::Scalar(Atomic::Integer),
+                    SurfaceType::Scalar(Atomic::Character),
+                ]))),
+            )]),
+        )])
+    );
 }
 
 #[test]

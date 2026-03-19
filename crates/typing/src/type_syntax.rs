@@ -174,38 +174,25 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     }
 
     fn parse_type(&mut self) -> Result<SurfaceType, TypeParseError> {
-        self.parse_type_until(&[], false)
-    }
-
-    fn parse_nested_type(&mut self, terminators: &[char]) -> Result<SurfaceType, TypeParseError> {
-        let saved_position = self.position;
-        let value_text = self.slice_until_matching_boundary(terminators)?;
-        match parse_surface_type(self.interner, value_text) {
-            Ok(surface_type) => Ok(surface_type),
-            Err(error) => {
-                self.position = saved_position;
-                self.parse_type_until(terminators, false)
-            }
-        }
+        self.parse_type_until(StopContext::root())
     }
 
     fn parse_type_until(
         &mut self,
-        terminators: &[char],
-        stop_before_top_level_comma: bool,
+        stop_context: StopContext,
     ) -> Result<SurfaceType, TypeParseError> {
         self.skip_whitespace();
         let left_type = self.parse_primary_type()?;
         self.skip_whitespace();
 
-        if stop_before_top_level_comma && self.peek_char() == Some(',') {
+        if stop_context.should_stop_at(self.peek_char()) {
             return Ok(left_type);
         }
 
-        if self.peek_char() == Some('|') && !self.at_terminator(terminators) {
+        if self.peek_char() == Some('|') && !stop_context.stops_before_union {
             self.consume_char('|');
             self.skip_whitespace();
-            let right_type = self.parse_type_until(terminators, stop_before_top_level_comma)?;
+            let right_type = self.parse_type_until(stop_context)?;
             return match (left_type, right_type) {
                 (SurfaceType::Null, other_type) | (other_type, SurfaceType::Null) => {
                     Ok(SurfaceType::Nullable(Box::new(other_type)))
@@ -223,40 +210,15 @@ impl<'a, 'b> TypeParser<'a, 'b> {
         self.skip_whitespace();
 
         if self.consume_keyword("list[") {
-            let surface_type = self.parse_list_type()?;
-            self.expect_char(']')?;
-            return Ok(surface_type);
+            return self.parse_list_bracket_type();
         }
 
         if self.consume_keyword("list{") {
-            let surface_type = self.parse_record_or_tuple_type()?;
-            self.expect_char('}')?;
-            return Ok(surface_type);
+            return self.parse_record_or_tuple_type();
         }
 
         if self.consume_keyword("fn(") {
-            let surface_type = self.parse_function_type()?;
-            self.expect_char(')')?;
-            self.skip_whitespace();
-
-            let return_type = if self.consume_keyword("->") {
-                self.skip_whitespace();
-                self.parse_type()
-                    .map_err(|error| error.with_context("while parsing function return type"))?
-            } else {
-                SurfaceType::Null
-            };
-
-            return match surface_type {
-                SurfaceType::Function(function_type) => {
-                    Ok(SurfaceType::Function(FunctionType::new(
-                        function_type.parameters,
-                        function_type.named_parameters,
-                        return_type,
-                    )))
-                }
-                _ => Err(invalid_syntax("invalid syntax in type expression")),
-            };
+            return self.parse_function_type();
         }
 
         if let Some(identifier) = self.parse_identifier_text() {
@@ -266,87 +228,30 @@ impl<'a, 'b> TypeParser<'a, 'b> {
         Err(invalid_syntax("invalid syntax in type expression"))
     }
 
-    fn parse_list_type(&mut self) -> Result<SurfaceType, TypeParseError> {
+    fn parse_list_bracket_type(&mut self) -> Result<SurfaceType, TypeParseError> {
         self.skip_whitespace();
+        let body_start = self.position;
+        let body_end = self
+            .find_matching_delimiter_from_current_position('[', ']')
+            .ok_or_else(|| invalid_syntax("missing closing delimiter ]"))?;
+        let body_text = self.text[body_start..body_end].trim();
 
-        let start_position = self.position;
-        if let Some(identifier) = self.parse_identifier_text() {
-            self.skip_whitespace();
-            if identifier == "named" && self.consume_char(':') {
-                self.skip_whitespace();
-                let value_type = self
-                    .parse_nested_type(&[']'])
-                    .map_err(|error| error.with_context("while parsing named list element type"))?;
-                return Ok(SurfaceType::NamedList(Box::new(value_type)));
-            }
+        if body_text.is_empty() {
+            return Err(invalid_syntax("invalid syntax in type expression"));
         }
 
-        self.position = start_position;
-        let item_type = self
-            .parse_nested_type(&[']'])
-            .map_err(|error| error.with_context("while parsing list element type"))?;
-        Ok(SurfaceType::List(Box::new(item_type)))
-    }
+        let parsed_type = if let Some(value_text) = body_text.strip_prefix("named:") {
+            let value_type = parse_surface_type(self.interner, value_text.trim())
+                .map_err(|error| error.with_context("while parsing named list element type"))?;
+            SurfaceType::NamedList(Box::new(value_type))
+        } else {
+            let item_type = parse_surface_type(self.interner, body_text)
+                .map_err(|error| error.with_context("while parsing list element type"))?;
+            SurfaceType::List(Box::new(item_type))
+        };
 
-    fn parse_function_type(&mut self) -> Result<SurfaceType, TypeParseError> {
-        let mut parameters = Vec::new();
-        let mut named_parameters = Vec::new();
-
-        self.skip_whitespace();
-        if self.peek_char() == Some(')') {
-            return Ok(SurfaceType::Function(FunctionType::new(
-                parameters,
-                named_parameters,
-                SurfaceType::Null,
-            )));
-        }
-
-        loop {
-            self.skip_whitespace();
-
-            let start_position = self.position;
-            if let Some(name_text) = self.parse_identifier_text() {
-                self.skip_whitespace();
-                if self.consume_char(':') {
-                    self.skip_whitespace();
-                    let name = self.interner.intern(&name_text);
-                    let parameter_type = self.parse_type().map_err(|error| {
-                        error
-                            .with_context(format!("while parsing function parameter `{name_text}`"))
-                    })?;
-                    named_parameters.push(RecordField::new(name, parameter_type));
-                } else {
-                    self.position = start_position;
-                    parameters.push(
-                        self.parse_type().map_err(|error| {
-                            error.with_context("while parsing function parameter")
-                        })?,
-                    );
-                }
-            } else {
-                parameters.push(
-                    self.parse_type()
-                        .map_err(|error| error.with_context("while parsing function parameter"))?,
-                );
-            }
-
-            self.skip_whitespace();
-            if self.consume_char(',') {
-                self.skip_whitespace();
-                if self.peek_char() == Some(')') {
-                    break;
-                }
-                continue;
-            }
-
-            break;
-        }
-
-        Ok(SurfaceType::Function(FunctionType::new(
-            parameters,
-            named_parameters,
-            SurfaceType::Null,
-        )))
+        self.position = body_end + ']'.len_utf8();
+        Ok(parsed_type)
     }
 
     fn parse_record_or_tuple_type(&mut self) -> Result<SurfaceType, TypeParseError> {
@@ -357,6 +262,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
 
         self.skip_whitespace();
         if self.peek_char() == Some('}') {
+            self.consume_char('}');
             return Ok(SurfaceType::Tuple(Vec::new()));
         }
 
@@ -368,30 +274,27 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                 self.skip_whitespace();
                 if self.consume_char(':') {
                     self.skip_whitespace();
-                    if name_text.is_empty() {
-                        return Err(invalid_syntax(
-                            "Expected a field name before `:` in the record type.",
-                        ));
-                    }
                     let name = self.interner.intern(&name_text);
-                    let value_type = self.parse_record_field_value().map_err(|error| {
-                        error.with_context(format!("while parsing field `{name_text}`"))
-                    })?;
+                    let value_type = self
+                        .parse_type_until(StopContext::for_record_or_tuple_item())
+                        .map_err(|error| {
+                            error.with_context(format!("while parsing field `{name_text}`"))
+                        })?;
                     fields.push(RecordField::new(name, value_type));
                     saw_named_item = true;
                 } else {
                     self.position = start_position;
-                    items.push(
-                        self.parse_type()
-                            .map_err(|error| error.with_context("while parsing tuple item"))?,
-                    );
+                    let item_type = self
+                        .parse_type_until(StopContext::for_record_or_tuple_item())
+                        .map_err(|error| error.with_context("while parsing tuple item"))?;
+                    items.push(item_type);
                     saw_unnamed_item = true;
                 }
             } else {
-                items.push(
-                    self.parse_type()
-                        .map_err(|error| error.with_context("while parsing tuple item"))?,
-                );
+                let item_type = self
+                    .parse_type_until(StopContext::for_record_or_tuple_item())
+                    .map_err(|error| error.with_context("while parsing tuple item"))?;
+                items.push(item_type);
                 saw_unnamed_item = true;
             }
 
@@ -399,11 +302,13 @@ impl<'a, 'b> TypeParser<'a, 'b> {
             if self.consume_char(',') {
                 self.skip_whitespace();
                 if self.peek_char() == Some('}') {
+                    self.consume_char('}');
                     break;
                 }
                 continue;
             }
 
+            self.expect_char('}')?;
             break;
         }
 
@@ -420,55 +325,98 @@ impl<'a, 'b> TypeParser<'a, 'b> {
         Ok(SurfaceType::Tuple(items))
     }
 
-    fn parse_record_field_value(&mut self) -> Result<SurfaceType, TypeParseError> {
-        self.parse_type_until(&[',', '}'], true)
+    fn parse_function_type(&mut self) -> Result<SurfaceType, TypeParseError> {
+        let mut parameters = Vec::new();
+        let mut named_parameters = Vec::new();
+
+        self.skip_whitespace();
+        if self.peek_char() == Some(')') {
+            self.consume_char(')');
+        } else {
+            loop {
+                self.skip_whitespace();
+
+                let start_position = self.position;
+                if let Some(name_text) = self.parse_identifier_text() {
+                    self.skip_whitespace();
+                    if self.consume_char(':') {
+                        self.skip_whitespace();
+                        let name = self.interner.intern(&name_text);
+                        let parameter_type = self
+                            .parse_type_until(StopContext::for_function_parameter())
+                            .map_err(|error| {
+                                error.with_context(format!(
+                                    "while parsing function parameter `{name_text}`"
+                                ))
+                            })?;
+                        named_parameters.push(RecordField::new(name, parameter_type));
+                    } else {
+                        self.position = start_position;
+                        let parameter_type = self
+                            .parse_type_until(StopContext::for_function_parameter())
+                            .map_err(|error| {
+                                error.with_context("while parsing function parameter")
+                            })?;
+                        parameters.push(parameter_type);
+                    }
+                } else {
+                    let parameter_type = self
+                        .parse_type_until(StopContext::for_function_parameter())
+                        .map_err(|error| error.with_context("while parsing function parameter"))?;
+                    parameters.push(parameter_type);
+                }
+
+                self.skip_whitespace();
+                if self.consume_char(',') {
+                    self.skip_whitespace();
+                    if self.peek_char() == Some(')') {
+                        self.consume_char(')');
+                        break;
+                    }
+                    continue;
+                }
+
+                self.expect_char(')')?;
+                break;
+            }
+        }
+
+        self.skip_whitespace();
+        let return_type = if self.consume_keyword("->") {
+            self.skip_whitespace();
+            self.parse_type()
+                .map_err(|error| error.with_context("while parsing function return type"))?
+        } else {
+            SurfaceType::Null
+        };
+
+        Ok(SurfaceType::Function(FunctionType::new(
+            parameters,
+            named_parameters,
+            return_type,
+        )))
     }
 
     fn parse_identifier_type(&mut self, identifier: &str) -> Result<SurfaceType, TypeParseError> {
         self.skip_whitespace();
 
         if self.consume_keyword("[named]") {
-            let inner_type = match identifier {
-                "logical" => SurfaceType::Scalar(Atomic::Logical),
-                "integer" => SurfaceType::Scalar(Atomic::Integer),
-                "double" => SurfaceType::Scalar(Atomic::Double),
-                "complex" => SurfaceType::Scalar(Atomic::Complex),
-                "character" => SurfaceType::Scalar(Atomic::Character),
-                "raw" => SurfaceType::Scalar(Atomic::Raw),
-                "NULL" | "null" => SurfaceType::Null,
-                "Unknown" | "unknown" => SurfaceType::Unknown,
-                "Any" | "any" => SurfaceType::Any,
-                other_name if looks_like_identifier(other_name) => {
-                    return Err(TypeParseError::UnknownType {
-                        name: other_name.to_owned(),
-                    });
-                }
-                _ => return Err(invalid_syntax("invalid syntax in type expression")),
-            };
+            let inner_type = self.parse_atomic_identifier_type(identifier)?;
             return Ok(SurfaceType::NamedVector(Box::new(inner_type)));
         }
 
         if self.consume_keyword("[]") {
-            let inner_type = match identifier {
-                "logical" => SurfaceType::Scalar(Atomic::Logical),
-                "integer" => SurfaceType::Scalar(Atomic::Integer),
-                "double" => SurfaceType::Scalar(Atomic::Double),
-                "complex" => SurfaceType::Scalar(Atomic::Complex),
-                "character" => SurfaceType::Scalar(Atomic::Character),
-                "raw" => SurfaceType::Scalar(Atomic::Raw),
-                "NULL" | "null" => SurfaceType::Null,
-                "Unknown" | "unknown" => SurfaceType::Unknown,
-                "Any" | "any" => SurfaceType::Any,
-                other_name if looks_like_identifier(other_name) => {
-                    return Err(TypeParseError::UnknownType {
-                        name: other_name.to_owned(),
-                    });
-                }
-                _ => return Err(invalid_syntax("invalid syntax in type expression")),
-            };
+            let inner_type = self.parse_atomic_identifier_type(identifier)?;
             return Ok(SurfaceType::Vector(Box::new(inner_type)));
         }
 
+        self.parse_atomic_identifier_type(identifier)
+    }
+
+    fn parse_atomic_identifier_type(
+        &self,
+        identifier: &str,
+    ) -> Result<SurfaceType, TypeParseError> {
         match identifier {
             "logical" => Ok(SurfaceType::Scalar(Atomic::Logical)),
             "integer" => Ok(SurfaceType::Scalar(Atomic::Integer)),
@@ -554,60 +502,30 @@ impl<'a, 'b> TypeParser<'a, 'b> {
         self.text[self.position..].chars().next()
     }
 
-    fn at_terminator(&self, terminators: &[char]) -> bool {
-        matches!(self.peek_char(), Some(character) if terminators.contains(&character))
-    }
+    fn find_matching_delimiter_from_current_position(
+        &self,
+        opener: char,
+        closer: char,
+    ) -> Option<usize> {
+        let mut delimiter_stack = vec![opener];
 
-    fn slice_until_matching_boundary(
-        &mut self,
-        terminators: &[char],
-    ) -> Result<&'b str, TypeParseError> {
-        self.skip_whitespace();
-        let start_position = self.position;
-        let mut delimiter_stack = Vec::new();
-
-        while let Some(character) = self.peek_char() {
-            if delimiter_stack.is_empty() && terminators.contains(&character) {
-                let value_text = self.text[start_position..self.position].trim();
-                if value_text.is_empty() {
-                    return Err(invalid_syntax("invalid syntax in type expression"));
-                }
-                return Ok(value_text);
-            }
-
+        for (offset, character) in self.text[self.position..].char_indices() {
             match character {
-                '(' | '[' | '{' => {
-                    delimiter_stack.push(character);
-                    self.position += character.len_utf8();
-                }
+                '(' | '[' | '{' => delimiter_stack.push(character),
                 ')' | ']' | '}' => {
-                    if delimiter_stack.is_empty() {
-                        break;
-                    }
                     if !pop_matching_delimiter(&mut delimiter_stack, character) {
-                        return Err(invalid_syntax(format!(
-                            "unexpected closing delimiter {character}"
-                        )));
+                        return None;
                     }
-                    self.position += character.len_utf8();
+                    if delimiter_stack.is_empty() {
+                        return Some(self.position + offset);
+                    }
                 }
-                _ => {
-                    self.position += character.len_utf8();
-                }
+                _ => {}
             }
         }
 
-        if let Some(opener) = delimiter_stack.last().copied() {
-            return Err(invalid_syntax(format!(
-                "missing closing delimiter {}",
-                expected_closer(opener)
-            )));
-        }
-
-        Err(invalid_syntax(format!(
-            "missing closing delimiter {}",
-            terminators.first().copied().unwrap_or('}')
-        )))
+        let _ = closer;
+        None
     }
 
     fn skip_whitespace(&mut self) {
@@ -618,6 +536,68 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                 break;
             }
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StopContext {
+    stop_at_comma: bool,
+    stop_at_right_bracket: bool,
+    stop_at_right_brace: bool,
+    stop_at_right_paren: bool,
+    stops_before_union: bool,
+}
+
+impl StopContext {
+    fn root() -> Self {
+        Self {
+            stop_at_comma: false,
+            stop_at_right_bracket: false,
+            stop_at_right_brace: false,
+            stop_at_right_paren: false,
+            stops_before_union: false,
+        }
+    }
+
+    fn for_list_bracket() -> Self {
+        Self {
+            stop_at_comma: false,
+            stop_at_right_bracket: true,
+            stop_at_right_brace: true,
+            stop_at_right_paren: true,
+            stops_before_union: false,
+        }
+    }
+
+    fn for_record_or_tuple_item() -> Self {
+        Self {
+            stop_at_comma: true,
+            stop_at_right_bracket: false,
+            stop_at_right_brace: true,
+            stop_at_right_paren: false,
+            stops_before_union: false,
+        }
+    }
+
+    fn for_function_parameter() -> Self {
+        Self {
+            stop_at_comma: true,
+            stop_at_right_bracket: false,
+            stop_at_right_brace: false,
+            stop_at_right_paren: true,
+            stops_before_union: false,
+        }
+    }
+
+    fn should_stop_at(self, next_char: Option<char>) -> bool {
+        matches!(
+            next_char,
+            Some(character)
+                if self.stop_at_comma && character == ','
+                    || self.stop_at_right_bracket && character == ']'
+                    || self.stop_at_right_brace && character == '}'
+                    || self.stop_at_right_paren && character == ')'
+        )
     }
 }
 

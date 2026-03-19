@@ -281,6 +281,13 @@ fn render_type_result(source: &str) -> String {
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join("\n");
+
+    if normalized_source.contains("list[named:list{integer,character}]") {
+        eprintln!(
+            "type fixture normalization:\nraw:\n{trimmed_source}\nnormalized:\n{normalized_source}"
+        );
+    }
+
     match parse_surface_type(&mut interner, &normalized_source) {
         Ok(surface_type) => render_surface_type(&interner, &surface_type),
         Err(error) => format!("parse error: {error:?}\nsource:\n{trimmed_source}"),
