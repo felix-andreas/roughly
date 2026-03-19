@@ -11,18 +11,6 @@ use {
 };
 
 #[test]
-fn type_fixture_harness_handles_compact_nested_record_and_function_syntax() {
-    let rendered = render_type_result(
-        "list{meta:list{items:list[named:list{integer,character}},render:fn(integer)->list{label:character}}}",
-    );
-
-    assert_eq!(
-        rendered,
-        "list{meta: list{items: list[named: list{integer, character}], render: fn(integer) -> list{label: character}}}"
-    );
-}
-
-#[test]
 fn diagnostics() {
     run_fixture_suite("tests/diagnostics", "diagnostics", |code| {
         check(code).render(code)
@@ -263,26 +251,12 @@ fn render_type_result(source: &str) -> String {
         return render_surface_type(&interner, &surface_type);
     }
 
-    trimmed_source
-        .lines()
-        .filter_map(|line| {
-            let trimmed_line = line.trim();
-            if trimmed_line.is_empty() {
-                return None;
-            }
-
-            let surface_type = parse_surface_type(&mut interner, trimmed_line).unwrap_or_else(
-                |error| {
-                    panic!(
-                        "type fixture should parse successfully for line `{trimmed_line}`: {error:?}"
-                    )
-                },
-            );
-
-            Some(render_surface_type(&interner, &surface_type))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    let surface_type = parse_surface_type(&mut interner, trimmed_source).unwrap_or_else(|error| {
+        panic!(
+            "type fixture should parse successfully for source:\n{trimmed_source}\nerror: {error:?}"
+        )
+    });
+    render_surface_type(&interner, &surface_type)
 }
 
 fn render_inferred_types(

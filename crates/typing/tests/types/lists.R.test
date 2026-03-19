@@ -141,3 +141,8 @@ list{render: fn(integer, label: character) -> character}
 list{meta:list{items:list[named:list{integer,character}},render:fn(integer)->list{label:character}}}
 #++++
 list{meta: list{items: list[named: list{integer, character}], render: fn(integer) -> list{label: character}}}
+
+#---- function_returning_record_inside_record_field
+list{render:fn(integer)->list{label:character}}
+#++++
+list{render: fn(integer) -> list{label: character}}

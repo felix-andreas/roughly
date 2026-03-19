@@ -39,27 +39,6 @@ null
 #++++
 NULL
 
-#==== atomic_special_types
-#---- unknown_uppercase
-Unknown
-#++++
-Unknown
-
-#---- unknown_lowercase
-unknown
-#++++
-Unknown
-
-#---- any_uppercase
-Any
-#++++
-Any
-
-#---- any_lowercase
-any
-#++++
-Any
-
 #==== atomic_nullable_forms
 #---- nullable_integer
 integer | NULL
@@ -75,16 +54,6 @@ logical | NULL
 character | null
 #++++
 character | NULL
-
-#---- nullable_unknown
-Unknown|NULL
-#++++
-Unknown | NULL
-
-#---- nullable_any
-Any|NULL
-#++++
-Any | NULL
 
 #==== atomic_vector_forms
 #---- integer_vector

@@ -1,0 +1,94 @@
+#==== multiline_function_types
+#---- multiline_function_and_record_type_expression
+fn(
+    integer,
+    options: list{
+        label: character,
+        nested: fn(
+            integer,
+            value: list[named: double]
+        ) -> list{
+            ok: logical
+        }
+    }
+) -> list{
+    result: character
+}
+#++++
+fn(integer, options: list{label: character, nested: fn(integer, value: list[named: double]) -> list{ok: logical}}) -> list{result: character}
+
+#---- multiline_higher_order_function
+fn(
+    handler: fn(
+        integer,
+        label: character
+    ) -> list{
+        ok: logical
+    },
+    fallback: list[named: double]
+) -> fn(
+    character
+) -> list{
+    result: double
+}
+#++++
+fn(handler: fn(integer, label: character) -> list{ok: logical}, fallback: list[named: double]) -> fn(character) -> list{result: double}
+
+#==== multiline_nested_lists_and_records
+#---- multiline_record_with_nested_named_list_and_function
+list{
+    meta: list{
+        items: list[named: list{
+            integer,
+            character
+        }],
+        render: fn(
+            integer
+        ) -> list{
+            label: character
+        }
+    }
+}
+#++++
+list{meta: list{items: list[named: list{integer, character}], render: fn(integer) -> list{label: character}}}
+
+#---- multiline_tuple_and_record_mix
+list{
+    integer,
+    list{
+        label: character,
+        values: list[
+            integer | NULL
+        ]
+    },
+    fn(
+        logical
+    ) -> character
+}
+#++++
+list{integer, list{label: character, values: list[integer | NULL]}, fn(logical) -> character}
+
+#==== multiline_expanded_annotations
+#---- multiline_expanded_structured_return
+@param {integer} count
+@param {list{
+    label: character,
+    values: list[double]
+}} payload
+@return {list{
+    ok: logical,
+    result: character
+}}
+#++++
+fn(count: integer, payload: list{label: character, values: list[double]}) -> list{ok: logical, result: character}
+
+#---- multiline_expanded_higher_order_parameter
+@param {fn(
+    integer,
+    options: list{
+        verbose: logical
+    }
+) -> character} formatter
+@return {list[named: character]}
+#++++
+fn(formatter: fn(integer, options: list{verbose: logical}) -> character) -> list[named: character]
