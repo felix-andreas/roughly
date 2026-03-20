@@ -76,57 +76,46 @@ pub fn parse_annotation(
         ));
     }
 
-    let block_lines = trimmed_text
+    let mut normalized_lines = trimmed_text
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
-        .map(|line| line.strip_prefix("#:").map(str::trim).unwrap_or(line))
-        .collect::<Vec<_>>();
+        .map(|line| line.strip_prefix("#:").map(str::trim).unwrap_or(line));
 
-    if block_lines.is_empty() {
+    let Some(first_line) = normalized_lines.next() else {
         return Err(invalid_syntax(
             "expected a type annotation, but found empty input.",
         ));
-    }
+    };
 
-    if block_lines
-        .iter()
-        .any(|line| is_expanded_annotation_line(line))
-    {
-        if !block_lines
-            .iter()
-            .all(|line| is_expanded_annotation_line(line))
-        {
-            return Err(invalid_syntax(
-                "cannot mix compact and expanded annotations in the same `#:` block.",
-            ));
+    if is_expanded_annotation_line(first_line) {
+        let mut expanded_block_text = String::from(first_line);
+
+        for line in normalized_lines {
+            if !is_expanded_annotation_line(line) {
+                return Err(invalid_syntax(
+                    "cannot mix compact and expanded annotations in the same `#:` block.",
+                ));
+            }
+
+            expanded_block_text.push('\n');
+            expanded_block_text.push_str(line);
         }
 
-        let block_text = block_lines.join("\n");
-        let surface_type = parse_expanded_block_surface_type(interner, &block_text)?;
+        let surface_type = parse_expanded_block_surface_type(interner, &expanded_block_text)?;
         return Ok(crate::types::Annotation::new(
             AnnotationKind::Checked,
             surface_type,
         ));
     }
 
-    if block_lines.len() > 1 {
+    if normalized_lines.next().is_some() {
         return Err(invalid_syntax(
             "cannot use multiple compact annotations in the same `#:` block.",
         ));
     }
 
-    let line = block_lines[0];
-    let (kind, surface_text) = if let Some(surface_text) = line
-        .strip_prefix("@if-unknown")
-        .and_then(keyword_surface_text)
-    {
-        (AnnotationKind::UnknownOnly, surface_text)
-    } else if let Some(surface_text) = line.strip_prefix("@trust").and_then(keyword_surface_text) {
-        (AnnotationKind::Trusted, surface_text)
-    } else {
-        (AnnotationKind::Checked, line)
-    };
+    let (kind, surface_text) = parse_compact_annotation_kind_and_surface_text(first_line)?;
 
     let surface_type = parse_surface_type(interner, surface_text)?;
     Ok(crate::types::Annotation::new(kind, surface_type))
@@ -142,75 +131,103 @@ pub fn parse_type_syntax_item(
         return Err(invalid_syntax("expected a type, but found empty input."));
     }
 
-    if let Some(definition_text) = trimmed_text.strip_prefix("@type") {
-        let (name, surface_type) = parse_named_type_definition(interner, definition_text.trim())?;
-        return Ok(TypeSyntaxItem::TypeDefinition { name, surface_type });
-    }
-
-    if let Some(definition_text) = trimmed_text.strip_prefix("@alias") {
-        let (name, surface_type) = parse_named_type_definition(interner, definition_text.trim())?;
-        return Ok(TypeSyntaxItem::TypeAlias { name, surface_type });
-    }
-
-    if let Some(surface_text) = trimmed_text.strip_prefix("@if-unknown") {
-        let Some(surface_text) = keyword_surface_text(surface_text) else {
-            return Err(invalid_syntax(
-                "expected a type after the annotation prefix.",
-            ));
-        };
-        let surface_type = parse_surface_type(interner, surface_text)?;
-        return Ok(TypeSyntaxItem::IfUnknown(surface_type));
-    }
-
-    if let Some(surface_text) = trimmed_text.strip_prefix("@trust") {
-        let Some(surface_text) = keyword_surface_text(surface_text) else {
-            return Err(invalid_syntax(
-                "expected a type after the annotation prefix.",
-            ));
-        };
-        let surface_type = parse_surface_type(interner, surface_text)?;
-        return Ok(TypeSyntaxItem::Trust(surface_type));
-    }
-
-    if let Some(name_text) = trimmed_text.strip_prefix("@new") {
-        let normalized_name = name_text.trim();
-        if normalized_name.is_empty() {
-            return Err(invalid_syntax(
-                "expected a type after the annotation prefix.",
-            ));
-        }
-
-        let Some((name_start, name_end)) = identifier_span(normalized_name) else {
-            return Err(invalid_syntax("expected a type."));
-        };
-
-        let name = &normalized_name[name_start..name_end];
-        if name_start != 0
-            || !normalized_name[name_end..].trim().is_empty()
-            || parse_atomic_or_named_type(name).is_some()
-        {
-            return Err(invalid_syntax("expected a type."));
-        }
-
-        return Ok(TypeSyntaxItem::New(interner.intern(name)));
-    }
-
-    if let Some(unknown_directive) = unknown_annotation_directive_name(trimmed_text) {
-        return Err(invalid_syntax(format!(
-            "unknown annotation directive `@{unknown_directive}`. expected one of `@type`, `@alias`, `@if-unknown`, `@trust`, or `@new`."
-        )));
+    if trimmed_text.starts_with('@') {
+        return parse_directive_type_syntax_item(interner, trimmed_text);
     }
 
     parse_surface_type(interner, trimmed_text).map(TypeSyntaxItem::SurfaceType)
 }
 
+fn parse_directive_type_syntax_item(
+    interner: &mut Interner,
+    text: &str,
+) -> Result<TypeSyntaxItem, TypeParseError> {
+    let (directive_name, directive_body) = parse_annotation_directive_name_and_body(text)
+        .ok_or_else(|| invalid_syntax("expected a type."))?;
+
+    match directive_name {
+        "type" => {
+            let (name, surface_type) = parse_named_type_definition(interner, directive_body)?;
+            Ok(TypeSyntaxItem::TypeDefinition { name, surface_type })
+        }
+        "alias" => {
+            let (name, surface_type) = parse_named_type_definition(interner, directive_body)?;
+            Ok(TypeSyntaxItem::TypeAlias { name, surface_type })
+        }
+        "if-unknown" => {
+            let surface_text = keyword_surface_text(directive_body)
+                .ok_or_else(|| invalid_syntax("expected a type after the annotation prefix."))?;
+            let surface_type = parse_surface_type(interner, surface_text)?;
+            Ok(TypeSyntaxItem::IfUnknown(surface_type))
+        }
+        "trust" => {
+            let surface_text = keyword_surface_text(directive_body)
+                .ok_or_else(|| invalid_syntax("expected a type after the annotation prefix."))?;
+            let surface_type = parse_surface_type(interner, surface_text)?;
+            Ok(TypeSyntaxItem::Trust(surface_type))
+        }
+        "new" => {
+            let normalized_name = directive_body;
+            if normalized_name.is_empty() {
+                return Err(invalid_syntax(
+                    "expected a type after the annotation prefix.",
+                ));
+            }
+
+            let Some((name_start, name_end)) = identifier_span(normalized_name) else {
+                return Err(invalid_syntax("expected a type."));
+            };
+
+            let name = &normalized_name[name_start..name_end];
+            if name_start != 0
+                || !normalized_name[name_end..].trim().is_empty()
+                || parse_atomic_or_named_type(name).is_some()
+            {
+                return Err(invalid_syntax("expected a type."));
+            }
+
+            Ok(TypeSyntaxItem::New(interner.intern(name)))
+        }
+        _ => Err(invalid_syntax(format!(
+            "unknown annotation directive `@{directive_name}`. expected one of `@type`, `@alias`, `@if-unknown`, `@trust`, or `@new`."
+        ))),
+    }
+}
+
 fn annotation_surface_text(text: &str) -> Option<&str> {
-    if let Some(surface_text) = text.strip_prefix("@if-unknown") {
-        keyword_surface_text(surface_text)
-    } else if let Some(surface_text) = text.strip_prefix("@trust") {
-        keyword_surface_text(surface_text)
-    } else {
-        Some(text.trim())
+    parse_compact_annotation_directive(text)
+        .ok()
+        .flatten()
+        .map(|(_, surface_text)| surface_text)
+        .or_else(|| Some(text.trim()))
+}
+
+fn parse_compact_annotation_kind_and_surface_text(
+    text: &str,
+) -> Result<(AnnotationKind, &str), TypeParseError> {
+    Ok(parse_compact_annotation_directive(text)?.unwrap_or((AnnotationKind::Checked, text)))
+}
+
+fn parse_compact_annotation_directive(
+    text: &str,
+) -> Result<Option<(AnnotationKind, &str)>, TypeParseError> {
+    let Some((directive_name, directive_body)) = parse_annotation_directive_name_and_body(text)
+    else {
+        return Ok(None);
+    };
+
+    match directive_name {
+        "if-unknown" => {
+            let surface_text = keyword_surface_text(directive_body)
+                .ok_or_else(|| invalid_syntax("expected a type after the annotation prefix."))?;
+            Ok(Some((AnnotationKind::UnknownOnly, surface_text)))
+        }
+        "trust" => {
+            let surface_text = keyword_surface_text(directive_body)
+                .ok_or_else(|| invalid_syntax("expected a type after the annotation prefix."))?;
+            Ok(Some((AnnotationKind::Trusted, surface_text)))
+        }
+        _ => Ok(None),
     }
 }
 
@@ -223,7 +240,7 @@ fn keyword_surface_text(text: &str) -> Option<&str> {
     }
 }
 
-fn unknown_annotation_directive_name(text: &str) -> Option<&str> {
+fn parse_annotation_directive_name_and_body(text: &str) -> Option<(&str, &str)> {
     let trimmed_text = text.trim();
     let remainder = trimmed_text.strip_prefix('@')?;
     let directive_end = remainder
@@ -232,7 +249,8 @@ fn unknown_annotation_directive_name(text: &str) -> Option<&str> {
         .map(|(index, _)| index)
         .unwrap_or(remainder.len());
     let directive_name = &remainder[..directive_end];
-    Some(directive_name)
+    let directive_body = remainder[directive_end..].trim();
+    Some((directive_name, directive_body))
 }
 
 pub fn parse_expanded_block_surface_type(
@@ -250,9 +268,8 @@ pub fn parse_expanded_block_surface_type(
     let mut named_parameters = Vec::new();
     let mut return_type = SurfaceType::Null;
     let mut seen_return = false;
-    let directives = collect_expanded_annotation_directives(trimmed_text)?;
 
-    for directive in directives {
+    for_each_expanded_annotation_directive(trimmed_text, |directive| {
         if let Some(parameter_text) = directive.strip_prefix("@param") {
             if seen_return {
                 return Err(invalid_syntax(
@@ -306,7 +323,9 @@ pub fn parse_expanded_block_surface_type(
                 "expected `@param`, `@return`, or `@returns` in the expanded annotation.",
             ));
         }
-    }
+
+        Ok(())
+    })?;
 
     Ok(SurfaceType::Function(FunctionType::new(
         Vec::new(),
@@ -957,8 +976,10 @@ fn parse_braced_type_and_tail(text: &str) -> Option<(&str, &str)> {
     Some((type_text.trim(), trailing_text))
 }
 
-fn collect_expanded_annotation_directives(text: &str) -> Result<Vec<String>, TypeParseError> {
-    let mut directives = Vec::new();
+fn for_each_expanded_annotation_directive(
+    text: &str,
+    mut visit_directive: impl FnMut(&str) -> Result<(), TypeParseError>,
+) -> Result<(), TypeParseError> {
     let mut current_directive = String::new();
     let mut delimiter_stack = Vec::new();
 
@@ -986,7 +1007,7 @@ fn collect_expanded_annotation_directives(text: &str) -> Result<Vec<String>, Typ
                         "missing closing delimiter {missing_closer}"
                     )));
                 }
-                directives.push(current_directive.trim().to_owned());
+                visit_directive(current_directive.trim())?;
                 current_directive.clear();
             }
         } else if current_directive.is_empty() {
@@ -1027,8 +1048,7 @@ fn collect_expanded_annotation_directives(text: &str) -> Result<Vec<String>, Typ
         )));
     }
 
-    directives.push(current_directive.trim().to_owned());
-    Ok(directives)
+    visit_directive(current_directive.trim())
 }
 
 fn find_matching_closer(text: &str, opener: char, _closer: char) -> Option<usize> {

@@ -50,7 +50,15 @@ impl<'a> SurfaceTypeRenderer<'a> {
             SurfaceType::Unknown => "Unknown".to_owned(),
             SurfaceType::Null => "NULL".to_owned(),
             SurfaceType::Nullable(inner_type) => format!("{} | NULL", self.render(inner_type)),
-            SurfaceType::Scalar(atomic) => render_atomic(*atomic).to_owned(),
+            SurfaceType::Scalar(atomic) => match atomic {
+                Atomic::Logical => "logical",
+                Atomic::Integer => "integer",
+                Atomic::Double => "double",
+                Atomic::Complex => "complex",
+                Atomic::Character => "character",
+                Atomic::Raw => "raw",
+            }
+            .to_owned(),
             SurfaceType::Named(name) => self
                 .interner
                 .resolve(*name)
@@ -104,16 +112,5 @@ impl<'a> SurfaceTypeRenderer<'a> {
                 )
             }
         }
-    }
-}
-
-fn render_atomic(atomic: Atomic) -> &'static str {
-    match atomic {
-        Atomic::Logical => "logical",
-        Atomic::Integer => "integer",
-        Atomic::Double => "double",
-        Atomic::Complex => "complex",
-        Atomic::Character => "character",
-        Atomic::Raw => "raw",
     }
 }
