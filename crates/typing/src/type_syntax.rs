@@ -27,18 +27,25 @@ pub fn parse_annotation_type(
         return Err(invalid_syntax("Expected a type, but found empty input."));
     }
 
-    let _surface_text = if allow_annotation_kind_prefix {
+    let surface_text = if allow_annotation_kind_prefix {
         annotation_surface_text(trimmed_text)
             .ok_or_else(|| invalid_syntax("Expected a type after the annotation prefix."))?
     } else {
         trimmed_text
     };
 
-    let _ = interner;
+    let mut parser = TypeParser::new(interner, surface_text);
+    let surface_type = parser.parse_type()?;
+    parser.skip_ascii_whitespace();
 
-    Err(invalid_syntax(
-        "TODO: replace the current type-syntax stub with a recursive-descent parser.",
-    ))
+    if !parser.is_at_end() {
+        return Err(invalid_syntax(format!(
+            "Unexpected trailing input starting at byte {}.",
+            parser.position
+        )));
+    }
+
+    Ok(surface_type)
 }
 
 pub fn parse_annotation(
@@ -176,17 +183,558 @@ impl TypeParseError {
     }
 }
 
-fn looks_like_identifier(text: &str) -> bool {
-    let mut characters = text.chars();
-    let Some(first_character) = characters.next() else {
-        return false;
+#[derive(Clone, Copy)]
+struct StopContext {
+    comma: bool,
+    right_bracket: bool,
+    right_brace: bool,
+    right_paren: bool,
+}
+
+impl StopContext {
+    const ROOT: Self = Self {
+        comma: false,
+        right_bracket: false,
+        right_brace: false,
+        right_paren: false,
     };
 
-    if !(first_character == '_' || first_character.is_ascii_alphabetic()) {
-        return false;
+    const LIST_BRACE_ITEM: Self = Self {
+        comma: true,
+        right_bracket: false,
+        right_brace: true,
+        right_paren: false,
+    };
+
+    const FUNCTION_PARAMETER: Self = Self {
+        comma: true,
+        right_bracket: false,
+        right_brace: false,
+        right_paren: true,
+    };
+
+    fn stops_on(self, byte: u8) -> bool {
+        (self.comma && byte == b',')
+            || (self.right_bracket && byte == b']')
+            || (self.right_brace && byte == b'}')
+            || (self.right_paren && byte == b')')
+    }
+}
+
+struct TypeParser<'a> {
+    interner: &'a mut Interner,
+    source: &'a str,
+    position: usize,
+}
+
+impl<'a> TypeParser<'a> {
+    fn new(interner: &'a mut Interner, source: &'a str) -> Self {
+        Self {
+            interner,
+            source,
+            position: 0,
+        }
     }
 
-    characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
+    fn parse_type(&mut self) -> Result<SurfaceType, TypeParseError> {
+        self.parse_type_until(StopContext::ROOT)
+    }
+
+    fn parse_type_until(
+        &mut self,
+        stop_context: StopContext,
+    ) -> Result<SurfaceType, TypeParseError> {
+        self.skip_ascii_whitespace();
+        let mut surface_type = self.parse_primary(stop_context)?;
+
+        loop {
+            self.skip_ascii_whitespace();
+            let Some(byte) = self.peek_byte() else {
+                break;
+            };
+
+            if stop_context.stops_on(byte) {
+                break;
+            }
+
+            if byte != b'|' {
+                break;
+            }
+
+            self.position += 1;
+            self.skip_ascii_whitespace();
+
+            if self.consume_keyword("NULL") || self.consume_keyword("null") {
+                surface_type = SurfaceType::Nullable(Box::new(surface_type));
+                continue;
+            }
+
+            return Err(invalid_syntax(
+                "Expected `NULL` after `|` in a nullable type.",
+            ));
+        }
+
+        Ok(surface_type)
+    }
+
+    fn parse_primary(&mut self, stop_context: StopContext) -> Result<SurfaceType, TypeParseError> {
+        self.skip_ascii_whitespace();
+
+        if self.consume_keyword("list") {
+            self.skip_ascii_whitespace();
+            if self.consume_byte(b'[') {
+                return self.parse_list_brackets(stop_context);
+            }
+            if self.consume_byte(b'{') {
+                return self.parse_list_braces();
+            }
+            return Err(invalid_syntax(
+                "Expected `[` or `{` after `list` in a list type.",
+            ));
+        }
+
+        if self.consume_keyword("fn") {
+            self.skip_ascii_whitespace();
+            if !self.consume_byte(b'(') {
+                return Err(invalid_syntax("Expected `(` after `fn`."));
+            }
+            return self.parse_function_type();
+        }
+
+        let identifier_span = self
+            .parse_identifier_span()
+            .ok_or_else(|| invalid_syntax("Expected a type."))?;
+        let identifier = &self.source[identifier_span.0..identifier_span.1];
+
+        let mut surface_type = parse_atomic_or_named_type(identifier).ok_or_else(|| {
+            invalid_syntax(format!(
+                "Unknown type `{identifier}`{}",
+                self.context_suffix(stop_context)
+            ))
+        })?;
+
+        loop {
+            self.skip_ascii_whitespace();
+
+            if self.consume_atomic_vector_suffix() {
+                surface_type = SurfaceType::Vector(Box::new(surface_type));
+                continue;
+            }
+
+            if self.consume_atomic_named_vector_suffix() {
+                surface_type = SurfaceType::NamedVector(Box::new(surface_type));
+                continue;
+            }
+
+            break;
+        }
+
+        Ok(surface_type)
+    }
+
+    fn parse_list_brackets(
+        &mut self,
+        caller_stop_context: StopContext,
+    ) -> Result<SurfaceType, TypeParseError> {
+        self.skip_ascii_whitespace();
+
+        let is_named_list = if self.consume_keyword("named") {
+            self.skip_ascii_whitespace();
+            if !self.consume_byte(b':') {
+                return Err(invalid_syntax("Expected `:` after `named` in `list[...]`."));
+            }
+            true
+        } else {
+            false
+        };
+
+        let item_type = self
+            .parse_list_bracket_item_type(caller_stop_context)
+            .map(Box::new)?;
+
+        self.skip_ascii_whitespace();
+        self.expect_byte(b']', "missing closing delimiter ]")?;
+
+        if is_named_list {
+            Ok(SurfaceType::NamedList(item_type))
+        } else {
+            Ok(SurfaceType::List(item_type))
+        }
+    }
+
+    fn parse_list_bracket_item_type(
+        &mut self,
+        caller_stop_context: StopContext,
+    ) -> Result<SurfaceType, TypeParseError> {
+        self.skip_ascii_whitespace();
+
+        if self.starts_list_brace_type() {
+            self.consume_keyword("list");
+            self.skip_ascii_whitespace();
+            self.expect_byte(b'{', "Expected `{` after `list` in a list type.")?;
+            return self.parse_list_braces();
+        }
+
+        self.parse_type_until(StopContext {
+            comma: caller_stop_context.comma,
+            right_bracket: true,
+            right_brace: caller_stop_context.right_brace,
+            right_paren: caller_stop_context.right_paren,
+        })
+    }
+
+    fn parse_list_braces(&mut self) -> Result<SurfaceType, TypeParseError> {
+        self.skip_ascii_whitespace();
+        if self.consume_byte(b'}') {
+            return Ok(SurfaceType::Tuple(Vec::new()));
+        }
+
+        let mut tuple_items = Vec::new();
+        let mut record_fields = Vec::new();
+        let mut item_kind = None;
+
+        loop {
+            self.skip_ascii_whitespace();
+
+            if let Some((field_start, field_end)) = self.peek_record_field_name() {
+                let saved_position = self.position;
+                self.position = field_end;
+                self.skip_ascii_whitespace();
+
+                if self.consume_byte(b':') {
+                    let field_name = &self.source[field_start..field_end];
+                    let name = self.interner.intern(&self.source[field_start..field_end]);
+                    let value = match self.parse_type_until(StopContext::LIST_BRACE_ITEM) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            return Err(
+                                error.with_context(format!("while parsing field `{field_name}`"))
+                            );
+                        }
+                    };
+
+                    match item_kind {
+                        None => item_kind = Some(ListBraceItemKind::Field),
+                        Some(ListBraceItemKind::Item) => {
+                            return Err(invalid_syntax(
+                                "Cannot mix named and unnamed items in `list{...}`.",
+                            ));
+                        }
+                        Some(ListBraceItemKind::Field) => {}
+                    }
+
+                    record_fields.push(RecordField::new(name, value));
+
+                    self.skip_ascii_whitespace();
+                    if self.consume_byte(b',') {
+                        continue;
+                    }
+                    self.expect_byte(b'}', "Expected `}` to close `list{...}`.")?;
+                    break;
+                }
+
+                self.position = saved_position;
+            }
+
+            let value = self
+                .parse_type_until(StopContext::LIST_BRACE_ITEM)
+                .map_err(|error| error.with_context("while parsing tuple item"))?;
+
+            match item_kind {
+                None => item_kind = Some(ListBraceItemKind::Item),
+                Some(ListBraceItemKind::Field) => {
+                    return Err(invalid_syntax(
+                        "Cannot mix named and unnamed items in `list{...}`.",
+                    ));
+                }
+                Some(ListBraceItemKind::Item) => {}
+            }
+
+            tuple_items.push(value);
+
+            self.skip_ascii_whitespace();
+            if self.consume_byte(b',') {
+                continue;
+            }
+            self.expect_byte(b'}', "Expected `}` to close `list{...}`.")?;
+            break;
+        }
+
+        Ok(match item_kind {
+            Some(ListBraceItemKind::Field) => SurfaceType::Record(record_fields),
+            Some(ListBraceItemKind::Item) | None => SurfaceType::Tuple(tuple_items),
+        })
+    }
+
+    fn parse_function_type(&mut self) -> Result<SurfaceType, TypeParseError> {
+        self.skip_ascii_whitespace();
+        let mut parameters = Vec::new();
+        let mut named_parameters = Vec::new();
+
+        if !self.consume_byte(b')') {
+            loop {
+                self.skip_ascii_whitespace();
+                let parameter_start = self.position;
+
+                let parsed_name = self.parse_identifier_span();
+                let is_named = if let Some((start, end)) = parsed_name {
+                    self.skip_ascii_whitespace();
+                    if self.consume_byte(b':') {
+                        let name = self.interner.intern(&self.source[start..end]);
+                        let value = self
+                            .parse_type_until(StopContext::FUNCTION_PARAMETER)
+                            .map_err(|error| {
+                                error.with_context("while parsing named parameter type")
+                            })?;
+                        named_parameters.push(RecordField::new(name, value));
+                        true
+                    } else {
+                        self.position = parameter_start;
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if !is_named {
+                    let parameter = self
+                        .parse_type_until(StopContext::FUNCTION_PARAMETER)
+                        .map_err(|error| {
+                            error.with_context("while parsing positional parameter")
+                        })?;
+                    parameters.push(parameter);
+                }
+
+                self.skip_ascii_whitespace();
+                if self.consume_byte(b',') {
+                    continue;
+                }
+                self.expect_byte(b')', "Expected `)` to close `fn(...)`.")?;
+                break;
+            }
+        }
+
+        self.skip_ascii_whitespace();
+        let return_type = if self.consume_byte(b'-') {
+            self.expect_byte(b'>', "Expected `>` after `-` in function return type.")?;
+            self.parse_type_until(StopContext::ROOT)?
+        } else {
+            SurfaceType::Null
+        };
+
+        Ok(SurfaceType::Function(FunctionType::new(
+            parameters,
+            named_parameters,
+            return_type,
+        )))
+    }
+
+    fn parse_identifier_span(&mut self) -> Option<(usize, usize)> {
+        self.skip_ascii_whitespace();
+        let start = self.position;
+        let bytes = self.source.as_bytes();
+
+        let first = *bytes.get(start)?;
+        if !(first == b'_' || first.is_ascii_alphabetic()) {
+            return None;
+        }
+
+        self.position += 1;
+        while let Some(byte) = bytes.get(self.position).copied() {
+            if byte == b'_' || byte.is_ascii_alphanumeric() {
+                self.position += 1;
+            } else {
+                break;
+            }
+        }
+
+        Some((start, self.position))
+    }
+
+    fn peek_record_field_name(&self) -> Option<(usize, usize)> {
+        let mut position = self.position;
+        let bytes = self.source.as_bytes();
+
+        while let Some(byte) = bytes.get(position).copied() {
+            if byte.is_ascii_whitespace() {
+                position += 1;
+            } else {
+                break;
+            }
+        }
+
+        let start = position;
+        let first = *bytes.get(start)?;
+        if !(first == b'_' || first.is_ascii_alphabetic()) {
+            return None;
+        }
+
+        position += 1;
+        while let Some(byte) = bytes.get(position).copied() {
+            if byte == b'_' || byte.is_ascii_alphanumeric() {
+                position += 1;
+            } else {
+                break;
+            }
+        }
+
+        if let Some(byte) = bytes.get(position).copied() {
+            if !byte.is_ascii() {
+                return None;
+            }
+        }
+
+        Some((start, position))
+    }
+
+    fn starts_list_brace_type(&self) -> bool {
+        let mut position = self.position;
+        let bytes = self.source.as_bytes();
+
+        while let Some(byte) = bytes.get(position).copied() {
+            if byte.is_ascii_whitespace() {
+                position += 1;
+            } else {
+                break;
+            }
+        }
+
+        if !self.source[position..].starts_with("list") {
+            return false;
+        }
+
+        let list_end = position + 4;
+        if let Some(next_byte) = bytes.get(list_end).copied() {
+            if next_byte == b'_' || next_byte.is_ascii_alphanumeric() {
+                return false;
+            }
+        }
+
+        position = list_end;
+        while let Some(byte) = bytes.get(position).copied() {
+            if byte.is_ascii_whitespace() {
+                position += 1;
+            } else {
+                break;
+            }
+        }
+
+        bytes.get(position).copied() == Some(b'{')
+    }
+
+    fn context_suffix(&self, stop_context: StopContext) -> &'static str {
+        if stop_context.right_bracket {
+            " in `list[...]`"
+        } else if stop_context.right_brace {
+            " in `list{...}`"
+        } else if stop_context.right_paren {
+            " in `fn(...)`"
+        } else {
+            ""
+        }
+    }
+
+    fn skip_ascii_whitespace(&mut self) {
+        while let Some(byte) = self.peek_byte() {
+            if byte.is_ascii_whitespace() {
+                self.position += 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn peek_byte(&self) -> Option<u8> {
+        self.source.as_bytes().get(self.position).copied()
+    }
+
+    fn consume_byte(&mut self, expected: u8) -> bool {
+        if self.peek_byte() == Some(expected) {
+            self.position += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn expect_byte(&mut self, expected: u8, message: &str) -> Result<(), TypeParseError> {
+        if self.consume_byte(expected) {
+            Ok(())
+        } else {
+            Err(invalid_syntax(message))
+        }
+    }
+
+    fn consume_keyword(&mut self, keyword: &str) -> bool {
+        let remaining = &self.source[self.position..];
+        if !remaining.starts_with(keyword) {
+            return false;
+        }
+
+        let end = self.position + keyword.len();
+        if let Some(next_byte) = self.source.as_bytes().get(end).copied() {
+            if next_byte == b'_' || next_byte.is_ascii_alphanumeric() {
+                return false;
+            }
+        }
+
+        self.position = end;
+        true
+    }
+
+    fn consume_atomic_vector_suffix(&mut self) -> bool {
+        let saved_position = self.position;
+        self.skip_ascii_whitespace();
+        if self.consume_byte(b'[') {
+            self.skip_ascii_whitespace();
+            if self.consume_byte(b']') {
+                return true;
+            }
+        }
+        self.position = saved_position;
+        false
+    }
+
+    fn consume_atomic_named_vector_suffix(&mut self) -> bool {
+        let saved_position = self.position;
+        self.skip_ascii_whitespace();
+        if self.consume_byte(b'[') {
+            self.skip_ascii_whitespace();
+            if self.consume_keyword("named") {
+                self.skip_ascii_whitespace();
+                if self.consume_byte(b']') {
+                    return true;
+                }
+            }
+        }
+        self.position = saved_position;
+        false
+    }
+
+    fn is_at_end(&self) -> bool {
+        self.position >= self.source.len()
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ListBraceItemKind {
+    Field,
+    Item,
+}
+
+fn parse_atomic_or_named_type(text: &str) -> Option<SurfaceType> {
+    match text {
+        "Any" | "any" => Some(SurfaceType::Any),
+        "Unknown" | "unknown" => Some(SurfaceType::Unknown),
+        "NULL" | "null" => Some(SurfaceType::Null),
+        "logical" => Some(SurfaceType::Scalar(Atomic::Logical)),
+        "integer" => Some(SurfaceType::Scalar(Atomic::Integer)),
+        "double" => Some(SurfaceType::Scalar(Atomic::Double)),
+        "complex" => Some(SurfaceType::Scalar(Atomic::Complex)),
+        "character" => Some(SurfaceType::Scalar(Atomic::Character)),
+        "raw" => Some(SurfaceType::Scalar(Atomic::Raw)),
+        _ => None,
+    }
 }
 
 fn parse_braced_type_and_tail(text: &str) -> Option<(&str, &str)> {
@@ -384,5 +932,91 @@ fn render_atomic(atomic: Atomic) -> &'static str {
         Atomic::Complex => "complex",
         Atomic::Character => "character",
         Atomic::Raw => "raw",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parser<'a>(source: &'a str) -> TypeParser<'a> {
+        let interner = Box::new(Interner::new());
+        TypeParser::new(Box::leak(interner), source)
+    }
+
+    #[test]
+    fn nested_named_list_tuple_value_consumes_inner_record_before_outer_bracket() {
+        let source = "list[named:list{integer,character}]}";
+        let mut parser = parser(source);
+
+        assert!(parser.consume_keyword("list"));
+        assert!(parser.consume_byte(b'['));
+        assert!(parser.consume_keyword("named"));
+        assert!(parser.consume_byte(b':'));
+
+        let inner_type = parser
+            .parse_list_bracket_item_type(StopContext::ROOT)
+            .expect("named-list inner tuple-like value should parse");
+
+        assert_eq!(
+            inner_type,
+            SurfaceType::Tuple(vec![
+                SurfaceType::Scalar(Atomic::Integer),
+                SurfaceType::Scalar(Atomic::Character),
+            ])
+        );
+        assert_eq!(parser.peek_byte(), Some(b']'));
+        assert_eq!(parser.position, source.len() - 2);
+    }
+
+    #[test]
+    fn nested_named_list_tuple_value_inside_record_stops_before_enclosing_record_closer() {
+        let source = "items:list[named:list{integer,character}]}}";
+        let mut parser = parser(source);
+
+        let (field_start, field_end) = parser
+            .peek_record_field_name()
+            .expect("record field lookahead should find `items`");
+        assert_eq!(&source[field_start..field_end], "items");
+
+        parser.position = field_end;
+        parser.skip_ascii_whitespace();
+        assert!(parser.consume_byte(b':'));
+
+        let field_value = parser
+            .parse_type_until(StopContext::LIST_BRACE_ITEM)
+            .expect("record field value should parse");
+
+        assert_eq!(
+            field_value,
+            SurfaceType::NamedList(Box::new(SurfaceType::Tuple(vec![
+                SurfaceType::Scalar(Atomic::Integer),
+                SurfaceType::Scalar(Atomic::Character),
+            ])))
+        );
+        assert_eq!(parser.peek_byte(), Some(b'}'));
+        assert_eq!(parser.position, source.len() - 2);
+    }
+
+    #[test]
+    fn non_ascii_record_field_name_is_not_treated_as_a_valid_field_name() {
+        let source = "naïve:integer}";
+        let mut parser = parser(source);
+
+        assert!(
+            parser.peek_record_field_name().is_none(),
+            "ASCII-only field-name scanning should reject non-ASCII names for now"
+        );
+
+        let error = parser
+            .parse_type_until(StopContext::LIST_BRACE_ITEM)
+            .expect_err("non-ASCII field names should currently fail to parse");
+
+        assert_eq!(
+            error,
+            TypeParseError::InvalidSyntax {
+                message: "Unknown type `na` in `list{...}`".to_owned(),
+            }
+        );
     }
 }

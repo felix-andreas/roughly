@@ -315,7 +315,7 @@ fn parse_surface_type_supports_exact_failing_deeply_nested_record_like_list_with
 
     let surface_type = parse_surface_type(
         &mut interner,
-        "list{meta:list{items:list[named:list{integer,character}}}}",
+        "list{meta:list{items:list[named:list{integer,character}]}}",
     )
     .expect("deeply nested named list with tuple-like inner value should parse");
 

@@ -173,7 +173,7 @@ list{render:fn(integer,label:character)->character}
 list{render: fn(integer, label: character) -> character}
 
 #---- deeply_nested_record_like_list
-list{meta:list{items:list[named:list{integer,character}},render:fn(integer)->list{label:character}}}
+list{meta:list{items:list[named:list{integer,character}],render:fn(integer)->list{label:character}}}
 #++++
 list{meta: list{items: list[named: list{integer, character}], render: fn(integer) -> list{label: character}}}
 
@@ -183,7 +183,7 @@ list{meta:list{items:list[named:list{integer,character}],render:character}}
 list{meta: list{items: list[named: list{integer, character}], render: character}}
 
 #---- deeply_nested_record_like_list_with_tuple_like_inner_value
-list{meta:list{items:list[named:list{integer,character}}}}
+list{meta:list{items:list[named:list{integer,character}]}}
 #++++
 list{meta: list{items: list[named: list{integer, character}]}}
 
@@ -197,3 +197,9 @@ error:
 list{meta:list{items:list[named:list{integer,character},render:character}}
 #++++
 InvalidSyntax { message: "missing closing delimiter ] (while parsing field `items`) (while parsing field `meta`)" }
+
+#---- non_ascii_record_field_name
+error:
+list{naïve:integer}
+#++++
+InvalidSyntax { message: "Unknown type `na` in `list{...}` (while parsing tuple item)" }
