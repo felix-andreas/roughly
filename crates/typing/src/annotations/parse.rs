@@ -76,32 +76,20 @@ pub fn parse_annotation(
         ));
     }
 
-    let mut normalized_lines = trimmed_text
+    let normalized_lines = trimmed_text
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
-        .map(|line| line.strip_prefix("#:").map(str::trim).unwrap_or(line));
+        .map(|line| line.strip_prefix("#:").map(str::trim).unwrap_or(line))
+        .collect::<Vec<_>>();
 
-    let Some(first_line) = normalized_lines.next() else {
+    let Some(first_line) = normalized_lines.first().copied() else {
         return Err(invalid_syntax(
             "expected a type annotation, but found empty input.",
         ));
     };
 
-    if is_expanded_annotation_line(first_line) {
-        let mut expanded_block_text = String::from(first_line);
-
-        for line in normalized_lines {
-            if !is_expanded_annotation_line(line) {
-                return Err(invalid_syntax(
-                    "cannot mix compact and expanded annotations in the same `#:` block.",
-                ));
-            }
-
-            expanded_block_text.push('\n');
-            expanded_block_text.push_str(line);
-        }
-
+    if let Some(expanded_block_text) = parse_expanded_annotation_block_text(&normalized_lines)? {
         let surface_type = parse_expanded_block_surface_type(interner, &expanded_block_text)?;
         return Ok(crate::types::Annotation::new(
             AnnotationKind::Checked,
@@ -109,7 +97,7 @@ pub fn parse_annotation(
         ));
     }
 
-    if normalized_lines.next().is_some() {
+    if normalized_lines.len() > 1 {
         return Err(invalid_syntax(
             "cannot use multiple compact annotations in the same `#:` block.",
         ));
@@ -335,7 +323,36 @@ pub fn parse_expanded_block_surface_type(
 }
 
 fn is_expanded_annotation_line(text: &str) -> bool {
-    text.starts_with("@param ") || text.starts_with("@return ") || text.starts_with("@returns ")
+    if let Some((directive_name, _)) = parse_annotation_directive_name_and_body(text) {
+        directive_name == "param" || directive_name == "return" || directive_name == "returns"
+    } else {
+        false
+    }
+}
+
+fn parse_expanded_annotation_block_text(lines: &[&str]) -> Result<Option<String>, TypeParseError> {
+    let Some(first_line) = lines.first().copied() else {
+        return Ok(None);
+    };
+
+    if !is_expanded_annotation_line(first_line) {
+        return Ok(None);
+    }
+
+    let mut expanded_block_text = String::from(first_line);
+
+    for line in &lines[1..] {
+        if !is_expanded_annotation_line(line) {
+            return Err(invalid_syntax(
+                "cannot mix compact and expanded annotations in the same `#:` block.",
+            ));
+        }
+
+        expanded_block_text.push('\n');
+        expanded_block_text.push_str(line);
+    }
+
+    Ok(Some(expanded_block_text))
 }
 
 fn parse_named_type_definition(
@@ -378,22 +395,27 @@ fn parse_named_type_definition(
 }
 
 fn identifier_span(text: &str) -> Option<(usize, usize)> {
-    let mut characters = text.char_indices();
+    identifier_span_at(text, 0)
+}
+
+fn identifier_span_at(text: &str, start: usize) -> Option<(usize, usize)> {
+    let remaining = &text[start..];
+    let mut characters = remaining.char_indices();
     let (_, first_character) = characters.next()?;
     if !is_identifier_start(first_character) {
         return None;
     }
 
-    let mut end = first_character.len_utf8();
+    let mut end = start + first_character.len_utf8();
     for (index, character) in characters {
         if is_identifier_continue(character) {
-            end = index + character.len_utf8();
+            end = start + index + character.len_utf8();
         } else {
             break;
         }
     }
 
-    Some((0, end))
+    Some((start, end))
 }
 
 fn is_identifier_start(character: char) -> bool {
@@ -778,23 +800,9 @@ impl<'a> TypeParser<'a> {
 
     fn parse_identifier_span(&mut self) -> Option<(usize, usize)> {
         self.skip_ascii_whitespace();
-        let start = self.position;
-        let remaining = &self.source[start..];
-        let (_, first_character) = remaining.char_indices().next()?;
-        if !is_identifier_start(first_character) {
-            return None;
-        }
-
-        self.position += first_character.len_utf8();
-        for (index, character) in remaining.char_indices().skip(1) {
-            if is_identifier_continue(character) {
-                self.position = start + index + character.len_utf8();
-            } else {
-                break;
-            }
-        }
-
-        Some((start, self.position))
+        let span = identifier_span_at(self.source, self.position)?;
+        self.position = span.1;
+        Some(span)
     }
 
     fn peek_record_field_name(&self) -> Option<(usize, usize)> {
@@ -811,23 +819,7 @@ impl<'a> TypeParser<'a> {
             break;
         }
 
-        let start = position;
-        let remaining = &self.source[start..];
-        let (_, first_character) = remaining.char_indices().next()?;
-        if !is_identifier_start(first_character) {
-            return None;
-        }
-
-        let mut end = start + first_character.len_utf8();
-        for (index, character) in remaining.char_indices().skip(1) {
-            if is_identifier_continue(character) {
-                end = start + index + character.len_utf8();
-            } else {
-                break;
-            }
-        }
-
-        Some((start, end))
+        identifier_span_at(self.source, position)
     }
 
     fn starts_list_brace_type(&self) -> bool {
