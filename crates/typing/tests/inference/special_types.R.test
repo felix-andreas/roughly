@@ -28,22 +28,22 @@ Any
 #++++
 Unknown
 
-#---- unknown_only_assertion_accepts_unknown
-#:? integer
+#---- unknown_only_coercion_accepts_unknown
+#: @if-unknown integer
 value <- 2L ^ 3L
 value
 #++++
 integer
 integer
 
-#---- unknown_only_assertion_rejects_known_type
-#:? integer
+#---- unknown_only_coercion_rejects_known_type
+#: @if-unknown integer
 value <- 1L
 #++++
 error: type mismatch
 
-#---- trusted_assertion_overrides_incompatible_source
-#:! integer
+#---- trusted_coercion_overrides_incompatible_source
+#: @trust integer
 value <- "hello"
 value
 #++++

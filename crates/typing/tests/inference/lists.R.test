@@ -56,7 +56,7 @@ value <- list(1L, "foo")
 error: type mismatch
 
 #---- array_like_list_does_not_coerce_back_to_tuple_like
-#:! list[integer]
+#: @trust list[integer]
 value <- list(1L, 2L)
 #: list{integer, integer}
 copy <- value
@@ -64,7 +64,7 @@ copy <- value
 error: type mismatch
 
 #---- map_like_list_does_not_coerce_back_to_record_like
-#:! list[named: integer]
+#: @trust list[named: integer]
 value <- list(foo = 1L, bar = 2L)
 #: list{foo: integer, bar: integer}
 copy <- value

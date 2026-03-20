@@ -20,15 +20,44 @@ If code changes make this document inaccurate, update it in the same session.
 
 ## Active continuity
 
-- `src/type_syntax.rs` now has a working recursive-descent parser for compact surface types plus the existing expanded-block annotation parser.
-- Consecutive `#:` lines are now parsed as a single annotation block in both diagnostics and lowering.
-- Invalid annotation blocks now report explicit block-level errors for:
-  - mixed compact and expanded forms
-  - multiple compact annotations
-  - duplicate `@return` / `@returns`
-  - `@param` after `@return`
-- This fixes the old false `type syntax error: expected a type` on valid expanded multi-line annotation blocks in `roughly`.
-- Record-field parse errors carry field-name context, for example `... (while parsing field \`items\`)`.
-- The type parser still treats identifiers and record-field names as ASCII-only. `list{naïve: integer}` currently fails as an unknown type starting at `na`; that is current behavior, not a newly introduced regression.
-- One parser audit note remains: vector suffix parsing is still permissive for non-atomic keywords such as `Any`, `Unknown`, and `NULL`. Tightening that would be a user-facing syntax decision and should be reviewed deliberately rather than folded into unrelated parser work.
-- A separate annotated-function inference limitation remains: compact and expanded function annotations still do not feed parameter types into the function body during inference, so examples like `#: fn(count: integer) -> integer` on `function(count) count + count` still fail with `invalid plus operand`.
+- Discussed and documented nominal typing syntax in `SEMANTICS.md`:
+  - `#: @type Name {TYPE}` defines a nominal type
+  - `#: @alias Name {TYPE}` defines a structural alias
+  - `#: @new Name` is nominal introduction
+  - plain `#: Name` checks an already-nominal value
+  - nominal values are compatible with their underlying structural representation
+  - aliases and nominal types share one namespace
+  - duplicate definitions are errors
+  - definition blocks are source-ordered and cannot mix with ordinary annotation forms
+- Renamed annotation keywords in `SEMANTICS.md`:
+  - `#:? TYPE` → `#: @if-unknown TYPE`
+  - `#:! TYPE` → `#: @trust TYPE`
+  - terminology now uses “unknown-only coercion” and “trusted coercion”
+- Updated inference fixtures to use `@if-unknown` and `@trust`:
+  - `tests/inference/special_types.R.test`
+  - `tests/inference/lists.R.test`
+- Added `tests/types/named_types.R.test` for named-type / annotation-syntax coverage.
+- Important parser/design conclusion from this session:
+  - `CoreType` is the inference/unification model.
+  - `SurfaceType` is the surface type-expression model, not the unification model.
+  - The crate currently lacks a proper top-level annotation-syntax model for the full `#:` DSL.
+  - We discussed a cleaner future direction: a single top-level syntax-item enum for annotation/comment syntax, rather than overloading `SurfaceType` for everything.
+- Important code-state note:
+  - `src/type_syntax.rs` was intentionally left in a conservative cleaned-up state after backing out a more invasive fixture-only parser experiment.
+  - The oversized fixture-only named-reference parser was removed because it was getting too complex and hacky.
+  - Current `type_syntax.rs` cleanly supports:
+    - `SurfaceType`
+    - `@if-unknown TYPE`
+    - `@trust TYPE`
+    - `@type Name {TYPE}`
+    - `@alias Name {TYPE}`
+  - It does **not** cleanly support bare named references like `Person` as type syntax items yet.
+- Expect broken tests after this cleanup:
+  - `tests/types/named_types.R.test` likely still expects named-reference behavior that is not implemented in the cleaned-up parser state.
+  - This is intentional: user asked to prefer clean code over forcing a brittle implementation through.
+- Open design question for next session:
+  - Decide whether named references like `Person` should become part of `SurfaceType`.
+  - If yes, parser design becomes simpler, but lowering/inference must then decide how to handle unresolved / nominal / alias names.
+  - If no, narrow the fixture scope so annotation-syntax tests avoid nested named references until a fuller syntax model is introduced.
+- Another open parser issue:
+  - non-ASCII field names like `list{naïve: integer}` should eventually render correctly; current legacy parser behavior still rejects them.

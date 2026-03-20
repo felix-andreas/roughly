@@ -5,7 +5,9 @@ use {
         infer::{BuiltinKind, InferenceError, InferenceState},
         lower::LoweringContext,
         new_parser, parse, render_surface_type,
-        type_syntax::{parse_expanded_block_surface_type, parse_surface_type},
+        type_syntax::{
+            parse_expanded_block_surface_type, parse_type_syntax_item, render_type_syntax_item,
+        },
         types::{Atomic, CoreType, InferenceVariableId},
     },
 };
@@ -252,10 +254,10 @@ fn render_type_result(source: &str) -> String {
                 .to_owned();
         }
 
-        return match parse_surface_type(&mut interner, &normalized_source) {
-            Ok(surface_type) => format!(
+        return match parse_type_syntax_item(&mut interner, &normalized_source) {
+            Ok(item) => format!(
                 "fixture error: expected parse error\nsource:\n{normalized_source}\nparsed as: {}",
-                render_surface_type(&interner, &surface_type)
+                render_type_syntax_item(&interner, &item)
             ),
             Err(error) => format!("{error:?}"),
         };
@@ -282,8 +284,8 @@ fn render_type_result(source: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
-    match parse_surface_type(&mut interner, &normalized_source) {
-        Ok(surface_type) => render_surface_type(&interner, &surface_type),
+    match parse_type_syntax_item(&mut interner, &normalized_source) {
+        Ok(item) => render_type_syntax_item(&interner, &item),
         Err(error) => format!("parse error: {error:?}\nsource:\n{trimmed_source}"),
     }
 }

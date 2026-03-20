@@ -1,5 +1,5 @@
 use crate::{
-    interner::Interner,
+    interner::{Interner, Symbol},
     types::{AnnotationKind, Atomic, FunctionType, RecordField, SurfaceType},
 };
 
@@ -7,6 +7,21 @@ use crate::{
 pub enum TypeParseError {
     InvalidSyntax { message: String },
     UnknownType { name: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeSyntaxItem {
+    SurfaceType(SurfaceType),
+    IfUnknown(SurfaceType),
+    Trust(SurfaceType),
+    TypeDefinition {
+        name: Symbol,
+        surface_type: SurfaceType,
+    },
+    TypeAlias {
+        name: Symbol,
+        surface_type: SurfaceType,
+    },
 }
 
 pub fn parse_surface_type(
@@ -101,10 +116,13 @@ pub fn parse_annotation(
     }
 
     let line = block_lines[0];
-    let (kind, surface_text) = if let Some(surface_text) = line.strip_prefix('?') {
-        (AnnotationKind::UnknownOnly, surface_text.trim())
-    } else if let Some(surface_text) = line.strip_prefix('!') {
-        (AnnotationKind::Trusted, surface_text.trim())
+    let (kind, surface_text) = if let Some(surface_text) = line
+        .strip_prefix("@if-unknown")
+        .and_then(keyword_surface_text)
+    {
+        (AnnotationKind::UnknownOnly, surface_text)
+    } else if let Some(surface_text) = line.strip_prefix("@trust").and_then(keyword_surface_text) {
+        (AnnotationKind::Trusted, surface_text)
     } else {
         (AnnotationKind::Checked, line)
     };
@@ -113,18 +131,92 @@ pub fn parse_annotation(
     Ok(crate::types::Annotation::new(kind, surface_type))
 }
 
+pub fn parse_type_syntax_item(
+    interner: &mut Interner,
+    text: &str,
+) -> Result<TypeSyntaxItem, TypeParseError> {
+    let trimmed_text = text.trim();
+
+    if trimmed_text.is_empty() {
+        return Err(invalid_syntax("expected a type, but found empty input."));
+    }
+
+    if let Some(definition_text) = trimmed_text.strip_prefix("@type") {
+        let (name, surface_type) = parse_named_type_definition(interner, definition_text.trim())?;
+        return Ok(TypeSyntaxItem::TypeDefinition { name, surface_type });
+    }
+
+    if let Some(definition_text) = trimmed_text.strip_prefix("@alias") {
+        let (name, surface_type) = parse_named_type_definition(interner, definition_text.trim())?;
+        return Ok(TypeSyntaxItem::TypeAlias { name, surface_type });
+    }
+
+    if let Some(surface_text) = trimmed_text.strip_prefix("@if-unknown") {
+        let Some(surface_text) = keyword_surface_text(surface_text) else {
+            return Err(invalid_syntax(
+                "expected a type after the annotation prefix.",
+            ));
+        };
+        let surface_type = parse_surface_type(interner, surface_text)?;
+        return Ok(TypeSyntaxItem::IfUnknown(surface_type));
+    }
+
+    if let Some(surface_text) = trimmed_text.strip_prefix("@trust") {
+        let Some(surface_text) = keyword_surface_text(surface_text) else {
+            return Err(invalid_syntax(
+                "expected a type after the annotation prefix.",
+            ));
+        };
+        let surface_type = parse_surface_type(interner, surface_text)?;
+        return Ok(TypeSyntaxItem::Trust(surface_type));
+    }
+
+    parse_surface_type(interner, trimmed_text).map(TypeSyntaxItem::SurfaceType)
+}
+
+pub fn render_type_syntax_item(interner: &Interner, item: &TypeSyntaxItem) -> String {
+    let mut renderer = SurfaceTypeRenderer::new(interner);
+
+    match item {
+        TypeSyntaxItem::SurfaceType(surface_type) => renderer.render(surface_type),
+        TypeSyntaxItem::IfUnknown(surface_type) => {
+            format!("@if-unknown {}", renderer.render(surface_type))
+        }
+        TypeSyntaxItem::Trust(surface_type) => {
+            format!("@trust {}", renderer.render(surface_type))
+        }
+        TypeSyntaxItem::TypeDefinition { name, surface_type } => {
+            let name = interner.resolve(*name).unwrap_or("<unknown>");
+            format!("@type {name} {{{}}}", renderer.render(surface_type))
+        }
+        TypeSyntaxItem::TypeAlias { name, surface_type } => {
+            let name = interner.resolve(*name).unwrap_or("<unknown>");
+            format!("@alias {name} {{{}}}", renderer.render(surface_type))
+        }
+    }
+}
+
 pub fn render_surface_type(interner: &Interner, surface_type: &SurfaceType) -> String {
     let mut renderer = SurfaceTypeRenderer::new(interner);
     renderer.render(surface_type)
 }
 
 fn annotation_surface_text(text: &str) -> Option<&str> {
-    if let Some(surface_text) = text.strip_prefix('?') {
-        Some(surface_text.trim())
-    } else if let Some(surface_text) = text.strip_prefix('!') {
-        Some(surface_text.trim())
+    if let Some(surface_text) = text.strip_prefix("@if-unknown") {
+        keyword_surface_text(surface_text)
+    } else if let Some(surface_text) = text.strip_prefix("@trust") {
+        keyword_surface_text(surface_text)
     } else {
         Some(text.trim())
+    }
+}
+
+fn keyword_surface_text(text: &str) -> Option<&str> {
+    let trimmed_text = text.trim();
+    if trimmed_text.is_empty() {
+        None
+    } else {
+        Some(trimmed_text)
     }
 }
 
@@ -210,6 +302,64 @@ pub fn parse_expanded_block_surface_type(
 
 fn is_expanded_annotation_line(text: &str) -> bool {
     text.starts_with("@param ") || text.starts_with("@return ") || text.starts_with("@returns ")
+}
+
+fn parse_named_type_definition(
+    interner: &mut Interner,
+    text: &str,
+) -> Result<(Symbol, SurfaceType), TypeParseError> {
+    let trimmed_text = text.trim();
+
+    if trimmed_text.is_empty() {
+        return Err(invalid_syntax("expected a type name."));
+    }
+
+    let Some((name_start, name_end)) = identifier_span(trimmed_text) else {
+        return Err(invalid_syntax("expected a type name."));
+    };
+
+    if name_start != 0 {
+        return Err(invalid_syntax("expected a type name."));
+    }
+
+    let name_text = &trimmed_text[name_start..name_end];
+    let remainder = trimmed_text[name_end..].trim();
+
+    if remainder.is_empty() {
+        return Err(invalid_syntax("expected `{TYPE}` after the type name."));
+    }
+
+    let (type_text, trailing_text) = parse_braced_type_and_tail(remainder)
+        .ok_or_else(|| invalid_syntax("expected `{TYPE}` after the type name."))?;
+
+    if !trailing_text.trim().is_empty() {
+        return Err(invalid_syntax(
+            "did not expect trailing text after the named type definition.",
+        ));
+    }
+
+    let name = interner.intern(name_text);
+    let surface_type = parse_surface_type(interner, type_text)?;
+    Ok((name, surface_type))
+}
+
+fn identifier_span(text: &str) -> Option<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let first = *bytes.first()?;
+    if !(first == b'_' || first.is_ascii_alphabetic()) {
+        return None;
+    }
+
+    let mut end = 1;
+    while let Some(byte) = bytes.get(end).copied() {
+        if byte == b'_' || byte.is_ascii_alphanumeric() {
+            end += 1;
+        } else {
+            break;
+        }
+    }
+
+    Some((0, end))
 }
 
 fn invalid_syntax(message: impl Into<String>) -> TypeParseError {

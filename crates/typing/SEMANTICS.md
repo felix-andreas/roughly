@@ -40,22 +40,31 @@ Typing annotations use preceding `#:` comments attached to the following binding
 
 This applies to all typing annotations in this crate, not only function annotations.
 
-Consecutive `#:` lines with no blank line between them are treated as a single annotation block attached to the following binding or expression.
+Consecutive `#:` lines with no blank line between them are treated as a single annotation block.
 
-There are three annotation forms:
+Most annotation blocks are attached to the following binding or expression.
+
+A block consisting only of `@type` and `@alias` lines is instead a definition block.
+
+Definition blocks are not attached to the following binding or expression. Each definition line is processed independently in source order, so later lines may refer to names defined by earlier lines in the same block.
+
+There are four annotation forms:
 
 - `#: TYPE`
   - checked annotation
-- `#:? TYPE`
-  - unknown-only assertion
-- `#:! TYPE`
-  - trusted assertion
+- `#: @trust TYPE`
+  - trusted coercion
+- `#: @if-unknown TYPE`
+  - unknown-only coercion
+- `#: @new TYPE_NAME`
+  - nominal introduction
 
 Additional block rules:
 
 - a block may contain exactly one compact annotation line
 - a block may contain an expanded function annotation made of multiple `@param` and `@return` / `@returns` lines
-- compact and expanded forms cannot be mixed in the same block
+- a block may contain one or more `@type` and `@alias` lines
+- compact, expanded, and definition forms cannot be mixed in the same block
 
 Examples:
 
@@ -82,7 +91,12 @@ double_count <- function(count) count + count
 apply_renderer <- function(render_count, count, label = NULL) {
   if (!is.null(label)) paste0(label, ": ", render_count(count)) else render_count(count)
 }
+```
+
 ```r
+#: @type Cat {list{ name: character }}
+#: @type Dog {list{ name: character }}
+```
 
 ## Type annotations and assertions
 
@@ -104,54 +118,82 @@ value <- list(1L, 2L, 3L)
 
 This is valid because `list{integer, integer, integer}` is compatible with `list[integer]`.
 
-### Unknown-only assertions
+### Unknown-only coercions
 
-`#:? TYPE` is an unknown-only assertion.
+`#: @if-unknown TYPE` is an unknown-only coercion.
 
 - it is allowed only when the inferred type is `Unknown`
-- if the checker already knows the source type, using `#:?` is an error, even if the asserted type matches that known type
-- if the assertion is allowed, the annotated binding or expression is then treated as having type `TYPE`
+- if the checker already knows the source type, using `#: @if-unknown` is an error, even if the requested type matches that known type
+- if the coercion is allowed, the annotated binding or expression is then treated as having type `TYPE`
 
 Examples:
 
 ```r
-#:? integer
+#: @if-unknown integer
 value <- unsupported_value
 ```
 
 This is valid only if `unsupported_value` has inferred type `Unknown`.
 
 ```r
-#:? integer
+#: @if-unknown integer
 value <- 1L
 ```
 
 This is an error because the checker already knows the type.
 
-`#:? TYPE` is intended for filling in inference gaps without overriding known information when the checker has no better type than `Unknown`.
+`#: @if-unknown TYPE` is intended for filling in inference gaps without overriding known information when the checker has no better type than `Unknown`.
 
-### Trusted assertions
+### Trusted coercions
 
-`#:! TYPE` is a trusted type assertion.
+`#: @trust TYPE` is a trusted coercion.
 
 - it tells the checker to treat the annotated value as `TYPE` without requiring ordinary compatibility at that annotation site
 - this is the “trust me bro” escape hatch
 - it is similar in spirit to TypeScript’s `as`
-- conceptually, `#:! TYPE` is like asserting through `Any` and then to `TYPE`, but written directly because that is more ergonomic
+- conceptually, `#: @trust TYPE` is like coercing through `Any` and then to `TYPE`, but written directly because that is more ergonomic
 
 Examples:
 
 ```r
-#:! integer
+#: @trust integer
 value <- external_input
 ```
 
 ```r
-#:! fn(count: integer) -> character
+#: @trust fn(count: integer) -> character
 render_count <- callback
 ```
 
-Trusted assertions can hide real mistakes and should be used only when the programmer knows more than the checker.
+Trusted coercions can hide real mistakes and should be used only when the programmer knows more than the checker.
+
+### Nominal introduction
+
+`#: @new TYPE_NAME` introduces a nominal value.
+
+- `TYPE_NAME` must refer to a nominal type declared with `@type`
+- the annotated value must be compatible with that nominal type's underlying representation type
+- if the annotation succeeds, the annotated binding or expression is then treated as having type `TYPE_NAME`
+- if the annotated value already has type `TYPE_NAME`, the annotation is allowed and has no further effect
+- `@new` is an annotation form, not a type expression, so it cannot appear inside compact type syntax or expanded function annotations
+
+Examples:
+
+```r
+#: @type Person {list{ name: character, age: double }}
+
+#: @new Person
+value <- list(name = "bob", age = 20)
+```
+
+```r
+#: @type Person {list{ name: character, age: double }}
+
+#: Person
+value <- list(name = "bob", age = 20)
+```
+
+The second example is an error because an ordinary checked annotation for a nominal type requires the value to already be nominally typed as `Person`.
 
 ## Types
 
@@ -337,6 +379,153 @@ Examples:
 - `Never` is compatible with every type
 - it is useful for non-returning constructs and calls
 - it is not important to implement `Never` in v1
+
+### Nominal types and aliases
+
+Named type definitions use `#:` lines with directive syntax.
+
+- `#: @type NAME {TYPE}`
+  - defines a nominal type named `NAME` with underlying representation type `TYPE`
+- `#: @alias NAME {TYPE}`
+  - defines a structural alias named `NAME` for `TYPE`
+
+Type and alias definitions share the same namespace.
+
+It is an error if a `@type` or `@alias` definition reuses a name that is already defined by either form.
+
+Consecutive `@type` and `@alias` lines in the same block are allowed and are equivalent to writing them as separate blocks.
+
+Examples:
+
+```r
+#: @type Cat {list{ name: character }}
+#: @type Dog {list{ name: character }}
+```
+
+This is equivalent to:
+
+```r
+#: @type Cat {list{ name: character }}
+
+#: @type Dog {list{ name: character }}
+```
+
+A definition block cannot mix `@type` or `@alias` lines with ordinary checked annotations, assertions, nominal introduction, or expanded function annotation lines.
+
+Examples of invalid mixed blocks:
+
+```r
+#: @type Person {list{ name: character, age: double }}
+#: list{ name: character, age: double }
+value <- list(name = "bob", age = 20)
+```
+
+```r
+#: @type Person {list{ name: character, age: double }}
+#: @param {Person} value
+identity_person <- function(value) value
+```
+
+Definitions are processed in source order.
+
+A name may be used only after it has been defined.
+
+Examples:
+
+```r
+#: @alias PersonShape {list{ name: character, age: double }}
+#: @type Person {PersonShape}
+```
+
+This is valid because `PersonShape` is defined earlier in the same block.
+
+```r
+#: @type Person {PersonShape}
+#: @alias PersonShape {list{ name: character, age: double }}
+```
+
+This is an error because `PersonShape` is not yet defined when `Person` is processed.
+
+#### Type aliases
+
+A type alias is purely structural.
+
+- using an alias name in a type annotation is equivalent to writing its underlying type directly
+- aliases may appear anywhere an ordinary type expression may appear
+- aliases do not create fresh type identity
+- aliases are compatible with other types exactly as their underlying type is
+- alias definition cycles are errors
+
+Example:
+
+```r
+#: @alias PersonShape {list{ name: character, age: double }}
+
+#: PersonShape
+value <- list(name = "bob", age = 20)
+```
+
+Aliases may also appear inside larger type expressions.
+
+```r
+#: @alias Person {list{ name: character, age: double }}
+
+#: list{ owner: Person }
+value <- list(owner = list(name = "bob", age = 20))
+```
+
+This behaves exactly as if `Person` were replaced with `list{ name: character, age: double }`.
+
+#### Nominal types
+
+A nominal type creates a fresh type identity, even when another nominal type has the same underlying representation type.
+
+- a nominal type name may appear anywhere an ordinary type expression may appear
+- a nominal type is compatible with itself
+- two different nominal types are not compatible with each other, even if their representation types are identical
+- an ordinary structural value is not compatible with a nominal type unless it is introduced with `@new`
+- a value of a nominal type is compatible with its underlying representation type
+
+Examples:
+
+```r
+#: @type Person {list{ name: character, age: double }}
+#: @type Pet {list{ name: character, age: double }}
+```
+
+`Person` and `Pet` are distinct and incompatible nominal types.
+
+```r
+#: @type Person {list{ name: character, age: double }}
+
+#: @new Person
+person <- list(name = "bob", age = 20)
+
+#: list{ name: character, age: double }
+shape <- person
+```
+
+This is valid because nominal values are compatible with their underlying representation type.
+
+```r
+#: @type Person {list{ name: character, age: double }}
+
+#: fn(value: Person) -> character
+get_name <- function(value) value$name
+```
+
+Nominal type names may be used in function annotations and nested type expressions.
+
+```r
+#: @type Person {list{ name: character, age: double }}
+
+#: fn(value: Person) -> character
+get_name <- function(value) value$name
+
+get_name(list(name = "bob", age = 20))
+```
+
+This is an error because an ordinary structural value is not compatible with `Person` without `@new`.
 
 ### Union types
 
