@@ -355,6 +355,82 @@ fn parse_expanded_annotation_block_text(lines: &[&str]) -> Result<Option<String>
     Ok(Some(expanded_block_text))
 }
 
+fn for_each_expanded_annotation_directive(
+    text: &str,
+    mut visit_directive: impl FnMut(&str) -> Result<(), TypeParseError>,
+) -> Result<(), TypeParseError> {
+    let mut current_directive = String::new();
+    let mut delimiter_stack = Vec::new();
+
+    for line in text.lines() {
+        let trimmed_line = line.trim();
+        if trimmed_line.is_empty() {
+            continue;
+        }
+
+        let content = if let Some(content) = trimmed_line.strip_prefix("#:") {
+            content.trim()
+        } else {
+            trimmed_line
+        };
+
+        let starts_new_directive = content.starts_with("@param")
+            || content.starts_with("@return")
+            || content.starts_with("@returns");
+
+        if starts_new_directive {
+            if !current_directive.is_empty() {
+                if !delimiter_stack.is_empty() {
+                    let missing_closer =
+                        utils::expected_closer(*delimiter_stack.last().unwrap_or(&'{'));
+                    return Err(invalid_syntax(format!(
+                        "missing closing delimiter {missing_closer}"
+                    )));
+                }
+                visit_directive(current_directive.trim())?;
+                current_directive.clear();
+            }
+        } else if current_directive.is_empty() {
+            return Err(invalid_syntax(
+                "expected an expanded annotation directive starting with `@param`, `@return`, or `@returns`.",
+            ));
+        } else {
+            current_directive.push('\n');
+        }
+
+        current_directive.push_str(content);
+
+        for character in content.chars() {
+            match character {
+                '(' | '[' | '{' => delimiter_stack.push(character),
+                ')' | ']' | '}' => {
+                    if !utils::pop_matching_delimiter(&mut delimiter_stack, character) {
+                        return Err(invalid_syntax(format!(
+                            "unexpected closing delimiter {character}"
+                        )));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if current_directive.is_empty() {
+        return Err(invalid_syntax(
+            "expected at least one expanded annotation directive.",
+        ));
+    }
+
+    if !delimiter_stack.is_empty() {
+        let missing_closer = utils::expected_closer(*delimiter_stack.last().unwrap_or(&'{'));
+        return Err(invalid_syntax(format!(
+            "missing closing delimiter {missing_closer}"
+        )));
+    }
+
+    visit_directive(current_directive.trim())
+}
+
 fn parse_named_type_definition(
     interner: &mut Interner,
     text: &str,
@@ -395,35 +471,7 @@ fn parse_named_type_definition(
 }
 
 fn identifier_span(text: &str) -> Option<(usize, usize)> {
-    identifier_span_at(text, 0)
-}
-
-fn identifier_span_at(text: &str, start: usize) -> Option<(usize, usize)> {
-    let remaining = &text[start..];
-    let mut characters = remaining.char_indices();
-    let (_, first_character) = characters.next()?;
-    if !is_identifier_start(first_character) {
-        return None;
-    }
-
-    let mut end = start + first_character.len_utf8();
-    for (index, character) in characters {
-        if is_identifier_continue(character) {
-            end = start + index + character.len_utf8();
-        } else {
-            break;
-        }
-    }
-
-    Some((start, end))
-}
-
-fn is_identifier_start(character: char) -> bool {
-    character == '_' || character.is_alphabetic()
-}
-
-fn is_identifier_continue(character: char) -> bool {
-    character == '_' || character.is_alphanumeric()
+    utils::identifier_span_at(text, 0)
 }
 
 fn invalid_syntax(message: impl Into<String>) -> TypeParseError {
@@ -800,7 +848,7 @@ impl<'a> TypeParser<'a> {
 
     fn parse_identifier_span(&mut self) -> Option<(usize, usize)> {
         self.skip_ascii_whitespace();
-        let span = identifier_span_at(self.source, self.position)?;
+        let span = utils::identifier_span_at(self.source, self.position)?;
         self.position = span.1;
         Some(span)
     }
@@ -819,7 +867,7 @@ impl<'a> TypeParser<'a> {
             break;
         }
 
-        identifier_span_at(self.source, position)
+        utils::identifier_span_at(self.source, position)
     }
 
     fn starts_list_brace_type(&self) -> bool {
@@ -968,81 +1016,6 @@ fn parse_braced_type_and_tail(text: &str) -> Option<(&str, &str)> {
     Some((type_text.trim(), trailing_text))
 }
 
-fn for_each_expanded_annotation_directive(
-    text: &str,
-    mut visit_directive: impl FnMut(&str) -> Result<(), TypeParseError>,
-) -> Result<(), TypeParseError> {
-    let mut current_directive = String::new();
-    let mut delimiter_stack = Vec::new();
-
-    for line in text.lines() {
-        let trimmed_line = line.trim();
-        if trimmed_line.is_empty() {
-            continue;
-        }
-
-        let content = if let Some(content) = trimmed_line.strip_prefix("#:") {
-            content.trim()
-        } else {
-            trimmed_line
-        };
-
-        let starts_new_directive = content.starts_with("@param")
-            || content.starts_with("@return")
-            || content.starts_with("@returns");
-
-        if starts_new_directive {
-            if !current_directive.is_empty() {
-                if !delimiter_stack.is_empty() {
-                    let missing_closer = expected_closer(*delimiter_stack.last().unwrap_or(&'{'));
-                    return Err(invalid_syntax(format!(
-                        "missing closing delimiter {missing_closer}"
-                    )));
-                }
-                visit_directive(current_directive.trim())?;
-                current_directive.clear();
-            }
-        } else if current_directive.is_empty() {
-            return Err(invalid_syntax(
-                "expected an expanded annotation directive starting with `@param`, `@return`, or `@returns`.",
-            ));
-        } else {
-            current_directive.push('\n');
-        }
-
-        current_directive.push_str(content);
-
-        for character in content.chars() {
-            match character {
-                '(' | '[' | '{' => delimiter_stack.push(character),
-                ')' | ']' | '}' => {
-                    if !pop_matching_delimiter(&mut delimiter_stack, character) {
-                        return Err(invalid_syntax(format!(
-                            "unexpected closing delimiter {character}"
-                        )));
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    if current_directive.is_empty() {
-        return Err(invalid_syntax(
-            "expected at least one expanded annotation directive.",
-        ));
-    }
-
-    if !delimiter_stack.is_empty() {
-        let missing_closer = expected_closer(*delimiter_stack.last().unwrap_or(&'{'));
-        return Err(invalid_syntax(format!(
-            "missing closing delimiter {missing_closer}"
-        )));
-    }
-
-    visit_directive(current_directive.trim())
-}
-
 fn find_matching_closer(text: &str, opener: char, _closer: char) -> Option<usize> {
     let mut delimiter_stack = vec![opener];
 
@@ -1050,7 +1023,7 @@ fn find_matching_closer(text: &str, opener: char, _closer: char) -> Option<usize
         match character {
             '(' | '[' | '{' => delimiter_stack.push(character),
             ')' | ']' | '}' => {
-                if !pop_matching_delimiter(&mut delimiter_stack, character) {
+                if !utils::pop_matching_delimiter(&mut delimiter_stack, character) {
                     return None;
                 }
                 if delimiter_stack.is_empty() {
@@ -1064,19 +1037,49 @@ fn find_matching_closer(text: &str, opener: char, _closer: char) -> Option<usize
     None
 }
 
-fn pop_matching_delimiter(delimiter_stack: &mut Vec<char>, closer: char) -> bool {
-    let Some(opener) = delimiter_stack.pop() else {
-        return false;
-    };
+mod utils {
+    pub(super) fn identifier_span_at(text: &str, start: usize) -> Option<(usize, usize)> {
+        let remaining = &text[start..];
+        let mut characters = remaining.char_indices();
+        let (_, first_character) = characters.next()?;
+        if !is_identifier_start(first_character) {
+            return None;
+        }
 
-    matches!((opener, closer), ('(', ')') | ('[', ']') | ('{', '}'))
-}
+        let mut end = start + first_character.len_utf8();
+        for (index, character) in characters {
+            if is_identifier_continue(character) {
+                end = start + index + character.len_utf8();
+            } else {
+                break;
+            }
+        }
 
-fn expected_closer(opener: char) -> char {
-    match opener {
-        '(' => ')',
-        '[' => ']',
-        '{' => '}',
-        _ => '}',
+        Some((start, end))
+    }
+
+    pub(super) fn pop_matching_delimiter(delimiter_stack: &mut Vec<char>, closer: char) -> bool {
+        let Some(opener) = delimiter_stack.pop() else {
+            return false;
+        };
+
+        matches!((opener, closer), ('(', ')') | ('[', ']') | ('{', '}'))
+    }
+
+    pub(super) fn expected_closer(opener: char) -> char {
+        match opener {
+            '(' => ')',
+            '[' => ']',
+            '{' => '}',
+            _ => '}',
+        }
+    }
+
+    fn is_identifier_start(character: char) -> bool {
+        character == '_' || character.is_alphabetic()
+    }
+
+    fn is_identifier_continue(character: char) -> bool {
+        character == '_' || character.is_alphanumeric()
     }
 }
