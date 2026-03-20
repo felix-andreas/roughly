@@ -60,23 +60,53 @@ pub fn parse_annotation(
         ));
     }
 
-    if trimmed_text
+    let block_lines = trimmed_text
         .lines()
-        .all(|line| line.trim().is_empty() || line.trim().starts_with("#:"))
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| line.strip_prefix("#:").map(str::trim).unwrap_or(line))
+        .collect::<Vec<_>>();
+
+    if block_lines.is_empty() {
+        return Err(invalid_syntax(
+            "expected a type annotation, but found empty input.",
+        ));
+    }
+
+    if block_lines
+        .iter()
+        .any(|line| is_expanded_annotation_line(line))
     {
-        let surface_type = parse_expanded_block_surface_type(interner, trimmed_text)?;
+        if !block_lines
+            .iter()
+            .all(|line| is_expanded_annotation_line(line))
+        {
+            return Err(invalid_syntax(
+                "cannot mix compact and expanded annotations in the same `#:` block.",
+            ));
+        }
+
+        let block_text = block_lines.join("\n");
+        let surface_type = parse_expanded_block_surface_type(interner, &block_text)?;
         return Ok(crate::types::Annotation::new(
             AnnotationKind::Checked,
             surface_type,
         ));
     }
 
-    let (kind, surface_text) = if let Some(surface_text) = trimmed_text.strip_prefix('?') {
+    if block_lines.len() > 1 {
+        return Err(invalid_syntax(
+            "cannot use multiple compact annotations in the same `#:` block.",
+        ));
+    }
+
+    let line = block_lines[0];
+    let (kind, surface_text) = if let Some(surface_text) = line.strip_prefix('?') {
         (AnnotationKind::UnknownOnly, surface_text.trim())
-    } else if let Some(surface_text) = trimmed_text.strip_prefix('!') {
+    } else if let Some(surface_text) = line.strip_prefix('!') {
         (AnnotationKind::Trusted, surface_text.trim())
     } else {
-        (AnnotationKind::Checked, trimmed_text)
+        (AnnotationKind::Checked, line)
     };
 
     let surface_type = parse_surface_type(interner, surface_text)?;
@@ -112,10 +142,16 @@ pub fn parse_expanded_block_surface_type(
 
     let mut named_parameters = Vec::new();
     let mut return_type = SurfaceType::Null;
+    let mut seen_return = false;
     let directives = collect_expanded_annotation_directives(trimmed_text)?;
 
     for directive in directives {
         if let Some(parameter_text) = directive.strip_prefix("@param") {
+            if seen_return {
+                return Err(invalid_syntax(
+                    "`@param` directives must appear before `@return` or `@returns` in the same `#:` block.",
+                ));
+            }
             let (type_text, name_text) = parse_braced_type_and_tail(parameter_text.trim())
                 .ok_or_else(|| {
                     invalid_syntax("expected `@param {TYPE} name` in the expanded annotation.")
@@ -134,6 +170,11 @@ pub fn parse_expanded_block_surface_type(
             let surface_type = parse_surface_type(interner, type_text)?;
             named_parameters.push(RecordField::new(name, surface_type));
         } else if directive.starts_with("@returns") || directive.starts_with("@return") {
+            if seen_return {
+                return Err(invalid_syntax(
+                    "cannot use more than one `@return` or `@returns` directive in the same `#:` block.",
+                ));
+            }
             let return_text = if let Some(return_text) = directive.strip_prefix("@returns") {
                 return_text.trim()
             } else {
@@ -152,6 +193,7 @@ pub fn parse_expanded_block_surface_type(
                 ));
             }
             return_type = parse_surface_type(interner, type_text)?;
+            seen_return = true;
         } else {
             return Err(invalid_syntax(
                 "expected `@param`, `@return`, or `@returns` in the expanded annotation.",
@@ -164,6 +206,10 @@ pub fn parse_expanded_block_surface_type(
         named_parameters,
         return_type,
     )))
+}
+
+fn is_expanded_annotation_line(text: &str) -> bool {
+    text.starts_with("@param ") || text.starts_with("@return ") || text.starts_with("@returns ")
 }
 
 fn invalid_syntax(message: impl Into<String>) -> TypeParseError {

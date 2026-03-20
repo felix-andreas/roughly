@@ -99,6 +99,7 @@ fn collect_annotation_diagnostics(source: &str, diagnostics: &mut Vec<Diagnostic
 
         let annotation_text = annotation_text.trim();
         let start_column = line.len() - trimmed_line.len();
+        let (annotation_block_text, last_annotation_row) = annotation_block_text(&lines, row);
         let annotation_range = tree_sitter::Range {
             start_byte: 0,
             end_byte: 0,
@@ -107,8 +108,8 @@ fn collect_annotation_diagnostics(source: &str, diagnostics: &mut Vec<Diagnostic
                 column: start_column,
             },
             end_point: tree_sitter::Point {
-                row,
-                column: line.len(),
+                row: last_annotation_row,
+                column: lines[last_annotation_row].len(),
             },
         };
 
@@ -121,14 +122,13 @@ fn collect_annotation_diagnostics(source: &str, diagnostics: &mut Vec<Diagnostic
             continue;
         }
 
-        let annotation_is_expanded = is_expanded_function_annotation_line(annotation_text);
-        let next_row = row + 1;
+        let next_row = last_annotation_row + 1;
         if next_row >= lines.len() {
             diagnostics.push(Diagnostic::syntax_error(
                 annotation_range,
                 "A `#:` typing comment must be followed immediately by an expression.",
             ));
-            row += 1;
+            row = last_annotation_row + 1;
             continue;
         }
 
@@ -140,46 +140,12 @@ fn collect_annotation_diagnostics(source: &str, diagnostics: &mut Vec<Diagnostic
                 annotation_range,
                 "A `#:` typing comment cannot be separated from its expression by an empty line.",
             ));
-            row += 1;
+            row = last_annotation_row + 1;
             continue;
         }
 
-        if let Some(next_annotation_text) = next_trimmed.strip_prefix("#:") {
-            let next_annotation_text = next_annotation_text.trim();
-            let next_annotation_is_expanded =
-                is_expanded_function_annotation_line(next_annotation_text);
-
-            if !annotation_is_expanded
-                || !next_annotation_is_expanded
-                || next_annotation_text.is_empty()
-            {
-                diagnostics.push(Diagnostic::syntax_error(
-                    annotation_range,
-                    "A `#:` typing comment must be followed by an expression, not another `#:` typing comment.",
-                ));
-
-                row += 1;
-                while row < lines.len() {
-                    let skipped_line = lines[row];
-                    let skipped_trimmed_line = skipped_line.trim_start();
-                    let Some(skipped_annotation_text) = skipped_trimmed_line.strip_prefix("#:")
-                    else {
-                        break;
-                    };
-
-                    if !is_expanded_function_annotation_line(skipped_annotation_text.trim()) {
-                        break;
-                    }
-
-                    row += 1;
-                }
-
-                continue;
-            }
-        }
-
         let mut interner = crate::Interner::new();
-        match parse_annotation(&mut interner, annotation_text) {
+        match parse_annotation(&mut interner, &annotation_block_text) {
             Ok(_annotation) => {}
             Err(TypeParseError::InvalidSyntax { message }) => {
                 diagnostics.push(Diagnostic::syntax_error(
@@ -195,12 +161,24 @@ fn collect_annotation_diagnostics(source: &str, diagnostics: &mut Vec<Diagnostic
             }
         }
 
-        row += 1;
+        row = last_annotation_row + 1;
     }
 }
 
-fn is_expanded_function_annotation_line(text: &str) -> bool {
-    text.starts_with("@param ") || text.starts_with("@return ") || text.starts_with("@returns ")
+fn annotation_block_text(lines: &[&str], start_row: usize) -> (String, usize) {
+    let mut row = start_row;
+    let mut block_lines = Vec::new();
+
+    while row < lines.len() {
+        let trimmed_line = lines[row].trim_start();
+        let Some(annotation_text) = trimmed_line.strip_prefix("#:") else {
+            break;
+        };
+        block_lines.push(annotation_text.trim().to_owned());
+        row += 1;
+    }
+
+    (block_lines.join("\n"), row.saturating_sub(1))
 }
 
 fn collect_syntax_errors(node: Node<'_>, source: &str, diagnostics: &mut Vec<Diagnostic>) {

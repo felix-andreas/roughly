@@ -40,6 +40,8 @@ Typing annotations use preceding `#:` comments attached to the following binding
 
 This applies to all typing annotations in this crate, not only function annotations.
 
+Consecutive `#:` lines with no blank line between them are treated as a single annotation block attached to the following binding or expression.
+
 There are three annotation forms:
 
 - `#: TYPE`
@@ -48,6 +50,12 @@ There are three annotation forms:
   - unknown-only assertion
 - `#:! TYPE`
   - trusted assertion
+
+Additional block rules:
+
+- a block may contain exactly one compact annotation line
+- a block may contain an expanded function annotation made of multiple `@param` and `@return` / `@returns` lines
+- compact and expanded forms cannot be mixed in the same block
 
 Examples:
 
@@ -65,6 +73,16 @@ value <- list(1L, 2L, 3L)
 #: fn(count: integer) -> integer
 double_count <- function(count) count + count
 ```
+
+```r
+#: @param {fn(integer) -> character} render_count
+#: @param {integer} count
+#: @param {character} [label]
+#: @returns {character}
+apply_renderer <- function(render_count, count, label = NULL) {
+  if (!is.null(label)) paste0(label, ": ", render_count(count)) else render_count(count)
+}
+```r
 
 ## Type annotations and assertions
 
@@ -613,6 +631,8 @@ A function may be annotated in exactly one of these two styles:
 
 It is not allowed to mix these two styles for the same function.
 
+When function annotations use consecutive `#:` lines, those lines are one annotation block for that function, not separate independent annotations.
+
 ### Expanded function annotations
 
 Expanded function annotations use these forms:
@@ -626,6 +646,8 @@ Additional rules:
 
 - the bracket syntax for optional parameters follows JSDoc-style notation
 - if no `@return` or `@returns` annotation is provided, the function type defaults to returning `NULL`
+- at most one `@return` or `@returns` directive may appear in the block
+- `@param` directives must appear before `@return` or `@returns`
 
 Examples:
 

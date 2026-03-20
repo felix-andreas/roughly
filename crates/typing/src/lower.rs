@@ -2,9 +2,7 @@ use {
     crate::{
         interner::{Interner, Symbol},
         type_syntax::parse_annotation,
-        types::{
-            Annotation, AnnotationKind, AttachedAnnotation, FunctionType, RecordField, SurfaceType,
-        },
+        types::{Annotation, AttachedAnnotation},
     },
     tree_sitter::{Node, Range, Tree},
 };
@@ -701,34 +699,13 @@ fn collect_pending_annotations(
             row += 1;
             continue;
         };
-        let annotation_text = annotation_text.trim();
         let start_column = line.len() - trimmed_line.len();
+        let _ = annotation_text;
+        let (annotation_block_text, last_row) = annotation_block_text(&lines, row);
 
-        if is_expanded_function_annotation_line(annotation_text) {
-            if let Some((annotation, last_row)) =
-                parse_expanded_function_annotation(lowering_context, &lines, row)
-            {
-                annotations.push(PendingAnnotation {
-                    range: Range {
-                        start_byte: 0,
-                        end_byte: 0,
-                        start_point: tree_sitter::Point {
-                            row,
-                            column: start_column,
-                        },
-                        end_point: tree_sitter::Point {
-                            row: last_row,
-                            column: lines[last_row].len(),
-                        },
-                    },
-                    annotation,
-                });
-                row = last_row + 1;
-                continue;
-            }
-        }
-
-        if let Ok(annotation) = parse_annotation(lowering_context.interner_mut(), annotation_text) {
+        if let Ok(annotation) =
+            parse_annotation(lowering_context.interner_mut(), &annotation_block_text)
+        {
             annotations.push(PendingAnnotation {
                 range: Range {
                     start_byte: 0,
@@ -738,134 +715,34 @@ fn collect_pending_annotations(
                         column: start_column,
                     },
                     end_point: tree_sitter::Point {
-                        row,
-                        column: line.len(),
+                        row: last_row,
+                        column: lines[last_row].len(),
                     },
                 },
                 annotation,
             });
         }
 
-        row += 1;
+        row = last_row + 1;
     }
 
     annotations
 }
 
-fn is_expanded_function_annotation_line(text: &str) -> bool {
-    text.starts_with("@param ") || text.starts_with("@return ") || text.starts_with("@returns ")
-}
-
-fn parse_expanded_function_annotation(
-    lowering_context: &mut LoweringContext,
-    lines: &[&str],
-    start_row: usize,
-) -> Option<(Annotation, usize)> {
+fn annotation_block_text(lines: &[&str], start_row: usize) -> (String, usize) {
     let mut row = start_row;
-    let mut parameters = Vec::new();
-    let mut named_parameters = Vec::new();
-    let mut return_type = SurfaceType::Null;
+    let mut block_lines = Vec::new();
 
     while row < lines.len() {
-        let line = lines[row];
-        let trimmed_line = line.trim_start();
+        let trimmed_line = lines[row].trim_start();
         let Some(annotation_text) = trimmed_line.strip_prefix("#:") else {
             break;
         };
-        let annotation_text = annotation_text.trim();
-        if !is_expanded_function_annotation_line(annotation_text) {
-            break;
-        }
-
-        if let Some((surface_type, name_text)) =
-            parse_expanded_param_annotation(lowering_context, annotation_text)
-        {
-            let name = lowering_context.intern(&name_text);
-            named_parameters.push(RecordField::new(name, surface_type));
-        } else if let Some(surface_type) =
-            parse_expanded_return_annotation(lowering_context, annotation_text)
-        {
-            return_type = surface_type;
-        } else {
-            return None;
-        }
-
+        block_lines.push(annotation_text.trim().to_owned());
         row += 1;
     }
 
-    if row == start_row {
-        return None;
-    }
-
-    Some((
-        Annotation::new(
-            AnnotationKind::Checked,
-            SurfaceType::Function(FunctionType::new(
-                std::mem::take(&mut parameters),
-                named_parameters,
-                return_type,
-            )),
-        ),
-        row - 1,
-    ))
-}
-
-fn parse_expanded_param_annotation(
-    lowering_context: &mut LoweringContext,
-    text: &str,
-) -> Option<(crate::types::SurfaceType, String)> {
-    let parameter_text = text.strip_prefix("@param")?.trim_start();
-    let (type_text, name_text) = parse_braced_type_and_tail(parameter_text)?;
-    let normalized_name = name_text
-        .trim()
-        .strip_prefix('[')
-        .and_then(|name| name.strip_suffix(']'))
-        .unwrap_or_else(|| name_text.trim())
-        .to_owned();
-    Some((
-        crate::type_syntax::parse_surface_type(lowering_context.interner_mut(), type_text).ok()?,
-        normalized_name,
-    ))
-}
-
-fn parse_expanded_return_annotation(
-    lowering_context: &mut LoweringContext,
-    text: &str,
-) -> Option<crate::types::SurfaceType> {
-    let return_text = text
-        .strip_prefix("@return")
-        .or_else(|| text.strip_prefix("@returns"))?
-        .trim_start();
-    let (type_text, trailing_text) = parse_braced_type_and_tail(return_text)?;
-    if !trailing_text.trim().is_empty() {
-        return None;
-    }
-    crate::type_syntax::parse_surface_type(lowering_context.interner_mut(), type_text).ok()
-}
-
-fn parse_braced_type_and_tail(text: &str) -> Option<(&str, &str)> {
-    let inner_text = text.strip_prefix('{')?;
-    let closing_index = find_matching_closer(inner_text, '{', '}')?;
-    let type_text = &inner_text[..closing_index];
-    let trailing_text = &inner_text[closing_index + 1..];
-    Some((type_text.trim(), trailing_text))
-}
-
-fn find_matching_closer(text: &str, opener: char, closer: char) -> Option<usize> {
-    let mut depth = 1;
-
-    for (index, character) in text.char_indices() {
-        if character == opener {
-            depth += 1;
-        } else if character == closer {
-            depth -= 1;
-            if depth == 0 {
-                return Some(index);
-            }
-        }
-    }
-
-    None
+    (block_lines.join("\n"), row.saturating_sub(1))
 }
 
 fn attach_annotations_to_expressions(
