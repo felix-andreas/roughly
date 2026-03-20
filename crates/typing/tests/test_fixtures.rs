@@ -265,7 +265,7 @@ fn render_type_result(source: &str) -> String {
         return match parse_type_syntax_item(&mut interner, &normalized_source) {
             Ok(item) => format!(
                 "fixture error: expected parse error\nsource:\n{normalized_source}\nparsed as: {}",
-                render_type_syntax_item(&interner, &item)
+                render_type_syntax_item(&item, &interner)
             ),
             Err(error) => format!("{error:?}"),
         };
@@ -278,7 +278,7 @@ fn render_type_result(source: &str) -> String {
             || trimmed_line.starts_with("@returns ")
     }) {
         return match parse_expanded_block_surface_type(&mut interner, trimmed_source) {
-            Ok(surface_type) => render_surface_type(&interner, &surface_type),
+            Ok(surface_type) => render_surface_type(&surface_type, &interner),
             Err(error) => {
                 format!("parse error: {error:?}\nsource:\n{trimmed_source}")
             }
@@ -293,7 +293,7 @@ fn render_type_result(source: &str) -> String {
         .join("\n");
 
     match parse_type_syntax_item(&mut interner, &normalized_source) {
-        Ok(item) => render_type_syntax_item(&interner, &item),
+        Ok(item) => render_type_syntax_item(&item, &interner),
         Err(error) => format!("parse error: {error:?}\nsource:\n{trimmed_source}"),
     }
 }
