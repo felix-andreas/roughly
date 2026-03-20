@@ -19,6 +19,23 @@ list{meta:list{shape:list{rows:integer,cols:integer}},payload:list{ok:logical}}
 #++++
 list{meta: list{shape: list{rows: integer, cols: integer}}, payload: list{ok: logical}}
 
+#---- multiline_record_with_nested_named_list_and_function
+list{
+    meta: list{
+        items: list[named: list{
+            integer,
+            character
+        }],
+        render: fn(
+            integer
+        ) -> list{
+            label: character
+        }
+    }
+}
+#++++
+list{meta: list{items: list[named: list{integer, character}], render: fn(integer) -> list{label: character}}}
+
 #==== nested_lists
 #---- list_of_lists
 list[list[integer]]
@@ -96,6 +113,41 @@ fn(handler: fn(integer) -> list{value: character}) -> list[named: logical]
 fn(loader:fn(list{path:character})->list[list{value:double}],fallback:list{ok:logical})->fn(integer)->list{result:double}
 #++++
 fn(loader: fn(list{path: character}) -> list[list{value: double}], fallback: list{ok: logical}) -> fn(integer) -> list{result: double}
+
+#---- multiline_function_and_record_type_expression
+fn(
+    integer,
+    options: list{
+        label: character,
+        nested: fn(
+            integer,
+            value: list[named: double]
+        ) -> list{
+            ok: logical
+        }
+    }
+) -> list{
+    result: character
+}
+#++++
+fn(integer, options: list{label: character, nested: fn(integer, value: list[named: double]) -> list{ok: logical}}) -> list{result: character}
+
+#---- multiline_higher_order_function
+fn(
+    handler: fn(
+        integer,
+        label: character
+    ) -> list{
+        ok: logical
+    },
+    fallback: list[named: double]
+) -> fn(
+    character
+) -> list{
+    result: double
+}
+#++++
+fn(handler: fn(integer, label: character) -> list{ok: logical}, fallback: list[named: double]) -> fn(character) -> list{result: double}
 
 #==== nested_nullable_types
 #---- nullable_list_item

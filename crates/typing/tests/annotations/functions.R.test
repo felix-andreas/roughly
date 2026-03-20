@@ -82,6 +82,13 @@ fn(count: integer) -> character
 #++++
 fn(count: integer, label: character) -> logical
 
+#---- expanded_optional_parameter
+@param {integer} count
+@param {character} [label]
+@return {logical}
+#++++
+fn(count: integer, label: character) -> logical
+
 #---- expanded_returns_alias
 @param {double} value
 @returns {integer}
@@ -105,3 +112,27 @@ fn(formatter: fn(integer) -> character, count: integer) -> character
 @return {list{value: integer, ok: logical}}
 #++++
 fn(count: integer) -> list{value: integer, ok: logical}
+
+#---- multiline_expanded_structured_return
+@param {integer} count
+@param {list{
+    label: character,
+    values: list[double]
+}} payload
+@return {list{
+    ok: logical,
+    result: character
+}}
+#++++
+fn(count: integer, payload: list{label: character, values: list[double]}) -> list{ok: logical, result: character}
+
+#---- multiline_expanded_higher_order_parameter
+@param {fn(
+    integer,
+    options: list{
+        verbose: logical
+    }
+) -> character} formatter
+@return {list[named: character]}
+#++++
+fn(formatter: fn(integer, options: list{verbose: logical}) -> character) -> list[named: character]

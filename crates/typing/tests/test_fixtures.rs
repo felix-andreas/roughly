@@ -160,6 +160,7 @@ where
     let maybe_filter = std::env::var("TYPING_FILTER").ok();
     let mut snapshot_names = BTreeSet::new();
     let mut failures = Vec::new();
+    let mut executed_fixture_count = 0;
 
     for group in groups {
         for case in &group.cases {
@@ -176,6 +177,8 @@ where
             {
                 continue;
             }
+
+            executed_fixture_count += 1;
 
             let rendered = render(&case.code);
             let rendered_trimmed = rendered.trim_end();
@@ -197,6 +200,8 @@ where
             failures.join("\n\n")
         );
     }
+
+    eprintln!("{} {kind} fixture(s) passed", executed_fixture_count);
 }
 
 fn render_inference_result(source: &str) -> String {

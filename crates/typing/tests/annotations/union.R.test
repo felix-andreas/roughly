@@ -1,45 +1,41 @@
-#==== special_types
-#---- null_keyword_uppercase
-NULL
-#++++
-NULL
-
-#---- null_keyword_lowercase
-null
-#++++
-NULL
-
-#---- unknown_keyword_uppercase
-Unknown
-#++++
-Unknown
-
-#---- unknown_keyword_lowercase
-unknown
-#++++
-Unknown
-
-#---- any_keyword_uppercase
-Any
-#++++
-Any
-
-#---- any_keyword_lowercase
-any
-#++++
-Any
-
-#==== nullable_special_forms
+#==== nullable_primitives
 #---- nullable_integer
 integer | NULL
 #++++
 integer | NULL
+
+#---- nullable_logical
+logical|NULL
+#++++
+logical | NULL
+
+#---- nullable_character_with_lowercase_null
+character | null
+#++++
+character | NULL
 
 #---- nullable_integer_with_null_on_left
 NULL | integer
 #++++
 integer | NULL
 
+#==== nullable_vectors
+#---- nullable_integer_vector
+integer[] | NULL
+#++++
+integer[] | NULL
+
+#---- nullable_named_character_vector
+character[named]|NULL
+#++++
+character[named] | NULL
+
+#---- nullable_logical_vector_with_lowercase_null
+logical[] | null
+#++++
+logical[] | NULL
+
+#==== nullable_lists
 #---- nullable_list_item
 list[integer | NULL]
 #++++
@@ -60,6 +56,7 @@ list{integer|NULL,character}
 #++++
 list{integer | NULL, character}
 
+#==== nullable_functions
 #---- nullable_function_return
 fn(integer)->character|NULL
 #++++
@@ -75,6 +72,23 @@ fn(integer)->NULL | character
 #++++
 fn(integer) -> character | NULL
 
+#---- nullable_function_inside_list
+list[fn(integer)->NULL]
+#++++
+list[fn(integer) -> NULL]
+
+#==== nested_nullable_forms
+#---- nested_nullable_special_record
+list{value:integer|NULL,meta:list{missing:Unknown,default:Any}}
+#++++
+list{value: integer | NULL, meta: list{missing: Unknown, default: Any}}
+
+#---- special_forms_in_higher_order_function
+fn(handler:fn(Unknown)->Any)->list{result:Any,missing:Unknown|NULL}
+#++++
+fn(handler: fn(Unknown) -> Any) -> list{result: Any, missing: Unknown | NULL}
+
+#==== invalid_unions
 #---- invalid_non_nullable_union
 error:
 integer | character
@@ -92,24 +106,3 @@ error:
 NULL | NULL
 #++++
 InvalidSyntax { message: "user-facing type syntax does not allow `NULL | NULL`." }
-
-#==== nested_special_forms
-#---- nested_any_and_unknown
-list{fallback:Any,unresolved:Unknown}
-#++++
-list{fallback: Any, unresolved: Unknown}
-
-#---- nested_nullable_special_record
-list{value:integer|NULL,meta:list{missing:Unknown,default:Any}}
-#++++
-list{value: integer | NULL, meta: list{missing: Unknown, default: Any}}
-
-#---- special_forms_in_higher_order_function
-fn(handler:fn(Unknown)->Any)->list{result:Any,missing:Unknown|NULL}
-#++++
-fn(handler: fn(Unknown) -> Any) -> list{result: Any, missing: Unknown | NULL}
-
-#---- nullable_function_inside_list
-list[fn(integer)->NULL]
-#++++
-list[fn(integer) -> NULL]

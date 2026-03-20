@@ -1,4 +1,4 @@
-#==== atomic_scalars
+#==== primitive_scalars
 #---- logical_scalar
 logical
 #++++
@@ -29,6 +29,7 @@ raw
 #++++
 raw
 
+#==== special_primitive_keywords
 #---- null_uppercase
 NULL
 #++++
@@ -39,23 +40,32 @@ null
 #++++
 NULL
 
-#==== atomic_nullable_forms
-#---- nullable_integer
-integer | NULL
+#---- unknown_uppercase
+Unknown
 #++++
-integer | NULL
+Unknown
 
-#---- nullable_logical
-logical|NULL
+#---- unknown_lowercase
+unknown
 #++++
-logical | NULL
+Unknown
 
-#---- nullable_character_with_lowercase_null
-character | null
+#---- any_uppercase
+Any
 #++++
-character | NULL
+Any
 
-#==== atomic_vector_forms
+#---- any_lowercase
+any
+#++++
+Any
+
+#==== primitive_vector_forms
+#---- logical_vector
+logical[]
+#++++
+logical[]
+
 #---- integer_vector
 integer[]
 #++++
@@ -66,10 +76,10 @@ double[]
 #++++
 double[]
 
-#---- logical_vector
-logical[]
+#---- complex_vector
+complex[]
 #++++
-logical[]
+complex[]
 
 #---- character_vector
 character[]
@@ -81,33 +91,33 @@ raw[]
 #++++
 raw[]
 
+#==== primitive_named_vector_forms
+#---- logical_named_vector
+logical[named]
+#++++
+logical[named]
+
 #---- integer_named_vector
 integer[named]
 #++++
 integer[named]
 
-#---- character_named_vector
-character[named]
+#---- double_named_vector
+double[named]
 #++++
-character[named]
+double[named]
 
 #---- complex_named_vector
 complex[named]
 #++++
 complex[named]
 
-#==== atomic_vector_nullable_forms
-#---- nullable_integer_vector
-integer[] | NULL
+#---- character_named_vector
+character[named]
 #++++
-integer[] | NULL
+character[named]
 
-#---- nullable_named_character_vector
-character[named]|NULL
+#---- raw_named_vector
+raw[named]
 #++++
-character[named] | NULL
-
-#---- nullable_logical_vector_with_lowercase_null
-logical[] | null
-#++++
-logical[] | NULL
+raw[named]

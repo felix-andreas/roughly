@@ -19,6 +19,21 @@
 #++++
 @if-unknown Person
 
+#---- trust_annotation_named_type
+@trust Person
+#++++
+@trust Person
+
+#---- trust_annotation_nullable_type
+@trust integer | NULL
+#++++
+@trust integer | NULL
+
+#---- if_unknown_annotation_nullable_type
+@if-unknown integer | NULL
+#++++
+@if-unknown integer | NULL
+
 #---- invalid_if_unknown_missing_type
 error:
 @if-unknown
@@ -30,28 +45,3 @@ error:
 @trust
 #++++
 InvalidSyntax { message: "expected a type after the annotation prefix." }
-
-#==== expanded_directives
-#---- expanded_return_unknown
-@param {integer} count
-@return {unknown}
-#++++
-fn(count: integer) -> Unknown
-
-#---- expanded_param_any
-@param {Any} value
-@return {character}
-#++++
-fn(value: Any) -> character
-
-#---- expanded_nullable_return
-@param {integer} count
-@return {integer | NULL}
-#++++
-fn(count: integer) -> integer | NULL
-
-#---- expanded_nullable_parameter
-@param {integer | NULL} count
-@return {character}
-#++++
-fn(count: integer | NULL) -> character

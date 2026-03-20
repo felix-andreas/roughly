@@ -14,6 +14,7 @@ pub enum TypeSyntaxItem {
     SurfaceType(SurfaceType),
     IfUnknown(SurfaceType),
     Trust(SurfaceType),
+    New(Symbol),
     TypeDefinition {
         name: Symbol,
         surface_type: SurfaceType,
@@ -171,6 +172,35 @@ pub fn parse_type_syntax_item(
         return Ok(TypeSyntaxItem::Trust(surface_type));
     }
 
+    if let Some(name_text) = trimmed_text.strip_prefix("@new") {
+        let normalized_name = name_text.trim();
+        if normalized_name.is_empty() {
+            return Err(invalid_syntax(
+                "expected a type after the annotation prefix.",
+            ));
+        }
+
+        let Some((name_start, name_end)) = identifier_span(normalized_name) else {
+            return Err(invalid_syntax("expected a type."));
+        };
+
+        let name = &normalized_name[name_start..name_end];
+        if name_start != 0
+            || !normalized_name[name_end..].trim().is_empty()
+            || parse_atomic_or_named_type(name).is_some()
+        {
+            return Err(invalid_syntax("expected a type."));
+        }
+
+        return Ok(TypeSyntaxItem::New(interner.intern(name)));
+    }
+
+    if let Some(unknown_directive) = unknown_annotation_directive_name(trimmed_text) {
+        return Err(invalid_syntax(format!(
+            "unknown annotation directive `@{unknown_directive}`. expected one of `@type`, `@alias`, `@if-unknown`, `@trust`, or `@new`."
+        )));
+    }
+
     parse_surface_type(interner, trimmed_text).map(TypeSyntaxItem::SurfaceType)
 }
 
@@ -191,6 +221,18 @@ fn keyword_surface_text(text: &str) -> Option<&str> {
     } else {
         Some(trimmed_text)
     }
+}
+
+fn unknown_annotation_directive_name(text: &str) -> Option<&str> {
+    let trimmed_text = text.trim();
+    let remainder = trimmed_text.strip_prefix('@')?;
+    let directive_end = remainder
+        .char_indices()
+        .find(|(_, character)| character.is_whitespace())
+        .map(|(index, _)| index)
+        .unwrap_or(remainder.len());
+    let directive_name = &remainder[..directive_end];
+    Some(directive_name)
 }
 
 pub fn parse_expanded_block_surface_type(
@@ -1024,91 +1066,5 @@ fn expected_closer(opener: char) -> char {
         '[' => ']',
         '{' => '}',
         _ => '}',
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn parser<'a>(source: &'a str) -> TypeParser<'a> {
-        let interner = Box::new(Interner::new());
-        TypeParser::new(Box::leak(interner), source)
-    }
-
-    #[test]
-    fn nested_named_list_tuple_value_consumes_inner_record_before_outer_bracket() {
-        let source = "list[named:list{integer,character}]}";
-        let mut parser = parser(source);
-
-        assert!(parser.consume_keyword("list"));
-        assert!(parser.consume_byte(b'['));
-        assert!(parser.consume_keyword("named"));
-        assert!(parser.consume_byte(b':'));
-
-        let inner_type = parser
-            .parse_list_bracket_item_type(StopContext::ROOT)
-            .expect("named-list inner tuple-like value should parse");
-
-        assert_eq!(
-            inner_type,
-            SurfaceType::Tuple(vec![
-                SurfaceType::Scalar(Atomic::Integer),
-                SurfaceType::Scalar(Atomic::Character),
-            ])
-        );
-        assert_eq!(parser.peek_byte(), Some(b']'));
-        assert_eq!(parser.position, source.len() - 2);
-    }
-
-    #[test]
-    fn nested_named_list_tuple_value_inside_record_stops_before_enclosing_record_closer() {
-        let source = "items:list[named:list{integer,character}]}}";
-        let mut parser = parser(source);
-
-        let (field_start, field_end) = parser
-            .peek_record_field_name()
-            .expect("record field lookahead should find `items`");
-        assert_eq!(&source[field_start..field_end], "items");
-
-        parser.position = field_end;
-        parser.skip_ascii_whitespace();
-        assert!(parser.consume_byte(b':'));
-
-        let field_value = parser
-            .parse_type_until(StopContext::LIST_BRACE_ITEM)
-            .expect("record field value should parse");
-
-        assert_eq!(
-            field_value,
-            SurfaceType::NamedList(Box::new(SurfaceType::Tuple(vec![
-                SurfaceType::Scalar(Atomic::Integer),
-                SurfaceType::Scalar(Atomic::Character),
-            ])))
-        );
-        assert_eq!(parser.peek_byte(), Some(b'}'));
-        assert_eq!(parser.position, source.len() - 2);
-    }
-
-    #[test]
-    fn non_ascii_record_field_name_is_parsed_as_a_valid_field_name() {
-        let source = "naïve:integer}";
-        let mut parser = parser(source);
-
-        let (field_start, field_end) = parser
-            .peek_record_field_name()
-            .expect("Unicode field names should be accepted");
-        assert_eq!(&source[field_start..field_end], "naïve");
-
-        parser.position = field_end;
-        parser.skip_ascii_whitespace();
-        assert!(parser.consume_byte(b':'));
-
-        let field_value = parser
-            .parse_type_until(StopContext::LIST_BRACE_ITEM)
-            .expect("field value should parse after a Unicode field name");
-
-        assert_eq!(field_value, SurfaceType::Scalar(Atomic::Integer));
-        assert_eq!(parser.peek_byte(), Some(b'}'));
     }
 }

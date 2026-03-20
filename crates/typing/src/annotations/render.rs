@@ -15,6 +15,10 @@ pub fn render_type_syntax_item(interner: &Interner, item: &TypeSyntaxItem) -> St
         TypeSyntaxItem::Trust(surface_type) => {
             format!("@trust {}", renderer.render(surface_type))
         }
+        TypeSyntaxItem::New(name) => {
+            let name = interner.resolve(*name).unwrap_or("<unknown>");
+            format!("@new {name}")
+        }
         TypeSyntaxItem::TypeDefinition { name, surface_type } => {
             let name = interner.resolve(*name).unwrap_or("<unknown>");
             format!("@type {name} {{{}}}", renderer.render(surface_type))
