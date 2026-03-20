@@ -10,6 +10,7 @@ pub enum SurfaceType {
     Null,
     Nullable(Box<SurfaceType>),
     Scalar(Atomic),
+    Named(Symbol),
     Vector(Box<SurfaceType>),
     NamedVector(Box<SurfaceType>),
     List(Box<SurfaceType>),

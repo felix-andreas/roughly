@@ -4,7 +4,7 @@ This crate explores a static type system for a subset of R.
 
 The authoritative user-facing typing contract lives in `SEMANTICS.md`.
 
-Fixture expectations under `tests/fixtures/` are also part of the current contract for user-visible behavior.
+Fixture expectations under `tests/annotations/`, `tests/inference/`, and `tests/diagnostics/` are also part of the current contract for user-visible behavior.
 
 ## What this crate is for
 
@@ -49,7 +49,20 @@ The default crate test command is:
 cargo test -p typing
 ```
 
-The fixture-based tests cover:
+The fixture-based tests cover three different layers of behavior:
 
-- rendered diagnostics
-- normalized inference behavior
+- `tests/annotations/`
+  - tests the annotation parser and renderer
+  - this suite is about annotation syntax, normalization, and rendering, not typing semantics
+- `tests/inference/`
+  - tests inferred results for individual expressions and small snippets
+  - this is the focused suite for inference behavior
+- `tests/diagnostics/`
+  - tests higher-level checking behavior and failure cases
+  - this structure is not fixed; some failure cases may later move into `inference`, or we may add dedicated suites such as unification fixtures
+
+The default crate test command is:
+
+```sh
+cargo test -p typing
+```

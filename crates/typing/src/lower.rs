@@ -1,7 +1,7 @@
 use {
     crate::{
+        annotations::parse_annotation,
         interner::{Interner, Symbol},
-        type_syntax::parse_annotation,
         types::{Annotation, AttachedAnnotation},
     },
     tree_sitter::{Node, Range, Tree},

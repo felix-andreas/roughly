@@ -3,10 +3,10 @@ use {
     tree_sitter::{Point, Range},
     typing::{
         Interner,
+        annotations::parse_surface_type,
         interner::Symbol,
         lower::{ExpressionKind, LoweringContext},
         new_parser, parse,
-        type_syntax::parse_surface_type,
         types::{
             Atomic, CoreType, FunctionType, InferenceVariableId, RecordField, SurfaceType,
             TypeScheme,

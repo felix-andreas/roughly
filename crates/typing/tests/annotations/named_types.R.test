@@ -43,36 +43,3 @@ error:
 @type Person {list{name: character}} extra
 #++++
 InvalidSyntax { message: "did not expect trailing text after the named type definition." }
-
-#==== keyword_annotation_forms
-#---- if_unknown_annotation_type
-@if-unknown integer
-#++++
-@if-unknown integer
-
-#---- trust_annotation_type
-@trust list[integer]
-#++++
-@trust list[integer]
-
-#---- trust_annotation_function_type
-@trust fn(count: integer) -> character
-#++++
-@trust fn(count: integer) -> character
-
-#---- if_unknown_annotation_named_type
-@if-unknown Person
-#++++
-@if-unknown Person
-
-#---- invalid_if_unknown_missing_type
-error:
-@if-unknown
-#++++
-InvalidSyntax { message: "expected a type after the annotation prefix." }
-
-#---- invalid_trust_missing_type
-error:
-@trust
-#++++
-InvalidSyntax { message: "expected a type after the annotation prefix." }

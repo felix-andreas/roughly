@@ -174,33 +174,6 @@ pub fn parse_type_syntax_item(
     parse_surface_type(interner, trimmed_text).map(TypeSyntaxItem::SurfaceType)
 }
 
-pub fn render_type_syntax_item(interner: &Interner, item: &TypeSyntaxItem) -> String {
-    let mut renderer = SurfaceTypeRenderer::new(interner);
-
-    match item {
-        TypeSyntaxItem::SurfaceType(surface_type) => renderer.render(surface_type),
-        TypeSyntaxItem::IfUnknown(surface_type) => {
-            format!("@if-unknown {}", renderer.render(surface_type))
-        }
-        TypeSyntaxItem::Trust(surface_type) => {
-            format!("@trust {}", renderer.render(surface_type))
-        }
-        TypeSyntaxItem::TypeDefinition { name, surface_type } => {
-            let name = interner.resolve(*name).unwrap_or("<unknown>");
-            format!("@type {name} {{{}}}", renderer.render(surface_type))
-        }
-        TypeSyntaxItem::TypeAlias { name, surface_type } => {
-            let name = interner.resolve(*name).unwrap_or("<unknown>");
-            format!("@alias {name} {{{}}}", renderer.render(surface_type))
-        }
-    }
-}
-
-pub fn render_surface_type(interner: &Interner, surface_type: &SurfaceType) -> String {
-    let mut renderer = SurfaceTypeRenderer::new(interner);
-    renderer.render(surface_type)
-}
-
 fn annotation_surface_text(text: &str) -> Option<&str> {
     if let Some(surface_text) = text.strip_prefix("@if-unknown") {
         keyword_surface_text(surface_text)
@@ -344,22 +317,30 @@ fn parse_named_type_definition(
 }
 
 fn identifier_span(text: &str) -> Option<(usize, usize)> {
-    let bytes = text.as_bytes();
-    let first = *bytes.first()?;
-    if !(first == b'_' || first.is_ascii_alphabetic()) {
+    let mut characters = text.char_indices();
+    let (_, first_character) = characters.next()?;
+    if !is_identifier_start(first_character) {
         return None;
     }
 
-    let mut end = 1;
-    while let Some(byte) = bytes.get(end).copied() {
-        if byte == b'_' || byte.is_ascii_alphanumeric() {
-            end += 1;
+    let mut end = first_character.len_utf8();
+    for (index, character) in characters {
+        if is_identifier_continue(character) {
+            end = index + character.len_utf8();
         } else {
             break;
         }
     }
 
     Some((0, end))
+}
+
+fn is_identifier_start(character: char) -> bool {
+    character == '_' || character.is_alphabetic()
+}
+
+fn is_identifier_continue(character: char) -> bool {
+    character == '_' || character.is_alphanumeric()
 }
 
 fn invalid_syntax(message: impl Into<String>) -> TypeParseError {
@@ -515,12 +496,8 @@ impl<'a> TypeParser<'a> {
             .ok_or_else(|| invalid_syntax("expected a type."))?;
         let identifier = &self.source[identifier_span.0..identifier_span.1];
 
-        let mut surface_type = parse_atomic_or_named_type(identifier).ok_or_else(|| {
-            invalid_syntax(format!(
-                "unknown type `{identifier}`{}",
-                self.context_suffix(stop_context)
-            ))
-        })?;
+        let mut surface_type = parse_atomic_or_named_type(identifier)
+            .unwrap_or_else(|| SurfaceType::Named(self.interner.intern(identifier)));
 
         loop {
             self.skip_ascii_whitespace();
@@ -741,17 +718,16 @@ impl<'a> TypeParser<'a> {
     fn parse_identifier_span(&mut self) -> Option<(usize, usize)> {
         self.skip_ascii_whitespace();
         let start = self.position;
-        let bytes = self.source.as_bytes();
-
-        let first = *bytes.get(start)?;
-        if !(first == b'_' || first.is_ascii_alphabetic()) {
+        let remaining = &self.source[start..];
+        let (_, first_character) = remaining.char_indices().next()?;
+        if !is_identifier_start(first_character) {
             return None;
         }
 
-        self.position += 1;
-        while let Some(byte) = bytes.get(self.position).copied() {
-            if byte == b'_' || byte.is_ascii_alphanumeric() {
-                self.position += 1;
+        self.position += first_character.len_utf8();
+        for (index, character) in remaining.char_indices().skip(1) {
+            if is_identifier_continue(character) {
+                self.position = start + index + character.len_utf8();
             } else {
                 break;
             }
@@ -762,38 +738,35 @@ impl<'a> TypeParser<'a> {
 
     fn peek_record_field_name(&self) -> Option<(usize, usize)> {
         let mut position = self.position;
-        let bytes = self.source.as_bytes();
+        let remaining = &self.source[position..];
 
-        while let Some(byte) = bytes.get(position).copied() {
-            if byte.is_ascii_whitespace() {
-                position += 1;
-            } else {
-                break;
+        for (index, character) in remaining.char_indices() {
+            if character.is_whitespace() {
+                position += character.len_utf8();
+                continue;
             }
+
+            position += index;
+            break;
         }
 
         let start = position;
-        let first = *bytes.get(start)?;
-        if !(first == b'_' || first.is_ascii_alphabetic()) {
+        let remaining = &self.source[start..];
+        let (_, first_character) = remaining.char_indices().next()?;
+        if !is_identifier_start(first_character) {
             return None;
         }
 
-        position += 1;
-        while let Some(byte) = bytes.get(position).copied() {
-            if byte == b'_' || byte.is_ascii_alphanumeric() {
-                position += 1;
+        let mut end = start + first_character.len_utf8();
+        for (index, character) in remaining.char_indices().skip(1) {
+            if is_identifier_continue(character) {
+                end = start + index + character.len_utf8();
             } else {
                 break;
             }
         }
 
-        if let Some(byte) = bytes.get(position).copied() {
-            if !byte.is_ascii() {
-                return None;
-            }
-        }
-
-        Some((start, position))
+        Some((start, end))
     }
 
     fn starts_list_brace_type(&self) -> bool {
@@ -829,18 +802,6 @@ impl<'a> TypeParser<'a> {
         }
 
         bytes.get(position).copied() == Some(b'{')
-    }
-
-    fn context_suffix(&self, stop_context: StopContext) -> &'static str {
-        if stop_context.right_bracket {
-            " in `list[...]`"
-        } else if stop_context.right_brace {
-            " in `list{...}`"
-        } else if stop_context.right_paren {
-            " in `fn(...)`"
-        } else {
-            ""
-        }
     }
 
     fn skip_ascii_whitespace(&mut self) {
@@ -1066,84 +1027,6 @@ fn expected_closer(opener: char) -> char {
     }
 }
 
-struct SurfaceTypeRenderer<'a> {
-    interner: &'a Interner,
-}
-
-impl<'a> SurfaceTypeRenderer<'a> {
-    fn new(interner: &'a Interner) -> Self {
-        Self { interner }
-    }
-
-    fn render(&mut self, surface_type: &SurfaceType) -> String {
-        match surface_type {
-            SurfaceType::Any => "Any".to_owned(),
-            SurfaceType::Unknown => "Unknown".to_owned(),
-            SurfaceType::Null => "NULL".to_owned(),
-            SurfaceType::Nullable(inner_type) => format!("{} | NULL", self.render(inner_type)),
-            SurfaceType::Scalar(atomic) => render_atomic(*atomic).to_owned(),
-            SurfaceType::Vector(inner_type) => format!("{}[]", self.render(inner_type)),
-            SurfaceType::NamedVector(inner_type) => format!("{}[named]", self.render(inner_type)),
-            SurfaceType::List(item_type) => format!("list[{}]", self.render(item_type)),
-            SurfaceType::NamedList(item_type) => {
-                format!("list[named: {}]", self.render(item_type))
-            }
-            SurfaceType::Record(fields) => {
-                let rendered_fields = fields
-                    .iter()
-                    .map(|field| {
-                        let name = self.interner.resolve(field.name).unwrap_or("<unknown>");
-                        format!("{name}: {}", self.render(&field.value))
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("list{{{rendered_fields}}}")
-            }
-            SurfaceType::Tuple(items) => {
-                let rendered_items = items
-                    .iter()
-                    .map(|item| self.render(item))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("list{{{rendered_items}}}")
-            }
-            SurfaceType::Function(function_type) => {
-                let rendered_parameters = function_type
-                    .parameters
-                    .iter()
-                    .map(|parameter| self.render(parameter))
-                    .collect::<Vec<_>>();
-                let rendered_named_parameters = function_type
-                    .named_parameters
-                    .iter()
-                    .map(|parameter| {
-                        let name = self.interner.resolve(parameter.name).unwrap_or("<unknown>");
-                        format!("{name}: {}", self.render(&parameter.value))
-                    })
-                    .collect::<Vec<_>>();
-                let mut rendered_parts = rendered_parameters;
-                rendered_parts.extend(rendered_named_parameters);
-                format!(
-                    "fn({}) -> {}",
-                    rendered_parts.join(", "),
-                    self.render(&function_type.return_type)
-                )
-            }
-        }
-    }
-}
-
-fn render_atomic(atomic: Atomic) -> &'static str {
-    match atomic {
-        Atomic::Logical => "logical",
-        Atomic::Integer => "integer",
-        Atomic::Double => "double",
-        Atomic::Complex => "complex",
-        Atomic::Character => "character",
-        Atomic::Raw => "raw",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1208,24 +1091,24 @@ mod tests {
     }
 
     #[test]
-    fn non_ascii_record_field_name_is_not_treated_as_a_valid_field_name() {
+    fn non_ascii_record_field_name_is_parsed_as_a_valid_field_name() {
         let source = "naïve:integer}";
         let mut parser = parser(source);
 
-        assert!(
-            parser.peek_record_field_name().is_none(),
-            "ASCII-only field-name scanning should reject non-ASCII names for now"
-        );
+        let (field_start, field_end) = parser
+            .peek_record_field_name()
+            .expect("Unicode field names should be accepted");
+        assert_eq!(&source[field_start..field_end], "naïve");
 
-        let error = parser
+        parser.position = field_end;
+        parser.skip_ascii_whitespace();
+        assert!(parser.consume_byte(b':'));
+
+        let field_value = parser
             .parse_type_until(StopContext::LIST_BRACE_ITEM)
-            .expect_err("non-ASCII field names should currently fail to parse");
+            .expect("field value should parse after a Unicode field name");
 
-        assert_eq!(
-            error,
-            TypeParseError::InvalidSyntax {
-                message: "unknown type `na` in `list{...}`".to_owned(),
-            }
-        );
+        assert_eq!(field_value, SurfaceType::Scalar(Atomic::Integer));
+        assert_eq!(parser.peek_byte(), Some(b'}'));
     }
 }

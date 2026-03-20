@@ -1,10 +1,10 @@
 use {
     crate::{
+        annotations::{TypeParseError, parse_annotation},
         diagnostics::Diagnostic,
         infer::{BuiltinKind, InferenceState},
         lower::LoweringContext,
         parse::{new_parser, parse},
-        type_syntax::{TypeParseError, parse_annotation},
     },
     tree_sitter::Node,
 };

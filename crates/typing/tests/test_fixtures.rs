@@ -1,13 +1,14 @@
 use {
     std::{collections::BTreeSet, fs, path::Path},
     typing::{
-        Interner, check,
+        Interner,
+        annotations::{
+            parse_expanded_block_surface_type, parse_type_syntax_item, render_type_syntax_item,
+        },
+        check,
         infer::{BuiltinKind, InferenceError, InferenceState},
         lower::LoweringContext,
         new_parser, parse, render_surface_type,
-        type_syntax::{
-            parse_expanded_block_surface_type, parse_type_syntax_item, render_type_syntax_item,
-        },
         types::{Atomic, CoreType, InferenceVariableId},
     },
 };
@@ -25,8 +26,8 @@ fn inference() {
 }
 
 #[test]
-fn types() {
-    run_fixture_suite("tests/types", "types", render_type_result);
+fn annotations() {
+    run_fixture_suite("tests/annotations", "annotations", render_type_result);
 }
 
 #[derive(Debug)]
@@ -180,8 +181,10 @@ where
             let rendered_trimmed = rendered.trim_end();
             if rendered_trimmed != case.expected {
                 failures.push(format!(
-                    "fixture `{snapshot_name}` failed\nexpected:\n{}\n\nactual:\n{}\n",
-                    case.expected, rendered_trimmed
+                    "\u{1b}[1mfixture `{snapshot_name}` failed\u{1b}[0m\n\u{1b}[1minput:\u{1b}[0m\n{}\n\u{1b}[1mexpected:\u{1b}[0m\n{}\n\u{1b}[1mactual:\u{1b}[0m\n{}",
+                    case.code.trim_end(),
+                    case.expected,
+                    rendered_trimmed
                 ));
             }
         }
@@ -191,7 +194,7 @@ where
         panic!(
             "{} {kind} test(s) failed:\n\n{}",
             failures.len(),
-            failures.join("\n----------------------------------------\n\n")
+            failures.join("\n\n")
         );
     }
 }
@@ -250,7 +253,7 @@ fn render_type_result(source: &str) -> String {
             .join("\n");
 
         if normalized_source.is_empty() {
-            return "fixture error: type fixture parse-error case must include source after `error:`"
+            return "fixture error: annotation fixture parse-error case must include source after `error:`"
                 .to_owned();
         }
 

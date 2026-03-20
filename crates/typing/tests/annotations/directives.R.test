@@ -1,0 +1,57 @@
+#==== compact_directives
+#---- if_unknown_annotation_type
+@if-unknown integer
+#++++
+@if-unknown integer
+
+#---- trust_annotation_type
+@trust list[integer]
+#++++
+@trust list[integer]
+
+#---- trust_annotation_function_type
+@trust fn(count: integer) -> character
+#++++
+@trust fn(count: integer) -> character
+
+#---- if_unknown_annotation_named_type
+@if-unknown Person
+#++++
+@if-unknown Person
+
+#---- invalid_if_unknown_missing_type
+error:
+@if-unknown
+#++++
+InvalidSyntax { message: "expected a type after the annotation prefix." }
+
+#---- invalid_trust_missing_type
+error:
+@trust
+#++++
+InvalidSyntax { message: "expected a type after the annotation prefix." }
+
+#==== expanded_directives
+#---- expanded_return_unknown
+@param {integer} count
+@return {unknown}
+#++++
+fn(count: integer) -> Unknown
+
+#---- expanded_param_any
+@param {Any} value
+@return {character}
+#++++
+fn(value: Any) -> character
+
+#---- expanded_nullable_return
+@param {integer} count
+@return {integer | NULL}
+#++++
+fn(count: integer) -> integer | NULL
+
+#---- expanded_nullable_parameter
+@param {integer | NULL} count
+@return {character}
+#++++
+fn(count: integer | NULL) -> character

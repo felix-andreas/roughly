@@ -93,31 +93,6 @@ NULL | NULL
 #++++
 InvalidSyntax { message: "user-facing type syntax does not allow `NULL | NULL`." }
 
-#==== expanded_special_forms
-#---- expanded_return_unknown
-@param {integer} count
-@return {unknown}
-#++++
-fn(count: integer) -> Unknown
-
-#---- expanded_param_any
-@param {Any} value
-@return {character}
-#++++
-fn(value: Any) -> character
-
-#---- expanded_nullable_return
-@param {integer} count
-@return {integer | NULL}
-#++++
-fn(count: integer) -> integer | NULL
-
-#---- expanded_nullable_parameter
-@param {integer | NULL} count
-@return {character}
-#++++
-fn(count: integer | NULL) -> character
-
 #==== nested_special_forms
 #---- nested_any_and_unknown
 list{fallback:Any,unresolved:Unknown}

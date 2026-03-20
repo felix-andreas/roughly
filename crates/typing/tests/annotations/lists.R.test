@@ -205,7 +205,6 @@ list{integer,label:character}
 InvalidSyntax { message: "cannot mix named and unnamed items in `list{...}`." }
 
 #---- non_ascii_record_field_name
-error:
 list{naïve:integer}
 #++++
-InvalidSyntax { message: "unknown type `na` in `list{...}` (while parsing tuple item)" }
+list{naïve: integer}
