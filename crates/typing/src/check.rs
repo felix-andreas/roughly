@@ -182,7 +182,10 @@ fn collect_annotation_diagnostics(source: &str, diagnostics: &mut Vec<Diagnostic
         match parse_annotation(&mut interner, annotation_text) {
             Ok(_annotation) => {}
             Err(TypeParseError::InvalidSyntax { message }) => {
-                diagnostics.push(Diagnostic::syntax_error(annotation_range, message));
+                diagnostics.push(Diagnostic::syntax_error(
+                    annotation_range,
+                    format!("type syntax error: {message}"),
+                ));
             }
             Err(TypeParseError::UnknownType { name }) => {
                 diagnostics.push(Diagnostic::type_error(

@@ -35,6 +35,11 @@ integer | NULL
 #++++
 integer | NULL
 
+#---- nullable_integer_with_null_on_left
+NULL | integer
+#++++
+integer | NULL
+
 #---- nullable_list_item
 list[integer | NULL]
 #++++
@@ -64,6 +69,29 @@ fn(integer) -> character | NULL
 fn(integer|NULL)->character
 #++++
 fn(integer | NULL) -> character
+
+#---- nullable_function_return_with_null_on_left
+fn(integer)->NULL | character
+#++++
+fn(integer) -> character | NULL
+
+#---- invalid_non_nullable_union
+error:
+integer | character
+#++++
+InvalidSyntax { message: "only nullable unions with a single `NULL` member are supported." }
+
+#---- invalid_union_with_multiple_non_null_members
+error:
+integer | character | NULL
+#++++
+InvalidSyntax { message: "only nullable unions with a single `NULL` member are supported." }
+
+#---- invalid_null_null_union
+error:
+NULL | NULL
+#++++
+InvalidSyntax { message: "user-facing type syntax does not allow `NULL | NULL`." }
 
 #==== expanded_special_forms
 #---- expanded_return_unknown

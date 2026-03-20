@@ -36,7 +36,7 @@ error[syntax-error] A `#:` typing comment must be followed by an expression, not
 #: list{length:
 value <- list(length = 1L)
 #++++
-error[syntax-error] invalid syntax in type expression
+error[syntax-error] type syntax error: expected a type. (while parsing field `length`)
 --> 1:1-1:16
 | #: list{length:
 
@@ -44,7 +44,7 @@ error[syntax-error] invalid syntax in type expression
 #: fn(integer
 value <- function(x) x
 #++++
-error[syntax-error] missing closing delimiter )
+error[syntax-error] type syntax error: expected `)` to close `fn(...)`.
 --> 1:1-1:14
 | #: fn(integer
 
@@ -52,7 +52,7 @@ error[syntax-error] missing closing delimiter )
 #: list[integer
 value <- list(1L)
 #++++
-error[syntax-error] invalid syntax in type expression
+error[syntax-error] type syntax error: missing closing delimiter ]
 --> 1:1-1:16
 | #: list[integer
 
@@ -60,7 +60,7 @@ error[syntax-error] invalid syntax in type expression
 #: list{value: integer
 value <- list(value = 1L)
 #++++
-error[syntax-error] invalid syntax in type expression
+error[syntax-error] type syntax error: expected `}` to close `list{...}`.
 --> 1:1-1:23
 | #: list{value: integer
 
@@ -68,7 +68,7 @@ error[syntax-error] invalid syntax in type expression
 #: user_id
 value <- 1L
 #++++
-error[type-error] I could not resolve type `user_id`.
+error[syntax-error] type syntax error: unknown type `user_id`
 --> 1:1-1:11
 | #: user_id
 
@@ -93,7 +93,7 @@ error[syntax-error] A `#:` typing comment cannot be separated from its expressio
 #: @param {list{length:} count
 render <- function(count) count
 #++++
-error[syntax-error] invalid syntax in type expression
+error[syntax-error] type syntax error: expected a type.
 --> 1:1-1:31
 | #: @param {list{length:} count
 
@@ -101,7 +101,7 @@ error[syntax-error] invalid syntax in type expression
 #: @param {list{length: integer} count
 render <- function(count) count
 #++++
-error[syntax-error] invalid syntax in type expression
+error[syntax-error] type syntax error: expected a type.
 --> 1:1-1:39
 | #: @param {list{length: integer} count
 
@@ -109,7 +109,7 @@ error[syntax-error] invalid syntax in type expression
 #: @param {user_id} count
 render <- function(count) count
 #++++
-error[syntax-error] invalid syntax in type expression
+error[syntax-error] type syntax error: expected a type.
 --> 1:1-1:26
 | #: @param {user_id} count
 

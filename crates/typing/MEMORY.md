@@ -16,21 +16,6 @@ Use this document to record:
 - next recommended steps
 - any subtle decisions that should not be rediscovered from scratch
 
-This is not a replacement for `AGENTS.md`, `ARCHITECTURE.md`, `SEMANTICS.md`, or `TODOS.md`.
-
-- `AGENTS.md` contains crate-specific working rules and workflow expectations.
-- `ARCHITECTURE.md` is the maintained design contract.
-- `SEMANTICS.md` is the user-facing semantics contract and must stay in sync with fixture expectations.
-- `TODOS.md` is the maintained execution plan.
-- `MEMORY.md` is a compact continuity document for session-to-session handoff.
-
 If code changes make this document inaccurate, update it in the same session.
 
 ## Active continuity
-
-- `src/type_syntax.rs` now has a working recursive-descent parser for compact surface types plus the existing expanded-block annotation parser.
-- The old nested named-list parser failure is resolved for well-formed inputs. The recent remaining failures were stale tests and fixtures that omitted the closing `]` in `list[named: ...]`.
-- Record-field parse errors now carry field-name context, for example `... (while parsing field \`items\`)`.
-- Temporary fixture debug logging that printed normalized named-list cases was removed.
-- The type parser still treats identifiers and record-field names as ASCII-only. `list{naïve: integer}` currently fails as an unknown type starting at `na`; that is current behavior, not a newly introduced regression.
-- One parser audit note remains: vector suffix parsing is still permissive for non-atomic keywords such as `Any`, `Unknown`, and `NULL`. Tightening that would be a user-facing syntax decision and should be reviewed deliberately rather than folded into unrelated parser work.

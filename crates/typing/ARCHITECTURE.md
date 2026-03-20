@@ -118,6 +118,19 @@ Parsing should be split into:
 
 The annotation parser should remain separate from the inference engine. Annotation parsing failures should preserve enough source information for good diagnostics.
 
+### Type-syntax parser strategy
+
+Surface type syntax should use a handwritten recursive-descent parser over the original source slice rather than a general parser-combinator style library.
+
+This is an architectural choice, not an incidental implementation detail:
+
+- the surface grammar is small, nested, and delimiter-heavy
+- parsing directly over the shared source text keeps allocations and reparsing pressure low
+- explicit parser state makes it easier to stop at caller-owned delimiters such as `]`, `}`, `)`, and `,`
+- that delimiter ownership is important for precise, local error messages in nested list and function types
+
+If the parser grows, preserve those properties. Convenience abstractions are acceptable only if they do not give up low-allocation parsing or degrade error locality.
+
 ## Lowering
 
 Lowering should translate supported R syntax into a smaller semantic IR designed for typing.

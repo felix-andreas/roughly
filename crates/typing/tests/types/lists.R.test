@@ -198,8 +198,14 @@ list{meta:list{items:list[named:list{integer,character},render:character}}
 #++++
 InvalidSyntax { message: "missing closing delimiter ] (while parsing field `items`) (while parsing field `meta`)" }
 
+#---- mixed_named_and_unnamed_items
+error:
+list{integer,label:character}
+#++++
+InvalidSyntax { message: "cannot mix named and unnamed items in `list{...}`." }
+
 #---- non_ascii_record_field_name
 error:
 list{naïve:integer}
 #++++
-InvalidSyntax { message: "Unknown type `na` in `list{...}` (while parsing tuple item)" }
+InvalidSyntax { message: "unknown type `na` in `list{...}` (while parsing tuple item)" }

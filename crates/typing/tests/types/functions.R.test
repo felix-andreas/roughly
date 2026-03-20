@@ -88,6 +88,11 @@ fn(count: integer, label: character) -> logical
 #++++
 fn(value: double) -> integer
 
+#---- expanded_without_return_defaults_to_null
+@param {integer} count
+#++++
+fn(count: integer) -> NULL
+
 #---- expanded_higher_order_parameter
 @param {fn(integer) -> character} formatter
 @param {integer} count

@@ -24,12 +24,12 @@ pub fn parse_annotation_type(
     let trimmed_text = text.trim();
 
     if trimmed_text.is_empty() {
-        return Err(invalid_syntax("Expected a type, but found empty input."));
+        return Err(invalid_syntax("expected a type, but found empty input."));
     }
 
     let surface_text = if allow_annotation_kind_prefix {
         annotation_surface_text(trimmed_text)
-            .ok_or_else(|| invalid_syntax("Expected a type after the annotation prefix."))?
+            .ok_or_else(|| invalid_syntax("expected a type after the annotation prefix."))?
     } else {
         trimmed_text
     };
@@ -40,7 +40,7 @@ pub fn parse_annotation_type(
 
     if !parser.is_at_end() {
         return Err(invalid_syntax(format!(
-            "Unexpected trailing input starting at byte {}.",
+            "unexpected trailing input starting at byte {}.",
             parser.position
         )));
     }
@@ -56,7 +56,7 @@ pub fn parse_annotation(
 
     if trimmed_text.is_empty() {
         return Err(invalid_syntax(
-            "Expected a type annotation, but found empty input.",
+            "expected a type annotation, but found empty input.",
         ));
     }
 
@@ -106,7 +106,7 @@ pub fn parse_expanded_block_surface_type(
 
     if trimmed_text.is_empty() {
         return Err(invalid_syntax(
-            "Expected an expanded type annotation block, but found empty input.",
+            "expected an expanded type annotation block, but found empty input.",
         ));
     }
 
@@ -118,7 +118,7 @@ pub fn parse_expanded_block_surface_type(
         if let Some(parameter_text) = directive.strip_prefix("@param") {
             let (type_text, name_text) = parse_braced_type_and_tail(parameter_text.trim())
                 .ok_or_else(|| {
-                    invalid_syntax("Expected `@param {TYPE} name` in the expanded annotation.")
+                    invalid_syntax("expected `@param {TYPE} name` in the expanded annotation.")
                 })?;
             let normalized_name = name_text
                 .trim()
@@ -142,19 +142,19 @@ pub fn parse_expanded_block_surface_type(
             let (type_text, trailing_text) = parse_braced_type_and_tail(return_text).ok_or_else(
                 || {
                     invalid_syntax(
-                        "Expected `@return {TYPE}` or `@returns {TYPE}` in the expanded annotation.",
+                        "expected `@return {TYPE}` or `@returns {TYPE}` in the expanded annotation.",
                     )
                 },
             )?;
             if !trailing_text.trim().is_empty() {
                 return Err(invalid_syntax(
-                    "Did not expect text after the return type in the expanded annotation.",
+                    "did not expect text after the return type in the expanded annotation.",
                 ));
             }
             return_type = parse_surface_type(interner, type_text)?;
         } else {
             return Err(invalid_syntax(
-                "Expected `@param`, `@return`, or `@returns` in the expanded annotation.",
+                "expected `@param`, `@return`, or `@returns` in the expanded annotation.",
             ));
         }
     }
@@ -261,17 +261,30 @@ impl<'a> TypeParser<'a> {
                 break;
             }
 
+            if matches!(surface_type, SurfaceType::Nullable(_)) {
+                return Err(invalid_syntax(
+                    "only nullable unions with a single `NULL` member are supported.",
+                ));
+            }
+
             self.position += 1;
             self.skip_ascii_whitespace();
 
-            if self.consume_keyword("NULL") || self.consume_keyword("null") {
-                surface_type = SurfaceType::Nullable(Box::new(surface_type));
-                continue;
-            }
-
-            return Err(invalid_syntax(
-                "Expected `NULL` after `|` in a nullable type.",
-            ));
+            let right_type = self.parse_primary(stop_context)?;
+            surface_type = match (surface_type, right_type) {
+                (SurfaceType::Null, SurfaceType::Null) => {
+                    return Err(invalid_syntax(
+                        "user-facing type syntax does not allow `NULL | NULL`.",
+                    ));
+                }
+                (SurfaceType::Null, right_type) => SurfaceType::Nullable(Box::new(right_type)),
+                (left_type, SurfaceType::Null) => SurfaceType::Nullable(Box::new(left_type)),
+                (_left_type, _right_type) => {
+                    return Err(invalid_syntax(
+                        "only nullable unions with a single `NULL` member are supported.",
+                    ));
+                }
+            };
         }
 
         Ok(surface_type)
@@ -289,26 +302,26 @@ impl<'a> TypeParser<'a> {
                 return self.parse_list_braces();
             }
             return Err(invalid_syntax(
-                "Expected `[` or `{` after `list` in a list type.",
+                "expected `[` or `{` after `list` in a list type.",
             ));
         }
 
         if self.consume_keyword("fn") {
             self.skip_ascii_whitespace();
             if !self.consume_byte(b'(') {
-                return Err(invalid_syntax("Expected `(` after `fn`."));
+                return Err(invalid_syntax("expected `(` after `fn`."));
             }
             return self.parse_function_type();
         }
 
         let identifier_span = self
             .parse_identifier_span()
-            .ok_or_else(|| invalid_syntax("Expected a type."))?;
+            .ok_or_else(|| invalid_syntax("expected a type."))?;
         let identifier = &self.source[identifier_span.0..identifier_span.1];
 
         let mut surface_type = parse_atomic_or_named_type(identifier).ok_or_else(|| {
             invalid_syntax(format!(
-                "Unknown type `{identifier}`{}",
+                "unknown type `{identifier}`{}",
                 self.context_suffix(stop_context)
             ))
         })?;
@@ -341,7 +354,7 @@ impl<'a> TypeParser<'a> {
         let is_named_list = if self.consume_keyword("named") {
             self.skip_ascii_whitespace();
             if !self.consume_byte(b':') {
-                return Err(invalid_syntax("Expected `:` after `named` in `list[...]`."));
+                return Err(invalid_syntax("expected `:` after `named` in `list[...]`."));
             }
             true
         } else {
@@ -371,7 +384,7 @@ impl<'a> TypeParser<'a> {
         if self.starts_list_brace_type() {
             self.consume_keyword("list");
             self.skip_ascii_whitespace();
-            self.expect_byte(b'{', "Expected `{` after `list` in a list type.")?;
+            self.expect_byte(b'{', "expected `{` after `list` in a list type.")?;
             return self.parse_list_braces();
         }
 
@@ -417,7 +430,7 @@ impl<'a> TypeParser<'a> {
                         None => item_kind = Some(ListBraceItemKind::Field),
                         Some(ListBraceItemKind::Item) => {
                             return Err(invalid_syntax(
-                                "Cannot mix named and unnamed items in `list{...}`.",
+                                "cannot mix named and unnamed items in `list{...}`.",
                             ));
                         }
                         Some(ListBraceItemKind::Field) => {}
@@ -429,7 +442,7 @@ impl<'a> TypeParser<'a> {
                     if self.consume_byte(b',') {
                         continue;
                     }
-                    self.expect_byte(b'}', "Expected `}` to close `list{...}`.")?;
+                    self.expect_byte(b'}', "expected `}` to close `list{...}`.")?;
                     break;
                 }
 
@@ -444,7 +457,7 @@ impl<'a> TypeParser<'a> {
                 None => item_kind = Some(ListBraceItemKind::Item),
                 Some(ListBraceItemKind::Field) => {
                     return Err(invalid_syntax(
-                        "Cannot mix named and unnamed items in `list{...}`.",
+                        "cannot mix named and unnamed items in `list{...}`.",
                     ));
                 }
                 Some(ListBraceItemKind::Item) => {}
@@ -456,7 +469,7 @@ impl<'a> TypeParser<'a> {
             if self.consume_byte(b',') {
                 continue;
             }
-            self.expect_byte(b'}', "Expected `}` to close `list{...}`.")?;
+            self.expect_byte(b'}', "expected `}` to close `list{...}`.")?;
             break;
         }
 
@@ -509,14 +522,14 @@ impl<'a> TypeParser<'a> {
                 if self.consume_byte(b',') {
                     continue;
                 }
-                self.expect_byte(b')', "Expected `)` to close `fn(...)`.")?;
+                self.expect_byte(b')', "expected `)` to close `fn(...)`.")?;
                 break;
             }
         }
 
         self.skip_ascii_whitespace();
         let return_type = if self.consume_byte(b'-') {
-            self.expect_byte(b'>', "Expected `>` after `-` in function return type.")?;
+            self.expect_byte(b'>', "expected `>` after `-` in function return type.")?;
             self.parse_type_until(StopContext::ROOT)?
         } else {
             SurfaceType::Null
@@ -779,7 +792,7 @@ fn collect_expanded_annotation_directives(text: &str) -> Result<Vec<String>, Typ
             }
         } else if current_directive.is_empty() {
             return Err(invalid_syntax(
-                "Expected an expanded annotation directive starting with `@param`, `@return`, or `@returns`.",
+                "expected an expanded annotation directive starting with `@param`, `@return`, or `@returns`.",
             ));
         } else {
             current_directive.push('\n');
@@ -804,7 +817,7 @@ fn collect_expanded_annotation_directives(text: &str) -> Result<Vec<String>, Typ
 
     if current_directive.is_empty() {
         return Err(invalid_syntax(
-            "Expected at least one expanded annotation directive.",
+            "expected at least one expanded annotation directive.",
         ));
     }
 
@@ -1015,7 +1028,7 @@ mod tests {
         assert_eq!(
             error,
             TypeParseError::InvalidSyntax {
-                message: "Unknown type `na` in `list{...}`".to_owned(),
+                message: "unknown type `na` in `list{...}`".to_owned(),
             }
         );
     }
