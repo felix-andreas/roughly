@@ -1,8 +1,14 @@
 use {
     ropey::Rope,
     std::{fmt::Write, ops::Range},
-    tree_sitter::{Node, Point},
+    tree_sitter::{Node, Point, Range as TreeSitterRange},
 };
+
+pub struct AnnotationBlock {
+    pub text: String,
+    pub range: TreeSitterRange,
+    pub last_row: usize,
+}
 
 pub fn point_to_char(rope: &Rope, point: Point) -> Option<usize> {
     let line_index = point.row;
@@ -55,12 +61,17 @@ pub fn compact_node_text(rope: &Rope, node: Node<'_>) -> String {
     }
 }
 
-pub fn annotation_block_text(rope: &Rope, start_row: usize) -> (String, usize) {
-    let mut row = start_row;
-    let mut block_lines = Vec::new();
+pub fn annotation_block(rope: &Rope, start_row: usize) -> Option<AnnotationBlock> {
+    let first_line = line_text(rope, start_row)?;
+    let first_trimmed_line = first_line.trim_start();
+    let first_annotation_text = first_trimmed_line.strip_prefix("#:")?;
 
-    while row < line_count(rope) {
-        let Some(line) = line_text(rope, row) else {
+    let start_column = first_line.len() - first_trimmed_line.len();
+    let mut row = start_row;
+    let mut block_lines = vec![first_annotation_text.trim().to_owned()];
+
+    while row + 1 < line_count(rope) {
+        let Some(line) = line_text(rope, row + 1) else {
             break;
         };
         let trimmed_line = line.trim_start();
@@ -71,7 +82,26 @@ pub fn annotation_block_text(rope: &Rope, start_row: usize) -> (String, usize) {
         row += 1;
     }
 
-    (block_lines.join("\n"), row.saturating_sub(1))
+    let end_line = line_text(rope, row).unwrap_or_default();
+    let end_trimmed_line = end_line.trim_end_matches(['\r', '\n']);
+    let end_column = end_trimmed_line.len();
+
+    Some(AnnotationBlock {
+        text: block_lines.join("\n"),
+        range: TreeSitterRange {
+            start_byte: 0,
+            end_byte: 0,
+            start_point: Point {
+                row: start_row,
+                column: start_column,
+            },
+            end_point: Point {
+                row,
+                column: end_column,
+            },
+        },
+        last_row: row,
+    })
 }
 
 pub fn all_lines(rope: &Rope) -> Vec<String> {

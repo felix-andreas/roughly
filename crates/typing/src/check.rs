@@ -73,7 +73,9 @@ pub fn check(node: Node<'_>, rope: &Rope, analysis_state: &mut AnalysisState) ->
         return CheckResult { diagnostics };
     }
 
-    let module = analysis_state.lowering_context.lower_root(node, rope);
+    let module = analysis_state
+        .lowering_context
+        .lower_root_with_rope(node, rope);
 
     let mut inference_state = InferenceState::new();
     bind_builtins(&mut inference_state, &mut analysis_state.lowering_context);
@@ -130,28 +132,13 @@ fn collect_annotation_diagnostics(
     let mut row = 0;
 
     while row < lines.len() {
-        let line = &lines[row];
-        let trimmed_line = line.trim_start();
-        let Some(annotation_text) = trimmed_line.strip_prefix("#:") else {
+        let Some(annotation_block) = text::annotation_block(rope, row) else {
             row += 1;
             continue;
         };
 
-        let annotation_text = annotation_text.trim();
-        let start_column = line.len() - trimmed_line.len();
-        let (annotation_block_text, last_annotation_row) = text::annotation_block_text(rope, row);
-        let annotation_range = tree_sitter::Range {
-            start_byte: 0,
-            end_byte: 0,
-            start_point: tree_sitter::Point {
-                row,
-                column: start_column,
-            },
-            end_point: tree_sitter::Point {
-                row: last_annotation_row,
-                column: lines[last_annotation_row].len(),
-            },
-        };
+        let annotation_range = annotation_block.range;
+        let annotation_text = annotation_block.text.trim();
 
         if annotation_text.is_empty() {
             diagnostics.push(Diagnostic::syntax_error(
@@ -162,13 +149,13 @@ fn collect_annotation_diagnostics(
             continue;
         }
 
-        let next_row = last_annotation_row + 1;
+        let next_row = annotation_block.last_row + 1;
         if next_row >= lines.len() {
             diagnostics.push(Diagnostic::syntax_error(
                 annotation_range,
                 "A `#:` typing comment must be followed immediately by an expression.",
             ));
-            row = last_annotation_row + 1;
+            row = annotation_block.last_row + 1;
             continue;
         }
 
@@ -180,11 +167,20 @@ fn collect_annotation_diagnostics(
                 annotation_range,
                 "A `#:` typing comment cannot be separated from its expression by an empty line.",
             ));
-            row = last_annotation_row + 1;
+            row = annotation_block.last_row + 1;
             continue;
         }
 
-        match parse_annotation(&annotation_block_text, interner) {
+        if next_trimmed.starts_with("#:") {
+            diagnostics.push(Diagnostic::syntax_error(
+                annotation_range,
+                "A `#:` typing comment must be followed immediately by an expression.",
+            ));
+            row = annotation_block.last_row + 1;
+            continue;
+        }
+
+        match parse_annotation(&annotation_block.text, interner) {
             Ok(_annotation) => {}
             Err(TypeParseError::InvalidSyntax { message }) => {
                 diagnostics.push(Diagnostic::syntax_error(
@@ -193,14 +189,14 @@ fn collect_annotation_diagnostics(
                 ));
             }
             Err(TypeParseError::UnknownType { name }) => {
-                diagnostics.push(Diagnostic::type_error(
+                diagnostics.push(Diagnostic::syntax_error(
                     annotation_range,
-                    format!("I could not resolve type `{name}`."),
+                    format!("type syntax error: unknown type `{name}`"),
                 ));
             }
         }
 
-        row = last_annotation_row + 1;
+        row = annotation_block.last_row + 1;
     }
 }
 

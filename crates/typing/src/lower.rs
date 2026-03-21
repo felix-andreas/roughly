@@ -179,8 +179,8 @@ impl LoweringContext {
         lower_tree(tree, source, self)
     }
 
-    pub fn lower_root(&mut self, root: Node<'_>, rope: &Rope) -> Module {
-        lower_root(root, rope, self)
+    pub fn lower_root_with_rope(&mut self, root: Node<'_>, rope: &Rope) -> Module {
+        lower_root_with_rope(root, rope, self)
     }
 
     pub fn lower_node(&mut self, node: Node<'_>, source: &str) -> Expression {
@@ -195,10 +195,14 @@ impl LoweringContext {
 pub fn lower_tree(tree: &Tree, source: &str, lowering_context: &mut LoweringContext) -> Module {
     let root = tree.root_node();
     let rope = Rope::from_str(source);
-    lower_root(root, &rope, lowering_context)
+    lower_root_with_rope(root, &rope, lowering_context)
 }
 
-pub fn lower_root(root: Node<'_>, rope: &Rope, lowering_context: &mut LoweringContext) -> Module {
+pub fn lower_root_with_rope(
+    root: Node<'_>,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
+) -> Module {
     let mut expressions = Vec::new();
 
     let child_count = root.named_child_count();
@@ -714,40 +718,21 @@ fn collect_pending_annotations(
     let mut row = 0;
 
     while row < lines.len() {
-        let line = &lines[row];
-        let trimmed_line = line.trim_start();
-        let Some(annotation_text) = trimmed_line.strip_prefix("#:") else {
+        let Some(annotation_block) = text::annotation_block(rope, row) else {
             row += 1;
             continue;
         };
-        let start_column = line.len() - trimmed_line.len();
-        let _ = annotation_text;
-        let (annotation_block_text, last_row) = text::annotation_block_text(rope, row);
 
         if let Ok(annotation) =
-            parse_annotation(&annotation_block_text, lowering_context.interner_mut())
+            parse_annotation(&annotation_block.text, lowering_context.interner_mut())
         {
-            let end_column = text::line_text(rope, last_row)
-                .map(|line_text| line_text.len())
-                .unwrap_or(0);
             annotations.push(PendingAnnotation {
-                range: Range {
-                    start_byte: 0,
-                    end_byte: 0,
-                    start_point: tree_sitter::Point {
-                        row,
-                        column: start_column,
-                    },
-                    end_point: tree_sitter::Point {
-                        row: last_row,
-                        column: end_column,
-                    },
-                },
+                range: annotation_block.range,
                 annotation,
             });
         }
 
-        row = last_row + 1;
+        row = annotation_block.last_row + 1;
     }
 
     annotations

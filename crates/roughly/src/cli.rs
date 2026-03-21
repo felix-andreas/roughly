@@ -12,6 +12,7 @@ use {
         path::{Path, PathBuf},
         time::Duration,
     },
+    typing::AnalysisState,
 };
 
 //
@@ -111,8 +112,14 @@ pub fn check(
             };
             let tree = tree::parse(&mut parser, &old, None);
             let rope = Rope::from_str(&old);
+            let mut typing_analysis_state = AnalysisState::new();
 
-            for diagnostic in diagnostics::analyze_full(tree.root_node(), &rope, config.lint) {
+            for diagnostic in diagnostics::analyze_full(
+                tree.root_node(),
+                &rope,
+                config.lint,
+                &mut typing_analysis_state,
+            ) {
                 n_errors += 1;
                 log(
                     match diagnostic.severity {

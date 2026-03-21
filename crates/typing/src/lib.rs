@@ -16,9 +16,10 @@ pub use {
         interner::{Interner, Symbol},
         lower::{
             Argument, Expression, ExpressionId, ExpressionKind, LoweringContext, Module, Parameter,
+            lower_root_with_rope,
         },
         parse::{new_parser, parse},
-        text::{line_text, node_text, point_label},
+        text::{AnnotationBlock, annotation_block, line_text, node_text, point_label},
         types::{Atomic, CoreType, InferenceVariableId, SurfaceType, TypeScheme},
     },
     tree_sitter::Parser,
