@@ -5,16 +5,21 @@ pub mod infer;
 pub mod interner;
 pub mod lower;
 pub mod parse;
+pub mod text;
 pub mod types;
 
-pub use crate::{
-    annotations::{TypeParseError, parse_surface_type, render_surface_type},
-    check::{CheckResult, check},
-    diagnostics::{Diagnostic, DiagnosticCode, Severity},
-    interner::{Interner, Symbol},
-    lower::{
-        Argument, Expression, ExpressionId, ExpressionKind, LoweringContext, Module, Parameter,
+pub use {
+    crate::{
+        annotations::{TypeParseError, parse_surface_type, render_surface_type},
+        check::{AnalysisState, CheckResult, check, check_source},
+        diagnostics::{Diagnostic, DiagnosticCode, Severity},
+        interner::{Interner, Symbol},
+        lower::{
+            Argument, Expression, ExpressionId, ExpressionKind, LoweringContext, Module, Parameter,
+        },
+        parse::{new_parser, parse},
+        text::{line_text, node_text, point_label},
+        types::{Atomic, CoreType, InferenceVariableId, SurfaceType, TypeScheme},
     },
-    parse::{new_parser, parse},
-    types::{Atomic, CoreType, InferenceVariableId, SurfaceType, TypeScheme},
+    tree_sitter::Parser,
 };

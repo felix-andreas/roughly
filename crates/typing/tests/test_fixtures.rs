@@ -1,11 +1,10 @@
 use {
     std::{collections::BTreeSet, fs, path::Path},
     typing::{
-        Interner,
+        AnalysisState, Interner,
         annotations::{
             parse_expanded_block_surface_type, parse_type_syntax_item, render_type_syntax_item,
         },
-        check,
         infer::{BuiltinKind, InferenceError, InferenceState},
         lower::LoweringContext,
         new_parser, parse, render_surface_type,
@@ -15,19 +14,30 @@ use {
 
 #[test]
 fn diagnostics() {
+    let mut parser = new_parser();
+    let mut analysis_state = AnalysisState::new();
+
     run_fixture_suite("tests/diagnostics", "diagnostics", |code| {
-        check(code).render(code)
+        typing::check_source(code, &mut parser, &mut analysis_state).render(code)
     });
 }
 
 #[test]
 fn inference() {
-    run_fixture_suite("tests/inference", "inference", render_inference_result);
+    run_fixture_suite(
+        "tests/inference",
+        "inference",
+        render_inference_fixture_result,
+    );
 }
 
 #[test]
 fn annotations() {
-    run_fixture_suite("tests/annotations", "annotations", render_type_result);
+    run_fixture_suite(
+        "tests/annotations",
+        "annotations",
+        render_annotation_fixture_result,
+    );
 }
 
 #[derive(Debug)]
@@ -204,7 +214,7 @@ where
     eprintln!("{} {kind} fixture(s) passed", executed_fixture_count);
 }
 
-fn render_inference_result(source: &str) -> String {
+fn render_inference_fixture_result(source: &str) -> String {
     let mut parser = new_parser();
     let tree = parse(&mut parser, source, None);
 
@@ -240,7 +250,7 @@ fn render_inference_result(source: &str) -> String {
     }
 }
 
-fn render_type_result(source: &str) -> String {
+fn render_annotation_fixture_result(source: &str) -> String {
     let mut interner = Interner::new();
     let trimmed_source = source.trim();
 
@@ -262,7 +272,7 @@ fn render_type_result(source: &str) -> String {
                 .to_owned();
         }
 
-        return match parse_type_syntax_item(&mut interner, &normalized_source) {
+        return match parse_type_syntax_item(&normalized_source, &mut interner) {
             Ok(item) => format!(
                 "fixture error: expected parse error\nsource:\n{normalized_source}\nparsed as: {}",
                 render_type_syntax_item(&item, &interner)
@@ -277,7 +287,7 @@ fn render_type_result(source: &str) -> String {
             || trimmed_line.starts_with("@return ")
             || trimmed_line.starts_with("@returns ")
     }) {
-        return match parse_expanded_block_surface_type(&mut interner, trimmed_source) {
+        return match parse_expanded_block_surface_type(trimmed_source, &mut interner) {
             Ok(surface_type) => render_surface_type(&surface_type, &interner),
             Err(error) => {
                 format!("parse error: {error:?}\nsource:\n{trimmed_source}")
@@ -292,7 +302,7 @@ fn render_type_result(source: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
-    match parse_type_syntax_item(&mut interner, &normalized_source) {
+    match parse_type_syntax_item(&normalized_source, &mut interner) {
         Ok(item) => render_type_syntax_item(&item, &interner),
         Err(error) => format!("parse error: {error:?}\nsource:\n{trimmed_source}"),
     }

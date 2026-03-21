@@ -1,13 +1,35 @@
 use {
     crate::{
+        Interner,
         annotations::{TypeParseError, parse_annotation},
         diagnostics::Diagnostic,
         infer::{BuiltinKind, InferenceState},
         lower::LoweringContext,
-        parse::{new_parser, parse},
+        parse::parse,
+        text,
     },
-    tree_sitter::Node,
+    ropey::Rope,
+    tree_sitter::{Node, Parser},
 };
+
+#[derive(Debug, Default)]
+pub struct AnalysisState {
+    lowering_context: LoweringContext,
+}
+
+impl AnalysisState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn interner(&self) -> &Interner {
+        self.lowering_context.interner()
+    }
+
+    pub fn interner_mut(&mut self) -> &mut Interner {
+        self.lowering_context.interner_mut()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckResult {
@@ -33,28 +55,51 @@ impl CheckResult {
     }
 }
 
-pub fn check(source: &str) -> CheckResult {
-    let mut parser = new_parser();
-    let tree = parse(&mut parser, source, None);
-    let root = tree.root_node();
-
+pub fn check(node: Node<'_>, rope: &Rope, analysis_state: &mut AnalysisState) -> CheckResult {
     let mut diagnostics = Vec::new();
 
-    if root.has_error() {
-        collect_syntax_errors(root, source, &mut diagnostics);
+    if node.has_error() {
+        collect_syntax_errors(node, rope, &mut diagnostics);
         return CheckResult { diagnostics };
     }
 
-    collect_annotation_diagnostics(source, &mut diagnostics);
+    collect_annotation_diagnostics(
+        rope,
+        analysis_state.lowering_context.interner_mut(),
+        &mut diagnostics,
+    );
 
     if !diagnostics.is_empty() {
         return CheckResult { diagnostics };
     }
 
-    let mut lowering_context = LoweringContext::new();
-    let module = lowering_context.lower_tree(&tree, source);
+    let module = analysis_state.lowering_context.lower_root(node, rope);
 
     let mut inference_state = InferenceState::new();
+    bind_builtins(&mut inference_state, &mut analysis_state.lowering_context);
+
+    if let Err(error) = inference_state.infer_module(&module) {
+        diagnostics.push(Diagnostic::from_inference_error(
+            &error,
+            fallback_range(rope),
+            analysis_state.lowering_context.interner(),
+        ));
+    }
+
+    CheckResult { diagnostics }
+}
+
+pub fn check_source(
+    source: &str,
+    parser: &mut Parser,
+    analysis_state: &mut AnalysisState,
+) -> CheckResult {
+    let tree = parse(parser, source, None);
+    let rope = Rope::from_str(source);
+    check(tree.root_node(), &rope, analysis_state)
+}
+
+fn bind_builtins(inference_state: &mut InferenceState, lowering_context: &mut LoweringContext) {
     let plus_symbol = lowering_context.intern("+");
     let minus_symbol = lowering_context.intern("-");
     let multiply_symbol = lowering_context.intern("*");
@@ -64,6 +109,7 @@ pub fn check(source: &str) -> CheckResult {
     let or_symbol = lowering_context.intern("||");
     let combine_symbol = lowering_context.intern("c");
     let list_symbol = lowering_context.intern("list");
+
     inference_state.bind_builtin(plus_symbol, BuiltinKind::Plus);
     inference_state.bind_builtin(minus_symbol, BuiltinKind::Minus);
     inference_state.bind_builtin(multiply_symbol, BuiltinKind::Multiply);
@@ -73,24 +119,18 @@ pub fn check(source: &str) -> CheckResult {
     inference_state.bind_builtin(or_symbol, BuiltinKind::Or);
     inference_state.bind_builtin(combine_symbol, BuiltinKind::Combine);
     inference_state.bind_builtin(list_symbol, BuiltinKind::List);
-
-    if let Err(error) = inference_state.infer_module(&module) {
-        diagnostics.push(Diagnostic::from_inference_error(
-            &error,
-            fallback_range(source),
-            lowering_context.interner(),
-        ));
-    }
-
-    CheckResult { diagnostics }
 }
 
-fn collect_annotation_diagnostics(source: &str, diagnostics: &mut Vec<Diagnostic>) {
-    let lines = source.lines().collect::<Vec<_>>();
+fn collect_annotation_diagnostics(
+    rope: &Rope,
+    interner: &mut Interner,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let lines = text::all_lines(rope);
     let mut row = 0;
 
     while row < lines.len() {
-        let line = lines[row];
+        let line = &lines[row];
         let trimmed_line = line.trim_start();
         let Some(annotation_text) = trimmed_line.strip_prefix("#:") else {
             row += 1;
@@ -99,7 +139,7 @@ fn collect_annotation_diagnostics(source: &str, diagnostics: &mut Vec<Diagnostic
 
         let annotation_text = annotation_text.trim();
         let start_column = line.len() - trimmed_line.len();
-        let (annotation_block_text, last_annotation_row) = annotation_block_text(&lines, row);
+        let (annotation_block_text, last_annotation_row) = text::annotation_block_text(rope, row);
         let annotation_range = tree_sitter::Range {
             start_byte: 0,
             end_byte: 0,
@@ -132,7 +172,7 @@ fn collect_annotation_diagnostics(source: &str, diagnostics: &mut Vec<Diagnostic
             continue;
         }
 
-        let next_line = lines[next_row];
+        let next_line = &lines[next_row];
         let next_trimmed = next_line.trim_start();
 
         if next_trimmed.is_empty() {
@@ -144,8 +184,7 @@ fn collect_annotation_diagnostics(source: &str, diagnostics: &mut Vec<Diagnostic
             continue;
         }
 
-        let mut interner = crate::Interner::new();
-        match parse_annotation(&mut interner, &annotation_block_text) {
+        match parse_annotation(&annotation_block_text, interner) {
             Ok(_annotation) => {}
             Err(TypeParseError::InvalidSyntax { message }) => {
                 diagnostics.push(Diagnostic::syntax_error(
@@ -165,27 +204,11 @@ fn collect_annotation_diagnostics(source: &str, diagnostics: &mut Vec<Diagnostic
     }
 }
 
-fn annotation_block_text(lines: &[&str], start_row: usize) -> (String, usize) {
-    let mut row = start_row;
-    let mut block_lines = Vec::new();
-
-    while row < lines.len() {
-        let trimmed_line = lines[row].trim_start();
-        let Some(annotation_text) = trimmed_line.strip_prefix("#:") else {
-            break;
-        };
-        block_lines.push(annotation_text.trim().to_owned());
-        row += 1;
-    }
-
-    (block_lines.join("\n"), row.saturating_sub(1))
-}
-
-fn collect_syntax_errors(node: Node<'_>, source: &str, diagnostics: &mut Vec<Diagnostic>) {
+fn collect_syntax_errors(node: Node<'_>, rope: &Rope, diagnostics: &mut Vec<Diagnostic>) {
     if node.is_error() {
         diagnostics.push(Diagnostic::syntax_error(
             node.range(),
-            format!("Unexpected syntax: {}", snippet(node, source)),
+            format!("Unexpected syntax: {}", snippet(node, rope)),
         ));
         return;
     }
@@ -204,17 +227,16 @@ fn collect_syntax_errors(node: Node<'_>, source: &str, diagnostics: &mut Vec<Dia
     let child_count = node.child_count();
     for child_index in 0..child_count {
         if let Some(child) = node.child(child_index) {
-            collect_syntax_errors(child, source, diagnostics);
+            collect_syntax_errors(child, rope, diagnostics);
         }
     }
 }
 
-fn snippet(node: Node<'_>, source: &str) -> String {
-    let text = node.utf8_text(source.as_bytes()).unwrap_or("<unavailable>");
-    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+fn snippet(node: Node<'_>, rope: &Rope) -> String {
+    let compact = text::compact_node_text(rope, node);
 
-    if compact.is_empty() {
-        "<empty>".to_owned()
+    if compact == "<empty>" || compact == "<unavailable>" {
+        compact
     } else if compact.len() > 40 {
         format!("{:?}…", &compact[..40])
     } else {
@@ -226,8 +248,8 @@ fn point_label(point: tree_sitter::Point) -> String {
     format!("{}:{}", point.row + 1, point.column + 1)
 }
 
-fn fallback_range(source: &str) -> tree_sitter::Range {
-    let line = source.lines().next().unwrap_or("");
+fn fallback_range(rope: &Rope) -> tree_sitter::Range {
+    let line = text::first_line_text(rope);
     tree_sitter::Range {
         start_byte: 0,
         end_byte: line.len(),

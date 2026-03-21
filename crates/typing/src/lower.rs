@@ -2,8 +2,10 @@ use {
     crate::{
         annotations::parse_annotation,
         interner::{Interner, Symbol},
+        text,
         types::{Annotation, AttachedAnnotation},
     },
+    ropey::Rope,
     tree_sitter::{Node, Range, Tree},
 };
 
@@ -174,16 +176,29 @@ impl LoweringContext {
     }
 
     pub fn lower_tree(&mut self, tree: &Tree, source: &str) -> Module {
-        lower_tree(self, tree, source)
+        lower_tree(tree, source, self)
+    }
+
+    pub fn lower_root(&mut self, root: Node<'_>, rope: &Rope) -> Module {
+        lower_root(root, rope, self)
     }
 
     pub fn lower_node(&mut self, node: Node<'_>, source: &str) -> Expression {
-        lower_node(self, node, source)
+        lower_node(node, source, self)
+    }
+
+    pub fn lower_node_with_rope(&mut self, node: Node<'_>, rope: &Rope) -> Expression {
+        lower_node_with_rope(node, rope, self)
     }
 }
 
-pub fn lower_tree(lowering_context: &mut LoweringContext, tree: &Tree, source: &str) -> Module {
+pub fn lower_tree(tree: &Tree, source: &str, lowering_context: &mut LoweringContext) -> Module {
     let root = tree.root_node();
+    let rope = Rope::from_str(source);
+    lower_root(root, &rope, lowering_context)
+}
+
+pub fn lower_root(root: Node<'_>, rope: &Rope, lowering_context: &mut LoweringContext) -> Module {
     let mut expressions = Vec::new();
 
     let child_count = root.named_child_count();
@@ -192,11 +207,11 @@ pub fn lower_tree(lowering_context: &mut LoweringContext, tree: &Tree, source: &
             if child.kind() == "comment" {
                 continue;
             }
-            expressions.push(lower_node(lowering_context, child, source));
+            expressions.push(lower_node_with_rope(child, rope, lowering_context));
         }
     }
 
-    let annotations = collect_pending_annotations(lowering_context, source);
+    let annotations = collect_pending_annotations(rope, lowering_context);
 
     attach_annotations_to_expressions(&annotations, &mut expressions);
 
@@ -204,31 +219,40 @@ pub fn lower_tree(lowering_context: &mut LoweringContext, tree: &Tree, source: &
 }
 
 pub fn lower_node(
-    lowering_context: &mut LoweringContext,
     node: Node<'_>,
     source: &str,
+    lowering_context: &mut LoweringContext,
+) -> Expression {
+    let rope = Rope::from_str(source);
+    lower_node_with_rope(node, &rope, lowering_context)
+}
+
+pub fn lower_node_with_rope(
+    node: Node<'_>,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> Expression {
     let kind = match node.kind() {
-        "identifier" => ExpressionKind::Symbol(intern_node_text(lowering_context, node, source)),
+        "identifier" => ExpressionKind::Symbol(intern_node_text(node, rope, lowering_context)),
         "null" => ExpressionKind::Null,
         "true" => ExpressionKind::Logical(true),
         "false" => ExpressionKind::Logical(false),
-        "integer" => ExpressionKind::Integer(node_text(node, source).to_owned()),
-        "float" => ExpressionKind::Double(node_text(node, source).to_owned()),
-        "string" => ExpressionKind::Character(node_text(node, source).to_owned()),
-        "braced_expression" => lower_block(lowering_context, node, source),
-        "binary_operator" => lower_binary_operator(lowering_context, node, source),
-        "unary_operator" => lower_unary_operator(lowering_context, node, source),
-        "function_definition" => lower_function_definition(lowering_context, node, source),
-        "if_statement" => lower_if_statement(lowering_context, node, source),
-        "for_statement" => lower_for_statement(lowering_context, node, source),
-        "while_statement" => lower_while_statement(lowering_context, node, source),
-        "repeat_statement" => lower_repeat_statement(lowering_context, node, source),
-        "call" => lower_call(lowering_context, node, source),
-        "subset" => lower_subset(lowering_context, node, source),
-        "subset2" => lower_subset2(lowering_context, node, source),
-        "extract_operator" => lower_extract_operator(lowering_context, node, source),
-        "parenthesized_expression" => lower_wrapped_expression_kind(lowering_context, node, source),
+        "integer" => ExpressionKind::Integer(node_text(node, rope)),
+        "float" => ExpressionKind::Double(node_text(node, rope)),
+        "string" => ExpressionKind::Character(node_text(node, rope)),
+        "braced_expression" => lower_block(node, rope, lowering_context),
+        "binary_operator" => lower_binary_operator(node, rope, lowering_context),
+        "unary_operator" => lower_unary_operator(node, rope, lowering_context),
+        "function_definition" => lower_function_definition(node, rope, lowering_context),
+        "if_statement" => lower_if_statement(node, rope, lowering_context),
+        "for_statement" => lower_for_statement(node, rope, lowering_context),
+        "while_statement" => lower_while_statement(node, rope, lowering_context),
+        "repeat_statement" => lower_repeat_statement(node, rope, lowering_context),
+        "call" => lower_call(node, rope, lowering_context),
+        "subset" => lower_subset(node, rope, lowering_context),
+        "subset2" => lower_subset2(node, rope, lowering_context),
+        "extract_operator" => lower_extract_operator(node, rope, lowering_context),
+        "parenthesized_expression" => lower_wrapped_expression_kind(node, rope, lowering_context),
         _ => ExpressionKind::Unsupported,
     };
 
@@ -236,9 +260,9 @@ pub fn lower_node(
 }
 
 fn lower_binary_operator(
-    lowering_context: &mut LoweringContext,
     node: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
     let maybe_lhs = node.child_by_field_name("lhs");
     let maybe_operator = node.child_by_field_name("operator");
@@ -260,8 +284,8 @@ fn lower_binary_operator(
                 return ExpressionKind::Unsupported;
             }
 
-            let target = intern_node_text(lowering_context, lhs, source);
-            let value = lower_node(lowering_context, rhs, source);
+            let target = intern_node_text(lhs, rope, lowering_context);
+            let value = lower_node_with_rope(rhs, rope, lowering_context);
 
             ExpressionKind::Assign {
                 target,
@@ -270,18 +294,18 @@ fn lower_binary_operator(
             }
         }
         "+" | "-" | "*" | "/" | "**" | "&&" | "||" => {
-            let operator_symbol = intern_node_text(lowering_context, operator, source);
+            let operator_symbol = intern_node_text(operator, rope, lowering_context);
             let callee = Box::new(
                 lowering_context
                     .expression(operator.range(), ExpressionKind::Symbol(operator_symbol)),
             );
             let arguments = vec![
                 Argument {
-                    expression: lower_node(lowering_context, lhs, source),
+                    expression: lower_node_with_rope(lhs, rope, lowering_context),
                     name: None,
                 },
                 Argument {
-                    expression: lower_node(lowering_context, rhs, source),
+                    expression: lower_node_with_rope(rhs, rope, lowering_context),
                     name: None,
                 },
             ];
@@ -293,9 +317,9 @@ fn lower_binary_operator(
 }
 
 fn lower_block(
-    lowering_context: &mut LoweringContext,
     node: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
     let mut expressions = Vec::new();
 
@@ -303,10 +327,10 @@ fn lower_block(
         let Some(child) = node.named_child(child_index) else {
             continue;
         };
-        expressions.push(lower_node(lowering_context, child, source));
+        expressions.push(lower_node_with_rope(child, rope, lowering_context));
     }
 
-    let has_trailing_semicolon = node_text(node, source)
+    let has_trailing_semicolon = node_text(node, rope)
         .trim()
         .strip_suffix('}')
         .is_some_and(|prefix| prefix.trim_end().ends_with(';'));
@@ -318,9 +342,9 @@ fn lower_block(
 }
 
 fn lower_unary_operator(
-    lowering_context: &mut LoweringContext,
     node: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
     let Some(operator) = node.child_by_field_name("operator") else {
         return ExpressionKind::Unsupported;
@@ -331,25 +355,25 @@ fn lower_unary_operator(
 
     match operator.kind() {
         "-" => ExpressionKind::UnaryMinus {
-            value: Box::new(lower_node(lowering_context, value, source)),
+            value: Box::new(lower_node_with_rope(value, rope, lowering_context)),
         },
         _ => ExpressionKind::Unsupported,
     }
 }
 
 fn lower_function_definition(
-    lowering_context: &mut LoweringContext,
     node: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
     let parameters = node
         .child_by_field_name("parameters")
-        .map(|parameters| lower_parameters(lowering_context, parameters, source))
+        .map(|parameters| lower_parameters(parameters, rope, lowering_context))
         .unwrap_or_default();
 
     let body = node
         .child_by_field_name("body")
-        .map(|body| Box::new(lower_node(lowering_context, body, source)))
+        .map(|body| Box::new(lower_node_with_rope(body, rope, lowering_context)))
         .unwrap_or_else(|| {
             Box::new(lowering_context.expression(node.range(), ExpressionKind::Unsupported))
         });
@@ -358,9 +382,9 @@ fn lower_function_definition(
 }
 
 fn lower_if_statement(
-    lowering_context: &mut LoweringContext,
     node: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
     let Some(condition) = node.child_by_field_name("condition") else {
         return ExpressionKind::Unsupported;
@@ -370,18 +394,18 @@ fn lower_if_statement(
     };
 
     ExpressionKind::If {
-        condition: Box::new(lower_node(lowering_context, condition, source)),
-        consequence: Box::new(lower_node(lowering_context, consequence, source)),
+        condition: Box::new(lower_node_with_rope(condition, rope, lowering_context)),
+        consequence: Box::new(lower_node_with_rope(consequence, rope, lowering_context)),
         alternative: node
             .child_by_field_name("alternative")
-            .map(|alternative| Box::new(lower_node(lowering_context, alternative, source))),
+            .map(|alternative| Box::new(lower_node_with_rope(alternative, rope, lowering_context))),
     }
 }
 
 fn lower_for_statement(
-    lowering_context: &mut LoweringContext,
     node: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
     let Some(variable) = node.child_by_field_name("variable") else {
         return ExpressionKind::Unsupported;
@@ -397,16 +421,16 @@ fn lower_for_statement(
     };
 
     ExpressionKind::For {
-        variable: intern_node_text(lowering_context, variable, source),
-        sequence: Box::new(lower_node(lowering_context, sequence, source)),
-        body: Box::new(lower_node(lowering_context, body, source)),
+        variable: intern_node_text(variable, rope, lowering_context),
+        sequence: Box::new(lower_node_with_rope(sequence, rope, lowering_context)),
+        body: Box::new(lower_node_with_rope(body, rope, lowering_context)),
     }
 }
 
 fn lower_while_statement(
-    lowering_context: &mut LoweringContext,
     node: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
     let Some(condition) = node.child_by_field_name("condition") else {
         return ExpressionKind::Unsupported;
@@ -416,29 +440,29 @@ fn lower_while_statement(
     };
 
     ExpressionKind::While {
-        condition: Box::new(lower_node(lowering_context, condition, source)),
-        body: Box::new(lower_node(lowering_context, body, source)),
+        condition: Box::new(lower_node_with_rope(condition, rope, lowering_context)),
+        body: Box::new(lower_node_with_rope(body, rope, lowering_context)),
     }
 }
 
 fn lower_repeat_statement(
-    lowering_context: &mut LoweringContext,
     node: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
     let Some(body) = node.child_by_field_name("body") else {
         return ExpressionKind::Unsupported;
     };
 
     ExpressionKind::Repeat {
-        body: Box::new(lower_node(lowering_context, body, source)),
+        body: Box::new(lower_node_with_rope(body, rope, lowering_context)),
     }
 }
 
 fn lower_parameters(
-    lowering_context: &mut LoweringContext,
     parameters: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> Vec<Parameter> {
     let mut lowered_parameters = Vec::new();
     let child_count = parameters.named_child_count();
@@ -451,7 +475,7 @@ fn lower_parameters(
         match child.kind() {
             "identifier" => {
                 lowered_parameters.push(Parameter {
-                    symbol: intern_node_text(lowering_context, child, source),
+                    symbol: intern_node_text(child, rope, lowering_context),
                     range: child.range(),
                 });
             }
@@ -460,7 +484,7 @@ fn lower_parameters(
                     && name.kind() == "identifier"
                 {
                     lowered_parameters.push(Parameter {
-                        symbol: intern_node_text(lowering_context, name, source),
+                        symbol: intern_node_text(name, rope, lowering_context),
                         range: name.range(),
                     });
                 }
@@ -473,63 +497,63 @@ fn lower_parameters(
 }
 
 fn lower_call(
-    lowering_context: &mut LoweringContext,
     node: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
     let Some(function) = node.child_by_field_name("function") else {
         return ExpressionKind::Unsupported;
     };
 
-    let callee = Box::new(lower_node(lowering_context, function, source));
+    let callee = Box::new(lower_node_with_rope(function, rope, lowering_context));
     let arguments = node
         .child_by_field_name("arguments")
-        .map(|arguments| lower_arguments(lowering_context, arguments, source))
+        .map(|arguments| lower_arguments(arguments, rope, lowering_context))
         .unwrap_or_default();
 
     ExpressionKind::Call { callee, arguments }
 }
 
 fn lower_subset(
-    lowering_context: &mut LoweringContext,
     node: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
     let Some(function) = node.child_by_field_name("function") else {
         return ExpressionKind::Unsupported;
     };
 
-    let value = Box::new(lower_node(lowering_context, function, source));
+    let value = Box::new(lower_node_with_rope(function, rope, lowering_context));
     let arguments = node
         .child_by_field_name("arguments")
-        .map(|arguments| lower_index_arguments(lowering_context, arguments, source))
+        .map(|arguments| lower_index_arguments(arguments, rope, lowering_context))
         .unwrap_or_default();
 
     ExpressionKind::Subset { value, arguments }
 }
 
 fn lower_subset2(
-    lowering_context: &mut LoweringContext,
     node: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
     let Some(function) = node.child_by_field_name("function") else {
         return ExpressionKind::Unsupported;
     };
 
-    let value = Box::new(lower_node(lowering_context, function, source));
+    let value = Box::new(lower_node_with_rope(function, rope, lowering_context));
     let arguments = node
         .child_by_field_name("arguments")
-        .map(|arguments| lower_index_arguments(lowering_context, arguments, source))
+        .map(|arguments| lower_index_arguments(arguments, rope, lowering_context))
         .unwrap_or_default();
 
     ExpressionKind::Subset2 { value, arguments }
 }
 
 fn lower_extract_operator(
-    lowering_context: &mut LoweringContext,
     node: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
     let Some(operator) = node.child_by_field_name("operator") else {
         return ExpressionKind::Unsupported;
@@ -545,21 +569,21 @@ fn lower_extract_operator(
         return ExpressionKind::Unsupported;
     };
     let name = match rhs.kind() {
-        "identifier" => intern_node_text(lowering_context, rhs, source),
-        "string" => intern_string_node_content(lowering_context, rhs, source),
+        "identifier" => intern_node_text(rhs, rope, lowering_context),
+        "string" => intern_string_node_content(rhs, rope, lowering_context),
         _ => return ExpressionKind::Unsupported,
     };
 
     ExpressionKind::Dollar {
-        value: Box::new(lower_node(lowering_context, lhs, source)),
+        value: Box::new(lower_node_with_rope(lhs, rope, lowering_context)),
         name,
     }
 }
 
 fn lower_arguments(
-    lowering_context: &mut LoweringContext,
     arguments: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> Vec<Argument> {
     let mut lowered_arguments = Vec::new();
     let child_count = arguments.named_child_count();
@@ -576,11 +600,11 @@ fn lower_arguments(
         let name = child
             .child_by_field_name("name")
             .filter(|name| name.kind() == "identifier")
-            .map(|name| intern_node_text(lowering_context, name, source));
+            .map(|name| intern_node_text(name, rope, lowering_context));
 
         let expression = child
             .child_by_field_name("value")
-            .map(|value| lower_node(lowering_context, value, source))
+            .map(|value| lower_node_with_rope(value, rope, lowering_context))
             .unwrap_or_else(|| {
                 lowering_context.expression(child.range(), ExpressionKind::Unsupported)
             });
@@ -592,9 +616,9 @@ fn lower_arguments(
 }
 
 fn lower_index_arguments(
-    lowering_context: &mut LoweringContext,
     arguments: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> Vec<Argument> {
     let mut lowered_arguments = Vec::new();
     let child_count = arguments.named_child_count();
@@ -611,16 +635,16 @@ fn lower_index_arguments(
         let name = child
             .child_by_field_name("name")
             .filter(|name| name.kind() == "identifier")
-            .map(|name| intern_node_text(lowering_context, name, source));
+            .map(|name| intern_node_text(name, rope, lowering_context));
 
         let expression = match child.child_by_field_name("value") {
             None => lowering_context.expression(child.range(), ExpressionKind::Unsupported),
             Some(value) if value.kind() == "string" => {
-                let symbol = intern_string_node_content(lowering_context, value, source);
+                let symbol = intern_string_node_content(value, rope, lowering_context);
                 lowering_context
                     .expression(value.range(), ExpressionKind::StringLiteralName(symbol))
             }
-            Some(value) => lower_node(lowering_context, value, source),
+            Some(value) => lower_node_with_rope(value, rope, lowering_context),
         };
 
         lowered_arguments.push(Argument { expression, name });
@@ -630,12 +654,12 @@ fn lower_index_arguments(
 }
 
 fn lower_wrapped_expression_kind(
-    lowering_context: &mut LoweringContext,
     node: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
     if let Some(inner) = first_named_child(node) {
-        return lower_node(lowering_context, inner, source).kind;
+        return lower_node_with_rope(inner, rope, lowering_context).kind;
     }
 
     ExpressionKind::Unsupported
@@ -653,22 +677,22 @@ fn first_named_child(node: Node<'_>) -> Option<Node<'_>> {
     None
 }
 
-fn node_text<'a>(node: Node<'_>, source: &'a str) -> &'a str {
-    node.utf8_text(source.as_bytes()).unwrap_or("")
+fn node_text(node: Node<'_>, rope: &Rope) -> String {
+    text::node_text(rope, node).unwrap_or_default()
 }
 
 fn intern_string_node_content(
-    lowering_context: &mut LoweringContext,
     node: Node<'_>,
-    source: &str,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
 ) -> Symbol {
     if let Some(content) = node.child_by_field_name("content") {
-        return intern_node_text(lowering_context, content, source);
+        return intern_node_text(content, rope, lowering_context);
     }
 
-    let text = node_text(node, source);
+    let text = node_text(node, rope);
     let Some(content) = text.strip_prefix(text.chars().next().unwrap_or('"')) else {
-        return lowering_context.intern(text);
+        return lowering_context.intern(&text);
     };
     let content = content
         .strip_suffix(text.chars().last().unwrap_or('"'))
@@ -676,24 +700,21 @@ fn intern_string_node_content(
     lowering_context.intern(content)
 }
 
-fn intern_node_text(
-    lowering_context: &mut LoweringContext,
-    node: Node<'_>,
-    source: &str,
-) -> Symbol {
-    lowering_context.intern(node_text(node, source))
+fn intern_node_text(node: Node<'_>, rope: &Rope, lowering_context: &mut LoweringContext) -> Symbol {
+    let text = node_text(node, rope);
+    lowering_context.intern(&text)
 }
 
 fn collect_pending_annotations(
+    rope: &Rope,
     lowering_context: &mut LoweringContext,
-    source: &str,
 ) -> Vec<PendingAnnotation> {
     let mut annotations = Vec::new();
-    let lines = source.lines().collect::<Vec<_>>();
+    let lines = text::all_lines(rope);
     let mut row = 0;
 
     while row < lines.len() {
-        let line = lines[row];
+        let line = &lines[row];
         let trimmed_line = line.trim_start();
         let Some(annotation_text) = trimmed_line.strip_prefix("#:") else {
             row += 1;
@@ -701,11 +722,14 @@ fn collect_pending_annotations(
         };
         let start_column = line.len() - trimmed_line.len();
         let _ = annotation_text;
-        let (annotation_block_text, last_row) = annotation_block_text(&lines, row);
+        let (annotation_block_text, last_row) = text::annotation_block_text(rope, row);
 
         if let Ok(annotation) =
-            parse_annotation(lowering_context.interner_mut(), &annotation_block_text)
+            parse_annotation(&annotation_block_text, lowering_context.interner_mut())
         {
+            let end_column = text::line_text(rope, last_row)
+                .map(|line_text| line_text.len())
+                .unwrap_or(0);
             annotations.push(PendingAnnotation {
                 range: Range {
                     start_byte: 0,
@@ -716,7 +740,7 @@ fn collect_pending_annotations(
                     },
                     end_point: tree_sitter::Point {
                         row: last_row,
-                        column: lines[last_row].len(),
+                        column: end_column,
                     },
                 },
                 annotation,
@@ -727,22 +751,6 @@ fn collect_pending_annotations(
     }
 
     annotations
-}
-
-fn annotation_block_text(lines: &[&str], start_row: usize) -> (String, usize) {
-    let mut row = start_row;
-    let mut block_lines = Vec::new();
-
-    while row < lines.len() {
-        let trimmed_line = lines[row].trim_start();
-        let Some(annotation_text) = trimmed_line.strip_prefix("#:") else {
-            break;
-        };
-        block_lines.push(annotation_text.trim().to_owned());
-        row += 1;
-    }
-
-    (block_lines.join("\n"), row.saturating_sub(1))
 }
 
 fn attach_annotations_to_expressions(

@@ -102,6 +102,8 @@ This should include at least:
 - function parameter names
 - record fields
 
+Interned symbols are session-scoped. A single checking run should reuse one interner across annotation parsing, lowering, builtin setup, inference, and diagnostic rendering. Fresh interners are still fine in isolated tests or other one-off parsing helpers, but the main pipeline should not create separate symbol universes for individual annotations.
+
 Interned symbols are not the same as bindings. Distinct bindings in different function scopes may share the same interned symbol. If binding identity needs to be modeled separately, represent it separately rather than overloading the symbol itself.
 
 Diagnostics must still render human-readable names from source text.

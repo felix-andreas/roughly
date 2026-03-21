@@ -1,16 +1,19 @@
-use crate::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
+use {
+    crate::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range},
+    ropey::Rope,
+    tree_sitter::Node,
+};
 
-pub fn diagnostics_for_source(source: &str) -> Vec<Diagnostic> {
-    typing::check(source)
+pub fn analyze(
+    node: Node,
+    rope: &Rope,
+    analysis_state: &mut typing::AnalysisState,
+) -> Vec<Diagnostic> {
+    typing::check(node, rope, analysis_state)
         .diagnostics
         .into_iter()
         .map(convert_diagnostic)
         .collect()
-}
-
-pub fn analyze_rope(rope: &ropey::Rope) -> Vec<Diagnostic> {
-    let source = rope.to_string();
-    diagnostics_for_source(&source)
 }
 
 fn convert_diagnostic(diagnostic: typing::Diagnostic) -> Diagnostic {

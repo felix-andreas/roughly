@@ -1786,6 +1786,7 @@ name = "typing"
 version = "0.1.1"
 dependencies = [
  "indoc",
+ "ropey",
  "thiserror",
  "tree-sitter",
  "tree-sitter-r",

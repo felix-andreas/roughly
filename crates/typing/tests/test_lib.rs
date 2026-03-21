@@ -18,14 +18,14 @@ fn lower(source: &str) -> typing::Module {
     let mut parser = new_parser();
     let tree = parse(&mut parser, source, None);
     let mut lowering_context = LoweringContext::new();
-    lowering_context.lower_tree(&tree, source)
+    typing::lower::lower_tree(&tree, source, &mut lowering_context)
 }
 
 fn lower_context(source: &str) -> LoweringContext {
     let mut parser = new_parser();
     let tree = parse(&mut parser, source, None);
     let mut lowering_context = LoweringContext::new();
-    let _module = lowering_context.lower_tree(&tree, source);
+    let _module = typing::lower::lower_tree(&tree, source, &mut lowering_context);
     lowering_context
 }
 
@@ -229,7 +229,7 @@ fn core_type_can_store_an_inference_variable() {
 fn parse_surface_type_supports_named_list_with_tuple_like_inner_value() {
     let mut interner = Interner::new();
 
-    let surface_type = parse_surface_type(&mut interner, "list[named:list{integer,character}]")
+    let surface_type = parse_surface_type("list[named:list{integer,character}]", &mut interner)
         .expect("nested named list type should parse");
 
     assert_eq!(
@@ -247,8 +247,8 @@ fn parse_surface_type_supports_named_list_inside_record_field() {
     let items = interner.intern("items");
 
     let surface_type = parse_surface_type(
-        &mut interner,
         "list{items:list[named:list{integer,character}]}",
+        &mut interner,
     )
     .expect("record containing nested named list type should parse");
 
@@ -273,8 +273,8 @@ fn parse_surface_type_supports_exact_failing_deeply_nested_record_like_list() {
     let label = interner.intern("label");
 
     let surface_type = parse_surface_type(
-        &mut interner,
         "list{meta:list{items:list[named:list{integer,character}],render:fn(integer)->list{label:character}}}",
+        &mut interner,
     )
     .expect("deeply nested named list type should parse");
 
@@ -314,8 +314,8 @@ fn parse_surface_type_supports_exact_failing_deeply_nested_record_like_list_with
     let items = interner.intern("items");
 
     let surface_type = parse_surface_type(
-        &mut interner,
         "list{meta:list{items:list[named:list{integer,character}]}}",
+        &mut interner,
     )
     .expect("deeply nested named list with tuple-like inner value should parse");
 

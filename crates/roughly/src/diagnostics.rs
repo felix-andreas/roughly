@@ -12,6 +12,7 @@ use {
     serde::Deserialize,
     thiserror::Error,
     tree_sitter::Node,
+    typing::AnalysisState,
 };
 
 #[derive(Debug, Default, Clone, Copy, Deserialize)]
@@ -22,7 +23,13 @@ pub struct Config {
     pub experimental_typing: bool,
 }
 
-pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagnostic> {
+pub fn analyze(
+    node: Node,
+    rope: &Rope,
+    config: Config,
+    full: bool,
+    typing_analysis_state: Option<&mut AnalysisState>,
+) -> Vec<Diagnostic> {
     let mut diagnostics = syntax::analyze(node, rope);
     let has_syntax_errors = !diagnostics.is_empty();
 
@@ -37,19 +44,31 @@ pub fn analyze(node: Node, rope: &Rope, config: Config, full: bool) -> Vec<Diagn
         }
     }
 
-    if config.experimental_typing && full {
-        diagnostics.extend(typing_diagnostics::analyze_rope(rope));
+    if config.experimental_typing
+        && full
+        && let Some(typing_analysis_state) = typing_analysis_state
+    {
+        diagnostics.extend(typing_diagnostics::analyze(
+            node,
+            rope,
+            typing_analysis_state,
+        ));
     }
 
     diagnostics
 }
 
 pub fn analyze_fast(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
-    analyze(node, rope, config, false)
+    analyze(node, rope, config, false, None)
 }
 
-pub fn analyze_full(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
-    analyze(node, rope, config, true)
+pub fn analyze_full(
+    node: Node,
+    rope: &Rope,
+    config: Config,
+    typing_analysis_state: &mut AnalysisState,
+) -> Vec<Diagnostic> {
+    analyze(node, rope, config, true, Some(typing_analysis_state))
 }
 
 fn error(node: Node, message: String) -> Diagnostic {

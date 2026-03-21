@@ -136,15 +136,15 @@ pub enum TypeSyntaxItem {
 }
 
 pub fn parse_surface_type(
-    interner: &mut Interner,
     text: &str,
+    interner: &mut Interner,
 ) -> Result<SurfaceType, TypeParseError> {
-    parse_annotation_type(interner, text, false)
+    parse_annotation_type(text, interner, false)
 }
 
 pub fn parse_annotation_type(
-    interner: &mut Interner,
     text: &str,
+    interner: &mut Interner,
     allow_annotation_kind_prefix: bool,
 ) -> Result<SurfaceType, TypeParseError> {
     let trimmed_text = text.trim();
@@ -175,8 +175,8 @@ pub fn parse_annotation_type(
 }
 
 pub fn parse_annotation(
-    interner: &mut Interner,
     text: &str,
+    interner: &mut Interner,
 ) -> Result<crate::types::Annotation, TypeParseError> {
     let trimmed_text = text.trim();
 
@@ -200,7 +200,7 @@ pub fn parse_annotation(
     };
 
     if let Some(expanded_block_text) = parse_expanded_annotation_block_text(&normalized_lines)? {
-        let surface_type = parse_expanded_block_surface_type(interner, &expanded_block_text)?;
+        let surface_type = parse_expanded_block_surface_type(&expanded_block_text, interner)?;
         return Ok(crate::types::Annotation::new(
             AnnotationKind::Checked,
             surface_type,
@@ -215,13 +215,13 @@ pub fn parse_annotation(
 
     let (kind, surface_text) = parse_compact_annotation_kind_and_surface_text(first_line)?;
 
-    let surface_type = parse_surface_type(interner, surface_text)?;
+    let surface_type = parse_surface_type(surface_text, interner)?;
     Ok(crate::types::Annotation::new(kind, surface_type))
 }
 
 pub fn parse_type_syntax_item(
-    interner: &mut Interner,
     text: &str,
+    interner: &mut Interner,
 ) -> Result<TypeSyntaxItem, TypeParseError> {
     let trimmed_text = text.trim();
 
@@ -230,38 +230,38 @@ pub fn parse_type_syntax_item(
     }
 
     if trimmed_text.starts_with('@') {
-        return parse_directive_type_syntax_item(interner, trimmed_text);
+        return parse_directive_type_syntax_item(trimmed_text, interner);
     }
 
-    parse_surface_type(interner, trimmed_text).map(TypeSyntaxItem::SurfaceType)
+    parse_surface_type(trimmed_text, interner).map(TypeSyntaxItem::SurfaceType)
 }
 
 fn parse_directive_type_syntax_item(
-    interner: &mut Interner,
     text: &str,
+    interner: &mut Interner,
 ) -> Result<TypeSyntaxItem, TypeParseError> {
     let (directive_name, directive_body) = parse_annotation_directive_name_and_body(text)
         .ok_or_else(|| invalid_syntax("expected a type."))?;
 
     match directive_name {
         "type" => {
-            let (name, surface_type) = parse_named_type_definition(interner, directive_body)?;
+            let (name, surface_type) = parse_named_type_definition(directive_body, interner)?;
             Ok(TypeSyntaxItem::TypeDefinition { name, surface_type })
         }
         "alias" => {
-            let (name, surface_type) = parse_named_type_definition(interner, directive_body)?;
+            let (name, surface_type) = parse_named_type_definition(directive_body, interner)?;
             Ok(TypeSyntaxItem::TypeAlias { name, surface_type })
         }
         "if-unknown" => {
             let surface_text = keyword_surface_text(directive_body)
                 .ok_or_else(|| invalid_syntax("expected a type after the annotation prefix."))?;
-            let surface_type = parse_surface_type(interner, surface_text)?;
+            let surface_type = parse_surface_type(surface_text, interner)?;
             Ok(TypeSyntaxItem::IfUnknown(surface_type))
         }
         "trust" => {
             let surface_text = keyword_surface_text(directive_body)
                 .ok_or_else(|| invalid_syntax("expected a type after the annotation prefix."))?;
-            let surface_type = parse_surface_type(interner, surface_text)?;
+            let surface_type = parse_surface_type(surface_text, interner)?;
             Ok(TypeSyntaxItem::Trust(surface_type))
         }
         "new" => {
@@ -352,8 +352,8 @@ fn parse_annotation_directive_name_and_body(text: &str) -> Option<(&str, &str)> 
 }
 
 pub fn parse_expanded_block_surface_type(
-    interner: &mut Interner,
     text: &str,
+    interner: &mut Interner,
 ) -> Result<SurfaceType, TypeParseError> {
     let trimmed_text = text.trim();
 
@@ -389,7 +389,7 @@ pub fn parse_expanded_block_surface_type(
                 ));
             }
             let name = interner.intern(normalized_name);
-            let surface_type = parse_surface_type(interner, type_text)?;
+            let surface_type = parse_surface_type(type_text, interner)?;
             named_parameters.push(RecordField::new(name, surface_type));
         } else if directive.starts_with("@returns") || directive.starts_with("@return") {
             if seen_return {
@@ -414,7 +414,7 @@ pub fn parse_expanded_block_surface_type(
                     "did not expect text after the return type in the expanded annotation.",
                 ));
             }
-            return_type = parse_surface_type(interner, type_text)?;
+            return_type = parse_surface_type(type_text, interner)?;
             seen_return = true;
         } else {
             return Err(invalid_syntax(
@@ -542,8 +542,8 @@ fn for_each_expanded_annotation_directive(
 }
 
 fn parse_named_type_definition(
-    interner: &mut Interner,
     text: &str,
+    interner: &mut Interner,
 ) -> Result<(Symbol, SurfaceType), TypeParseError> {
     let trimmed_text = text.trim();
 
@@ -576,7 +576,7 @@ fn parse_named_type_definition(
     }
 
     let name = interner.intern(name_text);
-    let surface_type = parse_surface_type(interner, type_text)?;
+    let surface_type = parse_surface_type(type_text, interner)?;
     Ok((name, surface_type))
 }
 

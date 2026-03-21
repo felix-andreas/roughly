@@ -40,6 +40,7 @@ use {
     },
     tower::ServiceBuilder,
     tree_sitter::{InputEdit, Parser, Point, Tree},
+    typing::AnalysisState as TypingAnalysisState,
 };
 
 const CONFIG_FILE_NAME: &str = "roughly.toml";
@@ -101,6 +102,7 @@ struct ServerState {
     /// stores index for all files in R/ folder
     workspace_items: HashMap<PathBuf, Vec<Item>>,
     parser: Parser,
+    typing_analysis_state: TypingAnalysisState,
 }
 
 #[derive(Debug)]
@@ -126,6 +128,7 @@ impl ServerState {
             document_items: HashMap::new(),
             document_map: HashMap::new(),
             parser: tree::new_parser(),
+            typing_analysis_state: TypingAnalysisState::new(),
         })
     }
 
@@ -279,7 +282,12 @@ impl LanguageServer for ServerState {
         let rope = Rope::from_str(text);
         let tree = tree::parse(&mut self.parser, text, None);
 
-        let diagnostics = diagnostics::analyze_full(tree.root_node(), &rope, self.config.lint);
+        let diagnostics = diagnostics::analyze_full(
+            tree.root_node(),
+            &rope,
+            self.config.lint,
+            &mut self.typing_analysis_state,
+        );
 
         let items = index::index(tree.root_node(), &rope, false, false);
         if path.starts_with(self.workspace_r_path()) {
@@ -417,7 +425,12 @@ impl LanguageServer for ServerState {
 
         let (rope, root_node) = (&document.rope, document.tree.root_node());
 
-        let diagnostics = diagnostics::analyze_full(root_node, rope, self.config.lint);
+        let diagnostics = diagnostics::analyze_full(
+            root_node,
+            rope,
+            self.config.lint,
+            &mut self.typing_analysis_state,
+        );
 
         if let Err(error) = self
             .client
