@@ -380,14 +380,41 @@ Examples:
 - it is useful for non-returning constructs and calls
 - it is not important to implement `Never` in v1
 
-### Nominal types and aliases
+### Type parameters, aliases, and nominal types
+
+Type expressions may bind type parameters with a leading universal binder:
+
+- `<T> TYPE`
+- `<T, U, ...> TYPE`
+
+Examples:
+
+- `<T> list[T]`
+- `<T> list{ value: T }`
+- `<T, U> fn(T) -> U`
+- `<T> fn(T) -> T | NULL`
+
+For now, universal binders are rank-1 only.
+
+- a `<...>` binder is allowed only at the outermost level of a user-facing type expression
+- nested binders are not allowed inside other type expressions
+- higher-rank polymorphism is not supported for now
+
+Examples of not allowed forms:
+
+- `fn(f: <T> fn(T) -> T) -> integer`
+- `list{ value: <T> list[T] }`
 
 Named type definitions use `#:` lines with directive syntax.
 
 - `#: @type NAME {TYPE}`
   - defines a nominal type named `NAME` with underlying representation type `TYPE`
+- `#: @type NAME<T, U, ...> {TYPE}`
+  - defines a generic nominal type named `NAME` with type parameters `T, U, ...`
 - `#: @alias NAME {TYPE}`
   - defines a structural alias named `NAME` for `TYPE`
+- `#: @alias NAME<T, U, ...> {TYPE}`
+  - defines a generic structural alias named `NAME` with type parameters `T, U, ...`
 
 Type and alias definitions share the same namespace.
 
@@ -446,12 +473,49 @@ This is valid because `PersonShape` is defined earlier in the same block.
 
 This is an error because `PersonShape` is not yet defined when `Person` is processed.
 
+#### Type parameters and generic application
+
+Type parameters may appear inside structural type expressions and function types.
+
+Examples:
+
+- `list[T]`
+- `list{ value: T }`
+- `fn(T) -> T`
+- `T | NULL`
+
+For now, type parameters are not allowed in atomic vector suffix forms.
+
+This is deferred because forms like `T[]` and `T[named]` would imply that `T` is restricted to atomic vector element types. The generic system does not yet model that kind of constraint, so these forms remain disallowed for now instead of implicitly introducing one.
+
+Not allowed:
+
+- `T[]`
+- `T[named]`
+
+Named generic aliases and nominal types are applied with angle brackets.
+
+Examples:
+
+- `Box<integer>`
+- `Pair<integer, character>`
+- `Person<integer>`
+
+Type argument counts must match the declared parameter count exactly.
+
+In `@type NAME<T, U, ...> {TYPE}` and `@alias NAME<T, U, ...> {TYPE}`, the declared type parameters are in scope only within `TYPE`.
+
+- `Pair<integer, character>` is valid for `Pair<T, U>`
+- `Pair<integer>` is an error for `Pair<T, U>`
+- `Pair<integer, character, double>` is an error for `Pair<T, U>`
+
 #### Type aliases
 
 A type alias is purely structural.
 
 - using an alias name in a type annotation is equivalent to writing its underlying type directly
 - aliases may appear anywhere an ordinary type expression may appear
+- generic aliases may use their type parameters anywhere inside their underlying type expression
 - aliases do not create fresh type identity
 - aliases are compatible with other types exactly as their underlying type is
 - alias definition cycles are errors
@@ -476,11 +540,21 @@ value <- list(owner = list(name = "bob", age = 20))
 
 This behaves exactly as if `Person` were replaced with `list{ name: character, age: double }`.
 
+Generic aliases may abstract over structural types.
+
+```r
+#: @alias Box<T> {list{ value: T }}
+
+#: Box<integer>
+value <- list(value = 1L)
+```
+
 #### Nominal types
 
 A nominal type creates a fresh type identity, even when another nominal type has the same underlying representation type.
 
 - a nominal type name may appear anywhere an ordinary type expression may appear
+- a generic nominal type may use its type parameters anywhere inside its underlying representation type
 - a nominal type is compatible with itself
 - two different nominal types are not compatible with each other, even if their representation types are identical
 - an ordinary structural value is not compatible with a nominal type unless it is introduced with `@new`
@@ -526,6 +600,18 @@ get_name(list(name = "bob", age = 20))
 ```
 
 This is an error because an ordinary structural value is not compatible with `Person` without `@new`.
+
+Generic nominal types are parameterized on the declared name.
+
+```r
+#: @type Person<T> {list{ value: T }}
+
+#: @new Person<integer>
+person <- list(value = 1L)
+
+#: list{ value: integer }
+shape <- person
+```
 
 ### Union types
 
@@ -815,7 +901,7 @@ Function annotations use only `#:` comments.
 
 A function may be annotated in exactly one of these two styles:
 
-- expanded style with `@param` and `@return` or `@returns`
+- expanded style with optional `@forall`, then `@param`, and `@return` or `@returns`
 - compact style with a single `fn(...)` annotation, with an optional `-> RETURN_TYPE`
 
 It is not allowed to mix these two styles for the same function.
@@ -826,6 +912,8 @@ When function annotations use consecutive `#:` lines, those lines are one annota
 
 Expanded function annotations use these forms:
 
+- `@forall T,U,...`
+- `@forall T`
 - `@param {TYPE} name`
 - `@param {TYPE} [name]` for optional parameters
 - `@return {TYPE}`
@@ -833,6 +921,9 @@ Expanded function annotations use these forms:
 
 Additional rules:
 
+- repeated `@forall` lines are allowed and accumulate in source order
+- duplicate type parameter names in the same annotation block are errors
+- `@forall` directives must appear before any `@param`, `@return`, or `@returns` directive
 - the bracket syntax for optional parameters follows JSDoc-style notation
 - if no `@return` or `@returns` annotation is provided, the function type defaults to returning `NULL`
 - at most one `@return` or `@returns` directive may appear in the block
@@ -852,6 +943,32 @@ double_count <- function(count, label = NULL) { count + count }
 log_count <- function(count) { }
 ```
 
+```r
+#: @forall T
+#: @param {T} value
+#: @return {T}
+identity <- function(value) value
+```
+
+```r
+#: @forall T
+#: @param {logical} condition
+#: @param {T} value
+#: @return {T | NULL}
+then_some <- function(condition, value) {
+  if (condition) value
+}
+```
+
+```r
+#: @forall T
+#: @forall U
+#: @param {T} left
+#: @param {U} right
+#: @return {T}
+keep_left <- function(left, right) left
+```
+
 ### Compact function annotations
 
 Compact function annotations use a single function type:
@@ -860,10 +977,14 @@ Compact function annotations use a single function type:
 - `fn(TYPE) -> RETURN_TYPE`
 - `fn(name: TYPE, [optional_name]: TYPE) -> RETURN_TYPE`
 - `fn(TYPE, [TYPE]) -> RETURN_TYPE`
+- `<T> fn(name: TYPE) -> RETURN_TYPE`
+- `<T, U, ...> fn(TYPE) -> RETURN_TYPE`
 
-Additional rule:
+Additional rules:
 
 - if the return type is omitted, it is implicitly `NULL`
+- when a compact function annotation starts with `<...>`, the binder introduces rank-1 type parameters for the whole function type
+- compact function annotations do not use `fn<T>(...)`; the supported binder form is `<T> fn(...) -> ...`
 
 Examples:
 
@@ -880,6 +1001,18 @@ double_count <- function(count, label = NULL) count + count
 ```r
 #: fn(count: integer)
 log_count <- function(count) { }
+```
+
+```r
+#: <T> fn(value: T) -> T
+identity <- function(value) value
+```
+
+```r
+#: <T> fn(condition: logical, value: T) -> T | NULL
+then_some <- function(condition, value) {
+  if (condition) value
+}
 ```
 
 ### Named and positional parameters
@@ -902,11 +1035,17 @@ Optional parameters follow the same rule:
 ### Higher-order function types
 
 - function types may appear inside other function types
+- rank-1 polymorphism is supported, but higher-rank polymorphism is not
 
 Examples:
 
 - `fn(transform: fn(integer) -> character) -> character`
 - `fn(fn(integer) -> character, integer) -> character`
+
+Not allowed:
+
+- `fn(transform: <T> fn(T) -> T, integer) -> integer`
+- `fn(fn(value: <T> list[T]) -> integer) -> integer`
 
 Expanded annotations may also use function types directly.
 

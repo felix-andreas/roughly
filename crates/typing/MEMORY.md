@@ -19,15 +19,3 @@ Use this document to record:
 If code changes make this document inaccurate, update it in the same session.
 
 ## Active continuity
-
-- `typing::check(node, rope, analysis_state)` is the primary rope-backed API.
-- `typing::check_source(source, parser, analysis_state)` remains the source-based helper path for tests and standalone use.
-- `roughly` typing diagnostics now analyze against the existing rope and tree instead of reparsing source text.
-- `typing::lower` and `typing::text` now have rope-backed helpers that support this path.
-
-## Open follow-up
-
-- Validate the rope-backed migration with focused `typing` tests and then broader `roughly` tests.
-- Keep the API split explicit: rope-backed entrypoints should read as the primary path, while source-based helpers should stay clearly secondary.
-- Revisit whether `src/text.rs` should expose its current helper surface publicly or keep more of it internal.
-- Longer-term LSP work may want `LoweringContext` to separate long-lived interner state from per-check expression-id state.
