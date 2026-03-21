@@ -1,6 +1,7 @@
 - scoping rules?
 - annotations
   - generics
+  - catch more user errors
 - lsp
   - inlay hints
   - hovering
