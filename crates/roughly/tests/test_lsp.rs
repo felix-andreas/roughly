@@ -6,10 +6,11 @@ use {
             CompletionParams, CompletionResponse, DidChangeWatchedFilesParams,
             DidOpenTextDocumentParams, DocumentFormattingParams, DocumentSymbolParams,
             DocumentSymbolResponse, FileChangeType, FileEvent, FormattingOptions,
-            GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, InitializeResult,
-            InitializedParams, PartialResultParams, Position, PublishDiagnosticsParams,
-            TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
-            WorkDoneProgressParams, WorkspaceFolder,
+            GotoDefinitionParams, GotoDefinitionResponse, HoverContents, HoverParams,
+            HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+            PartialResultParams, Position, PublishDiagnosticsParams, TextDocumentIdentifier,
+            TextDocumentItem, TextDocumentPositionParams, Url, WorkDoneProgressParams,
+            WorkspaceFolder,
             notification::{PublishDiagnostics, ShowMessage},
             request::RegisterCapability,
         },
@@ -62,9 +63,17 @@ fn build_test_client(
     })
 }
 
-fn spawn_server(workspace_dir: &Path) -> tokio::process::Child {
-    tokio::process::Command::new(env!("CARGO_BIN_EXE_roughly"))
-        .arg("server")
+fn spawn_server_with_experimental_features(
+    workspace_dir: &Path,
+    experimental_features: &[&str],
+) -> tokio::process::Child {
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_roughly"));
+    command.arg("server");
+    if !experimental_features.is_empty() {
+        command.arg("--experimental-features");
+        command.arg(experimental_features.join(" "));
+    }
+    command
         .current_dir(workspace_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -115,6 +124,14 @@ async fn setup_test_with_r_dir(
     create_r_directory: bool,
     initial_files: &[(&str, &str)],
 ) -> TestContext {
+    setup_test_with_r_dir_and_features(create_r_directory, initial_files, &[]).await
+}
+
+async fn setup_test_with_r_dir_and_features(
+    create_r_directory: bool,
+    initial_files: &[(&str, &str)],
+    experimental_features: &[&str],
+) -> TestContext {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let workspace_dir = temp_dir.path().to_path_buf();
     if create_r_directory {
@@ -132,7 +149,7 @@ async fn setup_test_with_r_dir(
     let (diagnostics_sender, diagnostics_receiver) = mpsc::unbounded_channel();
     let (mainloop, mut server) = build_test_client(diagnostics_sender);
 
-    let mut child = spawn_server(&workspace_dir);
+    let mut child = spawn_server_with_experimental_features(&workspace_dir, experimental_features);
     let stdout = child.stdout.take().expect("missing stdout").compat();
     let stdin = child.stdin.take().expect("missing stdin").compat_write();
 
@@ -176,6 +193,13 @@ async fn setup_test_with_r_dir(
 
 async fn setup_test(initial_files: &[(&str, &str)]) -> TestContext {
     setup_test_with_r_dir(true, initial_files).await
+}
+
+async fn setup_test_with_features(
+    initial_files: &[(&str, &str)],
+    experimental_features: &[&str],
+) -> TestContext {
+    setup_test_with_r_dir_and_features(true, initial_files, experimental_features).await
 }
 
 impl TestContext {
@@ -264,6 +288,25 @@ async fn initialize_reports_capabilities() {
         "expected document_symbol_provider to be true"
     );
 
+    let hover = &capabilities.hover_provider;
+    assert!(
+        hover.is_none(),
+        "expected hover_provider to be absent by default"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn initialize_reports_hover_capability_when_enabled() {
+    let context = setup_test_with_features(&[], &["hovering"]).await;
+
+    let hover = &context.init_result.capabilities.hover_provider;
+    assert!(
+        matches!(hover, Some(HoverProviderCapability::Simple(true))),
+        "expected hover_provider to be true when hovering is enabled"
+    );
+
     context.shutdown().await;
 }
 
@@ -293,6 +336,291 @@ async fn initialize_without_r_directory() {
             .any(|diagnostic| diagnostic.message.contains("TRUE")),
         "expected diagnostics after creating R directory and file, got: {:?}",
         diagnostics.diagnostics
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn hover_returns_identifier_name_without_debug_by_default() {
+    let mut context = setup_test_with_features(&[], &["hovering"]).await;
+
+    let file_uri = context.file_uri("R/test.R");
+    context.open_file(&file_uri, "variable_name <- 1\n").await;
+
+    let hover = context
+        .server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(0, 0),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover request failed")
+        .expect("hover response missing");
+
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markup hover contents");
+    };
+    let value = markup.value;
+    assert!(
+        value.contains("```text\nvariable_name\n```"),
+        "expected hover to include the identifier name in a fenced block, got: {value}"
+    );
+    assert!(
+        !value.contains("### Debug"),
+        "expected hover to omit debug section by default, got: {value}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn hover_returns_identifier_debug_info_when_debug_enabled() {
+    let mut context = setup_test_with_features(&[], &["hovering", "debug"]).await;
+
+    let file_uri = context.file_uri("R/test_debug.R");
+    context.open_file(&file_uri, "variable_name <- 1\n").await;
+
+    let hover = context
+        .server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(0, 0),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover request failed")
+        .expect("hover response missing");
+
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markup hover contents");
+    };
+    let value = markup.value;
+    assert!(
+        value.contains("```text\nvariable_name\n```"),
+        "expected hover to include the identifier name in a fenced block, got: {value}"
+    );
+    assert!(
+        value.contains("### Debug"),
+        "expected hover to include a debug section when enabled, got: {value}"
+    );
+    assert!(
+        value.contains("- kind: `identifier`"),
+        "expected hover to include node kind, got: {value}"
+    );
+    assert!(
+        value.contains("- id: `"),
+        "expected hover to include node id, got: {value}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn hover_truncates_literal_value_at_newline() {
+    let mut context = setup_test_with_features(&[], &["hovering"]).await;
+
+    let file_uri = context.file_uri("R/test_literal.R");
+    context.open_file(&file_uri, "x <- r\"foo\nbar\"\n").await;
+
+    let hover = context
+        .server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(0, 6),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover request failed")
+        .expect("hover response missing");
+
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markup hover contents");
+    };
+    let value = markup.value;
+    assert!(
+        value.contains("```r\n\"foo\n```"),
+        "expected hover to include an RA-style fenced literal section, got: {value}"
+    );
+    assert!(
+        value.contains("value of literal (truncated up to newline): ` foo `"),
+        "expected truncated literal value in hover, got: {value}"
+    );
+    assert!(
+        !value.contains("### Debug"),
+        "expected hover to omit debug section by default, got: {value}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn hover_literal_includes_debug_when_debug_enabled() {
+    let mut context = setup_test_with_features(&[], &["hovering", "debug"]).await;
+
+    let file_uri = context.file_uri("R/test_literal_debug.R");
+    context.open_file(&file_uri, "x <- r\"foo\nbar\"\n").await;
+
+    let hover = context
+        .server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(0, 6),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover request failed")
+        .expect("hover response missing");
+
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markup hover contents");
+    };
+    let value = markup.value;
+    assert!(
+        value.contains("### Debug"),
+        "expected hover to include a debug section when enabled, got: {value}"
+    );
+    assert!(
+        value.contains("- kind: `string`"),
+        "expected hover to include literal node kind, got: {value}"
+    );
+    assert!(
+        value.contains("- id: `"),
+        "expected hover to include literal node id, got: {value}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn hover_returns_keyword_information_for_if() {
+    let mut context = setup_test_with_features(&[], &["hovering"]).await;
+
+    let file_uri = context.file_uri("R/test_if.R");
+    context
+        .open_file(&file_uri, "if (TRUE) {\n  x <- 1\n}\n")
+        .await;
+
+    let hover = context
+        .server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(0, 0),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover request failed")
+        .expect("hover response missing");
+
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markup hover contents");
+    };
+    let value = markup.value;
+    assert!(
+        value.contains("```r\nif\n```"),
+        "expected keyword hover summary block, got: {value}"
+    );
+    assert!(
+        value.contains("Conditional branch."),
+        "expected keyword description, got: {value}"
+    );
+    assert!(
+        !value.contains("### Debug"),
+        "expected hover to omit debug section by default, got: {value}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn hover_keyword_includes_debug_when_debug_enabled() {
+    let mut context = setup_test_with_features(&[], &["hovering", "debug"]).await;
+
+    let file_uri = context.file_uri("R/test_if_debug.R");
+    context
+        .open_file(&file_uri, "if (TRUE) {\n  x <- 1\n}\n")
+        .await;
+
+    let hover = context
+        .server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(0, 0),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover request failed")
+        .expect("hover response missing");
+
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markup hover contents");
+    };
+    let value = markup.value;
+    assert!(
+        value.contains("### Debug"),
+        "expected hover to include a debug section when enabled, got: {value}"
+    );
+    assert!(
+        value.contains("- kind: `if`"),
+        "expected hover to include keyword node kind, got: {value}"
+    );
+    assert!(
+        value.contains("- id: `"),
+        "expected hover to include keyword node id, got: {value}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn hover_returns_none_for_unsupported_nodes() {
+    let mut context = setup_test_with_features(&[], &["hovering"]).await;
+
+    let file_uri = context.file_uri("R/test_unsupported.R");
+    context.open_file(&file_uri, "x <- 1 + 2\n").await;
+
+    let hover = context
+        .server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(0, 7),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover request failed");
+
+    assert!(
+        hover.is_none(),
+        "expected no hover response for unsupported nodes, got: {hover:?}"
     );
 
     context.shutdown().await;

@@ -2,7 +2,7 @@ use {
     crate::{
         cli, completion,
         config::{Config, ExperimentalFeatures},
-        definition, diagnostics, format,
+        definition, diagnostics, format, hover,
         index::{self, IndexError, Item},
         lsp_types::{
             CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
@@ -10,12 +10,14 @@ use {
             DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
             DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol,
             DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
-            GlobPattern, InitializeParams, InitializeResult, InitializedParams, Location,
-            MessageType, OneOf, Position, PublishDiagnosticsParams, Range, ReferenceParams,
-            Registration, RegistrationParams, RelativePattern, RenameParams, SaveOptions,
-            ServerCapabilities, ServerInfo, ShowMessageParams, TextDocumentSyncCapability,
-            TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
-            Url, WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+            GlobPattern, Hover, HoverContents, HoverParams, HoverProviderCapability,
+            InitializeParams, InitializeResult, InitializedParams, Location, MarkupContent,
+            MarkupKind, MessageType, OneOf, Position, PublishDiagnosticsParams, Range,
+            ReferenceParams, Registration, RegistrationParams, RelativePattern, RenameParams,
+            SaveOptions, ServerCapabilities, ServerInfo, ShowMessageParams,
+            TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+            TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceEdit, WorkspaceSymbolParams,
+            WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
         },
         references, rename, symbols, tree, utils,
@@ -190,6 +192,10 @@ impl LanguageServer for ServerState {
                     self.experimental_features.range_formatting,
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                hover_provider: self
+                    .experimental_features
+                    .hovering
+                    .then_some(HoverProviderCapability::Simple(true)),
                 references_provider: Some(OneOf::Left(self.experimental_features.goto_references)),
                 rename_provider: Some(OneOf::Left(self.experimental_features.rename)),
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -549,6 +555,48 @@ impl LanguageServer for ServerState {
         );
 
         box_future(Ok(definitions))
+    }
+
+    //
+    // HOVER
+    //
+
+    fn hover(
+        &mut self,
+        params: HoverParams,
+    ) -> BoxFuture<'static, Result<Option<Hover>, ResponseError>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let path = uri.to_file_path().unwrap();
+        let position = params.text_document_position_params.position;
+
+        tracing::debug!(?path, ?position, "hover");
+
+        let Some(document) = self.document_map.get(&path) else {
+            tracing::info!(?path, "document not found");
+            return box_future(Err(path_not_found_error(&path)));
+        };
+
+        let Some(node) = tree::node_at_position(
+            &document.tree,
+            Point::new(position.line as usize, position.character as usize),
+        ) else {
+            tracing::debug!(?position, "node not found");
+            return box_future(Ok(None));
+        };
+
+        let Some(value) = hover::markdown(document, node, self.experimental_features) else {
+            return box_future(Ok(None));
+        };
+
+        let hover = Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(utils::node_range(node)),
+        };
+
+        box_future(Ok(Some(hover)))
     }
 
     //

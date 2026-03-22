@@ -496,12 +496,16 @@ pub fn parse_experimental_flags(flags: &[impl AsRef<str>]) -> ExperimentalFeatur
         match flag {
             "all" => {
                 features.goto_references = true;
+                features.hovering = true;
+                features.debug = true;
                 features.range_formatting = true;
                 features.rename = true;
                 features.unused = true;
                 features.typing = true;
             }
             "goto_references" => features.goto_references = true,
+            "hovering" => features.hovering = true,
+            "debug" => features.debug = true,
             "range_formatting" => features.range_formatting = true,
             "rename" => features.rename = true,
             "unused" => features.unused = true,
