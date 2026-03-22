@@ -188,6 +188,18 @@ fn collect_annotation_diagnostics(
                     format!("type syntax error: {message}"),
                 ));
             }
+            Err(TypeParseError::UnsupportedConstruct { message }) => {
+                diagnostics.push(Diagnostic::syntax_error(
+                    annotation_range,
+                    format!("unsupported syntax: {message}"),
+                ));
+            }
+            Err(TypeParseError::InvalidSemantics { message }) => {
+                diagnostics.push(Diagnostic::syntax_error(
+                    annotation_range,
+                    format!("invalid semantics: {message}"),
+                ));
+            }
             Err(TypeParseError::UnknownType { name }) => {
                 diagnostics.push(Diagnostic::syntax_error(
                     annotation_range,

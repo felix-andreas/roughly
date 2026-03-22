@@ -10,7 +10,7 @@ pub enum SurfaceType {
     Null,
     Nullable(Box<SurfaceType>),
     Scalar(Atomic),
-    Named(Symbol),
+    Named(Symbol, Vec<SurfaceType>),
     Vector(Box<SurfaceType>),
     NamedVector(Box<SurfaceType>),
     List(Box<SurfaceType>),
@@ -18,6 +18,7 @@ pub enum SurfaceType {
     Record(Vec<RecordField<SurfaceType>>),
     Tuple(Vec<SurfaceType>),
     Function(FunctionType<SurfaceType>),
+    Binders(Vec<Symbol>, Box<SurfaceType>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

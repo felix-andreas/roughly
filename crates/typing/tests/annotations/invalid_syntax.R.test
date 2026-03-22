@@ -183,79 +183,73 @@ InvalidSyntax { message: "expected a type." }
 error:
 <> fn(integer) -> integer
 #++++
-InvalidSyntax { message: "expected a type." }
+InvalidSyntax { message: "expected at least one type parameter in `<...>`." }
 
 #---- trailing_comma_in_forall
 error:
 <T,> fn(T) -> T
 #++++
-InvalidSyntax { message: "expected a type." }
+InvalidSyntax { message: "expected a type parameter name in `<...>`." }
 
 #---- repeated_comma_in_forall
 error:
 <T,,U> fn(T) -> U
 #++++
-InvalidSyntax { message: "expected a type." }
-
-#---- malformed_expanded_forall_missing_name
-error:
-@forall
-#++++
-InvalidSyntax { message: "unknown annotation directive `@forall`. expected one of `@type`, `@alias`, `@if-unknown`, `@trust`, or `@new`." }
+InvalidSyntax { message: "expected a type parameter name in `<...>`." }
 
 #---- malformed_expanded_forall_trailing_comma
 error:
 @forall T,
 #++++
-InvalidSyntax { message: "unknown annotation directive `@forall`. expected one of `@type`, `@alias`, `@if-unknown`, `@trust`, or `@new`." }
+InvalidSyntax { message: "expected a type parameter name in `@forall`." }
 
 #---- malformed_expanded_forall_double_comma
 error:
 @forall T,,U
 #++++
-InvalidSyntax { message: "unknown annotation directive `@forall`. expected one of `@type`, `@alias`, `@if-unknown`, `@trust`, or `@new`." }
+InvalidSyntax { message: "expected a type parameter name in `@forall`." }
 
 #---- unclosed_universal_binder
 error:
 <T fn(T) -> T
 #++++
-InvalidSyntax { message: "expected a type." }
+InvalidSyntax { message: "expected `,` or `>` in `<...>`." }
 
 #---- unclosed_named_generic_application
 error:
 Person<integer
 #++++
-InvalidSyntax { message: "unexpected trailing input starting at byte 6." }
+InvalidSyntax { message: "expected `,` or `>` in type argument list." }
 
 #---- empty_named_generic_application
 error:
 Person<>
 #++++
-InvalidSyntax { message: "unexpected trailing input starting at byte 6." }
+InvalidSyntax { message: "expected at least one type argument in generic type application." }
 
 #---- trailing_comma_in_named_generic_application
 error:
 Person<integer,>
 #++++
-InvalidSyntax { message: "unexpected trailing input starting at byte 6." }
+InvalidSyntax { message: "expected a type." }
 
 #---- double_comma_in_named_generic_application
 error:
 Person<integer,,character>
 #++++
-InvalidSyntax { message: "unexpected trailing input starting at byte 6." }
+InvalidSyntax { message: "expected a type." }
 
 #---- missing_comma_in_named_generic_application
 error:
 Person<integer character>
 #++++
-InvalidSyntax { message: "unexpected trailing input starting at byte 6." }
+InvalidSyntax { message: "expected `,` or `>` in type argument list." }
 
 #---- malformed_named_generic_definition_parameter_list
 error:
 @alias Box<T,> {list{value: T}}
 #++++
-InvalidSyntax { message: "expected `{TYPE}` after the type name." }
+InvalidSyntax { message: "expected a type parameter name." }
 
 #---- trailing_pipe_in_union
 error:
@@ -279,4 +273,4 @@ InvalidSyntax { message: "expected a type." }
 error:
 integer || NULL
 #++++
-InvalidSyntax { message: "unexpected trailing input starting at byte 8." }
+InvalidSyntax { message: "expected a type." }

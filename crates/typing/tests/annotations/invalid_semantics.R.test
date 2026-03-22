@@ -3,7 +3,7 @@
 error:
 <T, T> fn(T) -> T
 #++++
-InvalidSemantics { message: "duplicate type parameter name `T` in universal binder." }
+InvalidSemantics { message: "duplicate type parameter name `T` in `<...>`." }
 
 #---- duplicate_type_parameters_in_expanded_forall
 error:

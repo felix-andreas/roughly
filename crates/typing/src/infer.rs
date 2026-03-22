@@ -1785,7 +1785,7 @@ fn core_type_from_surface_type(surface_type: &SurfaceType) -> CoreType {
         SurfaceType::Null => CoreType::Null,
         SurfaceType::Nullable(inner_type) => nullable_type(core_type_from_surface_type(inner_type)),
         SurfaceType::Scalar(atomic) => CoreType::Scalar(*atomic),
-        SurfaceType::Named(_) => CoreType::Unknown,
+        SurfaceType::Named(_, _) => CoreType::Unknown,
         SurfaceType::Vector(inner_type) => match core_type_from_surface_type(inner_type) {
             CoreType::Scalar(atomic) => CoreType::Vector(atomic),
             other_type => CoreType::List(Box::new(other_type)),
@@ -1829,6 +1829,7 @@ fn core_type_from_surface_type(surface_type: &SurfaceType) -> CoreType {
                 .collect(),
             core_type_from_surface_type(&function_type.return_type),
         )),
+        SurfaceType::Binders(_, inner_type) => core_type_from_surface_type(inner_type),
     }
 }
 

@@ -84,7 +84,7 @@ list{owner: Person<integer>}
 @param {T} value
 @return {T}
 #++++
-fn(value: T) -> T
+<T> fn(value: T) -> T
 
 #---- expanded_multiple_forall_lines
 @forall T
@@ -93,7 +93,7 @@ fn(value: T) -> T
 @param {U} right
 @return {T}
 #++++
-fn(left: T, right: U) -> T
+<T, U> fn(left: T, right: U) -> T
 
 #---- expanded_single_forall_multiple_names
 @forall T,U
@@ -101,7 +101,7 @@ fn(left: T, right: U) -> T
 @param {U} right
 @return {U}
 #++++
-fn(left: T, right: U) -> U
+<T, U> fn(left: T, right: U) -> U
 
 #---- expanded_generic_nullable_return
 @forall T
@@ -109,11 +109,11 @@ fn(left: T, right: U) -> U
 @param {T} value
 @return {T | NULL}
 #++++
-fn(condition: logical, value: T) -> T | NULL
+<T> fn(condition: logical, value: T) -> T | NULL
 
 #---- expanded_generic_structural_parameter
 @forall T
 @param {list[T]} values
 @return {list[T]}
 #++++
-fn(values: list[T]) -> list[T]
+<T> fn(values: list[T]) -> list[T]

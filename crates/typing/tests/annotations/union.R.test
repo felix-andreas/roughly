@@ -93,16 +93,16 @@ fn(handler: fn(Unknown) -> Any) -> list{result: Any, missing: Unknown | NULL}
 error:
 integer | character
 #++++
-InvalidSyntax { message: "only nullable unions with a single `NULL` member are supported." }
+UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now." }
 
 #---- invalid_union_with_multiple_non_null_members
 error:
 integer | character | NULL
 #++++
-InvalidSyntax { message: "only nullable unions with a single `NULL` member are supported." }
+UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now." }
 
 #---- invalid_null_null_union
 error:
 NULL | NULL
 #++++
-InvalidSyntax { message: "user-facing type syntax does not allow `NULL | NULL`." }
+UnsupportedConstruct { message: "`NULL | NULL` is not valid type syntax." }

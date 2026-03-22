@@ -1,4 +1,4 @@
-- scoping rules?
+- scoping rules? (canonicalization in genreal)
 - annotations
   - generics
   - catch more user errors

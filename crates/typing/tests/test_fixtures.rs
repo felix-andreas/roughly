@@ -272,6 +272,22 @@ fn render_annotation_fixture_result(source: &str) -> String {
                 .to_owned();
         }
 
+        if normalized_source.lines().any(|line| {
+            let trimmed_line = line.trim();
+            trimmed_line.starts_with("@param ")
+                || trimmed_line.starts_with("@return ")
+                || trimmed_line.starts_with("@returns ")
+                || trimmed_line.starts_with("@forall ")
+        }) {
+            return match parse_expanded_block_surface_type(&normalized_source, &mut interner) {
+                Ok(surface_type) => format!(
+                    "fixture error: expected parse error\nsource:\n{normalized_source}\nparsed as: {}",
+                    render_surface_type(&surface_type, &interner)
+                ),
+                Err(error) => format!("{error:?}"),
+            };
+        }
+
         return match parse_type_syntax_item(&normalized_source, &mut interner) {
             Ok(item) => format!(
                 "fixture error: expected parse error\nsource:\n{normalized_source}\nparsed as: {}",
@@ -286,6 +302,7 @@ fn render_annotation_fixture_result(source: &str) -> String {
         trimmed_line.starts_with("@param ")
             || trimmed_line.starts_with("@return ")
             || trimmed_line.starts_with("@returns ")
+            || trimmed_line.starts_with("@forall ")
     }) {
         return match parse_expanded_block_surface_type(trimmed_source, &mut interner) {
             Ok(surface_type) => render_surface_type(&surface_type, &interner),

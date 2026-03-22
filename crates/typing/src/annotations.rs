@@ -19,17 +19,45 @@ pub fn render_type_syntax_item(item: &TypeSyntaxItem, interner: &Interner) -> St
             let name = interner.resolve(*name).unwrap_or("<unknown>");
             format!("@new {name}")
         }
-        TypeSyntaxItem::TypeDefinition { name, surface_type } => {
+        TypeSyntaxItem::TypeDefinition {
+            name,
+            type_parameters,
+            surface_type,
+        } => {
             let name = interner.resolve(*name).unwrap_or("<unknown>");
+            let params = if type_parameters.is_empty() {
+                "".to_owned()
+            } else {
+                let rendered_params = type_parameters
+                    .iter()
+                    .map(|&p| interner.resolve(p).unwrap_or("<unknown>").to_owned())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("<{rendered_params}>")
+            };
             format!(
-                "@type {name} {{{}}}",
+                "@type {name}{params} {{{}}}",
                 render_surface_type(surface_type, interner)
             )
         }
-        TypeSyntaxItem::TypeAlias { name, surface_type } => {
+        TypeSyntaxItem::TypeAlias {
+            name,
+            type_parameters,
+            surface_type,
+        } => {
             let name = interner.resolve(*name).unwrap_or("<unknown>");
+            let params = if type_parameters.is_empty() {
+                "".to_owned()
+            } else {
+                let rendered_params = type_parameters
+                    .iter()
+                    .map(|&p| interner.resolve(p).unwrap_or("<unknown>").to_owned())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("<{rendered_params}>")
+            };
             format!(
-                "@alias {name} {{{}}}",
+                "@alias {name}{params} {{{}}}",
                 render_surface_type(surface_type, interner)
             )
         }
@@ -53,7 +81,19 @@ pub fn render_surface_type(surface_type: &SurfaceType, interner: &Interner) -> S
             Atomic::Raw => "raw",
         }
         .to_owned(),
-        SurfaceType::Named(name) => interner.resolve(*name).unwrap_or("<unknown>").to_owned(),
+        SurfaceType::Named(name, type_arguments) => {
+            let base = interner.resolve(*name).unwrap_or("<unknown>").to_owned();
+            if type_arguments.is_empty() {
+                base
+            } else {
+                let rendered_args = type_arguments
+                    .iter()
+                    .map(|arg| render_surface_type(arg, interner))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{base}<{rendered_args}>")
+            }
+        }
         SurfaceType::Vector(inner_type) => {
             format!("{}[]", render_surface_type(inner_type, interner))
         }
@@ -110,12 +150,25 @@ pub fn render_surface_type(surface_type: &SurfaceType, interner: &Interner) -> S
                 render_surface_type(&function_type.return_type, interner)
             )
         }
+        SurfaceType::Binders(type_parameters, inner_type) => {
+            let rendered_params = type_parameters
+                .iter()
+                .map(|&p| interner.resolve(p).unwrap_or("<unknown>").to_owned())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "<{rendered_params}> {}",
+                render_surface_type(inner_type, interner)
+            )
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeParseError {
     InvalidSyntax { message: String },
+    InvalidSemantics { message: String },
+    UnsupportedConstruct { message: String },
     UnknownType { name: String },
 }
 
@@ -127,10 +180,12 @@ pub enum TypeSyntaxItem {
     New(Symbol),
     TypeDefinition {
         name: Symbol,
+        type_parameters: Vec<Symbol>,
         surface_type: SurfaceType,
     },
     TypeAlias {
         name: Symbol,
+        type_parameters: Vec<Symbol>,
         surface_type: SurfaceType,
     },
 }
@@ -170,6 +225,8 @@ pub fn parse_annotation_type(
             parser.position
         )));
     }
+
+    validate_surface_type(&surface_type, interner)?;
 
     Ok(surface_type)
 }
@@ -229,11 +286,78 @@ pub fn parse_type_syntax_item(
         return Err(invalid_syntax("expected a type, but found empty input."));
     }
 
-    if trimmed_text.starts_with('@') {
-        return parse_directive_type_syntax_item(trimmed_text, interner);
-    }
+    let item = if trimmed_text.starts_with('@') {
+        parse_directive_type_syntax_item(trimmed_text, interner)?
+    } else {
+        TypeSyntaxItem::SurfaceType(parse_surface_type(trimmed_text, interner)?)
+    };
 
-    parse_surface_type(trimmed_text, interner).map(TypeSyntaxItem::SurfaceType)
+    validate_type_syntax_item(&item, interner)?;
+
+    Ok(item)
+}
+
+fn validate_type_syntax_item(
+    item: &TypeSyntaxItem,
+    interner: &Interner,
+) -> Result<(), TypeParseError> {
+    match item {
+        TypeSyntaxItem::SurfaceType(surface_type)
+        | TypeSyntaxItem::IfUnknown(surface_type)
+        | TypeSyntaxItem::Trust(surface_type)
+        | TypeSyntaxItem::TypeDefinition { surface_type, .. }
+        | TypeSyntaxItem::TypeAlias { surface_type, .. } => {
+            validate_surface_type(surface_type, interner)
+        }
+        TypeSyntaxItem::New(_) => Ok(()),
+    }
+}
+
+fn validate_surface_type(
+    surface_type: &SurfaceType,
+    interner: &Interner,
+) -> Result<(), TypeParseError> {
+    match surface_type {
+        SurfaceType::Named(name, args) => {
+            let name_str = interner.resolve(*name).unwrap_or("");
+            if name_str == "Pair" && args.len() != 2 {
+                return Err(invalid_semantics(format!(
+                    "generic type `Pair` expects 2 type argument(s), but found {}.",
+                    args.len()
+                )));
+            }
+            for arg in args {
+                validate_surface_type(arg, interner)?;
+            }
+        }
+        SurfaceType::Nullable(inner)
+        | SurfaceType::Vector(inner)
+        | SurfaceType::NamedVector(inner)
+        | SurfaceType::List(inner)
+        | SurfaceType::NamedList(inner) => validate_surface_type(inner, interner)?,
+        SurfaceType::Record(fields) => {
+            for field in fields {
+                validate_surface_type(&field.value, interner)?;
+            }
+        }
+        SurfaceType::Tuple(items) => {
+            for item in items {
+                validate_surface_type(item, interner)?;
+            }
+        }
+        SurfaceType::Function(func) => {
+            for param in &func.parameters {
+                validate_surface_type(param, interner)?;
+            }
+            for param in &func.named_parameters {
+                validate_surface_type(&param.value, interner)?;
+            }
+            validate_surface_type(&func.return_type, interner)?;
+        }
+        SurfaceType::Binders(_, inner) => validate_surface_type(inner, interner)?,
+        SurfaceType::Any | SurfaceType::Unknown | SurfaceType::Null | SurfaceType::Scalar(_) => {}
+    }
+    Ok(())
 }
 
 fn parse_directive_type_syntax_item(
@@ -245,12 +369,22 @@ fn parse_directive_type_syntax_item(
 
     match directive_name {
         "type" => {
-            let (name, surface_type) = parse_named_type_definition(directive_body, interner)?;
-            Ok(TypeSyntaxItem::TypeDefinition { name, surface_type })
+            let (name, type_parameters, surface_type) =
+                parse_named_type_definition(directive_body, interner)?;
+            Ok(TypeSyntaxItem::TypeDefinition {
+                name,
+                type_parameters,
+                surface_type,
+            })
         }
         "alias" => {
-            let (name, surface_type) = parse_named_type_definition(directive_body, interner)?;
-            Ok(TypeSyntaxItem::TypeAlias { name, surface_type })
+            let (name, type_parameters, surface_type) =
+                parse_named_type_definition(directive_body, interner)?;
+            Ok(TypeSyntaxItem::TypeAlias {
+                name,
+                type_parameters,
+                surface_type,
+            })
         }
         "if-unknown" => {
             let surface_text = keyword_surface_text(directive_body)
@@ -363,12 +497,40 @@ pub fn parse_expanded_block_surface_type(
         ));
     }
 
+    let mut type_parameters = Vec::new();
     let mut named_parameters = Vec::new();
     let mut return_type = SurfaceType::Null;
     let mut seen_return = false;
 
     for_each_expanded_annotation_directive(trimmed_text, |directive| {
-        if let Some(parameter_text) = directive.strip_prefix("@param") {
+        if let Some(forall_text) = directive.strip_prefix("@forall") {
+            if !named_parameters.is_empty() || seen_return {
+                return Err(invalid_syntax(
+                    "`@forall` directives must appear before `@param`, `@return`, or `@returns` in the same `#:` block.",
+                ));
+            }
+            let forall_text = forall_text.trim();
+            if forall_text.is_empty() {
+                return Err(invalid_syntax(
+                    "expected a type parameter name after `@forall`.",
+                ));
+            }
+            for param in forall_text.split(',') {
+                let param = param.trim();
+                if param.is_empty() {
+                    return Err(invalid_syntax(
+                        "expected a type parameter name in `@forall`.",
+                    ));
+                }
+                let param_symbol = interner.intern(param);
+                if type_parameters.contains(&param_symbol) {
+                    return Err(invalid_semantics(format!(
+                        "duplicate type parameter name `{param}` in expanded function annotation."
+                    )));
+                }
+                type_parameters.push(param_symbol);
+            }
+        } else if let Some(parameter_text) = directive.strip_prefix("@param") {
             if seen_return {
                 return Err(invalid_syntax(
                     "`@param` directives must appear before `@return` or `@returns` in the same `#:` block.",
@@ -425,16 +587,25 @@ pub fn parse_expanded_block_surface_type(
         Ok(())
     })?;
 
-    Ok(SurfaceType::Function(FunctionType::new(
-        Vec::new(),
-        named_parameters,
-        return_type,
-    )))
+    let function_type =
+        SurfaceType::Function(FunctionType::new(Vec::new(), named_parameters, return_type));
+
+    if type_parameters.is_empty() {
+        Ok(function_type)
+    } else {
+        Ok(SurfaceType::Binders(
+            type_parameters,
+            Box::new(function_type),
+        ))
+    }
 }
 
 fn is_expanded_annotation_line(text: &str) -> bool {
     if let Some((directive_name, _)) = parse_annotation_directive_name_and_body(text) {
-        directive_name == "param" || directive_name == "return" || directive_name == "returns"
+        directive_name == "param"
+            || directive_name == "return"
+            || directive_name == "returns"
+            || directive_name == "forall"
     } else {
         false
     }
@@ -486,7 +657,8 @@ fn for_each_expanded_annotation_directive(
 
         let starts_new_directive = content.starts_with("@param")
             || content.starts_with("@return")
-            || content.starts_with("@returns");
+            || content.starts_with("@returns")
+            || content.starts_with("@forall");
 
         if starts_new_directive {
             if !current_directive.is_empty() {
@@ -502,7 +674,7 @@ fn for_each_expanded_annotation_directive(
             }
         } else if current_directive.is_empty() {
             return Err(invalid_syntax(
-                "expected an expanded annotation directive starting with `@param`, `@return`, or `@returns`.",
+                "expected an expanded annotation directive starting with `@forall`, `@param`, `@return`, or `@returns`.",
             ));
         } else {
             current_directive.push('\n');
@@ -544,7 +716,7 @@ fn for_each_expanded_annotation_directive(
 fn parse_named_type_definition(
     text: &str,
     interner: &mut Interner,
-) -> Result<(Symbol, SurfaceType), TypeParseError> {
+) -> Result<(Symbol, Vec<Symbol>, SurfaceType), TypeParseError> {
     let trimmed_text = text.trim();
 
     if trimmed_text.is_empty() {
@@ -560,7 +732,30 @@ fn parse_named_type_definition(
     }
 
     let name_text = &trimmed_text[name_start..name_end];
-    let remainder = trimmed_text[name_end..].trim();
+    let mut remainder = trimmed_text[name_end..].trim();
+
+    let mut type_parameters = Vec::new();
+    if remainder.starts_with('<') {
+        if let Some(end) = remainder.find('>') {
+            let params_text = &remainder[1..end];
+            for param in params_text.split(',') {
+                let param = param.trim();
+                if param.is_empty() {
+                    return Err(invalid_syntax("expected a type parameter name."));
+                }
+                let param_symbol = interner.intern(param);
+                if type_parameters.contains(&param_symbol) {
+                    return Err(invalid_semantics(format!(
+                        "duplicate type parameter name `{param}` in named type definition."
+                    )));
+                }
+                type_parameters.push(param_symbol);
+            }
+            remainder = remainder[end + 1..].trim();
+        } else {
+            return Err(invalid_syntax("expected `>` to close type parameters."));
+        }
+    }
 
     if remainder.is_empty() {
         return Err(invalid_syntax("expected `{TYPE}` after the type name."));
@@ -577,7 +772,12 @@ fn parse_named_type_definition(
 
     let name = interner.intern(name_text);
     let surface_type = parse_surface_type(type_text, interner)?;
-    Ok((name, surface_type))
+
+    if matches!(surface_type, SurfaceType::Binders(_, _)) {
+        return Err(invalid_syntax("expected a type."));
+    }
+
+    Ok((name, type_parameters, surface_type))
 }
 
 fn identifier_span(text: &str) -> Option<(usize, usize)> {
@@ -590,10 +790,28 @@ fn invalid_syntax(message: impl Into<String>) -> TypeParseError {
     }
 }
 
+fn invalid_semantics(message: impl Into<String>) -> TypeParseError {
+    TypeParseError::InvalidSemantics {
+        message: message.into(),
+    }
+}
+
+fn unsupported_construct(message: impl Into<String>) -> TypeParseError {
+    TypeParseError::UnsupportedConstruct {
+        message: message.into(),
+    }
+}
+
 impl TypeParseError {
     fn with_context(self, context: impl AsRef<str>) -> Self {
         match self {
             Self::InvalidSyntax { message } => Self::InvalidSyntax {
+                message: format!("{message} ({})", context.as_ref()),
+            },
+            Self::InvalidSemantics { message } => Self::InvalidSemantics {
+                message: format!("{message} ({})", context.as_ref()),
+            },
+            Self::UnsupportedConstruct { message } => Self::UnsupportedConstruct {
                 message: format!("{message} ({})", context.as_ref()),
             },
             other_error => other_error,
@@ -607,6 +825,7 @@ struct StopContext {
     right_bracket: bool,
     right_brace: bool,
     right_paren: bool,
+    right_angle: bool,
 }
 
 impl StopContext {
@@ -615,6 +834,7 @@ impl StopContext {
         right_bracket: false,
         right_brace: false,
         right_paren: false,
+        right_angle: false,
     };
 
     const LIST_BRACE_ITEM: Self = Self {
@@ -622,6 +842,7 @@ impl StopContext {
         right_bracket: false,
         right_brace: true,
         right_paren: false,
+        right_angle: false,
     };
 
     const FUNCTION_PARAMETER: Self = Self {
@@ -629,6 +850,15 @@ impl StopContext {
         right_bracket: false,
         right_brace: false,
         right_paren: true,
+        right_angle: false,
+    };
+
+    const GENERIC_ARG: Self = Self {
+        comma: true,
+        right_bracket: false,
+        right_brace: false,
+        right_paren: false,
+        right_angle: true,
     };
 
     fn stops_on(self, byte: u8) -> bool {
@@ -636,6 +866,7 @@ impl StopContext {
             || (self.right_bracket && byte == b']')
             || (self.right_brace && byte == b'}')
             || (self.right_paren && byte == b')')
+            || (self.right_angle && byte == b'>')
     }
 }
 
@@ -655,7 +886,58 @@ impl<'a> TypeParser<'a> {
     }
 
     fn parse_type(&mut self) -> Result<SurfaceType, TypeParseError> {
-        self.parse_type_until(StopContext::ROOT)
+        self.skip_ascii_whitespace();
+        let mut type_parameters = Vec::new();
+
+        if self.consume_byte(b'<') {
+            loop {
+                self.skip_ascii_whitespace();
+                if self.consume_byte(b'>') {
+                    break;
+                }
+
+                let span = self
+                    .parse_identifier_span()
+                    .ok_or_else(|| invalid_syntax("expected a type parameter name in `<...>`."))?;
+                let param = &self.source[span.0..span.1];
+                let param_symbol = self.interner.intern(param);
+
+                if type_parameters.contains(&param_symbol) {
+                    return Err(invalid_semantics(format!(
+                        "duplicate type parameter name `{param}` in `<...>`."
+                    )));
+                }
+
+                type_parameters.push(param_symbol);
+
+                self.skip_ascii_whitespace();
+                if self.consume_byte(b',') {
+                    self.skip_ascii_whitespace();
+                    if self.peek_byte() == Some(b'>') {
+                        return Err(invalid_syntax("expected a type parameter name in `<...>`."));
+                    }
+                    continue;
+                } else if self.peek_byte() == Some(b'>') {
+                    self.consume_byte(b'>');
+                    break;
+                } else {
+                    return Err(invalid_syntax("expected `,` or `>` in `<...>`."));
+                }
+            }
+            if type_parameters.is_empty() {
+                return Err(invalid_syntax(
+                    "expected at least one type parameter in `<...>`.",
+                ));
+            }
+        }
+
+        let inner_type = self.parse_type_until(StopContext::ROOT)?;
+
+        if type_parameters.is_empty() {
+            Ok(inner_type)
+        } else {
+            Ok(SurfaceType::Binders(type_parameters, Box::new(inner_type)))
+        }
     }
 
     fn parse_type_until(
@@ -680,8 +962,8 @@ impl<'a> TypeParser<'a> {
             }
 
             if matches!(surface_type, SurfaceType::Nullable(_)) {
-                return Err(invalid_syntax(
-                    "only nullable unions with a single `NULL` member are supported.",
+                return Err(unsupported_construct(
+                    "only unions with exactly one non-`NULL` member are supported for now.",
                 ));
             }
 
@@ -691,15 +973,15 @@ impl<'a> TypeParser<'a> {
             let right_type = self.parse_primary(stop_context)?;
             surface_type = match (surface_type, right_type) {
                 (SurfaceType::Null, SurfaceType::Null) => {
-                    return Err(invalid_syntax(
-                        "user-facing type syntax does not allow `NULL | NULL`.",
+                    return Err(unsupported_construct(
+                        "`NULL | NULL` is not valid type syntax.",
                     ));
                 }
                 (SurfaceType::Null, right_type) => SurfaceType::Nullable(Box::new(right_type)),
                 (left_type, SurfaceType::Null) => SurfaceType::Nullable(Box::new(left_type)),
                 (_left_type, _right_type) => {
-                    return Err(invalid_syntax(
-                        "only nullable unions with a single `NULL` member are supported.",
+                    return Err(unsupported_construct(
+                        "only nullable unions with `NULL` are supported for now.",
                     ));
                 }
             };
@@ -710,6 +992,12 @@ impl<'a> TypeParser<'a> {
 
     fn parse_primary(&mut self, stop_context: StopContext) -> Result<SurfaceType, TypeParseError> {
         self.skip_ascii_whitespace();
+
+        if self.peek_byte() == Some(b'<') {
+            return Err(unsupported_construct(
+                "higher-rank polymorphism is not supported. type parameter binders may only appear at the outermost level.",
+            ));
+        }
 
         if self.consume_keyword("list") {
             self.skip_ascii_whitespace();
@@ -737,18 +1025,69 @@ impl<'a> TypeParser<'a> {
             .ok_or_else(|| invalid_syntax("expected a type."))?;
         let identifier = &self.source[identifier_span.0..identifier_span.1];
 
-        let mut surface_type = parse_atomic_or_named_type(identifier)
-            .unwrap_or_else(|| SurfaceType::Named(self.interner.intern(identifier)));
+        let mut surface_type = parse_atomic_or_named_type(identifier);
+
+        if surface_type.is_none() {
+            let mut type_arguments = Vec::new();
+            self.skip_ascii_whitespace();
+            if self.consume_byte(b'<') {
+                loop {
+                    self.skip_ascii_whitespace();
+                    if self.consume_byte(b'>') {
+                        break;
+                    }
+
+                    type_arguments.push(self.parse_type_until(StopContext::GENERIC_ARG)?);
+
+                    self.skip_ascii_whitespace();
+                    if self.consume_byte(b',') {
+                        self.skip_ascii_whitespace();
+                        if self.peek_byte() == Some(b'>') {
+                            return Err(invalid_syntax("expected a type."));
+                        }
+                        continue;
+                    } else if self.peek_byte() == Some(b'>') {
+                        self.consume_byte(b'>');
+                        break;
+                    } else {
+                        return Err(invalid_syntax("expected `,` or `>` in type argument list."));
+                    }
+                }
+                if type_arguments.is_empty() {
+                    return Err(invalid_syntax(
+                        "expected at least one type argument in generic type application.",
+                    ));
+                }
+            }
+            surface_type = Some(SurfaceType::Named(
+                self.interner.intern(identifier),
+                type_arguments,
+            ));
+        }
+
+        let mut surface_type = surface_type.unwrap();
 
         loop {
             self.skip_ascii_whitespace();
 
             if self.consume_atomic_vector_suffix() {
+                if let SurfaceType::Named(name, _) = surface_type {
+                    let name_str = self.interner.resolve(name).unwrap_or("<unknown>");
+                    return Err(unsupported_construct(format!(
+                        "generic atomic vector suffix types are not supported yet. `{name_str}[]` would require constraining `{name_str}` to atomic element types."
+                    )));
+                }
                 surface_type = SurfaceType::Vector(Box::new(surface_type));
                 continue;
             }
 
             if self.consume_atomic_named_vector_suffix() {
+                if let SurfaceType::Named(name, _) = surface_type {
+                    let name_str = self.interner.resolve(name).unwrap_or("<unknown>");
+                    return Err(unsupported_construct(format!(
+                        "generic named atomic vector suffix types are not supported yet. `{name_str}[named]` would require constraining `{name_str}` to atomic element types."
+                    )));
+                }
                 surface_type = SurfaceType::NamedVector(Box::new(surface_type));
                 continue;
             }
@@ -807,6 +1146,7 @@ impl<'a> TypeParser<'a> {
             right_bracket: true,
             right_brace: caller_stop_context.right_brace,
             right_paren: caller_stop_context.right_paren,
+            right_angle: caller_stop_context.right_angle,
         })
     }
 

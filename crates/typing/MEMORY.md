@@ -26,9 +26,8 @@ If code changes make this document inaccurate, update it in the same session.
   - `tests/annotations/invalid_semantics.R.test`
   - `tests/annotations/unsupported.R.test`
 - A new `tests/annotations/generics.R.test` suite was added as the contract target for generics syntax and annotation behavior.
-- Current implementation does not yet support the generics syntax covered by `tests/annotations/generics.R.test`.
+- The parser now successfully parses the intended supported generic syntax, and all tests in `tests/annotations/generics.R.test` pass.
 - The recommended implementation order is:
-  1. make `tests/annotations/generics.R.test` pass for the intended supported generic syntax
-  2. then implement the distinction between invalid syntax, invalid semantics, and unsupported constructs
-  3. only after the supported generics path works, reconcile diagnostics and failure behavior with the three failure-oriented fixture suites
-- Do not start by “fixing” failure fixtures to current parser behavior. Treat the generics fixture suite as the primary target contract first, then handle failure cases deliberately afterward.
+  1. (DONE) make `tests/annotations/generics.R.test` pass for the intended supported generic syntax
+  2. (DONE) then implement the distinction between invalid syntax, invalid semantics, and unsupported constructs
+  3. (NEXT) only after the supported generics path works, reconcile diagnostics and failure behavior with the three failure-oriented fixture suites

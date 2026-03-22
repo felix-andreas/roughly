@@ -3,71 +3,71 @@
 error:
 T[]
 #++++
-UnsupportedSyntax { message: "generic atomic vector suffix types are not supported yet. `T[]` would require constraining `T` to atomic element types." }
+UnsupportedConstruct { message: "generic atomic vector suffix types are not supported yet. `T[]` would require constraining `T` to atomic element types." }
 
 #---- generic_atomic_named_suffix_not_supported
 error:
 T[named]
 #++++
-UnsupportedSyntax { message: "generic named atomic vector suffix types are not supported yet. `T[named]` would require constraining `T` to atomic element types." }
+UnsupportedConstruct { message: "generic named atomic vector suffix types are not supported yet. `T[named]` would require constraining `T` to atomic element types." }
 
 #---- higher_rank_function_parameter_not_supported
 error:
 fn(transform: <T> fn(T) -> T) -> integer
 #++++
-UnsupportedSyntax { message: "higher-rank polymorphism is not supported. type parameter binders may only appear at the outermost level." }
+UnsupportedConstruct { message: "higher-rank polymorphism is not supported. type parameter binders may only appear at the outermost level. (while parsing named parameter type)" }
 
 #---- higher_rank_record_field_not_supported
 error:
 list{value: <T> list[T]}
 #++++
-UnsupportedSyntax { message: "higher-rank polymorphism is not supported. type parameter binders may only appear at the outermost level." }
+UnsupportedConstruct { message: "higher-rank polymorphism is not supported. type parameter binders may only appear at the outermost level. (while parsing field `value`)" }
 
 #---- nested_forall_inside_function_return_not_supported
 error:
 fn(integer) -> <T> fn(T) -> T
 #++++
-UnsupportedSyntax { message: "higher-rank polymorphism is not supported. type parameter binders may only appear at the outermost level." }
+UnsupportedConstruct { message: "higher-rank polymorphism is not supported. type parameter binders may only appear at the outermost level." }
 
 #==== unsupported_unions
 #---- non_nullable_union_two_members
 error:
 integer | character
 #++++
-UnsupportedSyntax { message: "only nullable unions with `NULL` are supported for now." }
+UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now." }
 
 #---- non_nullable_union_three_members
 error:
 integer | character | logical
 #++++
-UnsupportedSyntax { message: "only nullable unions with `NULL` are supported for now." }
+UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now." }
 
 #---- nullable_union_with_two_non_null_members
 error:
 integer | character | NULL
 #++++
-UnsupportedSyntax { message: "only unions with exactly one non-`NULL` member are supported for now." }
+UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now." }
 
 #---- duplicate_null_union
 error:
 NULL | NULL
 #++++
-UnsupportedSyntax { message: "`NULL | NULL` is not valid user-facing type syntax." }
+UnsupportedConstruct { message: "`NULL | NULL` is not valid type syntax." }
 
 #---- nested_nonnullable_union_in_function
 error:
 fn(integer | character) -> integer
 #++++
-UnsupportedSyntax { message: "only nullable unions with `NULL` are supported for now." }
+UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now. (while parsing positional parameter)" }
 
 #---- nested_nonnullable_union_in_list
 error:
 list[integer | character]
 #++++
-UnsupportedSyntax { message: "only nullable unions with `NULL` are supported for now." }
+UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now." }
 
 #---- nested_nonnullable_union_in_record
 error:
 list{value: integer | character}
 #++++
-UnsupportedSyntax { message: "only nullable unions with `NULL` are supported for now." }
+UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now. (while parsing field `value`)" }
