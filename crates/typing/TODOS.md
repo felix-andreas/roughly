@@ -13,30 +13,55 @@ This document tracks actionable planned work for the `typing` crate.
 
 ## Current priorities
 
-- Migrate the fixture harness and fixture directories to the new suite split.
-  - Replace the current `inference` suite with separate successful-check suites.
-  - Use `expressions` for smaller checked-expression cases.
-  - Add `bindings` and `interfaces` suites.
-  - Add `naming` fixture coverage.
+- Rename the current `infer.rs` implementation module to `typecheck.rs`.
+  - Move the current inference-centric code under the `typecheck` phase name.
+  - Keep one `typecheck.rs` file initially.
+  - Defer splitting builtin typing, compatibility logic, and interface extraction into separate modules.
 
-- Clean up the front-end boundary.
+- Rename the current `inference` fixture suite to `expressions`.
+  - Use `expressions` for smaller checked-expression cases.
+  - Update fixture harness suite names and focused test-running expectations.
+
+- Apply the desired file split in code.
+  - Add `hir.rs` as the explicit representation boundary.
+  - Add `naming.rs` for scopes, bindings, and use-site resolution.
+  - Add `diagnostic.rs` as the shared diagnostics module.
+  - Rename or reshape the current checker files so they match `STRUCTURE.md`.
+  - Remove `parse.rs` from the public crate surface and keep parser setup as test or integration glue only.
+
+- Rebuild the front-end boundary around HIR.
+  - Move lowered data structures out of `lower.rs` into `hir.rs`.
+  - Convert HIR to stable arena or id-based storage.
+  - Keep source ranges and source-order information available on HIR items.
+  - Represent annotation payloads and definition blocks directly in HIR.
   - Parse annotations during lowering exactly once.
   - Remove duplicate annotation parsing from the main checking flow.
-  - Remove `parse.rs` from the public crate surface.
-  - Keep parser setup only as test support or external integration glue.
 
-- Introduce explicit HIR ownership.
-  - Create `hir.rs` as the representation boundary.
-  - Move lowered data structures out of `lower.rs`.
-  - Convert the lowered representation to stable arena or id-based storage.
-  - Keep source ranges and source-order information available on HIR items.
-
-- Introduce a separate naming phase.
+- Introduce the naming phase.
   - Add a naming entry point after lowering.
   - Keep naming distinct even if lowering and naming run back to back.
-  - Delay the unresolved naming output choice until `OPEN_DECISIONS.md` is settled.
+  - Add binding identities and scope construction.
+  - Add use-site resolution over HIR.
+  - Resolve the open naming-output choice from `OPEN_DECISIONS.md` before locking in the representation.
 
-- Keep typechecking structurally simple at first.
-  - Keep one `typecheck.rs` file initially.
-  - Defer splitting builtins, compatibility, and interface extraction into separate modules.
-  - Reshape the current inference code around the `typecheck` phase boundary.
+- Reshape typechecking around the new boundaries.
+  - Make `typecheck` consume the naming output instead of raw lowered names.
+  - Keep builtin typing, compatibility logic, and interface extraction inside `typecheck.rs` for now.
+  - Replace the current inference-centric API with checked-file results that fit the new architecture.
+
+- Expose checked-file and interface boundaries.
+  - Define the checked-file result owned by `check.rs`.
+  - Retain diagnostics, typed results, and file-interface extraction at that boundary.
+  - Use per-file interfaces as the dependency boundary for later project scheduling.
+
+- Migrate the fixture harness and fixture directories to the new suite split.
+  - Add `bindings` and `interfaces` suites.
+  - Add `naming` fixture coverage.
+  - Keep `annotations` and `diagnostics` as first-class suites.
+  - Update focused test-running guidance and suite names in the harness.
+
+- Add the project-level rechecking foundation without overcommitting.
+  - Keep single-file rechecking fast.
+  - Make exported interfaces the dependency boundary.
+  - Ensure dependent files can be rechecked when an imported interface changes, even if they are not open.
+  - Avoid committing yet to reuse of inference or unification state across edits.
