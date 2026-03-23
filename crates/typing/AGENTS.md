@@ -17,7 +17,7 @@ This crate is written by AI under human guidance and supervision. The markdown d
 
 If the user says:
 
-- `get-started`: read the relevant crate documents, then continue with the next actionable item in `TODOS.md` (assume fresh context unless the documents indicate otherwise).
+- `get-started`: read the relevant steering documents and `MEMORY.md`, then continue with the next actionable item in `TODOS.md` (assume fresh context unless the documents indicate otherwise).
 - `cleanup memory`: aggressively remove resolved, stale, or low-value session-specific details, while preserving this purpose section and any continuity that will still matter next session.
 
 ## Steering Documents
