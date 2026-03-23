@@ -19,15 +19,3 @@ Use this document to record:
 If code changes make this document inaccurate, update it in the same session.
 
 ## Active continuity
-
-- Generic type syntax and semantics were discussed and written into `SEMANTICS.md`.
-- Fixture suites were reorganized into three intended categories:
-  - `tests/annotations/invalid_syntax.R.test`
-  - `tests/annotations/invalid_semantics.R.test`
-  - `tests/annotations/unsupported.R.test`
-- A new `tests/annotations/generics.R.test` suite was added as the contract target for generics syntax and annotation behavior.
-- The parser now successfully parses the intended supported generic syntax, and all tests in `tests/annotations/generics.R.test` pass.
-- The recommended implementation order is:
-  1. (DONE) make `tests/annotations/generics.R.test` pass for the intended supported generic syntax
-  2. (DONE) then implement the distinction between invalid syntax, invalid semantics, and unsupported constructs
-  3. (NEXT) only after the supported generics path works, reconcile diagnostics and failure behavior with the three failure-oriented fixture suites

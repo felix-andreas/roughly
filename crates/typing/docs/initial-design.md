@@ -1,4 +1,4 @@
-# `typing` Draft Notes
+# Initial Design
 
 This document preserves early, non-authoritative semantics ideas for the `typing` crate.
 
