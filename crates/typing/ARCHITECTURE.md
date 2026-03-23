@@ -2,258 +2,213 @@
 
 This document is the authoritative implementation architecture for the `typing` crate.
 
-`SEMANTICS.md` is the authoritative user-facing typing contract. This file describes the implementation boundaries required to realize that contract. It should stay focused on durable representation and pipeline decisions rather than status notes or historical plans.
+`SEMANTICS.md` is the authoritative user-facing typing contract. This file defines the implementation boundaries needed to realize that contract. Keep it focused on durable phase boundaries and representation boundaries.
 
 ## Role of this document
 
-Keep this file focused on:
+Use this document for:
 
 - phase boundaries
 - representation boundaries
-- binding and scope architecture
+- naming and scope architecture
 - typechecking architecture
-- diagnostic constraints
 
-Do not use this file as:
+Do not use this document for:
 
 - a changelog
 - a task tracker
 - a restatement of user-facing typing rules
 
-## Phase overview
-
-The intended per-file pipeline is:
-
-1. Parse R syntax with tree-sitter.
-2. Lower to annotated HIR.
-   - Parse type syntax from annotations and type declarations.
-   - Attach parsed annotation payloads to the relevant HIR items.
-   - Represent definition blocks as declaration items in source order.
-3. Run naming over annotated HIR.
-4. Typecheck named HIR.
-5. Produce file results for diagnostics and tooling.
-
-When the checker is embedded in `roughly`, it may enter this pipeline after syntax parsing. In that mode, the checker should be able to consume an already-parsed tree together with shared analysis state rather than reparsing source text internally.
-
 ## File-local pipeline
 
-The checker should be organized around a small number of explicit per-file phases.
+The intended file-local pipeline is:
 
-### 1. Parse R syntax
+1. `check`
+2. `lower`
+3. `naming`
+4. `typecheck`
+5. diagnostics output and checked-file results
 
-Parse R source into a syntax tree using tree-sitter.
+`check` is the top-level orchestration entry point. It is responsible for wiring the phases together and returning file results.
 
-This phase is responsible only for R syntactic structure. It should not perform lowering, name resolution, or typechecking.
+Syntax parsing is not a real `typing` crate phase. The checker may receive already-parsed syntax from `roughly` or from tests. Parser setup is integration glue, not a core architectural boundary.
 
-### 2. Lower to annotated HIR
+Diagnostics are not a pipeline phase. Diagnostics are structured output produced by lowering, naming, and typechecking.
 
-Lower supported R syntax into annotated HIR. This is the front-end artifact consumed by later phases.
+## Phase boundaries
 
-It should contain:
+### `lower`
 
-- lowered expressions and other semantic items
-- precise source ranges
-- interned names where appropriate
-- parsed annotations attached to the relevant HIR items
-- type declarations as HIR items
+Input:
 
-Later phases should consume parsed annotation and declaration data, not raw `#:` text.
+- parsed syntax
+- source access
+- shared interner state when available
 
-Definition blocks should be represented as declarations, not as annotations attached to following expressions.
+Output:
 
-Annotation parsing may happen during lowering or in an adjacent helper, but the output boundary is the same: annotated HIR.
+- `HirFile`
 
-The annotation parser should remain directly testable as a separate module.
+Responsibilities:
 
-### 3. Naming
+- lower supported R syntax into HIR
+- preserve source order and source ranges
+- intern spelled names
+- parse annotation and type-declaration syntax exactly once
+- attach parsed annotation payloads to the HIR items they govern
+- represent definition blocks as explicit HIR declarations
 
-Resolve names in annotated HIR to binding identities.
+Lowering is the front-end boundary. Later phases should consume parsed annotation and declaration data, not raw `#:` text.
 
-This is the canonicalization phase. It should stay separate from lowering even if the implementation runs it immediately afterward.
+Lowering stays distinct from naming even if the implementation runs both phases back to back.
 
-Naming is responsible for:
+### `naming`
+
+Input:
+
+- `HirFile`
+- builtins and imported interfaces as needed for name lookup
+
+Output:
+
+- a named or resolved view of the file
+
+Responsibilities:
 
 - binding introduction
-- lexical scope handling
+- lexical scope construction
 - shadowing
 - use-site resolution
-- cross-file name lookup
+- any additional name resolution required before typechecking
 
-Naming should produce either resolved HIR or HIR plus side tables keyed by stable HIR identities. The important boundary is that later phases should no longer reason about raw textual names alone when binding identity matters.
+The exact output shape is still open:
 
-### 4. Typecheck
+- a new resolved artifact
+- or HIR plus side tables keyed by stable ids
 
-Typecheck named HIR using the user-facing rules from `SEMANTICS.md`.
+What is fixed is the phase boundary: later phases must be able to distinguish binding identity from spelled names.
 
-This is the top-level semantic checking phase. It is responsible for:
+### `typecheck`
+
+Input:
+
+- named program representation
+- builtin and imported environment information
+
+Output:
+
+- `CheckedFile`
+
+Responsibilities:
 
 - expression checking
 - annotation checking
-- compatibility rules
+- compatibility and coercion rules
 - builtin typing rules
-- producing typed results for tooling and diagnostics
-
-Hindley-Milner-style inference is an internal mechanism of this phase, not the architectural name of the whole phase.
-
-### 5. Produce file results
-
-File results should retain at least:
-
-- diagnostics
-- typed expression results for the active file
+- typed results for tooling
 - file interface extraction
 
-## Project-level pipeline
+Inference is an internal mechanism of `typecheck`, not the architectural name of the phase.
+
+## Representation boundaries
+
+### Syntax tree
+
+The syntax tree preserves surface structure and syntax ranges, but it is not the long-term semantic representation used by later phases.
+
+### Surface type syntax
+
+Annotations and type declarations should first be parsed into a syntax-oriented type representation.
+
+Do not collapse user-written type syntax directly into inference-oriented semantic types.
+
+The annotation and declaration parser should remain directly testable as its own module.
+
+### HIR
+
+HIR is the front-end representation produced by lowering.
+
+HIR should:
+
+- remove parser-tree quirks
+- represent expressions, annotations, and declarations explicitly
+- preserve source ranges and source order
+- use stable arena or id-based storage
+
+Stable ids are required so later phases can use side tables for naming, typechecking, hover, and incremental analysis.
+
+### Naming data
+
+After naming, the checker needs binding identity in addition to spelled names.
+
+Whether naming produces a new artifact or side tables is still open, but later phases must be able to distinguish:
+
+- two bindings with the same spelled name
+- a definition site from a use site
+- which binding a particular use refers to
+
+### Internal semantic types
+
+Typechecking needs an internal semantic type representation that preserves the distinctions required by semantics, diagnostics, and inference.
+
+It must represent:
+
+- ordinary semantic types
+- temporary unknowns
+- inference variables
+- generalized binding types
+- exported interface types
+
+## Project-level direction
 
 Multi-file checking should build on the file-local pipeline rather than bypass it.
 
-The checker should be designed to run with shared analysis state across files rather than as isolated single-file invocations. That shared state is the place for data that should survive across checks, such as interned names and project-level caches.
+The checker should support shared analysis state across files for:
 
-The exact incremental project design is still open. The architecture should leave room for at least these directions:
+- interned names
+- imported interfaces
+- later project-level caches
 
-- dependency tracking with rechecking when a file's public interface changes
-- caching intermediate semantic results and reusing unaffected work across checks
-- future finer-grained invalidation below the whole-file level if the naming and typecheck representations make that practical
+The exact incremental project design is still open, but the architecture should leave room for:
+
+- dependency tracking by interface changes
+- reusing unaffected work across checks
+- finer-grained invalidation later if the chosen naming and checked representations make that practical
+
+The architecture should optimize for fast re-analysis of a single changed file.
+
+File-local phases and artifacts should remain explicit so one file can be reparsed, relowered, renamed, and rechecked without unnecessary project-wide recomputation.
+
+Project-level analysis should track dependencies through checked file interfaces.
+
+If file `A` changes, dependent files such as `B` must be rechecked when `A`'s exported interface changes, even if those dependent files are not open.
+
+Per-file interfaces are the boundary between file-local checking and later project scheduling.
 
 The intended later project-level stages are:
 
 1. build or load imported file interfaces
 2. run naming and typechecking with those interfaces in scope
 3. extract the checked file interface
-4. track dependencies and invalidation
+4. track dependency invalidation and dependent diagnostics
 
-Per-file interfaces are the boundary between file-local checking and project scheduling.
+The architecture should not assume that only full-file rechecking is possible, but it should also not commit yet to reusing unification or inference state across edits.
 
-The architecture should not assume yet that only full-file rechecking is possible, but it also should not commit to reusing unification or inference state across edits until that design is worked out explicitly.
-
-## Performance and reuse
-
-The checker should be designed for repeated analysis, not only one-off single-file runs.
-
-Shared analysis state should be reusable across many checks and should usually live at least as long as the editor or server session that owns it.
-
-Interned symbols should be reused across checks that share analysis state. The main pipeline should not create separate symbol universes for individual annotations or individual file checks when shared state is available.
-
-## Representation boundaries
-
-Keep these conceptual representations distinct.
-
-### Syntax tree
-
-The syntax tree is the tree-sitter output for R source. It preserves surface structure and syntax ranges, but it is not the long-term semantic representation used by later phases.
-
-### Parsed annotations and type declarations
-
-Parse annotations and type declarations into a syntax-oriented representation before lowering them into internal checking types.
-
-Do not collapse user-written type syntax directly into inference-oriented representations.
-
-Annotation and declaration type syntax should use a handwritten recursive-descent parser over the original source slice rather than tree-sitter or a general parser-combinator layer.
-
-This is a deliberate architectural choice:
-
-- the type grammar is small, nested, and delimiter-heavy
-- parsing directly over shared source text keeps allocations and reparsing pressure low
-- explicit parser state makes it easier to stop at caller-owned delimiters such as `]`, `}`, `)`, and `,`
-- delimiter ownership matters for precise, local error messages in nested list and function types
-
-If the type parser grows, preserve those properties.
-
-### Annotated HIR
-
-Annotated HIR is the file-local semantic representation produced by the front end.
-
-It should:
-
-- remove parser-tree quirks
-- represent expressions, annotations, and declarations explicitly
-- attach parsed annotations to the items they govern
-- include type declarations as first-class HIR items
-
-Annotated HIR should be usable as a stable fixture target.
-
-### Named program representation
-
-After naming, the checker needs a representation in which binding identity is available in addition to spelled names.
-
-Whether this is represented as a new tree or as side tables is an implementation choice. The architectural requirement is that later phases can distinguish:
-
-- two bindings with the same spelled name
-- a definition site from a use site
-- which binding a particular use refers to
-
-### Internal type representation
-
-Typechecking needs an internal semantic type representation that preserves the distinctions required by the semantics, compatibility rules, and diagnostics.
-
-In particular, it should not erase structural information too early, and it must be able to represent both ordinary semantic types and temporary unknowns introduced during inference.
-
-### Generalized binding and interface representation
-
-The checker also needs a representation for generalized binding types and exported file interfaces.
-
-This is the boundary used for let-polymorphic bindings inside a file and for sharing checked information across files.
-
-## Names, symbols, and bindings
-
-Interned symbols and binding identities are different concepts and must stay separate.
-
-Binding identities are needed for:
-
-- shadowing
-- precise hover and go-to-definition
-- dependency tracking
-- future fine-grained invalidation
-
-Diagnostics must still be able to render human-readable names.
-
-Naming owns scope construction and binding identity. The exact language rules for scope belong in `SEMANTICS.md`.
-
-## Typechecking architecture
-
-Typechecking should keep three concerns distinct even when they share helpers:
-
-- HM-style inference machinery
-- compatibility and coercion rules
-- language-specific typing rules for builtins and operators
-
-The implementation may split these into separate modules over time, but the conceptual separation should remain.
-
-### HM engine
-
-The HM core should provide:
-
-- fresh inference variables
-- unification
-- instantiation
-- generalization
-- occurs checks
-- representative lookup with path compression
-
-This layer should operate over the internal type representation and type environments. It is a reusable engine, not the entire checker.
-
-Representative lookup should use path compression.
-
-### Compatibility
-
-User-facing checking is not equality-only. Compatibility must stay separate from structural unification, with the exact compatibility rules defined by `SEMANTICS.md`.
-
-### Builtins and special typing rules
-
-Some builtins and operators require dedicated typing rules.
-
-Those rules belong to typechecking, not lowering. Builtins may still be registered through ordinary name machinery so diagnostics and later tooling remain coherent.
+The desired near-term file split is recorded in `STRUCTURE.md`.
 
 ## Diagnostics
 
-Diagnostics are part of the product, not a side effect.
+Diagnostics are part of the product surface, not a side effect.
 
-`SEMANTICS.md` and the fixture suite together define the user-facing contract. If implementation changes alter fixture-visible behavior, update the relevant documents in the same session.
+Diagnostic data should stay structured until rendering so wording, ranges, and phase-local errors can be managed consistently.
 
 ## Testing seams
 
-The architecture should support stable fixture tests at phase boundaries.
+The architecture should expose stable phase boundaries for fixture testing.
 
-`TESTING.md` is authoritative for the fixture suites and their exact contracts.
+At the architectural level, the important requirement is that the implementation support direct testing of:
 
-At the architectural level, the important requirement is that the implementation expose clear, testable boundaries for the major phases rather than forcing all behavior through end-to-end checks only.
+- annotation and type syntax parsing
+- naming results
+- successful checked output
+- rendered diagnostics

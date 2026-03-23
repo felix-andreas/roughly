@@ -36,9 +36,6 @@
 - keep builtin typing, compatibility logic, and interface extraction inside `typecheck.rs` for now.
   - Those splits should wait until the typechecking structure stabilizes.
 
-- rename the current successful-check fixture suite from `inference` to `typecheck`.
-  - The suite should match the architectural phase name instead of the internal inference mechanism.
-
 - successful-check fixtures should be split into separate suites rather than one overloaded suite.
   - Different checked outputs have different contracts and should not be forced into a single renderer.
 

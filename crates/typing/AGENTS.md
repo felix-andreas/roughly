@@ -7,6 +7,7 @@ This crate is written by AI under human guidance and supervision. The markdown d
 - Deliver high-quality diagnostics for R in the style of Rust and Elm.
 - Support language-tooling features such as hover and inlay hints, so preserve the semantic information needed for them whenever practical.
 - Scale to very large code bases, including code bases larger than 300,000 LoC; performance matters.
+- Keep single-file rechecking fast while still reporting dependent type errors across the project when exported interfaces change.
 - Prefer clear, precise, actionable diagnostic wording.
 - Avoid overly internal or theory-heavy diagnostic language when user-facing wording would be clearer.
 - Keep fixture expectations updated only when wording or behavior intentionally improves.
@@ -52,9 +53,12 @@ Use these documents to surface uncertainty and record agreed decisions, not to s
   - Authoritative architectural constraints and durable phase or representation boundaries.
   - Keep only durable design decisions and constraints, not a changelog or session diary.
   - If implementation changes the design, or if the intended direction conflicts with this document, discuss it with the user before proceeding and update the document in the same session if the change is accepted.
+- `STRUCTURE.md`
+  - Authoritative desired file structure for the crate.
+  - Keep it focused on the intended file split and the role of each file.
 - `TESTING.md`
   - Authoritative fixture-testing contract and suite structure.
-  - Keep it aligned with `tests/test_fixtures.rs` and the actual fixture directories.
+  - Keep it aligned with `tests/test_fixtures.rs` and the intended fixture structure; note temporary migration gaps explicitly.
   - Keep only the minimal focused test-running information: suite names and the `TYPING_FILTER` workflow.
 
 ### Working documents

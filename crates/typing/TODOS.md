@@ -13,19 +13,11 @@ This document tracks actionable planned work for the `typing` crate.
 
 ## Current priorities
 
-- Rewrite `ARCHITECTURE.md`.
-  - Define the file-local phase order as `check -> lower -> naming -> typecheck -> diagnostics output`.
-  - Remove `parser` as a real crate phase.
-  - State that inference is an internal mechanism of `typecheck`.
-  - State that `diagnostics` is not a pipeline phase.
-  - State that `hir.rs` and `lower.rs` are separate boundaries.
-  - Record the use of stable arena or id-based HIR storage.
-
-- Rewrite `TESTING.md`.
+- Migrate the fixture harness and fixture directories to the new suite split.
   - Replace the current `inference` suite with separate successful-check suites.
   - Use `expressions` for smaller checked-expression cases.
-  - Describe the intended suite split for `annotations`, `naming`, `expressions`, `bindings`, `interfaces`, and `diagnostics`.
-  - Keep focused test-running guidance minimal.
+  - Add `bindings` and `interfaces` suites.
+  - Add `naming` fixture coverage.
 
 - Clean up the front-end boundary.
   - Parse annotations during lowering exactly once.
