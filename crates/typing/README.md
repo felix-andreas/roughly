@@ -4,6 +4,15 @@ This crate explores a static type system for a subset of R.
 
 The goal is to make a useful subset of R statically checkable while keeping the resulting types, diagnostics, and language-tooling output readable to R programmers. The checker is designed with large-codebase performance in mind.
 
+For the main crate documents:
+
+- `SEMANTICS.md` is the authoritative user-facing typing contract
+- `ARCHITECTURE.md` is the authoritative implementation architecture
+- `TESTING.md` describes the fixture-testing contract
+- `TODOS.md` tracks planned unfinished work
+- `TECHNICAL_DEBT.md` records current structural debt
+- `IMPLEMENTATION_GAPS.md` records where the current code still differs from the architecture
+
 ## Goals
 
 The project is guided by a few broad design goals:

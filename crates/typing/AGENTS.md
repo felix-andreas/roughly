@@ -43,6 +43,9 @@ Before making significant changes in this crate, review these files and keep the
   - Actionable plan.
   - Keep only concrete unfinished work.
   - Remove completed "next steps" once they stop helping planning.
+- `TECHNICAL_DEBT.md`
+  - Current structural debt and implementation seams that should be paid down deliberately.
+  - Keep it focused on present debt, not speculative future work or session history.
 - `MEMORY.md`
   - Handoff-only continuity that is easy to lose between sessions.
   - Keep it clean; remove resolved points, stale notes, and low-value session chatter.
