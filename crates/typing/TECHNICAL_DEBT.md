@@ -31,7 +31,7 @@ This makes it harder to test lowering structure separately from annotation attac
 
 ### Typechecking and inference-engine concerns are mixed together
 
-The current `infer.rs` file contains multiple responsibilities at once:
+The current `typecheck.rs` file contains multiple responsibilities at once:
 
 - HM-style inference state and unification
 - lexical environment handling

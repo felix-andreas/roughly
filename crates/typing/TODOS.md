@@ -13,15 +13,6 @@ This document tracks actionable planned work for the `typing` crate.
 
 ## Current priorities
 
-- Rename the current `infer.rs` implementation module to `typecheck.rs`.
-  - Move the current inference-centric code under the `typecheck` phase name.
-  - Keep one `typecheck.rs` file initially.
-  - Defer splitting builtin typing, compatibility logic, and interface extraction into separate modules.
-
-- Rename the current `inference` fixture suite to `expressions`.
-  - Use `expressions` for smaller checked-expression cases.
-  - Update fixture harness suite names and focused test-running expectations.
-
 - Apply the desired file split in code.
   - Add `hir.rs` as the explicit representation boundary.
   - Add `naming.rs` for scopes, bindings, and use-site resolution.
@@ -57,8 +48,7 @@ This document tracks actionable planned work for the `typing` crate.
 - Migrate the fixture harness and fixture directories to the new suite split.
   - Add `bindings` and `interfaces` suites.
   - Add `naming` fixture coverage.
-  - Keep `annotations` and `diagnostics` as first-class suites.
-  - Update focused test-running guidance and suite names in the harness.
+  - Keep `annotations`, `expressions`, and `diagnostics` as first-class suites.
 
 - Add the project-level rechecking foundation without overcommitting.
   - Keep single-file rechecking fast.

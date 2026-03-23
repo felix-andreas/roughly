@@ -1,11 +1,11 @@
 pub mod annotations;
 pub mod check;
 pub mod diagnostics;
-pub mod infer;
 pub mod interner;
 pub mod lower;
 pub mod parse;
 pub mod text;
+pub mod typecheck;
 pub mod types;
 
 pub use {

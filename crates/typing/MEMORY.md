@@ -25,9 +25,11 @@ If code changes make this document inaccurate, update it in the same session.
   - Then read `DECISION_LOG.md`, `OPEN_DECISIONS.md`, `TODOS.md`, `DISCUSS.md`, `ARCHITECTURE.md`, `STRUCTURE.md`, and `TESTING.md`.
   - Do not treat older architectural prose elsewhere in the crate as settled if it conflicts with those files.
 
-- This session was a documentation-structure and architecture-planning session only.
-  - No implementation code was changed.
-  - The main work was reorganizing the crate steering documents and rewriting the architecture and testing documents around the agreed phase model.
+- Recent implementation progress:
+  - The fixture harness now uses `tests/expressions` as the suite for smaller checked-expression cases.
+  - The old `tests/inference` directory was renamed to `tests/expressions`.
+  - The old `infer.rs` implementation module was renamed to `typecheck.rs`, and crate imports now use the phase name.
+  - `TODOS.md` no longer tracks either rename as unfinished.
 
 - Current steering-document layout:
   - persistent authoritative: `README.md`, `SEMANTICS.md`, `ARCHITECTURE.md`, `STRUCTURE.md`, `TESTING.md`
@@ -58,23 +60,18 @@ If code changes make this document inaccurate, update it in the same session.
 
 - `TESTING.md` was rewritten this session.
   - It now records the intended suite split as `annotations`, `naming`, `expressions`, `bindings`, `interfaces`, and `diagnostics`.
-  - The implementation and fixture directories still need to be migrated to match that contract.
+  - The `expressions` suite rename is now reflected in the harness and fixture directory layout.
+  - `naming`, `bindings`, and `interfaces` suites still need to be added.
 
 - Still-open design questions in `OPEN_DECISIONS.md`:
   - whether naming resolves both value names and type names
   - whether naming produces a new resolved artifact or HIR plus side tables
   - the exact typecheck environment shape beyond “builtins and imported interfaces”
 
-- Testing direction discussed this session:
-  - replace the current `inference` fixture suite
-  - intended suite split is now `annotations`, `naming`, `expressions`, `bindings`, `interfaces`, and `diagnostics`
-  - this is recorded in `TESTING.md` and `TODOS.md`
-  - `DISCUSS.md` contains a short note summarizing that direction
-
 - Recommended next step for the next agent:
-  - do not change implementation first
-  - migrate the fixture harness and fixture directories to match `TESTING.md`
-  - then start the code refactor for HIR/lowering/naming boundaries
+  - start the code refactor for HIR/lowering/naming boundaries
+  - keep the remaining fixture migration focused on adding `naming`, `bindings`, and `interfaces` coverage rather than renaming existing suites again
+  - treat `typecheck.rs` as the current home for the old inference engine until the deeper split is ready
 
 - Global requirement added near the end of the session:
   - keep single-file rechecking fast while still reporting dependent type errors across the project when exported interfaces change
@@ -83,3 +80,6 @@ If code changes make this document inaccurate, update it in the same session.
 - Important caution:
   - persistent authoritative documents must only be changed after user request or discussion
   - in this case, the user has explicitly been discussing and directing the architecture and testing rewrite, so updating `ARCHITECTURE.md` and `TESTING.md` was intentional
+  - current authoritative-document drift to discuss before editing:
+    - `README.md` points to `IMPLEMENTATION_GAPS.md`, but that file is absent
+    - `SEMANTICS.md` still references the old `tests/fixtures/inference/` path

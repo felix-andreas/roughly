@@ -5,9 +5,9 @@ use {
         annotations::{
             parse_expanded_block_surface_type, parse_type_syntax_item, render_type_syntax_item,
         },
-        infer::{BuiltinKind, InferenceError, InferenceState},
         lower::LoweringContext,
         new_parser, parse, render_surface_type,
+        typecheck::{BuiltinKind, InferenceError, InferenceState},
         types::{Atomic, CoreType, InferenceVariableId},
     },
 };
@@ -23,11 +23,11 @@ fn diagnostics() {
 }
 
 #[test]
-fn inference() {
+fn expressions() {
     run_fixture_suite(
-        "tests/inference",
-        "inference",
-        render_inference_fixture_result,
+        "tests/expressions",
+        "expressions",
+        render_expression_fixture_result,
     );
 }
 
@@ -214,7 +214,7 @@ where
     eprintln!("{} {kind} fixture(s) passed", executed_fixture_count);
 }
 
-fn render_inference_fixture_result(source: &str) -> String {
+fn render_expression_fixture_result(source: &str) -> String {
     let mut parser = new_parser();
     let tree = parse(&mut parser, source, None);
 
@@ -244,9 +244,9 @@ fn render_inference_fixture_result(source: &str) -> String {
 
     match inference_state.infer_module(&module) {
         Ok(inferred_types) => {
-            render_inferred_types(&mut inference_state, &lowering_context, &inferred_types)
+            render_expression_types(&mut inference_state, &lowering_context, &inferred_types)
         }
-        Err(error) => render_inference_error_kind(&error).to_owned(),
+        Err(error) => render_expression_error_kind(&error).to_owned(),
     }
 }
 
@@ -325,7 +325,7 @@ fn render_annotation_fixture_result(source: &str) -> String {
     }
 }
 
-fn render_inferred_types(
+fn render_expression_types(
     inference_state: &mut InferenceState,
     lowering_context: &LoweringContext,
     inferred_types: &[CoreType],
@@ -345,7 +345,7 @@ fn render_inferred_types(
     lines.join("\n")
 }
 
-fn render_inference_error_kind(error: &InferenceError) -> &'static str {
+fn render_expression_error_kind(error: &InferenceError) -> &'static str {
     match error {
         InferenceError::UnknownInferenceVariable(_) => "error: unknown inference variable",
         InferenceError::UnknownName { .. } => "error: unknown name",

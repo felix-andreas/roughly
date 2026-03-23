@@ -1,7 +1,7 @@
 use {
     crate::{
-        infer::InferenceError,
         interner::{Interner, Symbol},
+        typecheck::InferenceError,
         types::{Atomic, CoreType, InferenceVariableId},
     },
     std::{collections::BTreeMap, fmt},

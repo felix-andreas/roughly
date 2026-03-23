@@ -10,6 +10,4 @@ Move unresolved questions and options into `OPEN_DECISIONS.md`.
 
 ## Current topic
 
-- next `TESTING.md` rewrite should replace the current `inference` suite with separate successful-check suites
-- use `expressions` for smaller checked-expression cases
-- describe the intended suite split for `annotations`, `naming`, `expressions`, `bindings`, `interfaces`, and `diagnostics`
+- no active design discussion recorded

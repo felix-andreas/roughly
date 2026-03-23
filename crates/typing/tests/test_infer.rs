@@ -1,6 +1,6 @@
 use typing::{
-    infer::{InferenceEntry, InferenceError, InferenceState},
     interner::Interner,
+    typecheck::{InferenceEntry, InferenceError, InferenceState},
     types::{Atomic, CoreType, FunctionType, RecordField},
 };
 
