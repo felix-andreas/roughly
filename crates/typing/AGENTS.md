@@ -19,40 +19,81 @@ If the user says:
 - `get-started`: read the relevant crate documents, then continue with the next actionable item in `TODOS.md` (assume fresh context unless the documents indicate otherwise).
 - `cleanup memory`: aggressively remove resolved, stale, or low-value session-specific details, while preserving this purpose section and any continuity that will still matter next session.
 
-## Documents
+## Steering Documents
 
-Before making significant changes in this crate, review these files and keep them aligned. These documents are the primary way to steer AI work in this crate, so keeping them current is part of the implementation work.
+This crate is developed under user guidance and steering.
+
+The documents below are the primary means for steering work in this crate.
+
+Document kinds:
+
+- persistent authoritative documents: durable contract documents
+- working documents: durable engineering-state documents
+- ephemeral documents: short-lived session documents
+
+Before making significant changes in this crate, review these files and keep them aligned.
+
+### Persistent authoritative documents
+
+Request or discuss changes to persistent authoritative documents before editing them.
+
+If a persistent authoritative document is outdated, contradictory, or clearly no longer matches the implementation or agreed direction, inform the user even if they did not explicitly ask about that document.
+
+Use these documents to surface uncertainty and record agreed decisions, not to silently lock in unresolved design choices.
 
 - `README.md`
-  - Human-facing crate overview and pointers to the authoritative documents.
+  - Human-facing crate overview and pointers to the other persistent documents.
   - Avoid agent workflow details and implementation-status churn.
 - `SEMANTICS.md`
-  - Authoritative meaning of the type checker and authoritative user-facing typing semantics contract.
+  - Authoritative typing semantics contract.
   - Keep it concise, explicit, and in sync with the fixture tests.
-  - All semantic changes must be discussed with the user first.
+  - Discuss unclear or changed user-facing semantics with the user first, then record the resolved behavior here.
 - `ARCHITECTURE.md`
-  - Authoritative design decisions and architectural constraints.
+  - Authoritative architectural constraints and durable phase or representation boundaries.
   - Keep only durable design decisions and constraints, not a changelog or session diary.
   - If implementation changes the design, or if the intended direction conflicts with this document, discuss it with the user before proceeding and update the document in the same session if the change is accepted.
 - `TESTING.md`
   - Authoritative fixture-testing contract and suite structure.
-  - This is the primary contract for how fixture-based tests validate the low-level implementation details of the type checker.
   - Keep it aligned with `tests/test_fixtures.rs` and the actual fixture directories.
   - Keep only the minimal focused test-running information: suite names and the `TYPING_FILTER` workflow.
-- `TODOS.md`
-  - Actionable plan.
-  - Keep only concrete unfinished work.
-  - Remove completed "next steps" once they stop helping planning.
+
+### Working documents
+
+Update working documents proactively during the session.
+
 - `TECHNICAL_DEBT.md`
   - Current structural debt and implementation seams that should be paid down deliberately.
   - Keep it focused on present debt, not speculative future work or session history.
+- `DECISION_LOG.md`
+  - Durable record of settled decisions discussed with the user.
+  - Keep each entry in `decision` then `reason` form.
+  - Reflect durable decisions into the authoritative documents when the wording there is ready.
+
+### Ephemeral documents
+
+Update ephemeral documents proactively during the session.
+Delete or trim ephemeral documents once their content is resolved or no longer useful.
+
+- `TODOS.md`
+  - Actionable plan.
+  - Keep only concrete unfinished work.
+  - Use concise bullets and short nested bullets when they clarify sequencing.
+  - If a task is marked `(needs refinement)` or appears stale, discuss it with the user before acting on it.
+- `OPEN_DECISIONS.md`
+  - Active unresolved design questions and their current options.
+  - Keep it focused on decisions that still need user input.
+- `DISCUSS.md`
+  - Scratch space for active design discussion.
+  - Keep it short and move anything durable into `DECISION_LOG.md` or `OPEN_DECISIONS.md`.
 - `MEMORY.md`
   - Handoff-only continuity that is easy to lose between sessions.
   - Keep it clean; remove resolved points, stale notes, and low-value session chatter.
   - Do not repeat stable design, finished work, or obvious current code state.
   - If the remaining context is unclear or disputed, discuss it with the user instead of preserving ambiguous notes.
 
-Keep all crate documents extremely high signal:
+### Hygiene
+
+Keep all steering documents extremely high signal:
 
 - remove stale status notes
 - remove vague process language
@@ -62,22 +103,9 @@ Keep all crate documents extremely high signal:
 
 When in doubt, delete weak context instead of preserving it.
 
-## Collaboration with the user
-
-This crate is developed collaboratively with the user, with the documents above used to steer the AI.
-
-- Important design decisions must be discussed with the user before implementation.
-- If a task in `TODOS.md` is marked `(needs refinement)`, or if a task appears stale because semantics have moved on, stop and discuss it before proceeding.
-- Do not silently lock in semantics for difficult language-design questions.
-- If user-facing semantics are unclear, discuss them with the user first and then write the resolved semantics down in `SEMANTICS.md`.
-- Keep interning, lowering, and inference decisions consistent with `ARCHITECTURE.md`.
-- Prefer making uncertainty explicit over guessing.
-
 ## Testing strategy
 
-- `TESTING.md` is authoritative for the fixture setup and how fixtures are used to validate the low-level implementation details of the type checker.
 - Prefer fixtures because they are the primary way to validate the type checker, they are easy for humans to read in diffs, and they make it easy to create many tests quickly.
-- Prefer fixture-based tests for rendered diagnostics, normalized inference behavior, naming output, interface rendering, and other source-driven behavior whenever possible.
 - Prefer adding or tightening fixtures before writing parser-local or engine-local unit tests unless the behavior is genuinely awkward to express as a fixture.
 - Favor fixture renderers that expose semantic facts rather than implementation detail.
 - When adding a new phase or module, add or extend a fixture suite for that phase before relying on ad hoc unit tests.
@@ -89,6 +117,4 @@ This crate is developed collaboratively with the user, with the documents above 
 - Keep fixture `group__case` names stable as the test identity.
 - Reject duplicate fixture `group__case` names across the suite instead of silently shadowing one case with another.
 - Review fixture expectation changes deliberately when output changes.
-- Treat `SEMANTICS.md` and the fixture suite as contract documents; keep them in sync.
-- Do not change `SEMANTICS.md` without discussing it with the user first.
 - Do not reintroduce end-to-end named-argument mismatch fixtures until function-parameter lowering can represent the needed semantics.

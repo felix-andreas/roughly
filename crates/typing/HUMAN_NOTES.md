@@ -1,7 +1,6 @@
+# Human Notes (don't edit!)
+
 - scoping rules? (canonicalization in genreal)
-- annotations
-  - generics
-  - catch more user errors
 - lsp
   - inlay hints
   - hovering

@@ -12,3 +12,39 @@ This document tracks actionable planned work for the `typing` crate.
 - Delete or rewrite stale tasks instead of preserving historical plans.
 
 ## Current priorities
+
+- Rewrite `ARCHITECTURE.md`.
+  - Define the file-local phase order as `check -> lower -> naming -> typecheck -> diagnostics output`.
+  - Remove `parser` as a real crate phase.
+  - State that inference is an internal mechanism of `typecheck`.
+  - State that `diagnostics` is not a pipeline phase.
+  - State that `hir.rs` and `lower.rs` are separate boundaries.
+  - Record the use of stable arena or id-based HIR storage.
+
+- Rewrite `TESTING.md`.
+  - Replace the current `inference` suite with separate successful-check suites.
+  - Use `expressions` for smaller checked-expression cases.
+  - Describe the intended suite split for `annotations`, `naming`, `expressions`, `bindings`, `interfaces`, and `diagnostics`.
+  - Keep focused test-running guidance minimal.
+
+- Clean up the front-end boundary.
+  - Parse annotations during lowering exactly once.
+  - Remove duplicate annotation parsing from the main checking flow.
+  - Remove `parse.rs` from the public crate surface.
+  - Keep parser setup only as test support or external integration glue.
+
+- Introduce explicit HIR ownership.
+  - Create `hir.rs` as the representation boundary.
+  - Move lowered data structures out of `lower.rs`.
+  - Convert the lowered representation to stable arena or id-based storage.
+  - Keep source ranges and source-order information available on HIR items.
+
+- Introduce a separate naming phase.
+  - Add a naming entry point after lowering.
+  - Keep naming distinct even if lowering and naming run back to back.
+  - Delay the unresolved naming output choice until `OPEN_DECISIONS.md` is settled.
+
+- Keep typechecking structurally simple at first.
+  - Keep one `typecheck.rs` file initially.
+  - Defer splitting builtins, compatibility, and interface extraction into separate modules.
+  - Reshape the current inference code around the `typecheck` phase boundary.
