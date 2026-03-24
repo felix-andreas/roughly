@@ -1,0 +1,38 @@
+#==== basics
+#---- literals
+1L
+1.5
+"hello"
+TRUE
+#++++
+Integer("1L")
+Double("1.5")
+Character("\"hello\"")
+Logical(true)
+
+#---- assignment_with_annotation
+#: integer
+x <- 1L
+#++++
+#: integer
+Assign x
+  Integer("1L")
+
+#---- function_with_annotation
+#: fn(integer) -> integer
+f <- function(x) x
+#++++
+#: fn(integer) -> integer
+Assign f
+  Function (x)
+    Symbol(x)
+
+#---- standalone_type_alias
+#: @alias User {list{id: integer, name: character}}
+#++++
+TypeAlias User = list{id: integer, name: character}
+
+#---- type_definition_with_generic
+#: @type Pair<T, U> {list{first: T, second: U}}
+#++++
+TypeAlias Pair<T, U> = list{first: T, second: U}

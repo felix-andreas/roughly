@@ -26,11 +26,10 @@ If code changes make this document inaccurate, update it in the same session.
   - Do not treat older architectural prose elsewhere in the crate as settled if it conflicts with those files.
 
 - Recent implementation progress:
-  - The fixture harness now uses `tests/expressions` as the suite for smaller checked-expression cases.
-  - The old `tests/inference` directory was renamed to `tests/expressions`.
-  - The old `infer.rs` implementation module was renamed to `typecheck.rs`, and crate imports now use the phase name.
-  - `check_source` was removed from the crate surface; it now lives in test support alongside the parser helper.
-  - `diagnostics.rs` was renamed to `diagnostic.rs` so the crate layout now matches `STRUCTURE.md` more closely.
+  - `hir.rs` now uses `HirArena` and stable `ExpressionId`s.
+  - Lowering now processes `#:` annotations in a single pass directly into the `HirArena`.
+  - `naming.rs` resolves scopes and value bindings into stable `BindingId`s.
+  - Added a dedicated `lowering` fixture suite utilizing a new `Module.render()` method.
 
 - Current steering-document layout:
   - persistent authoritative: `README.md`, `SEMANTICS.md`, `ARCHITECTURE.md`, `STRUCTURE.md`, `TESTING.md`
@@ -40,39 +39,17 @@ If code changes make this document inaccurate, update it in the same session.
 
 - Agreed architectural direction already recorded in `DECISION_LOG.md`:
   - `check` stays the top-level orchestration entry point
-  - `parser` is not a real `typing` crate phase and should leave the public surface
   - phases should be `lower`, `naming`, `typecheck`, with diagnostics as output rather than a phase
-  - annotation parsing should happen during lowering exactly once
-  - naming stays distinct from lowering, even if they run back to back
-  - `hir.rs` and `lower.rs` should be separate files
-  - HIR should move to stable arena/id-based storage
   - keep one `typecheck.rs` for now
   - keep builtins, compatibility, and interface extraction inside `typecheck.rs` for now
-  - successful-check fixtures should be split into multiple suites
-  - use `expressions` as the suite name for the current smaller-expression fixture category
-
-- `ARCHITECTURE.md` was rewritten this session.
-  - It now records the new phase model, representation boundaries, and project-level direction.
-  - It also records that `parse.rs` is not part of the long-term public phase structure.
-  - It now explicitly requires fast single-file re-analysis and dependent rechecking through exported interfaces, even for closed files.
-
-- `STRUCTURE.md` was added this session.
-  - It now records the desired near-term file split and the role of each file.
-
-- `TESTING.md` was rewritten this session.
-  - It now records the intended suite split as `annotations`, `naming`, `expressions`, `bindings`, `interfaces`, and `diagnostics`.
-  - The `expressions` suite rename is now reflected in the harness and fixture directory layout.
-  - `naming`, `bindings`, and `interfaces` suites still need to be added.
 
 - Still-open design questions in `OPEN_DECISIONS.md`:
-  - whether naming resolves both value names and type names
-  - whether naming produces a new resolved artifact or HIR plus side tables
   - the exact typecheck environment shape beyond “builtins and imported interfaces”
 
 - Recommended next step for the next agent:
-  - start the code refactor for HIR/lowering/naming boundaries
-  - keep the remaining fixture migration focused on adding `naming`, `bindings`, and `interfaces` coverage rather than renaming existing suites again
-  - treat `typecheck.rs` as the current home for the old inference engine until the deeper split is ready
+  - Reshape `typecheck.rs` to consume the `NamingResult` bindings instead of the raw `Symbol`s.
+  - Handle mapping builtins and imported interfaces into stable `BindingId`s so typecheck can use them uniformly.
+  - Fix the failing tests in `diagnostics` and `expressions` suites, which were failing before the arena/naming refactor began.
 
 - Global requirement added near the end of the session:
   - keep single-file rechecking fast while still reporting dependent type errors across the project when exported interfaces change
@@ -80,7 +57,6 @@ If code changes make this document inaccurate, update it in the same session.
 
 - Important caution:
   - persistent authoritative documents must only be changed after user request or discussion
-  - in this case, the user has explicitly been discussing and directing the architecture and testing rewrite, so updating `ARCHITECTURE.md` and `TESTING.md` was intentional
   - current authoritative-document drift to discuss before editing:
     - `README.md` points to `IMPLEMENTATION_GAPS.md`, but that file is absent
     - `SEMANTICS.md` still references the old `tests/fixtures/inference/` path

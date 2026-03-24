@@ -13,24 +13,9 @@ This document tracks actionable planned work for the `typing` crate.
 
 ## Current priorities
 
-- Apply the desired file split in code.
-  - Add `naming.rs` for scopes, bindings, and use-site resolution.
-  - Rename or reshape the current checker files so they match `STRUCTURE.md`.
-
-- Rebuild the front-end boundary around HIR.
-  - Convert HIR to stable arena or id-based storage.
-  - Keep source ranges and source-order information available on HIR items.
-  - Represent annotation payloads and definition blocks directly in HIR.
-
-- Introduce the naming phase.
-  - Add a naming entry point after lowering.
-  - Keep naming distinct even if lowering and naming run back to back.
-  - Add binding identities and scope construction.
-  - Add use-site resolution over HIR.
-  - Resolve the open naming-output choice from `OPEN_DECISIONS.md` before locking in the representation.
-
 - Reshape typechecking around the new boundaries.
-  - Make `typecheck` consume the naming output instead of raw lowered names.
+  - Make `typecheck` consume the naming output (`BindingId`) instead of raw lowered `Symbol` names.
+  - Map builtin and imported interfaces to stable `BindingId`s so `typecheck` can look them up consistently.
   - Keep builtin typing, compatibility logic, and interface extraction inside `typecheck.rs` for now.
   - Replace the current inference-centric API with checked-file results that fit the new architecture.
 
@@ -42,7 +27,7 @@ This document tracks actionable planned work for the `typing` crate.
 - Migrate the fixture harness and fixture directories to the new suite split.
   - Add `bindings` and `interfaces` suites.
   - Add `naming` fixture coverage.
-  - Keep `annotations`, `expressions`, and `diagnostics` as first-class suites.
+  - Fix the failing tests in `diagnostics` and `expressions` that are failing due to known implementation gaps.
 
 - Add the project-level rechecking foundation without overcommitting.
   - Keep single-file rechecking fast.

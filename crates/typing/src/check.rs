@@ -71,6 +71,14 @@ pub fn check(node: Node<'_>, rope: &Rope, analysis_state: &mut AnalysisState) ->
 
     let module = lowering_result.module;
 
+    let naming_context = crate::naming::NamingContext::new(&module.arena);
+    let naming_result = naming_context.resolve_module(&module);
+    diagnostics.extend(naming_result.diagnostics.clone());
+
+    if !diagnostics.is_empty() {
+        return CheckResult { diagnostics };
+    }
+
     let mut inference_state = InferenceState::new();
     bind_builtins(&mut inference_state, &mut analysis_state.lowering_context);
 

@@ -94,8 +94,8 @@ fn scalar_types_unify_only_when_equal() {
     assert_eq!(
         result,
         Err(InferenceError::TypeMismatch {
-            expected: CoreType::Scalar(Atomic::Integer),
-            actual: CoreType::Scalar(Atomic::Double),
+            expected: Box::new(CoreType::Scalar(Atomic::Integer)),
+            actual: Box::new(CoreType::Scalar(Atomic::Double)),
             range: None,
             expression_id: None,
         })

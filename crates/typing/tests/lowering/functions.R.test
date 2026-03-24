@@ -1,0 +1,54 @@
+#==== functions
+#---- empty_function
+function() NULL
+#++++
+Function ()
+  Null
+
+#---- one_parameter
+function(x) x
+#++++
+Function (x)
+  Symbol(x)
+
+#---- multiple_parameters
+function(a, b, c) a
+#++++
+Function (a, b, c)
+  Symbol(a)
+
+#---- simple_call
+f()
+#++++
+Call
+  Symbol(f)
+
+#---- call_with_arguments
+f(1L, "a")
+#++++
+Call
+  Symbol(f)
+  Argument:
+    Integer("1L")
+  Argument:
+    Character("\"a\"")
+
+#---- call_with_named_arguments
+f(x = 1L, y = 2L)
+#++++
+Call
+  Symbol(f)
+  Argument x:
+    Integer("1L")
+  Argument y:
+    Integer("2L")
+
+#---- call_with_mixed_arguments
+f(1L, y = 2L)
+#++++
+Call
+  Symbol(f)
+  Argument:
+    Integer("1L")
+  Argument y:
+    Integer("2L")

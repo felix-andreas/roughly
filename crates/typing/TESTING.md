@@ -47,6 +47,7 @@ cargo test -p typing
 The intended fixture suites are:
 
 - `annotations`
+- `lowering`
 - `naming`
 - `expressions`
 - `bindings`
@@ -69,6 +70,19 @@ Expected output should show:
 
 - normalized type syntax
 - precise parse-error kind for invalid cases
+
+### `lowering`
+
+Purpose:
+
+- syntax-to-HIR lowering
+- annotation attachment
+- stable expression representation
+
+Expected output should show:
+
+- rendered AST-like dump of the HIR module
+- attached types on expressions
 
 ### `naming`
 

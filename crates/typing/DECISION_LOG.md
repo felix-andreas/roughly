@@ -41,3 +41,9 @@
 
 - use `expressions` as the suite name for smaller checked-expression cases.
   - This matches the current `inference` suite purpose more closely than `typecheck`.
+
+- Naming produces side tables keyed by stable ids.
+  - Now that HIR uses an arena and `ExpressionId`, side tables prevent allocating an entire new `NamedFile` tree. It also simplifies mapping AST locations for hover tools.
+
+- Naming resolves only value names for now.
+  - Since types are currently represented by `SurfaceType` from annotations, type-level scoping isn't necessary yet.

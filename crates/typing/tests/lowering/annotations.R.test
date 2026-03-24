@@ -1,0 +1,77 @@
+#==== annotations
+#---- top_level_assignment
+#: integer
+x <- 1L
+#++++
+#: integer
+Assign x
+  Integer("1L")
+
+#---- function_assignment
+#: fn(integer) -> integer
+f <- function(x) x
+#++++
+#: fn(integer) -> integer
+Assign f
+  Function (x)
+    Symbol(x)
+
+#---- expression_annotation
+#: integer
+1L
+#++++
+#: integer
+Integer("1L")
+
+#---- nested_block_annotation
+{
+  #: integer
+  x <- 1L
+}
+#++++
+Block (trailing_semi: false)
+  #: integer
+  Assign x
+    Integer("1L")
+
+#---- if_unknown_annotation
+#: @if-unknown integer
+x <- 1L
+#++++
+#: @if-unknown integer
+Assign x
+  Integer("1L")
+
+#---- trust_annotation
+#: @trust integer
+x <- 1L
+#++++
+#: @trust integer
+Assign x
+  Integer("1L")
+
+#---- multiline_annotation
+#: @param {integer} a
+#: @param {integer} b
+#: @return {integer}
+f <- function(a, b) a + b
+#++++
+#: fn(a: integer, b: integer) -> integer
+Assign f
+  Function (a, b)
+    Call
+      Symbol(+)
+      Argument:
+        Symbol(a)
+      Argument:
+        Symbol(b)
+
+#---- standalone_alias
+#: @alias Count {integer}
+#++++
+TypeAlias Count = integer
+
+#---- standalone_type
+#: @type Pair<T, U> {list{first: T, second: U}}
+#++++
+TypeAlias Pair<T, U> = list{first: T, second: U}

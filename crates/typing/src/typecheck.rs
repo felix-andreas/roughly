@@ -1,6 +1,6 @@
 use {
     crate::{
-        hir::{Argument, Expression, ExpressionId, ExpressionKind, Module},
+        hir::{Argument, Expression, ExpressionId, ExpressionKind, HirArena, Module},
         interner::Symbol,
         types::{
             AnnotationKind, Atomic, AttachedAnnotation, CoreType, FunctionType,
@@ -18,23 +18,12 @@ pub enum InferenceEntry {
     Bound(CoreType),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct InferenceState {
     next_variable_id: u32,
     entries: BTreeMap<InferenceVariableId, InferenceEntry>,
     environment: BTreeMap<Symbol, Binding>,
     builtins: BTreeMap<Symbol, BuiltinKind>,
-}
-
-impl Default for InferenceState {
-    fn default() -> Self {
-        Self {
-            next_variable_id: 0,
-            entries: BTreeMap::new(),
-            environment: BTreeMap::new(),
-            builtins: BTreeMap::new(),
-        }
-    }
 }
 
 impl InferenceState {
@@ -71,10 +60,11 @@ impl InferenceState {
     }
 
     pub fn infer_module(&mut self, module: &Module) -> Result<Vec<CoreType>, InferenceError> {
-        let mut inferred_types = Vec::with_capacity(module.expressions.len());
+        let mut inferred_types = Vec::with_capacity(module.root_expressions.len());
 
-        for expression in &module.expressions {
-            inferred_types.push(self.infer_expression(expression)?);
+        for expression_id in &module.root_expressions {
+            let expression = module.arena.get(*expression_id);
+            inferred_types.push(self.infer_expression(expression, &module.arena)?);
         }
 
         Ok(inferred_types)
@@ -83,6 +73,7 @@ impl InferenceState {
     pub fn infer_expression(
         &mut self,
         expression: &Expression,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
         match &expression.kind {
             ExpressionKind::Null => Ok(CoreType::Null),
@@ -96,7 +87,7 @@ impl InferenceState {
                 .cloned()
                 .map(|binding| self.instantiate_type_scheme(&binding.type_scheme))
                 .transpose()?
-                .ok_or_else(|| InferenceError::UnknownName {
+                .ok_or(InferenceError::UnknownName {
                     symbol: *symbol,
                     range: expression.range,
                     expression_id: expression.id,
@@ -104,13 +95,13 @@ impl InferenceState {
             ExpressionKind::Block {
                 expressions,
                 has_trailing_semicolon,
-            } => self.infer_block(expressions, *has_trailing_semicolon),
+            } => self.infer_block(expressions, *has_trailing_semicolon, arena),
             ExpressionKind::Assign {
                 target,
                 annotation,
                 value,
             } => {
-                let inferred_value = self.infer_expression(value)?;
+                let inferred_value = self.infer_expression(arena.get(*value), arena)?;
                 let binding_type = if let Some(annotation) = annotation {
                     if annotation.applies_to_binding {
                         self.apply_annotation(annotation, inferred_value, expression)?
@@ -135,7 +126,7 @@ impl InferenceState {
                     parameter_types.push(parameter_type);
                 }
 
-                let return_type = self.infer_expression(body)?;
+                let return_type = self.infer_expression(arena.get(*body), arena)?;
                 let function_type =
                     CoreType::Function(FunctionType::new(parameter_types, Vec::new(), return_type));
 
@@ -146,58 +137,74 @@ impl InferenceState {
                 condition,
                 consequence,
                 alternative,
-            } => {
-                self.infer_if_expression(condition, consequence, alternative.as_deref(), expression)
-            }
+            } => self.infer_if_expression(
+                arena.get(*condition),
+                arena.get(*consequence),
+                alternative.as_ref().map(|id| arena.get(*id)),
+                expression,
+                arena,
+            ),
             ExpressionKind::For {
                 variable,
                 sequence,
                 body,
-            } => self.infer_for_expression(*variable, sequence, body, expression.range),
+            } => self.infer_for_expression(
+                *variable,
+                arena.get(*sequence),
+                arena.get(*body),
+                expression.range,
+                arena,
+            ),
             ExpressionKind::While { condition, body } => {
-                self.infer_while_expression(condition, body)
+                self.infer_while_expression(arena.get(*condition), arena.get(*body), arena)
             }
-            ExpressionKind::Repeat { body } => self.infer_repeat_expression(body),
-            ExpressionKind::UnaryMinus { value } => self.infer_unary_minus(value),
+            ExpressionKind::Repeat { body } => {
+                self.infer_repeat_expression(arena.get(*body), arena)
+            }
+            ExpressionKind::UnaryMinus { value } => {
+                self.infer_unary_minus(arena.get(*value), arena)
+            }
             ExpressionKind::Call { callee, arguments } => {
-                if let ExpressionKind::Symbol(symbol) = &callee.kind {
-                    if let Some(inferred_type) =
-                        self.infer_builtin_call(*symbol, arguments, expression)?
-                    {
-                        return Ok(inferred_type);
-                    }
+                let callee_expr = arena.get(*callee);
+                if let ExpressionKind::Symbol(symbol) = &callee_expr.kind
+                    && let Some(inferred_type) =
+                        self.infer_builtin_call(*symbol, arguments, expression, arena)?
+                {
+                    return Ok(inferred_type);
                 }
 
-                self.infer_function_call_expression(callee, arguments, expression)
+                self.infer_function_call_expression(callee_expr, arguments, expression, arena)
             }
             ExpressionKind::Subset { value, arguments } => {
-                self.infer_subset_expression(value, arguments, expression)
+                self.infer_subset_expression(arena.get(*value), arguments, expression, arena)
             }
             ExpressionKind::Subset2 { value, arguments } => {
-                self.infer_subset2_expression(value, arguments, expression)
+                self.infer_subset2_expression(arena.get(*value), arguments, expression, arena)
             }
             ExpressionKind::Dollar { value, name } => {
-                self.infer_dollar_expression(value, *name, expression)
+                self.infer_dollar_expression(arena.get(*value), *name, expression, arena)
             }
+            ExpressionKind::TypeAlias { .. } => Ok(CoreType::Null),
             ExpressionKind::Unsupported => Ok(CoreType::Unknown),
         }
     }
 
     fn infer_block(
         &mut self,
-        expressions: &[Expression],
+        expressions: &[ExpressionId],
         has_trailing_semicolon: bool,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
         if expressions.is_empty() || has_trailing_semicolon {
-            for expression in expressions {
-                self.infer_expression(expression)?;
+            for expression_id in expressions {
+                self.infer_expression(arena.get(*expression_id), arena)?;
             }
             return Ok(CoreType::Null);
         }
 
         let mut last_type = CoreType::Null;
-        for expression in expressions {
-            last_type = self.infer_expression(expression)?;
+        for expression_id in expressions {
+            last_type = self.infer_expression(arena.get(*expression_id), arena)?;
         }
 
         Ok(last_type)
@@ -209,16 +216,17 @@ impl InferenceState {
         consequence: &Expression,
         alternative: Option<&Expression>,
         expression: &Expression,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
-        self.expect_scalar_logical(condition)?;
+        self.expect_scalar_logical(condition, arena)?;
 
-        let inferred_consequence = self.infer_expression(consequence)?;
+        let inferred_consequence = self.infer_expression(consequence, arena)?;
         let consequence_type = self.resolve(inferred_consequence)?;
         let Some(alternative) = alternative else {
             return Ok(nullable_type(consequence_type));
         };
 
-        let inferred_alternative = self.infer_expression(alternative)?;
+        let inferred_alternative = self.infer_expression(alternative, arena)?;
         let alternative_type = self.resolve(inferred_alternative)?;
         if consequence_type == alternative_type {
             return Ok(consequence_type);
@@ -229,8 +237,8 @@ impl InferenceState {
                 Ok(nullable_type(other_type))
             }
             (expected, actual) => Err(InferenceError::TypeMismatch {
-                expected,
-                actual,
+                expected: Box::new(expected),
+                actual: Box::new(actual),
                 range: Some(expression.range),
                 expression_id: Some(expression.id),
             }),
@@ -243,13 +251,14 @@ impl InferenceState {
         sequence: &Expression,
         body: &Expression,
         range: Range,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
-        let inferred_sequence = self.infer_expression(sequence)?;
+        let inferred_sequence = self.infer_expression(sequence, arena)?;
         let sequence_type = self.resolve(inferred_sequence)?;
         let Some(item_type) = iterable_item_type(&sequence_type) else {
             return Err(InferenceError::TypeMismatch {
-                expected: CoreType::Vector(Atomic::Integer),
-                actual: sequence_type,
+                expected: Box::new(CoreType::Vector(Atomic::Integer)),
+                actual: Box::new(sequence_type),
                 range: Some(range),
                 expression_id: Some(sequence.id),
             });
@@ -257,7 +266,7 @@ impl InferenceState {
 
         let previous_binding = self.environment.get(&variable).cloned();
         self.bind_name(variable, item_type, range);
-        self.infer_expression(body)?;
+        self.infer_expression(body, arena)?;
 
         if let Some(previous_binding) = previous_binding {
             self.environment.insert(variable, previous_binding);
@@ -272,26 +281,35 @@ impl InferenceState {
         &mut self,
         condition: &Expression,
         body: &Expression,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
-        self.expect_scalar_logical(condition)?;
-        self.infer_expression(body)?;
+        self.expect_scalar_logical(condition, arena)?;
+        self.infer_expression(body, arena)?;
         Ok(CoreType::Null)
     }
 
-    fn infer_repeat_expression(&mut self, body: &Expression) -> Result<CoreType, InferenceError> {
-        self.infer_expression(body)?;
+    fn infer_repeat_expression(
+        &mut self,
+        body: &Expression,
+        arena: &HirArena,
+    ) -> Result<CoreType, InferenceError> {
+        self.infer_expression(body, arena)?;
         Ok(CoreType::Null)
     }
 
-    fn expect_scalar_logical(&mut self, expression: &Expression) -> Result<(), InferenceError> {
-        let inferred_type = self.infer_expression(expression)?;
+    fn expect_scalar_logical(
+        &mut self,
+        expression: &Expression,
+        arena: &HirArena,
+    ) -> Result<(), InferenceError> {
+        let inferred_type = self.infer_expression(expression, arena)?;
         let actual = self.resolve(inferred_type)?;
         if actual == CoreType::Scalar(Atomic::Logical) {
             Ok(())
         } else {
             Err(InferenceError::TypeMismatch {
-                expected: CoreType::Scalar(Atomic::Logical),
-                actual,
+                expected: Box::new(CoreType::Scalar(Atomic::Logical)),
+                actual: Box::new(actual),
                 range: Some(expression.range),
                 expression_id: Some(expression.id),
             })
@@ -423,8 +441,8 @@ impl InferenceState {
                     Ok(expected_type)
                 } else {
                     Err(InferenceError::TypeMismatch {
-                        expected: expected_type,
-                        actual: actual_type,
+                        expected: Box::new(expected_type),
+                        actual: Box::new(actual_type),
                         range: Some(expression.range),
                         expression_id: Some(expression.id),
                     })
@@ -435,8 +453,8 @@ impl InferenceState {
                     Ok(expected_type)
                 } else {
                     Err(InferenceError::TypeMismatch {
-                        expected: CoreType::Unknown,
-                        actual: actual_type,
+                        expected: Box::new(CoreType::Unknown),
+                        actual: Box::new(actual_type),
                         range: Some(expression.range),
                         expression_id: Some(expression.id),
                     })
@@ -569,8 +587,8 @@ impl InferenceState {
                 Ok(CoreType::Function(unified_function))
             }
             (left_type, right_type) => Err(InferenceError::TypeMismatch {
-                expected: left_type,
-                actual: right_type,
+                expected: Box::new(left_type),
+                actual: Box::new(right_type),
                 range: expression.map(|current_expression| current_expression.range),
                 expression_id: expression.map(|current_expression| current_expression.id),
             }),
@@ -627,25 +645,40 @@ impl InferenceState {
         symbol: Symbol,
         arguments: &[Argument],
         expression: &Expression,
+        arena: &HirArena,
     ) -> Result<Option<CoreType>, InferenceError> {
         let Some(builtin_kind) = self.builtins.get(&symbol).copied() else {
             return Ok(None);
         };
 
         match builtin_kind {
-            BuiltinKind::Plus => self.infer_builtin_plus(arguments, expression).map(Some),
-            BuiltinKind::Minus => self.infer_builtin_minus(arguments, expression).map(Some),
-            BuiltinKind::Multiply => self.infer_builtin_multiply(arguments, expression).map(Some),
-            BuiltinKind::Divide => self.infer_builtin_divide(arguments, expression).map(Some),
-            BuiltinKind::Power => self.infer_builtin_power(arguments, expression).map(Some),
+            BuiltinKind::Plus => self
+                .infer_builtin_plus(arguments, expression, arena)
+                .map(Some),
+            BuiltinKind::Minus => self
+                .infer_builtin_minus(arguments, expression, arena)
+                .map(Some),
+            BuiltinKind::Multiply => self
+                .infer_builtin_multiply(arguments, expression, arena)
+                .map(Some),
+            BuiltinKind::Divide => self
+                .infer_builtin_divide(arguments, expression, arena)
+                .map(Some),
+            BuiltinKind::Power => self
+                .infer_builtin_power(arguments, expression, arena)
+                .map(Some),
             BuiltinKind::And => self
-                .infer_builtin_boolean_binary(arguments, expression)
+                .infer_builtin_boolean_binary(arguments, expression, arena)
                 .map(Some),
             BuiltinKind::Or => self
-                .infer_builtin_boolean_binary(arguments, expression)
+                .infer_builtin_boolean_binary(arguments, expression, arena)
                 .map(Some),
-            BuiltinKind::Combine => self.infer_builtin_combine(arguments, expression).map(Some),
-            BuiltinKind::List => self.infer_builtin_list(arguments, expression).map(Some),
+            BuiltinKind::Combine => self
+                .infer_builtin_combine(arguments, expression, arena)
+                .map(Some),
+            BuiltinKind::List => self
+                .infer_builtin_list(arguments, expression, arena)
+                .map(Some),
         }
     }
 
@@ -653,40 +686,55 @@ impl InferenceState {
         &mut self,
         arguments: &[Argument],
         expression: &Expression,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
-        self.infer_binary_numeric(arguments, expression, NumericResultAtomic::Promote)
+        self.infer_binary_numeric(arguments, expression, NumericResultAtomic::Promote, arena)
     }
 
     fn infer_builtin_minus(
         &mut self,
         arguments: &[Argument],
         expression: &Expression,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
-        self.infer_binary_numeric(arguments, expression, NumericResultAtomic::Promote)
+        self.infer_binary_numeric(arguments, expression, NumericResultAtomic::Promote, arena)
     }
 
     fn infer_builtin_multiply(
         &mut self,
         arguments: &[Argument],
         expression: &Expression,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
-        self.infer_binary_numeric(arguments, expression, NumericResultAtomic::Promote)
+        self.infer_binary_numeric(arguments, expression, NumericResultAtomic::Promote, arena)
     }
 
     fn infer_builtin_divide(
         &mut self,
         arguments: &[Argument],
         expression: &Expression,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
-        self.infer_binary_numeric(arguments, expression, NumericResultAtomic::AlwaysDouble)
+        self.infer_binary_numeric(
+            arguments,
+            expression,
+            NumericResultAtomic::AlwaysDouble,
+            arena,
+        )
     }
 
     fn infer_builtin_power(
         &mut self,
         arguments: &[Argument],
         expression: &Expression,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
-        self.infer_binary_numeric(arguments, expression, NumericResultAtomic::AlwaysDouble)
+        self.infer_binary_numeric(
+            arguments,
+            expression,
+            NumericResultAtomic::AlwaysDouble,
+            arena,
+        )
     }
 
     fn infer_binary_numeric(
@@ -694,6 +742,7 @@ impl InferenceState {
         arguments: &[Argument],
         expression: &Expression,
         numeric_result_atomic: NumericResultAtomic,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
         if arguments.len() != 2 {
             return Err(InferenceError::FunctionArityMismatch {
@@ -704,8 +753,11 @@ impl InferenceState {
             });
         }
 
-        let left_type = self.infer_expression(&arguments[0].expression)?;
-        let right_type = self.infer_expression(&arguments[1].expression)?;
+        let arg0 = arena.get(arguments[0].expression);
+        let arg1 = arena.get(arguments[1].expression);
+
+        let left_type = self.infer_expression(arg0, arena)?;
+        let right_type = self.infer_expression(arg1, arena)?;
 
         let resolved_left = self.resolve(left_type)?;
         let resolved_right = self.resolve(right_type)?;
@@ -721,8 +773,8 @@ impl InferenceState {
             None => {
                 return Err(InferenceError::InvalidPlusOperand {
                     actual: resolved_left.clone(),
-                    range: arguments[0].expression.range,
-                    expression_id: arguments[0].expression.id,
+                    range: arg0.range,
+                    expression_id: arg0.id,
                 });
             }
         };
@@ -735,8 +787,8 @@ impl InferenceState {
             None => {
                 return Err(InferenceError::InvalidPlusOperand {
                     actual: resolved_right.clone(),
-                    range: arguments[1].expression.range,
-                    expression_id: arguments[1].expression.id,
+                    range: arg1.range,
+                    expression_id: arg1.id,
                 });
             }
         };
@@ -756,8 +808,12 @@ impl InferenceState {
         Ok(core_type_for_shape(result_shape, result_atomic))
     }
 
-    fn infer_unary_minus(&mut self, value: &Expression) -> Result<CoreType, InferenceError> {
-        let inferred_type = self.infer_expression(value)?;
+    fn infer_unary_minus(
+        &mut self,
+        value: &Expression,
+        arena: &HirArena,
+    ) -> Result<CoreType, InferenceError> {
+        let inferred_type = self.infer_expression(value, arena)?;
         let resolved_type = self.resolve(inferred_type)?;
         let (shape, atomic) = numeric_operand_parts(&resolved_type).ok_or_else(|| {
             InferenceError::InvalidPlusOperand {
@@ -775,8 +831,9 @@ impl InferenceState {
         callee: &Expression,
         arguments: &[Argument],
         expression: &Expression,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
-        let inferred_callee = self.infer_expression(callee)?;
+        let inferred_callee = self.infer_expression(callee, arena)?;
         let resolved_callee = self.resolve(inferred_callee)?;
 
         match resolved_callee {
@@ -787,7 +844,8 @@ impl InferenceState {
                 let mut named_arguments = Vec::new();
 
                 for argument in arguments {
-                    let inferred_argument = self.infer_expression(&argument.expression)?;
+                    let inferred_argument =
+                        self.infer_expression(arena.get(argument.expression), arena)?;
                     if let Some(name) = argument.name {
                         named_arguments.push(RecordField::new(name, inferred_argument));
                     } else {
@@ -808,7 +866,7 @@ impl InferenceState {
                 self.resolve(CoreType::Variable(return_variable))
             }
             CoreType::Function(function_type) => {
-                self.infer_function_call(function_type, arguments, callee, expression)
+                self.infer_function_call(function_type, arguments, callee, expression, arena)
             }
             other_type => Err(InferenceError::ExpectedFunction {
                 actual_type: other_type,
@@ -824,6 +882,7 @@ impl InferenceState {
         arguments: &[Argument],
         callee: &Expression,
         expression: &Expression,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
         let total_parameters =
             function_type.parameters.len() + function_type.named_parameters.len();
@@ -843,7 +902,8 @@ impl InferenceState {
         let mut remaining_named_parameters = function_type.named_parameters;
 
         for argument in arguments {
-            let inferred_argument = self.infer_expression(&argument.expression)?;
+            let arg_expr = arena.get(argument.expression);
+            let inferred_argument = self.infer_expression(arg_expr, arena)?;
             if let Some(name) = argument.name {
                 let Some(parameter_index) = remaining_named_parameters
                     .iter()
@@ -858,23 +918,19 @@ impl InferenceState {
                 };
 
                 let parameter = remaining_named_parameters.remove(parameter_index);
-                self.unify_with_context(parameter.value, inferred_argument, &argument.expression)?;
+                self.unify_with_context(parameter.value, inferred_argument, arg_expr)?;
                 continue;
             }
 
             if let Some(parameter) = positional_parameters.get(next_positional_index) {
                 next_positional_index += 1;
-                self.unify_with_context(
-                    parameter.clone(),
-                    inferred_argument,
-                    &argument.expression,
-                )?;
+                self.unify_with_context(parameter.clone(), inferred_argument, arg_expr)?;
                 continue;
             }
 
             if !remaining_named_parameters.is_empty() {
                 let parameter = remaining_named_parameters.remove(0);
-                self.unify_with_context(parameter.value, inferred_argument, &argument.expression)?;
+                self.unify_with_context(parameter.value, inferred_argument, arg_expr)?;
                 continue;
             }
 
@@ -905,6 +961,7 @@ impl InferenceState {
         value: &Expression,
         arguments: &[Argument],
         expression: &Expression,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
         if arguments.len() != 1 || arguments[0].name.is_some() {
             return Err(InferenceError::FunctionArityMismatch {
@@ -915,9 +972,10 @@ impl InferenceState {
             });
         }
 
-        let inferred_value = self.infer_expression(value)?;
+        let inferred_value = self.infer_expression(value, arena)?;
         let value_type = self.resolve(inferred_value)?;
-        let inferred_index = self.infer_expression(&arguments[0].expression)?;
+        let arg0_expr = arena.get(arguments[0].expression);
+        let inferred_index = self.infer_expression(arg0_expr, arena)?;
         let index_type = self.resolve(inferred_index)?;
 
         match value_type {
@@ -930,7 +988,7 @@ impl InferenceState {
                     return Err(index_type_mismatch(
                         CoreType::Tuple(items),
                         index_type,
-                        &arguments[0].expression,
+                        arg0_expr,
                     ));
                 };
                 Ok(CoreType::List(Box::new(item_type)))
@@ -944,16 +1002,12 @@ impl InferenceState {
                     return Err(index_type_mismatch(
                         CoreType::Record(fields),
                         index_type,
-                        &arguments[0].expression,
+                        arg0_expr,
                     ));
                 };
                 Ok(CoreType::NamedList(Box::new(item_type)))
             }
-            other_type => Err(index_type_mismatch(
-                other_type,
-                index_type,
-                &arguments[0].expression,
-            )),
+            other_type => Err(index_type_mismatch(other_type, index_type, arg0_expr)),
         }
     }
 
@@ -962,6 +1016,7 @@ impl InferenceState {
         value: &Expression,
         arguments: &[Argument],
         expression: &Expression,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
         if arguments.len() != 1 || arguments[0].name.is_some() {
             return Err(InferenceError::FunctionArityMismatch {
@@ -972,10 +1027,10 @@ impl InferenceState {
             });
         }
 
-        let inferred_value = self.infer_expression(value)?;
+        let inferred_value = self.infer_expression(value, arena)?;
         let value_type = self.resolve(inferred_value)?;
-        let index_expression = &arguments[0].expression;
-        let inferred_index = self.infer_expression(index_expression)?;
+        let index_expression = arena.get(arguments[0].expression);
+        let inferred_index = self.infer_expression(index_expression, arena)?;
         let index_type = self.resolve(inferred_index)?;
 
         match value_type {
@@ -1048,8 +1103,9 @@ impl InferenceState {
         value: &Expression,
         name: Symbol,
         expression: &Expression,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
-        let inferred_value = self.infer_expression(value)?;
+        let inferred_value = self.infer_expression(value, arena)?;
         let value_type = self.resolve(inferred_value)?;
 
         match value_type {
@@ -1079,6 +1135,7 @@ impl InferenceState {
         &mut self,
         arguments: &[Argument],
         expression: &Expression,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
         if arguments.len() != 2 {
             return Err(InferenceError::FunctionArityMismatch {
@@ -1089,8 +1146,8 @@ impl InferenceState {
             });
         }
 
-        self.expect_scalar_logical(&arguments[0].expression)?;
-        self.expect_scalar_logical(&arguments[1].expression)?;
+        self.expect_scalar_logical(arena.get(arguments[0].expression), arena)?;
+        self.expect_scalar_logical(arena.get(arguments[1].expression), arena)?;
         Ok(CoreType::Scalar(Atomic::Logical))
     }
 
@@ -1098,6 +1155,7 @@ impl InferenceState {
         &mut self,
         arguments: &[Argument],
         _expression: &Expression,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
         if arguments.is_empty() {
             return Ok(CoreType::Unknown);
@@ -1109,25 +1167,26 @@ impl InferenceState {
         for argument in arguments {
             all_arguments_are_named &= argument.name.is_some();
 
-            let inferred_argument = self.infer_expression(&argument.expression)?;
+            let arg_expr = arena.get(argument.expression);
+            let inferred_argument = self.infer_expression(arg_expr, arena)?;
             let resolved_argument = self.resolve(inferred_argument)?;
 
             let Some(current_atomic) = combine_operand_atomic(&resolved_argument) else {
                 return Err(InferenceError::TypeMismatch {
-                    expected: CoreType::Scalar(Atomic::Integer),
-                    actual: resolved_argument.clone(),
-                    range: Some(argument.expression.range),
-                    expression_id: Some(argument.expression.id),
+                    expected: Box::new(CoreType::Scalar(Atomic::Integer)),
+                    actual: Box::new(resolved_argument.clone()),
+                    range: Some(arg_expr.range),
+                    expression_id: Some(arg_expr.id),
                 });
             };
 
             item_atomic = Some(match item_atomic {
                 Some(previous_atomic) => promote_combine_atomic(previous_atomic, current_atomic)
                     .ok_or_else(|| InferenceError::TypeMismatch {
-                        expected: CoreType::Scalar(previous_atomic),
-                        actual: resolved_argument.clone(),
-                        range: Some(argument.expression.range),
-                        expression_id: Some(argument.expression.id),
+                        expected: Box::new(CoreType::Scalar(previous_atomic)),
+                        actual: Box::new(resolved_argument.clone()),
+                        range: Some(arg_expr.range),
+                        expression_id: Some(arg_expr.id),
                     })?,
                 None => current_atomic,
             });
@@ -1145,6 +1204,7 @@ impl InferenceState {
         &mut self,
         arguments: &[Argument],
         expression: &Expression,
+        arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
         if arguments.is_empty() {
             return Ok(CoreType::Tuple(Vec::new()));
@@ -1163,7 +1223,7 @@ impl InferenceState {
         if all_arguments_are_named {
             let mut fields = Vec::with_capacity(arguments.len());
             for argument in arguments {
-                let inferred_type = self.infer_expression(&argument.expression)?;
+                let inferred_type = self.infer_expression(arena.get(argument.expression), arena)?;
                 let inferred_type = self.resolve(inferred_type)?;
                 fields.push(RecordField::new(
                     argument
@@ -1176,7 +1236,7 @@ impl InferenceState {
         } else {
             let mut items = Vec::with_capacity(arguments.len());
             for argument in arguments {
-                let inferred_type = self.infer_expression(&argument.expression)?;
+                let inferred_type = self.infer_expression(arena.get(argument.expression), arena)?;
                 items.push(self.resolve(inferred_type)?);
             }
             Ok(CoreType::Tuple(items))
@@ -1771,8 +1831,8 @@ fn index_type_mismatch(
     expression: &Expression,
 ) -> InferenceError {
     InferenceError::TypeMismatch {
-        expected,
-        actual,
+        expected: Box::new(expected),
+        actual: Box::new(actual),
         range: Some(expression.range),
         expression_id: Some(expression.id),
     }
@@ -1853,8 +1913,8 @@ pub enum InferenceError {
         expression_id: Option<ExpressionId>,
     },
     TypeMismatch {
-        expected: CoreType,
-        actual: CoreType,
+        expected: Box<CoreType>,
+        actual: Box<CoreType>,
         range: Option<Range>,
         expression_id: Option<ExpressionId>,
     },

@@ -4,6 +4,7 @@ pub mod diagnostic;
 pub mod hir;
 pub mod interner;
 pub mod lower;
+pub mod naming;
 pub mod text;
 pub mod typecheck;
 pub mod types;

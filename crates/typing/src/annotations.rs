@@ -1337,10 +1337,10 @@ impl<'a> TypeParser<'a> {
         }
 
         let list_end = position + 4;
-        if let Some(next_byte) = bytes.get(list_end).copied() {
-            if next_byte == b'_' || next_byte.is_ascii_alphanumeric() {
-                return false;
-            }
+        if let Some(next_byte) = bytes.get(list_end).copied()
+            && (next_byte == b'_' || next_byte.is_ascii_alphanumeric())
+        {
+            return false;
         }
 
         position = list_end;
@@ -1393,10 +1393,10 @@ impl<'a> TypeParser<'a> {
         }
 
         let end = self.position + keyword.len();
-        if let Some(next_byte) = self.source.as_bytes().get(end).copied() {
-            if next_byte == b'_' || next_byte.is_ascii_alphanumeric() {
-                return false;
-            }
+        if let Some(next_byte) = self.source.as_bytes().get(end).copied()
+            && (next_byte == b'_' || next_byte.is_ascii_alphanumeric())
+        {
+            return false;
         }
 
         self.position = end;

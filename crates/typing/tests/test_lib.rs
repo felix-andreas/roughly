@@ -61,7 +61,7 @@ fn lowering_context_assigns_unique_expression_ids() {
     let first_expression = lowering_context.expression(range, ExpressionKind::Null);
     let second_expression = lowering_context.expression(range, ExpressionKind::Null);
 
-    assert_ne!(first_expression.id, second_expression.id);
+    assert_ne!(first_expression, second_expression);
 }
 
 #[test]
@@ -70,7 +70,8 @@ fn lowered_symbol_expression_preserves_range_and_symbol() {
     let range = test_range();
     let symbol = lowering_context.intern("identity");
 
-    let expression = lowering_context.expression(range, ExpressionKind::Symbol(symbol));
+    let expression_id = lowering_context.expression(range, ExpressionKind::Symbol(symbol));
+    let expression = lowering_context.arena.get(expression_id);
 
     assert_eq!(expression.range, range);
     assert_eq!(expression.annotation, None);
@@ -85,14 +86,15 @@ fn lowered_assignment_uses_interned_target_symbol() {
     let target = lowering_context.intern("result");
     let value = lowering_context.expression(range, ExpressionKind::Integer("1L".to_owned()));
 
-    let assignment = lowering_context.expression(
+    let assignment_id = lowering_context.expression(
         range,
         ExpressionKind::Assign {
             target,
             annotation: None,
-            value: Box::new(value),
+            value,
         },
     );
+    let assignment = lowering_context.arena.get(assignment_id);
 
     match assignment.kind {
         ExpressionKind::Assign {
@@ -103,7 +105,7 @@ fn lowered_assignment_uses_interned_target_symbol() {
             assert_eq!(assigned_target, target);
             assert_eq!(lowering_context.resolve(assigned_target), Some("result"));
         }
-        other_kind => panic!("expected assignment, got {other_kind:?}"),
+        ref other_kind => panic!("expected assignment, got {other_kind:?}"),
     }
 }
 
@@ -121,10 +123,11 @@ fn lowering_assignment_snippet_interns_the_assigned_name() {
         value <- 1L
     "#});
 
-    let expression = module
-        .expressions
+    let expression_id = module
+        .root_expressions
         .first()
         .expect("assignment expression should be lowered");
+    let expression = module.arena.get(*expression_id);
 
     match &expression.kind {
         ExpressionKind::Assign { target, .. } => {
@@ -180,10 +183,11 @@ fn lowering_unsupported_snippet_produces_an_unsupported_expression() {
         if (flag) value else other
     "#});
 
-    let expression = module
-        .expressions
+    let expression_id = module
+        .root_expressions
         .first()
         .expect("unsupported expression should be lowered");
+    let expression = module.arena.get(*expression_id);
 
     assert_eq!(expression.annotation, None);
     assert!(matches!(expression.kind, ExpressionKind::Unsupported));
@@ -193,12 +197,12 @@ fn lowering_unsupported_snippet_produces_an_unsupported_expression() {
 fn trailing_assignment_annotation_attaches_to_the_assignment_expression_and_binding() {
     let module = lower("value <- 1L #: integer\n");
 
-    let expression = module
-        .expressions
+    let expression_id = module
+        .root_expressions
         .first()
         .expect("assignment expression should be lowered");
+    let expression = module.arena.get(*expression_id);
 
-    assert!(module.annotations.is_empty());
     assert_eq!(expression.annotation, None);
 
     match &expression.kind {
@@ -208,7 +212,8 @@ fn trailing_assignment_annotation_attaches_to_the_assignment_expression_and_bind
             value,
         } => {
             assert_eq!(*annotation, None);
-            assert_eq!(value.annotation, None);
+            let value_expr = module.arena.get(*value);
+            assert_eq!(value_expr.annotation, None);
         }
         other_kind => panic!("expected assignment, got {other_kind:?}"),
     }

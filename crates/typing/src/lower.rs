@@ -2,10 +2,7 @@ use {
     crate::{
         annotations::parse_annotation,
         diagnostic::Diagnostic,
-        hir::{
-            Argument, Expression, ExpressionId, ExpressionKind, Module, Parameter,
-            PendingAnnotation,
-        },
+        hir::{Argument, Expression, ExpressionId, ExpressionKind, HirArena, Module, Parameter},
         interner::{Interner, Symbol},
         text,
         types::{Annotation, AttachedAnnotation},
@@ -16,7 +13,8 @@ use {
 
 #[derive(Debug, Default)]
 pub struct LoweringContext {
-    next_expression_id: u32,
+    pub arena: HirArena,
+    pub diagnostics: Vec<Diagnostic>,
     interner: Interner,
 }
 
@@ -29,12 +27,6 @@ pub struct LoweringResult {
 impl LoweringContext {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn fresh_expression_id(&mut self) -> ExpressionId {
-        let expression_id = ExpressionId(self.next_expression_id);
-        self.next_expression_id += 1;
-        expression_id
     }
 
     pub fn intern(&mut self, text: &str) -> Symbol {
@@ -53,7 +45,7 @@ impl LoweringContext {
         &mut self.interner
     }
 
-    pub fn expression(&mut self, range: Range, kind: ExpressionKind) -> Expression {
+    pub fn expression(&mut self, range: Range, kind: ExpressionKind) -> ExpressionId {
         self.annotated_expression(range, None, kind)
     }
 
@@ -62,8 +54,10 @@ impl LoweringContext {
         range: Range,
         annotation: Option<AttachedAnnotation>,
         kind: ExpressionKind,
-    ) -> Expression {
-        Expression::new(self.fresh_expression_id(), range, annotation, kind)
+    ) -> ExpressionId {
+        // ID will be assigned by arena.alloc
+        let expr = Expression::new(ExpressionId(0), range, annotation, kind);
+        self.arena.alloc(expr)
     }
 
     pub fn lower_tree(&mut self, tree: &Tree, source: &str) -> Module {
@@ -86,11 +80,11 @@ impl LoweringContext {
         lower_root_with_rope_with_diagnostics(root, rope, self)
     }
 
-    pub fn lower_node(&mut self, node: Node<'_>, source: &str) -> Expression {
+    pub fn lower_node(&mut self, node: Node<'_>, source: &str) -> ExpressionId {
         lower_node(node, source, self)
     }
 
-    pub fn lower_node_with_rope(&mut self, node: Node<'_>, rope: &Rope) -> Expression {
+    pub fn lower_node_with_rope(&mut self, node: Node<'_>, rope: &Rope) -> ExpressionId {
         lower_node_with_rope(node, rope, self)
     }
 }
@@ -122,23 +116,13 @@ pub fn lower_root_with_rope_with_diagnostics(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> LoweringResult {
-    let mut expressions = Vec::new();
+    let expressions = lower_expression_list(root, rope, lowering_context);
 
-    let child_count = root.named_child_count();
-    for child_index in 0..child_count {
-        if let Some(child) = root.named_child(child_index) {
-            if child.kind() == "comment" {
-                continue;
-            }
-            expressions.push(lower_node_with_rope(child, rope, lowering_context));
-        }
-    }
-
-    let (annotations, diagnostics) =
-        collect_and_attach_annotations(rope, &mut expressions, lowering_context);
+    let arena = std::mem::take(&mut lowering_context.arena);
+    let diagnostics = std::mem::take(&mut lowering_context.diagnostics);
 
     LoweringResult {
-        module: Module::new(expressions, annotations),
+        module: Module::new(arena, expressions),
         diagnostics,
     }
 }
@@ -147,7 +131,7 @@ pub fn lower_node(
     node: Node<'_>,
     source: &str,
     lowering_context: &mut LoweringContext,
-) -> Expression {
+) -> ExpressionId {
     let rope = Rope::from_str(source);
     lower_node_with_rope(node, &rope, lowering_context)
 }
@@ -156,7 +140,7 @@ pub fn lower_node_with_rope(
     node: Node<'_>,
     rope: &Rope,
     lowering_context: &mut LoweringContext,
-) -> Expression {
+) -> ExpressionId {
     let kind = match node.kind() {
         "identifier" => ExpressionKind::Symbol(intern_node_text(node, rope, lowering_context)),
         "null" => ExpressionKind::Null,
@@ -177,7 +161,12 @@ pub fn lower_node_with_rope(
         "subset" => lower_subset(node, rope, lowering_context),
         "subset2" => lower_subset2(node, rope, lowering_context),
         "extract_operator" => lower_extract_operator(node, rope, lowering_context),
-        "parenthesized_expression" => lower_wrapped_expression_kind(node, rope, lowering_context),
+        "parenthesized_expression" => {
+            if let Some(inner) = first_named_child(node) {
+                return lower_node_with_rope(inner, rope, lowering_context);
+            }
+            ExpressionKind::Unsupported
+        }
         _ => ExpressionKind::Unsupported,
     };
 
@@ -215,15 +204,13 @@ fn lower_binary_operator(
             ExpressionKind::Assign {
                 target,
                 annotation: None,
-                value: Box::new(value),
+                value,
             }
         }
         "+" | "-" | "*" | "/" | "**" | "&&" | "||" => {
             let operator_symbol = intern_node_text(operator, rope, lowering_context);
-            let callee = Box::new(
-                lowering_context
-                    .expression(operator.range(), ExpressionKind::Symbol(operator_symbol)),
-            );
+            let callee = lowering_context
+                .expression(operator.range(), ExpressionKind::Symbol(operator_symbol));
             let arguments = vec![
                 Argument {
                     expression: lower_node_with_rope(lhs, rope, lowering_context),
@@ -246,14 +233,7 @@ fn lower_block(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
-    let mut expressions = Vec::new();
-
-    for child_index in 0..node.named_child_count() {
-        let Some(child) = node.named_child(child_index) else {
-            continue;
-        };
-        expressions.push(lower_node_with_rope(child, rope, lowering_context));
-    }
+    let expressions = lower_expression_list(node, rope, lowering_context);
 
     let has_trailing_semicolon = node_text(node, rope)
         .trim()
@@ -280,7 +260,7 @@ fn lower_unary_operator(
 
     match operator.kind() {
         "-" => ExpressionKind::UnaryMinus {
-            value: Box::new(lower_node_with_rope(value, rope, lowering_context)),
+            value: lower_node_with_rope(value, rope, lowering_context),
         },
         _ => ExpressionKind::Unsupported,
     }
@@ -298,10 +278,8 @@ fn lower_function_definition(
 
     let body = node
         .child_by_field_name("body")
-        .map(|body| Box::new(lower_node_with_rope(body, rope, lowering_context)))
-        .unwrap_or_else(|| {
-            Box::new(lowering_context.expression(node.range(), ExpressionKind::Unsupported))
-        });
+        .map(|body| lower_node_with_rope(body, rope, lowering_context))
+        .unwrap_or_else(|| lowering_context.expression(node.range(), ExpressionKind::Unsupported));
 
     ExpressionKind::Function { parameters, body }
 }
@@ -319,11 +297,11 @@ fn lower_if_statement(
     };
 
     ExpressionKind::If {
-        condition: Box::new(lower_node_with_rope(condition, rope, lowering_context)),
-        consequence: Box::new(lower_node_with_rope(consequence, rope, lowering_context)),
+        condition: lower_node_with_rope(condition, rope, lowering_context),
+        consequence: lower_node_with_rope(consequence, rope, lowering_context),
         alternative: node
             .child_by_field_name("alternative")
-            .map(|alternative| Box::new(lower_node_with_rope(alternative, rope, lowering_context))),
+            .map(|alternative| lower_node_with_rope(alternative, rope, lowering_context)),
     }
 }
 
@@ -347,8 +325,8 @@ fn lower_for_statement(
 
     ExpressionKind::For {
         variable: intern_node_text(variable, rope, lowering_context),
-        sequence: Box::new(lower_node_with_rope(sequence, rope, lowering_context)),
-        body: Box::new(lower_node_with_rope(body, rope, lowering_context)),
+        sequence: lower_node_with_rope(sequence, rope, lowering_context),
+        body: lower_node_with_rope(body, rope, lowering_context),
     }
 }
 
@@ -365,8 +343,8 @@ fn lower_while_statement(
     };
 
     ExpressionKind::While {
-        condition: Box::new(lower_node_with_rope(condition, rope, lowering_context)),
-        body: Box::new(lower_node_with_rope(body, rope, lowering_context)),
+        condition: lower_node_with_rope(condition, rope, lowering_context),
+        body: lower_node_with_rope(body, rope, lowering_context),
     }
 }
 
@@ -380,7 +358,7 @@ fn lower_repeat_statement(
     };
 
     ExpressionKind::Repeat {
-        body: Box::new(lower_node_with_rope(body, rope, lowering_context)),
+        body: lower_node_with_rope(body, rope, lowering_context),
     }
 }
 
@@ -430,7 +408,7 @@ fn lower_call(
         return ExpressionKind::Unsupported;
     };
 
-    let callee = Box::new(lower_node_with_rope(function, rope, lowering_context));
+    let callee = lower_node_with_rope(function, rope, lowering_context);
     let arguments = node
         .child_by_field_name("arguments")
         .map(|arguments| lower_arguments(arguments, rope, lowering_context))
@@ -448,7 +426,7 @@ fn lower_subset(
         return ExpressionKind::Unsupported;
     };
 
-    let value = Box::new(lower_node_with_rope(function, rope, lowering_context));
+    let value = lower_node_with_rope(function, rope, lowering_context);
     let arguments = node
         .child_by_field_name("arguments")
         .map(|arguments| lower_index_arguments(arguments, rope, lowering_context))
@@ -466,7 +444,7 @@ fn lower_subset2(
         return ExpressionKind::Unsupported;
     };
 
-    let value = Box::new(lower_node_with_rope(function, rope, lowering_context));
+    let value = lower_node_with_rope(function, rope, lowering_context);
     let arguments = node
         .child_by_field_name("arguments")
         .map(|arguments| lower_index_arguments(arguments, rope, lowering_context))
@@ -500,7 +478,7 @@ fn lower_extract_operator(
     };
 
     ExpressionKind::Dollar {
-        value: Box::new(lower_node_with_rope(lhs, rope, lowering_context)),
+        value: lower_node_with_rope(lhs, rope, lowering_context),
         name,
     }
 }
@@ -578,18 +556,6 @@ fn lower_index_arguments(
     lowered_arguments
 }
 
-fn lower_wrapped_expression_kind(
-    node: Node<'_>,
-    rope: &Rope,
-    lowering_context: &mut LoweringContext,
-) -> ExpressionKind {
-    if let Some(inner) = first_named_child(node) {
-        return lower_node_with_rope(inner, rope, lowering_context).kind;
-    }
-
-    ExpressionKind::Unsupported
-}
-
 fn first_named_child(node: Node<'_>) -> Option<Node<'_>> {
     let child_count = node.named_child_count();
 
@@ -630,102 +596,159 @@ fn intern_node_text(node: Node<'_>, rope: &Rope, lowering_context: &mut Lowering
     lowering_context.intern(&text)
 }
 
-fn collect_and_attach_annotations(
+fn lower_expression_list(
+    node: Node<'_>,
     rope: &Rope,
-    expressions: &mut [Expression],
     lowering_context: &mut LoweringContext,
-) -> (Vec<PendingAnnotation>, Vec<Diagnostic>) {
-    let mut annotations = Vec::new();
-    let mut diagnostics = Vec::new();
-    let lines = text::all_lines(rope);
-    let mut row = 0;
+) -> Vec<ExpressionId> {
+    let mut expressions = Vec::new();
+    let child_count = node.named_child_count();
+    let mut child_index = 0;
 
-    while row < lines.len() {
-        let Some(annotation_block) = text::annotation_block(rope, row) else {
-            row += 1;
+    while child_index < child_count {
+        let Some(child) = node.named_child(child_index) else {
+            child_index += 1;
             continue;
         };
 
-        let annotation_text = annotation_block.text.trim();
+        if child.kind() == "comment" {
+            let text = node_text(child, rope);
+            let trimmed = text.trim_start();
+            if trimmed.starts_with("#:") {
+                let mut block_text = trimmed.to_string();
+                let mut block_range = child.range();
 
-        if annotation_text.is_empty() {
-            diagnostics.push(Diagnostic::syntax_error(
-                annotation_block.range,
-                "A `#:` typing comment must include a type expression.",
-            ));
-            row = annotation_block.last_row + 1;
-            continue;
-        }
-
-        let next_row = annotation_block.last_row + 1;
-        if next_row >= lines.len() {
-            diagnostics.push(Diagnostic::syntax_error(
-                annotation_block.range,
-                "A `#:` typing comment must be followed immediately by an expression.",
-            ));
-            row = annotation_block.last_row + 1;
-            continue;
-        }
-
-        let next_line = &lines[next_row];
-        let next_trimmed = next_line.trim_start();
-
-        if next_trimmed.is_empty() {
-            diagnostics.push(Diagnostic::syntax_error(
-                annotation_block.range,
-                "A `#:` typing comment cannot be separated from its expression by an empty line.",
-            ));
-            row = annotation_block.last_row + 1;
-            continue;
-        }
-
-        if next_trimmed.starts_with("#:") {
-            diagnostics.push(Diagnostic::syntax_error(
-                annotation_block.range,
-                "A `#:` typing comment must be followed immediately by an expression.",
-            ));
-            row = annotation_block.last_row + 1;
-            continue;
-        }
-
-        match parse_annotation(&annotation_block.text, lowering_context.interner_mut()) {
-            Ok(annotation) => {
-                let pending_annotation = PendingAnnotation {
-                    range: annotation_block.range,
-                    annotation,
-                };
-
-                if let Some(expression) =
-                    trailing_top_level_expression(expressions, &pending_annotation)
-                {
-                    attach_annotation_to_expression(expression, &pending_annotation.annotation);
+                let mut next_index = child_index + 1;
+                while next_index < child_count {
+                    if let Some(next_child) = node.named_child(next_index)
+                        && next_child.kind() == "comment"
+                    {
+                        let next_text = node_text(next_child, rope);
+                        let next_trimmed = next_text.trim_start();
+                        if next_trimmed.starts_with("#:") {
+                            if next_child.range().start_point.row > block_range.end_point.row + 1 {
+                                break;
+                            }
+                            block_text.push('\n');
+                            block_text.push_str(next_trimmed);
+                            block_range.end_point = next_child.range().end_point;
+                            block_range.end_byte = next_child.range().end_byte;
+                            next_index += 1;
+                            continue;
+                        }
+                    }
+                    break;
                 }
 
-                annotations.push(pending_annotation);
-            }
-            Err(error) => {
-                diagnostics.push(annotation_parse_diagnostic(annotation_block.range, error))
+                // Check for standalone type definition or alias using parse_type_syntax_item
+                // We must strip `#:` before passing to parse_type_syntax_item
+                let stripped_text = block_text
+                    .lines()
+                    .map(|line| {
+                        line.trim()
+                            .strip_prefix("#:")
+                            .map(str::trim)
+                            .unwrap_or(line.trim())
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                if let Ok(
+                    crate::annotations::TypeSyntaxItem::TypeDefinition {
+                        name,
+                        type_parameters,
+                        surface_type,
+                    }
+                    | crate::annotations::TypeSyntaxItem::TypeAlias {
+                        name,
+                        type_parameters,
+                        surface_type,
+                    },
+                ) = crate::annotations::parse_type_syntax_item(
+                    &stripped_text,
+                    lowering_context.interner_mut(),
+                ) {
+                    let kind = ExpressionKind::TypeAlias {
+                        name,
+                        type_parameters,
+                        surface_type,
+                    };
+                    let expr_id = lowering_context.annotated_expression(block_range, None, kind);
+                    expressions.push(expr_id);
+                    child_index = next_index;
+                    continue;
+                }
+
+                let parsed_annotation =
+                    parse_annotation(&block_text, lowering_context.interner_mut());
+
+                let mut expr_child_index = next_index;
+                let mut next_expr_child = None;
+                while expr_child_index < child_count {
+                    if let Some(c) = node.named_child(expr_child_index)
+                        && c.kind() != "comment"
+                    {
+                        next_expr_child = Some(c);
+                        break;
+                    }
+                    expr_child_index += 1;
+                }
+
+                if let Some(expr_child) = next_expr_child {
+                    if expr_child.range().start_point.row > block_range.end_point.row + 1 {
+                        lowering_context.diagnostics.push(Diagnostic::syntax_error(
+                            block_range,
+                            "A `#:` typing comment cannot be separated from its expression by an empty line.",
+                        ));
+                        child_index = next_index;
+                    } else {
+                        let expr_id = lower_node_with_rope(expr_child, rope, lowering_context);
+
+                        match parsed_annotation {
+                            Ok(annotation) => {
+                                attach_annotation_to_expression(
+                                    expr_id,
+                                    &annotation,
+                                    &mut lowering_context.arena,
+                                );
+                            }
+                            Err(error) => {
+                                lowering_context
+                                    .diagnostics
+                                    .push(annotation_parse_diagnostic(block_range, error));
+                            }
+                        }
+
+                        expressions.push(expr_id);
+                        child_index = expr_child_index + 1;
+                    }
+                } else {
+                    lowering_context.diagnostics.push(Diagnostic::syntax_error(
+                        block_range,
+                        "A `#:` typing comment must be followed immediately by an expression.",
+                    ));
+                    child_index = next_index;
+                }
+                continue;
             }
         }
 
-        row = annotation_block.last_row + 1;
+        if child.kind() != "comment" {
+            expressions.push(lower_node_with_rope(child, rope, lowering_context));
+        }
+
+        child_index += 1;
     }
 
-    (annotations, diagnostics)
-}
-
-fn trailing_top_level_expression<'a>(
-    expressions: &'a mut [Expression],
-    pending_annotation: &PendingAnnotation,
-) -> Option<&'a mut Expression> {
-    let annotation_row = pending_annotation.range.start_point.row;
-
     expressions
-        .iter_mut()
-        .find(|expression| expression.range.start_point.row > annotation_row)
 }
 
-fn attach_annotation_to_expression(expression: &mut Expression, annotation: &Annotation) {
+fn attach_annotation_to_expression(
+    expression_id: ExpressionId,
+    annotation: &Annotation,
+    arena: &mut HirArena,
+) {
+    let expression = arena.get_mut(expression_id);
     expression.annotation = Some(AttachedAnnotation::expression(annotation.clone()));
 
     if let ExpressionKind::Assign {

@@ -17,6 +17,11 @@ use {
 };
 
 #[test]
+fn lowering() {
+    run_fixture_suite("tests/lowering", "lowering", render_lowering_fixture_result);
+}
+
+#[test]
 fn diagnostics() {
     let mut parser = new_parser();
     let mut analysis_state = AnalysisState::new();
@@ -216,6 +221,16 @@ where
     }
 
     eprintln!("{} {kind} fixture(s) passed", executed_fixture_count);
+}
+
+fn render_lowering_fixture_result(source: &str) -> String {
+    let mut parser = new_parser();
+    let tree = parse_source(&mut parser, source);
+
+    let mut lowering_context = LoweringContext::new();
+    let module = lowering_context.lower_tree(&tree, source);
+
+    module.render(lowering_context.interner())
 }
 
 fn render_expression_fixture_result(source: &str) -> String {
