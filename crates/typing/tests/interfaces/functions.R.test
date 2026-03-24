@@ -1,0 +1,15 @@
+#==== exports
+#---- exports_bindings_and_aliases
+#: @alias Formatter {fn(integer) -> character}
+identity <- function(x) x
+render <- function(count) "ok"
+#++++
+type Formatter = fn(integer) -> character
+identity: <T> fn(T) -> T
+render: <T> fn(T) -> character
+
+#---- interface_keeps_latest_binding_shape
+value <- 1L
+value <- "ok"
+#++++
+value: character

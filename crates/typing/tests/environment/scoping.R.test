@@ -1,0 +1,23 @@
+#==== scoping
+#---- local_binding_does_not_escape
+x <- 1L
+f <- function() {
+  x <- "ok"
+  x
+}
+x
+#++++
+x: integer
+f: fn() -> character
+integer
+
+#---- parameter_shadowing_preserves_outer_binding
+x <- 1L
+f <- function(x) x
+x
+f("ok")
+#++++
+x: integer
+f: <T> fn(T) -> T
+integer
+character

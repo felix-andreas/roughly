@@ -25,7 +25,7 @@ f <- function(x) {
 }
 #++++
 integer
-fn(type1) -> type1
+fn(?1) -> ?1
 
 #---- nested_function_access
 f <- function() {

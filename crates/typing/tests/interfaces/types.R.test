@@ -1,0 +1,16 @@
+#==== types
+#---- type_definitions_and_binding
+#: @type Person {list{name: character}}
+
+#: @alias Formatter {fn(integer) -> character}
+value <- 1L
+#++++
+type Person = list{name: character}
+type Formatter = fn(integer) -> character
+value: integer
+
+#---- latest_binding_wins_in_interface
+identity <- function(x) x
+identity <- function(x) 1L
+#++++
+identity: <T> fn(T) -> integer

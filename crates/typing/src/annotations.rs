@@ -136,8 +136,13 @@ pub fn render_surface_type(surface_type: &SurfaceType, interner: &Interner) -> S
                 .iter()
                 .map(|parameter| {
                     let name = interner.resolve(parameter.name).unwrap_or("<unknown>");
+                    let rendered_name = if parameter.optional {
+                        format!("[{name}]")
+                    } else {
+                        name.to_owned()
+                    };
                     format!(
-                        "{name}: {}",
+                        "{rendered_name}: {}",
                         render_surface_type(&parameter.value, interner)
                     )
                 })
@@ -540,11 +545,12 @@ pub fn parse_expanded_block_surface_type(
                 .ok_or_else(|| {
                     invalid_syntax("expected `@param {TYPE} name` in the expanded annotation.")
                 })?;
-            let normalized_name = name_text
-                .trim()
+            let trimmed_name = name_text.trim();
+            let is_optional = trimmed_name.starts_with('[') && trimmed_name.ends_with(']');
+            let normalized_name = trimmed_name
                 .strip_prefix('[')
                 .and_then(|name| name.strip_suffix(']'))
-                .unwrap_or(name_text.trim());
+                .unwrap_or(trimmed_name);
             if normalized_name.is_empty() {
                 return Err(invalid_syntax(
                     "Expected a parameter name after `@param {TYPE}`.",
@@ -552,7 +558,7 @@ pub fn parse_expanded_block_surface_type(
             }
             let name = interner.intern(normalized_name);
             let surface_type = parse_surface_type(type_text, interner)?;
-            named_parameters.push(RecordField::new(name, surface_type));
+            named_parameters.push(RecordField::with_optional(name, surface_type, is_optional));
         } else if directive.starts_with("@returns") || directive.starts_with("@return") {
             if seen_return {
                 return Err(invalid_syntax(

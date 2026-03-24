@@ -67,11 +67,32 @@ pub enum Atomic {
 pub struct RecordField<Type> {
     pub name: Symbol,
     pub value: Type,
+    pub optional: bool,
 }
 
 impl<Type> RecordField<Type> {
     pub fn new(name: Symbol, value: Type) -> Self {
-        Self { name, value }
+        Self {
+            name,
+            value,
+            optional: false,
+        }
+    }
+
+    pub fn optional(name: Symbol, value: Type) -> Self {
+        Self {
+            name,
+            value,
+            optional: true,
+        }
+    }
+
+    pub fn with_optional(name: Symbol, value: Type, optional: bool) -> Self {
+        Self {
+            name,
+            value,
+            optional,
+        }
     }
 }
 

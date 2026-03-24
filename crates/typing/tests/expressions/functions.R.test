@@ -2,12 +2,12 @@
 #---- identity_function
 identity <- function(x) x
 #++++
-fn(type1) -> type1
+fn(?1) -> ?1
 
 #---- two_parameter_function_returns_first_argument_type
 first <- function(x, y) x
 #++++
-fn(type1, type2) -> type1
+fn(?1, ?2) -> ?1
 
 #==== annotated_functions
 #---- compact_annotation_named_parameter_and_return

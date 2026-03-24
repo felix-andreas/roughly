@@ -1,5 +1,9 @@
 # Human Notes (!AIs are not allowed to edit!)
 
+- get rid of old test_infer.
+
+- verify fixtures test suite. can we consoldate different fixture suites?
+
 - scoping rules? (canonicalization in genreal)
 - lsp
   - inlay hints
@@ -35,6 +39,21 @@
 - do we need lowering?
   - can't we just have a table for annotations (key is tree-sitter id)
   - can't even typing check not use tree-sitter directly ??
+  
+  
+- free variables in fixtures:
+
+I have a question in the expression/functions fixture test suite we have:
+
+#---- identity_function
+identity <- function(x) x
+#++++
+fn(type1) -> type1
+
+
+but this should probably rather be <T> fn(T) -> T. shouldn't it?
+
+also if not. shouldn't we render free variables differently in the fixutre ? what syntax whould you recommedn?
 
 - questions?
   - do we need canonicalization? (is it part of lowering)

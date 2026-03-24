@@ -7,18 +7,25 @@ use {
     typing::{
         AnalysisState, Interner,
         annotations::{
-            parse_expanded_block_surface_type, parse_type_syntax_item, render_type_syntax_item,
+            parse_expanded_block_surface_type, parse_type_syntax_item, render_surface_type,
+            render_type_syntax_item,
         },
+        hir::{ExpressionId, ExpressionKind, HirArena},
         lower::LoweringContext,
-        render_surface_type,
+        naming::{BindingId, NamingContext, NamingResult},
         typecheck::{BuiltinKind, InferenceError, InferenceState},
-        types::{Atomic, CoreType, InferenceVariableId},
+        types::{Atomic, CoreType, InferenceVariableId, TypeScheme},
     },
 };
 
 #[test]
 fn lowering() {
     run_fixture_suite("tests/lowering", "lowering", render_lowering_fixture_result);
+}
+
+#[test]
+fn naming() {
+    run_fixture_suite("tests/naming", "naming", render_naming_fixture_result);
 }
 
 #[test]
@@ -37,6 +44,65 @@ fn expressions() {
         "tests/expressions",
         "expressions",
         render_expression_fixture_result,
+    );
+}
+
+#[test]
+fn unification() {
+    run_fixture_suite(
+        "tests/unification",
+        "unification",
+        render_unification_fixture_result,
+    );
+}
+
+#[test]
+fn generalization() {
+    run_fixture_suite(
+        "tests/generalization",
+        "generalization",
+        render_generalization_fixture_result,
+    );
+}
+
+#[test]
+fn instantiation() {
+    run_fixture_suite(
+        "tests/instantiation",
+        "instantiation",
+        render_instantiation_fixture_result,
+    );
+}
+
+#[test]
+fn bindings() {
+    run_fixture_suite("tests/bindings", "bindings", render_bindings_fixture_result);
+}
+
+#[test]
+fn substitution() {
+    run_fixture_suite(
+        "tests/substitution",
+        "substitution",
+        render_substitution_fixture_result,
+    );
+}
+
+#[test]
+fn environment() {
+    run_fixture_suite(
+        "tests/environment",
+        "environment",
+        render_environment_fixture_result,
+    );
+}
+
+#[test]
+fn interfaces() {
+    run_fixture_suite(
+        "tests/interfaces",
+        "interfaces",
+        render_interfaces_fixture_result,
     );
 }
 
@@ -233,7 +299,76 @@ fn render_lowering_fixture_result(source: &str) -> String {
     module.render(lowering_context.interner())
 }
 
+fn render_naming_fixture_result(source: &str) -> String {
+    let mut parser = new_parser();
+    let tree = parse_source(&mut parser, source);
+
+    let mut lowering_context = LoweringContext::new();
+    let module = lowering_context.lower_tree(&tree, source);
+    let naming_result = NamingContext::new(&module.arena).resolve_module(&module);
+
+    render_named_module(&module, &naming_result, lowering_context.interner())
+}
+
 fn render_expression_fixture_result(source: &str) -> String {
+    match infer_fixture_source(source) {
+        Ok((lowering_context, _module, mut inference_state, inferred_types)) => {
+            render_expression_types(&mut inference_state, &lowering_context, &inferred_types)
+        }
+        Err(error) => render_expression_error_kind(&error).to_owned(),
+    }
+}
+
+fn render_unification_fixture_result(source: &str) -> String {
+    render_expression_fixture_result(source)
+}
+
+fn render_generalization_fixture_result(source: &str) -> String {
+    match render_progressive_fixture_result(source, ProgressiveRenderMode::BindingsOnly) {
+        Ok(rendered) => rendered,
+        Err(error) => render_expression_error_kind(&error).to_owned(),
+    }
+}
+
+fn render_bindings_fixture_result(source: &str) -> String {
+    render_generalization_fixture_result(source)
+}
+
+fn render_substitution_fixture_result(source: &str) -> String {
+    render_instantiation_fixture_result(source)
+}
+
+fn render_environment_fixture_result(source: &str) -> String {
+    render_instantiation_fixture_result(source)
+}
+
+fn render_interfaces_fixture_result(source: &str) -> String {
+    match infer_fixture_source(source) {
+        Ok((lowering_context, module, inference_state, _inferred_types)) => {
+            render_interface_snapshot(&module, &inference_state, &lowering_context)
+        }
+        Err(error) => render_expression_error_kind(&error).to_owned(),
+    }
+}
+
+fn render_instantiation_fixture_result(source: &str) -> String {
+    match render_progressive_fixture_result(source, ProgressiveRenderMode::BindingsAndResults) {
+        Ok(rendered) => rendered,
+        Err(error) => render_expression_error_kind(&error).to_owned(),
+    }
+}
+
+fn infer_fixture_source(
+    source: &str,
+) -> Result<
+    (
+        LoweringContext,
+        typing::Module,
+        InferenceState,
+        Vec<CoreType>,
+    ),
+    InferenceError,
+> {
     let mut parser = new_parser();
     let tree = parse_source(&mut parser, source);
 
@@ -241,6 +376,16 @@ fn render_expression_fixture_result(source: &str) -> String {
     let module = lowering_context.lower_tree(&tree, source);
 
     let mut inference_state = InferenceState::new();
+    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+    let inferred_types = inference_state.infer_module(&module)?;
+
+    Ok((lowering_context, module, inference_state, inferred_types))
+}
+
+fn bind_fixture_builtins(
+    inference_state: &mut InferenceState,
+    lowering_context: &mut LoweringContext,
+) {
     let plus_symbol = lowering_context.intern("+");
     let minus_symbol = lowering_context.intern("-");
     let multiply_symbol = lowering_context.intern("*");
@@ -260,13 +405,6 @@ fn render_expression_fixture_result(source: &str) -> String {
     inference_state.bind_builtin(or_symbol, BuiltinKind::Or);
     inference_state.bind_builtin(combine_symbol, BuiltinKind::Combine);
     inference_state.bind_builtin(list_symbol, BuiltinKind::List);
-
-    match inference_state.infer_module(&module) {
-        Ok(inferred_types) => {
-            render_expression_types(&mut inference_state, &lowering_context, &inferred_types)
-        }
-        Err(error) => render_expression_error_kind(&error).to_owned(),
-    }
 }
 
 fn render_annotation_fixture_result(source: &str) -> String {
@@ -364,6 +502,58 @@ fn render_expression_types(
     lines.join("\n")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProgressiveRenderMode {
+    BindingsOnly,
+    BindingsAndResults,
+}
+
+fn render_progressive_fixture_result(
+    source: &str,
+    mode: ProgressiveRenderMode,
+) -> Result<String, InferenceError> {
+    let mut parser = new_parser();
+    let tree = parse_source(&mut parser, source);
+
+    let mut lowering_context = LoweringContext::new();
+    let module = lowering_context.lower_tree(&tree, source);
+
+    let mut inference_state = InferenceState::new();
+    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+
+    let mut lines = Vec::with_capacity(module.root_expressions.len());
+
+    for expression_id in &module.root_expressions {
+        let expression = module.arena.get(*expression_id);
+        let inferred_type = inference_state.infer_expression(expression, &module.arena)?;
+
+        match &expression.kind {
+            ExpressionKind::Assign { target, .. } => {
+                let name = lowering_context
+                    .interner()
+                    .resolve(*target)
+                    .unwrap_or("<unknown>");
+                let binding = inference_state.lookup_name(*target).unwrap_or_else(|| {
+                    panic!("binding `{name}` should be present after inference")
+                });
+                let mut renderer = SimpleTypeRenderer::new(lowering_context.interner());
+                lines.push(format!(
+                    "{name}: {}",
+                    renderer.render_type_scheme(&binding.type_scheme)
+                ));
+            }
+            _ if matches!(mode, ProgressiveRenderMode::BindingsAndResults) => {
+                let resolved_type = inference_state.resolve(inferred_type)?;
+                let mut renderer = SimpleTypeRenderer::new(lowering_context.interner());
+                lines.push(renderer.render(&resolved_type));
+            }
+            _ => {}
+        }
+    }
+
+    Ok(lines.join("\n"))
+}
+
 fn render_expression_error_kind(error: &InferenceError) -> &'static str {
     match error {
         InferenceError::UnknownInferenceVariable(_) => "error: unknown inference variable",
@@ -383,6 +573,7 @@ fn render_expression_error_kind(error: &InferenceError) -> &'static str {
 struct SimpleTypeRenderer<'a> {
     interner: &'a Interner,
     variable_names: std::collections::BTreeMap<InferenceVariableId, String>,
+    quantified_variable_names: std::collections::BTreeMap<InferenceVariableId, String>,
     next_variable_index: usize,
 }
 
@@ -391,7 +582,29 @@ impl<'a> SimpleTypeRenderer<'a> {
         Self {
             interner,
             variable_names: std::collections::BTreeMap::new(),
+            quantified_variable_names: std::collections::BTreeMap::new(),
             next_variable_index: 0,
+        }
+    }
+
+    fn render_type_scheme(&mut self, type_scheme: &TypeScheme) -> String {
+        let quantified_names = type_scheme
+            .quantified_variables
+            .iter()
+            .enumerate()
+            .map(|(index, variable)| {
+                let name = quantified_variable_name(index);
+                self.quantified_variable_names
+                    .insert(*variable, name.clone());
+                name
+            })
+            .collect::<Vec<_>>();
+        let rendered_body = self.render(&type_scheme.body);
+
+        if quantified_names.is_empty() {
+            rendered_body
+        } else {
+            format!("<{}> {}", quantified_names.join(", "), rendered_body)
         }
     }
 
@@ -436,7 +649,12 @@ impl<'a> SimpleTypeRenderer<'a> {
                     .iter()
                     .map(|parameter| {
                         let name = self.interner.resolve(parameter.name).unwrap_or("<unknown>");
-                        format!("{name}: {}", self.render(&parameter.value))
+                        let rendered_name = if parameter.optional {
+                            format!("[{name}]")
+                        } else {
+                            name.to_owned()
+                        };
+                        format!("{rendered_name}: {}", self.render(&parameter.value))
                     })
                     .collect::<Vec<_>>();
                 let mut rendered_parts = rendered_parameters;
@@ -447,21 +665,25 @@ impl<'a> SimpleTypeRenderer<'a> {
                     self.render(&function_type.return_type)
                 )
             }
-            CoreType::Variable(variable) => self.variable_name(*variable).to_owned(),
+            CoreType::Variable(variable) => self.render_variable(*variable),
         }
     }
 
-    fn variable_name(&mut self, variable: InferenceVariableId) -> &str {
+    fn render_variable(&mut self, variable: InferenceVariableId) -> String {
+        if let Some(name) = self.quantified_variable_names.get(&variable) {
+            return name.clone();
+        }
+
         if !self.variable_names.contains_key(&variable) {
-            let name = format!("type{}", self.next_variable_index + 1);
+            let name = format!("?{}", self.next_variable_index + 1);
             self.next_variable_index += 1;
             self.variable_names.insert(variable, name);
         }
 
         self.variable_names
             .get(&variable)
-            .map(String::as_str)
-            .unwrap_or("type")
+            .cloned()
+            .unwrap_or_else(|| "?".to_owned())
     }
 }
 
@@ -474,4 +696,370 @@ fn render_atomic(atomic: Atomic) -> &'static str {
         Atomic::Character => "character",
         Atomic::Raw => "raw",
     }
+}
+
+fn quantified_variable_name(index: usize) -> String {
+    const QUANTIFIED_NAMES: [&str; 7] = ["T", "U", "V", "W", "X", "Y", "Z"];
+
+    QUANTIFIED_NAMES
+        .get(index)
+        .map(|name| (*name).to_owned())
+        .unwrap_or_else(|| format!("T{}", index + 1))
+}
+
+fn render_named_module(
+    module: &typing::Module,
+    naming_result: &NamingResult,
+    interner: &Interner,
+) -> String {
+    let mut lines = Vec::new();
+
+    for expression_id in &module.root_expressions {
+        render_named_expression(
+            &module.arena,
+            *expression_id,
+            naming_result,
+            interner,
+            0,
+            &mut lines,
+        );
+    }
+
+    lines.join("\n")
+}
+
+fn render_named_expression(
+    arena: &HirArena,
+    expression_id: ExpressionId,
+    naming_result: &NamingResult,
+    interner: &Interner,
+    indent: usize,
+    lines: &mut Vec<String>,
+) {
+    let expression = arena.get(expression_id);
+    let prefix = "  ".repeat(indent);
+
+    match &expression.kind {
+        ExpressionKind::Null => lines.push(format!("{prefix}Null")),
+        ExpressionKind::Logical(value) => lines.push(format!("{prefix}Logical({value})")),
+        ExpressionKind::Integer(value) => lines.push(format!("{prefix}Integer({value})")),
+        ExpressionKind::Double(value) => lines.push(format!("{prefix}Double({value})")),
+        ExpressionKind::Character(value) => lines.push(format!("{prefix}Character({value:?})")),
+        ExpressionKind::StringLiteralName(symbol) => {
+            let name = interner.resolve(*symbol).unwrap_or("<unknown>");
+            lines.push(format!("{prefix}StringLiteralName({name:?})"));
+        }
+        ExpressionKind::Symbol(symbol) => {
+            let name = interner.resolve(*symbol).unwrap_or("<unknown>");
+            let binding = naming_result
+                .resolutions
+                .get(&expression_id)
+                .map(|binding_id| binding_label(*binding_id))
+                .unwrap_or_else(|| "?".to_owned());
+            lines.push(format!("{prefix}Symbol({name}@{binding})"));
+        }
+        ExpressionKind::Block { expressions, .. } => {
+            lines.push(format!("{prefix}Block"));
+            for nested_expression in expressions {
+                render_named_expression(
+                    arena,
+                    *nested_expression,
+                    naming_result,
+                    interner,
+                    indent + 1,
+                    lines,
+                );
+            }
+        }
+        ExpressionKind::Assign { target, value, .. } => {
+            let name = interner.resolve(*target).unwrap_or("<unknown>");
+            let binding = naming_result
+                .resolutions
+                .get(&expression_id)
+                .map(|binding_id| binding_label(*binding_id))
+                .unwrap_or_else(|| "?".to_owned());
+            lines.push(format!("{prefix}Assign({name}@{binding})"));
+            render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
+        }
+        ExpressionKind::Function { parameters, body } => {
+            let rendered_parameters = parameters
+                .iter()
+                .map(|parameter| {
+                    let name = interner.resolve(parameter.symbol).unwrap_or("<unknown>");
+                    let binding = find_binding_by_symbol_and_range(
+                        naming_result,
+                        parameter.symbol,
+                        parameter.range,
+                    )
+                    .map(|binding_id| binding_label(binding_id))
+                    .unwrap_or_else(|| "?".to_owned());
+                    format!("{name}@{binding}")
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!("{prefix}Function({rendered_parameters})"));
+            render_named_expression(arena, *body, naming_result, interner, indent + 1, lines);
+        }
+        ExpressionKind::If {
+            condition,
+            consequence,
+            alternative,
+        } => {
+            lines.push(format!("{prefix}If"));
+            render_named_expression(
+                arena,
+                *condition,
+                naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+            render_named_expression(
+                arena,
+                *consequence,
+                naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+            if let Some(alternative) = alternative {
+                render_named_expression(
+                    arena,
+                    *alternative,
+                    naming_result,
+                    interner,
+                    indent + 1,
+                    lines,
+                );
+            }
+        }
+        ExpressionKind::For {
+            variable,
+            sequence,
+            body,
+        } => {
+            let name = interner.resolve(*variable).unwrap_or("<unknown>");
+            let binding =
+                find_binding_by_symbol_and_range(naming_result, *variable, expression.range)
+                    .map(|binding_id| binding_label(binding_id))
+                    .unwrap_or_else(|| "?".to_owned());
+            lines.push(format!("{prefix}For({name}@{binding})"));
+            render_named_expression(arena, *sequence, naming_result, interner, indent + 1, lines);
+            render_named_expression(arena, *body, naming_result, interner, indent + 1, lines);
+        }
+        ExpressionKind::While { condition, body } => {
+            lines.push(format!("{prefix}While"));
+            render_named_expression(
+                arena,
+                *condition,
+                naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+            render_named_expression(arena, *body, naming_result, interner, indent + 1, lines);
+        }
+        ExpressionKind::Repeat { body } => {
+            lines.push(format!("{prefix}Repeat"));
+            render_named_expression(arena, *body, naming_result, interner, indent + 1, lines);
+        }
+        ExpressionKind::UnaryMinus { value } => {
+            lines.push(format!("{prefix}UnaryMinus"));
+            render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
+        }
+        ExpressionKind::Call { callee, arguments } => {
+            lines.push(format!("{prefix}Call"));
+            render_named_expression(arena, *callee, naming_result, interner, indent + 1, lines);
+            for argument in arguments {
+                let argument_prefix = "  ".repeat(indent + 1);
+                if let Some(name) = argument.name {
+                    let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
+                    lines.push(format!("{argument_prefix}Argument({rendered_name})"));
+                } else {
+                    lines.push(format!("{argument_prefix}Argument"));
+                }
+                render_named_expression(
+                    arena,
+                    argument.expression,
+                    naming_result,
+                    interner,
+                    indent + 2,
+                    lines,
+                );
+            }
+        }
+        ExpressionKind::Subset { value, arguments } => {
+            lines.push(format!("{prefix}Subset"));
+            render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
+            for argument in arguments {
+                let argument_prefix = "  ".repeat(indent + 1);
+                if let Some(name) = argument.name {
+                    let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
+                    lines.push(format!("{argument_prefix}Argument({rendered_name})"));
+                } else {
+                    lines.push(format!("{argument_prefix}Argument"));
+                }
+                render_named_expression(
+                    arena,
+                    argument.expression,
+                    naming_result,
+                    interner,
+                    indent + 2,
+                    lines,
+                );
+            }
+        }
+        ExpressionKind::Subset2 { value, arguments } => {
+            lines.push(format!("{prefix}Subset2"));
+            render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
+            for argument in arguments {
+                let argument_prefix = "  ".repeat(indent + 1);
+                if let Some(name) = argument.name {
+                    let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
+                    lines.push(format!("{argument_prefix}Argument({rendered_name})"));
+                } else {
+                    lines.push(format!("{argument_prefix}Argument"));
+                }
+                render_named_expression(
+                    arena,
+                    argument.expression,
+                    naming_result,
+                    interner,
+                    indent + 2,
+                    lines,
+                );
+            }
+        }
+        ExpressionKind::Dollar { value, name } => {
+            let rendered_name = interner.resolve(*name).unwrap_or("<unknown>");
+            lines.push(format!("{prefix}Dollar({rendered_name})"));
+            render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
+        }
+        ExpressionKind::TypeAlias {
+            name,
+            type_parameters,
+            surface_type,
+        } => {
+            let rendered_name = interner.resolve(*name).unwrap_or("<unknown>");
+            let rendered_parameters = if type_parameters.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "<{}>",
+                    type_parameters
+                        .iter()
+                        .map(|parameter| interner
+                            .resolve(*parameter)
+                            .unwrap_or("<unknown>")
+                            .to_owned())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            lines.push(format!(
+                "{prefix}TypeAlias({rendered_name}{rendered_parameters} = {})",
+                render_surface_type(surface_type, interner)
+            ));
+        }
+        ExpressionKind::Unsupported => lines.push(format!("{prefix}Unsupported")),
+    }
+}
+
+fn binding_label(binding_id: BindingId) -> String {
+    format!("b{}", binding_id.0)
+}
+
+fn find_binding_by_symbol_and_range(
+    naming_result: &NamingResult,
+    symbol: typing::Symbol,
+    range: tree_sitter::Range,
+) -> Option<BindingId> {
+    naming_result
+        .bindings
+        .values()
+        .find(|binding| binding.symbol == symbol && binding.range == range)
+        .map(|binding| binding.id)
+}
+
+fn render_interface_snapshot(
+    module: &typing::Module,
+    inference_state: &InferenceState,
+    lowering_context: &LoweringContext,
+) -> String {
+    let mut exported_entries = Vec::<(usize, typing::Symbol, String)>::new();
+
+    for (index, expression_id) in module.root_expressions.iter().enumerate() {
+        let expression = module.arena.get(*expression_id);
+
+        match &expression.kind {
+            ExpressionKind::Assign { target, .. } => {
+                let name = lowering_context
+                    .interner()
+                    .resolve(*target)
+                    .unwrap_or("<unknown>");
+                let binding = inference_state.lookup_name(*target).unwrap_or_else(|| {
+                    panic!("binding `{name}` should be present after inference")
+                });
+                let mut renderer = SimpleTypeRenderer::new(lowering_context.interner());
+                exported_entries.push((
+                    index,
+                    *target,
+                    format!(
+                        "{name}: {}",
+                        renderer.render_type_scheme(&binding.type_scheme)
+                    ),
+                ));
+            }
+            ExpressionKind::TypeAlias {
+                name,
+                type_parameters,
+                surface_type,
+            } => {
+                let rendered_name = lowering_context
+                    .interner()
+                    .resolve(*name)
+                    .unwrap_or("<unknown>");
+                let rendered_parameters = if type_parameters.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "<{}>",
+                        type_parameters
+                            .iter()
+                            .map(|parameter| {
+                                lowering_context
+                                    .interner()
+                                    .resolve(*parameter)
+                                    .unwrap_or("<unknown>")
+                                    .to_owned()
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
+                exported_entries.push((
+                    index,
+                    *name,
+                    format!(
+                        "type {rendered_name}{rendered_parameters} = {}",
+                        render_surface_type(surface_type, lowering_context.interner())
+                    ),
+                ));
+            }
+            _ => {}
+        }
+    }
+
+    let mut final_entries = std::collections::BTreeMap::new();
+    for (index, symbol, rendered_entry) in exported_entries {
+        final_entries.insert(symbol, (index, rendered_entry));
+    }
+
+    let mut ordered_entries = final_entries.into_values().collect::<Vec<_>>();
+    ordered_entries.sort_by_key(|(index, _)| *index);
+    ordered_entries
+        .into_iter()
+        .map(|(_, rendered_entry)| rendered_entry)
+        .collect::<Vec<_>>()
+        .join("\n")
 }

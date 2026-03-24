@@ -1,0 +1,10 @@
+#==== basics
+#---- scalar_binding
+value <- 1L
+#++++
+value: integer
+
+#---- character_binding
+label <- "ok"
+#++++
+label: character

@@ -1,0 +1,55 @@
+#==== calls
+#---- identity_at_multiple_types
+identity <- function(x) x
+identity(1L)
+identity("hello")
+#++++
+identity: <T> fn(T) -> T
+integer
+character
+
+#---- alias_remains_polymorphic
+identity <- function(x) x
+alias <- identity
+alias(1L)
+alias("hello")
+#++++
+identity: <T> fn(T) -> T
+alias: <T> fn(T) -> T
+integer
+character
+
+#---- constant_function_instantiates_across_argument_types
+const_integer <- function(x) 1L
+const_integer(1L)
+const_integer("hello")
+#++++
+const_integer: <T> fn(T) -> integer
+integer
+integer
+
+#---- higher_order_instantiation
+apply <- function(f, value) f(value)
+identity <- function(x) x
+apply(identity, 1L)
+apply(identity, "hello")
+#++++
+apply: <T, U> fn(fn(T) -> U, T) -> U
+identity: <T> fn(T) -> T
+integer
+character
+
+#---- repeated_fresh_instantiation_in_higher_order_calls
+apply <- function(f, value) f(value)
+const_integer <- function(x) 1L
+identity <- function(x) x
+apply(const_integer, "hello")
+apply(identity, 1L)
+apply(identity, "hello")
+#++++
+apply: <T, U> fn(fn(T) -> U, T) -> U
+const_integer: <T> fn(T) -> integer
+identity: <T> fn(T) -> T
+integer
+integer
+character

@@ -1,0 +1,41 @@
+#==== bindings
+#---- identity_binding
+identity <- function(x) x
+#++++
+identity: <T> fn(T) -> T
+
+#---- first_binding
+first <- function(x, y) x
+#++++
+first: <T, U> fn(T, U) -> T
+
+#---- constant_function_binding
+const_integer <- function(x) 1L
+#++++
+const_integer: <T> fn(T) -> integer
+
+#---- higher_order_apply_binding
+apply <- function(f, value) f(value)
+#++++
+apply: <T, U> fn(fn(T) -> U, T) -> U
+
+#---- alias_binding_generalizes_scheme
+identity <- function(x) x
+alias <- identity
+#++++
+identity: <T> fn(T) -> T
+alias: <T> fn(T) -> T
+
+#---- annotated_binding
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+#++++
+double_count: fn(count: integer) -> integer
+
+#---- annotated_optional_parameter_binding
+#: @param {integer} count
+#: @param {character} [label]
+#: @return {integer}
+double_count <- function(count, label = NULL) count + count
+#++++
+double_count: fn(count: integer, [label]: character) -> integer

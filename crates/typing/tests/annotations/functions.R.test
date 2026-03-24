@@ -87,7 +87,7 @@ fn(count: integer, label: character) -> logical
 @param {character} [label]
 @return {logical}
 #++++
-fn(count: integer, label: character) -> logical
+fn(count: integer, [label]: character) -> logical
 
 #---- expanded_returns_alias
 @param {double} value

@@ -25,9 +25,7 @@ This document tracks actionable planned work for the `typing` crate.
   - Use per-file interfaces as the dependency boundary for later project scheduling.
 
 - Migrate the fixture harness and fixture directories to the new suite split.
-  - Add `bindings` and `interfaces` suites.
-  - Add `naming` fixture coverage.
-  - Fix the failing tests in `diagnostics` and `expressions` that are failing due to known implementation gaps.
+  - Fix the remaining failing tests in `diagnostics`.
 
 - Add the project-level rechecking foundation without overcommitting.
   - Keep single-file rechecking fast.

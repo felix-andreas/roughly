@@ -1,0 +1,36 @@
+#==== scopes
+#---- outer_name_used_inside_function
+x <- 1L
+f <- function(y) x
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(f@b2)
+  Function(y@b1)
+    Symbol(x@b0)
+
+#---- parameter_shadows_outer_name
+x <- 1L
+f <- function(x) x
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(f@b2)
+  Function(x@b1)
+    Symbol(x@b1)
+
+#---- local_rebinding_inside_function
+x <- 1L
+f <- function() {
+  x <- "ok"
+  x
+}
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(f@b2)
+  Function()
+    Block
+      Assign(x@b1)
+        Character("\"ok\"")
+      Symbol(x@b1)

@@ -1,0 +1,12 @@
+#==== basics
+#---- scalar_literal
+1L
+#++++
+integer
+
+#---- assignment_then_call
+identity <- function(x) x
+identity(1L)
+#++++
+fn(?1) -> ?1
+integer

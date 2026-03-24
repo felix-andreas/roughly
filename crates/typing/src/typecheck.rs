@@ -303,17 +303,8 @@ impl InferenceState {
         arena: &HirArena,
     ) -> Result<(), InferenceError> {
         let inferred_type = self.infer_expression(expression, arena)?;
-        let actual = self.resolve(inferred_type)?;
-        if actual == CoreType::Scalar(Atomic::Logical) {
-            Ok(())
-        } else {
-            Err(InferenceError::TypeMismatch {
-                expected: Box::new(CoreType::Scalar(Atomic::Logical)),
-                actual: Box::new(actual),
-                range: Some(expression.range),
-                expression_id: Some(expression.id),
-            })
-        }
+        self.unify_with_context(CoreType::Scalar(Atomic::Logical), inferred_type, expression)?;
+        Ok(())
     }
 
     fn check_compatibility(&mut self, actual_type: CoreType, expected_type: CoreType) -> bool {
@@ -767,6 +758,11 @@ impl InferenceState {
 
         let (left_shape, left_atomic) = match left_shape_atomic {
             Some(parts) => parts,
+            None if matches!(resolved_left, CoreType::Variable(_))
+                || matches!(resolved_right, CoreType::Variable(_)) =>
+            {
+                return Ok(CoreType::Variable(self.fresh_variable()));
+            }
             None if matches!(resolved_left, CoreType::Any | CoreType::Unknown) => {
                 return Ok(CoreType::Unknown);
             }
@@ -781,6 +777,13 @@ impl InferenceState {
 
         let (right_shape, right_atomic) = match right_shape_atomic {
             Some(parts) => parts,
+            None if matches!(resolved_left, CoreType::Variable(_))
+                || matches!(resolved_right, CoreType::Variable(_)) =>
+            {
+                // Already handled in left_shape_atomic if left was a variable,
+                // but if left was known and right was a variable, we must return here.
+                return Ok(CoreType::Variable(self.fresh_variable()));
+            }
             None if matches!(resolved_right, CoreType::Any | CoreType::Unknown) => {
                 return Ok(CoreType::Unknown);
             }
@@ -815,15 +818,21 @@ impl InferenceState {
     ) -> Result<CoreType, InferenceError> {
         let inferred_type = self.infer_expression(value, arena)?;
         let resolved_type = self.resolve(inferred_type)?;
-        let (shape, atomic) = numeric_operand_parts(&resolved_type).ok_or_else(|| {
-            InferenceError::InvalidPlusOperand {
+
+        match numeric_operand_parts(&resolved_type) {
+            Some((shape, atomic)) => Ok(core_type_for_shape(shape, atomic)),
+            None if matches!(resolved_type, CoreType::Variable(_)) => {
+                Ok(CoreType::Variable(self.fresh_variable()))
+            }
+            None if matches!(resolved_type, CoreType::Any | CoreType::Unknown) => {
+                Ok(CoreType::Unknown)
+            }
+            None => Err(InferenceError::InvalidPlusOperand {
                 actual: resolved_type.clone(),
                 range: value.range,
                 expression_id: value.id,
-            }
-        })?;
-
-        Ok(core_type_for_shape(shape, atomic))
+            }),
+        }
     }
 
     fn infer_function_call_expression(
@@ -886,6 +895,12 @@ impl InferenceState {
     ) -> Result<CoreType, InferenceError> {
         let total_parameters =
             function_type.parameters.len() + function_type.named_parameters.len();
+        let required_parameters = function_type.parameters.len()
+            + function_type
+                .named_parameters
+                .iter()
+                .filter(|parameter| !parameter.optional)
+                .count();
         let expected_named_parameters = function_type
             .named_parameters
             .iter()
@@ -943,10 +958,12 @@ impl InferenceState {
         }
 
         if next_positional_index != positional_parameters.len()
-            || !remaining_named_parameters.is_empty()
+            || remaining_named_parameters
+                .iter()
+                .any(|parameter| !parameter.optional)
         {
             return Err(InferenceError::FunctionArityMismatch {
-                expected: total_parameters,
+                expected: required_parameters,
                 actual: arguments.len(),
                 range: Some(callee.range),
                 expression_id: Some(callee.id),
@@ -1405,9 +1422,10 @@ impl InferenceState {
                 let mut instantiated_named_parameters =
                     Vec::with_capacity(function_type.named_parameters.len());
                 for named_parameter in &function_type.named_parameters {
-                    instantiated_named_parameters.push(RecordField::new(
+                    instantiated_named_parameters.push(RecordField::with_optional(
                         named_parameter.name,
                         self.instantiate_core_type(&named_parameter.value, substitutions)?,
+                        named_parameter.optional,
                     ));
                 }
 
@@ -1536,9 +1554,10 @@ impl InferenceState {
         let mut resolved_named_parameters =
             Vec::with_capacity(function_type.named_parameters.len());
         for named_parameter in function_type.named_parameters {
-            resolved_named_parameters.push(RecordField::new(
+            resolved_named_parameters.push(RecordField::with_optional(
                 named_parameter.name,
                 self.resolve(named_parameter.value)?,
+                named_parameter.optional,
             ));
         }
 
@@ -1666,12 +1685,13 @@ impl InferenceState {
         let right_named_by_name: BTreeMap<_, _> = right_function
             .named_parameters
             .into_iter()
-            .map(|parameter| (parameter.name, parameter.value))
+            .map(|parameter| (parameter.name, (parameter.value, parameter.optional)))
             .collect();
 
         let mut unified_named_parameters = Vec::with_capacity(left_function.named_parameters.len());
         for left_named_parameter in left_function.named_parameters {
-            let Some(right_value) = right_named_by_name.get(&left_named_parameter.name).cloned()
+            let Some((right_value, right_optional)) =
+                right_named_by_name.get(&left_named_parameter.name).cloned()
             else {
                 return Err(InferenceError::NamedParameterMismatch {
                     expected_parameters: vec![left_named_parameter.name],
@@ -1683,8 +1703,11 @@ impl InferenceState {
 
             let unified_value =
                 self.unify_internal(left_named_parameter.value, right_value, expression)?;
-            unified_named_parameters
-                .push(RecordField::new(left_named_parameter.name, unified_value));
+            unified_named_parameters.push(RecordField::with_optional(
+                left_named_parameter.name,
+                unified_value,
+                left_named_parameter.optional || right_optional,
+            ));
         }
 
         let unified_return_type = self.unify_internal(
@@ -1881,9 +1904,10 @@ fn core_type_from_surface_type(surface_type: &SurfaceType) -> CoreType {
                 .named_parameters
                 .iter()
                 .map(|parameter| {
-                    RecordField::new(
+                    RecordField::with_optional(
                         parameter.name,
                         core_type_from_surface_type(&parameter.value),
+                        parameter.optional,
                     )
                 })
                 .collect(),

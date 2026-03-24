@@ -1,0 +1,8 @@
+#==== basics
+#---- annotated_identity_call
+#: fn(count: integer) -> integer
+identity <- function(count) count
+identity(1L)
+#++++
+identity: fn(count: integer) -> integer
+integer

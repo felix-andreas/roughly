@@ -1,0 +1,25 @@
+#==== propagation
+#---- identity_flows_argument_type_to_result
+identity <- function(x) x
+identity(1L)
+#++++
+identity: <T> fn(T) -> T
+integer
+
+#---- higher_order_solution_flows_through_call
+apply <- function(f, value) f(value)
+identity <- function(x) x
+apply(identity, 1L)
+#++++
+apply: <T, U> fn(fn(T) -> U, T) -> U
+identity: <T> fn(T) -> T
+integer
+
+#---- solved_returned_function_keeps_outer_argument_type
+apply_left <- function(x) function(f) f(x)
+use_integer <- apply_left(1L)
+use_integer(function(value) 1L)
+#++++
+apply_left: <T, U> fn(T) -> fn(fn(T) -> U) -> U
+use_integer: <T> fn(fn(integer) -> T) -> T
+integer

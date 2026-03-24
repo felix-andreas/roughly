@@ -382,7 +382,15 @@ impl<'a> TypeRenderer<'a> {
                     .iter()
                     .map(|parameter| {
                         let name = self.interner.resolve(parameter.name).unwrap_or("<unknown>");
-                        format!("{name}: {}", self.render_core_type(&parameter.value))
+                        let rendered_name = if parameter.optional {
+                            format!("[{name}]")
+                        } else {
+                            name.to_owned()
+                        };
+                        format!(
+                            "{rendered_name}: {}",
+                            self.render_core_type(&parameter.value)
+                        )
                     })
                     .collect::<Vec<_>>();
                 let mut rendered_parts = rendered_parameters;

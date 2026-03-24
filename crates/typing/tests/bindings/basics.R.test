@@ -1,0 +1,12 @@
+#==== basics
+#---- integer_binding
+value <- 1L
+#++++
+value: integer
+
+#---- rebinding_updates_binding_shape
+value <- 1L
+value <- "ok"
+#++++
+value: integer
+value: character
