@@ -14,9 +14,7 @@ This document tracks actionable planned work for the `typing` crate.
 ## Current priorities
 
 - Apply the desired file split in code.
-  - Add `hir.rs` as the explicit representation boundary.
   - Add `naming.rs` for scopes, bindings, and use-site resolution.
-  - Add `diagnostic.rs` as the shared diagnostics module.
   - Rename or reshape the current checker files so they match `STRUCTURE.md`.
 
 - Rebuild the front-end boundary around HIR.

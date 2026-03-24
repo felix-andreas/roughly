@@ -1,7 +1,7 @@
 use {
     crate::{
         Interner,
-        diagnostics::Diagnostic,
+        diagnostic::Diagnostic,
         lower::{LoweringContext, lower_root_with_rope_with_diagnostics},
         text,
         typecheck::{BuiltinKind, InferenceState},

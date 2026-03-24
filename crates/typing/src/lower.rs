@@ -1,7 +1,7 @@
 use {
     crate::{
         annotations::parse_annotation,
-        diagnostics::Diagnostic,
+        diagnostic::Diagnostic,
         hir::{
             Argument, Expression, ExpressionId, ExpressionKind, Module, Parameter,
             PendingAnnotation,

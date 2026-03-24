@@ -30,6 +30,7 @@ If code changes make this document inaccurate, update it in the same session.
   - The old `tests/inference` directory was renamed to `tests/expressions`.
   - The old `infer.rs` implementation module was renamed to `typecheck.rs`, and crate imports now use the phase name.
   - `check_source` was removed from the crate surface; it now lives in test support alongside the parser helper.
+  - `diagnostics.rs` was renamed to `diagnostic.rs` so the crate layout now matches `STRUCTURE.md` more closely.
 
 - Current steering-document layout:
   - persistent authoritative: `README.md`, `SEMANTICS.md`, `ARCHITECTURE.md`, `STRUCTURE.md`, `TESTING.md`

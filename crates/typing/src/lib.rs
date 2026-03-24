@@ -1,6 +1,6 @@
 pub mod annotations;
 pub mod check;
-pub mod diagnostics;
+pub mod diagnostic;
 pub mod hir;
 pub mod interner;
 pub mod lower;
@@ -12,7 +12,7 @@ pub use {
     crate::{
         annotations::{TypeParseError, parse_surface_type, render_surface_type},
         check::{AnalysisState, CheckResult, check},
-        diagnostics::{Diagnostic, DiagnosticCode, Severity},
+        diagnostic::{Diagnostic, DiagnosticCode, Severity},
         hir::{Argument, Expression, ExpressionId, ExpressionKind, Module, Parameter},
         interner::{Interner, Symbol},
         lower::{LoweringContext, lower_root_with_rope},
