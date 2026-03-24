@@ -29,7 +29,7 @@ If code changes make this document inaccurate, update it in the same session.
   - The fixture harness now uses `tests/expressions` as the suite for smaller checked-expression cases.
   - The old `tests/inference` directory was renamed to `tests/expressions`.
   - The old `infer.rs` implementation module was renamed to `typecheck.rs`, and crate imports now use the phase name.
-  - `TODOS.md` no longer tracks either rename as unfinished.
+  - `check_source` was removed from the crate surface; it now lives in test support alongside the parser helper.
 
 - Current steering-document layout:
   - persistent authoritative: `README.md`, `SEMANTICS.md`, `ARCHITECTURE.md`, `STRUCTURE.md`, `TESTING.md`

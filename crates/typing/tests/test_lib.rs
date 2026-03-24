@@ -1,12 +1,16 @@
+#[path = "support.rs"]
+mod support;
+
 use {
     indoc::indoc,
+    support::{new_parser, parse_source},
     tree_sitter::{Point, Range},
     typing::{
         Interner,
         annotations::parse_surface_type,
+        hir::ExpressionKind,
         interner::Symbol,
-        lower::{ExpressionKind, LoweringContext},
-        new_parser, parse,
+        lower::LoweringContext,
         types::{
             Atomic, CoreType, FunctionType, InferenceVariableId, RecordField, SurfaceType,
             TypeScheme,
@@ -16,14 +20,14 @@ use {
 
 fn lower(source: &str) -> typing::Module {
     let mut parser = new_parser();
-    let tree = parse(&mut parser, source, None);
+    let tree = parse_source(&mut parser, source);
     let mut lowering_context = LoweringContext::new();
     typing::lower::lower_tree(&tree, source, &mut lowering_context)
 }
 
 fn lower_context(source: &str) -> LoweringContext {
     let mut parser = new_parser();
-    let tree = parse(&mut parser, source, None);
+    let tree = parse_source(&mut parser, source);
     let mut lowering_context = LoweringContext::new();
     let _module = typing::lower::lower_tree(&tree, source, &mut lowering_context);
     lowering_context

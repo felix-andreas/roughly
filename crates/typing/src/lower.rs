@@ -1,6 +1,11 @@
 use {
     crate::{
         annotations::parse_annotation,
+        diagnostics::Diagnostic,
+        hir::{
+            Argument, Expression, ExpressionId, ExpressionKind, Module, Parameter,
+            PendingAnnotation,
+        },
         interner::{Interner, Symbol},
         text,
         types::{Annotation, AttachedAnnotation},
@@ -9,130 +14,16 @@ use {
     tree_sitter::{Node, Range, Tree},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ExpressionId(pub u32);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Module {
-    pub expressions: Vec<Expression>,
-    pub annotations: Vec<PendingAnnotation>,
-}
-
-impl Module {
-    pub fn new(expressions: Vec<Expression>, annotations: Vec<PendingAnnotation>) -> Self {
-        Self {
-            expressions,
-            annotations,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Expression {
-    pub id: ExpressionId,
-    pub range: Range,
-    pub annotation: Option<AttachedAnnotation>,
-    pub kind: ExpressionKind,
-}
-
-impl Expression {
-    pub fn new(
-        id: ExpressionId,
-        range: Range,
-        annotation: Option<AttachedAnnotation>,
-        kind: ExpressionKind,
-    ) -> Self {
-        Self {
-            id,
-            range,
-            annotation,
-            kind,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ExpressionKind {
-    Null,
-    Logical(bool),
-    Integer(String),
-    Double(String),
-    Character(String),
-    StringLiteralName(Symbol),
-    Symbol(Symbol),
-    Block {
-        expressions: Vec<Expression>,
-        has_trailing_semicolon: bool,
-    },
-    Assign {
-        target: Symbol,
-        annotation: Option<AttachedAnnotation>,
-        value: Box<Expression>,
-    },
-    Function {
-        parameters: Vec<Parameter>,
-        body: Box<Expression>,
-    },
-    If {
-        condition: Box<Expression>,
-        consequence: Box<Expression>,
-        alternative: Option<Box<Expression>>,
-    },
-    For {
-        variable: Symbol,
-        sequence: Box<Expression>,
-        body: Box<Expression>,
-    },
-    While {
-        condition: Box<Expression>,
-        body: Box<Expression>,
-    },
-    Repeat {
-        body: Box<Expression>,
-    },
-    UnaryMinus {
-        value: Box<Expression>,
-    },
-    Call {
-        callee: Box<Expression>,
-        arguments: Vec<Argument>,
-    },
-    Subset {
-        value: Box<Expression>,
-        arguments: Vec<Argument>,
-    },
-    Subset2 {
-        value: Box<Expression>,
-        arguments: Vec<Argument>,
-    },
-    Dollar {
-        value: Box<Expression>,
-        name: Symbol,
-    },
-    Unsupported,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Parameter {
-    pub symbol: Symbol,
-    pub range: Range,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Argument {
-    pub expression: Expression,
-    pub name: Option<Symbol>,
-}
-
 #[derive(Debug, Default)]
 pub struct LoweringContext {
     next_expression_id: u32,
     interner: Interner,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PendingAnnotation {
-    pub range: Range,
-    pub annotation: Annotation,
+pub struct LoweringResult {
+    pub module: Module,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 impl LoweringContext {
@@ -179,8 +70,20 @@ impl LoweringContext {
         lower_tree(tree, source, self)
     }
 
+    pub fn lower_tree_with_diagnostics(&mut self, tree: &Tree, source: &str) -> LoweringResult {
+        lower_tree_with_diagnostics(tree, source, self)
+    }
+
     pub fn lower_root_with_rope(&mut self, root: Node<'_>, rope: &Rope) -> Module {
         lower_root_with_rope(root, rope, self)
+    }
+
+    pub fn lower_root_with_rope_with_diagnostics(
+        &mut self,
+        root: Node<'_>,
+        rope: &Rope,
+    ) -> LoweringResult {
+        lower_root_with_rope_with_diagnostics(root, rope, self)
     }
 
     pub fn lower_node(&mut self, node: Node<'_>, source: &str) -> Expression {
@@ -193,9 +96,17 @@ impl LoweringContext {
 }
 
 pub fn lower_tree(tree: &Tree, source: &str, lowering_context: &mut LoweringContext) -> Module {
+    lower_tree_with_diagnostics(tree, source, lowering_context).module
+}
+
+pub fn lower_tree_with_diagnostics(
+    tree: &Tree,
+    source: &str,
+    lowering_context: &mut LoweringContext,
+) -> LoweringResult {
     let root = tree.root_node();
     let rope = Rope::from_str(source);
-    lower_root_with_rope(root, &rope, lowering_context)
+    lower_root_with_rope_with_diagnostics(root, &rope, lowering_context)
 }
 
 pub fn lower_root_with_rope(
@@ -203,6 +114,14 @@ pub fn lower_root_with_rope(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> Module {
+    lower_root_with_rope_with_diagnostics(root, rope, lowering_context).module
+}
+
+pub fn lower_root_with_rope_with_diagnostics(
+    root: Node<'_>,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
+) -> LoweringResult {
     let mut expressions = Vec::new();
 
     let child_count = root.named_child_count();
@@ -215,11 +134,13 @@ pub fn lower_root_with_rope(
         }
     }
 
-    let annotations = collect_pending_annotations(rope, lowering_context);
+    let (annotations, diagnostics) =
+        collect_and_attach_annotations(rope, &mut expressions, lowering_context);
 
-    attach_annotations_to_expressions(&annotations, &mut expressions);
-
-    Module::new(expressions, annotations)
+    LoweringResult {
+        module: Module::new(expressions, annotations),
+        diagnostics,
+    }
 }
 
 pub fn lower_node(
@@ -709,11 +630,13 @@ fn intern_node_text(node: Node<'_>, rope: &Rope, lowering_context: &mut Lowering
     lowering_context.intern(&text)
 }
 
-fn collect_pending_annotations(
+fn collect_and_attach_annotations(
     rope: &Rope,
+    expressions: &mut [Expression],
     lowering_context: &mut LoweringContext,
-) -> Vec<PendingAnnotation> {
+) -> (Vec<PendingAnnotation>, Vec<Diagnostic>) {
     let mut annotations = Vec::new();
+    let mut diagnostics = Vec::new();
     let lines = text::all_lines(rope);
     let mut row = 0;
 
@@ -723,30 +646,72 @@ fn collect_pending_annotations(
             continue;
         };
 
-        if let Ok(annotation) =
-            parse_annotation(&annotation_block.text, lowering_context.interner_mut())
-        {
-            annotations.push(PendingAnnotation {
-                range: annotation_block.range,
-                annotation,
-            });
+        let annotation_text = annotation_block.text.trim();
+
+        if annotation_text.is_empty() {
+            diagnostics.push(Diagnostic::syntax_error(
+                annotation_block.range,
+                "A `#:` typing comment must include a type expression.",
+            ));
+            row = annotation_block.last_row + 1;
+            continue;
+        }
+
+        let next_row = annotation_block.last_row + 1;
+        if next_row >= lines.len() {
+            diagnostics.push(Diagnostic::syntax_error(
+                annotation_block.range,
+                "A `#:` typing comment must be followed immediately by an expression.",
+            ));
+            row = annotation_block.last_row + 1;
+            continue;
+        }
+
+        let next_line = &lines[next_row];
+        let next_trimmed = next_line.trim_start();
+
+        if next_trimmed.is_empty() {
+            diagnostics.push(Diagnostic::syntax_error(
+                annotation_block.range,
+                "A `#:` typing comment cannot be separated from its expression by an empty line.",
+            ));
+            row = annotation_block.last_row + 1;
+            continue;
+        }
+
+        if next_trimmed.starts_with("#:") {
+            diagnostics.push(Diagnostic::syntax_error(
+                annotation_block.range,
+                "A `#:` typing comment must be followed immediately by an expression.",
+            ));
+            row = annotation_block.last_row + 1;
+            continue;
+        }
+
+        match parse_annotation(&annotation_block.text, lowering_context.interner_mut()) {
+            Ok(annotation) => {
+                let pending_annotation = PendingAnnotation {
+                    range: annotation_block.range,
+                    annotation,
+                };
+
+                if let Some(expression) =
+                    trailing_top_level_expression(expressions, &pending_annotation)
+                {
+                    attach_annotation_to_expression(expression, &pending_annotation.annotation);
+                }
+
+                annotations.push(pending_annotation);
+            }
+            Err(error) => {
+                diagnostics.push(annotation_parse_diagnostic(annotation_block.range, error))
+            }
         }
 
         row = annotation_block.last_row + 1;
     }
 
-    annotations
-}
-
-fn attach_annotations_to_expressions(
-    annotations: &[PendingAnnotation],
-    expressions: &mut [Expression],
-) {
-    for pending_annotation in annotations {
-        if let Some(expression) = trailing_top_level_expression(expressions, pending_annotation) {
-            attach_annotation_to_expression(expression, &pending_annotation.annotation);
-        }
-    }
+    (annotations, diagnostics)
 }
 
 fn trailing_top_level_expression<'a>(
@@ -771,5 +736,25 @@ fn attach_annotation_to_expression(expression: &mut Expression, annotation: &Ann
         *assignment_annotation = Some(AttachedAnnotation::binding_and_expression(
             annotation.clone(),
         ));
+    }
+}
+
+fn annotation_parse_diagnostic(
+    range: Range,
+    error: crate::annotations::TypeParseError,
+) -> Diagnostic {
+    match error {
+        crate::annotations::TypeParseError::InvalidSyntax { message } => {
+            Diagnostic::syntax_error(range, format!("type syntax error: {message}"))
+        }
+        crate::annotations::TypeParseError::UnsupportedConstruct { message } => {
+            Diagnostic::syntax_error(range, format!("unsupported syntax: {message}"))
+        }
+        crate::annotations::TypeParseError::InvalidSemantics { message } => {
+            Diagnostic::syntax_error(range, format!("invalid semantics: {message}"))
+        }
+        crate::annotations::TypeParseError::UnknownType { name } => {
+            Diagnostic::syntax_error(range, format!("type syntax error: unknown type `{name}`"))
+        }
     }
 }

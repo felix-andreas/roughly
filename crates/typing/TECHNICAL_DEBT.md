@@ -8,27 +8,6 @@ Keep this file focused on concrete, current debt that affects correctness, testa
 
 ## Current debt
 
-### Annotation parsing is duplicated
-
-`#:` annotations are parsed more than once in the main checking flow.
-
-- `check.rs` parses annotations to produce annotation syntax diagnostics before lowering
-- `lower.rs` scans and parses annotations again in order to attach them to lowered expressions
-
-This duplicates work, couples annotation policy to two parts of the pipeline, and makes the phase boundary harder to test cleanly.
-
-### Lowering is not a pure front-end lowering phase
-
-`lower.rs` currently does more than syntax-to-HIR lowering.
-
-It also:
-
-- scans source text for annotations
-- reparses annotation syntax
-- attaches parsed annotations to top-level expressions
-
-This makes it harder to test lowering structure separately from annotation attachment behavior.
-
 ### Typechecking and inference-engine concerns are mixed together
 
 The current `typecheck.rs` file contains multiple responsibilities at once:

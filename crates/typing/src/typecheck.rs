@@ -1,7 +1,7 @@
 use {
     crate::{
+        hir::{Argument, Expression, ExpressionId, ExpressionKind, Module},
         interner::Symbol,
-        lower::{Expression, ExpressionId, ExpressionKind, Module},
         types::{
             AnnotationKind, Atomic, AttachedAnnotation, CoreType, FunctionType,
             InferenceVariableId, RecordField, SurfaceType, TypeScheme,
@@ -625,7 +625,7 @@ impl InferenceState {
     fn infer_builtin_call(
         &mut self,
         symbol: Symbol,
-        arguments: &[crate::lower::Argument],
+        arguments: &[Argument],
         expression: &Expression,
     ) -> Result<Option<CoreType>, InferenceError> {
         let Some(builtin_kind) = self.builtins.get(&symbol).copied() else {
@@ -651,7 +651,7 @@ impl InferenceState {
 
     fn infer_builtin_plus(
         &mut self,
-        arguments: &[crate::lower::Argument],
+        arguments: &[Argument],
         expression: &Expression,
     ) -> Result<CoreType, InferenceError> {
         self.infer_binary_numeric(arguments, expression, NumericResultAtomic::Promote)
@@ -659,7 +659,7 @@ impl InferenceState {
 
     fn infer_builtin_minus(
         &mut self,
-        arguments: &[crate::lower::Argument],
+        arguments: &[Argument],
         expression: &Expression,
     ) -> Result<CoreType, InferenceError> {
         self.infer_binary_numeric(arguments, expression, NumericResultAtomic::Promote)
@@ -667,7 +667,7 @@ impl InferenceState {
 
     fn infer_builtin_multiply(
         &mut self,
-        arguments: &[crate::lower::Argument],
+        arguments: &[Argument],
         expression: &Expression,
     ) -> Result<CoreType, InferenceError> {
         self.infer_binary_numeric(arguments, expression, NumericResultAtomic::Promote)
@@ -675,7 +675,7 @@ impl InferenceState {
 
     fn infer_builtin_divide(
         &mut self,
-        arguments: &[crate::lower::Argument],
+        arguments: &[Argument],
         expression: &Expression,
     ) -> Result<CoreType, InferenceError> {
         self.infer_binary_numeric(arguments, expression, NumericResultAtomic::AlwaysDouble)
@@ -683,7 +683,7 @@ impl InferenceState {
 
     fn infer_builtin_power(
         &mut self,
-        arguments: &[crate::lower::Argument],
+        arguments: &[Argument],
         expression: &Expression,
     ) -> Result<CoreType, InferenceError> {
         self.infer_binary_numeric(arguments, expression, NumericResultAtomic::AlwaysDouble)
@@ -691,7 +691,7 @@ impl InferenceState {
 
     fn infer_binary_numeric(
         &mut self,
-        arguments: &[crate::lower::Argument],
+        arguments: &[Argument],
         expression: &Expression,
         numeric_result_atomic: NumericResultAtomic,
     ) -> Result<CoreType, InferenceError> {
@@ -773,7 +773,7 @@ impl InferenceState {
     fn infer_function_call_expression(
         &mut self,
         callee: &Expression,
-        arguments: &[crate::lower::Argument],
+        arguments: &[Argument],
         expression: &Expression,
     ) -> Result<CoreType, InferenceError> {
         let inferred_callee = self.infer_expression(callee)?;
@@ -821,7 +821,7 @@ impl InferenceState {
     fn infer_function_call(
         &mut self,
         function_type: FunctionType<CoreType>,
-        arguments: &[crate::lower::Argument],
+        arguments: &[Argument],
         callee: &Expression,
         expression: &Expression,
     ) -> Result<CoreType, InferenceError> {
@@ -903,7 +903,7 @@ impl InferenceState {
     fn infer_subset_expression(
         &mut self,
         value: &Expression,
-        arguments: &[crate::lower::Argument],
+        arguments: &[Argument],
         expression: &Expression,
     ) -> Result<CoreType, InferenceError> {
         if arguments.len() != 1 || arguments[0].name.is_some() {
@@ -960,7 +960,7 @@ impl InferenceState {
     fn infer_subset2_expression(
         &mut self,
         value: &Expression,
-        arguments: &[crate::lower::Argument],
+        arguments: &[Argument],
         expression: &Expression,
     ) -> Result<CoreType, InferenceError> {
         if arguments.len() != 1 || arguments[0].name.is_some() {
@@ -1077,7 +1077,7 @@ impl InferenceState {
 
     fn infer_builtin_boolean_binary(
         &mut self,
-        arguments: &[crate::lower::Argument],
+        arguments: &[Argument],
         expression: &Expression,
     ) -> Result<CoreType, InferenceError> {
         if arguments.len() != 2 {
@@ -1096,7 +1096,7 @@ impl InferenceState {
 
     fn infer_builtin_combine(
         &mut self,
-        arguments: &[crate::lower::Argument],
+        arguments: &[Argument],
         _expression: &Expression,
     ) -> Result<CoreType, InferenceError> {
         if arguments.is_empty() {
@@ -1143,7 +1143,7 @@ impl InferenceState {
 
     fn infer_builtin_list(
         &mut self,
-        arguments: &[crate::lower::Argument],
+        arguments: &[Argument],
         expression: &Expression,
     ) -> Result<CoreType, InferenceError> {
         if arguments.is_empty() {

@@ -1,4 +1,4 @@
-# Human Notes (don't edit!)
+# Human Notes (!AIs are not allowed to edit!)
 
 - scoping rules? (canonicalization in genreal)
 - lsp
@@ -31,7 +31,10 @@
 - unify usage of rope helpers in roughly and typing crate
   - shared tree helpers
   - shared rope helpers (maybe hide behind opaque struct)
-
+  
+- do we need lowering?
+  - can't we just have a table for annotations (key is tree-sitter id)
+  - can't even typing check not use tree-sitter directly ??
 
 - questions?
   - do we need canonicalization? (is it part of lowering)

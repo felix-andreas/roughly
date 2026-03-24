@@ -1,12 +1,16 @@
+#[path = "support.rs"]
+mod support;
+
 use {
     std::{collections::BTreeSet, fs, path::Path},
+    support::{check_source, new_parser, parse_source},
     typing::{
         AnalysisState, Interner,
         annotations::{
             parse_expanded_block_surface_type, parse_type_syntax_item, render_type_syntax_item,
         },
         lower::LoweringContext,
-        new_parser, parse, render_surface_type,
+        render_surface_type,
         typecheck::{BuiltinKind, InferenceError, InferenceState},
         types::{Atomic, CoreType, InferenceVariableId},
     },
@@ -18,7 +22,7 @@ fn diagnostics() {
     let mut analysis_state = AnalysisState::new();
 
     run_fixture_suite("tests/diagnostics", "diagnostics", |code| {
-        typing::check_source(code, &mut parser, &mut analysis_state).render(code)
+        check_source(code, &mut parser, &mut analysis_state).render(code)
     });
 }
 
@@ -216,7 +220,7 @@ where
 
 fn render_expression_fixture_result(source: &str) -> String {
     let mut parser = new_parser();
-    let tree = parse(&mut parser, source, None);
+    let tree = parse_source(&mut parser, source);
 
     let mut lowering_context = LoweringContext::new();
     let module = lowering_context.lower_tree(&tree, source);

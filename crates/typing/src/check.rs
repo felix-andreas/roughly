@@ -1,15 +1,13 @@
 use {
     crate::{
         Interner,
-        annotations::{TypeParseError, parse_annotation},
         diagnostics::Diagnostic,
-        lower::LoweringContext,
-        parse::parse,
+        lower::{LoweringContext, lower_root_with_rope_with_diagnostics},
         text,
         typecheck::{BuiltinKind, InferenceState},
     },
     ropey::Rope,
-    tree_sitter::{Node, Parser},
+    tree_sitter::Node,
 };
 
 #[derive(Debug, Default)]
@@ -63,19 +61,15 @@ pub fn check(node: Node<'_>, rope: &Rope, analysis_state: &mut AnalysisState) ->
         return CheckResult { diagnostics };
     }
 
-    collect_annotation_diagnostics(
-        rope,
-        analysis_state.lowering_context.interner_mut(),
-        &mut diagnostics,
-    );
+    let lowering_result =
+        lower_root_with_rope_with_diagnostics(node, rope, &mut analysis_state.lowering_context);
+    diagnostics.extend(lowering_result.diagnostics);
 
     if !diagnostics.is_empty() {
         return CheckResult { diagnostics };
     }
 
-    let module = analysis_state
-        .lowering_context
-        .lower_root_with_rope(node, rope);
+    let module = lowering_result.module;
 
     let mut inference_state = InferenceState::new();
     bind_builtins(&mut inference_state, &mut analysis_state.lowering_context);
@@ -89,16 +83,6 @@ pub fn check(node: Node<'_>, rope: &Rope, analysis_state: &mut AnalysisState) ->
     }
 
     CheckResult { diagnostics }
-}
-
-pub fn check_source(
-    source: &str,
-    parser: &mut Parser,
-    analysis_state: &mut AnalysisState,
-) -> CheckResult {
-    let tree = parse(parser, source, None);
-    let rope = Rope::from_str(source);
-    check(tree.root_node(), &rope, analysis_state)
 }
 
 fn bind_builtins(inference_state: &mut InferenceState, lowering_context: &mut LoweringContext) {
@@ -121,95 +105,6 @@ fn bind_builtins(inference_state: &mut InferenceState, lowering_context: &mut Lo
     inference_state.bind_builtin(or_symbol, BuiltinKind::Or);
     inference_state.bind_builtin(combine_symbol, BuiltinKind::Combine);
     inference_state.bind_builtin(list_symbol, BuiltinKind::List);
-}
-
-fn collect_annotation_diagnostics(
-    rope: &Rope,
-    interner: &mut Interner,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let lines = text::all_lines(rope);
-    let mut row = 0;
-
-    while row < lines.len() {
-        let Some(annotation_block) = text::annotation_block(rope, row) else {
-            row += 1;
-            continue;
-        };
-
-        let annotation_range = annotation_block.range;
-        let annotation_text = annotation_block.text.trim();
-
-        if annotation_text.is_empty() {
-            diagnostics.push(Diagnostic::syntax_error(
-                annotation_range,
-                "A `#:` typing comment must include a type expression.",
-            ));
-            row += 1;
-            continue;
-        }
-
-        let next_row = annotation_block.last_row + 1;
-        if next_row >= lines.len() {
-            diagnostics.push(Diagnostic::syntax_error(
-                annotation_range,
-                "A `#:` typing comment must be followed immediately by an expression.",
-            ));
-            row = annotation_block.last_row + 1;
-            continue;
-        }
-
-        let next_line = &lines[next_row];
-        let next_trimmed = next_line.trim_start();
-
-        if next_trimmed.is_empty() {
-            diagnostics.push(Diagnostic::syntax_error(
-                annotation_range,
-                "A `#:` typing comment cannot be separated from its expression by an empty line.",
-            ));
-            row = annotation_block.last_row + 1;
-            continue;
-        }
-
-        if next_trimmed.starts_with("#:") {
-            diagnostics.push(Diagnostic::syntax_error(
-                annotation_range,
-                "A `#:` typing comment must be followed immediately by an expression.",
-            ));
-            row = annotation_block.last_row + 1;
-            continue;
-        }
-
-        match parse_annotation(&annotation_block.text, interner) {
-            Ok(_annotation) => {}
-            Err(TypeParseError::InvalidSyntax { message }) => {
-                diagnostics.push(Diagnostic::syntax_error(
-                    annotation_range,
-                    format!("type syntax error: {message}"),
-                ));
-            }
-            Err(TypeParseError::UnsupportedConstruct { message }) => {
-                diagnostics.push(Diagnostic::syntax_error(
-                    annotation_range,
-                    format!("unsupported syntax: {message}"),
-                ));
-            }
-            Err(TypeParseError::InvalidSemantics { message }) => {
-                diagnostics.push(Diagnostic::syntax_error(
-                    annotation_range,
-                    format!("invalid semantics: {message}"),
-                ));
-            }
-            Err(TypeParseError::UnknownType { name }) => {
-                diagnostics.push(Diagnostic::syntax_error(
-                    annotation_range,
-                    format!("type syntax error: unknown type `{name}`"),
-                ));
-            }
-        }
-
-        row = annotation_block.last_row + 1;
-    }
 }
 
 fn collect_syntax_errors(node: Node<'_>, rope: &Rope, diagnostics: &mut Vec<Diagnostic>) {

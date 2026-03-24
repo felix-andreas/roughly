@@ -90,8 +90,9 @@ Delete or trim ephemeral documents once their content is resolved or no longer u
   - Scratch space for active design discussion.
   - Keep it short and move anything durable into `DECISION_LOG.md` or `OPEN_DECISIONS.md`.
 - `MEMORY.md`
-  - Handoff-only continuity that is easy to lose between sessions.
-  - Keep it clean; remove resolved points, stale notes, and low-value session chatter.
+  - Inter-session memory only: use it for continuity that is easy to lose between sessions, not as a general session dump.
+  - Keep it clean by default; remove resolved points, stale notes, and low-value session chatter automatically.
+  - Only preserve a broader dump of session details when the user explicitly asks for that.
   - Do not repeat stable design, finished work, or obvious current code state.
   - If the remaining context is unclear or disputed, discuss it with the user instead of preserving ambiguous notes.
 

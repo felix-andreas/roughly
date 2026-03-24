@@ -18,15 +18,11 @@ This document tracks actionable planned work for the `typing` crate.
   - Add `naming.rs` for scopes, bindings, and use-site resolution.
   - Add `diagnostic.rs` as the shared diagnostics module.
   - Rename or reshape the current checker files so they match `STRUCTURE.md`.
-  - Remove `parse.rs` from the public crate surface and keep parser setup as test or integration glue only.
 
 - Rebuild the front-end boundary around HIR.
-  - Move lowered data structures out of `lower.rs` into `hir.rs`.
   - Convert HIR to stable arena or id-based storage.
   - Keep source ranges and source-order information available on HIR items.
   - Represent annotation payloads and definition blocks directly in HIR.
-  - Parse annotations during lowering exactly once.
-  - Remove duplicate annotation parsing from the main checking flow.
 
 - Introduce the naming phase.
   - Add a naming entry point after lowering.
