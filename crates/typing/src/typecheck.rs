@@ -3,8 +3,8 @@ use {
         hir::{Argument, Expression, ExpressionId, ExpressionKind, HirArena, Module},
         interner::Symbol,
         types::{
-            AnnotationKind, Atomic, AttachedAnnotation, CoreType, FunctionType,
-            InferenceVariableId, RecordField, SurfaceType, TypeScheme,
+            Annotation, Atomic, AttachedAnnotation, CoreType, FunctionType, InferenceVariableId,
+            RecordField, SurfaceType, TypeAnnotationKind, TypeScheme,
         },
     },
     std::collections::{BTreeMap, BTreeSet},
@@ -101,7 +101,24 @@ impl InferenceState {
                 annotation,
                 value,
             } => {
-                let inferred_value = self.infer_expression(arena.get(*value), arena)?;
+                let value_expression = arena.get(*value);
+                let inferred_value = if let Some(expected_function_type) =
+                    checked_function_annotation(annotation.as_ref())
+                {
+                    if let ExpressionKind::Function { parameters, body } = &value_expression.kind {
+                        self.infer_function_expression(
+                            parameters,
+                            *body,
+                            Some(expected_function_type),
+                            expression,
+                            arena,
+                        )?
+                    } else {
+                        self.infer_expression(value_expression, arena)?
+                    }
+                } else {
+                    self.infer_expression(value_expression, arena)?
+                };
                 let binding_type = if let Some(annotation) = annotation {
                     if annotation.applies_to_binding {
                         self.apply_annotation(annotation, inferred_value, expression)?
@@ -116,22 +133,7 @@ impl InferenceState {
                 Ok(binding_type)
             }
             ExpressionKind::Function { parameters, body } => {
-                let parent_environment = self.environment.clone();
-
-                let mut parameter_types = Vec::with_capacity(parameters.len());
-                for parameter in parameters {
-                    let variable = self.fresh_variable();
-                    let parameter_type = CoreType::Variable(variable);
-                    self.bind_name(parameter.symbol, parameter_type.clone(), parameter.range);
-                    parameter_types.push(parameter_type);
-                }
-
-                let return_type = self.infer_expression(arena.get(*body), arena)?;
-                let function_type =
-                    CoreType::Function(FunctionType::new(parameter_types, Vec::new(), return_type));
-
-                self.environment = parent_environment;
-                Ok(function_type)
+                self.infer_function_expression(parameters, *body, None, expression, arena)
             }
             ExpressionKind::If {
                 condition,
@@ -184,7 +186,7 @@ impl InferenceState {
             ExpressionKind::Dollar { value, name } => {
                 self.infer_dollar_expression(arena.get(*value), *name, expression, arena)
             }
-            ExpressionKind::TypeAlias { .. } => Ok(CoreType::Null),
+            ExpressionKind::Definition(_) => Ok(CoreType::Null),
             ExpressionKind::Unsupported => Ok(CoreType::Unknown),
         }
     }
@@ -208,6 +210,48 @@ impl InferenceState {
         }
 
         Ok(last_type)
+    }
+
+    fn infer_function_expression(
+        &mut self,
+        parameters: &[crate::hir::Parameter],
+        body: ExpressionId,
+        expected_function_type: Option<FunctionType<CoreType>>,
+        expression: &Expression,
+        arena: &HirArena,
+    ) -> Result<CoreType, InferenceError> {
+        let parent_environment = self.environment.clone();
+
+        let expected_parameter_types = expected_function_type
+            .as_ref()
+            .map(flatten_expected_parameter_types)
+            .filter(|types| types.len() == parameters.len());
+        let expected_return_type =
+            expected_function_type.map(|function_type| *function_type.return_type);
+
+        let mut parameter_types = Vec::with_capacity(parameters.len());
+        for (index, parameter) in parameters.iter().enumerate() {
+            let parameter_type = expected_parameter_types
+                .as_ref()
+                .and_then(|types| types.get(index))
+                .cloned()
+                .unwrap_or_else(|| CoreType::Variable(self.fresh_variable()));
+            self.bind_name(parameter.symbol, parameter_type.clone(), parameter.range);
+            parameter_types.push(parameter_type);
+        }
+
+        let inferred_return_type = self.infer_expression(arena.get(body), arena)?;
+        let return_type = if let Some(expected_return_type) = expected_return_type {
+            self.unify_with_context(expected_return_type, inferred_return_type, expression)?
+        } else {
+            inferred_return_type
+        };
+
+        let function_type =
+            CoreType::Function(FunctionType::new(parameter_types, Vec::new(), return_type));
+
+        self.environment = parent_environment;
+        Ok(function_type)
     }
 
     fn infer_if_expression(
@@ -423,35 +467,41 @@ impl InferenceState {
         inferred_type: CoreType,
         expression: &Expression,
     ) -> Result<CoreType, InferenceError> {
-        let expected_type = core_type_from_surface_type(&annotation.annotation.surface_type);
         let actual_type = self.resolve(inferred_type)?;
 
-        match annotation.annotation.kind {
-            AnnotationKind::Checked => {
-                if self.check_compatibility(actual_type.clone(), expected_type.clone()) {
-                    Ok(expected_type)
-                } else {
-                    Err(InferenceError::TypeMismatch {
-                        expected: Box::new(expected_type),
-                        actual: Box::new(actual_type),
-                        range: Some(expression.range),
-                        expression_id: Some(expression.id),
-                    })
+        match &annotation.annotation {
+            Annotation::Type { kind, surface_type } => {
+                let expected_type = core_type_from_surface_type(surface_type);
+
+                match kind {
+                    TypeAnnotationKind::Checked => {
+                        if self.check_compatibility(actual_type.clone(), expected_type.clone()) {
+                            Ok(expected_type)
+                        } else {
+                            Err(InferenceError::TypeMismatch {
+                                expected: Box::new(expected_type),
+                                actual: Box::new(actual_type),
+                                range: Some(expression.range),
+                                expression_id: Some(expression.id),
+                            })
+                        }
+                    }
+                    TypeAnnotationKind::UnknownOnly => {
+                        if actual_type == CoreType::Unknown {
+                            Ok(expected_type)
+                        } else {
+                            Err(InferenceError::TypeMismatch {
+                                expected: Box::new(CoreType::Unknown),
+                                actual: Box::new(actual_type),
+                                range: Some(expression.range),
+                                expression_id: Some(expression.id),
+                            })
+                        }
+                    }
+                    TypeAnnotationKind::Trusted => Ok(expected_type),
                 }
             }
-            AnnotationKind::UnknownOnly => {
-                if actual_type == CoreType::Unknown {
-                    Ok(expected_type)
-                } else {
-                    Err(InferenceError::TypeMismatch {
-                        expected: Box::new(CoreType::Unknown),
-                        actual: Box::new(actual_type),
-                        range: Some(expression.range),
-                        expression_id: Some(expression.id),
-                    })
-                }
-            }
-            AnnotationKind::Trusted => Ok(expected_type),
+            Annotation::New { .. } => Ok(actual_type),
         }
     }
 
@@ -758,10 +808,12 @@ impl InferenceState {
 
         let (left_shape, left_atomic) = match left_shape_atomic {
             Some(parts) => parts,
-            None if matches!(resolved_left, CoreType::Variable(_))
-                || matches!(resolved_right, CoreType::Variable(_)) =>
-            {
-                return Ok(CoreType::Variable(self.fresh_variable()));
+            None if matches!(resolved_left, CoreType::Variable(_)) => {
+                return Err(InferenceError::InvalidPlusOperand {
+                    actual: resolved_left.clone(),
+                    range: arg0.range,
+                    expression_id: arg0.id,
+                });
             }
             None if matches!(resolved_left, CoreType::Any | CoreType::Unknown) => {
                 return Ok(CoreType::Unknown);
@@ -777,12 +829,12 @@ impl InferenceState {
 
         let (right_shape, right_atomic) = match right_shape_atomic {
             Some(parts) => parts,
-            None if matches!(resolved_left, CoreType::Variable(_))
-                || matches!(resolved_right, CoreType::Variable(_)) =>
-            {
-                // Already handled in left_shape_atomic if left was a variable,
-                // but if left was known and right was a variable, we must return here.
-                return Ok(CoreType::Variable(self.fresh_variable()));
+            None if matches!(resolved_right, CoreType::Variable(_)) => {
+                return Err(InferenceError::InvalidPlusOperand {
+                    actual: resolved_right.clone(),
+                    range: arg1.range,
+                    expression_id: arg1.id,
+                });
             }
             None if matches!(resolved_right, CoreType::Any | CoreType::Unknown) => {
                 return Ok(CoreType::Unknown);
@@ -822,7 +874,11 @@ impl InferenceState {
         match numeric_operand_parts(&resolved_type) {
             Some((shape, atomic)) => Ok(core_type_for_shape(shape, atomic)),
             None if matches!(resolved_type, CoreType::Variable(_)) => {
-                Ok(CoreType::Variable(self.fresh_variable()))
+                Err(InferenceError::InvalidPlusOperand {
+                    actual: resolved_type,
+                    range: value.range,
+                    expression_id: value.id,
+                })
             }
             None if matches!(resolved_type, CoreType::Any | CoreType::Unknown) => {
                 Ok(CoreType::Unknown)
@@ -1915,6 +1971,35 @@ fn core_type_from_surface_type(surface_type: &SurfaceType) -> CoreType {
         )),
         SurfaceType::Binders(_, inner_type) => core_type_from_surface_type(inner_type),
     }
+}
+
+fn checked_function_annotation(
+    annotation: Option<&AttachedAnnotation>,
+) -> Option<FunctionType<CoreType>> {
+    let annotation = annotation?;
+    match &annotation.annotation {
+        Annotation::Type {
+            kind: TypeAnnotationKind::Checked,
+            surface_type,
+        } => match core_type_from_surface_type(surface_type) {
+            CoreType::Function(function_type) => Some(function_type),
+            _ => None,
+        },
+        Annotation::Type { .. } | Annotation::New { .. } => None,
+    }
+}
+
+fn flatten_expected_parameter_types(function_type: &FunctionType<CoreType>) -> Vec<CoreType> {
+    let mut parameter_types =
+        Vec::with_capacity(function_type.parameters.len() + function_type.named_parameters.len());
+    parameter_types.extend(function_type.parameters.iter().cloned());
+    parameter_types.extend(
+        function_type
+            .named_parameters
+            .iter()
+            .map(|parameter| parameter.value.clone()),
+    );
+    parameter_types
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

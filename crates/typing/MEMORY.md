@@ -22,29 +22,8 @@ If code changes make this document inaccurate, update it in the same session.
 
 - Fresh-session starting point:
   - Read `AGENTS.md` first.
-  - Then read `DECISION_LOG.md`, `OPEN_DECISIONS.md`, `TODOS.md`, `DISCUSS.md`, `ARCHITECTURE.md`, `STRUCTURE.md`, and `TESTING.md`.
+  - Then read `DECISION_LOG.md`, `OPEN_DECISIONS.md`, `TODOS.md`, `ARCHITECTURE.md`, and `TESTING.md`.
   - Do not treat older architectural prose elsewhere in the crate as settled if it conflicts with those files.
-
-- Recent implementation progress:
-  - `hir.rs` now uses `HirArena` and stable `ExpressionId`s.
-  - Lowering now processes `#:` annotations in a single pass directly into the `HirArena`.
-  - `naming.rs` resolves scopes and value bindings into stable `BindingId`s.
-  - Added a dedicated `lowering` fixture suite utilizing a new `Module.render()` method.
-  - Added HM-oriented fixture suites for `unification`, `generalization`, `instantiation`, `bindings`, `substitution`, and `environment`.
-  - Added `naming` and `interfaces` fixture suites.
-  - Binding-oriented fixture renderers now walk root expressions sequentially so rebinding cases capture the scheme visible at each assignment site rather than the final environment snapshot.
-
-- Current steering-document layout:
-  - persistent authoritative: `README.md`, `SEMANTICS.md`, `ARCHITECTURE.md`, `STRUCTURE.md`, `TESTING.md`
-  - working: `TECHNICAL_DEBT.md`, `DECISION_LOG.md`
-  - ephemeral: `TODOS.md`, `OPEN_DECISIONS.md`, `DISCUSS.md`, `MEMORY.md`
-  - `AGENTS.md` now explains the role of each document kind and the update rules for them
-
-- Agreed architectural direction already recorded in `DECISION_LOG.md`:
-  - `check` stays the top-level orchestration entry point
-  - phases should be `lower`, `naming`, `typecheck`, with diagnostics as output rather than a phase
-  - keep one `typecheck.rs` for now
-  - keep builtins, compatibility, and interface extraction inside `typecheck.rs` for now
 
 - Still-open design questions in `OPEN_DECISIONS.md`:
   - the exact typecheck environment shape beyond “builtins and imported interfaces”
@@ -52,11 +31,6 @@ If code changes make this document inaccurate, update it in the same session.
 - Recommended next step for the next agent:
   - Reshape `typecheck.rs` to consume the `NamingResult` bindings instead of the raw `Symbol`s.
   - Handle mapping builtins and imported interfaces into stable `BindingId`s so typecheck can use them uniformly.
-  - Fix the remaining failing tests in the `diagnostics` suite.
-
-- Global requirement added near the end of the session:
-  - keep single-file rechecking fast while still reporting dependent type errors across the project when exported interfaces change
-  - this is now reflected both in `AGENTS.md` goals and in `ARCHITECTURE.md` project-level direction
 
 - Important caution:
   - persistent authoritative documents must only be changed after user request or discussion

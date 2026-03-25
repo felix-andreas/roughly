@@ -1,67 +1,76 @@
 use crate::{
+    hir::{Definition, DefinitionKind},
     interner::{Interner, Symbol},
-    types::{AnnotationKind, Atomic, FunctionType, RecordField, SurfaceType},
+    types::{Annotation, Atomic, FunctionType, RecordField, SurfaceType, TypeAnnotationKind},
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeSyntaxItem {
+    Annotation(Annotation),
+    Definitions(Vec<Definition>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeParseError {
+    InvalidSyntax { message: String },
+    InvalidSemantics { message: String },
+    UnsupportedConstruct { message: String },
+    UnknownType { name: String },
+}
 
 pub fn render_type_syntax_item(item: &TypeSyntaxItem, interner: &Interner) -> String {
     match item {
-        TypeSyntaxItem::SurfaceType(surface_type) => render_surface_type(surface_type, interner),
-        TypeSyntaxItem::IfUnknown(surface_type) => {
-            format!(
-                "@if-unknown {}",
-                render_surface_type(surface_type, interner)
-            )
-        }
-        TypeSyntaxItem::Trust(surface_type) => {
-            format!("@trust {}", render_surface_type(surface_type, interner))
-        }
-        TypeSyntaxItem::New(name) => {
+        TypeSyntaxItem::Annotation(annotation) => render_annotation(annotation, interner),
+        TypeSyntaxItem::Definitions(definitions) => definitions
+            .iter()
+            .map(|definition| render_definition(definition, interner))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
+}
+
+fn render_annotation(annotation: &Annotation, interner: &Interner) -> String {
+    match annotation {
+        Annotation::Type { kind, surface_type } => match kind {
+            TypeAnnotationKind::Checked => render_surface_type(surface_type, interner),
+            TypeAnnotationKind::UnknownOnly => {
+                format!(
+                    "@if-unknown {}",
+                    render_surface_type(surface_type, interner)
+                )
+            }
+            TypeAnnotationKind::Trusted => {
+                format!("@trust {}", render_surface_type(surface_type, interner))
+            }
+        },
+        Annotation::New { name } => {
             let name = interner.resolve(*name).unwrap_or("<unknown>");
             format!("@new {name}")
         }
-        TypeSyntaxItem::TypeDefinition {
-            name,
-            type_parameters,
-            surface_type,
-        } => {
-            let name = interner.resolve(*name).unwrap_or("<unknown>");
-            let params = if type_parameters.is_empty() {
-                "".to_owned()
-            } else {
-                let rendered_params = type_parameters
-                    .iter()
-                    .map(|&p| interner.resolve(p).unwrap_or("<unknown>").to_owned())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("<{rendered_params}>")
-            };
-            format!(
-                "@type {name}{params} {{{}}}",
-                render_surface_type(surface_type, interner)
-            )
-        }
-        TypeSyntaxItem::TypeAlias {
-            name,
-            type_parameters,
-            surface_type,
-        } => {
-            let name = interner.resolve(*name).unwrap_or("<unknown>");
-            let params = if type_parameters.is_empty() {
-                "".to_owned()
-            } else {
-                let rendered_params = type_parameters
-                    .iter()
-                    .map(|&p| interner.resolve(p).unwrap_or("<unknown>").to_owned())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("<{rendered_params}>")
-            };
-            format!(
-                "@alias {name}{params} {{{}}}",
-                render_surface_type(surface_type, interner)
-            )
-        }
     }
+}
+
+fn render_definition(definition: &Definition, interner: &Interner) -> String {
+    let directive = match definition.kind {
+        DefinitionKind::Type => "@type",
+        DefinitionKind::Alias => "@alias",
+    };
+    let name = interner.resolve(definition.name).unwrap_or("<unknown>");
+    let params = if definition.type_parameters.is_empty() {
+        String::new()
+    } else {
+        let rendered_params = definition
+            .type_parameters
+            .iter()
+            .map(|&p| interner.resolve(p).unwrap_or("<unknown>").to_owned())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("<{rendered_params}>")
+    };
+    format!(
+        "{directive} {name}{params} {{{}}}",
+        render_surface_type(&definition.surface_type, interner)
+    )
 }
 
 pub fn render_surface_type(surface_type: &SurfaceType, interner: &Interner) -> String {
@@ -169,30 +178,47 @@ pub fn render_surface_type(surface_type: &SurfaceType, interner: &Interner) -> S
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypeParseError {
-    InvalidSyntax { message: String },
-    InvalidSemantics { message: String },
-    UnsupportedConstruct { message: String },
-    UnknownType { name: String },
-}
+pub fn parse_annotation(
+    text: &str,
+    interner: &mut Interner,
+) -> Result<TypeSyntaxItem, TypeParseError> {
+    let trimmed_text = text.trim();
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypeSyntaxItem {
-    SurfaceType(SurfaceType),
-    IfUnknown(SurfaceType),
-    Trust(SurfaceType),
-    New(Symbol),
-    TypeDefinition {
-        name: Symbol,
-        type_parameters: Vec<Symbol>,
-        surface_type: SurfaceType,
-    },
-    TypeAlias {
-        name: Symbol,
-        type_parameters: Vec<Symbol>,
-        surface_type: SurfaceType,
-    },
+    if trimmed_text.is_empty() {
+        return Err(invalid_syntax(
+            "expected a type annotation, but found empty input.",
+        ));
+    }
+
+    let block_items = split_annotation_block_items(trimmed_text)?;
+
+    let Some(first_item) = block_items.first() else {
+        return Err(invalid_syntax(
+            "expected a type annotation, but found empty input.",
+        ));
+    };
+
+    match first_item.kind {
+        BlockItemKind::Definition => {
+            let mut definitions = Vec::with_capacity(block_items.len());
+            for item in block_items {
+                definitions.push(parse_definition_item(&item.text, interner)?);
+            }
+            Ok(TypeSyntaxItem::Definitions(definitions))
+        }
+        BlockItemKind::Expanded => {
+            let expanded_block_text = block_items
+                .into_iter()
+                .map(|item| item.text)
+                .collect::<Vec<_>>()
+                .join("\n");
+            let surface_type = parse_expanded_block_surface_type(&expanded_block_text, interner)?;
+            Ok(TypeSyntaxItem::Annotation(Annotation::checked(
+                surface_type,
+            )))
+        }
+        BlockItemKind::Compact => parse_single_line_annotation(&first_item.text, interner),
+    }
 }
 
 pub fn parse_surface_type(
@@ -236,86 +262,121 @@ pub fn parse_annotation_type(
     Ok(surface_type)
 }
 
-pub fn parse_annotation(
-    text: &str,
-    interner: &mut Interner,
-) -> Result<crate::types::Annotation, TypeParseError> {
-    let trimmed_text = text.trim();
-
-    if trimmed_text.is_empty() {
-        return Err(invalid_syntax(
-            "expected a type annotation, but found empty input.",
-        ));
-    }
-
-    let normalized_lines = trimmed_text
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(|line| line.strip_prefix("#:").map(str::trim).unwrap_or(line))
-        .collect::<Vec<_>>();
-
-    let Some(first_line) = normalized_lines.first().copied() else {
-        return Err(invalid_syntax(
-            "expected a type annotation, but found empty input.",
-        ));
-    };
-
-    if let Some(expanded_block_text) = parse_expanded_annotation_block_text(&normalized_lines)? {
-        let surface_type = parse_expanded_block_surface_type(&expanded_block_text, interner)?;
-        return Ok(crate::types::Annotation::new(
-            AnnotationKind::Checked,
-            surface_type,
-        ));
-    }
-
-    if normalized_lines.len() > 1 {
-        return Err(invalid_syntax(
-            "cannot use multiple compact annotations in the same `#:` block.",
-        ));
-    }
-
-    let (kind, surface_text) = parse_compact_annotation_kind_and_surface_text(first_line)?;
-
-    let surface_type = parse_surface_type(surface_text, interner)?;
-    Ok(crate::types::Annotation::new(kind, surface_type))
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockItemKind {
+    Compact,
+    Expanded,
+    Definition,
 }
 
-pub fn parse_type_syntax_item(
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedBlockItem {
+    kind: BlockItemKind,
+    text: String,
+}
+
+fn split_annotation_block_items(text: &str) -> Result<Vec<ParsedBlockItem>, TypeParseError> {
+    let mut items = Vec::new();
+    let mut current_kind = None;
+    let mut current_text = String::new();
+    let mut delimiter_stack = Vec::new();
+
+    for raw_line in text.lines() {
+        let trimmed_line = raw_line.trim();
+        if trimmed_line.is_empty() {
+            continue;
+        }
+
+        if current_kind.is_none() || delimiter_stack.is_empty() {
+            let next_kind = classify_annotation_block_line(trimmed_line);
+
+            if let Some(existing_kind) = current_kind {
+                validate_block_item_sequence(existing_kind, next_kind)?;
+                items.push(ParsedBlockItem {
+                    kind: existing_kind,
+                    text: std::mem::take(&mut current_text),
+                });
+            }
+
+            current_kind = Some(next_kind);
+            current_text.push_str(trimmed_line);
+        } else {
+            current_text.push('\n');
+            current_text.push_str(trimmed_line);
+        }
+
+        update_delimiter_stack(trimmed_line, &mut delimiter_stack);
+    }
+
+    if let Some(kind) = current_kind {
+        items.push(ParsedBlockItem {
+            kind,
+            text: current_text,
+        });
+    }
+
+    Ok(items)
+}
+
+fn classify_annotation_block_line(text: &str) -> BlockItemKind {
+    match parse_annotation_directive_name_and_body(text) {
+        Some(("type", _)) | Some(("alias", _)) => BlockItemKind::Definition,
+        _ if is_expanded_annotation_line(text) => BlockItemKind::Expanded,
+        _ => BlockItemKind::Compact,
+    }
+}
+
+fn validate_block_item_sequence(
+    existing_kind: BlockItemKind,
+    next_kind: BlockItemKind,
+) -> Result<(), TypeParseError> {
+    match (existing_kind, next_kind) {
+        (BlockItemKind::Definition, BlockItemKind::Definition)
+        | (BlockItemKind::Expanded, BlockItemKind::Expanded) => Ok(()),
+        (BlockItemKind::Compact, BlockItemKind::Compact) => Err(invalid_syntax(
+            "cannot use multiple compact annotations in the same `#:` block.",
+        )),
+        (BlockItemKind::Definition, _) | (_, BlockItemKind::Definition) => Err(invalid_syntax(
+            "cannot mix definition and annotation directives in the same `#:` block.",
+        )),
+        (BlockItemKind::Compact, BlockItemKind::Expanded)
+        | (BlockItemKind::Expanded, BlockItemKind::Compact) => Err(invalid_syntax(
+            "cannot mix compact and expanded annotations in the same `#:` block.",
+        )),
+    }
+}
+
+fn update_delimiter_stack(text: &str, delimiter_stack: &mut Vec<char>) {
+    for character in text.chars() {
+        match character {
+            '(' | '[' | '{' => delimiter_stack.push(character),
+            ')' | ']' | '}' => {
+                let _ = utils::pop_matching_delimiter(delimiter_stack, character);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn parse_single_line_annotation(
     text: &str,
     interner: &mut Interner,
 ) -> Result<TypeSyntaxItem, TypeParseError> {
-    let trimmed_text = text.trim();
-
-    if trimmed_text.is_empty() {
-        return Err(invalid_syntax("expected a type, but found empty input."));
-    }
-
-    let item = if trimmed_text.starts_with('@') {
-        parse_directive_type_syntax_item(trimmed_text, interner)?
-    } else {
-        TypeSyntaxItem::SurfaceType(parse_surface_type(trimmed_text, interner)?)
-    };
-
-    validate_type_syntax_item(&item, interner)?;
-
-    Ok(item)
-}
-
-fn validate_type_syntax_item(
-    item: &TypeSyntaxItem,
-    interner: &Interner,
-) -> Result<(), TypeParseError> {
-    match item {
-        TypeSyntaxItem::SurfaceType(surface_type)
-        | TypeSyntaxItem::IfUnknown(surface_type)
-        | TypeSyntaxItem::Trust(surface_type)
-        | TypeSyntaxItem::TypeDefinition { surface_type, .. }
-        | TypeSyntaxItem::TypeAlias { surface_type, .. } => {
-            validate_surface_type(surface_type, interner)
+    if parse_annotation_directive_name_and_body(text).is_some() {
+        match parse_directive_type_syntax_item(text, interner)? {
+            annotation @ TypeSyntaxItem::Annotation(_) => return Ok(annotation),
+            TypeSyntaxItem::Definitions(_) => {
+                return Err(invalid_syntax(
+                    "definition directives must not be mixed with annotations in the same `#:` block.",
+                ));
+            }
         }
-        TypeSyntaxItem::New(_) => Ok(()),
     }
+
+    let surface_type = parse_surface_type(text, interner)?;
+    Ok(TypeSyntaxItem::Annotation(Annotation::checked(
+        surface_type,
+    )))
 }
 
 fn validate_surface_type(
@@ -376,32 +437,38 @@ fn parse_directive_type_syntax_item(
         "type" => {
             let (name, type_parameters, surface_type) =
                 parse_named_type_definition(directive_body, interner)?;
-            Ok(TypeSyntaxItem::TypeDefinition {
+            Ok(TypeSyntaxItem::Definitions(vec![Definition {
+                kind: DefinitionKind::Type,
                 name,
                 type_parameters,
                 surface_type,
-            })
+            }]))
         }
         "alias" => {
             let (name, type_parameters, surface_type) =
                 parse_named_type_definition(directive_body, interner)?;
-            Ok(TypeSyntaxItem::TypeAlias {
+            Ok(TypeSyntaxItem::Definitions(vec![Definition {
+                kind: DefinitionKind::Alias,
                 name,
                 type_parameters,
                 surface_type,
-            })
+            }]))
         }
         "if-unknown" => {
             let surface_text = keyword_surface_text(directive_body)
                 .ok_or_else(|| invalid_syntax("expected a type after the annotation prefix."))?;
             let surface_type = parse_surface_type(surface_text, interner)?;
-            Ok(TypeSyntaxItem::IfUnknown(surface_type))
+            Ok(TypeSyntaxItem::Annotation(Annotation::unknown_only(
+                surface_type,
+            )))
         }
         "trust" => {
             let surface_text = keyword_surface_text(directive_body)
                 .ok_or_else(|| invalid_syntax("expected a type after the annotation prefix."))?;
             let surface_type = parse_surface_type(surface_text, interner)?;
-            Ok(TypeSyntaxItem::Trust(surface_type))
+            Ok(TypeSyntaxItem::Annotation(Annotation::trusted(
+                surface_type,
+            )))
         }
         "new" => {
             let normalized_name = directive_body;
@@ -423,11 +490,28 @@ fn parse_directive_type_syntax_item(
                 return Err(invalid_syntax("expected a type."));
             }
 
-            Ok(TypeSyntaxItem::New(interner.intern(name)))
+            Ok(TypeSyntaxItem::Annotation(Annotation::new(
+                interner.intern(name),
+            )))
         }
         _ => Err(invalid_syntax(format!(
             "unknown annotation directive `@{directive_name}`. expected one of `@type`, `@alias`, `@if-unknown`, `@trust`, or `@new`."
         ))),
+    }
+}
+
+fn parse_definition_item(
+    text: &str,
+    interner: &mut Interner,
+) -> Result<Definition, TypeParseError> {
+    match parse_directive_type_syntax_item(text, interner)? {
+        TypeSyntaxItem::Definitions(definitions) => definitions
+            .into_iter()
+            .next()
+            .ok_or_else(|| invalid_syntax("expected `@type` or `@alias` in a definition block.")),
+        _ => Err(invalid_syntax(
+            "expected `@type` or `@alias` in a definition block.",
+        )),
     }
 }
 
@@ -439,15 +523,9 @@ fn annotation_surface_text(text: &str) -> Option<&str> {
         .or_else(|| Some(text.trim()))
 }
 
-fn parse_compact_annotation_kind_and_surface_text(
-    text: &str,
-) -> Result<(AnnotationKind, &str), TypeParseError> {
-    Ok(parse_compact_annotation_directive(text)?.unwrap_or((AnnotationKind::Checked, text)))
-}
-
 fn parse_compact_annotation_directive(
     text: &str,
-) -> Result<Option<(AnnotationKind, &str)>, TypeParseError> {
+) -> Result<Option<(TypeAnnotationKind, &str)>, TypeParseError> {
     let Some((directive_name, directive_body)) = parse_annotation_directive_name_and_body(text)
     else {
         return Ok(None);
@@ -457,12 +535,12 @@ fn parse_compact_annotation_directive(
         "if-unknown" => {
             let surface_text = keyword_surface_text(directive_body)
                 .ok_or_else(|| invalid_syntax("expected a type after the annotation prefix."))?;
-            Ok(Some((AnnotationKind::UnknownOnly, surface_text)))
+            Ok(Some((TypeAnnotationKind::UnknownOnly, surface_text)))
         }
         "trust" => {
             let surface_text = keyword_surface_text(directive_body)
                 .ok_or_else(|| invalid_syntax("expected a type after the annotation prefix."))?;
-            Ok(Some((AnnotationKind::Trusted, surface_text)))
+            Ok(Some((TypeAnnotationKind::Trusted, surface_text)))
         }
         _ => Ok(None),
     }
@@ -615,31 +693,6 @@ fn is_expanded_annotation_line(text: &str) -> bool {
     } else {
         false
     }
-}
-
-fn parse_expanded_annotation_block_text(lines: &[&str]) -> Result<Option<String>, TypeParseError> {
-    let Some(first_line) = lines.first().copied() else {
-        return Ok(None);
-    };
-
-    if !is_expanded_annotation_line(first_line) {
-        return Ok(None);
-    }
-
-    let mut expanded_block_text = String::from(first_line);
-
-    for line in &lines[1..] {
-        if !is_expanded_annotation_line(line) {
-            return Err(invalid_syntax(
-                "cannot mix compact and expanded annotations in the same `#:` block.",
-            ));
-        }
-
-        expanded_block_text.push('\n');
-        expanded_block_text.push_str(line);
-    }
-
-    Ok(Some(expanded_block_text))
 }
 
 fn for_each_expanded_annotation_directive(

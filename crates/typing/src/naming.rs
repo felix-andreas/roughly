@@ -156,7 +156,7 @@ impl<'a> NamingContext<'a> {
             ExpressionKind::Dollar { value, .. } => {
                 self.resolve_expression(*value);
             }
-            ExpressionKind::TypeAlias { .. } => {
+            ExpressionKind::Definition(_) => {
                 // Note: type names are not currently resolved in the value namespace
             }
             ExpressionKind::Null

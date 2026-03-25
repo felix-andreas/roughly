@@ -150,3 +150,19 @@ render <- function(count) count
 error[syntax-error] type syntax error: cannot mix compact and expanded annotations in the same `#:` block.
 --> 1:1-2:11
 | #: @param {integer} count
+
+#==== type_definitions
+#---- definition_can_reference_previous_definition
+#: @type Person {list{name: character}}
+#: @type Team {list{owner: Person}}
+value <- 1L
+#++++
+No diagnostics.
+
+#---- definition_unknown_type
+#: @type Team {list{owner: Person}}
+value <- 1L
+#++++
+error[syntax-error] type syntax error: unknown type `Person`
+--> 1:1-1:36
+| #: @type Team {list{owner: Person}}

@@ -118,19 +118,45 @@ impl<Type> FunctionType<Type> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Annotation {
-    pub kind: AnnotationKind,
-    pub surface_type: SurfaceType,
+pub enum Annotation {
+    Type {
+        kind: TypeAnnotationKind,
+        surface_type: SurfaceType,
+    },
+    New {
+        name: Symbol,
+    },
 }
 
 impl Annotation {
-    pub fn new(kind: AnnotationKind, surface_type: SurfaceType) -> Self {
-        Self { kind, surface_type }
+    pub fn checked(surface_type: SurfaceType) -> Self {
+        Self::Type {
+            kind: TypeAnnotationKind::Checked,
+            surface_type,
+        }
+    }
+
+    pub fn unknown_only(surface_type: SurfaceType) -> Self {
+        Self::Type {
+            kind: TypeAnnotationKind::UnknownOnly,
+            surface_type,
+        }
+    }
+
+    pub fn trusted(surface_type: SurfaceType) -> Self {
+        Self::Type {
+            kind: TypeAnnotationKind::Trusted,
+            surface_type,
+        }
+    }
+
+    pub fn new(name: Symbol) -> Self {
+        Self::New { name }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AnnotationKind {
+pub enum TypeAnnotationKind {
     Checked,
     UnknownOnly,
     Trusted,

@@ -1,13 +1,17 @@
 use {
     crate::{
-        annotations::parse_annotation,
+        annotations::{TypeParseError, TypeSyntaxItem, parse_annotation},
         diagnostic::Diagnostic,
-        hir::{Argument, Expression, ExpressionId, ExpressionKind, HirArena, Module, Parameter},
+        hir::{
+            Argument, Definition, Expression, ExpressionId, ExpressionKind, HirArena, Module,
+            Parameter,
+        },
         interner::{Interner, Symbol},
         text,
-        types::{Annotation, AttachedAnnotation},
+        types::{Annotation, AttachedAnnotation, SurfaceType},
     },
     ropey::Rope,
+    std::collections::BTreeSet,
     tree_sitter::{Node, Range, Tree},
 };
 
@@ -15,6 +19,7 @@ use {
 pub struct LoweringContext {
     pub arena: HirArena,
     pub diagnostics: Vec<Diagnostic>,
+    declared_type_names: BTreeSet<Symbol>,
     interner: Interner,
 }
 
@@ -116,7 +121,9 @@ pub fn lower_root_with_rope_with_diagnostics(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> LoweringResult {
+    lowering_context.declared_type_names.clear();
     let expressions = lower_expression_list(root, rope, lowering_context);
+    lowering_context.declared_type_names.clear();
 
     let arena = std::mem::take(&mut lowering_context.arena);
     let diagnostics = std::mem::take(&mut lowering_context.diagnostics);
@@ -617,6 +624,7 @@ fn lower_expression_list(
             if trimmed.starts_with("#:") {
                 let mut block_text = trimmed.to_string();
                 let mut block_range = child.range();
+                let mut block_lines = vec![(trimmed.to_string(), child.range())];
 
                 let mut next_index = child_index + 1;
                 while next_index < child_count {
@@ -633,6 +641,7 @@ fn lower_expression_list(
                             block_text.push_str(next_trimmed);
                             block_range.end_point = next_child.range().end_point;
                             block_range.end_byte = next_child.range().end_byte;
+                            block_lines.push((next_trimmed.to_string(), next_child.range()));
                             next_index += 1;
                             continue;
                         }
@@ -640,87 +649,125 @@ fn lower_expression_list(
                     break;
                 }
 
-                // Check for standalone type definition or alias using parse_type_syntax_item
-                // We must strip `#:` before passing to parse_type_syntax_item
-                let stripped_text = block_text
-                    .lines()
-                    .map(|line| {
+                let stripped_lines = block_lines
+                    .iter()
+                    .map(|(line, _)| {
                         line.trim()
                             .strip_prefix("#:")
                             .map(str::trim)
                             .unwrap_or(line.trim())
+                            .to_owned()
                     })
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                    .collect::<Vec<_>>();
+                let stripped_text = stripped_lines.join("\n");
 
-                if let Ok(
-                    crate::annotations::TypeSyntaxItem::TypeDefinition {
-                        name,
-                        type_parameters,
-                        surface_type,
+                let parsed_annotation = if stripped_text.trim().is_empty() {
+                    AnnotationParseOutcome::MissingTypeExpression
+                } else {
+                    match parse_annotation(&stripped_text, lowering_context.interner_mut()) {
+                        Ok(TypeSyntaxItem::Definitions(definitions)) => {
+                            AnnotationParseOutcome::Definitions(definitions)
+                        }
+                        Ok(TypeSyntaxItem::Annotation(annotation)) => match validate_annotation(
+                            &annotation,
+                            &lowering_context.declared_type_names,
+                            lowering_context.interner(),
+                        ) {
+                            Ok(()) => AnnotationParseOutcome::Annotation(annotation),
+                            Err(error) => AnnotationParseOutcome::Error(error),
+                        },
+                        Err(error) => AnnotationParseOutcome::Error(error),
                     }
-                    | crate::annotations::TypeSyntaxItem::TypeAlias {
-                        name,
-                        type_parameters,
-                        surface_type,
-                    },
-                ) = crate::annotations::parse_type_syntax_item(
-                    &stripped_text,
-                    lowering_context.interner_mut(),
-                ) {
-                    let kind = ExpressionKind::TypeAlias {
-                        name,
-                        type_parameters,
-                        surface_type,
-                    };
-                    let expr_id = lowering_context.annotated_expression(block_range, None, kind);
-                    expressions.push(expr_id);
-                    child_index = next_index;
-                    continue;
-                }
+                };
 
-                let parsed_annotation =
-                    parse_annotation(&block_text, lowering_context.interner_mut());
+                let parsed_annotation = match parsed_annotation {
+                    AnnotationParseOutcome::Definitions(definitions) => {
+                        for (definition, range) in definitions
+                            .into_iter()
+                            .zip(block_lines.iter().map(|(_, range)| *range))
+                        {
+                            let Definition {
+                                name,
+                                type_parameters,
+                                surface_type,
+                                kind,
+                            } = definition;
 
-                let mut expr_child_index = next_index;
-                let mut next_expr_child = None;
-                while expr_child_index < child_count {
-                    if let Some(c) = node.named_child(expr_child_index)
-                        && c.kind() != "comment"
-                    {
-                        next_expr_child = Some(c);
-                        break;
+                            match validate_declared_type_surface_type(
+                                &surface_type,
+                                &lowering_context.declared_type_names,
+                                &type_parameters,
+                                lowering_context.interner(),
+                            ) {
+                                Ok(()) => {
+                                    let kind = ExpressionKind::Definition(Definition {
+                                        kind,
+                                        name,
+                                        type_parameters,
+                                        surface_type,
+                                    });
+                                    lowering_context.declared_type_names.insert(name);
+                                    let expr_id =
+                                        lowering_context.annotated_expression(range, None, kind);
+                                    expressions.push(expr_id);
+                                }
+                                Err(error) => lowering_context
+                                    .diagnostics
+                                    .push(annotation_parse_diagnostic(range, error)),
+                            }
+                        }
+                        child_index = next_index;
+                        continue;
                     }
-                    expr_child_index += 1;
-                }
+                    other => other,
+                };
 
-                if let Some(expr_child) = next_expr_child {
+                let next_named_child = if next_index < child_count {
+                    node.named_child(next_index)
+                } else {
+                    None
+                };
+
+                if let Some(expr_child) = next_named_child {
                     if expr_child.range().start_point.row > block_range.end_point.row + 1 {
                         lowering_context.diagnostics.push(Diagnostic::syntax_error(
                             block_range,
                             "A `#:` typing comment cannot be separated from its expression by an empty line.",
                         ));
                         child_index = next_index;
+                    } else if expr_child.kind() == "comment" {
+                        lowering_context.diagnostics.push(Diagnostic::syntax_error(
+                            block_range,
+                            "A `#:` typing comment must be followed immediately by an expression.",
+                        ));
+                        child_index = next_index;
                     } else {
                         let expr_id = lower_node_with_rope(expr_child, rope, lowering_context);
 
                         match parsed_annotation {
-                            Ok(annotation) => {
+                            AnnotationParseOutcome::Annotation(annotation) => {
                                 attach_annotation_to_expression(
                                     expr_id,
                                     &annotation,
                                     &mut lowering_context.arena,
                                 );
                             }
-                            Err(error) => {
+                            AnnotationParseOutcome::MissingTypeExpression => {
+                                lowering_context.diagnostics.push(Diagnostic::syntax_error(
+                                    block_range,
+                                    "A `#:` typing comment must include a type expression.",
+                                ));
+                            }
+                            AnnotationParseOutcome::Error(error) => {
                                 lowering_context
                                     .diagnostics
                                     .push(annotation_parse_diagnostic(block_range, error));
                             }
+                            AnnotationParseOutcome::Definitions(_) => {}
                         }
 
                         expressions.push(expr_id);
-                        child_index = expr_child_index + 1;
+                        child_index = next_index + 1;
                     }
                 } else {
                     lowering_context.diagnostics.push(Diagnostic::syntax_error(
@@ -743,6 +790,13 @@ fn lower_expression_list(
     expressions
 }
 
+enum AnnotationParseOutcome {
+    Annotation(Annotation),
+    Definitions(Vec<Definition>),
+    MissingTypeExpression,
+    Error(TypeParseError),
+}
+
 fn attach_annotation_to_expression(
     expression_id: ExpressionId,
     annotation: &Annotation,
@@ -762,22 +816,144 @@ fn attach_annotation_to_expression(
     }
 }
 
-fn annotation_parse_diagnostic(
-    range: Range,
-    error: crate::annotations::TypeParseError,
-) -> Diagnostic {
+fn annotation_parse_diagnostic(range: Range, error: TypeParseError) -> Diagnostic {
     match error {
-        crate::annotations::TypeParseError::InvalidSyntax { message } => {
+        TypeParseError::InvalidSyntax { message } => {
             Diagnostic::syntax_error(range, format!("type syntax error: {message}"))
         }
-        crate::annotations::TypeParseError::UnsupportedConstruct { message } => {
+        TypeParseError::UnsupportedConstruct { message } => {
             Diagnostic::syntax_error(range, format!("unsupported syntax: {message}"))
         }
-        crate::annotations::TypeParseError::InvalidSemantics { message } => {
+        TypeParseError::InvalidSemantics { message } => {
             Diagnostic::syntax_error(range, format!("invalid semantics: {message}"))
         }
-        crate::annotations::TypeParseError::UnknownType { name } => {
+        TypeParseError::UnknownType { name } => {
             Diagnostic::syntax_error(range, format!("type syntax error: unknown type `{name}`"))
         }
     }
+}
+
+fn validate_declared_type_surface_type(
+    surface_type: &SurfaceType,
+    declared_type_names: &BTreeSet<Symbol>,
+    type_parameters: &[Symbol],
+    interner: &Interner,
+) -> Result<(), TypeParseError> {
+    let local_type_parameters = type_parameters.iter().copied().collect::<BTreeSet<_>>();
+    validate_surface_type_names(
+        surface_type,
+        declared_type_names,
+        &local_type_parameters,
+        interner,
+    )
+}
+
+fn validate_annotation(
+    annotation: &Annotation,
+    declared_type_names: &BTreeSet<Symbol>,
+    interner: &Interner,
+) -> Result<(), TypeParseError> {
+    match annotation {
+        Annotation::Type { surface_type, .. } => validate_surface_type_names(
+            surface_type,
+            declared_type_names,
+            &BTreeSet::new(),
+            interner,
+        ),
+        Annotation::New { .. } => Ok(()),
+    }
+}
+
+fn validate_surface_type_names(
+    surface_type: &SurfaceType,
+    declared_type_names: &BTreeSet<Symbol>,
+    local_type_parameters: &BTreeSet<Symbol>,
+    interner: &Interner,
+) -> Result<(), TypeParseError> {
+    match surface_type {
+        SurfaceType::Named(name, arguments) => {
+            if !declared_type_names.contains(name) && !local_type_parameters.contains(name) {
+                let name = interner.resolve(*name).unwrap_or("<unknown>").to_owned();
+                return Err(TypeParseError::UnknownType { name });
+            }
+
+            for argument in arguments {
+                validate_surface_type_names(
+                    argument,
+                    declared_type_names,
+                    local_type_parameters,
+                    interner,
+                )?;
+            }
+        }
+        SurfaceType::Nullable(inner_type)
+        | SurfaceType::Vector(inner_type)
+        | SurfaceType::NamedVector(inner_type)
+        | SurfaceType::List(inner_type)
+        | SurfaceType::NamedList(inner_type) => {
+            validate_surface_type_names(
+                inner_type,
+                declared_type_names,
+                local_type_parameters,
+                interner,
+            )?;
+        }
+        SurfaceType::Record(fields) => {
+            for field in fields {
+                validate_surface_type_names(
+                    &field.value,
+                    declared_type_names,
+                    local_type_parameters,
+                    interner,
+                )?;
+            }
+        }
+        SurfaceType::Tuple(items) => {
+            for item in items {
+                validate_surface_type_names(
+                    item,
+                    declared_type_names,
+                    local_type_parameters,
+                    interner,
+                )?;
+            }
+        }
+        SurfaceType::Function(function_type) => {
+            for parameter in &function_type.parameters {
+                validate_surface_type_names(
+                    parameter,
+                    declared_type_names,
+                    local_type_parameters,
+                    interner,
+                )?;
+            }
+            for parameter in &function_type.named_parameters {
+                validate_surface_type_names(
+                    &parameter.value,
+                    declared_type_names,
+                    local_type_parameters,
+                    interner,
+                )?;
+            }
+            validate_surface_type_names(
+                &function_type.return_type,
+                declared_type_names,
+                local_type_parameters,
+                interner,
+            )?;
+        }
+        SurfaceType::Binders(type_parameters, inner_type) => {
+            let mut nested_type_parameters = local_type_parameters.clone();
+            nested_type_parameters.extend(type_parameters.iter().copied());
+            validate_surface_type_names(
+                inner_type,
+                declared_type_names,
+                &nested_type_parameters,
+                interner,
+            )?;
+        }
+        SurfaceType::Any | SurfaceType::Unknown | SurfaceType::Null | SurfaceType::Scalar(_) => {}
+    }
+
+    Ok(())
 }

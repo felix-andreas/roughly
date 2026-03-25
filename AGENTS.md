@@ -10,6 +10,8 @@
 * Avoid creative additions unless explicitly requested
 * Use full words for variable names (no abbreviations like "q" for "queue")
 * Prefer importing types directly. For functions, prefer at least one module-level import instead of fully qualifying every call; fully qualified paths are still fine when needed to avoid ambiguity.
+* Organize modules top-down. Put core types and public functions first, order container types before the types they contain, and keep private types and helper functions after public items in the same caller-before-callee order.
+* Do not optimize for the smallest safe fix. When you touch an area, bring it to the intended shape for that change, remove dead paths or temporary seams, and pay down nearby technical debt needed to keep the code coherent. You are responsible for code quality, not just feature delivery.
 
 # Additional Guidlines
 

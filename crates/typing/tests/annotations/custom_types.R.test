@@ -19,6 +19,13 @@
 #++++
 @alias Formatter {fn(count: integer) -> character}
 
+#---- multiline_definition_block
+@type Person {list{name: character, age: double}}
+@alias Team {list{owner: Person}}
+#++++
+@type Person {list{name: character, age: double}}
+@alias Team {list{owner: Person}}
+
 #==== nominal_introduction
 #---- nominal_introduction
 @new Person
@@ -112,3 +119,18 @@ error:
 @type Person {list{name: character}} extra
 #++++
 InvalidSyntax { message: "did not expect trailing text after the named type definition." }
+
+#---- mixed_definition_and_compact_annotation_block
+error:
+@type Person {list{name: character}}
+integer
+#++++
+InvalidSyntax { message: "cannot mix definition and annotation directives in the same `#:` block." }
+
+#---- mixed_definition_and_expanded_annotation_block
+error:
+@type Person {list{name: character}}
+@param {integer} count
+@return {Person}
+#++++
+InvalidSyntax { message: "cannot mix definition and annotation directives in the same `#:` block." }

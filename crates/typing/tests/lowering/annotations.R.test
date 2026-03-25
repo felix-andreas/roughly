@@ -74,4 +74,4 @@ TypeAlias Count = integer
 #---- standalone_type
 #: @type Pair<T, U> {list{first: T, second: U}}
 #++++
-TypeAlias Pair<T, U> = list{first: T, second: U}
+TypeDefinition Pair<T, U> = list{first: T, second: U}

@@ -136,12 +136,22 @@ pub enum ExpressionKind {
         value: ExpressionId,
         name: Symbol,
     },
-    TypeAlias {
-        name: Symbol,
-        type_parameters: Vec<Symbol>,
-        surface_type: SurfaceType,
-    },
+    Definition(Definition),
     Unsupported,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Definition {
+    pub kind: DefinitionKind,
+    pub name: Symbol,
+    pub type_parameters: Vec<Symbol>,
+    pub surface_type: SurfaceType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefinitionKind {
+    Type,
+    Alias,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,15 +187,23 @@ impl Module {
 
         if let Some(annotation) = &expr.annotation {
             use crate::annotations::render_surface_type;
-            let kind = match annotation.annotation.kind {
-                crate::types::AnnotationKind::Checked => "",
-                crate::types::AnnotationKind::UnknownOnly => "@if-unknown ",
-                crate::types::AnnotationKind::Trusted => "@trust ",
-            };
-            out.push_str(&format!(
-                "{prefix}#: {kind}{}\n",
-                render_surface_type(&annotation.annotation.surface_type, interner)
-            ));
+            match &annotation.annotation {
+                crate::types::Annotation::Type { kind, surface_type } => {
+                    let prefix_kind = match kind {
+                        crate::types::TypeAnnotationKind::Checked => "",
+                        crate::types::TypeAnnotationKind::UnknownOnly => "@if-unknown ",
+                        crate::types::TypeAnnotationKind::Trusted => "@trust ",
+                    };
+                    out.push_str(&format!(
+                        "{prefix}#: {prefix_kind}{}\n",
+                        render_surface_type(surface_type, interner)
+                    ));
+                }
+                crate::types::Annotation::New { name } => {
+                    let rendered_name = interner.resolve(*name).unwrap_or("<unknown>");
+                    out.push_str(&format!("{prefix}#: @new {rendered_name}\n"));
+                }
+            }
         }
 
         match &expr.kind {
@@ -316,27 +334,26 @@ impl Module {
                 out.push_str(&format!("{prefix}Dollar {name_str}\n"));
                 self.render_expression(*value, indent + 1, out, interner);
             }
-            ExpressionKind::TypeAlias {
-                name,
-                type_parameters,
-                surface_type,
-            } => {
+            ExpressionKind::Definition(definition) => {
                 use crate::annotations::render_surface_type;
-                let name_str = interner.resolve(*name).unwrap_or("<unknown>");
-                let params = if type_parameters.is_empty() {
+                let label = match definition.kind {
+                    DefinitionKind::Type => "TypeDefinition",
+                    DefinitionKind::Alias => "TypeAlias",
+                };
+                let name_str = interner.resolve(definition.name).unwrap_or("<unknown>");
+                let params = if definition.type_parameters.is_empty() {
                     "".to_owned()
                 } else {
-                    let rendered_params = type_parameters
+                    let rendered_params = definition
+                        .type_parameters
                         .iter()
                         .map(|&p| interner.resolve(p).unwrap_or("<unknown>").to_owned())
                         .collect::<Vec<_>>()
                         .join(", ");
                     format!("<{rendered_params}>")
                 };
-                let ty_str = render_surface_type(surface_type, interner);
-                out.push_str(&format!(
-                    "{prefix}TypeAlias {name_str}{params} = {ty_str}\n"
-                ));
+                let ty_str = render_surface_type(&definition.surface_type, interner);
+                out.push_str(&format!("{prefix}{label} {name_str}{params} = {ty_str}\n"));
             }
             ExpressionKind::Unsupported => out.push_str(&format!("{prefix}Unsupported\n")),
         }

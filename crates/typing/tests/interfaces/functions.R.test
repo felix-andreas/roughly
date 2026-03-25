@@ -4,7 +4,7 @@
 identity <- function(x) x
 render <- function(count) "ok"
 #++++
-type Formatter = fn(integer) -> character
+alias Formatter = fn(integer) -> character
 identity: <T> fn(T) -> T
 render: <T> fn(T) -> character
 

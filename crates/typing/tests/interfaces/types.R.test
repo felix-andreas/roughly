@@ -6,7 +6,7 @@
 value <- 1L
 #++++
 type Person = list{name: character}
-type Formatter = fn(integer) -> character
+alias Formatter = fn(integer) -> character
 value: integer
 
 #---- latest_binding_wins_in_interface

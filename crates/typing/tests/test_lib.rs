@@ -178,7 +178,7 @@ fn lowering_plus_operator_snippet_interns_the_builtin_symbol() {
 }
 
 #[test]
-fn lowering_unsupported_snippet_produces_an_unsupported_expression() {
+fn lowering_if_expression_produces_an_if_expression() {
     let module = lower(indoc! {r#"
         if (flag) value else other
     "#});
@@ -186,11 +186,11 @@ fn lowering_unsupported_snippet_produces_an_unsupported_expression() {
     let expression_id = module
         .root_expressions
         .first()
-        .expect("unsupported expression should be lowered");
+        .expect("if expression should be lowered");
     let expression = module.arena.get(*expression_id);
 
     assert_eq!(expression.annotation, None);
-    assert!(matches!(expression.kind, ExpressionKind::Unsupported));
+    assert!(matches!(expression.kind, ExpressionKind::If { .. }));
 }
 
 #[test]

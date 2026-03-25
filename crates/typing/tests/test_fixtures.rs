@@ -6,11 +6,8 @@ use {
     support::{check_source, new_parser, parse_source},
     typing::{
         AnalysisState, Interner,
-        annotations::{
-            parse_expanded_block_surface_type, parse_type_syntax_item, render_surface_type,
-            render_type_syntax_item,
-        },
-        hir::{ExpressionId, ExpressionKind, HirArena},
+        annotations::{parse_annotation, render_surface_type, render_type_syntax_item},
+        hir::{DefinitionKind, ExpressionId, ExpressionKind, HirArena},
         lower::LoweringContext,
         naming::{BindingId, NamingContext, NamingResult},
         typecheck::{BuiltinKind, InferenceError, InferenceState},
@@ -429,23 +426,7 @@ fn render_annotation_fixture_result(source: &str) -> String {
                 .to_owned();
         }
 
-        if normalized_source.lines().any(|line| {
-            let trimmed_line = line.trim();
-            trimmed_line.starts_with("@param ")
-                || trimmed_line.starts_with("@return ")
-                || trimmed_line.starts_with("@returns ")
-                || trimmed_line.starts_with("@forall ")
-        }) {
-            return match parse_expanded_block_surface_type(&normalized_source, &mut interner) {
-                Ok(surface_type) => format!(
-                    "fixture error: expected parse error\nsource:\n{normalized_source}\nparsed as: {}",
-                    render_surface_type(&surface_type, &interner)
-                ),
-                Err(error) => format!("{error:?}"),
-            };
-        }
-
-        return match parse_type_syntax_item(&normalized_source, &mut interner) {
+        return match parse_annotation(&normalized_source, &mut interner) {
             Ok(item) => format!(
                 "fixture error: expected parse error\nsource:\n{normalized_source}\nparsed as: {}",
                 render_type_syntax_item(&item, &interner)
@@ -454,29 +435,7 @@ fn render_annotation_fixture_result(source: &str) -> String {
         };
     }
 
-    if trimmed_source.lines().any(|line| {
-        let trimmed_line = line.trim();
-        trimmed_line.starts_with("@param ")
-            || trimmed_line.starts_with("@return ")
-            || trimmed_line.starts_with("@returns ")
-            || trimmed_line.starts_with("@forall ")
-    }) {
-        return match parse_expanded_block_surface_type(trimmed_source, &mut interner) {
-            Ok(surface_type) => render_surface_type(&surface_type, &interner),
-            Err(error) => {
-                format!("parse error: {error:?}\nsource:\n{trimmed_source}")
-            }
-        };
-    }
-
-    let normalized_source = trimmed_source
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    match parse_type_syntax_item(&normalized_source, &mut interner) {
+    match parse_annotation(trimmed_source, &mut interner) {
         Ok(item) => render_type_syntax_item(&item, &interner),
         Err(error) => format!("parse error: {error:?}\nsource:\n{trimmed_source}"),
     }
@@ -935,18 +894,15 @@ fn render_named_expression(
             lines.push(format!("{prefix}Dollar({rendered_name})"));
             render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
         }
-        ExpressionKind::TypeAlias {
-            name,
-            type_parameters,
-            surface_type,
-        } => {
-            let rendered_name = interner.resolve(*name).unwrap_or("<unknown>");
-            let rendered_parameters = if type_parameters.is_empty() {
+        ExpressionKind::Definition(definition) => {
+            let rendered_name = interner.resolve(definition.name).unwrap_or("<unknown>");
+            let rendered_parameters = if definition.type_parameters.is_empty() {
                 String::new()
             } else {
                 format!(
                     "<{}>",
-                    type_parameters
+                    definition
+                        .type_parameters
                         .iter()
                         .map(|parameter| interner
                             .resolve(*parameter)
@@ -956,9 +912,13 @@ fn render_named_expression(
                         .join(", ")
                 )
             };
+            let label = match definition.kind {
+                DefinitionKind::Type => "TypeDefinition",
+                DefinitionKind::Alias => "TypeAlias",
+            };
             lines.push(format!(
-                "{prefix}TypeAlias({rendered_name}{rendered_parameters} = {})",
-                render_surface_type(surface_type, interner)
+                "{prefix}{label}({rendered_name}{rendered_parameters} = {})",
+                render_surface_type(&definition.surface_type, interner)
             ));
         }
         ExpressionKind::Unsupported => lines.push(format!("{prefix}Unsupported")),
@@ -1010,21 +970,18 @@ fn render_interface_snapshot(
                     ),
                 ));
             }
-            ExpressionKind::TypeAlias {
-                name,
-                type_parameters,
-                surface_type,
-            } => {
+            ExpressionKind::Definition(definition) => {
                 let rendered_name = lowering_context
                     .interner()
-                    .resolve(*name)
+                    .resolve(definition.name)
                     .unwrap_or("<unknown>");
-                let rendered_parameters = if type_parameters.is_empty() {
+                let rendered_parameters = if definition.type_parameters.is_empty() {
                     String::new()
                 } else {
                     format!(
                         "<{}>",
-                        type_parameters
+                        definition
+                            .type_parameters
                             .iter()
                             .map(|parameter| {
                                 lowering_context
@@ -1037,12 +994,16 @@ fn render_interface_snapshot(
                             .join(", ")
                     )
                 };
+                let label = match definition.kind {
+                    DefinitionKind::Type => "type",
+                    DefinitionKind::Alias => "alias",
+                };
                 exported_entries.push((
                     index,
-                    *name,
+                    definition.name,
                     format!(
-                        "type {rendered_name}{rendered_parameters} = {}",
-                        render_surface_type(surface_type, lowering_context.interner())
+                        "{label} {rendered_name}{rendered_parameters} = {}",
+                        render_surface_type(&definition.surface_type, lowering_context.interner())
                     ),
                 ));
             }

@@ -1,8 +1,12 @@
 # Human Notes (!AIs are not allowed to edit!)
 
+- hir only supports attaching annotations to assignment
+
 - get rid of old test_infer.
 
 - verify fixtures test suite. can we consoldate different fixture suites?
+
+- setup benchmark for large codebase
 
 - scoping rules? (canonicalization in genreal)
 - lsp
