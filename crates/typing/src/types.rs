@@ -163,26 +163,27 @@ pub enum TypeAnnotationKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AttachedAnnotation {
-    pub annotation: Annotation,
-    pub applies_to_binding: bool,
-    pub applies_to_expression: bool,
+pub enum AttachedAnnotation {
+    Expression(Annotation),
+    BindingAndExpression(Annotation),
 }
 
 impl AttachedAnnotation {
     pub fn expression(annotation: Annotation) -> Self {
-        Self {
-            annotation,
-            applies_to_binding: false,
-            applies_to_expression: true,
-        }
+        Self::Expression(annotation)
     }
 
     pub fn binding_and_expression(annotation: Annotation) -> Self {
-        Self {
-            annotation,
-            applies_to_binding: true,
-            applies_to_expression: true,
+        Self::BindingAndExpression(annotation)
+    }
+
+    pub fn annotation(&self) -> &Annotation {
+        match self {
+            Self::Expression(annotation) | Self::BindingAndExpression(annotation) => annotation,
         }
+    }
+
+    pub fn applies_to_binding(&self) -> bool {
+        matches!(self, Self::BindingAndExpression(_))
     }
 }

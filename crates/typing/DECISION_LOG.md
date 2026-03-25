@@ -2,6 +2,9 @@
 
 Keep newest decisions at the top.
 
+- assignment annotations live only on the assignment expression, not in a second `Assign.annotation` slot.
+  - `AttachedAnnotation` now uses explicit variants for expression-only versus binding-and-expression attachment, so duplicating assignment annotations in HIR was redundant.
+
 - The parser module for `#:` typing blocks is `typing_syntax`.
   - It handles both attachable annotations and standalone `@type` / `@alias` definition blocks, so `annotations` was too narrow.
 

@@ -1,5 +1,6 @@
 # Human Notes (!AIs are not allowed to edit!)
 
+
 - hir only supports attaching annotations to assignment
 
 - get rid of old test_infer.

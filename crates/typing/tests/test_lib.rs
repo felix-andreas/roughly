@@ -86,20 +86,13 @@ fn lowered_assignment_uses_interned_target_symbol() {
     let target = lowering_context.intern("result");
     let value = lowering_context.expression(range, ExpressionKind::Integer("1L".to_owned()));
 
-    let assignment_id = lowering_context.expression(
-        range,
-        ExpressionKind::Assign {
-            target,
-            annotation: None,
-            value,
-        },
-    );
+    let assignment_id =
+        lowering_context.expression(range, ExpressionKind::Assign { target, value });
     let assignment = lowering_context.arena.get(assignment_id);
 
     match assignment.kind {
         ExpressionKind::Assign {
             target: assigned_target,
-            annotation: None,
             ..
         } => {
             assert_eq!(assigned_target, target);
@@ -206,12 +199,7 @@ fn trailing_assignment_annotation_attaches_to_the_assignment_expression_and_bind
     assert_eq!(expression.annotation, None);
 
     match &expression.kind {
-        ExpressionKind::Assign {
-            target: _,
-            annotation,
-            value,
-        } => {
-            assert_eq!(*annotation, None);
+        ExpressionKind::Assign { target: _, value } => {
             let value_expr = module.arena.get(*value);
             assert_eq!(value_expr.annotation, None);
         }

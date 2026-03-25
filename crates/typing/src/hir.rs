@@ -94,7 +94,6 @@ pub enum ExpressionKind {
     },
     Assign {
         target: Symbol,
-        annotation: Option<AttachedAnnotation>,
         value: ExpressionId,
     },
     Function {
@@ -187,7 +186,7 @@ impl Module {
         let prefix = "  ".repeat(indent);
 
         if let Some(annotation) = &expr.annotation {
-            match &annotation.annotation {
+            match annotation.annotation() {
                 crate::types::Annotation::Type { kind, surface_type } => {
                     let prefix_kind = match kind {
                         crate::types::TypeAnnotationKind::Checked => "",
@@ -231,11 +230,7 @@ impl Module {
                     self.render_expression(*e, indent + 1, out, interner);
                 }
             }
-            ExpressionKind::Assign {
-                target,
-                value,
-                annotation: _,
-            } => {
+            ExpressionKind::Assign { target, value } => {
                 let name = interner.resolve(*target).unwrap_or("<unknown>");
                 out.push_str(&format!("{prefix}Assign {name}\n"));
                 self.render_expression(*value, indent + 1, out, interner);

@@ -96,14 +96,11 @@ impl InferenceState {
                 expressions,
                 has_trailing_semicolon,
             } => self.infer_block(expressions, *has_trailing_semicolon, arena),
-            ExpressionKind::Assign {
-                target,
-                annotation,
-                value,
-            } => {
+            ExpressionKind::Assign { target, value } => {
+                let annotation = expression.annotation.as_ref();
                 let value_expression = arena.get(*value);
                 let inferred_value = if let Some(expected_function_type) =
-                    checked_function_annotation(annotation.as_ref())
+                    checked_function_annotation(annotation)
                 {
                     if let ExpressionKind::Function { parameters, body } = &value_expression.kind {
                         self.infer_function_expression(
@@ -120,7 +117,7 @@ impl InferenceState {
                     self.infer_expression(value_expression, arena)?
                 };
                 let binding_type = if let Some(annotation) = annotation {
-                    if annotation.applies_to_binding {
+                    if annotation.applies_to_binding() {
                         self.apply_annotation(annotation, inferred_value, expression)?
                     } else {
                         inferred_value
@@ -469,7 +466,7 @@ impl InferenceState {
     ) -> Result<CoreType, InferenceError> {
         let actual_type = self.resolve(inferred_type)?;
 
-        match &annotation.annotation {
+        match annotation.annotation() {
             Annotation::Type { kind, surface_type } => {
                 let expected_type = core_type_from_surface_type(surface_type);
 
@@ -1977,7 +1974,7 @@ fn checked_function_annotation(
     annotation: Option<&AttachedAnnotation>,
 ) -> Option<FunctionType<CoreType>> {
     let annotation = annotation?;
-    match &annotation.annotation {
+    match annotation.annotation() {
         Annotation::Type {
             kind: TypeAnnotationKind::Checked,
             surface_type,

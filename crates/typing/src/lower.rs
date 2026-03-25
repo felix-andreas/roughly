@@ -208,11 +208,7 @@ fn lower_binary_operator(
             let target = intern_node_text(lhs, rope, lowering_context);
             let value = lower_node_with_rope(rhs, rope, lowering_context);
 
-            ExpressionKind::Assign {
-                target,
-                annotation: None,
-                value,
-            }
+            ExpressionKind::Assign { target, value }
         }
         "+" | "-" | "*" | "/" | "**" | "&&" | "||" => {
             let operator_symbol = intern_node_text(operator, rope, lowering_context);
@@ -803,17 +799,12 @@ fn attach_annotation_to_expression(
     arena: &mut HirArena,
 ) {
     let expression = arena.get_mut(expression_id);
-    expression.annotation = Some(AttachedAnnotation::expression(annotation.clone()));
-
-    if let ExpressionKind::Assign {
-        annotation: assignment_annotation,
-        ..
-    } = &mut expression.kind
-    {
-        *assignment_annotation = Some(AttachedAnnotation::binding_and_expression(
-            annotation.clone(),
-        ));
-    }
+    expression.annotation = Some(match expression.kind {
+        ExpressionKind::Assign { .. } => {
+            AttachedAnnotation::binding_and_expression(annotation.clone())
+        }
+        _ => AttachedAnnotation::expression(annotation.clone()),
+    });
 }
 
 fn annotation_parse_diagnostic(range: Range, error: TypeParseError) -> Diagnostic {
