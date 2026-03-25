@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use {
     ropey::Rope,
     tree_sitter::{Parser, Tree},

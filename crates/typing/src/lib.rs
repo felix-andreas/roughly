@@ -5,9 +5,9 @@ pub mod interner;
 pub mod lower;
 pub mod naming;
 pub mod text;
+pub mod type_syntax;
 pub mod typecheck;
 pub mod types;
-pub mod typing_syntax;
 
 pub use {
     crate::{
@@ -17,11 +17,11 @@ pub use {
         interner::{Interner, Symbol},
         lower::{LoweringContext, lower_root_with_rope},
         text::{AnnotationBlock, annotation_block, line_text, node_text, point_label},
-        types::{Atomic, CoreType, InferenceVariableId, SurfaceType, TypeScheme},
-        typing_syntax::{
+        type_syntax::{
             TypeParseError, TypeSyntax, parse_surface_type, parse_type_syntax, render_surface_type,
             render_type_syntax,
         },
+        types::{Atomic, CoreType, InferenceVariableId, SurfaceType, TypeScheme},
     },
     tree_sitter::Parser,
 };

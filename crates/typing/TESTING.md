@@ -45,7 +45,7 @@ cargo test -p typing
 
 The intended fixture suites are:
 
-- `typing_syntax` - typing-comment syntax and normalized type rendering
+- `type_syntax` - typing-comment syntax and normalized type rendering
 - `bindings` - top-level binding result types
 - `diagnostics` - final user-facing errors
 - `environment` - rebinding, shadowing, and scheme reuse across scopes
@@ -62,7 +62,7 @@ Keep focused test-running guidance minimal in this document. Exact suite adoptio
 
 ## Suite contracts
 
-### `typing_syntax`
+### `type_syntax`
 
 Purpose:
 

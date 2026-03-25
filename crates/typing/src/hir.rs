@@ -1,8 +1,8 @@
 use {
     crate::{
         interner::Symbol,
+        type_syntax::render_surface_type,
         types::{AttachedAnnotation, SurfaceType},
-        typing_syntax::render_surface_type,
     },
     tree_sitter::Range,
 };

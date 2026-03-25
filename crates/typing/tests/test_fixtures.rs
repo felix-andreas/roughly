@@ -9,9 +9,9 @@ use {
         hir::{DefinitionKind, ExpressionId, ExpressionKind, HirArena},
         lower::LoweringContext,
         naming::{BindingId, NamingContext, NamingResult},
+        type_syntax::{parse_type_syntax, render_surface_type, render_type_syntax},
         typecheck::{BuiltinKind, InferenceError, InferenceState},
         types::{Atomic, CoreType, InferenceVariableId, TypeScheme},
-        typing_syntax::{parse_type_syntax, render_surface_type, render_type_syntax},
     },
 };
 
@@ -104,11 +104,11 @@ fn interfaces() {
 }
 
 #[test]
-fn typing_syntax() {
+fn type_syntax() {
     run_fixture_suite(
-        "tests/typing_syntax",
-        "typing_syntax",
-        render_annotation_fixture_result,
+        "tests/type_syntax",
+        "type_syntax",
+        render_type_syntax_fixture_result,
     );
 }
 
@@ -404,7 +404,7 @@ fn bind_fixture_builtins(
     inference_state.bind_builtin(list_symbol, BuiltinKind::List);
 }
 
-fn render_annotation_fixture_result(source: &str) -> String {
+fn render_type_syntax_fixture_result(source: &str) -> String {
     let mut interner = Interner::new();
     let trimmed_source = source.trim();
 

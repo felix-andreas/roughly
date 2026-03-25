@@ -23,3 +23,8 @@ fn(?1, ?2) -> ?1
 function(f) function(x) f(x)
 #++++
 fn(fn(?1) -> ?2) -> fn(?1) -> ?2
+
+#---- self_application_occurs_check
+function(x) x(x)
+#++++
+error: occurs check failed
