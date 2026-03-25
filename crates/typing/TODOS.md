@@ -24,8 +24,6 @@ This document tracks actionable planned work for the `typing` crate.
   - Retain diagnostics, typed results, and file-interface extraction at that boundary.
   - Use per-file interfaces as the dependency boundary for later project scheduling.
 
-- Migrate the fixture harness and fixture directories to the new suite split.
-
 - Add the project-level rechecking foundation without overcommitting.
   - Keep single-file rechecking fast.
   - Make exported interfaces the dependency boundary.

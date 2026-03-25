@@ -1,5 +1,13 @@
 # Typing Crate Decision Log
 
+Keep newest decisions at the top.
+
+- The parser module for `#:` typing blocks is `typing_syntax`.
+  - It handles both attachable annotations and standalone `@type` / `@alias` definition blocks, so `annotations` was too narrow.
+
+- The public parser entrypoint is `parse_type_syntax`, and its result type is `TypeSyntax`.
+  - This removes the old naming overlap where the public parser used `annotation` for both the whole parsed block and one semantic variant.
+
 - `check` remains the top-level orchestration entry point.
   - This keeps the public entry point aligned with the full checking pipeline instead of exposing internal phases.
 

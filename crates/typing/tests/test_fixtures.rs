@@ -6,12 +6,12 @@ use {
     support::{check_source, new_parser, parse_source},
     typing::{
         AnalysisState, Interner,
-        annotations::{parse_annotation, render_surface_type, render_type_syntax_item},
         hir::{DefinitionKind, ExpressionId, ExpressionKind, HirArena},
         lower::LoweringContext,
         naming::{BindingId, NamingContext, NamingResult},
         typecheck::{BuiltinKind, InferenceError, InferenceState},
         types::{Atomic, CoreType, InferenceVariableId, TypeScheme},
+        typing_syntax::{parse_type_syntax, render_surface_type, render_type_syntax},
     },
 };
 
@@ -104,10 +104,10 @@ fn interfaces() {
 }
 
 #[test]
-fn annotations() {
+fn typing_syntax() {
     run_fixture_suite(
-        "tests/annotations",
-        "annotations",
+        "tests/typing_syntax",
+        "typing_syntax",
         render_annotation_fixture_result,
     );
 }
@@ -426,17 +426,17 @@ fn render_annotation_fixture_result(source: &str) -> String {
                 .to_owned();
         }
 
-        return match parse_annotation(&normalized_source, &mut interner) {
+        return match parse_type_syntax(&normalized_source, &mut interner) {
             Ok(item) => format!(
                 "fixture error: expected parse error\nsource:\n{normalized_source}\nparsed as: {}",
-                render_type_syntax_item(&item, &interner)
+                render_type_syntax(&item, &interner)
             ),
             Err(error) => format!("{error:?}"),
         };
     }
 
-    match parse_annotation(trimmed_source, &mut interner) {
-        Ok(item) => render_type_syntax_item(&item, &interner),
+    match parse_type_syntax(trimmed_source, &mut interner) {
+        Ok(item) => render_type_syntax(&item, &interner),
         Err(error) => format!("parse error: {error:?}\nsource:\n{trimmed_source}"),
     }
 }

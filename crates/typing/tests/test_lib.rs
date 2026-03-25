@@ -7,7 +7,6 @@ use {
     tree_sitter::{Point, Range},
     typing::{
         Interner,
-        annotations::parse_surface_type,
         hir::ExpressionKind,
         interner::Symbol,
         lower::LoweringContext,
@@ -15,6 +14,7 @@ use {
             Atomic, CoreType, FunctionType, InferenceVariableId, RecordField, SurfaceType,
             TypeScheme,
         },
+        typing_syntax::parse_surface_type,
     },
 };
 

@@ -34,6 +34,3 @@ If code changes make this document inaccurate, update it in the same session.
 
 - Important caution:
   - persistent authoritative documents must only be changed after user request or discussion
-  - current authoritative-document drift to discuss before editing:
-    - `README.md` points to `IMPLEMENTATION_GAPS.md`, but that file is absent
-    - `SEMANTICS.md` still references the old `tests/fixtures/inference/` path

@@ -2,6 +2,7 @@ use {
     crate::{
         interner::Symbol,
         types::{AttachedAnnotation, SurfaceType},
+        typing_syntax::render_surface_type,
     },
     tree_sitter::Range,
 };
@@ -186,7 +187,6 @@ impl Module {
         let prefix = "  ".repeat(indent);
 
         if let Some(annotation) = &expr.annotation {
-            use crate::annotations::render_surface_type;
             match &annotation.annotation {
                 crate::types::Annotation::Type { kind, surface_type } => {
                     let prefix_kind = match kind {
@@ -335,7 +335,6 @@ impl Module {
                 self.render_expression(*value, indent + 1, out, interner);
             }
             ExpressionKind::Definition(definition) => {
-                use crate::annotations::render_surface_type;
                 let label = match definition.kind {
                     DefinitionKind::Type => "TypeDefinition",
                     DefinitionKind::Alias => "TypeAlias",

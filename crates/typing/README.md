@@ -2,16 +2,11 @@
 
 This crate explores a static type system for a subset of R.
 
-The goal is to make a useful subset of R statically checkable while keeping the resulting types, diagnostics, and language-tooling output readable to R programmers. The checker is designed with large-codebase performance in mind.
+The goal is to make a useful subset of R statically checkable while keeping the resulting types, diagnostics, and language-tooling output readable to R programmers.
 
-For the main crate documents:
+It is intended to stay practical on large code bases, not only on small examples.
 
-- `SEMANTICS.md` is the authoritative user-facing typing contract
-- `ARCHITECTURE.md` is the authoritative implementation architecture
-- `TESTING.md` describes the fixture-testing contract
-- `TODOS.md` tracks planned unfinished work
-- `TECHNICAL_DEBT.md` records current structural debt
-- `IMPLEMENTATION_GAPS.md` records where the current code still differs from the architecture
+This is still a work in progress. The supported language subset, the exact type behavior, and some user-facing details are still evolving.
 
 ## Goals
 
@@ -33,9 +28,7 @@ It also has clear non-goals for v1:
 - NSE and metaprogramming completeness
 - environment and reference semantics
 
-## Semantics
-
-`SEMANTICS.md` is the authoritative user-facing typing contract. The current semantics focus on a small set of ideas:
+For the current supported semantics, see `SEMANTICS.md`. Today the checker focuses on a small set of ideas:
 
 - atomic R types such as `logical`, `integer`, `double`, and `character`
 - scalar-like, array-like, and map-like vector shapes
@@ -43,5 +36,3 @@ It also has clear non-goals for v1:
 - function types written in `#:` comments
 - explicit `Any`, `Unknown`, and `NULL`
 - nullable unions written as `T | NULL`
-
-For the precise rules and more complete examples, start there.

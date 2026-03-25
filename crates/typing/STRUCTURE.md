@@ -16,8 +16,8 @@ Keep it focused on the intended near-term file split and the role of each file.
   - stable ids
   - file-local semantic representation
 
-- `annotations.rs`
-  - annotation and type-declaration parsing
+- `typing_syntax.rs`
+  - typing-comment and type-declaration parsing
   - surface-type rendering
 
 - `lower.rs`

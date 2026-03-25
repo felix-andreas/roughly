@@ -1,6 +1,5 @@
 use {
     crate::{
-        annotations::{TypeParseError, TypeSyntaxItem, parse_annotation},
         diagnostic::Diagnostic,
         hir::{
             Argument, Definition, Expression, ExpressionId, ExpressionKind, HirArena, Module,
@@ -9,6 +8,7 @@ use {
         interner::{Interner, Symbol},
         text,
         types::{Annotation, AttachedAnnotation, SurfaceType},
+        typing_syntax::{TypeParseError, TypeSyntax, parse_type_syntax},
     },
     ropey::Rope,
     std::collections::BTreeSet,
@@ -664,11 +664,11 @@ fn lower_expression_list(
                 let parsed_annotation = if stripped_text.trim().is_empty() {
                     AnnotationParseOutcome::MissingTypeExpression
                 } else {
-                    match parse_annotation(&stripped_text, lowering_context.interner_mut()) {
-                        Ok(TypeSyntaxItem::Definitions(definitions)) => {
+                    match parse_type_syntax(&stripped_text, lowering_context.interner_mut()) {
+                        Ok(TypeSyntax::Definitions(definitions)) => {
                             AnnotationParseOutcome::Definitions(definitions)
                         }
-                        Ok(TypeSyntaxItem::Annotation(annotation)) => match validate_annotation(
+                        Ok(TypeSyntax::Annotation(annotation)) => match validate_annotation(
                             &annotation,
                             &lowering_context.declared_type_names,
                             lowering_context.interner(),

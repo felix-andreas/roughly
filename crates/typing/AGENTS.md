@@ -46,8 +46,9 @@ Use these documents to surface uncertainty and record agreed decisions, not to s
   - Human-facing crate overview and pointers to the other persistent documents.
   - Avoid agent workflow details and implementation-status churn.
 - `SEMANTICS.md`
-  - Authoritative typing semantics contract.
-  - Keep it concise, explicit, and in sync with the fixture tests.
+  - Authoritative desired typing semantics contract.
+  - Keep it concise, explicit, and in sync with the agreed semantics fixtures.
+  - Do not rewrite it to match temporary implementation gaps
   - Discuss unclear or changed user-facing semantics with the user first, then record the resolved behavior here.
 - `ARCHITECTURE.md`
   - Authoritative architectural constraints and durable phase or representation boundaries.
