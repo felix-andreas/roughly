@@ -50,6 +50,17 @@ x <- 1L
 Assign x
   Integer("1L")
 
+#---- generic_nominal_introduction_annotation
+#: @type Person<T> {T}
+
+#: @new Person<integer>
+x <- 1L
+#++++
+TypeDefinition Person<T> = T
+#: @new Person<integer>
+Assign x
+  Integer("1L")
+
 #---- multiline_annotation
 #: @param {integer} a
 #: @param {integer} b

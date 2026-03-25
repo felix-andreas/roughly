@@ -1,7 +1,10 @@
 use crate::{
     hir::{Definition, DefinitionKind},
     interner::{Interner, Symbol},
-    types::{Annotation, Atomic, FunctionType, RecordField, SurfaceType, TypeAnnotationKind},
+    types::{
+        Annotation, Atomic, FunctionType, NamedTypeRef, RecordField, SurfaceType,
+        TypeAnnotationKind,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,9 +46,8 @@ fn render_annotation(annotation: &Annotation, interner: &Interner) -> String {
                 format!("@trust {}", render_surface_type(surface_type, interner))
             }
         },
-        Annotation::New { name } => {
-            let name = interner.resolve(*name).unwrap_or("<unknown>");
-            format!("@new {name}")
+        Annotation::New { nominal_type } => {
+            format!("@new {}", render_named_type_ref(nominal_type, interner))
         }
     }
 }
@@ -175,6 +177,21 @@ pub fn render_surface_type(surface_type: &SurfaceType, interner: &Interner) -> S
                 render_surface_type(inner_type, interner)
             )
         }
+    }
+}
+
+pub fn render_named_type_ref(named_type_ref: &NamedTypeRef, interner: &Interner) -> String {
+    let name = interner.resolve(named_type_ref.name).unwrap_or("<unknown>");
+    if named_type_ref.type_arguments.is_empty() {
+        name.to_owned()
+    } else {
+        let rendered_args = named_type_ref
+            .type_arguments
+            .iter()
+            .map(|argument| render_surface_type(argument, interner))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{name}<{rendered_args}>")
     }
 }
 
@@ -465,28 +482,15 @@ fn parse_directive_syntax(
             Ok(TypeSyntax::Annotation(Annotation::trusted(surface_type)))
         }
         "new" => {
-            let normalized_name = directive_body;
-            if normalized_name.is_empty() {
+            if directive_body.is_empty() {
                 return Err(invalid_syntax(
                     "expected a type after the annotation prefix.",
                 ));
             }
 
-            let Some((name_start, name_end)) = identifier_span(normalized_name) else {
-                return Err(invalid_syntax("expected a type."));
-            };
+            let nominal_type = parse_named_type_ref(directive_body, interner)?;
 
-            let name = &normalized_name[name_start..name_end];
-            if name_start != 0
-                || !normalized_name[name_end..].trim().is_empty()
-                || parse_atomic_or_named_type(name).is_some()
-            {
-                return Err(invalid_syntax("expected a type."));
-            }
-
-            Ok(TypeSyntax::Annotation(Annotation::new(
-                interner.intern(name),
-            )))
+            Ok(TypeSyntax::Annotation(Annotation::new(nominal_type)))
         }
         _ => Err(invalid_syntax(format!(
             "unknown annotation directive `@{directive_name}`. expected one of `@type`, `@alias`, `@if-unknown`, `@trust`, or `@new`."
@@ -831,6 +835,17 @@ fn parse_named_type_definition(
     }
 
     Ok((name, type_parameters, surface_type))
+}
+
+fn parse_named_type_ref(
+    text: &str,
+    interner: &mut Interner,
+) -> Result<NamedTypeRef, TypeParseError> {
+    let surface_type = parse_surface_type(text, interner)?;
+    match surface_type {
+        SurfaceType::Named(name, type_arguments) => Ok(NamedTypeRef::new(name, type_arguments)),
+        _ => Err(invalid_syntax("expected a type.")),
+    }
 }
 
 fn identifier_span(text: &str) -> Option<(usize, usize)> {

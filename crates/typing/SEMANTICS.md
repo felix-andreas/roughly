@@ -56,7 +56,7 @@ There are four annotation forms:
   - trusted coercion
 - `#: @if-unknown TYPE`
   - unknown-only coercion
-- `#: @new TYPE_NAME`
+- `#: @new NOMINAL_TYPE`
   - nominal introduction
 
 Additional block rules:
@@ -169,12 +169,15 @@ Trusted coercions can hide real mistakes and should be used only when the progra
 
 ### Nominal introduction
 
-`#: @new TYPE_NAME` introduces a nominal value.
+`#: @new NOMINAL_TYPE` introduces a nominal value.
 
-- `TYPE_NAME` must refer to a nominal type declared with `@type`
+- `NOMINAL_TYPE` must be a nominal type reference declared with `@type`
+- `NOMINAL_TYPE` may be either a bare nominal name such as `Person` or a generic nominal application such as `Person<integer>`
+- aliases, structural types, unions, function types, and other non-nominal type forms are not allowed after `@new`
+- generic nominal types must be fully applied, so if `Person<T>` is declared then `@new Person` is an error
 - the annotated value must be compatible with that nominal type's underlying representation type
-- if the annotation succeeds, the annotated binding or expression is then treated as having type `TYPE_NAME`
-- if the annotated value already has type `TYPE_NAME`, the annotation is allowed and has no further effect
+- if the annotation succeeds, the annotated binding or expression is then treated as having type `NOMINAL_TYPE`
+- if the annotated value already has type `NOMINAL_TYPE`, the annotation is allowed and has no further effect
 - `@new` is an annotation form, not a type expression, so it cannot appear inside compact type syntax or expanded function annotations
 
 Examples:
@@ -184,6 +187,13 @@ Examples:
 
 #: @new Person
 value <- list(name = "bob", age = 20)
+```
+
+```r
+#: @type Person<T> {list{ value: T }}
+
+#: @new Person<integer>
+value <- list(value = 1L)
 ```
 
 ```r
@@ -500,6 +510,11 @@ Examples:
 - `Box<integer>`
 - `Pair<integer, character>`
 - `Person<integer>`
+
+The same generic application syntax is used by `@new` when introducing a value of a generic nominal type.
+
+- `#: @new Person<integer>` is valid when `Person<T>` is declared with `@type`
+- `#: @new Person` is an error when `Person<T>` is generic and therefore requires type arguments
 
 Type argument counts must match the declared parameter count exactly.
 

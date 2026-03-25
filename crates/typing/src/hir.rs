@@ -1,7 +1,7 @@
 use {
     crate::{
         interner::Symbol,
-        type_syntax::render_surface_type,
+        type_syntax::{render_named_type_ref, render_surface_type},
         types::{AttachedAnnotation, SurfaceType},
     },
     tree_sitter::Range,
@@ -198,9 +198,11 @@ impl Module {
                         render_surface_type(surface_type, interner)
                     ));
                 }
-                crate::types::Annotation::New { name } => {
-                    let rendered_name = interner.resolve(*name).unwrap_or("<unknown>");
-                    out.push_str(&format!("{prefix}#: @new {rendered_name}\n"));
+                crate::types::Annotation::New { nominal_type } => {
+                    out.push_str(&format!(
+                        "{prefix}#: @new {}\n",
+                        render_named_type_ref(nominal_type, interner)
+                    ));
                 }
             }
         }

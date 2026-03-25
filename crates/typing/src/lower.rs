@@ -2,16 +2,16 @@ use {
     crate::{
         diagnostic::Diagnostic,
         hir::{
-            Argument, Definition, Expression, ExpressionId, ExpressionKind, HirArena, Module,
-            Parameter,
+            Argument, Definition, DefinitionKind, Expression, ExpressionId, ExpressionKind,
+            HirArena, Module, Parameter,
         },
         interner::{Interner, Symbol},
         text,
         type_syntax::{TypeParseError, TypeSyntax, parse_type_syntax},
-        types::{Annotation, AttachedAnnotation, SurfaceType},
+        types::{Annotation, AttachedAnnotation, NamedTypeRef, SurfaceType},
     },
     ropey::Rope,
-    std::collections::BTreeSet,
+    std::collections::{BTreeMap, BTreeSet},
     tree_sitter::{Node, Range, Tree},
 };
 
@@ -19,7 +19,7 @@ use {
 pub struct LoweringContext {
     pub arena: HirArena,
     pub diagnostics: Vec<Diagnostic>,
-    declared_type_names: BTreeSet<Symbol>,
+    declared_types: BTreeMap<Symbol, DefinitionKind>,
     interner: Interner,
 }
 
@@ -121,9 +121,9 @@ pub fn lower_root_with_rope_with_diagnostics(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> LoweringResult {
-    lowering_context.declared_type_names.clear();
+    lowering_context.declared_types.clear();
     let expressions = lower_expression_list(root, rope, lowering_context);
-    lowering_context.declared_type_names.clear();
+    lowering_context.declared_types.clear();
 
     let arena = std::mem::take(&mut lowering_context.arena);
     let diagnostics = std::mem::take(&mut lowering_context.diagnostics);
@@ -666,7 +666,7 @@ fn lower_expression_list(
                         }
                         Ok(TypeSyntax::Annotation(annotation)) => match validate_annotation(
                             &annotation,
-                            &lowering_context.declared_type_names,
+                            &lowering_context.declared_types,
                             lowering_context.interner(),
                         ) {
                             Ok(()) => AnnotationParseOutcome::Annotation(annotation),
@@ -686,25 +686,30 @@ fn lower_expression_list(
                                 name,
                                 type_parameters,
                                 surface_type,
-                                kind,
+                                kind: definition_kind,
                             } = definition;
 
                             match validate_declared_type_surface_type(
                                 &surface_type,
-                                &lowering_context.declared_type_names,
+                                &lowering_context.declared_types,
                                 &type_parameters,
                                 lowering_context.interner(),
                             ) {
                                 Ok(()) => {
-                                    let kind = ExpressionKind::Definition(Definition {
-                                        kind,
+                                    let expression_kind = ExpressionKind::Definition(Definition {
+                                        kind: definition_kind,
                                         name,
                                         type_parameters,
                                         surface_type,
                                     });
-                                    lowering_context.declared_type_names.insert(name);
-                                    let expr_id =
-                                        lowering_context.annotated_expression(range, None, kind);
+                                    lowering_context
+                                        .declared_types
+                                        .insert(name, definition_kind);
+                                    let expr_id = lowering_context.annotated_expression(
+                                        range,
+                                        None,
+                                        expression_kind,
+                                    );
                                     expressions.push(expr_id);
                                 }
                                 Err(error) => lowering_context
@@ -826,14 +831,14 @@ fn annotation_parse_diagnostic(range: Range, error: TypeParseError) -> Diagnosti
 
 fn validate_declared_type_surface_type(
     surface_type: &SurfaceType,
-    declared_type_names: &BTreeSet<Symbol>,
+    declared_types: &BTreeMap<Symbol, DefinitionKind>,
     type_parameters: &[Symbol],
     interner: &Interner,
 ) -> Result<(), TypeParseError> {
     let local_type_parameters = type_parameters.iter().copied().collect::<BTreeSet<_>>();
     validate_surface_type_names(
         surface_type,
-        declared_type_names,
+        declared_types,
         &local_type_parameters,
         interner,
     )
@@ -841,29 +846,62 @@ fn validate_declared_type_surface_type(
 
 fn validate_annotation(
     annotation: &Annotation,
-    declared_type_names: &BTreeSet<Symbol>,
+    declared_types: &BTreeMap<Symbol, DefinitionKind>,
     interner: &Interner,
 ) -> Result<(), TypeParseError> {
     match annotation {
-        Annotation::Type { surface_type, .. } => validate_surface_type_names(
-            surface_type,
-            declared_type_names,
-            &BTreeSet::new(),
-            interner,
-        ),
-        Annotation::New { .. } => Ok(()),
+        Annotation::Type { surface_type, .. } => {
+            validate_surface_type_names(surface_type, declared_types, &BTreeSet::new(), interner)
+        }
+        Annotation::New { nominal_type } => {
+            validate_new_annotation_type(nominal_type, declared_types, interner)
+        }
     }
+}
+
+fn validate_new_annotation_type(
+    nominal_type: &NamedTypeRef,
+    declared_types: &BTreeMap<Symbol, DefinitionKind>,
+    interner: &Interner,
+) -> Result<(), TypeParseError> {
+    match declared_types.get(&nominal_type.name) {
+        Some(DefinitionKind::Type) => {}
+        Some(DefinitionKind::Alias) => {
+            let name = interner
+                .resolve(nominal_type.name)
+                .unwrap_or("<unknown>")
+                .to_owned();
+            return Err(TypeParseError::InvalidSemantics {
+                message: format!(
+                    "`@new` requires a nominal type declared with `@type`, but `{name}` is an alias."
+                ),
+            });
+        }
+        None => {
+            let name = interner
+                .resolve(nominal_type.name)
+                .unwrap_or("<unknown>")
+                .to_owned();
+            return Err(TypeParseError::UnknownType { name });
+        }
+    }
+
+    for type_argument in &nominal_type.type_arguments {
+        validate_surface_type_names(type_argument, declared_types, &BTreeSet::new(), interner)?;
+    }
+
+    Ok(())
 }
 
 fn validate_surface_type_names(
     surface_type: &SurfaceType,
-    declared_type_names: &BTreeSet<Symbol>,
+    declared_types: &BTreeMap<Symbol, DefinitionKind>,
     local_type_parameters: &BTreeSet<Symbol>,
     interner: &Interner,
 ) -> Result<(), TypeParseError> {
     match surface_type {
         SurfaceType::Named(name, arguments) => {
-            if !declared_type_names.contains(name) && !local_type_parameters.contains(name) {
+            if !declared_types.contains_key(name) && !local_type_parameters.contains(name) {
                 let name = interner.resolve(*name).unwrap_or("<unknown>").to_owned();
                 return Err(TypeParseError::UnknownType { name });
             }
@@ -871,7 +909,7 @@ fn validate_surface_type_names(
             for argument in arguments {
                 validate_surface_type_names(
                     argument,
-                    declared_type_names,
+                    declared_types,
                     local_type_parameters,
                     interner,
                 )?;
@@ -884,7 +922,7 @@ fn validate_surface_type_names(
         | SurfaceType::NamedList(inner_type) => {
             validate_surface_type_names(
                 inner_type,
-                declared_type_names,
+                declared_types,
                 local_type_parameters,
                 interner,
             )?;
@@ -893,7 +931,7 @@ fn validate_surface_type_names(
             for field in fields {
                 validate_surface_type_names(
                     &field.value,
-                    declared_type_names,
+                    declared_types,
                     local_type_parameters,
                     interner,
                 )?;
@@ -901,19 +939,14 @@ fn validate_surface_type_names(
         }
         SurfaceType::Tuple(items) => {
             for item in items {
-                validate_surface_type_names(
-                    item,
-                    declared_type_names,
-                    local_type_parameters,
-                    interner,
-                )?;
+                validate_surface_type_names(item, declared_types, local_type_parameters, interner)?;
             }
         }
         SurfaceType::Function(function_type) => {
             for parameter in &function_type.parameters {
                 validate_surface_type_names(
                     parameter,
-                    declared_type_names,
+                    declared_types,
                     local_type_parameters,
                     interner,
                 )?;
@@ -921,14 +954,14 @@ fn validate_surface_type_names(
             for parameter in &function_type.named_parameters {
                 validate_surface_type_names(
                     &parameter.value,
-                    declared_type_names,
+                    declared_types,
                     local_type_parameters,
                     interner,
                 )?;
             }
             validate_surface_type_names(
                 &function_type.return_type,
-                declared_type_names,
+                declared_types,
                 local_type_parameters,
                 interner,
             )?;
@@ -938,7 +971,7 @@ fn validate_surface_type_names(
             nested_type_parameters.extend(type_parameters.iter().copied());
             validate_surface_type_names(
                 inner_type,
-                declared_type_names,
+                declared_types,
                 &nested_type_parameters,
                 interner,
             )?;

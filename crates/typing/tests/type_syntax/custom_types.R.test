@@ -37,6 +37,16 @@
 #++++
 @new Person
 
+#---- generic_nominal_introduction
+@new Person<integer>
+#++++
+@new Person<integer>
+
+#---- nested_generic_nominal_introduction
+@new Result<Person<integer>>
+#++++
+@new Result<Person<integer>>
+
 #---- invalid_nominal_introduction_missing_name
 error:
 @new
@@ -52,6 +62,18 @@ InvalidSyntax { message: "expected a type." }
 #---- invalid_nominal_introduction_structural_payload
 error:
 @new list{name: character}
+#++++
+InvalidSyntax { message: "expected a type." }
+
+#---- invalid_nominal_introduction_nullable_payload
+error:
+@new Person | NULL
+#++++
+InvalidSyntax { message: "expected a type." }
+
+#---- invalid_nominal_introduction_function_payload
+error:
+@new fn(integer) -> integer
 #++++
 InvalidSyntax { message: "expected a type." }
 

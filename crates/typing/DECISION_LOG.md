@@ -2,6 +2,9 @@
 
 Keep newest decisions at the top.
 
+- `@new` accepts nominal type references, including generic nominal applications.
+  - This keeps nominal introduction aligned with ordinary nominal type syntax while still rejecting aliases and structural type forms; generic nominal types therefore require full type arguments such as `@new Person<integer>`.
+
 - assignment annotations live only on the assignment expression, not in a second `Assign.annotation` slot.
   - `AttachedAnnotation` now uses explicit variants for expression-only versus binding-and-expression attachment, so duplicating assignment annotations in HIR was redundant.
 

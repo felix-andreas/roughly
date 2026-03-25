@@ -43,3 +43,9 @@ error:
 fn(integer) -> Pair<integer>
 #++++
 InvalidSemantics { message: "generic type `Pair` expects 2 type argument(s), but found 1." }
+
+#---- wrong_generic_arity_in_nominal_introduction
+error:
+@new Pair<integer>
+#++++
+InvalidSemantics { message: "generic type `Pair` expects 2 type argument(s), but found 1." }

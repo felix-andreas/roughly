@@ -118,13 +118,28 @@ impl<Type> FunctionType<Type> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedTypeRef {
+    pub name: Symbol,
+    pub type_arguments: Vec<SurfaceType>,
+}
+
+impl NamedTypeRef {
+    pub fn new(name: Symbol, type_arguments: Vec<SurfaceType>) -> Self {
+        Self {
+            name,
+            type_arguments,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Annotation {
     Type {
         kind: TypeAnnotationKind,
         surface_type: SurfaceType,
     },
     New {
-        name: Symbol,
+        nominal_type: NamedTypeRef,
     },
 }
 
@@ -150,8 +165,8 @@ impl Annotation {
         }
     }
 
-    pub fn new(name: Symbol) -> Self {
-        Self::New { name }
+    pub fn new(nominal_type: NamedTypeRef) -> Self {
+        Self::New { nominal_type }
     }
 }
 
