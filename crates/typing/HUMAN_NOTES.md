@@ -1,5 +1,7 @@
 # Human Notes (!AIs are not allowed to edit!)
 
+- we should resolve types during lowering
+
 
 - hir only supports attaching annotations to assignment
 
@@ -7,7 +9,18 @@
 
 - verify fixtures test suite. can we consoldate different fixture suites?
 
-- setup benchmark for large codebase
+- new test suits:
+  - project tests (multiple files)
+  - incremtenal test (or maybe call it e2e??) <- change files
+  - benchmark tests (static)
+  - benchmark tests (incremental)
+
+- separate module for parsing
+  - contains rope
+  - contains tree-siter
+  - contains incremental update -> this can be used for benchmark tests
+
+- separate tools module to generatively create large R code bases
 
 - scoping rules? (canonicalization in genreal)
 - lsp

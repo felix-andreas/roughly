@@ -17,6 +17,12 @@ function(a, b, c) a
 Function (a, b, c)
   Symbol(a)
 
+#---- parameter_with_default
+function(count, label = NULL) count
+#++++
+Function (count, label)
+  Symbol(count)
+
 #---- simple_call
 f()
 #++++

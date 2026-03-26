@@ -82,11 +82,13 @@ Purpose:
 - syntax-to-HIR lowering
 - annotation attachment
 - stable expression representation
+- diagnostics that arise during lowering itself, for example annotation attachment failures
 
 Expected output should show:
 
 - rendered AST-like dump of the HIR module
 - attached types on expressions
+- or rendered diagnostics when the suite intentionally targets failures produced by lowering
 
 ### `naming`
 

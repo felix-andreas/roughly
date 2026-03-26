@@ -348,14 +348,14 @@ fn validate_block_item_sequence(
     match (existing_kind, next_kind) {
         (BlockItemKind::Definition, BlockItemKind::Definition)
         | (BlockItemKind::Expanded, BlockItemKind::Expanded) => Ok(()),
-        (BlockItemKind::Compact, BlockItemKind::Compact) => Err(invalid_syntax(
+        (BlockItemKind::Compact, BlockItemKind::Compact) => Err(invalid_semantics(
             "cannot use multiple compact annotations in the same `#:` block.",
         )),
-        (BlockItemKind::Definition, _) | (_, BlockItemKind::Definition) => Err(invalid_syntax(
+        (BlockItemKind::Definition, _) | (_, BlockItemKind::Definition) => Err(invalid_semantics(
             "cannot mix definition and annotation directives in the same `#:` block.",
         )),
         (BlockItemKind::Compact, BlockItemKind::Expanded)
-        | (BlockItemKind::Expanded, BlockItemKind::Compact) => Err(invalid_syntax(
+        | (BlockItemKind::Expanded, BlockItemKind::Compact) => Err(invalid_semantics(
             "cannot mix compact and expanded annotations in the same `#:` block.",
         )),
     }
@@ -586,7 +586,7 @@ pub fn parse_expanded_block_surface_type(
     for_each_expanded_annotation_directive(trimmed_text, |directive| {
         if let Some(forall_text) = directive.strip_prefix("@forall") {
             if !named_parameters.is_empty() || seen_return {
-                return Err(invalid_syntax(
+                return Err(invalid_semantics(
                     "`@forall` directives must appear before `@param`, `@return`, or `@returns` in the same `#:` block.",
                 ));
             }
@@ -613,7 +613,7 @@ pub fn parse_expanded_block_surface_type(
             }
         } else if let Some(parameter_text) = directive.strip_prefix("@param") {
             if seen_return {
-                return Err(invalid_syntax(
+                return Err(invalid_semantics(
                     "`@param` directives must appear before `@return` or `@returns` in the same `#:` block.",
                 ));
             }
@@ -637,7 +637,7 @@ pub fn parse_expanded_block_surface_type(
             named_parameters.push(RecordField::with_optional(name, surface_type, is_optional));
         } else if directive.starts_with("@returns") || directive.starts_with("@return") {
             if seen_return {
-                return Err(invalid_syntax(
+                return Err(invalid_semantics(
                     "cannot use more than one `@return` or `@returns` directive in the same `#:` block.",
                 ));
             }

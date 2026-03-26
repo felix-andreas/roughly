@@ -291,9 +291,13 @@ fn render_lowering_fixture_result(source: &str) -> String {
     let tree = parse_source(&mut parser, source);
 
     let mut lowering_context = LoweringContext::new();
-    let module = lowering_context.lower_tree(&tree, source);
+    let lowering_result = lowering_context.lower_tree_with_diagnostics(&tree, source);
 
-    module.render(lowering_context.interner())
+    if !lowering_result.diagnostics.is_empty() {
+        return render_diagnostics(source, &lowering_result.diagnostics);
+    }
+
+    lowering_result.module.render(lowering_context.interner())
 }
 
 fn render_naming_fixture_result(source: &str) -> String {
@@ -314,6 +318,23 @@ fn render_expression_fixture_result(source: &str) -> String {
         }
         Err(error) => render_expression_error_kind(&error).to_owned(),
     }
+}
+
+fn render_diagnostics(source: &str, diagnostics: &[typing::Diagnostic]) -> String {
+    if diagnostics.is_empty() {
+        return "No diagnostics.\n".to_owned();
+    }
+
+    let mut rendered = String::new();
+
+    for (index, diagnostic) in diagnostics.iter().enumerate() {
+        if index > 0 {
+            rendered.push('\n');
+        }
+        rendered.push_str(&diagnostic.render(source));
+    }
+
+    rendered
 }
 
 fn render_unification_fixture_result(source: &str) -> String {

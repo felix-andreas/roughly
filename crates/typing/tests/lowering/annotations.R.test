@@ -50,6 +50,20 @@ x <- 1L
 Assign x
   Integer("1L")
 
+#---- nominal_introduction_annotation
+#: @type Person {list{name: character}}
+
+#: @new Person
+x <- list(name = "bob")
+#++++
+TypeDefinition Person = list{name: character}
+#: @new Person
+Assign x
+  Call
+    Symbol(list)
+    Argument name:
+      Character("\"bob\"")
+
 #---- generic_nominal_introduction_annotation
 #: @type Person<T> {T}
 
@@ -60,6 +74,42 @@ TypeDefinition Person<T> = T
 #: @new Person<integer>
 Assign x
   Integer("1L")
+
+#---- checked_generic_nominal_annotation
+#: @type Person<T> {list{value: T}}
+
+#: Person<integer>
+x <- list(value = 1L)
+#++++
+TypeDefinition Person<T> = list{value: T}
+#: Person<integer>
+Assign x
+  Call
+    Symbol(list)
+    Argument value:
+      Integer("1L")
+
+#---- expanded_optional_parameter_annotation
+#: @param {integer} count
+#: @param {character} [label]
+#: @returns {integer}
+f <- function(count, label = NULL) count
+#++++
+#: fn(count: integer, [label]: character) -> integer
+Assign f
+  Function (count, label)
+    Symbol(count)
+
+#---- generic_expanded_annotation
+#: @forall T
+#: @param {T} value
+#: @return {T}
+identity <- function(value) value
+#++++
+#: <T> fn(value: T) -> T
+Assign identity
+  Function (value)
+    Symbol(value)
 
 #---- multiline_annotation
 #: @param {integer} a
@@ -82,7 +132,19 @@ Assign f
 #++++
 TypeAlias Count = integer
 
+#---- generic_alias_definition
+#: @alias Box<T> {list{value: T}}
+#++++
+TypeAlias Box<T> = list{value: T}
+
 #---- standalone_type
 #: @type Pair<T, U> {list{first: T, second: U}}
 #++++
 TypeDefinition Pair<T, U> = list{first: T, second: U}
+
+#---- multiline_definition_block
+#: @alias PersonShape {list{name: character}}
+#: @type Person {PersonShape}
+#++++
+TypeAlias PersonShape = list{name: character}
+TypeDefinition Person = PersonShape

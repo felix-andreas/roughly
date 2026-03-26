@@ -14,6 +14,20 @@ error:
 #++++
 InvalidSemantics { message: "duplicate type parameter name `T` in expanded function annotation." }
 
+#---- consecutive_typing_comments
+error:
+integer
+character
+#++++
+InvalidSemantics { message: "cannot use multiple compact annotations in the same `#:` block." }
+
+#---- expanded_param_after_return
+error:
+@return {integer}
+@param {integer} count
+#++++
+InvalidSemantics { message: "`@param` directives must appear before `@return` or `@returns` in the same `#:` block." }
+
 #---- wrong_generic_arity_too_few_arguments
 error:
 Pair<integer>
