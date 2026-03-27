@@ -6,8 +6,8 @@ Use it for short summaries or temporary notes during a design conversation.
 
 Move settled points into `DECISION_LOG.md`.
 
-Move unresolved questions and options into `OPEN_DECISIONS.md`.
-
 ## Current topic
 
-### Expanding naming fixtures
+## Open decisions
+
+- None currently recorded.

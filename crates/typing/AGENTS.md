@@ -7,7 +7,7 @@ This crate is written by AI under human guidance and supervision. The markdown d
 - Deliver high-quality diagnostics for R in the style of Rust and Elm.
 - Support language-tooling features such as hover and inlay hints, so preserve the semantic information needed for them whenever practical.
 - Scale to very large code bases, including code bases larger than 300,000 LoC; performance matters.
-- Keep single-file rechecking fast while still reporting dependent type errors across the project when exported interfaces change.
+- Keep single-file rechecking fast while still reporting dependent type errors across the project when project-visible names change.
 - Prefer clear, precise, actionable diagnostic wording.
 - Avoid overly internal or theory-heavy diagnostic language when user-facing wording would be clearer.
 - Keep fixture expectations updated only when wording or behavior intentionally improves.
@@ -17,8 +17,11 @@ This crate is written by AI under human guidance and supervision. The markdown d
 
 If the user says:
 
-- `get-started`: read the relevant steering documents and `MEMORY.md`, then continue with the next actionable item in `TODOS.md` (assume fresh context unless the documents indicate otherwise).
+- `get started`: read the relevant steering documents and `MEMORY.md`, then continue with the next actionable item in `TODOS.md` (assume fresh context unless the documents indicate otherwise).
 - `cleanup memory`: aggressively remove resolved, stale, or low-value session-specific details, while preserving this purpose section and any continuity that will still matter next session.
+- `authorative check`: compare the authoritative documents against the fixture suites and report contradictions, stale wording, or missing documented coverage.
+- `implementation check`: compare the implementation against the authoritative documents and report contract or architecture mismatches.
+- `session check`: do an end-of-session closure pass. Verify that decisions, open questions, and new work discovered during the session are either resolved or captured in the right documents; look especially for thread sprawl where side investigations created uncaptured follow-up work. Check that `TODOS.md`, `projects/`, `DISCUSS.md`, and the authoritative documents are consistent, then report anything still hanging.
 
 ## Steering Documents
 
@@ -73,6 +76,15 @@ Update working documents proactively during the session.
   - Durable record of settled decisions discussed with the user.
   - Keep each entry in `decision` then `reason` form.
   - Reflect durable decisions into the authoritative documents when the wording there is ready.
+- `projects/`
+  - Detailed project plans for larger multi-step efforts that would make `TODOS.md` too crowded.
+  - Name project files with a three-digit numeric prefix followed by a short snake_case title, for example `000_fixture_harness_multi_file_generations.md`.
+  - Each project file should declare one top-level project state: `[planning]`, `[in-progress]`, `[done]`, or `[discarded]`.
+  - Put unresolved questions near the top of each project file, before the implementation plan, so they are easy to notice.
+  - Discuss and settle those unresolved questions with the user before starting implementation work on that project.
+  - Individual tasks inside a project should also carry explicit state markers so progress is visible within the file.
+  - Task-level states may also use `[blocked]` when progress is waiting on a decision or prerequisite.
+  - Keep `TODOS.md` as the index of active work and reference the relevant project file there instead of duplicating the full plan.
 
 ### Ephemeral documents
 
@@ -84,12 +96,10 @@ Delete or trim ephemeral documents once their content is resolved or no longer u
   - Keep only concrete unfinished work.
   - Use concise bullets and short nested bullets when they clarify sequencing.
   - If a task is marked `(needs refinement)` or appears stale, discuss it with the user before acting on it.
-- `OPEN_DECISIONS.md`
-  - Active unresolved design questions and their current options.
-  - Keep it focused on decisions that still need user input.
 - `DISCUSS.md`
   - Scratch space for active design discussion.
-  - Keep it short and move anything durable into `DECISION_LOG.md` or `OPEN_DECISIONS.md`.
+  - Keep it short and move anything durable into `DECISION_LOG.md`.
+  - Keep a dedicated `Open decisions` section inside this file and update it after each focused design discussion pass.
 - `MEMORY.md`
   - Inter-session memory only: use it for continuity that is easy to lose between sessions, not as a general session dump.
   - Keep it clean by default; remove resolved points, stale notes, and low-value session chatter automatically.

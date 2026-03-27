@@ -30,6 +30,42 @@ Notes:
 - `group__case` names must be unique across the suite
 - the fixture runner only loads files with the `.test` extension, so suite-local `README.md` files are ignored by the runner
 
+## Planned multi-file format
+
+This crate is moving toward a fixture format that can describe multi-file projects and grouped generations.
+
+This format is not implemented yet. Remove this warning once the new harness actually supports it.
+
+The intended direction is:
+
+```text
+#==== group_name
+#---- case_name
+#.... v1
+#---- a.R
+<file contents>
+#---- b.R
+<file contents>
+#.... v2
+#---- a.R
+<replacement file contents>
+#---- edit b.R 3:1-3:4 -> "foo"
+#---- move c.R -> d.R
+#---- delete e.R
+#++++
+<expected rendered output>
+```
+
+Planned rules:
+
+- if no `#.... vN` block is present, the case remains a normal single-file fixture
+- each `#.... vN` block describes one grouped project edit step
+- all entries inside one generation are applied together
+- bare filenames such as `#---- a.R` mean whole-file contents for that generation
+- `edit`, `move`, and `delete` are first-class project operations
+- small tests should usually restate whole files
+- large-file or edit-heavy tests may use range edits
+
 ## Focused runs
 
 Run one focused fixture case with:

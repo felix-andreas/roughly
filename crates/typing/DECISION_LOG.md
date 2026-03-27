@@ -2,8 +2,11 @@
 
 Keep newest decisions at the top.
 
+- type names are project-global, and top-level value names are package-global across files.
+  - `@type` and `@alias` declarations share one project-global namespace, forward references are allowed across files, and duplicate type names are errors at every conflicting declaration. Top-level value names are visible across package files, later files in package collation order win on conflicts, and both overwritten and overwriting value definitions should warn. We also want to leave room for a future file-local opaque-type feature.
+
 - naming data is a tooling boundary as well as a typechecking boundary.
-  - The naming result should support go-to-definition and local rename within a file now, and it should scale to project-level rename once cross-file naming data and imported interfaces exist.
+  - The naming result should support go-to-definition and local rename within a file now, and it should scale to project-level rename once cross-file naming data exists.
 
 - HIR stores top-level type declarations separately from top-level executable expressions.
   - Type declarations are not expression nodes, and their interleaving with executable top-level expressions is not semantically significant for later phases.

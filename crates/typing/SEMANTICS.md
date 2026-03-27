@@ -46,7 +46,7 @@ Most annotation blocks are attached to the following binding or expression.
 
 A block consisting only of `@type` and `@alias` lines is instead a definition block.
 
-Definition blocks are not attached to the following binding or expression. Each definition line is processed independently in source order, so later lines may refer to names defined by earlier lines in the same block.
+Definition blocks are not attached to the following binding or expression. They only provide a compact way to write several top-level `@type` or `@alias` declarations together.
 
 There are four annotation forms:
 
@@ -97,6 +97,58 @@ apply_renderer <- function(render_count, count, label = NULL) {
 #: @type Cat {list{ name: character }}
 #: @type Dog {list{ name: character }}
 ```
+
+## Naming and scoping
+
+### Project file order
+
+Project file order follows normal R package collation order.
+
+- if `DESCRIPTION` provides `Collate`, that order is used
+- otherwise files are ordered by the default `C`-locale collation of package source files
+
+When this document refers to an earlier or later file, it means earlier or later in that project file order.
+
+### Value names
+
+Top-level value names are package-global across files.
+
+- a top-level binding may be referenced from another file
+- if several files define the same top-level value name, the later file wins
+- both the overwritten earlier definition and the overwriting later definition should warn
+
+Inside executable code, value naming remains lexical.
+
+- function parameters introduce local bindings
+- local assignments introduce local bindings in the current lexical scope
+- later assignments in the same scope rebind that name in that scope
+- local bindings shadow outer and package-global bindings of the same name
+- ordinary braced blocks do not introduce a new value scope by themselves
+- `for` introduces a loop-local binding for the iteration variable
+
+### Type names
+
+Top-level `@type` and `@alias` declarations share one project-global namespace.
+
+- type references may resolve to declarations in the same file or in another file
+- forward references are allowed
+- duplicate type names are errors regardless of file or declaration kind
+- every declaration participating in a duplicate-name conflict is erroneous
+- type parameters are local binders and shadow project-global type names
+
+All current `@type` and `@alias` declarations are top-level and project-global.
+
+### Future direction
+
+The current semantics use one project-global type namespace.
+
+In the future, the language may add file-local opaque types.
+
+A file-local opaque type would:
+
+- be nameable only within its defining file
+- be constructible and directly mutable only within its defining file
+- remain opaque outside that file except through values and operations the file explicitly exposes
 
 ## Type annotations and assertions
 
@@ -463,25 +515,13 @@ value <- list(name = "bob", age = 20)
 identity_person <- function(value) value
 ```
 
-Definitions are processed in source order.
+Definitions are project-global rather than block-local.
 
-A name may be used only after it has been defined.
+That means:
 
-Examples:
-
-```r
-#: @alias PersonShape {list{ name: character, age: double }}
-#: @type Person {PersonShape}
-```
-
-This is valid because `PersonShape` is defined earlier in the same block.
-
-```r
-#: @type Person {PersonShape}
-#: @alias PersonShape {list{ name: character, age: double }}
-```
-
-This is an error because `PersonShape` is not yet defined when `Person` is processed.
+- consecutive `@type` and `@alias` lines in one block are still equivalent to separate blocks
+- named type references are not limited to earlier lines in the same block
+- forward references are allowed across both block and file boundaries
 
 #### Type parameters and generic application
 

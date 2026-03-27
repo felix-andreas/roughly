@@ -60,7 +60,7 @@ Responsibilities:
 Non-responsibilities:
 
 - value-name resolution
-- type-name resolution against imported interfaces
+- project-wide type-name resolution
 - typechecking
 
 Lowering is the front-end structural boundary. Later phases consume parsed HIR data, not raw `#:` text.
@@ -70,7 +70,7 @@ Lowering is the front-end structural boundary. Later phases consume parsed HIR d
 Input:
 
 - `HirModule`
-- builtins and imported interfaces needed for name lookup
+- builtins and project naming context needed for name lookup
 
 Output:
 
@@ -85,10 +85,11 @@ Responsibilities:
 - construct lexical value scopes
 - handle value shadowing
 - resolve value use sites to binding identities
-- build the file-global type namespace from top-level declarations
+- resolve top-level value names against the package-global project environment
+- build the project-global type namespace from top-level declarations
 - resolve type references in annotations and declarations
-- resolve type references against imported interfaces
-- diagnose unknown type names, duplicate type declarations, wrong type-argument arity, and alias-versus-nominal misuse for `@new`
+- resolve type references against that project-global namespace
+- diagnose unknown type names, duplicate type declarations, wrong type-argument arity, alias-versus-nominal misuse for `@new`, and cross-file top-level value collisions
 
 Naming data is also a tooling boundary, not only a typechecking prerequisite.
 
@@ -96,7 +97,7 @@ The naming result should be rich enough to support:
 
 - go-to-definition within a file
 - local rename within a file
-- project-level rename across files once imported interfaces and project scheduling exist
+- project-level rename across files once cross-file naming data and project scheduling exist
 
 Non-responsibilities:
 
@@ -112,7 +113,7 @@ Input:
 
 - `NamedModule`
 - builtin typing information
-- imported interfaces as needed for semantic checking
+- project summaries as needed for semantic checking and incremental invalidation
 
 Output:
 
@@ -181,7 +182,7 @@ The named representation must distinguish:
 - a value definition site from a value use site
 - which value binding a use refers to
 - a type declaration from a type reference
-- which type declaration or imported interface entry a type reference resolves to
+- which type declaration a type reference resolves to
 - whether a resolved type name is nominal or an alias
 
 The named representation should also preserve the information needed for editor tooling built on name resolution, especially:
@@ -209,7 +210,8 @@ Multi-file checking should build on the file-local pipeline rather than bypass i
 The checker should support shared analysis state across files for:
 
 - interned names
-- imported interfaces
+- project file order
+- project-global declaration tables
 - later project-level caches
 
 That project-level direction should leave room for tooling operations built on naming identity, including cross-file go-to-definition and rename.
@@ -218,19 +220,17 @@ The architecture should optimize for fast re-analysis of a single changed file.
 
 File-local phases and artifacts should remain explicit so one file can be reparsed, relowered, renamed, and rechecked without unnecessary project-wide recomputation.
 
-Project-level analysis should track dependencies through checked file interfaces.
+Project-level analysis should track dependencies through project-global names and any later checked-file summaries used for incremental invalidation.
 
-If file `A` changes, dependent files such as `B` must be rechecked when `A`'s exported interface changes, even if those dependent files are not open.
-
-Per-file interfaces are the boundary between file-local checking and later project scheduling.
+If file `A` changes, later files that depend on `A`'s project-visible names must be rechecked when those visible names change, even if those dependent files are not open.
 
 The intended later project-level stages are:
 
-1. build or load imported file interfaces
+1. build or load project file order and project-global declaration tables
 2. run `lower`
-3. run `naming` with imported interfaces in scope
+3. run `naming` with project naming context in scope
 4. run `typecheck`
-5. extract the checked file interface
+5. extract any checked-file summaries needed for incremental invalidation
 6. track dependency invalidation and dependent diagnostics
 
 The architecture should not assume that only full-file rechecking is possible, but it should also not commit yet to reusing unification or inference state across edits.

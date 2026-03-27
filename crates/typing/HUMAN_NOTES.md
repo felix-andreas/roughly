@@ -2,16 +2,30 @@
 
 - we should resolve types during lowering
 
+- (update semantics) maybe later support local types. @new would work only in the same file. also can only be edited in local file (opaque like type)
 
-atm we have this bug
+- better document split: (https://chatgpt.com/c/69c5985f-f050-8332-bf70-4834bc44b3c4)
+  - Overview / Goals
+  - Requirements
+    - Functional
+    - Non-functional
+  - Behavior
+    - Use cases or flows
+  - Architecture
+  - Interfaces
+  - Constraints
+  - Testing / Acceptance
 
-A `#:` typing comment must be followed immediately by an expression. (typing syntax-error)
-
-for an expression like this:
-
-[@typing.R (18:19)](file:///home/felix/Projects/roughly/R/typing.R#L18:19) 
-
-we shouldn't errors of the previous phase first. i think the problem here is that we first
+- errors of earlier phases should be shown first.
+    atm we have this bug:
+    
+    A `#:` typing comment must be followed immediately by an expression. (typing syntax-error)
+    
+    for an expression like this:
+    
+    [@typing.R (18:19)](file:///home/felix/Projects/roughly/R/typing.R#L18:19) 
+    
+    we shouldn't errors of the previous phase first. i think the problem here is that we first
 
 
 - naming:
