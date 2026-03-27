@@ -19,35 +19,32 @@ Do not use this document for:
 - a task tracker
 - a restatement of user-facing typing rules
 
-## File-local pipeline
+## Pipeline
 
-The intended file-local pipeline is:
+The file-local checking pipeline is:
 
-1. `check`
-2. `lower`
-3. `naming`
-4. `typecheck`
-5. diagnostics output and checked-file results
+parsed syntax -> `lower` -> `naming` -> `typecheck` -> checked-file results and diagnostics
 
-`check` is the top-level orchestration entry point. It is responsible for wiring the phases together and returning file results.
+`check` is the orchestration entry point around that pipeline. It wires phases together and returns file results, but it is not itself a semantic phase.
 
-Syntax parsing is not a real `typing` crate phase. The checker may receive already-parsed syntax from `roughly` or from tests. Parser setup is integration glue, not a core architectural boundary.
+Syntax parsing is not a `typing` crate phase. The checker may receive already-parsed syntax from `roughly` or from tests.
 
-Diagnostics are not a pipeline phase. Diagnostics are structured output produced by lowering, naming, and typechecking.
+Diagnostics are not a separate phase. They are structured outputs produced by lowering, naming, and typechecking.
 
-## Phase boundaries
+## Phase contracts
 
 ### `lower`
 
 Input:
 
-- parsed syntax
-- source access
+- parsed syntax for one file
+- source text access
 - shared interner state when available
 
 Output:
 
-- `HirFile`
+- `HirModule`
+- lowering diagnostics
 
 Responsibilities:
 
@@ -55,58 +52,87 @@ Responsibilities:
 - preserve source order and source ranges
 - intern spelled names
 - parse annotation and type-declaration syntax exactly once
-- attach parsed annotation payloads to the HIR items they govern
-- represent definition blocks as explicit HIR declarations
+- attach parsed annotation payloads to the HIR nodes they govern
+- collect explicit top-level HIR type declarations for `@type` and `@alias`
+- collect executable top-level expressions separately from declarations
+- reject declaration placements that cannot appear in HIR, such as non-top-level type definition blocks
 
-Lowering is the front-end boundary. Later phases should consume parsed annotation and declaration data, not raw `#:` text.
+Non-responsibilities:
 
-Lowering stays distinct from naming even if the implementation runs both phases back to back.
+- value-name resolution
+- type-name resolution against imported interfaces
+- typechecking
+
+Lowering is the front-end structural boundary. Later phases consume parsed HIR data, not raw `#:` text.
 
 ### `naming`
 
 Input:
 
-- `HirFile`
-- builtins and imported interfaces as needed for name lookup
+- `HirModule`
+- builtins and imported interfaces needed for name lookup
 
 Output:
 
-- a named or resolved view of the file
+- `NamedModule`
+- naming diagnostics
+
+`NamedModule` is the named view consumed by typechecking. It may be represented as HIR plus side tables keyed by stable ids, but the phase contract is fixed even if the exact Rust types evolve.
 
 Responsibilities:
 
-- binding introduction
-- lexical scope construction
-- shadowing
-- use-site resolution
-- any additional name resolution required before typechecking
+- introduce value bindings
+- construct lexical value scopes
+- handle value shadowing
+- resolve value use sites to binding identities
+- build the file-global type namespace from top-level declarations
+- resolve type references in annotations and declarations
+- resolve type references against imported interfaces
+- diagnose unknown type names, duplicate type declarations, wrong type-argument arity, and alias-versus-nominal misuse for `@new`
 
-The exact output shape is still open:
+Naming data is also a tooling boundary, not only a typechecking prerequisite.
 
-- a new resolved artifact
-- or HIR plus side tables keyed by stable ids
+The naming result should be rich enough to support:
 
-What is fixed is the phase boundary: later phases must be able to distinguish binding identity from spelled names.
+- go-to-definition within a file
+- local rename within a file
+- project-level rename across files once imported interfaces and project scheduling exist
+
+Non-responsibilities:
+
+- syntax parsing
+- structural placement validation already enforced by lowering
+- expression type inference and compatibility checking
+
+Naming is the semantic name-resolution boundary. Later phases must consume resolved binding identity and resolved type identity rather than re-resolving spelled names ad hoc.
 
 ### `typecheck`
 
 Input:
 
-- named program representation
-- builtin and imported environment information
+- `NamedModule`
+- builtin typing information
+- imported interfaces as needed for semantic checking
 
 Output:
 
 - `CheckedFile`
+- typechecking diagnostics
 
 Responsibilities:
 
 - expression checking
-- annotation checking
+- annotation checking after type references are already resolved
 - compatibility and coercion rules
 - builtin typing rules
 - typed results for tooling
-- file interface extraction
+- checked-file interface extraction
+
+Non-responsibilities:
+
+- parsing type syntax
+- name resolution
+- declaration placement validation
 
 Inference is an internal mechanism of `typecheck`, not the architectural name of the phase.
 
@@ -118,7 +144,7 @@ The syntax tree preserves surface structure and syntax ranges, but it is not the
 
 ### Surface type syntax
 
-Annotations and type declarations should first be parsed into a syntax-oriented type representation.
+Annotations and type declarations are first parsed into a syntax-oriented type representation.
 
 Do not collapse user-written type syntax directly into inference-oriented semantic types.
 
@@ -126,26 +152,43 @@ The annotation and declaration parser should remain directly testable as its own
 
 ### HIR
 
-HIR is the front-end representation produced by lowering.
+HIR is the structural front-end representation produced by lowering.
 
 HIR should:
 
 - remove parser-tree quirks
-- represent expressions, annotations, and declarations explicitly
+- represent top-level type declarations explicitly
+- represent executable top-level expressions separately from type declarations
 - preserve source ranges and source order
-- use stable arena or id-based storage
+- use stable ids for nodes that later phases need to reference from side tables
 
-Stable ids are required so later phases can use side tables for naming, typechecking, hover, and incremental analysis.
+The HIR module should model a file as:
+
+- a top-level declaration collection
+- a top-level executable expression list
+
+Type declarations are not expression nodes, and their interleaving with top-level expressions is not semantically significant.
+
+Expression HIR remains separate from type-syntax parsing concerns. A block expression contains executable child expressions only; it does not contain nested type declarations.
 
 ### Naming data
 
-After naming, the checker needs binding identity in addition to spelled names.
+After naming, the checker needs semantic identity in addition to spelled names.
 
-Whether naming produces a new artifact or side tables is still open, but later phases must be able to distinguish:
+The named representation must distinguish:
 
-- two bindings with the same spelled name
-- a definition site from a use site
-- which binding a particular use refers to
+- two value bindings with the same spelled name
+- a value definition site from a value use site
+- which value binding a use refers to
+- a type declaration from a type reference
+- which type declaration or imported interface entry a type reference resolves to
+- whether a resolved type name is nominal or an alias
+
+The named representation should also preserve the information needed for editor tooling built on name resolution, especially:
+
+- jumping from a use site to its definition site
+- enumerating all use sites for local rename
+- extending that same identity model to project-level rename when cross-file naming data is available
 
 ### Internal semantic types
 
@@ -169,11 +212,7 @@ The checker should support shared analysis state across files for:
 - imported interfaces
 - later project-level caches
 
-The exact incremental project design is still open, but the architecture should leave room for:
-
-- dependency tracking by interface changes
-- reusing unaffected work across checks
-- finer-grained invalidation later if the chosen naming and checked representations make that practical
+That project-level direction should leave room for tooling operations built on naming identity, including cross-file go-to-definition and rename.
 
 The architecture should optimize for fast re-analysis of a single changed file.
 
@@ -188,9 +227,11 @@ Per-file interfaces are the boundary between file-local checking and later proje
 The intended later project-level stages are:
 
 1. build or load imported file interfaces
-2. run naming and typechecking with those interfaces in scope
-3. extract the checked file interface
-4. track dependency invalidation and dependent diagnostics
+2. run `lower`
+3. run `naming` with imported interfaces in scope
+4. run `typecheck`
+5. extract the checked file interface
+6. track dependency invalidation and dependent diagnostics
 
 The architecture should not assume that only full-file rechecking is possible, but it should also not commit yet to reusing unification or inference state across edits.
 
@@ -209,6 +250,7 @@ The architecture should expose stable phase boundaries for fixture testing.
 At the architectural level, the important requirement is that the implementation support direct testing of:
 
 - annotation and type syntax parsing
+- lowering results
 - naming results
 - successful checked output
 - rendered diagnostics

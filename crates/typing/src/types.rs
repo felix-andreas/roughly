@@ -1,4 +1,4 @@
-use crate::interner::Symbol;
+use {crate::interner::Symbol, tree_sitter::Range};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct InferenceVariableId(pub u32);
@@ -179,26 +179,40 @@ pub enum TypeAnnotationKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttachedAnnotation {
-    Expression(Annotation),
-    BindingAndExpression(Annotation),
+    Expression {
+        annotation: Annotation,
+        range: Range,
+    },
+    BindingAndExpression {
+        annotation: Annotation,
+        range: Range,
+    },
 }
 
 impl AttachedAnnotation {
-    pub fn expression(annotation: Annotation) -> Self {
-        Self::Expression(annotation)
+    pub fn expression(annotation: Annotation, range: Range) -> Self {
+        Self::Expression { annotation, range }
     }
 
-    pub fn binding_and_expression(annotation: Annotation) -> Self {
-        Self::BindingAndExpression(annotation)
+    pub fn binding_and_expression(annotation: Annotation, range: Range) -> Self {
+        Self::BindingAndExpression { annotation, range }
     }
 
     pub fn annotation(&self) -> &Annotation {
         match self {
-            Self::Expression(annotation) | Self::BindingAndExpression(annotation) => annotation,
+            Self::Expression { annotation, .. } | Self::BindingAndExpression { annotation, .. } => {
+                annotation
+            }
         }
     }
 
     pub fn applies_to_binding(&self) -> bool {
-        matches!(self, Self::BindingAndExpression(_))
+        matches!(self, Self::BindingAndExpression { .. })
+    }
+
+    pub fn range(&self) -> Range {
+        match self {
+            Self::Expression { range, .. } | Self::BindingAndExpression { range, .. } => *range,
+        }
     }
 }

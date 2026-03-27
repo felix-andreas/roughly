@@ -2,6 +2,15 @@
 
 Keep newest decisions at the top.
 
+- naming data is a tooling boundary as well as a typechecking boundary.
+  - The naming result should support go-to-definition and local rename within a file now, and it should scale to project-level rename once cross-file naming data and imported interfaces exist.
+
+- HIR stores top-level type declarations separately from top-level executable expressions.
+  - Type declarations are not expression nodes, and their interleaving with executable top-level expressions is not semantically significant for later phases.
+
+- non-top-level `@type` and `@alias` definition blocks are lowering errors.
+  - Declaration placement is a structural front-end concern, so the checker should reject it before naming or typechecking.
+
 - `@new` accepts nominal type references, including generic nominal applications.
   - This keeps nominal introduction aligned with ordinary nominal type syntax while still rejecting aliases and structural type forms; generic nominal types therefore require full type arguments such as `@new Person<integer>`.
 

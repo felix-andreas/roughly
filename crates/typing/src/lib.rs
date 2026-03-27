@@ -13,7 +13,10 @@ pub use {
     crate::{
         check::{AnalysisState, CheckResult, check},
         diagnostic::{Diagnostic, DiagnosticCode, Severity},
-        hir::{Argument, Expression, ExpressionId, ExpressionKind, Module, Parameter},
+        hir::{
+            Argument, Definition, DefinitionId, DefinitionItem, DefinitionKind, Expression,
+            ExpressionId, ExpressionKind, Module, Parameter,
+        },
         interner::{Interner, Symbol},
         lower::{LoweringContext, lower_root_with_rope},
         text::{AnnotationBlock, annotation_block, line_text, node_text, point_label},

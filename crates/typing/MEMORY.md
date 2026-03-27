@@ -19,18 +19,3 @@ Use this document to record:
 If code changes make this document inaccurate, update it in the same session.
 
 ## Active continuity
-
-- Fresh-session starting point:
-  - Read `AGENTS.md` first.
-  - Then read `DECISION_LOG.md`, `OPEN_DECISIONS.md`, `TODOS.md`, `ARCHITECTURE.md`, and `TESTING.md`.
-  - Do not treat older architectural prose elsewhere in the crate as settled if it conflicts with those files.
-
-- Still-open design questions in `OPEN_DECISIONS.md`:
-  - the exact typecheck environment shape beyond “builtins and imported interfaces”
-
-- Recommended next step for the next agent:
-  - Reshape `typecheck.rs` to consume the `NamingResult` bindings instead of the raw `Symbol`s.
-  - Handle mapping builtins and imported interfaces into stable `BindingId`s so typecheck can use them uniformly.
-
-- Important caution:
-  - persistent authoritative documents must only be changed after user request or discussion

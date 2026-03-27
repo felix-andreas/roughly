@@ -43,14 +43,40 @@ impl HirArena {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Module {
     pub arena: HirArena,
-    pub root_expressions: Vec<ExpressionId>,
+    pub definitions: Vec<DefinitionItem>,
+    pub expressions: Vec<ExpressionId>,
 }
 
 impl Module {
-    pub fn new(arena: HirArena, root_expressions: Vec<ExpressionId>) -> Self {
+    pub fn new(
+        arena: HirArena,
+        definitions: Vec<DefinitionItem>,
+        expressions: Vec<ExpressionId>,
+    ) -> Self {
         Self {
             arena,
-            root_expressions,
+            definitions,
+            expressions,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DefinitionId(pub u32);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DefinitionItem {
+    pub id: DefinitionId,
+    pub range: Range,
+    pub definition: Definition,
+}
+
+impl DefinitionItem {
+    pub fn new(id: DefinitionId, range: Range, definition: Definition) -> Self {
+        Self {
+            id,
+            range,
+            definition,
         }
     }
 }
@@ -136,7 +162,6 @@ pub enum ExpressionKind {
         value: ExpressionId,
         name: Symbol,
     },
-    Definition(Definition),
     Unsupported,
 }
 
@@ -154,6 +179,15 @@ pub enum DefinitionKind {
     Alias,
 }
 
+impl DefinitionKind {
+    pub fn directive_name(self) -> &'static str {
+        match self {
+            Self::Type => "@type",
+            Self::Alias => "@alias",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parameter {
     pub symbol: Symbol,
@@ -169,10 +203,47 @@ pub struct Argument {
 impl Module {
     pub fn render(&self, interner: &crate::interner::Interner) -> String {
         let mut out = String::new();
-        for expr_id in &self.root_expressions {
-            self.render_expression(*expr_id, 0, &mut out, interner);
+        for definition in &self.definitions {
+            self.render_definition(definition, 0, &mut out, interner);
+        }
+        for expression_id in &self.expressions {
+            self.render_expression(*expression_id, 0, &mut out, interner);
         }
         out
+    }
+
+    fn render_definition(
+        &self,
+        definition_item: &DefinitionItem,
+        indent: usize,
+        out: &mut String,
+        interner: &crate::interner::Interner,
+    ) {
+        let prefix = "  ".repeat(indent);
+        let definition = &definition_item.definition;
+        let label = match definition.kind {
+            DefinitionKind::Type => "TypeDefinition",
+            DefinitionKind::Alias => "TypeAlias",
+        };
+        let name_str = interner.resolve(definition.name).unwrap_or("<unknown>");
+        let params = if definition.type_parameters.is_empty() {
+            String::new()
+        } else {
+            let rendered_params = definition
+                .type_parameters
+                .iter()
+                .map(|&parameter| {
+                    interner
+                        .resolve(parameter)
+                        .unwrap_or("<unknown>")
+                        .to_owned()
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("<{rendered_params}>")
+        };
+        let ty_str = render_surface_type(&definition.surface_type, interner);
+        out.push_str(&format!("{prefix}{label} {name_str}{params} = {ty_str}\n"));
     }
 
     fn render_expression(
@@ -330,26 +401,6 @@ impl Module {
                 let name_str = interner.resolve(*name).unwrap_or("<unknown>");
                 out.push_str(&format!("{prefix}Dollar {name_str}\n"));
                 self.render_expression(*value, indent + 1, out, interner);
-            }
-            ExpressionKind::Definition(definition) => {
-                let label = match definition.kind {
-                    DefinitionKind::Type => "TypeDefinition",
-                    DefinitionKind::Alias => "TypeAlias",
-                };
-                let name_str = interner.resolve(definition.name).unwrap_or("<unknown>");
-                let params = if definition.type_parameters.is_empty() {
-                    "".to_owned()
-                } else {
-                    let rendered_params = definition
-                        .type_parameters
-                        .iter()
-                        .map(|&p| interner.resolve(p).unwrap_or("<unknown>").to_owned())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    format!("<{rendered_params}>")
-                };
-                let ty_str = render_surface_type(&definition.surface_type, interner);
-                out.push_str(&format!("{prefix}{label} {name_str}{params} = {ty_str}\n"));
             }
             ExpressionKind::Unsupported => out.push_str(&format!("{prefix}Unsupported\n")),
         }

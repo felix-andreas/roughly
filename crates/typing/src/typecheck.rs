@@ -60,9 +60,9 @@ impl InferenceState {
     }
 
     pub fn infer_module(&mut self, module: &Module) -> Result<Vec<CoreType>, InferenceError> {
-        let mut inferred_types = Vec::with_capacity(module.root_expressions.len());
+        let mut inferred_types = Vec::with_capacity(module.expressions.len());
 
-        for expression_id in &module.root_expressions {
+        for expression_id in &module.expressions {
             let expression = module.arena.get(*expression_id);
             inferred_types.push(self.infer_expression(expression, &module.arena)?);
         }
@@ -183,7 +183,6 @@ impl InferenceState {
             ExpressionKind::Dollar { value, name } => {
                 self.infer_dollar_expression(arena.get(*value), *name, expression, arena)
             }
-            ExpressionKind::Definition(_) => Ok(CoreType::Null),
             ExpressionKind::Unsupported => Ok(CoreType::Unknown),
         }
     }
@@ -475,12 +474,19 @@ impl InferenceState {
                         if self.check_compatibility(actual_type.clone(), expected_type.clone()) {
                             Ok(expected_type)
                         } else {
-                            Err(InferenceError::TypeMismatch {
-                                expected: Box::new(expected_type),
-                                actual: Box::new(actual_type),
-                                range: Some(expression.range),
-                                expression_id: Some(expression.id),
-                            })
+                            match self.unify_with_context(
+                                expected_type.clone(),
+                                actual_type.clone(),
+                                expression,
+                            ) {
+                                Err(error) => Err(error),
+                                Ok(_) => Err(InferenceError::TypeMismatch {
+                                    expected: Box::new(expected_type),
+                                    actual: Box::new(actual_type),
+                                    range: Some(expression.range),
+                                    expression_id: Some(expression.id),
+                                }),
+                            }
                         }
                     }
                     TypeAnnotationKind::UnknownOnly => {

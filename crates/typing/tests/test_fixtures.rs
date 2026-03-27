@@ -6,7 +6,7 @@ use {
     support::{check_source, new_parser, parse_source},
     typing::{
         AnalysisState, Interner,
-        hir::{DefinitionKind, ExpressionId, ExpressionKind, HirArena},
+        hir::{DefinitionItem, DefinitionKind, ExpressionId, ExpressionKind, HirArena},
         lower::LoweringContext,
         naming::{BindingId, NamingContext, NamingResult},
         type_syntax::{parse_type_syntax, render_surface_type, render_type_syntax},
@@ -305,8 +305,17 @@ fn render_naming_fixture_result(source: &str) -> String {
     let tree = parse_source(&mut parser, source);
 
     let mut lowering_context = LoweringContext::new();
-    let module = lowering_context.lower_tree(&tree, source);
-    let naming_result = NamingContext::new(&module.arena).resolve_module(&module);
+    let lowering_result = lowering_context.lower_tree_with_diagnostics(&tree, source);
+    if !lowering_result.diagnostics.is_empty() {
+        return render_diagnostics(source, &lowering_result.diagnostics);
+    }
+
+    let module = lowering_result.module;
+    let naming_result =
+        NamingContext::new(&module.arena, lowering_context.interner()).resolve_module(&module);
+    if !naming_result.diagnostics.is_empty() {
+        return render_diagnostics(source, &naming_result.diagnostics);
+    }
 
     render_named_module(&module, &naming_result, lowering_context.interner())
 }
@@ -501,9 +510,9 @@ fn render_progressive_fixture_result(
     let mut inference_state = InferenceState::new();
     bind_fixture_builtins(&mut inference_state, &mut lowering_context);
 
-    let mut lines = Vec::with_capacity(module.root_expressions.len());
+    let mut lines = Vec::new();
 
-    for expression_id in &module.root_expressions {
+    for expression_id in &module.expressions {
         let expression = module.arena.get(*expression_id);
         let inferred_type = inference_state.infer_expression(expression, &module.arena)?;
 
@@ -694,7 +703,10 @@ fn render_named_module(
 ) -> String {
     let mut lines = Vec::new();
 
-    for expression_id in &module.root_expressions {
+    for definition in &module.definitions {
+        render_named_definition(definition, interner, 0, &mut lines);
+    }
+    for expression_id in &module.expressions {
         render_named_expression(
             &module.arena,
             *expression_id,
@@ -706,6 +718,41 @@ fn render_named_module(
     }
 
     lines.join("\n")
+}
+
+fn render_named_definition(
+    definition_item: &DefinitionItem,
+    interner: &Interner,
+    indent: usize,
+    lines: &mut Vec<String>,
+) {
+    let prefix = "  ".repeat(indent);
+    let definition = &definition_item.definition;
+    let rendered_name = interner.resolve(definition.name).unwrap_or("<unknown>");
+    let rendered_parameters = if definition.type_parameters.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<{}>",
+            definition
+                .type_parameters
+                .iter()
+                .map(|parameter| interner
+                    .resolve(*parameter)
+                    .unwrap_or("<unknown>")
+                    .to_owned())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let label = match definition.kind {
+        DefinitionKind::Type => "TypeDefinition",
+        DefinitionKind::Alias => "TypeAlias",
+    };
+    lines.push(format!(
+        "{prefix}{label}({rendered_name}{rendered_parameters} = {})",
+        render_surface_type(&definition.surface_type, interner)
+    ));
 }
 
 fn render_named_expression(
@@ -915,33 +962,6 @@ fn render_named_expression(
             lines.push(format!("{prefix}Dollar({rendered_name})"));
             render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
         }
-        ExpressionKind::Definition(definition) => {
-            let rendered_name = interner.resolve(definition.name).unwrap_or("<unknown>");
-            let rendered_parameters = if definition.type_parameters.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    "<{}>",
-                    definition
-                        .type_parameters
-                        .iter()
-                        .map(|parameter| interner
-                            .resolve(*parameter)
-                            .unwrap_or("<unknown>")
-                            .to_owned())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            };
-            let label = match definition.kind {
-                DefinitionKind::Type => "TypeDefinition",
-                DefinitionKind::Alias => "TypeAlias",
-            };
-            lines.push(format!(
-                "{prefix}{label}({rendered_name}{rendered_parameters} = {})",
-                render_surface_type(&definition.surface_type, interner)
-            ));
-        }
         ExpressionKind::Unsupported => lines.push(format!("{prefix}Unsupported")),
     }
 }
@@ -969,66 +989,65 @@ fn render_interface_snapshot(
 ) -> String {
     let mut exported_entries = Vec::<(usize, typing::Symbol, String)>::new();
 
-    for (index, expression_id) in module.root_expressions.iter().enumerate() {
-        let expression = module.arena.get(*expression_id);
+    for (index, definition_item) in module.definitions.iter().enumerate() {
+        let definition = &definition_item.definition;
+        let rendered_name = lowering_context
+            .interner()
+            .resolve(definition.name)
+            .unwrap_or("<unknown>");
+        let rendered_parameters = if definition.type_parameters.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<{}>",
+                definition
+                    .type_parameters
+                    .iter()
+                    .map(|parameter| {
+                        lowering_context
+                            .interner()
+                            .resolve(*parameter)
+                            .unwrap_or("<unknown>")
+                            .to_owned()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        let label = match definition.kind {
+            DefinitionKind::Type => "type",
+            DefinitionKind::Alias => "alias",
+        };
+        exported_entries.push((
+            index,
+            definition.name,
+            format!(
+                "{label} {rendered_name}{rendered_parameters} = {}",
+                render_surface_type(&definition.surface_type, lowering_context.interner())
+            ),
+        ));
+    }
 
-        match &expression.kind {
-            ExpressionKind::Assign { target, .. } => {
-                let name = lowering_context
-                    .interner()
-                    .resolve(*target)
-                    .unwrap_or("<unknown>");
-                let binding = inference_state.lookup_name(*target).unwrap_or_else(|| {
-                    panic!("binding `{name}` should be present after inference")
-                });
-                let mut renderer = SimpleTypeRenderer::new(lowering_context.interner());
-                exported_entries.push((
-                    index,
-                    *target,
-                    format!(
-                        "{name}: {}",
-                        renderer.render_type_scheme(&binding.type_scheme)
-                    ),
-                ));
-            }
-            ExpressionKind::Definition(definition) => {
-                let rendered_name = lowering_context
-                    .interner()
-                    .resolve(definition.name)
-                    .unwrap_or("<unknown>");
-                let rendered_parameters = if definition.type_parameters.is_empty() {
-                    String::new()
-                } else {
-                    format!(
-                        "<{}>",
-                        definition
-                            .type_parameters
-                            .iter()
-                            .map(|parameter| {
-                                lowering_context
-                                    .interner()
-                                    .resolve(*parameter)
-                                    .unwrap_or("<unknown>")
-                                    .to_owned()
-                            })
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                };
-                let label = match definition.kind {
-                    DefinitionKind::Type => "type",
-                    DefinitionKind::Alias => "alias",
-                };
-                exported_entries.push((
-                    index,
-                    definition.name,
-                    format!(
-                        "{label} {rendered_name}{rendered_parameters} = {}",
-                        render_surface_type(&definition.surface_type, lowering_context.interner())
-                    ),
-                ));
-            }
-            _ => {}
+    let definition_count = module.definitions.len();
+    for (expression_index, expression_id) in module.expressions.iter().enumerate() {
+        let expression = module.arena.get(*expression_id);
+        if let ExpressionKind::Assign { target, .. } = &expression.kind {
+            let name = lowering_context
+                .interner()
+                .resolve(*target)
+                .unwrap_or("<unknown>");
+            let binding = inference_state
+                .lookup_name(*target)
+                .unwrap_or_else(|| panic!("binding `{name}` should be present after inference"));
+            let mut renderer = SimpleTypeRenderer::new(lowering_context.interner());
+            exported_entries.push((
+                definition_count + expression_index,
+                *target,
+                format!(
+                    "{name}: {}",
+                    renderer.render_type_scheme(&binding.type_scheme)
+                ),
+            ));
         }
     }
 

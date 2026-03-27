@@ -12,6 +12,8 @@ Use ordinary Rust tests only when the behavior is awkward to express as a render
 
 The fixture harness lives in `tests/test_fixtures.rs`.
 
+Some suites may include a local `README.md` with more detailed strategy, coverage expectations, or renderer-specific guidance. Use `TESTING.md` for crate-level test contracts and suite-local README files for suite-specific concepts that would otherwise make this document too long.
+
 Each `.test` file uses:
 
 ```text
@@ -26,6 +28,7 @@ Notes:
 
 - `group__case` is the stable test identity
 - `group__case` names must be unique across the suite
+- the fixture runner only loads files with the `.test` extension, so suite-local `README.md` files are ignored by the runner
 
 ## Focused runs
 
@@ -102,6 +105,19 @@ Expected output should show:
 
 - normalized binding identities
 - definition-site and use-site relationships
+
+The naming suite should be organized as a small coverage matrix rather than a grab bag of examples.
+
+At minimum, that matrix should cover:
+
+- top-level bindings
+- function parameters
+- local rebinding inside blocks
+- nested functions closing over outer bindings
+- inner bindings shadowing outer bindings
+- loop bindings such as `for` variables
+- assignment RHS resolution before the new binding is introduced
+- naming diagnostics for type references that fail during naming
 
 ### `expressions`
 

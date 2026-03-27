@@ -71,7 +71,10 @@ pub fn check(node: Node<'_>, rope: &Rope, analysis_state: &mut AnalysisState) ->
 
     let module = lowering_result.module;
 
-    let naming_context = crate::naming::NamingContext::new(&module.arena);
+    let naming_context = crate::naming::NamingContext::new(
+        &module.arena,
+        analysis_state.lowering_context.interner(),
+    );
     let naming_result = naming_context.resolve_module(&module);
     diagnostics.extend(naming_result.diagnostics.clone());
 

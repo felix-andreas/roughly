@@ -13,26 +13,25 @@ This document tracks actionable planned work for the `typing` crate.
 
 ## Current priorities
 
+### Split `types.rs` By Phase
+
+- Separate the current mixed type data model into phase-shaped representations.
+  - Move HIR attachment metadata such as `AttachedAnnotation` out of `types.rs` and into `hir.rs`.
+  - Keep syntax-layer type forms grouped as front-end data instead of mixing them with typechecker internals.
+  - Keep `CoreType`, `TypeScheme`, and inference-only identifiers as the semantic internal layer used by `typecheck.rs`.
+  - Decide whether resolved type references need their own representation immediately after naming or can stay as a follow-up project.
+- Reasoning:
+  - `types.rs` currently mixes surface syntax, HIR attachment concerns, and typechecker internals in one file, while `lower.rs` and `hir.rs` now have much cleaner phase boundaries.
+  - The current `SurfaceType` shape still uses raw `Symbol`s with no stable ids for nested type references, which is awkward now that naming owns type-name resolution.
+  - Cleaning this split should make later imported-type resolution and semantic named-type support easier to add without further phase leakage.
+
 ### Type Name Resolution In Naming
 
-- Move type-name resolution out of `lower.rs` and into `naming.rs`.
-  - Keep lowering limited to parsing `SurfaceType`, `NamedTypeRef`, and definition declarations into HIR.
-  - Stop doing semantic type-name checks such as unknown type, generic arity, or `@new`-on-alias during lowering.
-- Extend naming to resolve both value names and type names in one pass over HIR.
-  - Keep the implementation side-table based rather than introducing another transformed AST.
-  - Maintain separate value and type namespaces during naming.
-- Resolve type references during naming.
-  - Resolve `NamedTypeRef` in `@new`.
-  - Resolve `SurfaceType::Named(...)` inside annotations, type definitions, aliases, and nested generic arguments.
-  - Resolve against earlier local definitions first, then imported interfaces once they exist.
-- Move type-level diagnostics into naming.
-  - Unknown type names.
-  - Use-before-definition for type names if source-order rules remain part of the contract.
-  - Wrong generic arity.
-  - `@new` on aliases instead of nominal `@type`s.
-- Update downstream consumers after the move.
-  - Make `typecheck` consume resolved type-name information from naming side tables.
-  - Move fixtures so lowering covers only lowering-owned failures while naming or diagnostics covers type-name resolution errors.
+- Finish the naming-phase type-resolution project.
+  - Add wrong-generic-arity checks in naming instead of parser-local or lowering-local validation.
+  - Introduce an explicit resolved type-name result for downstream consumers instead of having naming only emit diagnostics.
+  - Resolve type references against imported interfaces once cross-file interface loading exists.
+  - Make `typecheck` consume resolved type-name information from naming rather than reinterpreting raw `SurfaceType` trees.
 
 ### Typecheck Boundaries
 

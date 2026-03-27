@@ -1,0 +1,117 @@
+#==== top_level
+#---- top_level_reference
+x <- 1L
+x
+#++++
+Assign(x@b0)
+  Integer(1L)
+Symbol(x@b0)
+
+#---- top_level_call_resolves_callee_and_argument
+value <- 1L
+identity <- function(x) x
+identity(value)
+#++++
+Assign(value@b0)
+  Integer(1L)
+Assign(identity@b2)
+  Function(x@b1)
+    Symbol(x@b1)
+Call
+  Symbol(identity@b2)
+  Argument
+    Symbol(value@b0)
+
+#==== rebinding
+#---- top_level_rebinding_creates_fresh_binding
+x <- 1L
+x <- "ok"
+x
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(x@b1)
+  Character("\"ok\"")
+Symbol(x@b1)
+
+#---- earlier_use_keeps_earlier_binding
+x <- 1L
+x
+x <- "ok"
+x
+#++++
+Assign(x@b0)
+  Integer(1L)
+Symbol(x@b0)
+Assign(x@b1)
+  Character("\"ok\"")
+Symbol(x@b1)
+
+#---- assignment_rhs_sees_outer_binding
+x <- 1L
+x <- x
+x
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(x@b1)
+  Symbol(x@b0)
+Symbol(x@b1)
+
+#==== blocks
+#---- nested_block_uses_nearest_binding
+x <- 1L
+f <- function() {
+  x <- "ok"
+  {
+    x
+  }
+}
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(f@b2)
+  Function()
+    Block
+      Assign(x@b1)
+        Character("\"ok\"")
+      Block
+        Symbol(x@b1)
+
+#---- nested_block_shadows_outer_binding
+x <- 1L
+f <- function() {
+  {
+    x <- "ok"
+    x
+  }
+}
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(f@b2)
+  Function()
+    Block
+      Block
+        Assign(x@b1)
+          Character("\"ok\"")
+        Symbol(x@b1)
+
+#---- braces_do_not_restore_outer_binding
+x <- 1L
+f <- function() {
+  {
+    x <- "ok"
+  }
+  x
+}
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(f@b2)
+  Function()
+    Block
+      Block
+        Assign(x@b1)
+          Character("\"ok\"")
+      Symbol(x@b1)

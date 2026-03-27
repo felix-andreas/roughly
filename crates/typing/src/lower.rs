@@ -2,16 +2,15 @@ use {
     crate::{
         diagnostic::Diagnostic,
         hir::{
-            Argument, Definition, DefinitionKind, Expression, ExpressionId, ExpressionKind,
-            HirArena, Module, Parameter,
+            Argument, Definition, DefinitionId, DefinitionItem, Expression, ExpressionId,
+            ExpressionKind, HirArena, Module, Parameter,
         },
         interner::{Interner, Symbol},
         text,
         type_syntax::{TypeParseError, TypeSyntax, parse_type_syntax},
-        types::{Annotation, AttachedAnnotation, NamedTypeRef, SurfaceType},
+        types::{Annotation, AttachedAnnotation},
     },
     ropey::Rope,
-    std::collections::{BTreeMap, BTreeSet},
     tree_sitter::{Node, Range, Tree},
 };
 
@@ -19,7 +18,6 @@ use {
 pub struct LoweringContext {
     pub arena: HirArena,
     pub diagnostics: Vec<Diagnostic>,
-    declared_types: BTreeMap<Symbol, DefinitionKind>,
     interner: Interner,
 }
 
@@ -121,15 +119,13 @@ pub fn lower_root_with_rope_with_diagnostics(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> LoweringResult {
-    lowering_context.declared_types.clear();
-    let expressions = lower_expression_list(root, rope, lowering_context);
-    lowering_context.declared_types.clear();
+    let (definitions, expressions) = lower_module(root, rope, lowering_context);
 
     let arena = std::mem::take(&mut lowering_context.arena);
     let diagnostics = std::mem::take(&mut lowering_context.diagnostics);
 
     LoweringResult {
-        module: Module::new(arena, expressions),
+        module: Module::new(arena, definitions, expressions),
         diagnostics,
     }
 }
@@ -236,7 +232,7 @@ fn lower_block(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
-    let expressions = lower_expression_list(node, rope, lowering_context);
+    let expressions = lower_block_expressions(node, rope, lowering_context);
 
     let has_trailing_semicolon = node_text(node, rope)
         .trim()
@@ -599,12 +595,52 @@ fn intern_node_text(node: Node<'_>, rope: &Rope, lowering_context: &mut Lowering
     lowering_context.intern(&text)
 }
 
-fn lower_expression_list(
+fn lower_module(
+    node: Node<'_>,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
+) -> (Vec<DefinitionItem>, Vec<ExpressionId>) {
+    let mut definitions = Vec::new();
+    let mut expressions = Vec::new();
+
+    for sequence_item in lower_sequence(node, rope, lowering_context, SequenceContext::Module) {
+        match sequence_item {
+            LoweredSequenceItem::Definition { range, definition } => {
+                let definition_id = DefinitionId(definitions.len() as u32);
+                definitions.push(DefinitionItem::new(definition_id, range, definition));
+            }
+            LoweredSequenceItem::Expression(expression_id) => {
+                expressions.push(expression_id);
+            }
+        }
+    }
+
+    (definitions, expressions)
+}
+
+fn lower_block_expressions(
     node: Node<'_>,
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> Vec<ExpressionId> {
     let mut expressions = Vec::new();
+
+    for sequence_item in lower_sequence(node, rope, lowering_context, SequenceContext::Block) {
+        if let LoweredSequenceItem::Expression(expression_id) = sequence_item {
+            expressions.push(expression_id);
+        }
+    }
+
+    expressions
+}
+
+fn lower_sequence(
+    node: Node<'_>,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
+    sequence_context: SequenceContext,
+) -> Vec<LoweredSequenceItem> {
+    let mut items = Vec::new();
     let child_count = node.named_child_count();
     let mut child_index = 0;
 
@@ -618,7 +654,6 @@ fn lower_expression_list(
             let text = node_text(child, rope);
             let trimmed = text.trim_start();
             if trimmed.starts_with("#:") {
-                let mut block_text = trimmed.to_string();
                 let mut block_range = child.range();
                 let mut block_lines = vec![(trimmed.to_string(), child.range())];
 
@@ -633,8 +668,6 @@ fn lower_expression_list(
                             if next_child.range().start_point.row > block_range.end_point.row + 1 {
                                 break;
                             }
-                            block_text.push('\n');
-                            block_text.push_str(next_trimmed);
                             block_range.end_point = next_child.range().end_point;
                             block_range.end_byte = next_child.range().end_byte;
                             block_lines.push((next_trimmed.to_string(), next_child.range()));
@@ -664,20 +697,24 @@ fn lower_expression_list(
                         Ok(TypeSyntax::Definitions(definitions)) => {
                             AnnotationParseOutcome::Definitions(definitions)
                         }
-                        Ok(TypeSyntax::Annotation(annotation)) => match validate_annotation(
-                            &annotation,
-                            &lowering_context.declared_types,
-                            lowering_context.interner(),
-                        ) {
-                            Ok(()) => AnnotationParseOutcome::Annotation(annotation),
-                            Err(error) => AnnotationParseOutcome::Error(error),
-                        },
+                        Ok(TypeSyntax::Annotation(annotation)) => {
+                            AnnotationParseOutcome::Annotation(annotation)
+                        }
                         Err(error) => AnnotationParseOutcome::Error(error),
                     }
                 };
 
                 let parsed_annotation = match parsed_annotation {
                     AnnotationParseOutcome::Definitions(definitions) => {
+                        if matches!(sequence_context, SequenceContext::Block) {
+                            lowering_context.diagnostics.push(Diagnostic::syntax_error(
+                                block_range,
+                                "Type definition blocks are only allowed at the top level of a file.",
+                            ));
+                            child_index = next_index;
+                            continue;
+                        }
+
                         for (definition, range) in definitions
                             .into_iter()
                             .zip(block_lines.iter().map(|(_, range)| *range))
@@ -688,34 +725,13 @@ fn lower_expression_list(
                                 surface_type,
                                 kind: definition_kind,
                             } = definition;
-
-                            match validate_declared_type_surface_type(
-                                &surface_type,
-                                &lowering_context.declared_types,
-                                &type_parameters,
-                                lowering_context.interner(),
-                            ) {
-                                Ok(()) => {
-                                    let expression_kind = ExpressionKind::Definition(Definition {
-                                        kind: definition_kind,
-                                        name,
-                                        type_parameters,
-                                        surface_type,
-                                    });
-                                    lowering_context
-                                        .declared_types
-                                        .insert(name, definition_kind);
-                                    let expr_id = lowering_context.annotated_expression(
-                                        range,
-                                        None,
-                                        expression_kind,
-                                    );
-                                    expressions.push(expr_id);
-                                }
-                                Err(error) => lowering_context
-                                    .diagnostics
-                                    .push(annotation_parse_diagnostic(range, error)),
-                            }
+                            let definition = Definition {
+                                kind: definition_kind,
+                                name,
+                                type_parameters,
+                                surface_type,
+                            };
+                            items.push(LoweredSequenceItem::Definition { range, definition });
                         }
                         child_index = next_index;
                         continue;
@@ -750,6 +766,7 @@ fn lower_expression_list(
                                 attach_annotation_to_expression(
                                     expr_id,
                                     &annotation,
+                                    block_range,
                                     &mut lowering_context.arena,
                                 );
                             }
@@ -767,7 +784,7 @@ fn lower_expression_list(
                             AnnotationParseOutcome::Definitions(_) => {}
                         }
 
-                        expressions.push(expr_id);
+                        items.push(LoweredSequenceItem::Expression(expr_id));
                         child_index = next_index + 1;
                     }
                 } else {
@@ -782,13 +799,32 @@ fn lower_expression_list(
         }
 
         if child.kind() != "comment" {
-            expressions.push(lower_node_with_rope(child, rope, lowering_context));
+            items.push(LoweredSequenceItem::Expression(lower_node_with_rope(
+                child,
+                rope,
+                lowering_context,
+            )));
         }
 
         child_index += 1;
     }
 
-    expressions
+    items
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SequenceContext {
+    Module,
+    Block,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LoweredSequenceItem {
+    Definition {
+        range: Range,
+        definition: Definition,
+    },
+    Expression(ExpressionId),
 }
 
 enum AnnotationParseOutcome {
@@ -801,14 +837,15 @@ enum AnnotationParseOutcome {
 fn attach_annotation_to_expression(
     expression_id: ExpressionId,
     annotation: &Annotation,
+    annotation_range: Range,
     arena: &mut HirArena,
 ) {
     let expression = arena.get_mut(expression_id);
     expression.annotation = Some(match expression.kind {
         ExpressionKind::Assign { .. } => {
-            AttachedAnnotation::binding_and_expression(annotation.clone())
+            AttachedAnnotation::binding_and_expression(annotation.clone(), annotation_range)
         }
-        _ => AttachedAnnotation::expression(annotation.clone()),
+        _ => AttachedAnnotation::expression(annotation.clone(), annotation_range),
     });
 }
 
@@ -827,157 +864,4 @@ fn annotation_parse_diagnostic(range: Range, error: TypeParseError) -> Diagnosti
             Diagnostic::syntax_error(range, format!("type syntax error: unknown type `{name}`"))
         }
     }
-}
-
-fn validate_declared_type_surface_type(
-    surface_type: &SurfaceType,
-    declared_types: &BTreeMap<Symbol, DefinitionKind>,
-    type_parameters: &[Symbol],
-    interner: &Interner,
-) -> Result<(), TypeParseError> {
-    let local_type_parameters = type_parameters.iter().copied().collect::<BTreeSet<_>>();
-    validate_surface_type_names(
-        surface_type,
-        declared_types,
-        &local_type_parameters,
-        interner,
-    )
-}
-
-fn validate_annotation(
-    annotation: &Annotation,
-    declared_types: &BTreeMap<Symbol, DefinitionKind>,
-    interner: &Interner,
-) -> Result<(), TypeParseError> {
-    match annotation {
-        Annotation::Type { surface_type, .. } => {
-            validate_surface_type_names(surface_type, declared_types, &BTreeSet::new(), interner)
-        }
-        Annotation::New { nominal_type } => {
-            validate_new_annotation_type(nominal_type, declared_types, interner)
-        }
-    }
-}
-
-fn validate_new_annotation_type(
-    nominal_type: &NamedTypeRef,
-    declared_types: &BTreeMap<Symbol, DefinitionKind>,
-    interner: &Interner,
-) -> Result<(), TypeParseError> {
-    match declared_types.get(&nominal_type.name) {
-        Some(DefinitionKind::Type) => {}
-        Some(DefinitionKind::Alias) => {
-            let name = interner
-                .resolve(nominal_type.name)
-                .unwrap_or("<unknown>")
-                .to_owned();
-            return Err(TypeParseError::InvalidSemantics {
-                message: format!(
-                    "`@new` requires a nominal type declared with `@type`, but `{name}` is an alias."
-                ),
-            });
-        }
-        None => {
-            let name = interner
-                .resolve(nominal_type.name)
-                .unwrap_or("<unknown>")
-                .to_owned();
-            return Err(TypeParseError::UnknownType { name });
-        }
-    }
-
-    for type_argument in &nominal_type.type_arguments {
-        validate_surface_type_names(type_argument, declared_types, &BTreeSet::new(), interner)?;
-    }
-
-    Ok(())
-}
-
-fn validate_surface_type_names(
-    surface_type: &SurfaceType,
-    declared_types: &BTreeMap<Symbol, DefinitionKind>,
-    local_type_parameters: &BTreeSet<Symbol>,
-    interner: &Interner,
-) -> Result<(), TypeParseError> {
-    match surface_type {
-        SurfaceType::Named(name, arguments) => {
-            if !declared_types.contains_key(name) && !local_type_parameters.contains(name) {
-                let name = interner.resolve(*name).unwrap_or("<unknown>").to_owned();
-                return Err(TypeParseError::UnknownType { name });
-            }
-
-            for argument in arguments {
-                validate_surface_type_names(
-                    argument,
-                    declared_types,
-                    local_type_parameters,
-                    interner,
-                )?;
-            }
-        }
-        SurfaceType::Nullable(inner_type)
-        | SurfaceType::Vector(inner_type)
-        | SurfaceType::NamedVector(inner_type)
-        | SurfaceType::List(inner_type)
-        | SurfaceType::NamedList(inner_type) => {
-            validate_surface_type_names(
-                inner_type,
-                declared_types,
-                local_type_parameters,
-                interner,
-            )?;
-        }
-        SurfaceType::Record(fields) => {
-            for field in fields {
-                validate_surface_type_names(
-                    &field.value,
-                    declared_types,
-                    local_type_parameters,
-                    interner,
-                )?;
-            }
-        }
-        SurfaceType::Tuple(items) => {
-            for item in items {
-                validate_surface_type_names(item, declared_types, local_type_parameters, interner)?;
-            }
-        }
-        SurfaceType::Function(function_type) => {
-            for parameter in &function_type.parameters {
-                validate_surface_type_names(
-                    parameter,
-                    declared_types,
-                    local_type_parameters,
-                    interner,
-                )?;
-            }
-            for parameter in &function_type.named_parameters {
-                validate_surface_type_names(
-                    &parameter.value,
-                    declared_types,
-                    local_type_parameters,
-                    interner,
-                )?;
-            }
-            validate_surface_type_names(
-                &function_type.return_type,
-                declared_types,
-                local_type_parameters,
-                interner,
-            )?;
-        }
-        SurfaceType::Binders(type_parameters, inner_type) => {
-            let mut nested_type_parameters = local_type_parameters.clone();
-            nested_type_parameters.extend(type_parameters.iter().copied());
-            validate_surface_type_names(
-                inner_type,
-                declared_types,
-                &nested_type_parameters,
-                interner,
-            )?;
-        }
-        SurfaceType::Any | SurfaceType::Unknown | SurfaceType::Null | SurfaceType::Scalar(_) => {}
-    }
-
-    Ok(())
 }

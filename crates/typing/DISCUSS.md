@@ -10,4 +10,4 @@ Move unresolved questions and options into `OPEN_DECISIONS.md`.
 
 ## Current topic
 
-- no active design discussion recorded
+### Expanding naming fixtures

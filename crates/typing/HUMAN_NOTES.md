@@ -3,6 +3,21 @@
 - we should resolve types during lowering
 
 
+atm we have this bug
+
+A `#:` typing comment must be followed immediately by an expression. (typing syntax-error)
+
+for an expression like this:
+
+[@typing.R (18:19)](file:///home/felix/Projects/roughly/R/typing.R#L18:19) 
+
+we shouldn't errors of the previous phase first. i think the problem here is that we first
+
+
+- naming:
+  - add support for <<- (what are the semantics/
+  - support for local
+
 - hir only supports attaching annotations to assignment
 
 - get rid of old test_infer.

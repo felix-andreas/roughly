@@ -148,3 +148,27 @@ TypeDefinition Pair<T, U> = list{first: T, second: U}
 #++++
 TypeAlias PersonShape = list{name: character}
 TypeDefinition Person = PersonShape
+
+#---- definition_unknown_type_is_not_lowering_error
+#: @type Team {list{owner: Person}}
+value <- 1L
+#++++
+TypeDefinition Team = list{owner: Person}
+Assign value
+  Integer("1L")
+
+#---- nominal_introduction_alias_check_is_not_lowering_error
+#: @alias Person {list{name: character}}
+value <- 1L
+#: @new Person
+other <- list(name = "bob")
+#++++
+TypeAlias Person = list{name: character}
+Assign value
+  Integer("1L")
+#: @new Person
+Assign other
+  Call
+    Symbol(list)
+    Argument name:
+      Character("\"bob\"")
