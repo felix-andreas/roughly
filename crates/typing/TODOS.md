@@ -76,9 +76,11 @@ This document tracks actionable planned work for the `typing` crate.
 ### Fixture Harness Multi-File Generations
 
 - Detailed plan: `projects/000_fixture_harness_multi_file_generations.md`
-- Implement the multi-file fixture and generation support described there.
+- First implement the `workspace` crate described there.
+- Then build the separate fixture crate on top of it.
+- Then adopt those crates in `typing` fixture cases and in `roughly`.
 - Reasoning:
-  - Project-global naming semantics cannot be tested properly with the current single-file fixture shape.
-  - Later incremental and project-recheck behavior will also need generation-based fixture cases.
+  - Package-global naming semantics cannot be tested properly with the current single-file fixture shape.
+  - Later incremental package-recheck behavior will also need generation-based fixture cases.
   - Reusing the existing incremental tree update path matters for correctness and for later benchmarking of incremental typing.
   - Once the harness gains its own language, it needs direct parser and harness tests so syntax or project-state changes do not silently break the suite.

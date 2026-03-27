@@ -2,6 +2,24 @@
 
 Keep newest decisions at the top.
 
+- direct tests for the `workspace` crate live in the `workspace` crate itself.
+  - Core workspace behavior should be tested where it is implemented. `typing` and `roughly` should keep only consumer-side integration coverage on top.
+
+- the `workspace` crate owns its parser state.
+  - Consumers such as `roughly::ServerState` own a `Workspace`, but do not separately own or pass a parser through each document operation.
+
+- the future fixture crate parses the fixture language, and the testing framework may combine that parsed data with `workspace` state.
+  - Expectations attach per document per generation. A generation may explicitly declare no expectation. If a document already has an expectation from an earlier generation, that expectation carries forward until replaced or explicitly cleared.
+
+- the reusable document-management crate is named `workspace`, and the semantic analysis unit inside it is `Package`.
+  - `Workspace` owns package roots, routing, and standalone documents. `Package` stays path-free and remains the semantic unit of analysis rather than a filesystem-root owner.
+
+- package-attached non-contributing files are `auxiliary documents`.
+  - These documents can resolve against package symbols but do not contribute back to the package-level namespace, which fits scripts and tests better than a narrower name.
+
+- the reusable document-management crate and the fixture crate are separate efforts, and the document-management crate comes first.
+  - The reusable file/project state plus incremental parsing layer needs to be usable by both future typing fixtures and `roughly`, while the fixture mini-language is a separate concern and should not be bundled into that crate.
+
 - type names are project-global, and top-level value names are package-global across files.
   - `@type` and `@alias` declarations share one project-global namespace, forward references are allowed across files, and duplicate type names are errors at every conflicting declaration. Top-level value names are visible across package files, later files in package collation order win on conflicts, and both overwritten and overwriting value definitions should warn. We also want to leave room for a future file-local opaque-type feature.
 

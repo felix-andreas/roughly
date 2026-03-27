@@ -8,6 +8,8 @@ Move settled points into `DECISION_LOG.md`.
 
 ## Current topic
 
+Fixture harness multi-file generations and the new reusable workspace crate.
+
 ## Open decisions
 
 - None currently recorded.

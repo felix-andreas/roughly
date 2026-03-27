@@ -2,105 +2,240 @@
 
 ## Goal
 
-Extend the fixture harness so one test case can describe a `project`, not only a single file, and so grouped generations can model incremental project edits.
+Extend the fixture harness so one test case can describe a `workspace`, not only a single file, and so grouped generations can model incremental document edits across package-attached and standalone files.
 
 This work should reuse the same incremental tree update path already used by `roughly` instead of reimplementing rope and tree-sitter edit logic inside the typing fixture harness.
 
-The intended direction is to introduce a new crate for the reusable project/edit engine rather than burying that logic inside the typing fixture harness.
+The intended direction is to introduce:
+
+- a reusable document-management crate for workspace/package/document state plus incremental parsing
+- a separate fixture crate that can use that document-management crate later
+- the document-management crate should model a workspace that can contain multiple packages plus standalone documents
+
+The first implementation step is only the document-management crate.
+
+## First milestone
+
+The first milestone is only the `workspace` crate.
+
+That crate is responsible for:
+
+- storing document text as ropes
+- storing parsed trees
+- applying incremental edits
+- routing documents into the right semantic bucket inside one workspace
+
+That crate is not responsible for:
+
+- fixture syntax parsing
+- typing or naming analysis
+- LSP request or notification types
+- `roughly` diagnostics or indexing
 
 ## Unresolved questions
 
-- How should expectations attach across generations:
-  - one expectation per generation
-  - final generation only
-  - or either, depending on explicit markers?
-- What should the new crate be called, and what should its exact API boundary be?
-- Where should parser tests and end-to-end harness tests live if the project/edit engine is split out?
+- None currently recorded for the first `workspace` crate milestone.
 
 ## Settled direction
 
-- Use `project` as the main abstraction for multiple documents.
-- Parse each fixture case into an initial project snapshot plus later generations.
-- Treat each generation as one grouped project edit step.
-- Run analysis after each generation.
-- Keep single-file cases as the default when no generation block is present.
-- Use explicit generation blocks with `#.... vN`.
-- Use bare filenames such as `#---- a.R` for whole-file content in a generation.
+- Call the new crate `workspace`.
+- Use `workspace` as the top-level abstraction.
+- Model analysis around `Package` rather than `Project`.
+- Keep `Package` as a semantic unit of analysis rather than a filesystem-root owner.
+- Store package roots in `Workspace`, not in `Package`.
+- Let one `Workspace` contain:
+  - multiple packages
+  - standalone documents not attached to any package
+- Let one `Package` contain:
+  - package documents that contribute to the package-level namespace
+  - auxiliary documents such as scripts or tests that can see package symbols but do not contribute to the package-level namespace
+- Start with an R-specific reusable workspace/document layer.
+- Let the `workspace` crate own its parser state.
+- The first crate only handles workspace/package/document state and incremental parse updates.
+- Keep direct tests for the `workspace` crate in the `workspace` crate itself.
+- A separate fixture crate will parse the fixture mini-language.
+- In the later testing framework built on top of that parsing:
+  - expectations attach per document per generation
+  - a generation may explicitly declare no expectation
+  - an earlier expectation carries forward until replaced or explicitly cleared
+- The testing framework may combine parsed fixture data with `workspace` document state.
+- The document-management crate must cover the current document use cases in `roughly/src/server.rs`.
 - Support first-class operations for:
   - whole-file replacement
   - range edits
   - delete
   - move / rename
-- Prefer full-file restatement in small tests.
-- Allow range edits for large files or edit-heavy tests.
-- Start with an R-specific reusable project/edit layer.
+
+## Core model
+
+The `workspace` crate should model three layers:
+
+- `Workspace`
+  - owns parser state
+  - owns package roots
+  - owns the set of packages
+  - owns standalone documents that are attached to no package
+- `Package`
+  - is the semantic unit of analysis
+  - does not own filesystem roots
+  - groups the documents that belong to one package
+- `Document`
+  - stores the current rope and parsed tree for one file
+  - is addressed by path within the workspace
+
+Within one package, documents fall into two buckets:
+
+- package documents
+  - contribute to the package-level namespace
+- auxiliary documents
+  - can resolve against package-visible symbols
+  - do not contribute back to the package-level namespace
+
+Outside packages, a workspace may also contain:
+
+- standalone documents
+  - are attached to no package
+  - are still parsed and managed by the workspace
+
+## Behavioral invariants
+
+The implementation should preserve these invariants:
+
+- parser state is owned by `Workspace`
+- package roots are owned by `Workspace`
+- `Package` remains path-free
+- every managed document is in exactly one bucket:
+  - package document
+  - auxiliary document
+  - standalone document
+- package membership is explicit in the API rather than inferred ad hoc during later analysis
+- package documents contribute to package-global names
+- auxiliary documents do not contribute to package-global names
+- standalone documents do not belong to any package
+- all document mutations update both rope state and parse tree state together
+- incremental reparsing should reuse the previous tree whenever possible
+
+## API boundary
+
+The first crate should provide explicit operations around the settled model:
+
+- workspace creation
+- package registration
+- package-root registration and lookup
+- package document add or replace
+- auxiliary document add or replace
+- standalone document add or replace
+- document lookup by path
+- range edit for an existing document
+- document delete
+- document move or rename
+
+The API should make it possible for consumers to:
+
+- inspect a document's rope
+- inspect a document's tree
+- distinguish package, auxiliary, and standalone documents
+- find the package association for package-attached documents
+
+The API should not require consumers such as `roughly::ServerState` to manage a separate parser.
 
 ## Planned work
 
-### 1. Finalize fixture syntax [planning]
+### 1. Finalize the document-management crate boundary [planning]
+
+- Define the public API around:
+  - workspace creation
+  - package registration and package-root storage
+  - package document lookup
+  - auxiliary document lookup
+  - standalone document lookup
+  - add or replace
+  - range edit
+  - delete
+  - move / rename
+- Define how paths map to document buckets in the public API:
+  - explicit package document insertion
+  - explicit auxiliary document insertion
+  - explicit standalone document insertion
+- Define the read API needed by `roughly`:
+  - document lookup by path
+  - access to rope and tree
+  - package-root lookup
+  - package association lookup where applicable
+
+### 2. Build the reusable incremental document-management crate [planning]
+
+- Introduce the new crate.
+- Reuse the same `Rope`, `Tree::edit`, and reparsing behavior currently used by `roughly`.
+- Support:
+  - add package
+  - add or replace package document
+  - add or replace auxiliary document
+  - add or replace standalone document
+  - edit document range
+  - delete document
+  - move document
+- Preserve tree reuse across generations.
+- Keep the API suitable for later reuse by `ServerState`.
+- Keep the implementation focused on one coherent state owner rather than splitting parser ownership or edit bookkeeping across callers.
+
+### 3. Add direct tests for the document-management crate [planning]
+
+- Place these tests in the `workspace` crate itself.
+- Cover:
+  - package registration
+  - package document add or replace
+  - auxiliary document add or replace
+  - standalone document add or replace
+  - range edit
+  - delete
+  - move
+  - tree reuse across incremental edits
+- Cover the invariants explicitly:
+  - documents stay in exactly one bucket
+  - auxiliary documents do not become package documents by accident
+  - standalone documents stay detached from packages
+  - package-root storage does not leak into `Package`
+- Cover the document access patterns that `roughly/src/server.rs` depends on.
+
+### 4. Build the separate fixture crate [planning]
 
 - Define the exact grammar for:
   - backward-compatible single-file cases
   - `#.... vN` generation blocks
-  - whole-file entries using bare filenames
+  - whole-document entries using bare filenames
   - `delete`, `move`, and `edit` operations
-  - expected-output attachment across generations
-- Record the syntax and authoring guidance in `TESTING.md` once settled.
-
-### 2. Add parser tests for the fixture language [planning]
-
-- Cover:
-  - valid single-file cases
-  - valid multi-file initial generations
-  - valid multi-generation cases
-  - grouped edits in the same generation
-  - whole-file replacement
-  - range edits
-  - delete
-  - move
-- Reject clearly:
-  - malformed nesting
-  - duplicate generation labels in one case
-  - ambiguous file or operation entries
-  - invalid operation syntax
-
-### 3. Build the reusable incremental `Project` engine [planning]
-
-- Introduce a new crate for the reusable project/edit engine.
-- Reuse the same `Rope`, `Tree::edit`, and reparsing behavior currently used by `roughly`.
-- Support:
-  - add file
-  - replace file
-  - edit file range
-  - delete file
-  - move file
-- Preserve tree reuse across generations.
-- Keep the API suitable for later reuse by `ServerState`.
-
-### 4. Wire the fixture harness to the `Project` engine [planning]
-
-- Parse a fixture case into:
-  - initial project state
-  - later grouped generations
-- Apply one generation at a time.
-- Expose the resulting project state to each test suite.
-- Let each consumer decide whether it inspects every generation or only selected ones.
-
-### 5. Add direct harness tests [planning]
-
-- Add parser-focused tests for the new fixture mini-language.
-- Add project-evolution tests that exercise grouped generations and incremental edits.
+  - expected-output attachment per document per generation
+  - explicit no-expectation markers
+- Parse a fixture case into an initial workspace snapshot plus later grouped generations.
+- Treat each generation as one grouped workspace edit step.
+- Keep single-file cases as the default when no generation block is present.
+- Run analysis after each generation.
+- Prefer full-file restatement in small tests.
+- Allow range edits for large files or edit-heavy tests.
+- Add parser-focused tests for the fixture mini-language.
+- Add workspace-evolution tests that exercise grouped generations and incremental edits.
 - Add backward-compatibility tests so existing single-file fixtures remain supported.
+- Record the syntax and authoring guidance in `TESTING.md` once settled.
+- Keep fixture parser tests with the fixture parser.
+- Keep harness end-to-end tests with the testing framework that combines parsed fixtures with `workspace` state.
 
-### 6. Add real typing fixtures that use the new format [planning]
+### 5. Use the new crates for typing fixture cases [planning]
 
 - Start with multi-file naming fixtures.
 - Then add multi-file diagnostics fixtures.
-- Later add project-recheck and incremental-typing fixtures when the semantics and APIs are ready.
+- Later add package-recheck and incremental-typing fixtures when the semantics and APIs are ready.
+
+### 6. Adopt the document-management crate in `roughly` [planning]
+
+- Replace the current ad hoc document state and incremental parse path in `roughly/src/server.rs`.
+- Keep `ServerState` as the owner of workspace orchestration, indexing state, diagnostics publication, and typing analysis state.
+- Make the `roughly` server use the shared document-management crate for file state and parse updates.
 
 ## Why this project exists
 
-- Project-global naming semantics cannot be tested properly with the current single-file fixture shape.
-- Later incremental and project-recheck behavior also need generation-based fixture cases.
+- Package-global naming semantics cannot be tested properly with the current single-file fixture shape.
+- Later incremental package rechecking behavior also needs generation-based fixture cases.
 - Reusing the existing incremental tree update path matters for correctness and for later benchmarking of incremental typing.
+- The workspace/package/document split must be precise before implementation so `typing`, the future fixture crate, and `roughly` can all reuse the same model instead of growing slightly different state layers.
 - Once the harness gains its own language, it needs direct parser and harness tests so syntax or project-state changes do not silently break the suite.

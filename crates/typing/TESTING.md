@@ -32,7 +32,7 @@ Notes:
 
 ## Planned multi-file format
 
-This crate is moving toward a fixture format that can describe multi-file projects and grouped generations.
+This crate is moving toward a fixture format that can describe multi-document workspaces and grouped generations.
 
 This format is not implemented yet. Remove this warning once the new harness actually supports it.
 
@@ -52,19 +52,32 @@ The intended direction is:
 #---- edit b.R 3:1-3:4 -> "foo"
 #---- move c.R -> d.R
 #---- delete e.R
-#++++
-<expected rendered output>
+#++++ a.R
+<expected rendered output for a.R>
+#++++ b.R
+<expected rendered output for b.R>
 ```
 
 Planned rules:
 
 - if no `#.... vN` block is present, the case remains a normal single-file fixture
-- each `#.... vN` block describes one grouped project edit step
+- each `#.... vN` block describes one grouped workspace edit step
 - all entries inside one generation are applied together
 - bare filenames such as `#---- a.R` mean whole-file contents for that generation
-- `edit`, `move`, and `delete` are first-class project operations
+- `edit`, `move`, and `delete` are first-class workspace document operations
+- one fixture case may describe package documents, auxiliary documents, and standalone documents
+- expectation attachment is per document per generation
+- a generation may explicitly declare no expectation for a document
+- if a document already has an expectation from an earlier generation, that expectation carries forward until replaced or explicitly cleared
 - small tests should usually restate whole files
 - large-file or edit-heavy tests may use range edits
+
+Planned architecture:
+
+- the reusable `workspace` crate owns workspace/package/document state and incremental parsing
+- a separate fixture crate will parse this fixture language
+- the testing framework may combine parsed fixture data with `workspace` document state
+- `typing` should not own a second workspace/document engine inside the fixture harness
 
 ## Focused runs
 
