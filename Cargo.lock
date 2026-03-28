@@ -479,6 +479,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0399f9d26e5191ce32c498bebd31e7a3ceabc2745f0ac54af3f335126c3f24b3"
 
 [[package]]
+name = "fixtures"
+version = "0.1.1"
+dependencies = [
+ "indoc",
+ "serde_json",
+ "thiserror",
+ "workspace",
+]
+
+[[package]]
 name = "flate2"
 version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1785,6 +1795,7 @@ dependencies = [
 name = "typing"
 version = "0.1.1"
 dependencies = [
+ "fixtures",
  "indoc",
  "ropey",
  "thiserror",
@@ -2358,6 +2369,17 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
+]
+
+[[package]]
+name = "workspace"
+version = "0.1.1"
+dependencies = [
+ "indoc",
+ "ropey",
+ "thiserror",
+ "tree-sitter",
+ "tree-sitter-r",
 ]
 
 [[package]]

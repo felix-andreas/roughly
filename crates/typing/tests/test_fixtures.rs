@@ -2,7 +2,7 @@
 mod support;
 
 use {
-    std::{collections::BTreeSet, fs, path::Path},
+    fixtures::{Fixture, FixtureKind, run_fixture_suite},
     support::{check_source, new_parser, parse_source},
     typing::{
         AnalysisState, Interner,
@@ -17,12 +17,12 @@ use {
 
 #[test]
 fn lowering() {
-    run_fixture_suite("tests/lowering", "lowering", render_lowering_fixture_result);
+    run_fixture_suite("tests/lowering", "lowering", run_lowering_fixture);
 }
 
 #[test]
 fn naming() {
-    run_fixture_suite("tests/naming", "naming", render_naming_fixture_result);
+    run_fixture_suite("tests/naming", "naming", run_naming_fixture);
 }
 
 #[test]
@@ -30,27 +30,19 @@ fn diagnostics() {
     let mut parser = new_parser();
     let mut analysis_state = AnalysisState::new();
 
-    run_fixture_suite("tests/diagnostics", "diagnostics", |code| {
-        check_source(code, &mut parser, &mut analysis_state).render(code)
+    run_fixture_suite("tests/diagnostics", "diagnostics", |fixture| {
+        run_diagnostics_fixture(fixture, &mut parser, &mut analysis_state)
     });
 }
 
 #[test]
 fn expressions() {
-    run_fixture_suite(
-        "tests/expressions",
-        "expressions",
-        render_expression_fixture_result,
-    );
+    run_fixture_suite("tests/expressions", "expressions", run_expressions_fixture);
 }
 
 #[test]
 fn unification() {
-    run_fixture_suite(
-        "tests/unification",
-        "unification",
-        render_unification_fixture_result,
-    );
+    run_fixture_suite("tests/unification", "unification", run_unification_fixture);
 }
 
 #[test]
@@ -58,7 +50,7 @@ fn generalization() {
     run_fixture_suite(
         "tests/generalization",
         "generalization",
-        render_generalization_fixture_result,
+        run_generalization_fixture,
     );
 }
 
@@ -67,13 +59,13 @@ fn instantiation() {
     run_fixture_suite(
         "tests/instantiation",
         "instantiation",
-        render_instantiation_fixture_result,
+        run_instantiation_fixture,
     );
 }
 
 #[test]
 fn bindings() {
-    run_fixture_suite("tests/bindings", "bindings", render_bindings_fixture_result);
+    run_fixture_suite("tests/bindings", "bindings", run_bindings_fixture);
 }
 
 #[test]
@@ -81,212 +73,34 @@ fn substitution() {
     run_fixture_suite(
         "tests/substitution",
         "substitution",
-        render_substitution_fixture_result,
+        run_substitution_fixture,
     );
 }
 
 #[test]
 fn environment() {
-    run_fixture_suite(
-        "tests/environment",
-        "environment",
-        render_environment_fixture_result,
-    );
+    run_fixture_suite("tests/environment", "environment", run_environment_fixture);
 }
 
 #[test]
 fn interfaces() {
-    run_fixture_suite(
-        "tests/interfaces",
-        "interfaces",
-        render_interfaces_fixture_result,
-    );
+    run_fixture_suite("tests/interfaces", "interfaces", run_interfaces_fixture);
 }
 
 #[test]
 fn type_syntax() {
-    run_fixture_suite(
-        "tests/type_syntax",
-        "type_syntax",
-        render_type_syntax_fixture_result,
-    );
+    run_fixture_suite("tests/type_syntax", "type_syntax", run_type_syntax_fixture);
 }
 
-#[derive(Debug)]
-struct TestGroup {
-    name: String,
-    cases: Vec<TestCase>,
-}
-
-#[derive(Debug)]
-struct TestCase {
-    name: String,
-    code: String,
-    expected: String,
-}
-
-fn run_fixture_suite<F>(directory_path: &str, kind: &str, render: F)
-where
-    F: FnMut(&str) -> String,
-{
-    let fixture_paths = collect_fixture_paths(directory_path, kind);
-    let mut groups = Vec::new();
-
-    for fixture_path in fixture_paths {
-        let fixture_text = fs::read_to_string(&fixture_path).unwrap_or_else(|error| {
-            panic!(
-                "failed to read {kind} fixture file `{}`: {error}",
-                fixture_path.display()
-            )
-        });
-        groups.extend(parse_test_file(&fixture_text, kind));
-    }
-
-    run_test_groups(&groups, kind, render);
-}
-
-fn collect_fixture_paths(directory_path: &str, kind: &str) -> Vec<std::path::PathBuf> {
-    let mut fixture_paths = Vec::new();
-    collect_fixture_paths_recursively(Path::new(directory_path), &mut fixture_paths, kind);
-    fixture_paths.sort();
-    fixture_paths
-}
-
-fn collect_fixture_paths_recursively(
-    directory_path: &Path,
-    fixture_paths: &mut Vec<std::path::PathBuf>,
-    kind: &str,
-) {
-    let entries = fs::read_dir(directory_path).unwrap_or_else(|error| {
-        panic!(
-            "failed to read {kind} fixture directory `{}`: {error}",
-            directory_path.display()
-        )
-    });
-
-    let mut entry_paths = entries
-        .map(|entry| {
-            entry.unwrap_or_else(|error| {
-                panic!(
-                    "failed to read entry in {kind} fixture directory `{}`: {error}",
-                    directory_path.display()
-                )
-            })
-        })
-        .map(|entry| entry.path())
-        .collect::<Vec<_>>();
-    entry_paths.sort();
-
-    for entry_path in entry_paths {
-        if entry_path.is_dir() {
-            collect_fixture_paths_recursively(&entry_path, fixture_paths, kind);
-            continue;
+fn run_lowering_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = match &fixture.kind {
+        FixtureKind::Simple(case) => &case.input,
+        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
+        FixtureKind::Generational(_) => {
+            return Err("generation-based multi-file cases are not supported".to_owned());
         }
+    };
 
-        if entry_path
-            .extension()
-            .is_some_and(|extension| extension == "test")
-        {
-            fixture_paths.push(entry_path);
-        }
-    }
-}
-
-fn parse_test_file(text: &str, kind: &str) -> Vec<TestGroup> {
-    text.split("#====")
-        .filter_map(|block| {
-            if block.trim().is_empty() {
-                return None;
-            }
-
-            let (name, cases) = block.split_once('\n').unwrap_or_else(|| {
-                panic!("each test group must have a name line followed by content")
-            });
-
-            Some(TestGroup {
-                name: name.trim().to_owned(),
-                cases: cases
-                    .split("#----")
-                    .filter_map(|case| {
-                        if case.trim().is_empty() {
-                            return None;
-                        }
-
-                        let (name, body) = case.split_once('\n').unwrap_or_else(|| {
-                            panic!("each test case must have a name line followed by content")
-                        });
-
-                        let (code, expected_block) =
-                            body.split_once("#++++\n").unwrap_or_else(|| {
-                                panic!(
-                                    "each test case must include a `#++++` separator before the expected {kind} result"
-                                )
-                            });
-
-                        Some(TestCase {
-                            name: name.trim().to_owned(),
-                            code: code.to_owned(),
-                            expected: expected_block.trim_end().to_owned(),
-                        })
-                    })
-                    .collect(),
-            })
-        })
-        .collect()
-}
-
-fn run_test_groups<F>(groups: &[TestGroup], kind: &str, mut render: F)
-where
-    F: FnMut(&str) -> String,
-{
-    let maybe_filter = std::env::var("TYPING_FILTER").ok();
-    let mut snapshot_names = BTreeSet::new();
-    let mut failures = Vec::new();
-    let mut executed_fixture_count = 0;
-
-    for group in groups {
-        for case in &group.cases {
-            let snapshot_name = format!("{}__{}", group.name, case.name);
-
-            assert!(
-                snapshot_names.insert(snapshot_name.clone()),
-                "duplicate typing {kind} test snapshot name `{snapshot_name}`"
-            );
-
-            if maybe_filter
-                .as_ref()
-                .is_some_and(|filter| !snapshot_name.contains(filter))
-            {
-                continue;
-            }
-
-            executed_fixture_count += 1;
-
-            let rendered = render(&case.code);
-            let rendered_trimmed = rendered.trim_end();
-            if rendered_trimmed != case.expected {
-                failures.push(format!(
-                    "\u{1b}[1mfixture `{snapshot_name}` failed\u{1b}[0m\n\u{1b}[1minput:\u{1b}[0m\n{}\n\u{1b}[1mexpected:\u{1b}[0m\n{}\n\u{1b}[1mactual:\u{1b}[0m\n{}",
-                    case.code.trim_end(),
-                    case.expected,
-                    rendered_trimmed
-                ));
-            }
-        }
-    }
-
-    if !failures.is_empty() {
-        panic!(
-            "{} {kind} test(s) failed:\n\n{}",
-            failures.len(),
-            failures.join("\n\n")
-        );
-    }
-
-    eprintln!("{} {kind} fixture(s) passed", executed_fixture_count);
-}
-
-fn render_lowering_fixture_result(source: &str) -> String {
     let mut parser = new_parser();
     let tree = parse_source(&mut parser, source);
 
@@ -294,39 +108,76 @@ fn render_lowering_fixture_result(source: &str) -> String {
     let lowering_result = lowering_context.lower_tree_with_diagnostics(&tree, source);
 
     if !lowering_result.diagnostics.is_empty() {
-        return render_diagnostics(source, &lowering_result.diagnostics);
+        return Ok(render_diagnostics(source, &lowering_result.diagnostics));
     }
 
-    lowering_result.module.render(lowering_context.interner())
+    Ok(lowering_result.module.render(lowering_context.interner()))
 }
 
-fn render_naming_fixture_result(source: &str) -> String {
+fn run_diagnostics_fixture(
+    fixture: &Fixture,
+    parser: &mut tree_sitter::Parser,
+    analysis_state: &mut AnalysisState,
+) -> Result<String, String> {
+    let source = match &fixture.kind {
+        FixtureKind::Simple(case) => &case.input,
+        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
+        FixtureKind::Generational(_) => {
+            return Err("generation-based multi-file cases are not supported".to_owned());
+        }
+    };
+
+    Ok(check_source(source, parser, analysis_state).render(source))
+}
+
+fn run_naming_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = match &fixture.kind {
+        FixtureKind::Simple(case) => &case.input,
+        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
+        FixtureKind::Generational(_) => {
+            return Err("generation-based multi-file cases are not supported".to_owned());
+        }
+    };
+
     let mut parser = new_parser();
     let tree = parse_source(&mut parser, source);
 
     let mut lowering_context = LoweringContext::new();
     let lowering_result = lowering_context.lower_tree_with_diagnostics(&tree, source);
+
     if !lowering_result.diagnostics.is_empty() {
-        return render_diagnostics(source, &lowering_result.diagnostics);
+        return Ok(render_diagnostics(source, &lowering_result.diagnostics));
     }
 
     let module = lowering_result.module;
     let naming_result =
         NamingContext::new(&module.arena, lowering_context.interner()).resolve_module(&module);
     if !naming_result.diagnostics.is_empty() {
-        return render_diagnostics(source, &naming_result.diagnostics);
+        return Ok(render_diagnostics(source, &naming_result.diagnostics));
     }
 
-    render_named_module(&module, &naming_result, lowering_context.interner())
+    Ok(render_named_module(
+        &module,
+        &naming_result,
+        lowering_context.interner(),
+    ))
 }
 
-fn render_expression_fixture_result(source: &str) -> String {
-    match infer_fixture_source(source) {
+fn run_expressions_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = match &fixture.kind {
+        FixtureKind::Simple(case) => &case.input,
+        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
+        FixtureKind::Generational(_) => {
+            return Err("generation-based multi-file cases are not supported".to_owned());
+        }
+    };
+
+    Ok(match infer_fixture_source(source) {
         Ok((lowering_context, _module, mut inference_state, inferred_types)) => {
             render_expression_types(&mut inference_state, &lowering_context, &inferred_types)
         }
         Err(error) => render_expression_error_kind(&error).to_owned(),
-    }
+    })
 }
 
 fn render_diagnostics(source: &str, diagnostics: &[typing::Diagnostic]) -> String {
@@ -346,43 +197,139 @@ fn render_diagnostics(source: &str, diagnostics: &[typing::Diagnostic]) -> Strin
     rendered
 }
 
-fn render_unification_fixture_result(source: &str) -> String {
-    render_expression_fixture_result(source)
-}
+fn run_unification_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = match &fixture.kind {
+        FixtureKind::Simple(case) => &case.input,
+        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
+        FixtureKind::Generational(_) => {
+            return Err("generation-based multi-file cases are not supported".to_owned());
+        }
+    };
 
-fn render_generalization_fixture_result(source: &str) -> String {
-    match render_progressive_fixture_result(source, ProgressiveRenderMode::BindingsOnly) {
-        Ok(rendered) => rendered,
+    Ok(match infer_fixture_source(source) {
+        Ok((lowering_context, _module, mut inference_state, inferred_types)) => {
+            render_expression_types(&mut inference_state, &lowering_context, &inferred_types)
+        }
         Err(error) => render_expression_error_kind(&error).to_owned(),
-    }
+    })
 }
 
-fn render_bindings_fixture_result(source: &str) -> String {
-    render_generalization_fixture_result(source)
+fn run_generalization_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = match &fixture.kind {
+        FixtureKind::Simple(case) => &case.input,
+        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
+        FixtureKind::Generational(_) => {
+            return Err("generation-based multi-file cases are not supported".to_owned());
+        }
+    };
+
+    Ok(
+        match render_progressive(source, ProgressiveRenderMode::BindingsOnly) {
+            Ok(rendered) => rendered,
+            Err(error) => render_expression_error_kind(&error).to_owned(),
+        },
+    )
 }
 
-fn render_substitution_fixture_result(source: &str) -> String {
-    render_instantiation_fixture_result(source)
+fn run_instantiation_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = match &fixture.kind {
+        FixtureKind::Simple(case) => &case.input,
+        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
+        FixtureKind::Generational(_) => {
+            return Err("generation-based multi-file cases are not supported".to_owned());
+        }
+    };
+
+    Ok(
+        match render_progressive(source, ProgressiveRenderMode::BindingsAndResults) {
+            Ok(rendered) => rendered,
+            Err(error) => render_expression_error_kind(&error).to_owned(),
+        },
+    )
 }
 
-fn render_environment_fixture_result(source: &str) -> String {
-    render_instantiation_fixture_result(source)
+fn run_bindings_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = match &fixture.kind {
+        FixtureKind::Simple(case) => &case.input,
+        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
+        FixtureKind::Generational(_) => {
+            return Err("generation-based multi-file cases are not supported".to_owned());
+        }
+    };
+
+    Ok(
+        match render_progressive(source, ProgressiveRenderMode::BindingsOnly) {
+            Ok(rendered) => rendered,
+            Err(error) => render_expression_error_kind(&error).to_owned(),
+        },
+    )
 }
 
-fn render_interfaces_fixture_result(source: &str) -> String {
-    match infer_fixture_source(source) {
+fn run_substitution_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = match &fixture.kind {
+        FixtureKind::Simple(case) => &case.input,
+        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
+        FixtureKind::Generational(_) => {
+            return Err("generation-based multi-file cases are not supported".to_owned());
+        }
+    };
+
+    Ok(
+        match render_progressive(source, ProgressiveRenderMode::BindingsAndResults) {
+            Ok(rendered) => rendered,
+            Err(error) => render_expression_error_kind(&error).to_owned(),
+        },
+    )
+}
+
+fn run_environment_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = match &fixture.kind {
+        FixtureKind::Simple(case) => &case.input,
+        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
+        FixtureKind::Generational(_) => {
+            return Err("generation-based multi-file cases are not supported".to_owned());
+        }
+    };
+
+    Ok(
+        match render_progressive(source, ProgressiveRenderMode::BindingsAndResults) {
+            Ok(rendered) => rendered,
+            Err(error) => render_expression_error_kind(&error).to_owned(),
+        },
+    )
+}
+
+fn run_interfaces_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = match &fixture.kind {
+        FixtureKind::Simple(case) => &case.input,
+        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
+        FixtureKind::Generational(_) => {
+            return Err("generation-based multi-file cases are not supported".to_owned());
+        }
+    };
+
+    Ok(match infer_fixture_source(source) {
         Ok((lowering_context, module, inference_state, _inferred_types)) => {
             render_interface_snapshot(&module, &inference_state, &lowering_context)
         }
         Err(error) => render_expression_error_kind(&error).to_owned(),
-    }
+    })
 }
 
-fn render_instantiation_fixture_result(source: &str) -> String {
-    match render_progressive_fixture_result(source, ProgressiveRenderMode::BindingsAndResults) {
-        Ok(rendered) => rendered,
-        Err(error) => render_expression_error_kind(&error).to_owned(),
-    }
+fn run_type_syntax_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = match &fixture.kind {
+        FixtureKind::Simple(case) => &case.input,
+        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
+        FixtureKind::Generational(_) => {
+            return Err("generation-based multi-file cases are not supported".to_owned());
+        }
+    };
+
+    let mut interner = Interner::new();
+    Ok(match parse_type_syntax(source, &mut interner) {
+        Ok(item) => render_type_syntax(&item, &interner),
+        Err(error) => format!("{error:?}"),
+    })
 }
 
 fn infer_fixture_source(
@@ -434,43 +381,6 @@ fn bind_fixture_builtins(
     inference_state.bind_builtin(list_symbol, BuiltinKind::List);
 }
 
-fn render_type_syntax_fixture_result(source: &str) -> String {
-    let mut interner = Interner::new();
-    let trimmed_source = source.trim();
-
-    if trimmed_source.is_empty() {
-        return String::new();
-    }
-
-    if let Some(expected_parse_error) = trimmed_source.strip_prefix("error:") {
-        let normalized_source = expected_parse_error
-            .lines()
-            .skip(1)
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        if normalized_source.is_empty() {
-            return "fixture error: annotation fixture parse-error case must include source after `error:`"
-                .to_owned();
-        }
-
-        return match parse_type_syntax(&normalized_source, &mut interner) {
-            Ok(item) => format!(
-                "fixture error: expected parse error\nsource:\n{normalized_source}\nparsed as: {}",
-                render_type_syntax(&item, &interner)
-            ),
-            Err(error) => format!("{error:?}"),
-        };
-    }
-
-    match parse_type_syntax(trimmed_source, &mut interner) {
-        Ok(item) => render_type_syntax(&item, &interner),
-        Err(error) => format!("parse error: {error:?}\nsource:\n{trimmed_source}"),
-    }
-}
-
 fn render_expression_types(
     inference_state: &mut InferenceState,
     lowering_context: &LoweringContext,
@@ -497,10 +407,7 @@ enum ProgressiveRenderMode {
     BindingsAndResults,
 }
 
-fn render_progressive_fixture_result(
-    source: &str,
-    mode: ProgressiveRenderMode,
-) -> Result<String, InferenceError> {
+fn render_progressive(source: &str, mode: ProgressiveRenderMode) -> Result<String, InferenceError> {
     let mut parser = new_parser();
     let tree = parse_source(&mut parser, source);
 

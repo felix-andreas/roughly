@@ -10,11 +10,20 @@ Use ordinary Rust tests only when the behavior is awkward to express as a render
 
 ## Fixture format
 
-The fixture harness lives in `tests/test_fixtures.rs`.
+The current typing fixture runner lives in `tests/test_fixtures.rs`.
+Fixture parsing itself lives in the separate `fixtures` crate.
 
 Some suites may include a local `README.md` with more detailed strategy, coverage expectations, or renderer-specific guidance. Use `TESTING.md` for crate-level test contracts and suite-local README files for suite-specific concepts that would otherwise make this document too long.
 
-Each `.test` file uses:
+The `fixtures` crate currently parses three fixture shapes:
+
+- `Simple`
+- `MultiFile`
+- `Generational`
+
+### `Simple`
+
+Use `Simple` when one case has one implicit main input document and one expected output.
 
 ```text
 #==== group_name
@@ -24,19 +33,41 @@ Each `.test` file uses:
 <expected rendered output>
 ```
 
-Notes:
+Rules:
 
+- `Simple` uses a bare `#++++` separator with no path
 - `group__case` is the stable test identity
 - `group__case` names must be unique across the suite
-- the fixture runner only loads files with the `.test` extension, so suite-local `README.md` files are ignored by the runner
+- suite-specific behavior belongs in the suite runner, not in fixture syntax
 
-## Planned multi-file format
+For `type_syntax`, invalid cases use the same `Simple` shape as valid cases. Put the actual type-syntax source in the input block and snapshot the rendered parse error in `#++++`. Do not prefix invalid inputs with `error:`.
 
-This crate is moving toward a fixture format that can describe multi-document workspaces and grouped generations.
+### `MultiFile`
 
-This format is not implemented yet. Remove this warning once the new harness actually supports it.
+Use `MultiFile` when one case has multiple whole-file inputs and per-file expectations, but no later generations.
 
-The intended direction is:
+```text
+#==== group_name
+#---- case_name
+#---- a.R
+<file contents>
+#---- b.R
+<file contents>
+#++++ a.R
+<expected rendered output for a.R>
+#++++ b.R
+<expected rendered output for b.R>
+```
+
+Rules:
+
+- every `#---- path` entry before the first `#++++` is a whole-file input
+- every `#++++ path` entry is a per-file expectation
+- `MultiFile` does not use `edit`, `move`, `delete`, or explicit expectation clearing
+
+### `Generational`
+
+Use `Generational` when a case needs grouped workspace edits across later generations.
 
 ```text
 #==== group_name
@@ -46,36 +77,55 @@ The intended direction is:
 <file contents>
 #---- b.R
 <file contents>
-#.... v2
-#---- a.R
-<replacement file contents>
-#---- edit b.R 3:1-3:4 -> "foo"
-#---- move c.R -> d.R
-#---- delete e.R
 #++++ a.R
 <expected rendered output for a.R>
 #++++ b.R
 <expected rendered output for b.R>
+#.... v2
+#---- edit a.R 3:1-3:4 -> "foo"
+#---- move b.R -> c.R
+#---- delete d.R
+#++++ a.R
+<expected rendered output for a.R>
+#++++ none c.R
 ```
 
-Planned rules:
+Rules:
 
-- if no `#.... vN` block is present, the case remains a normal single-file fixture
 - each `#.... vN` block describes one grouped workspace edit step
-- all entries inside one generation are applied together
+- all `#----` entries in a generation come before any `#++++` expectations for that generation
 - bare filenames such as `#---- a.R` mean whole-file contents for that generation
 - `edit`, `move`, and `delete` are first-class workspace document operations
+- `#++++ none path` explicitly clears a carried expectation for that document
 - one fixture case may describe package documents, auxiliary documents, and standalone documents
-- expectation attachment is per document per generation
-- a generation may explicitly declare no expectation for a document
 - if a document already has an expectation from an earlier generation, that expectation carries forward until replaced or explicitly cleared
-- small tests should usually restate whole files
-- large-file or edit-heavy tests may use range edits
+
+### Current migration status
+
+The parser now understands all three fixture shapes.
+
+The current typing fixture runner still executes only `Simple` cases. Treat `MultiFile` and `Generational` as parser-level support that is waiting on renderer-side adoption in `typing`.
+
+### File loading
+
+The fixture runner only loads files with the `.test` extension, so suite-local `README.md` files are ignored by the runner.
+
+### Historical simple example
+
+Every `.test` file may still use the original simple shape:
+
+```text
+#==== group_name
+#---- case_name
+<input source>
+#++++
+<expected rendered output>
+```
 
 Planned architecture:
 
 - the reusable `workspace` crate owns workspace/package/document state and incremental parsing
-- a separate fixture crate will parse this fixture language
+- the separate `fixtures` crate parses this fixture language
 - the testing framework may combine parsed fixture data with `workspace` document state
 - `typing` should not own a second workspace/document engine inside the fixture harness
 
@@ -126,6 +176,8 @@ Expected output should show:
 
 - normalized type syntax
 - precise parse-error kind for invalid cases
+
+Invalid `type_syntax` fixtures use the same `Simple` shape as successful ones. The runner parses the input and compares either the rendered type or the rendered parse error directly.
 
 ### `lowering`
 

@@ -1,4 +1,4 @@
-# Fixture Harness Multi-File Generations [planning]
+# Fixture Harness Multi-File Generations [in-progress]
 
 ## Goal
 
@@ -13,6 +13,15 @@ The intended direction is to introduce:
 - the document-management crate should model a workspace that can contain multiple packages plus standalone documents
 
 The first implementation step is only the document-management crate.
+
+## Current status
+
+- [done] Implemented the first milestone as a new `workspace` crate at `crates/workspace`.
+- [done] The crate owns parser state, package roots, package and standalone document buckets, and incremental text/tree updates.
+- [done] Direct crate tests cover package registration, bucket invariants, range edits, move/delete, and tree reuse across incremental edits.
+- [done] Implemented a new `fixtures` crate at `crates/fixtures` that parses single-file, multi-file, and generation-based workspace cases.
+- [in-progress] `typing` now reads fixtures through the `fixtures` crate, but its suite renderers still only execute `Simple` cases.
+- [planning] Adoption in `roughly` is still pending.
 
 ## First milestone
 
@@ -122,9 +131,7 @@ The first crate should provide explicit operations around the settled model:
 - workspace creation
 - package registration
 - package-root registration and lookup
-- package document add or replace
-- auxiliary document add or replace
-- standalone document add or replace
+- document add or replace with explicit package, auxiliary, or standalone kind
 - document lookup by path
 - range edit for an existing document
 - document delete
@@ -141,15 +148,13 @@ The API should not require consumers such as `roughly::ServerState` to manage a 
 
 ## Planned work
 
-### 1. Finalize the document-management crate boundary [planning]
+### 1. Finalize the document-management crate boundary [done]
 
 - Define the public API around:
   - workspace creation
   - package registration and package-root storage
-  - package document lookup
-  - auxiliary document lookup
-  - standalone document lookup
-  - add or replace
+  - document lookup
+  - add or replace with explicit kind
   - range edit
   - delete
   - move / rename
@@ -163,15 +168,13 @@ The API should not require consumers such as `roughly::ServerState` to manage a 
   - package-root lookup
   - package association lookup where applicable
 
-### 2. Build the reusable incremental document-management crate [planning]
+### 2. Build the reusable incremental document-management crate [done]
 
 - Introduce the new crate.
 - Reuse the same `Rope`, `Tree::edit`, and reparsing behavior currently used by `roughly`.
 - Support:
   - add package
-  - add or replace package document
-  - add or replace auxiliary document
-  - add or replace standalone document
+  - add or replace a document with explicit package, auxiliary, or standalone kind
   - edit document range
   - delete document
   - move document
@@ -179,7 +182,7 @@ The API should not require consumers such as `roughly::ServerState` to manage a 
 - Keep the API suitable for later reuse by `ServerState`.
 - Keep the implementation focused on one coherent state owner rather than splitting parser ownership or edit bookkeeping across callers.
 
-### 3. Add direct tests for the document-management crate [planning]
+### 3. Add direct tests for the document-management crate [done]
 
 - Place these tests in the `workspace` crate itself.
 - Cover:
@@ -198,7 +201,7 @@ The API should not require consumers such as `roughly::ServerState` to manage a 
   - package-root storage does not leak into `Package`
 - Cover the document access patterns that `roughly/src/server.rs` depends on.
 
-### 4. Build the separate fixture crate [planning]
+### 4. Build the separate fixture crate [in-progress]
 
 - Define the exact grammar for:
   - backward-compatible single-file cases
@@ -210,6 +213,10 @@ The API should not require consumers such as `roughly::ServerState` to manage a 
 - Parse a fixture case into an initial workspace snapshot plus later grouped generations.
 - Treat each generation as one grouped workspace edit step.
 - Keep single-file cases as the default when no generation block is present.
+- `fixtures` now parses the legacy and generation-based formats and has direct parser tests plus workspace-evolution tests.
+- `typing/tests/test_fixtures.rs` now uses the `fixtures` crate for parsing and still executes legacy cases unchanged.
+- `typing/tests/test_fixtures.rs` now uses the `fixtures` crate for parsing and still executes `Simple` cases unchanged.
+- `type_syntax` simple fixtures now compare rendered parser success or failure directly, with no `error:` sentinel embedded in fixture input.
 - Run analysis after each generation.
 - Prefer full-file restatement in small tests.
 - Allow range edits for large files or edit-heavy tests.

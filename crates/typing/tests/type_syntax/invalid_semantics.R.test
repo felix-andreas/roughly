@@ -1,12 +1,10 @@
 #==== generic_semantic_errors
 #---- duplicate_type_parameters_in_universal_binder
-error:
 <T, T> fn(T) -> T
 #++++
 InvalidSemantics { message: "duplicate type parameter name `T` in `<...>`." }
 
 #---- duplicate_type_parameters_in_expanded_forall
-error:
 @forall T
 @forall T
 @param {T} value
@@ -15,51 +13,43 @@ error:
 InvalidSemantics { message: "duplicate type parameter name `T` in expanded function annotation." }
 
 #---- consecutive_typing_comments
-error:
 integer
 character
 #++++
 InvalidSemantics { message: "cannot use multiple compact annotations in the same `#:` block." }
 
 #---- expanded_param_after_return
-error:
 @return {integer}
 @param {integer} count
 #++++
 InvalidSemantics { message: "`@param` directives must appear before `@return` or `@returns` in the same `#:` block." }
 
 #---- wrong_generic_arity_too_few_arguments
-error:
 Pair<integer>
 #++++
 InvalidSemantics { message: "generic type `Pair` expects 2 type argument(s), but found 1." }
 
 #---- wrong_generic_arity_too_many_arguments
-error:
 Pair<integer, character, logical>
 #++++
 InvalidSemantics { message: "generic type `Pair` expects 2 type argument(s), but found 3." }
 
 #---- wrong_generic_arity_nested_in_record
-error:
 list{value: Pair<integer>}
 #++++
 InvalidSemantics { message: "generic type `Pair` expects 2 type argument(s), but found 1." }
 
 #---- wrong_generic_arity_nested_in_function_parameter
-error:
 fn(Pair<integer>) -> integer
 #++++
 InvalidSemantics { message: "generic type `Pair` expects 2 type argument(s), but found 1." }
 
 #---- wrong_generic_arity_nested_in_function_return
-error:
 fn(integer) -> Pair<integer>
 #++++
 InvalidSemantics { message: "generic type `Pair` expects 2 type argument(s), but found 1." }
 
 #---- wrong_generic_arity_in_nominal_introduction
-error:
 @new Pair<integer>
 #++++
 InvalidSemantics { message: "generic type `Pair` expects 2 type argument(s), but found 1." }

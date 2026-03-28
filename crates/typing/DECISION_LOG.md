@@ -2,6 +2,9 @@
 
 Keep newest decisions at the top.
 
+- `type_syntax` simple fixtures compare the parser's rendered success or rendered failure directly, with no `error:` sentinel in fixture input.
+  - The fixture body should contain only the actual source under test. The runner always calls `parse_type_syntax` on that source and compares either the rendered type or the rendered parse error.
+
 - direct tests for the `workspace` crate live in the `workspace` crate itself.
   - Core workspace behavior should be tested where it is implemented. `typing` and `roughly` should keep only consumer-side integration coverage on top.
 

@@ -1,6 +1,6 @@
 # Human Notes (!AIs are not allowed to edit!)
 
-- we should resolve types during lowering
+- the test_fixtures is in a very bad shape. finish it
 
 - (update semantics) maybe later support local types. @new would work only in the same file. also can only be edited in local file (opaque like type)
 

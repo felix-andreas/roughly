@@ -35,13 +35,11 @@
 @if-unknown integer | NULL
 
 #---- invalid_if_unknown_missing_type
-error:
 @if-unknown
 #++++
 InvalidSyntax { message: "expected a type after the annotation prefix." }
 
 #---- invalid_trust_missing_type
-error:
 @trust
 #++++
 InvalidSyntax { message: "expected a type after the annotation prefix." }

@@ -1,10 +1,10 @@
 [package]
-name = "typing"
+name = "workspace"
 edition = "2024"
 version.workspace = true
 
 [lib]
-path = "src/lib.rs"
+path = "src/workspace.rs"
 
 [dependencies]
 ropey.workspace = true
@@ -13,5 +13,4 @@ tree-sitter.workspace = true
 tree-sitter-r.workspace = true
 
 [dev-dependencies]
-fixtures = { path = "../fixtures" }
 indoc.workspace = true

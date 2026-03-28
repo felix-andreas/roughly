@@ -193,13 +193,11 @@ list{render:fn(integer)->list{label:character}}
 list{render: fn(integer) -> list{label: character}}
 
 #---- malformed_missing_inner_named_list_closing_bracket_before_sibling
-error:
 list{meta:list{items:list[named:list{integer,character},render:character}}
 #++++
 InvalidSyntax { message: "missing closing delimiter ] (while parsing field `items`) (while parsing field `meta`)" }
 
 #---- mixed_named_and_unnamed_items
-error:
 list{integer,label:character}
 #++++
 InvalidSyntax { message: "cannot mix named and unnamed items in `list{...}`." }

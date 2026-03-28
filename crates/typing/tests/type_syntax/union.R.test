@@ -90,19 +90,16 @@ fn(handler: fn(Unknown) -> Any) -> list{result: Any, missing: Unknown | NULL}
 
 #==== invalid_unions
 #---- invalid_non_nullable_union
-error:
 integer | character
 #++++
 UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now." }
 
 #---- invalid_union_with_multiple_non_null_members
-error:
 integer | character | NULL
 #++++
 UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now." }
 
 #---- invalid_null_null_union
-error:
 NULL | NULL
 #++++
 UnsupportedConstruct { message: "`NULL | NULL` is not valid type syntax." }
