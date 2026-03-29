@@ -19,6 +19,7 @@ If the user says:
 
 - `get started`: read the relevant steering documents and `MEMORY.md`, then continue with the next actionable item in `TODOS.md` (assume fresh context unless the documents indicate otherwise).
 - `cleanup memory`: aggressively remove resolved, stale, or low-value session-specific details, while preserving this purpose section and any continuity that will still matter next session.
+- `discuss`: move the active design discussion into `DISCUSS.md` and continue answering it there in later turns, not only in chat; remove resolved points as they are settled, and keep only concise open decisions rephrased so the unresolved question is easy to answer.
 - `authorative check`: compare the authoritative documents against the fixture suites and report contradictions, stale wording, or missing documented coverage.
 - `implementation check`: compare the implementation against the authoritative documents and report contract or architecture mismatches.
 - `session check`: do an end-of-session closure pass. Verify that decisions, open questions, and new work discovered during the session are either resolved or captured in the right documents; look especially for thread sprawl where side investigations created uncaptured follow-up work. Check that `TODOS.md`, `projects/`, `DISCUSS.md`, and the authoritative documents are consistent, then report anything still hanging.
@@ -63,7 +64,7 @@ Use these documents to surface uncertainty and record agreed decisions, not to s
 - `TESTING.md`
   - Authoritative fixture-testing contract and suite structure.
   - Keep it aligned with `tests/test_fixtures.rs` and the intended fixture structure; note temporary migration gaps explicitly.
-  - Keep only the minimal focused test-running information: suite names and the `TYPING_FILTER` workflow.
+  - Keep only the minimal focused test-running information: suite names and the `FIXTURE_FILTER` workflow.
 
 ### Working documents
 
@@ -127,7 +128,7 @@ When in doubt, delete weak context instead of preserving it.
 - When adding a new phase or module, add or extend a fixture suite for that phase before relying on ad hoc unit tests.
 - Use the lightest fixture change that captures the failing shape.
 - Read `TESTING.md` before changing the fixture harness or adding a new fixture suite.
-- Run focused fixture cases with `TYPING_FILTER=group__case cargo test -p typing --test test_fixtures <suite> -- --nocapture`.
+- Run focused fixture cases with `FIXTURE_FILTER=group__case cargo test -p typing --test test_fixtures <suite> -- --nocapture`.
 - Prefer running focused crate tests while iterating.
 - `cargo test -p typing` is the default crate test command.
 - Keep fixture `group__case` names stable as the test identity.

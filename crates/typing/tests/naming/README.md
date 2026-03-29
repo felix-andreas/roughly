@@ -60,6 +60,20 @@ Use this file for function-local naming behavior:
 - multi-hop nested function resolution through more than one enclosing scope
 - multi-hop nested function resolution picking the nearest shadowing binding
 
+### `globals.R.test`
+
+Use this file for multi-file package-global naming behavior:
+
+- a later file referencing a top-level value from an earlier file
+- a later file resolving both a cross-file callee and a cross-file argument
+- a later file rebinding a top-level value and later files observing the new binding
+- a function body closing over a package-global value defined in another file
+- an annotation using a nominal type declared in another file
+- an annotation using an alias declared in another file
+- a type definition using a forward reference to a type declared in a later file
+- a generic type parameter shadowing a global type declared in another file
+- `@new` using a nominal type declared in another file
+
 ### `loops.R.test`
 
 Use this file for loop-specific naming behavior:

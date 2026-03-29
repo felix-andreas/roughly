@@ -1801,6 +1801,7 @@ dependencies = [
  "thiserror",
  "tree-sitter",
  "tree-sitter-r",
+ "workspace",
 ]
 
 [[package]]

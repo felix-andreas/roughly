@@ -1,8 +1,33 @@
 # Human Notes (!AIs are not allowed to edit!)
 
+- state
+  - lowering
+  - naming
+  - typecheck
+
+
+why do we have:
+
+pub enum AttachedAnnotation {
+    Expression {
+        annotation: Annotation,
+        range: Range,
+    },
+    BindingAndExpression {
+        annotation: Annotation,
+        range: Range,
+    },
+}
+
+- bind_fixture_builtins <- we shouldn't do this in fixtures
+
 - the test_fixtures is in a very bad shape. finish it
+- bind_fixture_builtins. w
 
 - (update semantics) maybe later support local types. @new would work only in the same file. also can only be edited in local file (opaque like type)
+
+- lowering
+  - we should have one main entry point
 
 - better document split: (https://chatgpt.com/c/69c5985f-f050-8332-bf70-4834bc44b3c4)
   - Overview / Goals

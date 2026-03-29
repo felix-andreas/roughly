@@ -1,48 +1,45 @@
-#[path = "support.rs"]
-mod support;
+#[path = "fixture_renderers.rs"]
+mod fixture_renderers;
+#[path = "fixture_workspace.rs"]
+mod fixture_workspace;
 
 use {
+    fixture_renderers::{
+        render_core_type, render_diagnostics, render_expression_error_kind,
+        render_expression_types, render_interface_snapshot, render_multi_file_output,
+        render_named_hir, render_named_module, render_type_scheme,
+    },
+    fixture_workspace::{simple_fixture_source, with_fixture_document, with_fixture_documents},
     fixtures::{Fixture, FixtureKind, run_fixture_suite},
-    support::{check_source, new_parser, parse_source},
+    std::{collections::BTreeMap, mem, path::PathBuf},
     typing::{
         AnalysisState, Interner,
-        hir::{DefinitionItem, DefinitionKind, ExpressionId, ExpressionKind, HirArena},
+        hir::{DefinitionId, DefinitionItem, ExpressionId, ExpressionKind, HirArena},
         lower::LoweringContext,
-        naming::{BindingId, NamingContext, NamingResult},
-        type_syntax::{parse_type_syntax, render_surface_type, render_type_syntax},
-        typecheck::{BuiltinKind, InferenceError, InferenceState},
-        types::{Atomic, CoreType, InferenceVariableId, TypeScheme},
+        naming::NamingContext,
+        type_syntax::{parse_type_syntax, render_type_syntax},
+        typecheck::{BuiltinKind, InferenceState},
     },
 };
 
 #[test]
-fn lowering() {
-    run_fixture_suite("tests/lowering", "lowering", run_lowering_fixture);
-}
-
-#[test]
-fn naming() {
-    run_fixture_suite("tests/naming", "naming", run_naming_fixture);
+fn bindings() {
+    run_fixture_suite("tests/bindings", "bindings", run_bindings_fixture);
 }
 
 #[test]
 fn diagnostics() {
-    let mut parser = new_parser();
-    let mut analysis_state = AnalysisState::new();
+    run_fixture_suite("tests/diagnostics", "diagnostics", run_diagnostics_fixture);
+}
 
-    run_fixture_suite("tests/diagnostics", "diagnostics", |fixture| {
-        run_diagnostics_fixture(fixture, &mut parser, &mut analysis_state)
-    });
+#[test]
+fn environment() {
+    run_fixture_suite("tests/environment", "environment", run_environment_fixture);
 }
 
 #[test]
 fn expressions() {
     run_fixture_suite("tests/expressions", "expressions", run_expressions_fixture);
-}
-
-#[test]
-fn unification() {
-    run_fixture_suite("tests/unification", "unification", run_unification_fixture);
 }
 
 #[test]
@@ -64,8 +61,18 @@ fn instantiation() {
 }
 
 #[test]
-fn bindings() {
-    run_fixture_suite("tests/bindings", "bindings", run_bindings_fixture);
+fn interfaces() {
+    run_fixture_suite("tests/interfaces", "interfaces", run_interfaces_fixture);
+}
+
+#[test]
+fn lowering() {
+    run_fixture_suite("tests/lowering", "lowering", run_lowering_fixture);
+}
+
+#[test]
+fn naming() {
+    run_fixture_suite("tests/naming", "naming", run_naming_fixture);
 }
 
 #[test]
@@ -78,34 +85,255 @@ fn substitution() {
 }
 
 #[test]
-fn environment() {
-    run_fixture_suite("tests/environment", "environment", run_environment_fixture);
-}
-
-#[test]
-fn interfaces() {
-    run_fixture_suite("tests/interfaces", "interfaces", run_interfaces_fixture);
-}
-
-#[test]
 fn type_syntax() {
     run_fixture_suite("tests/type_syntax", "type_syntax", run_type_syntax_fixture);
 }
 
-fn run_lowering_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = match &fixture.kind {
-        FixtureKind::Simple(case) => &case.input,
-        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
-        FixtureKind::Generational(_) => {
-            return Err("generation-based multi-file cases are not supported".to_owned());
+#[test]
+fn unification() {
+    run_fixture_suite("tests/unification", "unification", run_unification_fixture);
+}
+
+fn run_bindings_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = simple_fixture_source(fixture)?;
+    let mut lowering_context = LoweringContext::new();
+    let module = with_fixture_document(source, |document| {
+        lowering_context.lower_root_with_rope(
+            document.document().tree().root_node(),
+            document.document().rope(),
+        )
+    })?;
+    let mut inference_state = InferenceState::new();
+    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+    let mut lines = Vec::new();
+
+    for expression_id in &module.expressions {
+        let expression = module.arena.get(*expression_id);
+        inference_state
+            .infer_expression(expression, &module.arena)
+            .map_err(|error| render_expression_error_kind(&error).to_owned())?;
+
+        if let ExpressionKind::Assign { target, .. } = &expression.kind {
+            let name = lowering_context
+                .interner()
+                .resolve(*target)
+                .unwrap_or("<unknown>");
+            let binding = inference_state
+                .lookup_name(*target)
+                .unwrap_or_else(|| panic!("binding `{name}` should be present after inference"));
+            lines.push(format!(
+                "{name}: {}",
+                render_type_scheme(lowering_context.interner(), &binding.type_scheme)
+            ));
         }
+    }
+
+    Ok(lines.join("\n"))
+}
+
+fn run_diagnostics_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = simple_fixture_source(fixture)?;
+    let rendered = with_fixture_document(source, |document| {
+        let mut analysis_state = AnalysisState::new();
+        typing::check(
+            document.document().tree().root_node(),
+            document.document().rope(),
+            &mut analysis_state,
+        )
+        .render(source)
+    })?;
+    Ok(rendered)
+}
+
+fn run_environment_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = simple_fixture_source(fixture)?;
+    let mut lowering_context = LoweringContext::new();
+    let module = with_fixture_document(source, |document| {
+        lowering_context.lower_root_with_rope(
+            document.document().tree().root_node(),
+            document.document().rope(),
+        )
+    })?;
+    let mut inference_state = InferenceState::new();
+    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+    let mut lines = Vec::new();
+
+    for expression_id in &module.expressions {
+        let expression = module.arena.get(*expression_id);
+        let inferred_type = inference_state
+            .infer_expression(expression, &module.arena)
+            .map_err(|error| render_expression_error_kind(&error).to_owned())?;
+
+        match &expression.kind {
+            ExpressionKind::Assign { target, .. } => {
+                let name = lowering_context
+                    .interner()
+                    .resolve(*target)
+                    .unwrap_or("<unknown>");
+                let binding = inference_state.lookup_name(*target).unwrap_or_else(|| {
+                    panic!("binding `{name}` should be present after inference")
+                });
+                lines.push(format!(
+                    "{name}: {}",
+                    render_type_scheme(lowering_context.interner(), &binding.type_scheme)
+                ));
+            }
+            _ => {
+                let resolved_type = inference_state
+                    .resolve(inferred_type)
+                    .map_err(|error| render_expression_error_kind(&error).to_owned())?;
+                lines.push(render_core_type(
+                    lowering_context.interner(),
+                    &resolved_type,
+                ));
+            }
+        }
+    }
+
+    Ok(lines.join("\n"))
+}
+
+fn run_expressions_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = simple_fixture_source(fixture)?;
+    let mut lowering_context = LoweringContext::new();
+    let module = with_fixture_document(source, |document| {
+        lowering_context.lower_root_with_rope(
+            document.document().tree().root_node(),
+            document.document().rope(),
+        )
+    })?;
+    let mut inference_state = InferenceState::new();
+    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+    let inferred_types = match inference_state.infer_module(&module) {
+        Ok(inferred_types) => inferred_types,
+        Err(error) => return Ok(render_expression_error_kind(&error).to_owned()),
     };
 
-    let mut parser = new_parser();
-    let tree = parse_source(&mut parser, source);
+    Ok(render_expression_types(
+        &mut inference_state,
+        &lowering_context,
+        &inferred_types,
+    ))
+}
 
+fn run_generalization_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = simple_fixture_source(fixture)?;
     let mut lowering_context = LoweringContext::new();
-    let lowering_result = lowering_context.lower_tree_with_diagnostics(&tree, source);
+    let module = with_fixture_document(source, |document| {
+        lowering_context.lower_root_with_rope(
+            document.document().tree().root_node(),
+            document.document().rope(),
+        )
+    })?;
+    let mut inference_state = InferenceState::new();
+    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+    let mut lines = Vec::new();
+
+    for expression_id in &module.expressions {
+        let expression = module.arena.get(*expression_id);
+        inference_state
+            .infer_expression(expression, &module.arena)
+            .map_err(|error| render_expression_error_kind(&error).to_owned())?;
+
+        if let ExpressionKind::Assign { target, .. } = &expression.kind {
+            let name = lowering_context
+                .interner()
+                .resolve(*target)
+                .unwrap_or("<unknown>");
+            let binding = inference_state
+                .lookup_name(*target)
+                .unwrap_or_else(|| panic!("binding `{name}` should be present after inference"));
+            lines.push(format!(
+                "{name}: {}",
+                render_type_scheme(lowering_context.interner(), &binding.type_scheme)
+            ));
+        }
+    }
+
+    Ok(lines.join("\n"))
+}
+
+fn run_instantiation_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = simple_fixture_source(fixture)?;
+    let mut lowering_context = LoweringContext::new();
+    let module = with_fixture_document(source, |document| {
+        lowering_context.lower_root_with_rope(
+            document.document().tree().root_node(),
+            document.document().rope(),
+        )
+    })?;
+    let mut inference_state = InferenceState::new();
+    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+    let mut lines = Vec::new();
+
+    for expression_id in &module.expressions {
+        let expression = module.arena.get(*expression_id);
+        let inferred_type = inference_state
+            .infer_expression(expression, &module.arena)
+            .map_err(|error| render_expression_error_kind(&error).to_owned())?;
+
+        match &expression.kind {
+            ExpressionKind::Assign { target, .. } => {
+                let name = lowering_context
+                    .interner()
+                    .resolve(*target)
+                    .unwrap_or("<unknown>");
+                let binding = inference_state.lookup_name(*target).unwrap_or_else(|| {
+                    panic!("binding `{name}` should be present after inference")
+                });
+                lines.push(format!(
+                    "{name}: {}",
+                    render_type_scheme(lowering_context.interner(), &binding.type_scheme)
+                ));
+            }
+            _ => {
+                let resolved_type = inference_state
+                    .resolve(inferred_type)
+                    .map_err(|error| render_expression_error_kind(&error).to_owned())?;
+                lines.push(render_core_type(
+                    lowering_context.interner(),
+                    &resolved_type,
+                ));
+            }
+        }
+    }
+
+    Ok(lines.join("\n"))
+}
+
+fn run_interfaces_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = simple_fixture_source(fixture)?;
+    let mut lowering_context = LoweringContext::new();
+    let module = with_fixture_document(source, |document| {
+        lowering_context.lower_root_with_rope(
+            document.document().tree().root_node(),
+            document.document().rope(),
+        )
+    })?;
+    let mut inference_state = InferenceState::new();
+    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+
+    if inference_state.infer_module(&module).is_err() {
+        return Ok("error: inference".to_owned());
+    }
+
+    Ok(render_interface_snapshot(
+        &module,
+        &inference_state,
+        &lowering_context,
+    ))
+}
+
+fn run_lowering_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = simple_fixture_source(fixture)?;
+    let (lowering_context, lowering_result) = with_fixture_document(source, |document| {
+        let mut lowering_context = LoweringContext::new();
+        let lowering_result = lowering_context.lower_root_with_rope_with_diagnostics(
+            document.document().tree().root_node(),
+            document.document().rope(),
+        );
+        (lowering_context, lowering_result)
+    })?;
 
     if !lowering_result.diagnostics.is_empty() {
         return Ok(render_diagnostics(source, &lowering_result.diagnostics));
@@ -114,36 +342,184 @@ fn run_lowering_fixture(fixture: &Fixture) -> Result<String, String> {
     Ok(lowering_result.module.render(lowering_context.interner()))
 }
 
-fn run_diagnostics_fixture(
-    fixture: &Fixture,
-    parser: &mut tree_sitter::Parser,
-    analysis_state: &mut AnalysisState,
-) -> Result<String, String> {
-    let source = match &fixture.kind {
-        FixtureKind::Simple(case) => &case.input,
-        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
-        FixtureKind::Generational(_) => {
-            return Err("generation-based multi-file cases are not supported".to_owned());
-        }
-    };
-
-    Ok(check_source(source, parser, analysis_state).render(source))
-}
-
 fn run_naming_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = match &fixture.kind {
-        FixtureKind::Simple(case) => &case.input,
-        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
-        FixtureKind::Generational(_) => {
-            return Err("generation-based multi-file cases are not supported".to_owned());
+    if let FixtureKind::MultiFile(case) = &fixture.kind {
+        let lowered_project = with_fixture_documents(&case.input_files, |workspace| {
+            let mut lowering_context = LoweringContext::new();
+            let mut lowered_files = Vec::with_capacity(case.input_files.len());
+
+            for input_file in &case.input_files {
+                let document = workspace
+                    .document(&input_file.path)
+                    .ok_or_else(|| "workspace".to_owned())?;
+                let lowering_result = lowering_context.lower_root_with_rope_with_diagnostics(
+                    document.document().tree().root_node(),
+                    document.document().rope(),
+                );
+                lowered_files.push((
+                    input_file.path.clone(),
+                    lowering_result.module,
+                    lowering_result.diagnostics,
+                ));
+            }
+
+            Ok((mem::take(lowering_context.interner_mut()), lowered_files))
+        })?;
+
+        if lowered_project
+            .1
+            .iter()
+            .any(|(_, _, diagnostics)| !diagnostics.is_empty())
+        {
+            return Err("multi-file lowering".to_owned());
         }
-    };
 
-    let mut parser = new_parser();
-    let tree = parse_source(&mut parser, source);
+        let mut arena = HirArena::new();
+        let mut definitions = Vec::new();
+        let mut expressions = Vec::new();
+        let mut files_by_path =
+            BTreeMap::<PathBuf, (Vec<DefinitionItem>, Vec<ExpressionId>)>::new();
+        let mut next_expression_id = 0u32;
+        let mut next_definition_id = 0u32;
 
-    let mut lowering_context = LoweringContext::new();
-    let lowering_result = lowering_context.lower_tree_with_diagnostics(&tree, source);
+        for (path, module, _) in lowered_project.1 {
+            let expression_offset = next_expression_id;
+            let definition_offset = next_definition_id;
+
+            let remapped_arena_expressions = module
+                .arena
+                .expressions()
+                .iter()
+                .cloned()
+                .map(|mut expression| {
+                    expression.id = ExpressionId(expression.id.0 + expression_offset);
+                    match &mut expression.kind {
+                        ExpressionKind::Block { expressions, .. } => {
+                            for expression_id in expressions {
+                                *expression_id = ExpressionId(expression_id.0 + expression_offset);
+                            }
+                        }
+                        ExpressionKind::Assign { value, .. }
+                        | ExpressionKind::UnaryMinus { value }
+                        | ExpressionKind::Dollar { value, .. } => {
+                            *value = ExpressionId(value.0 + expression_offset);
+                        }
+                        ExpressionKind::Function { body, .. } | ExpressionKind::Repeat { body } => {
+                            *body = ExpressionId(body.0 + expression_offset);
+                        }
+                        ExpressionKind::While { condition, body } => {
+                            *condition = ExpressionId(condition.0 + expression_offset);
+                            *body = ExpressionId(body.0 + expression_offset);
+                        }
+                        ExpressionKind::For { sequence, body, .. } => {
+                            *sequence = ExpressionId(sequence.0 + expression_offset);
+                            *body = ExpressionId(body.0 + expression_offset);
+                        }
+                        ExpressionKind::If {
+                            condition,
+                            consequence,
+                            alternative,
+                        } => {
+                            *condition = ExpressionId(condition.0 + expression_offset);
+                            *consequence = ExpressionId(consequence.0 + expression_offset);
+                            if let Some(alternative) = alternative {
+                                *alternative = ExpressionId(alternative.0 + expression_offset);
+                            }
+                        }
+                        ExpressionKind::Call { callee, arguments }
+                        | ExpressionKind::Subset {
+                            value: callee,
+                            arguments,
+                        }
+                        | ExpressionKind::Subset2 {
+                            value: callee,
+                            arguments,
+                        } => {
+                            *callee = ExpressionId(callee.0 + expression_offset);
+                            for argument in arguments {
+                                argument.expression =
+                                    ExpressionId(argument.expression.0 + expression_offset);
+                            }
+                        }
+                        ExpressionKind::Null
+                        | ExpressionKind::Logical(_)
+                        | ExpressionKind::Integer(_)
+                        | ExpressionKind::Double(_)
+                        | ExpressionKind::Character(_)
+                        | ExpressionKind::StringLiteralName(_)
+                        | ExpressionKind::Symbol(_)
+                        | ExpressionKind::Unsupported => {}
+                    }
+                    expression
+                })
+                .collect::<Vec<_>>();
+            next_expression_id += u32::try_from(remapped_arena_expressions.len())
+                .expect("expression count exceeded u32");
+            arena.expressions.extend(remapped_arena_expressions);
+
+            let remapped_definitions = module
+                .definitions
+                .into_iter()
+                .map(|definition| {
+                    DefinitionItem::new(
+                        DefinitionId(definition.id.0 + definition_offset),
+                        definition.range,
+                        definition.definition,
+                    )
+                })
+                .collect::<Vec<_>>();
+            next_definition_id +=
+                u32::try_from(remapped_definitions.len()).expect("definition count exceeded u32");
+
+            let remapped_expressions = module
+                .expressions
+                .into_iter()
+                .map(|expression_id| ExpressionId(expression_id.0 + expression_offset))
+                .collect::<Vec<_>>();
+
+            definitions.extend(remapped_definitions.clone());
+            expressions.extend(remapped_expressions.iter().copied());
+            files_by_path.insert(path, (remapped_definitions, remapped_expressions));
+        }
+
+        let merged_module =
+            typing::Module::new(arena.clone(), definitions.clone(), expressions.clone());
+        let naming_result = NamingContext::new(&merged_module.arena, &lowered_project.0)
+            .resolve_module(&merged_module);
+
+        if !naming_result.diagnostics.is_empty() {
+            return Err("multi-file naming".to_owned());
+        }
+
+        let mut rendered_outputs = Vec::with_capacity(case.expectations.len());
+        for expectation in &case.expectations {
+            let (file_definitions, file_expressions) = files_by_path
+                .get(&expectation.path)
+                .ok_or_else(|| "missing file".to_owned())?;
+            rendered_outputs.push((
+                expectation.path.clone(),
+                render_named_hir(
+                    &arena,
+                    file_definitions,
+                    file_expressions,
+                    &naming_result,
+                    &lowered_project.0,
+                ),
+            ));
+        }
+
+        return Ok(render_multi_file_output(&rendered_outputs));
+    }
+
+    let source = simple_fixture_source(fixture)?;
+    let (lowering_context, lowering_result) = with_fixture_document(source, |document| {
+        let mut lowering_context = LoweringContext::new();
+        let lowering_result = lowering_context.lower_root_with_rope_with_diagnostics(
+            document.document().tree().root_node(),
+            document.document().rope(),
+        );
+        (lowering_context, lowering_result)
+    })?;
 
     if !lowering_result.diagnostics.is_empty() {
         return Ok(render_diagnostics(source, &lowering_result.diagnostics));
@@ -163,167 +539,56 @@ fn run_naming_fixture(fixture: &Fixture) -> Result<String, String> {
     ))
 }
 
-fn run_expressions_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = match &fixture.kind {
-        FixtureKind::Simple(case) => &case.input,
-        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
-        FixtureKind::Generational(_) => {
-            return Err("generation-based multi-file cases are not supported".to_owned());
-        }
-    };
-
-    Ok(match infer_fixture_source(source) {
-        Ok((lowering_context, _module, mut inference_state, inferred_types)) => {
-            render_expression_types(&mut inference_state, &lowering_context, &inferred_types)
-        }
-        Err(error) => render_expression_error_kind(&error).to_owned(),
-    })
-}
-
-fn render_diagnostics(source: &str, diagnostics: &[typing::Diagnostic]) -> String {
-    if diagnostics.is_empty() {
-        return "No diagnostics.\n".to_owned();
-    }
-
-    let mut rendered = String::new();
-
-    for (index, diagnostic) in diagnostics.iter().enumerate() {
-        if index > 0 {
-            rendered.push('\n');
-        }
-        rendered.push_str(&diagnostic.render(source));
-    }
-
-    rendered
-}
-
-fn run_unification_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = match &fixture.kind {
-        FixtureKind::Simple(case) => &case.input,
-        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
-        FixtureKind::Generational(_) => {
-            return Err("generation-based multi-file cases are not supported".to_owned());
-        }
-    };
-
-    Ok(match infer_fixture_source(source) {
-        Ok((lowering_context, _module, mut inference_state, inferred_types)) => {
-            render_expression_types(&mut inference_state, &lowering_context, &inferred_types)
-        }
-        Err(error) => render_expression_error_kind(&error).to_owned(),
-    })
-}
-
-fn run_generalization_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = match &fixture.kind {
-        FixtureKind::Simple(case) => &case.input,
-        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
-        FixtureKind::Generational(_) => {
-            return Err("generation-based multi-file cases are not supported".to_owned());
-        }
-    };
-
-    Ok(
-        match render_progressive(source, ProgressiveRenderMode::BindingsOnly) {
-            Ok(rendered) => rendered,
-            Err(error) => render_expression_error_kind(&error).to_owned(),
-        },
-    )
-}
-
-fn run_instantiation_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = match &fixture.kind {
-        FixtureKind::Simple(case) => &case.input,
-        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
-        FixtureKind::Generational(_) => {
-            return Err("generation-based multi-file cases are not supported".to_owned());
-        }
-    };
-
-    Ok(
-        match render_progressive(source, ProgressiveRenderMode::BindingsAndResults) {
-            Ok(rendered) => rendered,
-            Err(error) => render_expression_error_kind(&error).to_owned(),
-        },
-    )
-}
-
-fn run_bindings_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = match &fixture.kind {
-        FixtureKind::Simple(case) => &case.input,
-        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
-        FixtureKind::Generational(_) => {
-            return Err("generation-based multi-file cases are not supported".to_owned());
-        }
-    };
-
-    Ok(
-        match render_progressive(source, ProgressiveRenderMode::BindingsOnly) {
-            Ok(rendered) => rendered,
-            Err(error) => render_expression_error_kind(&error).to_owned(),
-        },
-    )
-}
-
 fn run_substitution_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = match &fixture.kind {
-        FixtureKind::Simple(case) => &case.input,
-        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
-        FixtureKind::Generational(_) => {
-            return Err("generation-based multi-file cases are not supported".to_owned());
+    let source = simple_fixture_source(fixture)?;
+    let mut lowering_context = LoweringContext::new();
+    let module = with_fixture_document(source, |document| {
+        lowering_context.lower_root_with_rope(
+            document.document().tree().root_node(),
+            document.document().rope(),
+        )
+    })?;
+    let mut inference_state = InferenceState::new();
+    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+    let mut lines = Vec::new();
+
+    for expression_id in &module.expressions {
+        let expression = module.arena.get(*expression_id);
+        let inferred_type = inference_state
+            .infer_expression(expression, &module.arena)
+            .map_err(|error| render_expression_error_kind(&error).to_owned())?;
+
+        match &expression.kind {
+            ExpressionKind::Assign { target, .. } => {
+                let name = lowering_context
+                    .interner()
+                    .resolve(*target)
+                    .unwrap_or("<unknown>");
+                let binding = inference_state.lookup_name(*target).unwrap_or_else(|| {
+                    panic!("binding `{name}` should be present after inference")
+                });
+                lines.push(format!(
+                    "{name}: {}",
+                    render_type_scheme(lowering_context.interner(), &binding.type_scheme)
+                ));
+            }
+            _ => {
+                let resolved_type = inference_state
+                    .resolve(inferred_type)
+                    .map_err(|error| render_expression_error_kind(&error).to_owned())?;
+                lines.push(render_core_type(
+                    lowering_context.interner(),
+                    &resolved_type,
+                ));
+            }
         }
-    };
+    }
 
-    Ok(
-        match render_progressive(source, ProgressiveRenderMode::BindingsAndResults) {
-            Ok(rendered) => rendered,
-            Err(error) => render_expression_error_kind(&error).to_owned(),
-        },
-    )
-}
-
-fn run_environment_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = match &fixture.kind {
-        FixtureKind::Simple(case) => &case.input,
-        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
-        FixtureKind::Generational(_) => {
-            return Err("generation-based multi-file cases are not supported".to_owned());
-        }
-    };
-
-    Ok(
-        match render_progressive(source, ProgressiveRenderMode::BindingsAndResults) {
-            Ok(rendered) => rendered,
-            Err(error) => render_expression_error_kind(&error).to_owned(),
-        },
-    )
-}
-
-fn run_interfaces_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = match &fixture.kind {
-        FixtureKind::Simple(case) => &case.input,
-        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
-        FixtureKind::Generational(_) => {
-            return Err("generation-based multi-file cases are not supported".to_owned());
-        }
-    };
-
-    Ok(match infer_fixture_source(source) {
-        Ok((lowering_context, module, inference_state, _inferred_types)) => {
-            render_interface_snapshot(&module, &inference_state, &lowering_context)
-        }
-        Err(error) => render_expression_error_kind(&error).to_owned(),
-    })
+    Ok(lines.join("\n"))
 }
 
 fn run_type_syntax_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = match &fixture.kind {
-        FixtureKind::Simple(case) => &case.input,
-        FixtureKind::MultiFile(_) => return Err("multi-file cases are not supported".to_owned()),
-        FixtureKind::Generational(_) => {
-            return Err("generation-based multi-file cases are not supported".to_owned());
-        }
-    };
+    let source = simple_fixture_source(fixture)?;
 
     let mut interner = Interner::new();
     Ok(match parse_type_syntax(source, &mut interner) {
@@ -332,28 +597,27 @@ fn run_type_syntax_fixture(fixture: &Fixture) -> Result<String, String> {
     })
 }
 
-fn infer_fixture_source(
-    source: &str,
-) -> Result<
-    (
-        LoweringContext,
-        typing::Module,
-        InferenceState,
-        Vec<CoreType>,
-    ),
-    InferenceError,
-> {
-    let mut parser = new_parser();
-    let tree = parse_source(&mut parser, source);
-
+fn run_unification_fixture(fixture: &Fixture) -> Result<String, String> {
+    let source = simple_fixture_source(fixture)?;
     let mut lowering_context = LoweringContext::new();
-    let module = lowering_context.lower_tree(&tree, source);
-
+    let module = with_fixture_document(source, |document| {
+        lowering_context.lower_root_with_rope(
+            document.document().tree().root_node(),
+            document.document().rope(),
+        )
+    })?;
     let mut inference_state = InferenceState::new();
     bind_fixture_builtins(&mut inference_state, &mut lowering_context);
-    let inferred_types = inference_state.infer_module(&module)?;
+    let inferred_types = match inference_state.infer_module(&module) {
+        Ok(inferred_types) => inferred_types,
+        Err(error) => return Ok(render_expression_error_kind(&error).to_owned()),
+    };
 
-    Ok((lowering_context, module, inference_state, inferred_types))
+    Ok(render_expression_types(
+        &mut inference_state,
+        &lowering_context,
+        &inferred_types,
+    ))
 }
 
 fn bind_fixture_builtins(
@@ -379,595 +643,4 @@ fn bind_fixture_builtins(
     inference_state.bind_builtin(or_symbol, BuiltinKind::Or);
     inference_state.bind_builtin(combine_symbol, BuiltinKind::Combine);
     inference_state.bind_builtin(list_symbol, BuiltinKind::List);
-}
-
-fn render_expression_types(
-    inference_state: &mut InferenceState,
-    lowering_context: &LoweringContext,
-    inferred_types: &[CoreType],
-) -> String {
-    let mut lines = Vec::with_capacity(inferred_types.len());
-
-    for inferred_type in inferred_types {
-        let resolved_type = inference_state
-            .resolve(inferred_type.clone())
-            .unwrap_or_else(|error| {
-                panic!("inference result should resolve for rendering: {error:?}")
-            });
-        let mut renderer = SimpleTypeRenderer::new(lowering_context.interner());
-        lines.push(renderer.render(&resolved_type));
-    }
-
-    lines.join("\n")
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProgressiveRenderMode {
-    BindingsOnly,
-    BindingsAndResults,
-}
-
-fn render_progressive(source: &str, mode: ProgressiveRenderMode) -> Result<String, InferenceError> {
-    let mut parser = new_parser();
-    let tree = parse_source(&mut parser, source);
-
-    let mut lowering_context = LoweringContext::new();
-    let module = lowering_context.lower_tree(&tree, source);
-
-    let mut inference_state = InferenceState::new();
-    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
-
-    let mut lines = Vec::new();
-
-    for expression_id in &module.expressions {
-        let expression = module.arena.get(*expression_id);
-        let inferred_type = inference_state.infer_expression(expression, &module.arena)?;
-
-        match &expression.kind {
-            ExpressionKind::Assign { target, .. } => {
-                let name = lowering_context
-                    .interner()
-                    .resolve(*target)
-                    .unwrap_or("<unknown>");
-                let binding = inference_state.lookup_name(*target).unwrap_or_else(|| {
-                    panic!("binding `{name}` should be present after inference")
-                });
-                let mut renderer = SimpleTypeRenderer::new(lowering_context.interner());
-                lines.push(format!(
-                    "{name}: {}",
-                    renderer.render_type_scheme(&binding.type_scheme)
-                ));
-            }
-            _ if matches!(mode, ProgressiveRenderMode::BindingsAndResults) => {
-                let resolved_type = inference_state.resolve(inferred_type)?;
-                let mut renderer = SimpleTypeRenderer::new(lowering_context.interner());
-                lines.push(renderer.render(&resolved_type));
-            }
-            _ => {}
-        }
-    }
-
-    Ok(lines.join("\n"))
-}
-
-fn render_expression_error_kind(error: &InferenceError) -> &'static str {
-    match error {
-        InferenceError::UnknownInferenceVariable(_) => "error: unknown inference variable",
-        InferenceError::UnknownName { .. } => "error: unknown name",
-        InferenceError::ExpectedFunction { .. } => "error: expected function",
-        InferenceError::OccursCheckFailed { .. } => "error: occurs check failed",
-        InferenceError::TypeMismatch { .. } => "error: type mismatch",
-        InferenceError::InvalidPlusOperand { .. } => "error: invalid plus operand",
-        InferenceError::TupleLengthMismatch { .. } => "error: tuple length mismatch",
-        InferenceError::MixedListElements { .. } => "error: mixed list elements",
-        InferenceError::RecordFieldMismatch { .. } => "error: record field mismatch",
-        InferenceError::FunctionArityMismatch { .. } => "error: function arity mismatch",
-        InferenceError::NamedParameterMismatch { .. } => "error: named parameter mismatch",
-    }
-}
-
-struct SimpleTypeRenderer<'a> {
-    interner: &'a Interner,
-    variable_names: std::collections::BTreeMap<InferenceVariableId, String>,
-    quantified_variable_names: std::collections::BTreeMap<InferenceVariableId, String>,
-    next_variable_index: usize,
-}
-
-impl<'a> SimpleTypeRenderer<'a> {
-    fn new(interner: &'a Interner) -> Self {
-        Self {
-            interner,
-            variable_names: std::collections::BTreeMap::new(),
-            quantified_variable_names: std::collections::BTreeMap::new(),
-            next_variable_index: 0,
-        }
-    }
-
-    fn render_type_scheme(&mut self, type_scheme: &TypeScheme) -> String {
-        let quantified_names = type_scheme
-            .quantified_variables
-            .iter()
-            .enumerate()
-            .map(|(index, variable)| {
-                let name = quantified_variable_name(index);
-                self.quantified_variable_names
-                    .insert(*variable, name.clone());
-                name
-            })
-            .collect::<Vec<_>>();
-        let rendered_body = self.render(&type_scheme.body);
-
-        if quantified_names.is_empty() {
-            rendered_body
-        } else {
-            format!("<{}> {}", quantified_names.join(", "), rendered_body)
-        }
-    }
-
-    fn render(&mut self, core_type: &CoreType) -> String {
-        match core_type {
-            CoreType::Any => "Any".to_owned(),
-            CoreType::Unknown => "Unknown".to_owned(),
-            CoreType::Null => "NULL".to_owned(),
-            CoreType::Nullable(inner_type) => format!("{} | NULL", self.render(inner_type)),
-            CoreType::Scalar(atomic) => render_atomic(*atomic).to_owned(),
-            CoreType::Vector(atomic) => format!("{}[]", render_atomic(*atomic)),
-            CoreType::NamedVector(atomic) => format!("{}[named]", render_atomic(*atomic)),
-            CoreType::List(item_type) => format!("list[{}]", self.render(item_type)),
-            CoreType::NamedList(item_type) => format!("list[named: {}]", self.render(item_type)),
-            CoreType::Record(fields) => {
-                let rendered_fields = fields
-                    .iter()
-                    .map(|field| {
-                        let name = self.interner.resolve(field.name).unwrap_or("<unknown>");
-                        format!("{name}: {}", self.render(&field.value))
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("list{{{rendered_fields}}}")
-            }
-            CoreType::Tuple(items) => {
-                let rendered_items = items
-                    .iter()
-                    .map(|item| self.render(item))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("list{{{rendered_items}}}")
-            }
-            CoreType::Function(function_type) => {
-                let rendered_parameters = function_type
-                    .parameters
-                    .iter()
-                    .map(|parameter| self.render(parameter))
-                    .collect::<Vec<_>>();
-                let rendered_named_parameters = function_type
-                    .named_parameters
-                    .iter()
-                    .map(|parameter| {
-                        let name = self.interner.resolve(parameter.name).unwrap_or("<unknown>");
-                        let rendered_name = if parameter.optional {
-                            format!("[{name}]")
-                        } else {
-                            name.to_owned()
-                        };
-                        format!("{rendered_name}: {}", self.render(&parameter.value))
-                    })
-                    .collect::<Vec<_>>();
-                let mut rendered_parts = rendered_parameters;
-                rendered_parts.extend(rendered_named_parameters);
-                format!(
-                    "fn({}) -> {}",
-                    rendered_parts.join(", "),
-                    self.render(&function_type.return_type)
-                )
-            }
-            CoreType::Variable(variable) => self.render_variable(*variable),
-        }
-    }
-
-    fn render_variable(&mut self, variable: InferenceVariableId) -> String {
-        if let Some(name) = self.quantified_variable_names.get(&variable) {
-            return name.clone();
-        }
-
-        if !self.variable_names.contains_key(&variable) {
-            let name = format!("?{}", self.next_variable_index + 1);
-            self.next_variable_index += 1;
-            self.variable_names.insert(variable, name);
-        }
-
-        self.variable_names
-            .get(&variable)
-            .cloned()
-            .unwrap_or_else(|| "?".to_owned())
-    }
-}
-
-fn render_atomic(atomic: Atomic) -> &'static str {
-    match atomic {
-        Atomic::Logical => "logical",
-        Atomic::Integer => "integer",
-        Atomic::Double => "double",
-        Atomic::Complex => "complex",
-        Atomic::Character => "character",
-        Atomic::Raw => "raw",
-    }
-}
-
-fn quantified_variable_name(index: usize) -> String {
-    const QUANTIFIED_NAMES: [&str; 7] = ["T", "U", "V", "W", "X", "Y", "Z"];
-
-    QUANTIFIED_NAMES
-        .get(index)
-        .map(|name| (*name).to_owned())
-        .unwrap_or_else(|| format!("T{}", index + 1))
-}
-
-fn render_named_module(
-    module: &typing::Module,
-    naming_result: &NamingResult,
-    interner: &Interner,
-) -> String {
-    let mut lines = Vec::new();
-
-    for definition in &module.definitions {
-        render_named_definition(definition, interner, 0, &mut lines);
-    }
-    for expression_id in &module.expressions {
-        render_named_expression(
-            &module.arena,
-            *expression_id,
-            naming_result,
-            interner,
-            0,
-            &mut lines,
-        );
-    }
-
-    lines.join("\n")
-}
-
-fn render_named_definition(
-    definition_item: &DefinitionItem,
-    interner: &Interner,
-    indent: usize,
-    lines: &mut Vec<String>,
-) {
-    let prefix = "  ".repeat(indent);
-    let definition = &definition_item.definition;
-    let rendered_name = interner.resolve(definition.name).unwrap_or("<unknown>");
-    let rendered_parameters = if definition.type_parameters.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "<{}>",
-            definition
-                .type_parameters
-                .iter()
-                .map(|parameter| interner
-                    .resolve(*parameter)
-                    .unwrap_or("<unknown>")
-                    .to_owned())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    };
-    let label = match definition.kind {
-        DefinitionKind::Type => "TypeDefinition",
-        DefinitionKind::Alias => "TypeAlias",
-    };
-    lines.push(format!(
-        "{prefix}{label}({rendered_name}{rendered_parameters} = {})",
-        render_surface_type(&definition.surface_type, interner)
-    ));
-}
-
-fn render_named_expression(
-    arena: &HirArena,
-    expression_id: ExpressionId,
-    naming_result: &NamingResult,
-    interner: &Interner,
-    indent: usize,
-    lines: &mut Vec<String>,
-) {
-    let expression = arena.get(expression_id);
-    let prefix = "  ".repeat(indent);
-
-    match &expression.kind {
-        ExpressionKind::Null => lines.push(format!("{prefix}Null")),
-        ExpressionKind::Logical(value) => lines.push(format!("{prefix}Logical({value})")),
-        ExpressionKind::Integer(value) => lines.push(format!("{prefix}Integer({value})")),
-        ExpressionKind::Double(value) => lines.push(format!("{prefix}Double({value})")),
-        ExpressionKind::Character(value) => lines.push(format!("{prefix}Character({value:?})")),
-        ExpressionKind::StringLiteralName(symbol) => {
-            let name = interner.resolve(*symbol).unwrap_or("<unknown>");
-            lines.push(format!("{prefix}StringLiteralName({name:?})"));
-        }
-        ExpressionKind::Symbol(symbol) => {
-            let name = interner.resolve(*symbol).unwrap_or("<unknown>");
-            let binding = naming_result
-                .resolutions
-                .get(&expression_id)
-                .map(|binding_id| binding_label(*binding_id))
-                .unwrap_or_else(|| "?".to_owned());
-            lines.push(format!("{prefix}Symbol({name}@{binding})"));
-        }
-        ExpressionKind::Block { expressions, .. } => {
-            lines.push(format!("{prefix}Block"));
-            for nested_expression in expressions {
-                render_named_expression(
-                    arena,
-                    *nested_expression,
-                    naming_result,
-                    interner,
-                    indent + 1,
-                    lines,
-                );
-            }
-        }
-        ExpressionKind::Assign { target, value, .. } => {
-            let name = interner.resolve(*target).unwrap_or("<unknown>");
-            let binding = naming_result
-                .resolutions
-                .get(&expression_id)
-                .map(|binding_id| binding_label(*binding_id))
-                .unwrap_or_else(|| "?".to_owned());
-            lines.push(format!("{prefix}Assign({name}@{binding})"));
-            render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
-        }
-        ExpressionKind::Function { parameters, body } => {
-            let rendered_parameters = parameters
-                .iter()
-                .map(|parameter| {
-                    let name = interner.resolve(parameter.symbol).unwrap_or("<unknown>");
-                    let binding = find_binding_by_symbol_and_range(
-                        naming_result,
-                        parameter.symbol,
-                        parameter.range,
-                    )
-                    .map(|binding_id| binding_label(binding_id))
-                    .unwrap_or_else(|| "?".to_owned());
-                    format!("{name}@{binding}")
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            lines.push(format!("{prefix}Function({rendered_parameters})"));
-            render_named_expression(arena, *body, naming_result, interner, indent + 1, lines);
-        }
-        ExpressionKind::If {
-            condition,
-            consequence,
-            alternative,
-        } => {
-            lines.push(format!("{prefix}If"));
-            render_named_expression(
-                arena,
-                *condition,
-                naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
-            render_named_expression(
-                arena,
-                *consequence,
-                naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
-            if let Some(alternative) = alternative {
-                render_named_expression(
-                    arena,
-                    *alternative,
-                    naming_result,
-                    interner,
-                    indent + 1,
-                    lines,
-                );
-            }
-        }
-        ExpressionKind::For {
-            variable,
-            sequence,
-            body,
-        } => {
-            let name = interner.resolve(*variable).unwrap_or("<unknown>");
-            let binding =
-                find_binding_by_symbol_and_range(naming_result, *variable, expression.range)
-                    .map(|binding_id| binding_label(binding_id))
-                    .unwrap_or_else(|| "?".to_owned());
-            lines.push(format!("{prefix}For({name}@{binding})"));
-            render_named_expression(arena, *sequence, naming_result, interner, indent + 1, lines);
-            render_named_expression(arena, *body, naming_result, interner, indent + 1, lines);
-        }
-        ExpressionKind::While { condition, body } => {
-            lines.push(format!("{prefix}While"));
-            render_named_expression(
-                arena,
-                *condition,
-                naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
-            render_named_expression(arena, *body, naming_result, interner, indent + 1, lines);
-        }
-        ExpressionKind::Repeat { body } => {
-            lines.push(format!("{prefix}Repeat"));
-            render_named_expression(arena, *body, naming_result, interner, indent + 1, lines);
-        }
-        ExpressionKind::UnaryMinus { value } => {
-            lines.push(format!("{prefix}UnaryMinus"));
-            render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
-        }
-        ExpressionKind::Call { callee, arguments } => {
-            lines.push(format!("{prefix}Call"));
-            render_named_expression(arena, *callee, naming_result, interner, indent + 1, lines);
-            for argument in arguments {
-                let argument_prefix = "  ".repeat(indent + 1);
-                if let Some(name) = argument.name {
-                    let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
-                    lines.push(format!("{argument_prefix}Argument({rendered_name})"));
-                } else {
-                    lines.push(format!("{argument_prefix}Argument"));
-                }
-                render_named_expression(
-                    arena,
-                    argument.expression,
-                    naming_result,
-                    interner,
-                    indent + 2,
-                    lines,
-                );
-            }
-        }
-        ExpressionKind::Subset { value, arguments } => {
-            lines.push(format!("{prefix}Subset"));
-            render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
-            for argument in arguments {
-                let argument_prefix = "  ".repeat(indent + 1);
-                if let Some(name) = argument.name {
-                    let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
-                    lines.push(format!("{argument_prefix}Argument({rendered_name})"));
-                } else {
-                    lines.push(format!("{argument_prefix}Argument"));
-                }
-                render_named_expression(
-                    arena,
-                    argument.expression,
-                    naming_result,
-                    interner,
-                    indent + 2,
-                    lines,
-                );
-            }
-        }
-        ExpressionKind::Subset2 { value, arguments } => {
-            lines.push(format!("{prefix}Subset2"));
-            render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
-            for argument in arguments {
-                let argument_prefix = "  ".repeat(indent + 1);
-                if let Some(name) = argument.name {
-                    let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
-                    lines.push(format!("{argument_prefix}Argument({rendered_name})"));
-                } else {
-                    lines.push(format!("{argument_prefix}Argument"));
-                }
-                render_named_expression(
-                    arena,
-                    argument.expression,
-                    naming_result,
-                    interner,
-                    indent + 2,
-                    lines,
-                );
-            }
-        }
-        ExpressionKind::Dollar { value, name } => {
-            let rendered_name = interner.resolve(*name).unwrap_or("<unknown>");
-            lines.push(format!("{prefix}Dollar({rendered_name})"));
-            render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
-        }
-        ExpressionKind::Unsupported => lines.push(format!("{prefix}Unsupported")),
-    }
-}
-
-fn binding_label(binding_id: BindingId) -> String {
-    format!("b{}", binding_id.0)
-}
-
-fn find_binding_by_symbol_and_range(
-    naming_result: &NamingResult,
-    symbol: typing::Symbol,
-    range: tree_sitter::Range,
-) -> Option<BindingId> {
-    naming_result
-        .bindings
-        .values()
-        .find(|binding| binding.symbol == symbol && binding.range == range)
-        .map(|binding| binding.id)
-}
-
-fn render_interface_snapshot(
-    module: &typing::Module,
-    inference_state: &InferenceState,
-    lowering_context: &LoweringContext,
-) -> String {
-    let mut exported_entries = Vec::<(usize, typing::Symbol, String)>::new();
-
-    for (index, definition_item) in module.definitions.iter().enumerate() {
-        let definition = &definition_item.definition;
-        let rendered_name = lowering_context
-            .interner()
-            .resolve(definition.name)
-            .unwrap_or("<unknown>");
-        let rendered_parameters = if definition.type_parameters.is_empty() {
-            String::new()
-        } else {
-            format!(
-                "<{}>",
-                definition
-                    .type_parameters
-                    .iter()
-                    .map(|parameter| {
-                        lowering_context
-                            .interner()
-                            .resolve(*parameter)
-                            .unwrap_or("<unknown>")
-                            .to_owned()
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        };
-        let label = match definition.kind {
-            DefinitionKind::Type => "type",
-            DefinitionKind::Alias => "alias",
-        };
-        exported_entries.push((
-            index,
-            definition.name,
-            format!(
-                "{label} {rendered_name}{rendered_parameters} = {}",
-                render_surface_type(&definition.surface_type, lowering_context.interner())
-            ),
-        ));
-    }
-
-    let definition_count = module.definitions.len();
-    for (expression_index, expression_id) in module.expressions.iter().enumerate() {
-        let expression = module.arena.get(*expression_id);
-        if let ExpressionKind::Assign { target, .. } = &expression.kind {
-            let name = lowering_context
-                .interner()
-                .resolve(*target)
-                .unwrap_or("<unknown>");
-            let binding = inference_state
-                .lookup_name(*target)
-                .unwrap_or_else(|| panic!("binding `{name}` should be present after inference"));
-            let mut renderer = SimpleTypeRenderer::new(lowering_context.interner());
-            exported_entries.push((
-                definition_count + expression_index,
-                *target,
-                format!(
-                    "{name}: {}",
-                    renderer.render_type_scheme(&binding.type_scheme)
-                ),
-            ));
-        }
-    }
-
-    let mut final_entries = std::collections::BTreeMap::new();
-    for (index, symbol, rendered_entry) in exported_entries {
-        final_entries.insert(symbol, (index, rendered_entry));
-    }
-
-    let mut ordered_entries = final_entries.into_values().collect::<Vec<_>>();
-    ordered_entries.sort_by_key(|(index, _)| *index);
-    ordered_entries
-        .into_iter()
-        .map(|(_, rendered_entry)| rendered_entry)
-        .collect::<Vec<_>>()
-        .join("\n")
 }

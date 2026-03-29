@@ -104,7 +104,9 @@ Rules:
 
 The parser now understands all three fixture shapes.
 
-The current typing fixture runner still executes only `Simple` cases. Treat `MultiFile` and `Generational` as parser-level support that is waiting on renderer-side adoption in `typing`.
+The `naming` fixture runner executes `Simple` and `MultiFile` cases.
+The other typing fixture runners still execute only `Simple` cases.
+Treat `Generational` and the remaining multi-file suite support as parser-level functionality that is still waiting on renderer-side adoption in `typing`.
 
 ### File loading
 
@@ -134,7 +136,7 @@ Planned architecture:
 Run one focused fixture case with:
 
 ```sh
-TYPING_FILTER=group__case cargo test -p typing --test test_fixtures <suite> -- --nocapture
+FIXTURE_FILTER=group__case cargo test -p typing --test test_fixtures <suite> -- --nocapture
 ```
 
 Default crate test command:

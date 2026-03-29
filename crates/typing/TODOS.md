@@ -85,3 +85,10 @@ This document tracks actionable planned work for the `typing` crate.
   - Later incremental package-recheck behavior will also need generation-based fixture cases.
   - Reusing the existing incremental tree update path matters for correctness and for later benchmarking of incremental typing.
   - Once the harness gains its own language, it needs direct parser and harness tests so syntax or project-state changes do not silently break the suite.
+
+### Project Analysis State
+
+- Detailed plan: `projects/001_project_analysis_state.md`
+- Introduce a project-level analysis state for lowering and naming.
+- Make fixture tests use normal typing-crate phase APIs instead of fixture-harness-specific multi-file assembly.
+- Keep the design incremental-friendly by separating `Workspace` from durable semantic caches.

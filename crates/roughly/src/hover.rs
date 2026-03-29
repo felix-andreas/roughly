@@ -121,7 +121,7 @@ fn literal_markdown(document: &Document, node: Node, debug: bool) -> String {
         "{}\n\n---\n\nvalue of literal{}: ` {} `",
         fenced_block("r", &literal_source),
         if literal_truncated.len() != literal_source.len() {
-            "(truncated up to newline):"
+            " (truncated up to newline)"
         } else {
             ""
         },

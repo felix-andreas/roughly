@@ -8,7 +8,7 @@ where
     RunFixture: FnMut(&Fixture) -> Result<String, String>,
 {
     let groups = read_fixture_suite(directory_path, kind);
-    let maybe_filter = std::env::var("TYPING_FILTER").ok();
+    let maybe_filter = std::env::var("FIXTURE_FILTER").ok();
     let mut snapshot_names = BTreeSet::new();
     let mut failures = Vec::new();
     let mut executed_fixture_count = 0;
@@ -73,14 +73,26 @@ where
     eprintln!("{} {kind} fixture(s) passed", executed_fixture_count);
 }
 
-fn expected_output(fixture: &Fixture) -> Result<&str, String> {
+fn expected_output(fixture: &Fixture) -> Result<String, String> {
     match &fixture.kind {
-        crate::FixtureKind::Simple(case) => Ok(&case.expected),
-        crate::FixtureKind::MultiFile(_) => Err("multi-file cases are not supported".to_owned()),
+        crate::FixtureKind::Simple(case) => Ok(case.expected.clone()),
+        crate::FixtureKind::MultiFile(case) => {
+            Ok(render_multi_file_output(case.expectations.iter().map(
+                |expectation| (expectation.path.as_path(), expectation.expected.as_str()),
+            )))
+        }
         crate::FixtureKind::Generational(_) => {
             Err("generation-based multi-file cases are not supported".to_owned())
         }
     }
+}
+
+fn render_multi_file_output<'a>(entries: impl IntoIterator<Item = (&'a Path, &'a str)>) -> String {
+    entries
+        .into_iter()
+        .map(|(path, expected)| format!("== {} ==\n{}", path.display(), expected.trim_end()))
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 pub fn read_fixture_suite(directory_path: &str, kind: &str) -> Vec<FixtureGroup> {
