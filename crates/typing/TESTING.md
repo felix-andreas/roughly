@@ -21,6 +21,16 @@ The `fixtures` crate currently parses three fixture shapes:
 - `MultiFile`
 - `Generational`
 
+All typing fixture runners should normalize their results to one shared output shape:
+
+```rust
+Result<Vec<FixtureOutput>, String>
+```
+
+Where each `FixtureOutput` is one snapshot and each snapshot contains per-file rendered outputs by
+path. `Err(...)` is for runner failure only. Phase failures should still be rendered into normal
+fixture output.
+
 ### `Simple`
 
 Use `Simple` when one case has one implicit main input document and one expected output.
@@ -39,6 +49,7 @@ Rules:
 - `group__case` is the stable test identity
 - `group__case` names must be unique across the suite
 - suite-specific behavior belongs in the suite runner, not in fixture syntax
+- the runner still returns the shared structured output shape, even for `Simple`
 
 For `type_syntax`, invalid cases use the same `Simple` shape as valid cases. Put the actual type-syntax source in the input block and snapshot the rendered parse error in `#++++`. Do not prefix invalid inputs with `error:`.
 
@@ -51,19 +62,19 @@ Use `MultiFile` when one case has multiple whole-file inputs and per-file expect
 #---- case_name
 #---- a.R
 <file contents>
+#++++
+<expected rendered output for a.R>
 #---- b.R
 <file contents>
-#++++ a.R
-<expected rendered output for a.R>
-#++++ b.R
+#++++
 <expected rendered output for b.R>
 ```
 
 Rules:
 
-- every `#---- path` entry before the first `#++++` is a whole-file input
-- every `#++++ path` entry is a per-file expectation
+- each `#---- path` input block is followed immediately by either `#++++` or `#++++ any`
 - `MultiFile` does not use `edit`, `move`, `delete`, or explicit expectation clearing
+- actual outputs are compared by path, not by pre-joined `== path ==` text
 
 ### `Generational`
 
@@ -75,30 +86,35 @@ Use `Generational` when a case needs grouped workspace edits across later genera
 #.... v1
 #---- a.R
 <file contents>
+#++++
+<expected rendered output for a.R>
 #---- b.R
 <file contents>
-#++++ a.R
-<expected rendered output for a.R>
-#++++ b.R
+#++++
 <expected rendered output for b.R>
 #.... v2
 #---- edit a.R 3:1-3:4 -> "foo"
-#---- move b.R -> c.R
-#---- delete d.R
-#++++ a.R
+#++++
 <expected rendered output for a.R>
-#++++ none c.R
+#---- move b.R -> c.R
+#++++ any
+#---- delete d.R
 ```
 
 Rules:
 
 - each `#.... vN` block describes one grouped workspace edit step
-- all `#----` entries in a generation come before any `#++++` expectations for that generation
+- each input or operation block is followed immediately by any expectation update for that path
 - bare filenames such as `#---- a.R` mean whole-file contents for that generation
 - `edit`, `move`, and `delete` are first-class workspace document operations
-- `#++++ none path` explicitly clears a carried expectation for that document
-- one fixture case may describe package documents, auxiliary documents, and standalone documents
-- if a document already has an expectation from an earlier generation, that expectation carries forward until replaced or explicitly cleared
+- expectations carry forward by path from one generation to the next unless replaced
+- if a checked path is missing an expectation in the first generation, that is an error
+- `#++++ any` means the immediately preceding file or operation is expected, but its contents are
+  not asserted
+- deleting a document means later generations should not produce output for that path unless the
+  file is reintroduced
+- moving a document carries the expectation from the source path to the destination path
+- extra actual outputs beyond the expected paths are an error
 
 ### Current migration status
 
@@ -111,25 +127,6 @@ Treat `Generational` and the remaining multi-file suite support as parser-level 
 ### File loading
 
 The fixture runner only loads files with the `.test` extension, so suite-local `README.md` files are ignored by the runner.
-
-### Historical simple example
-
-Every `.test` file may still use the original simple shape:
-
-```text
-#==== group_name
-#---- case_name
-<input source>
-#++++
-<expected rendered output>
-```
-
-Planned architecture:
-
-- the reusable `workspace` crate owns workspace/package/document state and incremental parsing
-- the separate `fixtures` crate parses this fixture language
-- the testing framework may combine parsed fixture data with `workspace` document state
-- `typing` should not own a second workspace/document engine inside the fixture harness
 
 ## Focused runs
 

@@ -9,20 +9,21 @@ use {
         text,
         type_syntax::{TypeParseError, TypeSyntax, parse_type_syntax},
         types::{Annotation, AttachedAnnotation},
+        workspace::Document,
     },
     ropey::Rope,
-    tree_sitter::{Node, Range, Tree},
+    tree_sitter::{Node, Range},
 };
 
 #[derive(Debug, Default)]
 pub struct LoweringContext {
-    pub arena: HirArena,
-    pub diagnostics: Vec<Diagnostic>,
+    arena: HirArena,
+    diagnostics: Vec<Diagnostic>,
     interner: Interner,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoweringResult {
+pub(crate) struct LoweringResult {
     pub module: Module,
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -48,6 +49,10 @@ impl LoweringContext {
         &mut self.interner
     }
 
+    pub fn take_diagnostics(&mut self) -> Vec<Diagnostic> {
+        std::mem::take(&mut self.diagnostics)
+    }
+
     pub fn expression(&mut self, range: Range, kind: ExpressionKind) -> ExpressionId {
         self.annotated_expression(range, None, kind)
     }
@@ -62,84 +67,34 @@ impl LoweringContext {
         let expr = Expression::new(ExpressionId(0), range, annotation, kind);
         self.arena.alloc(expr)
     }
-
-    pub fn lower_tree(&mut self, tree: &Tree, source: &str) -> Module {
-        lower_tree(tree, source, self)
-    }
-
-    pub fn lower_tree_with_diagnostics(&mut self, tree: &Tree, source: &str) -> LoweringResult {
-        lower_tree_with_diagnostics(tree, source, self)
-    }
-
-    pub fn lower_root_with_rope(&mut self, root: Node<'_>, rope: &Rope) -> Module {
-        lower_root_with_rope(root, rope, self)
-    }
-
-    pub fn lower_root_with_rope_with_diagnostics(
-        &mut self,
-        root: Node<'_>,
-        rope: &Rope,
-    ) -> LoweringResult {
-        lower_root_with_rope_with_diagnostics(root, rope, self)
-    }
-
-    pub fn lower_node(&mut self, node: Node<'_>, source: &str) -> ExpressionId {
-        lower_node(node, source, self)
-    }
-
-    pub fn lower_node_with_rope(&mut self, node: Node<'_>, rope: &Rope) -> ExpressionId {
-        lower_node_with_rope(node, rope, self)
-    }
 }
 
-pub fn lower_tree(tree: &Tree, source: &str, lowering_context: &mut LoweringContext) -> Module {
-    lower_tree_with_diagnostics(tree, source, lowering_context).module
-}
+pub fn lower(document: &Document, lowering_context: &mut LoweringContext) -> Module {
+    lowering_context.arena = HirArena::new();
+    lowering_context.diagnostics.clear();
 
-pub fn lower_tree_with_diagnostics(
-    tree: &Tree,
-    source: &str,
-    lowering_context: &mut LoweringContext,
-) -> LoweringResult {
-    let root = tree.root_node();
-    let rope = Rope::from_str(source);
-    lower_root_with_rope_with_diagnostics(root, &rope, lowering_context)
-}
-
-pub fn lower_root_with_rope(
-    root: Node<'_>,
-    rope: &Rope,
-    lowering_context: &mut LoweringContext,
-) -> Module {
-    lower_root_with_rope_with_diagnostics(root, rope, lowering_context).module
-}
-
-pub fn lower_root_with_rope_with_diagnostics(
-    root: Node<'_>,
-    rope: &Rope,
-    lowering_context: &mut LoweringContext,
-) -> LoweringResult {
+    let root = document.tree().root_node();
+    let rope = document.rope();
     let (definitions, expressions) = lower_module(root, rope, lowering_context);
 
     let arena = std::mem::take(&mut lowering_context.arena);
-    let diagnostics = std::mem::take(&mut lowering_context.diagnostics);
+    Module::new(arena, definitions, expressions)
+}
+
+pub(crate) fn lower_with_diagnostics(
+    document: &Document,
+    lowering_context: &mut LoweringContext,
+) -> LoweringResult {
+    let module = lower(document, lowering_context);
+    let diagnostics = lowering_context.take_diagnostics();
 
     LoweringResult {
-        module: Module::new(arena, definitions, expressions),
+        module,
         diagnostics,
     }
 }
 
-pub fn lower_node(
-    node: Node<'_>,
-    source: &str,
-    lowering_context: &mut LoweringContext,
-) -> ExpressionId {
-    let rope = Rope::from_str(source);
-    lower_node_with_rope(node, &rope, lowering_context)
-}
-
-pub fn lower_node_with_rope(
+fn lower_node_with_rope(
     node: Node<'_>,
     rope: &Rope,
     lowering_context: &mut LoweringContext,

@@ -1,14 +1,11 @@
-use {
-    std::path::PathBuf,
-    typing::{
-        Diagnostic, Interner,
-        hir::{DefinitionItem, DefinitionKind, ExpressionId, ExpressionKind, HirArena},
-        lower::LoweringContext,
-        naming::{BindingId, NamingResult},
-        type_syntax::render_surface_type,
-        typecheck::{InferenceError, InferenceState},
-        types::{Atomic, CoreType, InferenceVariableId, TypeScheme},
-    },
+use typing::{
+    Diagnostic, Interner,
+    hir::{DefinitionItem, DefinitionKind, ExpressionId, ExpressionKind, HirArena},
+    lower::LoweringContext,
+    naming::{BindingId, NamingResult},
+    type_syntax::render_surface_type,
+    typecheck::{InferenceError, InferenceState},
+    types::{Atomic, CoreType, InferenceVariableId, TypeScheme},
 };
 
 pub fn render_diagnostics(source: &str, diagnostics: &[Diagnostic]) -> String {
@@ -155,28 +152,6 @@ pub fn render_interface_snapshot(
         .map(|(_, rendered_entry)| rendered_entry)
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-pub fn render_multi_file_output(entries: &[(PathBuf, String)]) -> String {
-    entries
-        .iter()
-        .map(|(path, rendered)| format!("== {} ==\n{}", path.display(), rendered.trim_end()))
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
-pub fn render_named_module(
-    module: &typing::Module,
-    naming_result: &NamingResult,
-    interner: &Interner,
-) -> String {
-    render_named_hir(
-        &module.arena,
-        &module.definitions,
-        &module.expressions,
-        naming_result,
-        interner,
-    )
 }
 
 pub fn render_named_hir(

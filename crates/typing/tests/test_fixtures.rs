@@ -1,22 +1,20 @@
 #[path = "fixture_renderers.rs"]
 mod fixture_renderers;
-#[path = "fixture_workspace.rs"]
-mod fixture_workspace;
 
 use {
     fixture_renderers::{
         render_core_type, render_diagnostics, render_expression_error_kind,
-        render_expression_types, render_interface_snapshot, render_multi_file_output,
-        render_named_hir, render_named_module, render_type_scheme,
+        render_expression_types, render_interface_snapshot, render_named_hir, render_type_scheme,
     },
-    fixture_workspace::{simple_fixture_source, with_fixture_document, with_fixture_documents},
-    fixtures::{Fixture, FixtureKind, run_fixture_suite},
-    std::{collections::BTreeMap, mem, path::PathBuf},
+    fixtures::{
+        Fixture, FixtureInputFile, FixtureKind, FixtureOutput, FixtureRunFile, run_fixture_suite,
+    },
+    std::path::{Path, PathBuf},
     typing::{
         AnalysisState, Interner,
-        hir::{DefinitionId, DefinitionItem, ExpressionId, ExpressionKind, HirArena},
-        lower::LoweringContext,
-        naming::NamingContext,
+        hir::ExpressionKind,
+        lower::{self, LoweringContext},
+        run_lowering_and_naming,
         type_syntax::{parse_type_syntax, render_type_syntax},
         typecheck::{BuiltinKind, InferenceState},
     },
@@ -94,15 +92,73 @@ fn unification() {
     run_fixture_suite("tests/unification", "unification", run_unification_fixture);
 }
 
-fn run_bindings_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = simple_fixture_source(fixture)?;
+fn workspace_for_fixture(
+    fixture: &Fixture,
+    use_package_documents: bool,
+) -> Result<typing::Workspace, String> {
+    const SINGLE_FILE_PHASE_DOCUMENT_PATH: &str = "/single_file_phase_fixture.R";
+    const PACKAGE_PHASE_PATH: &str = "/package_phase_fixture";
+    const PACKAGE_PHASE_DOCUMENT_PATH: &str = "/package_phase_fixture.R";
+
+    let input_files = match &fixture.kind {
+        FixtureKind::Simple(case) => vec![FixtureInputFile {
+            path: PathBuf::from(if use_package_documents {
+                PACKAGE_PHASE_DOCUMENT_PATH
+            } else {
+                SINGLE_FILE_PHASE_DOCUMENT_PATH
+            }),
+            contents: case.input.clone(),
+        }],
+        FixtureKind::MultiFile(case) => case.input_files.clone(),
+        _ => return Err("unsupported fixture".to_owned()),
+    };
+
+    let mut workspace = typing::Workspace::new().map_err(|_| "workspace".to_owned())?;
+    if use_package_documents {
+        workspace
+            .insert_package(PathBuf::from(PACKAGE_PHASE_PATH))
+            .map_err(|_| "workspace".to_owned())?;
+    }
+
+    for input_file in &input_files {
+        let result = if use_package_documents {
+            workspace.insert_package_document(
+                Path::new(PACKAGE_PHASE_PATH),
+                input_file.path.clone(),
+                &input_file.contents,
+            )
+        } else {
+            workspace.insert_workspace_script(input_file.path.clone(), &input_file.contents)
+        };
+        result.map_err(|_| "workspace".to_owned())?;
+    }
+
+    Ok(workspace)
+}
+
+fn document_for_fixture(fixture: &Fixture) -> Result<typing::Document, String> {
+    let workspace = workspace_for_fixture(fixture, false)?;
+    workspace
+        .document(Path::new("/single_file_phase_fixture.R"))
+        .cloned()
+        .ok_or_else(|| "workspace".to_owned())
+}
+
+fn package_for_fixture(fixture: &Fixture) -> Result<typing::Package, String> {
+    let workspace = workspace_for_fixture(fixture, true)?;
+    workspace
+        .package(Path::new("/package_phase_fixture"))
+        .cloned()
+        .ok_or_else(|| "workspace".to_owned())
+}
+
+fn run_bindings_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
+    let FixtureKind::Simple(_case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+    let document = document_for_fixture(fixture)?;
     let mut lowering_context = LoweringContext::new();
-    let module = with_fixture_document(source, |document| {
-        lowering_context.lower_root_with_rope(
-            document.document().tree().root_node(),
-            document.document().rope(),
-        )
-    })?;
+    let module = lower::lower(&document, &mut lowering_context);
     let mut inference_state = InferenceState::new();
     bind_fixture_builtins(&mut inference_state, &mut lowering_context);
     let mut lines = Vec::new();
@@ -128,32 +184,28 @@ fn run_bindings_fixture(fixture: &Fixture) -> Result<String, String> {
         }
     }
 
-    Ok(lines.join("\n"))
+    Ok(single_snapshot_output(&fixture.name, lines.join("\n")))
 }
 
-fn run_diagnostics_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = simple_fixture_source(fixture)?;
-    let rendered = with_fixture_document(source, |document| {
-        let mut analysis_state = AnalysisState::new();
-        typing::check(
-            document.document().tree().root_node(),
-            document.document().rope(),
-            &mut analysis_state,
-        )
-        .render(source)
-    })?;
-    Ok(rendered)
+fn run_diagnostics_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
+    let FixtureKind::Simple(case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+    let package = package_for_fixture(fixture)?;
+    let mut analysis_state = AnalysisState::new();
+    Ok(single_snapshot_output(
+        &fixture.name,
+        typing::check(&package, &mut analysis_state).render(&case.input),
+    ))
 }
 
-fn run_environment_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = simple_fixture_source(fixture)?;
+fn run_environment_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
+    let FixtureKind::Simple(_case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+    let document = document_for_fixture(fixture)?;
     let mut lowering_context = LoweringContext::new();
-    let module = with_fixture_document(source, |document| {
-        lowering_context.lower_root_with_rope(
-            document.document().tree().root_node(),
-            document.document().rope(),
-        )
-    })?;
+    let module = lower::lower(&document, &mut lowering_context);
     let mut inference_state = InferenceState::new();
     bind_fixture_builtins(&mut inference_state, &mut lowering_context);
     let mut lines = Vec::new();
@@ -190,41 +242,41 @@ fn run_environment_fixture(fixture: &Fixture) -> Result<String, String> {
         }
     }
 
-    Ok(lines.join("\n"))
+    Ok(single_snapshot_output(&fixture.name, lines.join("\n")))
 }
 
-fn run_expressions_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = simple_fixture_source(fixture)?;
+fn run_expressions_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
+    let FixtureKind::Simple(_case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+    let document = document_for_fixture(fixture)?;
     let mut lowering_context = LoweringContext::new();
-    let module = with_fixture_document(source, |document| {
-        lowering_context.lower_root_with_rope(
-            document.document().tree().root_node(),
-            document.document().rope(),
-        )
-    })?;
+    let module = lower::lower(&document, &mut lowering_context);
     let mut inference_state = InferenceState::new();
     bind_fixture_builtins(&mut inference_state, &mut lowering_context);
     let inferred_types = match inference_state.infer_module(&module) {
         Ok(inferred_types) => inferred_types,
-        Err(error) => return Ok(render_expression_error_kind(&error).to_owned()),
+        Err(error) => {
+            return Ok(single_snapshot_output(
+                &fixture.name,
+                render_expression_error_kind(&error).to_owned(),
+            ));
+        }
     };
 
-    Ok(render_expression_types(
-        &mut inference_state,
-        &lowering_context,
-        &inferred_types,
+    Ok(single_snapshot_output(
+        &fixture.name,
+        render_expression_types(&mut inference_state, &lowering_context, &inferred_types),
     ))
 }
 
-fn run_generalization_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = simple_fixture_source(fixture)?;
+fn run_generalization_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
+    let FixtureKind::Simple(_case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+    let document = document_for_fixture(fixture)?;
     let mut lowering_context = LoweringContext::new();
-    let module = with_fixture_document(source, |document| {
-        lowering_context.lower_root_with_rope(
-            document.document().tree().root_node(),
-            document.document().rope(),
-        )
-    })?;
+    let module = lower::lower(&document, &mut lowering_context);
     let mut inference_state = InferenceState::new();
     bind_fixture_builtins(&mut inference_state, &mut lowering_context);
     let mut lines = Vec::new();
@@ -250,18 +302,16 @@ fn run_generalization_fixture(fixture: &Fixture) -> Result<String, String> {
         }
     }
 
-    Ok(lines.join("\n"))
+    Ok(single_snapshot_output(&fixture.name, lines.join("\n")))
 }
 
-fn run_instantiation_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = simple_fixture_source(fixture)?;
+fn run_instantiation_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
+    let FixtureKind::Simple(_case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+    let document = document_for_fixture(fixture)?;
     let mut lowering_context = LoweringContext::new();
-    let module = with_fixture_document(source, |document| {
-        lowering_context.lower_root_with_rope(
-            document.document().tree().root_node(),
-            document.document().rope(),
-        )
-    })?;
+    let module = lower::lower(&document, &mut lowering_context);
     let mut inference_state = InferenceState::new();
     bind_fixture_builtins(&mut inference_state, &mut lowering_context);
     let mut lines = Vec::new();
@@ -298,256 +348,122 @@ fn run_instantiation_fixture(fixture: &Fixture) -> Result<String, String> {
         }
     }
 
-    Ok(lines.join("\n"))
+    Ok(single_snapshot_output(&fixture.name, lines.join("\n")))
 }
 
-fn run_interfaces_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = simple_fixture_source(fixture)?;
+fn run_interfaces_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
+    let FixtureKind::Simple(_case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+    let document = document_for_fixture(fixture)?;
     let mut lowering_context = LoweringContext::new();
-    let module = with_fixture_document(source, |document| {
-        lowering_context.lower_root_with_rope(
-            document.document().tree().root_node(),
-            document.document().rope(),
-        )
-    })?;
+    let module = lower::lower(&document, &mut lowering_context);
     let mut inference_state = InferenceState::new();
     bind_fixture_builtins(&mut inference_state, &mut lowering_context);
 
     if inference_state.infer_module(&module).is_err() {
-        return Ok("error: inference".to_owned());
+        return Ok(single_snapshot_output(
+            &fixture.name,
+            "error: inference".to_owned(),
+        ));
     }
 
-    Ok(render_interface_snapshot(
-        &module,
-        &inference_state,
-        &lowering_context,
+    Ok(single_snapshot_output(
+        &fixture.name,
+        render_interface_snapshot(&module, &inference_state, &lowering_context),
     ))
 }
 
-fn run_lowering_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = simple_fixture_source(fixture)?;
-    let (lowering_context, lowering_result) = with_fixture_document(source, |document| {
-        let mut lowering_context = LoweringContext::new();
-        let lowering_result = lowering_context.lower_root_with_rope_with_diagnostics(
-            document.document().tree().root_node(),
-            document.document().rope(),
-        );
-        (lowering_context, lowering_result)
-    })?;
+fn run_lowering_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
+    let FixtureKind::Simple(case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+    let document = document_for_fixture(fixture)?;
+    let mut lowering_context = LoweringContext::new();
+    let module = lower::lower(&document, &mut lowering_context);
+    let diagnostics = lowering_context.take_diagnostics();
+    let interner = lowering_context.interner().clone();
 
-    if !lowering_result.diagnostics.is_empty() {
-        return Ok(render_diagnostics(source, &lowering_result.diagnostics));
+    if !diagnostics.is_empty() {
+        return Ok(single_snapshot_output(
+            &fixture.name,
+            render_diagnostics(&case.input, &diagnostics),
+        ));
     }
 
-    Ok(lowering_result.module.render(lowering_context.interner()))
+    Ok(single_snapshot_output(
+        &fixture.name,
+        module.render(&interner),
+    ))
 }
 
-fn run_naming_fixture(fixture: &Fixture) -> Result<String, String> {
-    if let FixtureKind::MultiFile(case) = &fixture.kind {
-        let lowered_project = with_fixture_documents(&case.input_files, |workspace| {
-            let mut lowering_context = LoweringContext::new();
-            let mut lowered_files = Vec::with_capacity(case.input_files.len());
+fn run_naming_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
+    let package = package_for_fixture(fixture)?;
+    let mut analysis_state = AnalysisState::new();
+    let package_result = run_lowering_and_naming(&package, &mut analysis_state);
+    let interner = analysis_state.interner().clone();
 
-            for input_file in &case.input_files {
-                let document = workspace
-                    .document(&input_file.path)
-                    .ok_or_else(|| "workspace".to_owned())?;
-                let lowering_result = lowering_context.lower_root_with_rope_with_diagnostics(
-                    document.document().tree().root_node(),
-                    document.document().rope(),
-                );
-                lowered_files.push((
-                    input_file.path.clone(),
-                    lowering_result.module,
-                    lowering_result.diagnostics,
-                ));
-            }
-
-            Ok((mem::take(lowering_context.interner_mut()), lowered_files))
-        })?;
-
-        if lowered_project
-            .1
-            .iter()
-            .any(|(_, _, diagnostics)| !diagnostics.is_empty())
-        {
-            return Err("multi-file lowering".to_owned());
-        }
-
-        let mut arena = HirArena::new();
-        let mut definitions = Vec::new();
-        let mut expressions = Vec::new();
-        let mut files_by_path =
-            BTreeMap::<PathBuf, (Vec<DefinitionItem>, Vec<ExpressionId>)>::new();
-        let mut next_expression_id = 0u32;
-        let mut next_definition_id = 0u32;
-
-        for (path, module, _) in lowered_project.1 {
-            let expression_offset = next_expression_id;
-            let definition_offset = next_definition_id;
-
-            let remapped_arena_expressions = module
-                .arena
-                .expressions()
-                .iter()
-                .cloned()
-                .map(|mut expression| {
-                    expression.id = ExpressionId(expression.id.0 + expression_offset);
-                    match &mut expression.kind {
-                        ExpressionKind::Block { expressions, .. } => {
-                            for expression_id in expressions {
-                                *expression_id = ExpressionId(expression_id.0 + expression_offset);
-                            }
-                        }
-                        ExpressionKind::Assign { value, .. }
-                        | ExpressionKind::UnaryMinus { value }
-                        | ExpressionKind::Dollar { value, .. } => {
-                            *value = ExpressionId(value.0 + expression_offset);
-                        }
-                        ExpressionKind::Function { body, .. } | ExpressionKind::Repeat { body } => {
-                            *body = ExpressionId(body.0 + expression_offset);
-                        }
-                        ExpressionKind::While { condition, body } => {
-                            *condition = ExpressionId(condition.0 + expression_offset);
-                            *body = ExpressionId(body.0 + expression_offset);
-                        }
-                        ExpressionKind::For { sequence, body, .. } => {
-                            *sequence = ExpressionId(sequence.0 + expression_offset);
-                            *body = ExpressionId(body.0 + expression_offset);
-                        }
-                        ExpressionKind::If {
-                            condition,
-                            consequence,
-                            alternative,
-                        } => {
-                            *condition = ExpressionId(condition.0 + expression_offset);
-                            *consequence = ExpressionId(consequence.0 + expression_offset);
-                            if let Some(alternative) = alternative {
-                                *alternative = ExpressionId(alternative.0 + expression_offset);
-                            }
-                        }
-                        ExpressionKind::Call { callee, arguments }
-                        | ExpressionKind::Subset {
-                            value: callee,
-                            arguments,
-                        }
-                        | ExpressionKind::Subset2 {
-                            value: callee,
-                            arguments,
-                        } => {
-                            *callee = ExpressionId(callee.0 + expression_offset);
-                            for argument in arguments {
-                                argument.expression =
-                                    ExpressionId(argument.expression.0 + expression_offset);
-                            }
-                        }
-                        ExpressionKind::Null
-                        | ExpressionKind::Logical(_)
-                        | ExpressionKind::Integer(_)
-                        | ExpressionKind::Double(_)
-                        | ExpressionKind::Character(_)
-                        | ExpressionKind::StringLiteralName(_)
-                        | ExpressionKind::Symbol(_)
-                        | ExpressionKind::Unsupported => {}
-                    }
-                    expression
-                })
-                .collect::<Vec<_>>();
-            next_expression_id += u32::try_from(remapped_arena_expressions.len())
-                .expect("expression count exceeded u32");
-            arena.expressions.extend(remapped_arena_expressions);
-
-            let remapped_definitions = module
-                .definitions
-                .into_iter()
-                .map(|definition| {
-                    DefinitionItem::new(
-                        DefinitionId(definition.id.0 + definition_offset),
-                        definition.range,
-                        definition.definition,
-                    )
-                })
-                .collect::<Vec<_>>();
-            next_definition_id +=
-                u32::try_from(remapped_definitions.len()).expect("definition count exceeded u32");
-
-            let remapped_expressions = module
-                .expressions
-                .into_iter()
-                .map(|expression_id| ExpressionId(expression_id.0 + expression_offset))
-                .collect::<Vec<_>>();
-
-            definitions.extend(remapped_definitions.clone());
-            expressions.extend(remapped_expressions.iter().copied());
-            files_by_path.insert(path, (remapped_definitions, remapped_expressions));
-        }
-
-        let merged_module =
-            typing::Module::new(arena.clone(), definitions.clone(), expressions.clone());
-        let naming_result = NamingContext::new(&merged_module.arena, &lowered_project.0)
-            .resolve_module(&merged_module);
-
-        if !naming_result.diagnostics.is_empty() {
-            return Err("multi-file naming".to_owned());
-        }
-
-        let mut rendered_outputs = Vec::with_capacity(case.expectations.len());
-        for expectation in &case.expectations {
-            let (file_definitions, file_expressions) = files_by_path
-                .get(&expectation.path)
-                .ok_or_else(|| "missing file".to_owned())?;
-            rendered_outputs.push((
-                expectation.path.clone(),
-                render_named_hir(
-                    &arena,
-                    file_definitions,
-                    file_expressions,
-                    &naming_result,
-                    &lowered_project.0,
-                ),
+    if !package_result.diagnostics.is_empty() {
+        if let FixtureKind::Simple(case) = &fixture.kind {
+            return Ok(single_snapshot_output(
+                &fixture.name,
+                render_diagnostics(&case.input, &package_result.diagnostics),
             ));
         }
-
-        return Ok(render_multi_file_output(&rendered_outputs));
+        return Err("multi-file naming".to_owned());
     }
 
-    let source = simple_fixture_source(fixture)?;
-    let (lowering_context, lowering_result) = with_fixture_document(source, |document| {
-        let mut lowering_context = LoweringContext::new();
-        let lowering_result = lowering_context.lower_root_with_rope_with_diagnostics(
-            document.document().tree().root_node(),
-            document.document().rope(),
-        );
-        (lowering_context, lowering_result)
-    })?;
+    match &fixture.kind {
+        FixtureKind::Simple(_) => {
+            let module = package_result
+                .modules
+                .values()
+                .next()
+                .ok_or_else(|| "missing module".to_owned())?;
 
-    if !lowering_result.diagnostics.is_empty() {
-        return Ok(render_diagnostics(source, &lowering_result.diagnostics));
+            Ok(single_snapshot_output(
+                &fixture.name,
+                render_named_hir(
+                    &module.arena,
+                    &module.definitions,
+                    &module.expressions,
+                    &package_result.naming,
+                    &interner,
+                ),
+            ))
+        }
+        FixtureKind::MultiFile(case) => {
+            let mut rendered_outputs = Vec::with_capacity(case.expectations.len());
+            for expectation in &case.expectations {
+                let module = package_result
+                    .modules
+                    .get(&expectation.path)
+                    .ok_or_else(|| "missing file".to_owned())?;
+                rendered_outputs.push(FixtureRunFile {
+                    path: expectation.path.clone(),
+                    output: render_named_hir(
+                        &module.arena,
+                        &module.definitions,
+                        &module.expressions,
+                        &package_result.naming,
+                        &interner,
+                    ),
+                });
+            }
+
+            Ok(files_snapshot_output(&fixture.name, rendered_outputs))
+        }
+        _ => Err("unsupported fixture".to_owned()),
     }
-
-    let module = lowering_result.module;
-    let naming_result =
-        NamingContext::new(&module.arena, lowering_context.interner()).resolve_module(&module);
-    if !naming_result.diagnostics.is_empty() {
-        return Ok(render_diagnostics(source, &naming_result.diagnostics));
-    }
-
-    Ok(render_named_module(
-        &module,
-        &naming_result,
-        lowering_context.interner(),
-    ))
 }
 
-fn run_substitution_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = simple_fixture_source(fixture)?;
+fn run_substitution_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
+    let FixtureKind::Simple(_case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+    let document = document_for_fixture(fixture)?;
     let mut lowering_context = LoweringContext::new();
-    let module = with_fixture_document(source, |document| {
-        lowering_context.lower_root_with_rope(
-            document.document().tree().root_node(),
-            document.document().rope(),
-        )
-    })?;
+    let module = lower::lower(&document, &mut lowering_context);
     let mut inference_state = InferenceState::new();
     bind_fixture_builtins(&mut inference_state, &mut lowering_context);
     let mut lines = Vec::new();
@@ -584,40 +500,64 @@ fn run_substitution_fixture(fixture: &Fixture) -> Result<String, String> {
         }
     }
 
-    Ok(lines.join("\n"))
+    Ok(single_snapshot_output(&fixture.name, lines.join("\n")))
 }
 
-fn run_type_syntax_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = simple_fixture_source(fixture)?;
+fn run_type_syntax_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
+    let FixtureKind::Simple(case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
 
     let mut interner = Interner::new();
-    Ok(match parse_type_syntax(source, &mut interner) {
-        Ok(item) => render_type_syntax(&item, &interner),
-        Err(error) => format!("{error:?}"),
-    })
+    Ok(single_snapshot_output(
+        &fixture.name,
+        match parse_type_syntax(&case.input, &mut interner) {
+            Ok(item) => render_type_syntax(&item, &interner),
+            Err(error) => format!("{error:?}"),
+        },
+    ))
 }
 
-fn run_unification_fixture(fixture: &Fixture) -> Result<String, String> {
-    let source = simple_fixture_source(fixture)?;
+fn run_unification_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
+    let FixtureKind::Simple(_case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+    let document = document_for_fixture(fixture)?;
     let mut lowering_context = LoweringContext::new();
-    let module = with_fixture_document(source, |document| {
-        lowering_context.lower_root_with_rope(
-            document.document().tree().root_node(),
-            document.document().rope(),
-        )
-    })?;
+    let module = lower::lower(&document, &mut lowering_context);
     let mut inference_state = InferenceState::new();
     bind_fixture_builtins(&mut inference_state, &mut lowering_context);
     let inferred_types = match inference_state.infer_module(&module) {
         Ok(inferred_types) => inferred_types,
-        Err(error) => return Ok(render_expression_error_kind(&error).to_owned()),
+        Err(error) => {
+            return Ok(single_snapshot_output(
+                &fixture.name,
+                render_expression_error_kind(&error).to_owned(),
+            ));
+        }
     };
 
-    Ok(render_expression_types(
-        &mut inference_state,
-        &lowering_context,
-        &inferred_types,
+    Ok(single_snapshot_output(
+        &fixture.name,
+        render_expression_types(&mut inference_state, &lowering_context, &inferred_types),
     ))
+}
+
+fn single_snapshot_output(name: &str, output: String) -> Vec<FixtureOutput> {
+    vec![FixtureOutput {
+        name: name.to_owned(),
+        files: vec![FixtureRunFile {
+            path: PathBuf::new(),
+            output,
+        }],
+    }]
+}
+
+fn files_snapshot_output(name: &str, files: Vec<FixtureRunFile>) -> Vec<FixtureOutput> {
+    vec![FixtureOutput {
+        name: name.to_owned(),
+        files,
+    }]
 }
 
 fn bind_fixture_builtins(

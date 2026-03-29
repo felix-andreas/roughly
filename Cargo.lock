@@ -485,7 +485,6 @@ dependencies = [
  "indoc",
  "serde_json",
  "thiserror",
- "workspace",
 ]
 
 [[package]]
@@ -1801,7 +1800,6 @@ dependencies = [
  "thiserror",
  "tree-sitter",
  "tree-sitter-r",
- "workspace",
 ]
 
 [[package]]
@@ -2370,17 +2368,6 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
-]
-
-[[package]]
-name = "workspace"
-version = "0.1.1"
-dependencies = [
- "indoc",
- "ropey",
- "thiserror",
- "tree-sitter",
- "tree-sitter-r",
 ]
 
 [[package]]

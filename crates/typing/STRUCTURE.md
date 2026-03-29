@@ -8,7 +8,8 @@ Keep it focused on the intended near-term file split and the role of each file.
 
 - `check.rs`
   - top-level orchestration
-  - phase wiring
+  - package-level phase wiring
+  - `run_lowering_and_naming`
   - checked-file result assembly
 
 - `hir.rs`
@@ -41,6 +42,11 @@ Keep it focused on the intended near-term file split and the role of each file.
 
 - `interner.rs`
   - interned symbol storage
+
+- `workspace.rs`
+  - parsed document storage
+  - package and script buckets
+  - incremental text and parse-tree updates
 
 ## Not part of the long-term public phase structure
 

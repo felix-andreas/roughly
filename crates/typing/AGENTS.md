@@ -99,6 +99,7 @@ Delete or trim ephemeral documents once their content is resolved or no longer u
   - If a task is marked `(needs refinement)` or appears stale, discuss it with the user before acting on it.
 - `DISCUSS.md`
   - Scratch space for active design discussion.
+  - When a turn is an active design discussion, put the substantive answer in `DISCUSS.md`, not only in chat.
   - Keep it short and move anything durable into `DECISION_LOG.md`.
   - Keep a dedicated `Open decisions` section inside this file and update it after each focused design discussion pass.
 - `MEMORY.md`

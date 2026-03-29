@@ -42,6 +42,12 @@ pub struct Generational {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FixtureExpectedOutput {
+    Exact(String),
+    Any,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FixtureInputFile {
     pub path: PathBuf,
     pub contents: String,
@@ -50,14 +56,19 @@ pub struct FixtureInputFile {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FixtureOutputExpectation {
     pub path: PathBuf,
-    pub expected: String,
+    pub expected: FixtureExpectedOutput,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FixtureGeneration {
     pub name: String,
-    pub operations: Vec<FixtureOperation>,
-    pub expectations: Vec<FixtureExpectation>,
+    pub entries: Vec<FixtureGenerationEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FixtureGenerationEntry {
+    pub operation: FixtureOperation,
+    pub expectation: Option<FixtureExpectedOutput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,9 +98,9 @@ pub enum FixtureOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FixtureExpectation {
-    Set { path: FixturePath, expected: String },
-    Clear { path: FixturePath },
+pub struct FixtureExpectation {
+    pub path: FixturePath,
+    pub expected: FixtureExpectedOutput,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,41 +178,10 @@ fn collect_case_blocks(text: &str) -> Result<Vec<(String, String)>, ParseFixture
 
         let case_name = parse_named_directive(&lines, &mut line_index, "#----", "test case")?;
         let body_start = line_index;
-        let mut case_body_kind = CaseBodyKind::Undecided;
-        let mut inside_expectations = false;
 
         while line_index < lines.len() {
-            let line = lines[line_index];
-
-            if starts_with_directive(line, "#....") {
-                case_body_kind = CaseBodyKind::GenerationalMultiFile;
-                inside_expectations = false;
-                line_index += 1;
-                continue;
-            }
-
-            if starts_with_directive(line, "#++++") {
-                inside_expectations = true;
-                line_index += 1;
-                continue;
-            }
-
-            if starts_with_directive(line, "#----") {
-                match case_body_kind {
-                    CaseBodyKind::Undecided if inside_expectations => break,
-                    CaseBodyKind::Undecided => {
-                        case_body_kind = CaseBodyKind::MultiFile;
-                        line_index += 1;
-                        continue;
-                    }
-                    CaseBodyKind::MultiFile | CaseBodyKind::GenerationalMultiFile
-                        if !inside_expectations =>
-                    {
-                        line_index += 1;
-                        continue;
-                    }
-                    CaseBodyKind::MultiFile | CaseBodyKind::GenerationalMultiFile => break,
-                }
+            if is_case_header_line(&lines, line_index) {
+                break;
             }
 
             line_index += 1;
@@ -236,8 +216,40 @@ fn parse_simple_case(text: &str) -> Result<Simple, ParseFixtureError> {
 fn parse_multi_file_case(text: &str) -> Result<MultiFile, ParseFixtureError> {
     let lines = text.split_inclusive('\n').collect::<Vec<_>>();
     let mut line_index = 0;
-    let input_files = parse_multi_file_inputs(&lines, &mut line_index)?;
-    let expectations = parse_multi_file_expectations(&lines, &mut line_index)?;
+    let mut input_files = Vec::new();
+    let mut expectations = Vec::new();
+
+    loop {
+        skip_blank_lines(&lines, &mut line_index);
+
+        if line_index >= lines.len() {
+            break;
+        }
+
+        let path = parse_named_directive(&lines, &mut line_index, "#----", "input file")?;
+        if path.starts_with("edit ") || path.starts_with("move ") || path.starts_with("delete ") {
+            return Err(invalid_fixture_error(
+                "multi-file fixture cases only allow whole-file inputs",
+            ));
+        }
+
+        let path = parse_required_path(&path, "input file path")?;
+        let contents = collect_body_until_directive(&lines, &mut line_index);
+        let expectation = parse_immediate_output_expectation(
+            &lines,
+            &mut line_index,
+            "multi-file fixture inputs must be followed by an output expectation",
+        )?;
+
+        input_files.push(FixtureInputFile {
+            path: path.clone(),
+            contents,
+        });
+        expectations.push(FixtureOutputExpectation {
+            path,
+            expected: expectation,
+        });
+    }
 
     if input_files.is_empty() {
         return Err(invalid_fixture_error(
@@ -255,66 +267,6 @@ fn parse_multi_file_case(text: &str) -> Result<MultiFile, ParseFixtureError> {
         input_files,
         expectations,
     })
-}
-
-fn parse_multi_file_inputs(
-    lines: &[&str],
-    line_index: &mut usize,
-) -> Result<Vec<FixtureInputFile>, ParseFixtureError> {
-    let mut input_files = Vec::new();
-
-    loop {
-        skip_blank_lines(lines, line_index);
-
-        if *line_index >= lines.len() || starts_with_directive(lines[*line_index], "#++++") {
-            break;
-        }
-
-        let path = parse_named_directive(lines, line_index, "#----", "input file")?;
-        if path.starts_with("edit ") || path.starts_with("move ") || path.starts_with("delete ") {
-            return Err(invalid_fixture_error(
-                "multi-file fixture cases only allow whole-file inputs",
-            ));
-        }
-
-        input_files.push(FixtureInputFile {
-            path: parse_required_path(&path, "input file path")?,
-            contents: collect_body_until_directive(lines, line_index),
-        });
-    }
-
-    Ok(input_files)
-}
-
-fn parse_multi_file_expectations(
-    lines: &[&str],
-    line_index: &mut usize,
-) -> Result<Vec<FixtureOutputExpectation>, ParseFixtureError> {
-    let mut expectations = Vec::new();
-
-    loop {
-        skip_blank_lines(lines, line_index);
-
-        if *line_index >= lines.len() {
-            break;
-        }
-
-        let path = parse_named_directive(lines, line_index, "#++++", "output expectation")?;
-        if path.starts_with("none ") {
-            return Err(invalid_fixture_error(
-                "multi-file fixture cases do not allow explicit expectation clearing",
-            ));
-        }
-
-        expectations.push(FixtureOutputExpectation {
-            path: parse_required_path(&path, "expectation path")?,
-            expected: collect_body_until_directive(lines, line_index)
-                .trim_end()
-                .to_owned(),
-        });
-    }
-
-    Ok(expectations)
 }
 
 fn parse_generational_multi_file_case(text: &str) -> Result<Generational, ParseFixtureError> {
@@ -347,29 +299,43 @@ fn parse_generation_block(block: &str) -> Result<FixtureGeneration, ParseFixture
 
     Ok(FixtureGeneration {
         name: name.trim().to_owned(),
-        operations: parse_generation_operations(&lines, &mut line_index)?,
-        expectations: parse_generation_expectations(&lines, &mut line_index)?,
+        entries: parse_generation_entries(&lines, &mut line_index)?,
     })
 }
 
-fn parse_generation_operations(
+fn parse_generation_entries(
     lines: &[&str],
     line_index: &mut usize,
-) -> Result<Vec<FixtureOperation>, ParseFixtureError> {
-    let mut operations = Vec::new();
+) -> Result<Vec<FixtureGenerationEntry>, ParseFixtureError> {
+    let mut entries = Vec::new();
 
     loop {
         skip_blank_lines(lines, line_index);
 
-        if *line_index >= lines.len() || starts_with_directive(lines[*line_index], "#++++") {
+        if *line_index >= lines.len() {
             break;
         }
 
         let header = parse_named_directive(lines, line_index, "#----", "generation entry")?;
-        operations.push(parse_generation_operation(lines, line_index, &header)?);
+        let operation = parse_generation_operation(lines, line_index, &header)?;
+        let expectation = match operation_output_path(&operation) {
+            Some(_) => parse_optional_output_expectation(lines, line_index)?,
+            None => {
+                if *line_index < lines.len() && starts_with_directive(lines[*line_index], "#++++") {
+                    return Err(invalid_fixture_error(
+                        "delete operations must not be followed by an output expectation",
+                    ));
+                }
+                None
+            }
+        };
+        entries.push(FixtureGenerationEntry {
+            operation,
+            expectation,
+        });
     }
 
-    Ok(operations)
+    Ok(entries)
 }
 
 fn parse_generation_operation(
@@ -402,39 +368,6 @@ fn parse_generation_operation(
         path: parse_fixture_path(header.trim()),
         contents: collect_body_until_directive(lines, line_index),
     })
-}
-
-fn parse_generation_expectations(
-    lines: &[&str],
-    line_index: &mut usize,
-) -> Result<Vec<FixtureExpectation>, ParseFixtureError> {
-    let mut expectations = Vec::new();
-
-    loop {
-        skip_blank_lines(lines, line_index);
-
-        if *line_index >= lines.len() {
-            break;
-        }
-
-        let header = parse_named_directive(lines, line_index, "#++++", "generation expectation")?;
-
-        if let Some(path) = header.strip_prefix("none ") {
-            expectations.push(FixtureExpectation::Clear {
-                path: parse_fixture_path(path.trim()),
-            });
-            continue;
-        }
-
-        expectations.push(FixtureExpectation::Set {
-            path: parse_fixture_path(&header),
-            expected: collect_body_until_directive(lines, line_index)
-                .trim_end()
-                .to_owned(),
-        });
-    }
-
-    Ok(expectations)
 }
 
 fn parse_edit_operation(text: &str) -> Result<FixtureOperation, ParseFixtureError> {
@@ -534,6 +467,60 @@ fn parse_fixture_path(text: &str) -> FixturePath {
     }
 }
 
+fn parse_immediate_output_expectation(
+    lines: &[&str],
+    line_index: &mut usize,
+    missing_expectation_message: &str,
+) -> Result<FixtureExpectedOutput, ParseFixtureError> {
+    parse_optional_output_expectation(lines, line_index)?
+        .ok_or_else(|| invalid_fixture_error(missing_expectation_message))
+}
+
+fn parse_optional_output_expectation(
+    lines: &[&str],
+    line_index: &mut usize,
+) -> Result<Option<FixtureExpectedOutput>, ParseFixtureError> {
+    skip_blank_lines(lines, line_index);
+
+    if *line_index >= lines.len() || !starts_with_directive(lines[*line_index], "#++++") {
+        return Ok(None);
+    }
+
+    let header = parse_named_directive(lines, line_index, "#++++", "output expectation")?;
+    if header == "any" {
+        let body = collect_body_until_directive(lines, line_index);
+        if !body.trim().is_empty() {
+            return Err(invalid_fixture_error(
+                "`#++++ any` must not have an expectation body",
+            ));
+        }
+        return Ok(Some(FixtureExpectedOutput::Any));
+    }
+
+    if !header.is_empty() {
+        return Err(invalid_fixture_error(
+            "output expectations must use bare `#++++` or `#++++ any`",
+        ));
+    }
+
+    Ok(Some(FixtureExpectedOutput::Exact(
+        collect_body_until_directive(lines, line_index)
+            .trim_end()
+            .to_owned(),
+    )))
+}
+
+fn operation_output_path(operation: &FixtureOperation) -> Option<&FixturePath> {
+    match operation {
+        FixtureOperation::CreateDocument { path, .. } => Some(path),
+        FixtureOperation::EditDocument { path, .. } => Some(path),
+        FixtureOperation::MoveDocument {
+            destination_path, ..
+        } => Some(destination_path),
+        FixtureOperation::DeleteDocument { .. } => None,
+    }
+}
+
 fn collect_body_until_directive(lines: &[&str], line_index: &mut usize) -> String {
     let mut body = String::new();
 
@@ -586,14 +573,13 @@ fn trim_line(line: &str) -> &str {
         .trim_end_matches('\r')
 }
 
+fn is_case_header_line(lines: &[&str], line_index: usize) -> bool {
+    starts_with_directive(lines[line_index], "#----")
+        && (line_index == 0 || trim_line(lines[line_index - 1]).is_empty())
+}
+
 fn invalid_fixture_error(message: &str) -> ParseFixtureError {
     ParseFixtureError::InvalidFixture {
         message: message.to_owned(),
     }
-}
-
-enum CaseBodyKind {
-    Undecided,
-    MultiFile,
-    GenerationalMultiFile,
 }

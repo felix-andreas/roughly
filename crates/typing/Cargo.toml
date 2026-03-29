@@ -15,4 +15,3 @@ tree-sitter-r.workspace = true
 [dev-dependencies]
 fixtures = { path = "../fixtures" }
 indoc.workspace = true
-workspace = { path = "../workspace" }

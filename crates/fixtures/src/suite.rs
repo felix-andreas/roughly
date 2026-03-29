@@ -1,11 +1,30 @@
 use {
-    crate::{Fixture, FixtureGroup, parse_file},
-    std::{collections::BTreeSet, fs, path::Path},
+    crate::{
+        Fixture, FixtureExpectedOutput, FixtureGeneration, FixtureGroup, FixtureKind,
+        FixtureOperation, FixturePath, parse_file,
+    },
+    std::{
+        collections::{BTreeMap, BTreeSet},
+        fs,
+        path::{Path, PathBuf},
+    },
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FixtureOutput {
+    pub name: String,
+    pub files: Vec<FixtureRunFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FixtureRunFile {
+    pub path: PathBuf,
+    pub output: String,
+}
 
 pub fn run_fixture_suite<RunFixture>(directory_path: &str, kind: &str, mut run_fixture: RunFixture)
 where
-    RunFixture: FnMut(&Fixture) -> Result<String, String>,
+    RunFixture: FnMut(&Fixture) -> Result<Vec<FixtureOutput>, String>,
 {
     let groups = read_fixture_suite(directory_path, kind);
     let maybe_filter = std::env::var("FIXTURE_FILTER").ok();
@@ -15,49 +34,46 @@ where
 
     for group in &groups {
         for fixture in &group.cases {
-            let snapshot_name = format!("{}__{}", group.name, fixture.name);
+            let fixture_name = format!("{}__{}", group.name, fixture.name);
 
             assert!(
-                snapshot_names.insert(snapshot_name.clone()),
-                "duplicate typing {kind} test snapshot name `{snapshot_name}`"
+                snapshot_names.insert(fixture_name.clone()),
+                "duplicate typing {kind} test snapshot name `{fixture_name}`"
             );
-
-            let expected = match expected_output(fixture) {
-                Ok(expected) => expected,
-                Err(error) => {
-                    failures.push(format!(
-                "fixture `{snapshot_name}` is not supported by the current typing `{kind}` runner: {error}"
-            ));
-                    continue;
-                }
-            };
 
             if maybe_filter
                 .as_ref()
-                .is_some_and(|filter| !snapshot_name.contains(filter))
+                .is_some_and(|filter| !fixture_name.contains(filter))
             {
                 continue;
             }
 
             executed_fixture_count += 1;
 
-            let actual_output = match run_fixture(fixture) {
-                Ok(actual_output) => actual_output,
+            let expected_outputs = match expected_outputs_for_fixture(fixture) {
+                Ok(expected_outputs) => expected_outputs,
                 Err(error) => {
                     failures.push(format!(
-                        "fixture `{snapshot_name}` is not supported by the current typing `{kind}` runner: {error}"
+                        "fixture `{fixture_name}` is invalid for the current typing `{kind}` runner: {error}"
                     ));
                     continue;
                 }
             };
-            let actual_output = actual_output.trim_end();
-            if actual_output != expected {
-                failures.push(format!(
-                    "\u{1b}[1mfixture `{snapshot_name}` failed\u{1b}[0m\n\u{1b}[1minput:\u{1b}[0m\n{}\n\u{1b}[1mexpected:\u{1b}[0m\n{}\n\u{1b}[1mactual:\u{1b}[0m\n{}",
-                    format!("{fixture:?}").trim_end(),
-                    expected,
-                    actual_output
-                ));
+
+            let actual_outputs = match run_fixture(fixture) {
+                Ok(actual_outputs) => actual_outputs,
+                Err(error) => {
+                    failures.push(format!(
+                        "fixture `{fixture_name}` is not supported by the current typing `{kind}` runner: {error}"
+                    ));
+                    continue;
+                }
+            };
+
+            if let Some(failure) =
+                compare_fixture_outputs(fixture, &fixture_name, &expected_outputs, &actual_outputs)
+            {
+                failures.push(failure);
             }
         }
     }
@@ -71,28 +87,6 @@ where
     }
 
     eprintln!("{} {kind} fixture(s) passed", executed_fixture_count);
-}
-
-fn expected_output(fixture: &Fixture) -> Result<String, String> {
-    match &fixture.kind {
-        crate::FixtureKind::Simple(case) => Ok(case.expected.clone()),
-        crate::FixtureKind::MultiFile(case) => {
-            Ok(render_multi_file_output(case.expectations.iter().map(
-                |expectation| (expectation.path.as_path(), expectation.expected.as_str()),
-            )))
-        }
-        crate::FixtureKind::Generational(_) => {
-            Err("generation-based multi-file cases are not supported".to_owned())
-        }
-    }
-}
-
-fn render_multi_file_output<'a>(entries: impl IntoIterator<Item = (&'a Path, &'a str)>) -> String {
-    entries
-        .into_iter()
-        .map(|(path, expected)| format!("== {} ==\n{}", path.display(), expected.trim_end()))
-        .collect::<Vec<_>>()
-        .join("\n\n")
 }
 
 pub fn read_fixture_suite(directory_path: &str, kind: &str) -> Vec<FixtureGroup> {
@@ -118,7 +112,296 @@ pub fn read_fixture_suite(directory_path: &str, kind: &str) -> Vec<FixtureGroup>
     groups
 }
 
-fn collect_fixture_paths(directory_path: &str, kind: &str) -> Vec<std::path::PathBuf> {
+fn expected_outputs_for_fixture(fixture: &Fixture) -> Result<Vec<ExpectedFixtureOutput>, String> {
+    match &fixture.kind {
+        FixtureKind::Simple(case) => Ok(vec![ExpectedFixtureOutput {
+            name: fixture.name.clone(),
+            files: BTreeMap::from([(
+                PathBuf::new(),
+                ExpectedFileOutput::Exact(case.expected.clone()),
+            )]),
+        }]),
+        FixtureKind::MultiFile(case) => Ok(vec![ExpectedFixtureOutput {
+            name: fixture.name.clone(),
+            files: case
+                .expectations
+                .iter()
+                .map(|expectation| {
+                    (
+                        expectation.path.clone(),
+                        ExpectedFileOutput::from_fixture(&expectation.expected),
+                    )
+                })
+                .collect(),
+        }]),
+        FixtureKind::Generational(case) => expected_outputs_for_generations(&case.generations),
+    }
+}
+
+fn expected_outputs_for_generations(
+    generations: &[FixtureGeneration],
+) -> Result<Vec<ExpectedFixtureOutput>, String> {
+    let mut carried_outputs = BTreeMap::<PathBuf, ExpectedFileOutput>::new();
+    let mut expected_outputs = Vec::with_capacity(generations.len());
+
+    for generation in generations {
+        for entry in &generation.entries {
+            apply_generation_operation(&mut carried_outputs, &entry.operation);
+
+            let Some(path) = output_path_for_operation(&entry.operation) else {
+                continue;
+            };
+            let path = path_buf_from_fixture_path(path)?;
+
+            if let Some(expectation) = &entry.expectation {
+                carried_outputs.insert(path, ExpectedFileOutput::from_fixture(expectation));
+                continue;
+            }
+
+            if !carried_outputs.contains_key(&path) {
+                return Err(format!(
+                    "generation `{}` uses `{}` without an explicit first expectation",
+                    generation.name,
+                    path.display()
+                ));
+            }
+        }
+
+        expected_outputs.push(ExpectedFixtureOutput {
+            name: generation.name.clone(),
+            files: carried_outputs.clone(),
+        });
+    }
+
+    Ok(expected_outputs)
+}
+
+fn apply_generation_operation(
+    carried_outputs: &mut BTreeMap<PathBuf, ExpectedFileOutput>,
+    operation: &FixtureOperation,
+) {
+    match operation {
+        FixtureOperation::CreateDocument { .. } | FixtureOperation::EditDocument { .. } => {}
+        FixtureOperation::MoveDocument {
+            source_path,
+            destination_path,
+        } => {
+            let Some(source_path) = path_buf_from_fixture_path_lossy(source_path) else {
+                return;
+            };
+            let Some(destination_path) = path_buf_from_fixture_path_lossy(destination_path) else {
+                return;
+            };
+
+            if let Some(expected_output) = carried_outputs.remove(&source_path) {
+                carried_outputs.insert(destination_path, expected_output);
+            }
+        }
+        FixtureOperation::DeleteDocument { path } => {
+            let Some(path) = path_buf_from_fixture_path_lossy(path) else {
+                return;
+            };
+            carried_outputs.remove(&path);
+        }
+    }
+}
+
+fn compare_fixture_outputs(
+    fixture: &Fixture,
+    fixture_name: &str,
+    expected_outputs: &[ExpectedFixtureOutput],
+    actual_outputs: &[FixtureOutput],
+) -> Option<String> {
+    if actual_outputs.len() != expected_outputs.len() {
+        return Some(format!(
+            "\u{1b}[1mfixture `{fixture_name}` failed\u{1b}[0m\n\u{1b}[1minput:\u{1b}[0m\n{}\n\u{1b}[1mexpected snapshots:\u{1b}[0m {}\n\u{1b}[1mactual snapshots:\u{1b}[0m {}",
+            format!("{fixture:?}").trim_end(),
+            expected_outputs.len(),
+            actual_outputs.len()
+        ));
+    }
+
+    for (expected_output, actual_output) in expected_outputs.iter().zip(actual_outputs) {
+        if expected_output.name != actual_output.name {
+            return Some(format!(
+                "\u{1b}[1mfixture `{fixture_name}` failed\u{1b}[0m\n\u{1b}[1minput:\u{1b}[0m\n{}\n\u{1b}[1mexpected snapshot:\u{1b}[0m {}\n\u{1b}[1mactual snapshot:\u{1b}[0m {}",
+                format!("{fixture:?}").trim_end(),
+                expected_output.name,
+                actual_output.name
+            ));
+        }
+
+        let mut actual_files = BTreeMap::new();
+        for file in &actual_output.files {
+            let replaced =
+                actual_files.insert(file.path.clone(), file.output.trim_end().to_owned());
+            if replaced.is_some() {
+                return Some(format!(
+                    "\u{1b}[1mfixture `{fixture_name}` failed\u{1b}[0m\n\u{1b}[1minput:\u{1b}[0m\n{}\n\u{1b}[1mactual:\u{1b}[0m duplicate output for `{}` in snapshot `{}`",
+                    format!("{fixture:?}").trim_end(),
+                    file.path.display(),
+                    actual_output.name
+                ));
+            }
+        }
+
+        for path in actual_files.keys() {
+            if !expected_output.files.contains_key(path) {
+                return Some(render_output_mismatch(
+                    fixture,
+                    fixture_name,
+                    expected_outputs,
+                    actual_outputs,
+                    &format!(
+                        "unexpected output for `{}` in snapshot `{}`",
+                        display_fixture_path(path),
+                        actual_output.name
+                    ),
+                ));
+            }
+        }
+
+        for (path, expected_file_output) in &expected_output.files {
+            let Some(actual_output) = actual_files.get(path) else {
+                return Some(render_output_mismatch(
+                    fixture,
+                    fixture_name,
+                    expected_outputs,
+                    actual_outputs,
+                    &format!(
+                        "missing output for `{}` in snapshot `{}`",
+                        display_fixture_path(path),
+                        expected_output.name
+                    ),
+                ));
+            };
+
+            if let ExpectedFileOutput::Exact(expected_output_text) = expected_file_output {
+                if actual_output != expected_output_text {
+                    return Some(render_output_mismatch(
+                        fixture,
+                        fixture_name,
+                        expected_outputs,
+                        actual_outputs,
+                        "",
+                    ));
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn render_output_mismatch(
+    fixture: &Fixture,
+    fixture_name: &str,
+    expected_outputs: &[ExpectedFixtureOutput],
+    actual_outputs: &[FixtureOutput],
+    message: &str,
+) -> String {
+    let mut rendered = format!(
+        "\u{1b}[1mfixture `{fixture_name}` failed\u{1b}[0m\n\u{1b}[1minput:\u{1b}[0m\n{}",
+        format!("{fixture:?}").trim_end(),
+    );
+
+    if !message.is_empty() {
+        rendered.push('\n');
+        rendered.push_str("\u{1b}[1mreason:\u{1b}[0m ");
+        rendered.push_str(message);
+    }
+
+    rendered.push_str("\n\u{1b}[1mexpected:\u{1b}[0m\n");
+    rendered.push_str(&render_expected_outputs(expected_outputs));
+    rendered.push_str("\n\u{1b}[1mactual:\u{1b}[0m\n");
+    rendered.push_str(&render_actual_outputs(actual_outputs));
+    rendered
+}
+
+fn render_expected_outputs(outputs: &[ExpectedFixtureOutput]) -> String {
+    outputs
+        .iter()
+        .map(render_expected_snapshot)
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn render_expected_snapshot(output: &ExpectedFixtureOutput) -> String {
+    let rendered_files = render_expected_files(&output.files);
+    if output.name.is_empty() {
+        return rendered_files;
+    }
+
+    format!("## {}\n{}", output.name, rendered_files)
+}
+
+fn render_expected_files(files: &BTreeMap<PathBuf, ExpectedFileOutput>) -> String {
+    if files.len() == 1 {
+        let mut iter = files.iter();
+        let Some((path, expected_output)) = iter.next() else {
+            return String::new();
+        };
+        if path.as_os_str().is_empty() {
+            return render_expected_file_output(expected_output);
+        }
+    }
+
+    files
+        .iter()
+        .map(|(path, expected_output)| {
+            format!(
+                "== {} ==\n{}",
+                display_fixture_path(path),
+                render_expected_file_output(expected_output)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn render_expected_file_output(expected_output: &ExpectedFileOutput) -> String {
+    match expected_output {
+        ExpectedFileOutput::Exact(output) => output.clone(),
+        ExpectedFileOutput::Any => "any".to_owned(),
+    }
+}
+
+fn render_actual_outputs(outputs: &[FixtureOutput]) -> String {
+    outputs
+        .iter()
+        .map(render_actual_snapshot)
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn render_actual_snapshot(output: &FixtureOutput) -> String {
+    let rendered_files = render_actual_files(&output.files);
+    if output.name.is_empty() {
+        return rendered_files;
+    }
+
+    format!("## {}\n{}", output.name, rendered_files)
+}
+
+fn render_actual_files(files: &[FixtureRunFile]) -> String {
+    if files.len() == 1 && files[0].path.as_os_str().is_empty() {
+        return files[0].output.trim_end().to_owned();
+    }
+
+    files
+        .iter()
+        .map(|file| {
+            format!(
+                "== {} ==\n{}",
+                display_fixture_path(&file.path),
+                file.output.trim_end()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn collect_fixture_paths(directory_path: &str, kind: &str) -> Vec<PathBuf> {
     let mut fixture_paths = Vec::new();
     collect_fixture_paths_recursively(Path::new(directory_path), &mut fixture_paths, kind);
     fixture_paths.sort();
@@ -127,7 +410,7 @@ fn collect_fixture_paths(directory_path: &str, kind: &str) -> Vec<std::path::Pat
 
 fn collect_fixture_paths_recursively(
     directory_path: &Path,
-    fixture_paths: &mut Vec<std::path::PathBuf>,
+    fixture_paths: &mut Vec<PathBuf>,
     kind: &str,
 ) {
     let entries = fs::read_dir(directory_path).unwrap_or_else(|error| {
@@ -161,6 +444,62 @@ fn collect_fixture_paths_recursively(
             .is_some_and(|extension| extension == "test")
         {
             fixture_paths.push(entry_path);
+        }
+    }
+}
+
+fn output_path_for_operation(operation: &FixtureOperation) -> Option<&FixturePath> {
+    match operation {
+        FixtureOperation::CreateDocument { path, .. } => Some(path),
+        FixtureOperation::EditDocument { path, .. } => Some(path),
+        FixtureOperation::MoveDocument {
+            destination_path, ..
+        } => Some(destination_path),
+        FixtureOperation::DeleteDocument { .. } => None,
+    }
+}
+
+fn path_buf_from_fixture_path(path: &FixturePath) -> Result<PathBuf, String> {
+    match path {
+        FixturePath::Main => {
+            Err("fixture runner output paths must not use the implicit main path".to_owned())
+        }
+        FixturePath::Path(path) => Ok(path.clone()),
+    }
+}
+
+fn path_buf_from_fixture_path_lossy(path: &FixturePath) -> Option<PathBuf> {
+    match path {
+        FixturePath::Main => None,
+        FixturePath::Path(path) => Some(path.clone()),
+    }
+}
+
+fn display_fixture_path(path: &Path) -> String {
+    if path.as_os_str().is_empty() {
+        "<main>".to_owned()
+    } else {
+        path.display().to_string()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExpectedFixtureOutput {
+    name: String,
+    files: BTreeMap<PathBuf, ExpectedFileOutput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ExpectedFileOutput {
+    Exact(String),
+    Any,
+}
+
+impl ExpectedFileOutput {
+    fn from_fixture(expected_output: &FixtureExpectedOutput) -> Self {
+        match expected_output {
+            FixtureExpectedOutput::Exact(output) => Self::Exact(output.clone()),
+            FixtureExpectedOutput::Any => Self::Any,
         }
     }
 }

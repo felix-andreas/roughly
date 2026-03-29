@@ -76,10 +76,10 @@ This document tracks actionable planned work for the `typing` crate.
 ### Fixture Harness Multi-File Generations
 
 - Detailed plan: `projects/000_fixture_harness_multi_file_generations.md`
-- `workspace` crate milestone is implemented.
-- `fixtures` crate parser milestone is implemented.
-- Teach `typing` suite renderers to execute workspace-style generations instead of only legacy single-file cases.
-- Then adopt those crates in `typing` fixture cases and in `roughly`.
+- `typing::workspace` and the `fixtures` crate parser/runner milestones are implemented.
+- Teach `typing` suite renderers to execute workspace-style generations instead of only `Simple`
+  cases and current `naming` `MultiFile` cases.
+- Then adopt those APIs in more `typing` fixture cases and in `roughly`.
 - Reasoning:
   - Package-global naming semantics cannot be tested properly with the current single-file fixture shape.
   - Later incremental package-recheck behavior will also need generation-based fixture cases.

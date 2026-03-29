@@ -9,7 +9,7 @@ impl Symbol {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Interner {
     symbols_by_text: HashMap<String, Symbol>,
     text_by_symbol: Vec<String>,

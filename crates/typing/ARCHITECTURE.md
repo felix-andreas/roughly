@@ -37,8 +37,7 @@ Diagnostics are not a separate phase. They are structured outputs produced by lo
 
 Input:
 
-- parsed syntax for one file
-- source text access
+- one `workspace::Document`
 - shared interner state when available
 
 Output:
@@ -69,7 +68,7 @@ Lowering is the front-end structural boundary. Later phases consume parsed HIR d
 
 Input:
 
-- `HirModule`
+- lowered HIR for one package
 - builtins and project naming context needed for name lookup
 
 Output:
@@ -105,7 +104,7 @@ Non-responsibilities:
 - structural placement validation already enforced by lowering
 - expression type inference and compatibility checking
 
-Naming is the semantic name-resolution boundary. Later phases must consume resolved binding identity and resolved type identity rather than re-resolving spelled names ad hoc.
+Naming is the semantic name-resolution boundary. Lowering may still run document-by-document, but naming operates at package scope. Later phases must consume resolved binding identity and resolved type identity rather than re-resolving spelled names ad hoc.
 
 ### `typecheck`
 
@@ -205,7 +204,7 @@ It must represent:
 
 ## Project-level direction
 
-Multi-file checking should build on the file-local pipeline rather than bypass it.
+Multi-file checking should build on the file-local lowering pipeline rather than bypass it.
 
 The checker should support shared analysis state across files for:
 
@@ -218,7 +217,7 @@ That project-level direction should leave room for tooling operations built on n
 
 The architecture should optimize for fast re-analysis of a single changed file.
 
-File-local phases and artifacts should remain explicit so one file can be reparsed, relowered, renamed, and rechecked without unnecessary project-wide recomputation.
+File-local phases and artifacts should remain explicit so one file can be reparsed and relowered without unnecessary project-wide recomputation, while naming and later semantic phases still operate on the package.
 
 Project-level analysis should track dependencies through project-global names and any later checked-file summaries used for incremental invalidation.
 

@@ -2,29 +2,29 @@
 #---- later_file_uses_earlier_global
 #---- a.R
 x <- 1L
-#---- b.R
-x
-#++++ a.R
+#++++
 Assign(x@b0)
   Integer(1L)
-#++++ b.R
+#---- b.R
+x
+#++++
 Symbol(x@b0)
 
 #---- later_file_call_resolves_cross_file_callee_and_argument
 #---- a.R
 value <- 1L
-#---- b.R
-identity <- function(x) x
-#---- c.R
-identity(value)
-#++++ a.R
+#++++
 Assign(value@b0)
   Integer(1L)
-#++++ b.R
+#---- b.R
+identity <- function(x) x
+#++++
 Assign(identity@b2)
   Function(x@b1)
     Symbol(x@b1)
-#++++ c.R
+#---- c.R
+identity(value)
+#++++
 Call
   Symbol(identity@b2)
   Argument
@@ -33,28 +33,28 @@ Call
 #---- later_file_rebinding_wins_for_later_files
 #---- a.R
 x <- 1L
-#---- b.R
-x <- x
-#---- c.R
-x
-#++++ a.R
+#++++
 Assign(x@b0)
   Integer(1L)
-#++++ b.R
+#---- b.R
+x <- x
+#++++
 Assign(x@b1)
   Symbol(x@b0)
-#++++ c.R
+#---- c.R
+x
+#++++
 Symbol(x@b1)
 
 #---- function_body_uses_global_from_other_file
 #---- a.R
 x <- 1L
-#---- b.R
-f <- function() x
-#++++ a.R
+#++++
 Assign(x@b0)
   Integer(1L)
-#++++ b.R
+#---- b.R
+f <- function() x
+#++++
 Assign(f@b1)
   Function()
     Symbol(x@b0)
@@ -63,66 +63,66 @@ Assign(f@b1)
 #---- annotation_uses_nominal_type_from_other_file
 #---- a.R
 #: @type Person {integer}
+#++++
+TypeDefinition(Person = integer)
 #---- b.R
 #: Person
 value <- 1L
-#++++ a.R
-TypeDefinition(Person = integer)
-#++++ b.R
+#++++
 Assign(value@b0)
   Integer(1L)
 
 #---- annotation_uses_alias_from_other_file
 #---- a.R
 #: @alias Count {integer}
+#++++
+TypeAlias(Count = integer)
 #---- b.R
 #: Count
 value <- 1L
-#++++ a.R
-TypeAlias(Count = integer)
-#++++ b.R
+#++++
 Assign(value@b0)
   Integer(1L)
 
 #---- definition_forward_reference_resolves_across_files
 #---- a.R
 #: @type Team {list{owner: Person}}
+#++++
+TypeDefinition(Team = list{owner: Person})
 #---- b.R
 #: @type Person {list{name: character}}
+#++++
+TypeDefinition(Person = list{name: character})
 #---- c.R
 value <- 1L
-#++++ a.R
-TypeDefinition(Team = list{owner: Person})
-#++++ b.R
-TypeDefinition(Person = list{name: character})
-#++++ c.R
+#++++
 Assign(value@b0)
   Integer(1L)
 
 #---- generic_parameter_shadows_global_type_from_other_file
 #---- a.R
 #: @type T {integer}
+#++++
+TypeDefinition(T = integer)
 #---- b.R
 #: @type Box<T> {list{value: T}}
+#++++
+TypeDefinition(Box<T> = list{value: T})
 #---- c.R
 value <- 1L
-#++++ a.R
-TypeDefinition(T = integer)
-#++++ b.R
-TypeDefinition(Box<T> = list{value: T})
-#++++ c.R
+#++++
 Assign(value@b0)
   Integer(1L)
 
 #---- nominal_introduction_uses_type_from_other_file
 #---- a.R
 #: @type Person {list{name: character}}
+#++++
+TypeDefinition(Person = list{name: character})
 #---- b.R
 #: @new Person
 value <- list(name = "bob")
-#++++ a.R
-TypeDefinition(Person = list{name: character})
-#++++ b.R
+#++++
 Assign(value@b0)
   Call
     Symbol(list@?)

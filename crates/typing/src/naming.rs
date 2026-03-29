@@ -19,7 +19,7 @@ pub struct BindingInfo {
     pub range: Range,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NamingResult {
     pub bindings: BTreeMap<BindingId, BindingInfo>,
     pub resolutions: BTreeMap<ExpressionId, BindingId>,
