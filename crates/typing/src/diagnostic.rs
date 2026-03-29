@@ -4,7 +4,7 @@ use {
         typecheck::InferenceError,
         types::{Atomic, CoreType, InferenceVariableId},
     },
-    std::{collections::BTreeMap, fmt},
+    std::{collections::BTreeMap, fmt, path::PathBuf},
     tree_sitter::{Point, Range},
 };
 
@@ -34,6 +34,7 @@ impl CheckResult {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
+    pub path: Option<PathBuf>,
     pub severity: Severity,
     pub code: DiagnosticCode,
     pub message: String,
@@ -43,6 +44,7 @@ pub struct Diagnostic {
 impl Diagnostic {
     pub fn syntax_error(range: Range, message: impl Into<String>) -> Self {
         Self {
+            path: None,
             severity: Severity::Error,
             code: DiagnosticCode::SyntaxError,
             message: message.into(),
@@ -52,6 +54,7 @@ impl Diagnostic {
 
     pub fn type_error(range: Range, message: impl Into<String>) -> Self {
         Self {
+            path: None,
             severity: Severity::Error,
             code: DiagnosticCode::TypeError,
             message: message.into(),
@@ -61,6 +64,7 @@ impl Diagnostic {
 
     pub fn annotation_error(range: Range, message: impl Into<String>) -> Self {
         Self {
+            path: None,
             severity: Severity::Error,
             code: DiagnosticCode::AnnotationError,
             message: message.into(),
@@ -92,6 +96,11 @@ impl Diagnostic {
             range,
             "This `#:` type comment cannot be followed by another `#:` type comment.",
         )
+    }
+
+    pub fn with_path(mut self, path: PathBuf) -> Self {
+        self.path = Some(path);
+        self
     }
 
     pub fn from_inference_error(

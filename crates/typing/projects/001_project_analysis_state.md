@@ -19,8 +19,7 @@ The design must also leave room for later typechecking and project rechecking.
 
 ## Unresolved questions
 
-- Should naming grow a true multi-document API immediately, or should analysis first build a temporary merged project view for naming?
-  - current leaning: use a temporary merged project view first, but keep that merge logic inside analysis code rather than in the fixture harness
+- None currently recorded.
 
 ## Settled direction
 
@@ -31,6 +30,9 @@ The design must also leave room for later typechecking and project rechecking.
 - per-document lowered results are durable cached analysis data
 - project file order is defined by `Workspace`
 - naming results must be reusable for tooling such as go-to-definition and rename
+- naming should split into file-local preparation plus project-global resolution
+- the file-local naming pass should resolve local lexical facts eagerly and leave only package-wide questions unresolved
+- top-level declarations should receive distinct project-level identities during the project-global naming pass instead of reusing provisional file-local ids
 
 ## State model
 
@@ -76,6 +78,7 @@ struct LoweringState {
 ```rust
 struct NamingState {
     project_result: Option<ProjectNamingResult>,
+    file_results: BTreeMap<PathBuf, FileNamingResult>,
     dirty_documents: BTreeSet<PathBuf>,
 }
 ```
@@ -85,6 +88,7 @@ Persistent state should include:
 - shared interner
 - per-document lowered results
 - project-level lowered indexes
+- per-document naming preparation results
 - naming results
 - invalidation metadata
 
@@ -98,7 +102,6 @@ Transient state should include:
 
 - lowering walkers
 - naming walkers
-- temporary merged project views
 - temporary phase-local assembly data
 
 ## Phase contracts
@@ -174,11 +177,12 @@ Persistent inputs read:
 Persistent outputs written:
 
 - `NamingState.project_result`
+- `NamingState.file_results`
 - updated naming invalidation metadata
 
 Transient outputs:
 
-- temporary merged or ordered project view if naming still requires one
+- project-global lookup tables assembled from per-file naming artifacts
 - naming walkers and temporary lookup structures
 
 Conceptual API:
@@ -197,6 +201,17 @@ The naming result should support:
 - use sites
 - cross-file naming facts needed for go-to-definition
 - future rename support
+
+The intended split inside naming is:
+
+1. file-local preparation
+   - resolve local lexical references inside one file
+   - collect top-level declarations
+   - record unresolved references that may require package-global lookup
+2. project-global resolution
+   - build package-global declaration tables
+   - resolve cross-file top-level values and project-global type references
+   - assign project-level identities to package-visible declarations
 
 ### Later phases
 
@@ -248,8 +263,10 @@ That shape is not a hard API requirement, but it captures the intended boundary:
 ### 3. Move multi-file naming assembly into analysis code [pending]
 
 - remove fixture-harness-specific merge or remap logic from `tests/test_fixtures.rs`
-- build any temporary merged project view inside analysis if needed
+- build per-file naming preparation results inside analysis state
+- build project-global declaration tables from those per-file artifacts
 - make naming consume analysis-owned project inputs instead of fixture-owned ad hoc ones
+- assign project-level identities during project-global resolution rather than reusing provisional file-local ids
 
 ### 4. Expose normal phase APIs for tests and later consumers [pending]
 

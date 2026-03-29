@@ -11,7 +11,7 @@ use {
     },
     std::path::{Path, PathBuf},
     typing::{
-        AnalysisState, Interner,
+        AnalysisState, Diagnostic, Interner,
         hir::ExpressionKind,
         lower::{self, LoweringContext},
         run_lowering_and_naming,
@@ -19,6 +19,9 @@ use {
         typecheck::{BuiltinKind, InferenceState},
     },
 };
+
+const FIXTURE_PACKAGE_PATH: &str = "/fixture_package";
+const FIXTURE_MAIN_DOCUMENT_PATH: &str = "/fixture_package/main.R";
 
 #[test]
 fn bindings() {
@@ -92,62 +95,36 @@ fn unification() {
     run_fixture_suite("tests/unification", "unification", run_unification_fixture);
 }
 
-fn workspace_for_fixture(
-    fixture: &Fixture,
-    use_package_documents: bool,
-) -> Result<typing::Workspace, String> {
-    const SINGLE_FILE_PHASE_DOCUMENT_PATH: &str = "/single_file_phase_fixture.R";
-    const PACKAGE_PHASE_PATH: &str = "/package_phase_fixture";
-    const PACKAGE_PHASE_DOCUMENT_PATH: &str = "/package_phase_fixture.R";
-
-    let input_files = match &fixture.kind {
-        FixtureKind::Simple(case) => vec![FixtureInputFile {
-            path: PathBuf::from(if use_package_documents {
-                PACKAGE_PHASE_DOCUMENT_PATH
-            } else {
-                SINGLE_FILE_PHASE_DOCUMENT_PATH
-            }),
-            contents: case.input.clone(),
-        }],
-        FixtureKind::MultiFile(case) => case.input_files.clone(),
-        _ => return Err("unsupported fixture".to_owned()),
-    };
-
+fn package_for_fixture(fixture: &Fixture) -> Result<typing::Package, String> {
+    let input_files = input_files_for_fixture(fixture)?;
     let mut workspace = typing::Workspace::new().map_err(|_| "workspace".to_owned())?;
-    if use_package_documents {
-        workspace
-            .insert_package(PathBuf::from(PACKAGE_PHASE_PATH))
-            .map_err(|_| "workspace".to_owned())?;
-    }
+    workspace
+        .insert_package(PathBuf::from(FIXTURE_PACKAGE_PATH))
+        .map_err(|_| "workspace".to_owned())?;
 
     for input_file in &input_files {
-        let result = if use_package_documents {
-            workspace.insert_package_document(
-                Path::new(PACKAGE_PHASE_PATH),
+        workspace
+            .insert_package_document(
+                Path::new(FIXTURE_PACKAGE_PATH),
                 input_file.path.clone(),
                 &input_file.contents,
             )
-        } else {
-            workspace.insert_workspace_script(input_file.path.clone(), &input_file.contents)
-        };
-        result.map_err(|_| "workspace".to_owned())?;
+            .map_err(|_| "workspace".to_owned())?;
     }
 
-    Ok(workspace)
-}
-
-fn document_for_fixture(fixture: &Fixture) -> Result<typing::Document, String> {
-    let workspace = workspace_for_fixture(fixture, false)?;
     workspace
-        .document(Path::new("/single_file_phase_fixture.R"))
+        .package(Path::new(FIXTURE_PACKAGE_PATH))
         .cloned()
         .ok_or_else(|| "workspace".to_owned())
 }
 
-fn package_for_fixture(fixture: &Fixture) -> Result<typing::Package, String> {
-    let workspace = workspace_for_fixture(fixture, true)?;
-    workspace
-        .package(Path::new("/package_phase_fixture"))
+fn document_for_fixture(fixture: &Fixture) -> Result<typing::Document, String> {
+    let FixtureKind::Simple(_) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+    let package = package_for_fixture(fixture)?;
+    package
+        .document(Path::new(FIXTURE_MAIN_DOCUMENT_PATH))
         .cloned()
         .ok_or_else(|| "workspace".to_owned())
 }
@@ -398,63 +375,42 @@ fn run_lowering_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String>
 }
 
 fn run_naming_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
+    let output_files = naming_output_files_for_fixture(fixture)?;
     let package = package_for_fixture(fixture)?;
     let mut analysis_state = AnalysisState::new();
     let package_result = run_lowering_and_naming(&package, &mut analysis_state);
     let interner = analysis_state.interner().clone();
 
-    if !package_result.diagnostics.is_empty() {
-        if let FixtureKind::Simple(case) = &fixture.kind {
-            return Ok(single_snapshot_output(
-                &fixture.name,
-                render_diagnostics(&case.input, &package_result.diagnostics),
-            ));
-        }
-        return Err("multi-file naming".to_owned());
-    }
-
-    match &fixture.kind {
-        FixtureKind::Simple(_) => {
+    let mut files = Vec::with_capacity(output_files.len());
+    for output_file in output_files {
+        let output = if package_result.diagnostics.is_empty() {
             let module = package_result
                 .modules
-                .values()
-                .next()
+                .get(&output_file.package_path)
                 .ok_or_else(|| "missing module".to_owned())?;
-
-            Ok(single_snapshot_output(
-                &fixture.name,
-                render_named_hir(
-                    &module.arena,
-                    &module.definitions,
-                    &module.expressions,
-                    &package_result.naming,
-                    &interner,
-                ),
-            ))
-        }
-        FixtureKind::MultiFile(case) => {
-            let mut rendered_outputs = Vec::with_capacity(case.expectations.len());
-            for expectation in &case.expectations {
-                let module = package_result
-                    .modules
-                    .get(&expectation.path)
-                    .ok_or_else(|| "missing file".to_owned())?;
-                rendered_outputs.push(FixtureRunFile {
-                    path: expectation.path.clone(),
-                    output: render_named_hir(
-                        &module.arena,
-                        &module.definitions,
-                        &module.expressions,
-                        &package_result.naming,
-                        &interner,
-                    ),
-                });
-            }
-
-            Ok(files_snapshot_output(&fixture.name, rendered_outputs))
-        }
-        _ => Err("unsupported fixture".to_owned()),
+            render_named_hir(
+                &module.arena,
+                &module.definitions,
+                &module.expressions,
+                &package_result.naming,
+                &interner,
+            )
+        } else {
+            render_diagnostics(
+                &output_file.source,
+                &diagnostics_for_path(&package_result.diagnostics, &output_file.package_path)?,
+            )
+        };
+        files.push(FixtureRunFile {
+            path: output_file.fixture_output_path,
+            output,
+        });
     }
+
+    Ok(vec![FixtureOutput {
+        name: fixture.name.clone(),
+        files,
+    }])
 }
 
 fn run_substitution_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
@@ -553,11 +509,60 @@ fn single_snapshot_output(name: &str, output: String) -> Vec<FixtureOutput> {
     }]
 }
 
-fn files_snapshot_output(name: &str, files: Vec<FixtureRunFile>) -> Vec<FixtureOutput> {
-    vec![FixtureOutput {
-        name: name.to_owned(),
-        files,
-    }]
+fn input_files_for_fixture(fixture: &Fixture) -> Result<Vec<FixtureInputFile>, String> {
+    match &fixture.kind {
+        FixtureKind::Simple(case) => Ok(vec![FixtureInputFile {
+            path: PathBuf::from(FIXTURE_MAIN_DOCUMENT_PATH),
+            contents: case.input.clone(),
+        }]),
+        FixtureKind::MultiFile(case) => Ok(case.input_files.clone()),
+        _ => Err("unsupported fixture".to_owned()),
+    }
+}
+
+fn naming_output_files_for_fixture(fixture: &Fixture) -> Result<Vec<NamingOutputFile>, String> {
+    match &fixture.kind {
+        FixtureKind::Simple(case) => Ok(vec![NamingOutputFile {
+            fixture_output_path: PathBuf::new(),
+            package_path: PathBuf::from(FIXTURE_MAIN_DOCUMENT_PATH),
+            source: case.input.clone(),
+        }]),
+        FixtureKind::MultiFile(case) => Ok(case
+            .input_files
+            .iter()
+            .map(|input_file| NamingOutputFile {
+                fixture_output_path: input_file.path.clone(),
+                package_path: input_file.path.clone(),
+                source: input_file.contents.clone(),
+            })
+            .collect()),
+        _ => Err("unsupported fixture".to_owned()),
+    }
+}
+
+fn diagnostics_for_path(
+    diagnostics: &[Diagnostic],
+    path: &Path,
+) -> Result<Vec<Diagnostic>, String> {
+    let mut diagnostics_for_path = Vec::new();
+
+    for diagnostic in diagnostics {
+        let Some(diagnostic_path) = &diagnostic.path else {
+            return Err("diagnostic path".to_owned());
+        };
+
+        if diagnostic_path == path {
+            diagnostics_for_path.push(diagnostic.clone());
+        }
+    }
+
+    Ok(diagnostics_for_path)
+}
+
+struct NamingOutputFile {
+    fixture_output_path: PathBuf,
+    package_path: PathBuf,
+    source: String,
 }
 
 fn bind_fixture_builtins(

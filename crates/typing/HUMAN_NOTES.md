@@ -1,6 +1,9 @@
 # Human Notes (!AIs are not allowed to edit!)
 
+- integration into roughly is broken
+
 - naming:
+  - we should pass imported symbols, default namespaces, etc
   - should we have two phase: (currently we merge all modules?)
     - per document. resolves all locals (and remaining are assinged as globals)
     - per package. tries to resolve all globals

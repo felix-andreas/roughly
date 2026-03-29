@@ -69,7 +69,8 @@ Lowering is the front-end structural boundary. Later phases consume parsed HIR d
 Input:
 
 - lowered HIR for one package
-- builtins and project naming context needed for name lookup
+- project file order
+- project-global declaration tables derived from lowered files as needed
 
 Output:
 
@@ -80,14 +81,19 @@ Output:
 
 Responsibilities:
 
-- introduce value bindings
+- run file-local naming preparation for each lowered file
+- introduce file-local value bindings
 - construct lexical value scopes
 - handle value shadowing
-- resolve value use sites to binding identities
+- resolve value use sites that can be decided from file-local lexical structure
+- collect top-level value declarations and top-level type declarations
+- record unresolved value and type references that require package-global lookup
+- run project-global resolution over the collected per-file artifacts
 - resolve top-level value names against the package-global project environment
 - build the project-global type namespace from top-level declarations
 - resolve type references in annotations and declarations
 - resolve type references against that project-global namespace
+- assign package-visible project-level identities for top-level declarations
 - diagnose unknown type names, duplicate type declarations, wrong type-argument arity, alias-versus-nominal misuse for `@new`, and cross-file top-level value collisions
 
 Naming data is also a tooling boundary, not only a typechecking prerequisite.
@@ -105,6 +111,17 @@ Non-responsibilities:
 - expression type inference and compatibility checking
 
 Naming is the semantic name-resolution boundary. Lowering may still run document-by-document, but naming operates at package scope. Later phases must consume resolved binding identity and resolved type identity rather than re-resolving spelled names ad hoc.
+
+Internally, naming should be split into:
+
+1. file-local naming preparation
+2. project-global resolution
+
+The file-local preparation pass is authoritative for local lexical facts.
+The project-global pass is authoritative for package-visible top-level value and type resolution.
+
+Top-level declarations should not keep their preliminary file-local binding ids as their final package-visible identities.
+The project-global pass should assign distinct project-level ids for package-visible declarations so cross-file naming facts are owned by the package-level result rather than by incidental file-local traversal order.
 
 ### `typecheck`
 
@@ -184,6 +201,13 @@ The named representation must distinguish:
 - which type declaration a type reference resolves to
 - whether a resolved type name is nominal or an alias
 
+The naming representation should preserve both:
+
+- file-local naming artifacts needed to explain lexical resolution within one file
+- project-level naming identities for package-visible declarations and cross-file references
+
+For top-level value declarations, the final package-visible identity should come from the project-global naming pass rather than directly reusing a file-local provisional id.
+
 The named representation should also preserve the information needed for editor tooling built on name resolution, especially:
 
 - jumping from a use site to its definition site
@@ -227,10 +251,11 @@ The intended later project-level stages are:
 
 1. build or load project file order and project-global declaration tables
 2. run `lower`
-3. run `naming` with project naming context in scope
-4. run `typecheck`
-5. extract any checked-file summaries needed for incremental invalidation
-6. track dependency invalidation and dependent diagnostics
+3. run file-local naming preparation
+4. run project-global naming resolution and assign project-level declaration identities
+5. run `typecheck`
+6. extract any checked-file summaries needed for incremental invalidation
+7. track dependency invalidation and dependent diagnostics
 
 The architecture should not assume that only full-file rechecking is possible, but it should also not commit yet to reusing unification or inference state across edits.
 

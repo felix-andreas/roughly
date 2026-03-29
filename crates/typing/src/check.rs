@@ -88,9 +88,15 @@ pub fn run_lowering_and_naming(
         };
     }
 
-    let (merged_module, modules) = merge_modules(sorted_modules(&modules));
-    let naming = NamingContext::new(&merged_module.arena, analysis_state.interner())
-        .resolve_module(&merged_module);
+    let (merged_module, modules, definition_paths, expression_paths) =
+        merge_modules(sorted_modules(&modules));
+    let naming = NamingContext::new(
+        &merged_module.arena,
+        analysis_state.interner(),
+        &definition_paths,
+        &expression_paths,
+    )
+    .resolve_module(&merged_module);
     diagnostics.extend(naming.diagnostics.clone());
 
     PackageLoweringAndNamingResult {
@@ -123,9 +129,15 @@ pub fn run_lowering_and_naming_incremental(
         };
     }
 
-    let (merged_module, modules) = merge_modules(sorted_modules(&modules));
-    let naming = NamingContext::new(&merged_module.arena, analysis_state.interner())
-        .resolve_module(&merged_module);
+    let (merged_module, modules, definition_paths, expression_paths) =
+        merge_modules(sorted_modules(&modules));
+    let naming = NamingContext::new(
+        &merged_module.arena,
+        analysis_state.interner(),
+        &definition_paths,
+        &expression_paths,
+    )
+    .resolve_module(&merged_module);
     diagnostics.extend(naming.diagnostics.clone());
 
     PackageLoweringAndNamingResult {
@@ -143,7 +155,7 @@ pub fn check(package: &Package, analysis_state: &mut AnalysisState) -> CheckResu
         };
     }
 
-    let (merged_module, _) = merge_modules(sorted_modules(&package_result.modules));
+    let (merged_module, _, _, _) = merge_modules(sorted_modules(&package_result.modules));
     let mut inference_state = InferenceState::new();
     bind_builtins(&mut inference_state, &mut analysis_state.lowering_context);
 
@@ -184,27 +196,38 @@ fn refresh_lowered_documents(
         if should_refresh {
             analysis_state.lowered_documents.insert(
                 path.clone(),
-                lower_document(document, &mut analysis_state.lowering_context),
+                lower_document(document, &path, &mut analysis_state.lowering_context),
             );
         }
     }
 }
 
-fn lower_document(document: &Document, lowering_context: &mut LoweringContext) -> LoweredDocument {
+fn lower_document(
+    document: &Document,
+    path: &Path,
+    lowering_context: &mut LoweringContext,
+) -> LoweredDocument {
     let root = document.tree().root_node();
     if root.has_error() {
         let mut diagnostics = Vec::new();
         collect_syntax_errors(root, document.rope(), &mut diagnostics);
         return LoweredDocument {
             module: Module::new(HirArena::new(), Vec::new(), Vec::new()),
-            diagnostics,
+            diagnostics: diagnostics
+                .into_iter()
+                .map(|diagnostic| diagnostic.with_path(path.to_path_buf()))
+                .collect(),
         };
     }
 
     let lowering_result = lower_with_diagnostics(document, lowering_context);
     LoweredDocument {
         module: lowering_result.module,
-        diagnostics: lowering_result.diagnostics,
+        diagnostics: lowering_result
+            .diagnostics
+            .into_iter()
+            .map(|diagnostic| diagnostic.with_path(path.to_path_buf()))
+            .collect(),
     }
 }
 
@@ -234,13 +257,22 @@ fn sorted_modules(modules: &HashMap<PathBuf, Module>) -> Vec<(PathBuf, Module)> 
     sorted_modules
 }
 
-fn merge_modules(modules: Vec<(PathBuf, Module)>) -> (Module, HashMap<PathBuf, Module>) {
+fn merge_modules(
+    modules: Vec<(PathBuf, Module)>,
+) -> (
+    Module,
+    HashMap<PathBuf, Module>,
+    HashMap<DefinitionId, PathBuf>,
+    HashMap<ExpressionId, PathBuf>,
+) {
     let mut arena = HirArena::new();
     let mut definitions = Vec::new();
     let mut expressions = Vec::new();
     let mut next_expression_id = 0u32;
     let mut next_definition_id = 0u32;
     let mut remapped_module_items = Vec::new();
+    let mut definition_paths = HashMap::new();
+    let mut expression_paths = HashMap::new();
 
     for (path, module) in modules {
         let expression_offset = next_expression_id;
@@ -257,6 +289,9 @@ fn merge_modules(modules: Vec<(PathBuf, Module)>) -> (Module, HashMap<PathBuf, M
                 expression
             })
             .collect::<Vec<_>>();
+        for expression in &remapped_expressions {
+            expression_paths.insert(expression.id, path.clone());
+        }
         next_expression_id +=
             u32::try_from(remapped_expressions.len()).expect("expression count exceeded u32");
         arena.expressions.extend(remapped_expressions.clone());
@@ -272,6 +307,9 @@ fn merge_modules(modules: Vec<(PathBuf, Module)>) -> (Module, HashMap<PathBuf, M
                 )
             })
             .collect::<Vec<_>>();
+        for definition in &remapped_definitions {
+            definition_paths.insert(definition.id, path.clone());
+        }
         next_definition_id +=
             u32::try_from(remapped_definitions.len()).expect("definition count exceeded u32");
         definitions.extend(remapped_definitions.clone());
@@ -300,7 +338,12 @@ fn merge_modules(modules: Vec<(PathBuf, Module)>) -> (Module, HashMap<PathBuf, M
         })
         .collect::<HashMap<_, _>>();
 
-    (merged_module, remapped_modules)
+    (
+        merged_module,
+        remapped_modules,
+        definition_paths,
+        expression_paths,
+    )
 }
 
 fn remap_expression_kind(expression_kind: &mut ExpressionKind, expression_offset: u32) {
