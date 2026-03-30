@@ -2,6 +2,9 @@
 
 Keep newest decisions at the top.
 
+- `workspace` should stay thinner than `package` and should not mirror package mutation APIs.
+  - `Package` is the analysis unit and should own package contents directly. `Workspace` is the editor-facing registry and mutation helper around packages plus detached scripts, not a second package API surface.
+
 - naming should split into file-local preparation and project-global resolution, and the project-global pass should assign distinct package-visible ids for top-level declarations while updating the same naming result built by the file-local pass.
   - Local lexical resolution and package-global resolution have different invalidation and tooling needs. The boundary should stay explicit, but it does not need a separate intermediate artifact. Remapping top-level declarations onto project-level ids still makes cross-file identity owned by the package result rather than by file-local traversal details.
 
@@ -16,7 +19,7 @@ Keep newest decisions at the top.
 - package-attached non-contributing files are `scripts`.
   - They are attached to a package, can resolve against the package namespace, and do not contribute back to that namespace.
 
-- `lower` stays file-local, while `check.rs` owns package-scoped `run_lowering_and_naming` and full `check`.
+- `lower` stays file-local, while `pipeline.rs` owns package-scoped `run_lowering_and_naming` and full `check`.
   - The package is the unit of naming and later semantic phases, but lowering still needs to run directly on individual parsed documents.
 
 - `type_syntax` simple fixtures compare the parser's rendered success or rendered failure directly, with no `error:` sentinel in fixture input.

@@ -1,15 +1,16 @@
 use {
     crate::{
-        diagnostic::Diagnostic,
+        diagnostic::{Diagnostic, point_label},
+        document::Document,
         hir::{
             Argument, Definition, DefinitionId, DefinitionItem, Expression, ExpressionId,
             ExpressionKind, HirArena, Module, Parameter,
         },
         interner::{Interner, Symbol},
         text,
+        tree::{field, kind},
         type_syntax::{TypeParseError, TypeSyntax, parse_type_syntax},
         types::{Annotation, AttachedAnnotation},
-        workspace::Document,
     },
     ropey::Rope,
     tree_sitter::{Node, Range},
@@ -85,6 +86,14 @@ pub(crate) fn lower_with_diagnostics(
     document: &Document,
     lowering_context: &mut LoweringContext,
 ) -> LoweringResult {
+    let root = document.tree().root_node();
+    if root.has_error() {
+        return LoweringResult {
+            module: Module::new(HirArena::new(), Vec::new(), Vec::new()),
+            diagnostics: collect_syntax_errors(root, document.rope()),
+        };
+    }
+
     let module = lower(document, lowering_context);
     let diagnostics = lowering_context.take_diagnostics();
 
@@ -99,27 +108,27 @@ fn lower_node_with_rope(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> ExpressionId {
-    let kind = match node.kind() {
-        "identifier" => ExpressionKind::Symbol(intern_node_text(node, rope, lowering_context)),
-        "null" => ExpressionKind::Null,
-        "true" => ExpressionKind::Logical(true),
-        "false" => ExpressionKind::Logical(false),
-        "integer" => ExpressionKind::Integer(node_text(node, rope)),
-        "float" => ExpressionKind::Double(node_text(node, rope)),
-        "string" => ExpressionKind::Character(node_text(node, rope)),
-        "braced_expression" => lower_block(node, rope, lowering_context),
-        "binary_operator" => lower_binary_operator(node, rope, lowering_context),
-        "unary_operator" => lower_unary_operator(node, rope, lowering_context),
-        "function_definition" => lower_function_definition(node, rope, lowering_context),
-        "if_statement" => lower_if_statement(node, rope, lowering_context),
-        "for_statement" => lower_for_statement(node, rope, lowering_context),
-        "while_statement" => lower_while_statement(node, rope, lowering_context),
-        "repeat_statement" => lower_repeat_statement(node, rope, lowering_context),
-        "call" => lower_call(node, rope, lowering_context),
-        "subset" => lower_subset(node, rope, lowering_context),
-        "subset2" => lower_subset2(node, rope, lowering_context),
-        "extract_operator" => lower_extract_operator(node, rope, lowering_context),
-        "parenthesized_expression" => {
+    let kind = match node.kind_id() {
+        kind::IDENTIFIER => ExpressionKind::Symbol(intern_node_text(node, rope, lowering_context)),
+        kind::NULL => ExpressionKind::Null,
+        kind::TRUE => ExpressionKind::Logical(true),
+        kind::FALSE => ExpressionKind::Logical(false),
+        kind::INTEGER => ExpressionKind::Integer(node_text(node, rope)),
+        kind::FLOAT => ExpressionKind::Double(node_text(node, rope)),
+        kind::STRING => ExpressionKind::Character(node_text(node, rope)),
+        kind::BRACED_EXPRESSION => lower_block(node, rope, lowering_context),
+        kind::BINARY_OPERATOR => lower_binary_operator(node, rope, lowering_context),
+        kind::UNARY_OPERATOR => lower_unary_operator(node, rope, lowering_context),
+        kind::FUNCTION_DEFINITION => lower_function_definition(node, rope, lowering_context),
+        kind::IF_STATEMENT => lower_if_statement(node, rope, lowering_context),
+        kind::FOR_STATEMENT => lower_for_statement(node, rope, lowering_context),
+        kind::WHILE_STATEMENT => lower_while_statement(node, rope, lowering_context),
+        kind::REPEAT_STATEMENT => lower_repeat_statement(node, rope, lowering_context),
+        kind::CALL => lower_call(node, rope, lowering_context),
+        kind::SUBSET => lower_subset(node, rope, lowering_context),
+        kind::SUBSET2 => lower_subset2(node, rope, lowering_context),
+        kind::EXTRACT_OPERATOR => lower_extract_operator(node, rope, lowering_context),
+        kind::PARENTHESIZED_EXPRESSION => {
             if let Some(inner) = first_named_child(node) {
                 return lower_node_with_rope(inner, rope, lowering_context);
             }
@@ -136,9 +145,9 @@ fn lower_binary_operator(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
-    let maybe_lhs = node.child_by_field_name("lhs");
-    let maybe_operator = node.child_by_field_name("operator");
-    let maybe_rhs = node.child_by_field_name("rhs");
+    let maybe_lhs = node.child_by_field_id(field::LHS);
+    let maybe_operator = node.child_by_field_id(field::OPERATOR);
+    let maybe_rhs = node.child_by_field_id(field::RHS);
 
     let Some(lhs) = maybe_lhs else {
         return ExpressionKind::Unsupported;
@@ -150,9 +159,9 @@ fn lower_binary_operator(
         return ExpressionKind::Unsupported;
     };
 
-    match operator.kind() {
-        "<-" | "=" => {
-            if lhs.kind() != "identifier" {
+    match operator.kind_id() {
+        kind::LEFT_ASSIGN | kind::EQUAL => {
+            if lhs.kind_id() != kind::IDENTIFIER {
                 return ExpressionKind::Unsupported;
             }
 
@@ -161,7 +170,13 @@ fn lower_binary_operator(
 
             ExpressionKind::Assign { target, value }
         }
-        "+" | "-" | "*" | "/" | "**" | "&&" | "||" => {
+        kind::PLUS
+        | kind::MINUS
+        | kind::STAR
+        | kind::SLASH
+        | kind::DOUBLE_STAR
+        | kind::DOUBLE_AMPERSAND
+        | kind::DOUBLE_PIPE => {
             let operator_symbol = intern_node_text(operator, rope, lowering_context);
             let callee = lowering_context
                 .expression(operator.range(), ExpressionKind::Symbol(operator_symbol));
@@ -205,15 +220,15 @@ fn lower_unary_operator(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
-    let Some(operator) = node.child_by_field_name("operator") else {
+    let Some(operator) = node.child_by_field_id(field::OPERATOR) else {
         return ExpressionKind::Unsupported;
     };
-    let Some(value) = node.child_by_field_name("rhs") else {
+    let Some(value) = node.child_by_field_id(field::RHS) else {
         return ExpressionKind::Unsupported;
     };
 
-    match operator.kind() {
-        "-" => ExpressionKind::UnaryMinus {
+    match operator.kind_id() {
+        kind::MINUS => ExpressionKind::UnaryMinus {
             value: lower_node_with_rope(value, rope, lowering_context),
         },
         _ => ExpressionKind::Unsupported,
@@ -226,12 +241,12 @@ fn lower_function_definition(
     lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
     let parameters = node
-        .child_by_field_name("parameters")
+        .child_by_field_id(field::PARAMETERS)
         .map(|parameters| lower_parameters(parameters, rope, lowering_context))
         .unwrap_or_default();
 
     let body = node
-        .child_by_field_name("body")
+        .child_by_field_id(field::BODY)
         .map(|body| lower_node_with_rope(body, rope, lowering_context))
         .unwrap_or_else(|| lowering_context.expression(node.range(), ExpressionKind::Unsupported));
 
@@ -243,10 +258,10 @@ fn lower_if_statement(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
-    let Some(condition) = node.child_by_field_name("condition") else {
+    let Some(condition) = node.child_by_field_id(field::CONDITION) else {
         return ExpressionKind::Unsupported;
     };
-    let Some(consequence) = node.child_by_field_name("consequence") else {
+    let Some(consequence) = node.child_by_field_id(field::CONSEQUENCE) else {
         return ExpressionKind::Unsupported;
     };
 
@@ -254,7 +269,7 @@ fn lower_if_statement(
         condition: lower_node_with_rope(condition, rope, lowering_context),
         consequence: lower_node_with_rope(consequence, rope, lowering_context),
         alternative: node
-            .child_by_field_name("alternative")
+            .child_by_field_id(field::ALTERNATIVE)
             .map(|alternative| lower_node_with_rope(alternative, rope, lowering_context)),
     }
 }
@@ -264,16 +279,16 @@ fn lower_for_statement(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
-    let Some(variable) = node.child_by_field_name("variable") else {
+    let Some(variable) = node.child_by_field_id(field::VARIABLE) else {
         return ExpressionKind::Unsupported;
     };
-    if variable.kind() != "identifier" {
+    if variable.kind_id() != kind::IDENTIFIER {
         return ExpressionKind::Unsupported;
     }
-    let Some(sequence) = node.child_by_field_name("sequence") else {
+    let Some(sequence) = node.child_by_field_id(field::SEQUENCE) else {
         return ExpressionKind::Unsupported;
     };
-    let Some(body) = node.child_by_field_name("body") else {
+    let Some(body) = node.child_by_field_id(field::BODY) else {
         return ExpressionKind::Unsupported;
     };
 
@@ -289,10 +304,10 @@ fn lower_while_statement(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
-    let Some(condition) = node.child_by_field_name("condition") else {
+    let Some(condition) = node.child_by_field_id(field::CONDITION) else {
         return ExpressionKind::Unsupported;
     };
-    let Some(body) = node.child_by_field_name("body") else {
+    let Some(body) = node.child_by_field_id(field::BODY) else {
         return ExpressionKind::Unsupported;
     };
 
@@ -307,7 +322,7 @@ fn lower_repeat_statement(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
-    let Some(body) = node.child_by_field_name("body") else {
+    let Some(body) = node.child_by_field_id(field::BODY) else {
         return ExpressionKind::Unsupported;
     };
 
@@ -329,16 +344,16 @@ fn lower_parameters(
             continue;
         };
 
-        match child.kind() {
-            "identifier" => {
+        match child.kind_id() {
+            kind::IDENTIFIER => {
                 lowered_parameters.push(Parameter {
                     symbol: intern_node_text(child, rope, lowering_context),
                     range: child.range(),
                 });
             }
-            "parameter" => {
-                if let Some(name) = child.child_by_field_name("name")
-                    && name.kind() == "identifier"
+            kind::PARAMETER => {
+                if let Some(name) = child.child_by_field_id(field::NAME)
+                    && name.kind_id() == kind::IDENTIFIER
                 {
                     lowered_parameters.push(Parameter {
                         symbol: intern_node_text(name, rope, lowering_context),
@@ -358,13 +373,13 @@ fn lower_call(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
-    let Some(function) = node.child_by_field_name("function") else {
+    let Some(function) = node.child_by_field_id(field::FUNCTION) else {
         return ExpressionKind::Unsupported;
     };
 
     let callee = lower_node_with_rope(function, rope, lowering_context);
     let arguments = node
-        .child_by_field_name("arguments")
+        .child_by_field_id(field::ARGUMENTS)
         .map(|arguments| lower_arguments(arguments, rope, lowering_context))
         .unwrap_or_default();
 
@@ -376,13 +391,13 @@ fn lower_subset(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
-    let Some(function) = node.child_by_field_name("function") else {
+    let Some(function) = node.child_by_field_id(field::FUNCTION) else {
         return ExpressionKind::Unsupported;
     };
 
     let value = lower_node_with_rope(function, rope, lowering_context);
     let arguments = node
-        .child_by_field_name("arguments")
+        .child_by_field_id(field::ARGUMENTS)
         .map(|arguments| lower_index_arguments(arguments, rope, lowering_context))
         .unwrap_or_default();
 
@@ -394,13 +409,13 @@ fn lower_subset2(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
-    let Some(function) = node.child_by_field_name("function") else {
+    let Some(function) = node.child_by_field_id(field::FUNCTION) else {
         return ExpressionKind::Unsupported;
     };
 
     let value = lower_node_with_rope(function, rope, lowering_context);
     let arguments = node
-        .child_by_field_name("arguments")
+        .child_by_field_id(field::ARGUMENTS)
         .map(|arguments| lower_index_arguments(arguments, rope, lowering_context))
         .unwrap_or_default();
 
@@ -412,22 +427,22 @@ fn lower_extract_operator(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
-    let Some(operator) = node.child_by_field_name("operator") else {
+    let Some(operator) = node.child_by_field_id(field::OPERATOR) else {
         return ExpressionKind::Unsupported;
     };
-    if operator.kind() != "$" {
+    if operator.kind_id() != kind::DOLLAR {
         return ExpressionKind::Unsupported;
     }
 
-    let Some(lhs) = node.child_by_field_name("lhs") else {
+    let Some(lhs) = node.child_by_field_id(field::LHS) else {
         return ExpressionKind::Unsupported;
     };
-    let Some(rhs) = node.child_by_field_name("rhs") else {
+    let Some(rhs) = node.child_by_field_id(field::RHS) else {
         return ExpressionKind::Unsupported;
     };
-    let name = match rhs.kind() {
-        "identifier" => intern_node_text(rhs, rope, lowering_context),
-        "string" => intern_string_node_content(rhs, rope, lowering_context),
+    let name = match rhs.kind_id() {
+        kind::IDENTIFIER => intern_node_text(rhs, rope, lowering_context),
+        kind::STRING => intern_string_node_content(rhs, rope, lowering_context),
         _ => return ExpressionKind::Unsupported,
     };
 
@@ -450,17 +465,17 @@ fn lower_arguments(
             continue;
         };
 
-        if child.kind() != "argument" {
+        if child.kind_id() != kind::ARGUMENT {
             continue;
         }
 
         let name = child
-            .child_by_field_name("name")
-            .filter(|name| name.kind() == "identifier")
+            .child_by_field_id(field::NAME)
+            .filter(|name| name.kind_id() == kind::IDENTIFIER)
             .map(|name| intern_node_text(name, rope, lowering_context));
 
         let expression = child
-            .child_by_field_name("value")
+            .child_by_field_id(field::VALUE)
             .map(|value| lower_node_with_rope(value, rope, lowering_context))
             .unwrap_or_else(|| {
                 lowering_context.expression(child.range(), ExpressionKind::Unsupported)
@@ -485,18 +500,18 @@ fn lower_index_arguments(
             continue;
         };
 
-        if child.kind() != "argument" {
+        if child.kind_id() != kind::ARGUMENT {
             continue;
         }
 
         let name = child
-            .child_by_field_name("name")
-            .filter(|name| name.kind() == "identifier")
+            .child_by_field_id(field::NAME)
+            .filter(|name| name.kind_id() == kind::IDENTIFIER)
             .map(|name| intern_node_text(name, rope, lowering_context));
 
-        let expression = match child.child_by_field_name("value") {
+        let expression = match child.child_by_field_id(field::VALUE) {
             None => lowering_context.expression(child.range(), ExpressionKind::Unsupported),
-            Some(value) if value.kind() == "string" => {
+            Some(value) if value.kind_id() == kind::STRING => {
                 let symbol = intern_string_node_content(value, rope, lowering_context);
                 lowering_context
                     .expression(value.range(), ExpressionKind::StringLiteralName(symbol))
@@ -531,7 +546,7 @@ fn intern_string_node_content(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> Symbol {
-    if let Some(content) = node.child_by_field_name("content") {
+    if let Some(content) = node.child_by_field_id(field::CONTENT) {
         return intern_node_text(content, rope, lowering_context);
     }
 
@@ -605,7 +620,7 @@ fn lower_sequence(
             continue;
         };
 
-        if child.kind() == "comment" {
+        if child.kind_id() == kind::COMMENT {
             let text = node_text(child, rope);
             let trimmed = text.trim_start();
             if trimmed.starts_with("#:") {
@@ -615,7 +630,7 @@ fn lower_sequence(
                 let mut next_index = child_index + 1;
                 while next_index < child_count {
                     if let Some(next_child) = node.named_child(next_index)
-                        && next_child.kind() == "comment"
+                        && next_child.kind_id() == kind::COMMENT
                     {
                         let next_text = node_text(next_child, rope);
                         let next_trimmed = next_text.trim_start();
@@ -707,7 +722,7 @@ fn lower_sequence(
                             "A `#:` typing comment cannot be separated from its expression by an empty line.",
                         ));
                         child_index = next_index;
-                    } else if expr_child.kind() == "comment" {
+                    } else if expr_child.kind_id() == kind::COMMENT {
                         lowering_context.diagnostics.push(Diagnostic::syntax_error(
                             block_range,
                             "A `#:` typing comment must be followed immediately by an expression.",
@@ -753,7 +768,7 @@ fn lower_sequence(
             }
         }
 
-        if child.kind() != "comment" {
+        if child.kind_id() != kind::COMMENT {
             items.push(LoweredSequenceItem::Expression(lower_node_with_rope(
                 child,
                 rope,
@@ -818,5 +833,51 @@ fn annotation_parse_diagnostic(range: Range, error: TypeParseError) -> Diagnosti
         TypeParseError::UnknownType { name } => {
             Diagnostic::syntax_error(range, format!("type syntax error: unknown type `{name}`"))
         }
+    }
+}
+
+fn collect_syntax_errors(node: Node<'_>, rope: &Rope) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    collect_syntax_errors_recursive(node, rope, &mut diagnostics);
+    diagnostics
+}
+
+fn collect_syntax_errors_recursive(node: Node<'_>, rope: &Rope, diagnostics: &mut Vec<Diagnostic>) {
+    if node.is_error() {
+        diagnostics.push(Diagnostic::syntax_error(
+            node.range(),
+            format!("Unexpected syntax: {}", syntax_error_snippet(node, rope)),
+        ));
+        return;
+    }
+
+    if node.is_missing() {
+        diagnostics.push(Diagnostic::syntax_error(
+            node.range(),
+            format!(
+                "Missing syntax near {}",
+                point_label(node.range().start_point)
+            ),
+        ));
+        return;
+    }
+
+    let child_count = node.child_count();
+    for child_index in 0..child_count {
+        if let Some(child) = node.child(child_index) {
+            collect_syntax_errors_recursive(child, rope, diagnostics);
+        }
+    }
+}
+
+fn syntax_error_snippet(node: Node<'_>, rope: &Rope) -> String {
+    let compact = text::compact_node_text(rope, node);
+
+    if compact == "<empty>" || compact == "<unavailable>" {
+        compact
+    } else if compact.len() > 40 {
+        format!("{:?}…", &compact[..40])
+    } else {
+        format!("{compact:?}")
     }
 }

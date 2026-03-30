@@ -27,74 +27,62 @@ const FIXTURE_MAIN_DOCUMENT_PATH: &str = "/fixture_package/main.R";
 
 #[test]
 fn bindings() {
-    run_fixture_suite("tests/bindings", "bindings", run_bindings_fixture);
+    run_fixture_suite("tests/bindings", run_bindings_fixture);
 }
 
 #[test]
 fn diagnostics() {
-    run_fixture_suite("tests/diagnostics", "diagnostics", run_diagnostics_fixture);
+    run_fixture_suite("tests/diagnostics", run_diagnostics_fixture);
 }
 
 #[test]
 fn environment() {
-    run_fixture_suite("tests/environment", "environment", run_environment_fixture);
+    run_fixture_suite("tests/environment", run_environment_fixture);
 }
 
 #[test]
 fn expressions() {
-    run_fixture_suite("tests/expressions", "expressions", run_expressions_fixture);
+    run_fixture_suite("tests/expressions", run_expressions_fixture);
 }
 
 #[test]
 fn generalization() {
-    run_fixture_suite(
-        "tests/generalization",
-        "generalization",
-        run_generalization_fixture,
-    );
+    run_fixture_suite("tests/generalization", run_generalization_fixture);
 }
 
 #[test]
 fn instantiation() {
-    run_fixture_suite(
-        "tests/instantiation",
-        "instantiation",
-        run_instantiation_fixture,
-    );
+    run_fixture_suite("tests/instantiation", run_instantiation_fixture);
 }
 
 #[test]
 fn interfaces() {
-    run_fixture_suite("tests/interfaces", "interfaces", run_interfaces_fixture);
+    run_fixture_suite("tests/interfaces", run_interfaces_fixture);
 }
 
 #[test]
 fn lowering() {
-    run_fixture_suite("tests/lowering", "lowering", run_lowering_fixture);
+    run_fixture_suite("tests/lowering", run_lowering_fixture);
 }
 
 #[test]
 fn naming() {
-    run_fixture_suite("tests/naming", "naming", run_naming_fixture);
+    run_fixture_suite("tests/naming", run_naming_fixture);
 }
 
 #[test]
 fn substitution() {
-    run_fixture_suite(
-        "tests/substitution",
-        "substitution",
-        run_substitution_fixture,
-    );
+    run_fixture_suite("tests/substitution", run_substitution_fixture);
 }
 
 #[test]
 fn type_syntax() {
-    run_fixture_suite("tests/type_syntax", "type_syntax", run_type_syntax_fixture);
+    run_fixture_suite("tests/type_syntax", run_type_syntax_fixture);
 }
 
 #[test]
 fn unification() {
-    run_fixture_suite("tests/unification", "unification", run_unification_fixture);
+    run_fixture_suite("tests/unification", run_unification_fixture);
 }
 
 fn package_for_fixture(fixture: &Fixture) -> Result<typing::Package, String> {
@@ -452,7 +440,7 @@ fn run_naming_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
     };
     let package = package_for_fixture(fixture)?;
     let mut analysis_state = AnalysisState::new();
-    let package_result = run_lowering_and_naming(&package, &mut analysis_state);
+    let package_result = run_lowering_and_naming(&package, None, &mut analysis_state);
 
     let mut files = Vec::with_capacity(output_files.len());
     for output_file in output_files {

@@ -49,8 +49,8 @@ The current public checking result is diagnostics-only.
 
 That is enough for some tests, but it leaves later tooling work without a stable checked artifact to consume and encourages recomputation in places that will eventually need typed results.
 
-### There is duplicate `CheckResult` structure
+### `workspace` still overlaps too much with `package`
 
-`CheckResult` currently exists in more than one module.
+The current `workspace` API still exposes package-shaped mutation helpers.
 
-That is a small debt item, but it is a sign that result ownership and rendering boundaries are still blurry.
+That overlap makes the intended boundary harder to read: `Package` is the analysis unit, while `Workspace` should stay the editor-facing registry and mutation helper around packages and detached scripts.

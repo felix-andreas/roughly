@@ -1,11 +1,16 @@
 use {
-    ropey::Rope,
+    crate::{
+        document::{Document, DocumentEditError},
+        package::Package,
+        text::TextRange,
+        tree::new_parser,
+    },
     std::{
         collections::HashMap,
         path::{Path, PathBuf},
     },
     thiserror::Error,
-    tree_sitter::{InputEdit, Parser, Point, Tree},
+    tree_sitter::Parser,
 };
 
 pub struct Workspace {
@@ -13,32 +18,6 @@ pub struct Workspace {
     packages: HashMap<PathBuf, Package>,
     /// Scripts not attached to any package.
     scripts: HashMap<PathBuf, Document>,
-}
-
-#[derive(Clone, Default)]
-pub struct Package {
-    documents: HashMap<PathBuf, Document>,
-    /// Scripts attached to a package. They can resolve against the package namespace, but they do
-    /// not contribute back to that namespace.
-    scripts: HashMap<PathBuf, Document>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Document {
-    rope: Rope,
-    tree: Tree,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TextPosition {
-    pub line_index: usize,
-    pub character_index: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TextRange {
-    pub start: TextPosition,
-    pub end: TextPosition,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -61,10 +40,7 @@ pub enum WorkspaceError {
 
 impl Workspace {
     pub fn new() -> Result<Self, WorkspaceError> {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&tree_sitter_r::LANGUAGE.into())
-            .map_err(|_| WorkspaceError::ParserInitializationFailed)?;
+        let parser = new_parser().map_err(|_| WorkspaceError::ParserInitializationFailed)?;
 
         Ok(Self {
             parser,
@@ -147,71 +123,16 @@ impl Workspace {
         let (bucket, mut document) = self
             .take_document(path)
             .ok_or_else(|| WorkspaceError::DocumentNotFound(path.to_path_buf()))?;
-
-        let start_character = line_character_to_character_index(&document.rope, range.start)
-            .ok_or_else(|| WorkspaceError::InvalidEditRange {
-                path: path.to_path_buf(),
-            })?;
-        let end_character = line_character_to_character_index(&document.rope, range.end)
-            .ok_or_else(|| WorkspaceError::InvalidEditRange {
-                path: path.to_path_buf(),
-            })?;
-
-        if start_character > end_character {
+        if let Err(error) = document.edit_range(&mut self.parser, range, replacement_text) {
             self.insert_document_at(bucket, path.to_path_buf(), document)?;
-            return Err(WorkspaceError::InvalidEditRange {
-                path: path.to_path_buf(),
+            return Err(match error {
+                DocumentEditError::InvalidRange => WorkspaceError::InvalidEditRange {
+                    path: path.to_path_buf(),
+                },
+                DocumentEditError::ParseFailed => WorkspaceError::ParseFailed(path.to_path_buf()),
             });
         }
 
-        let start_byte = document
-            .rope
-            .try_char_to_byte(start_character)
-            .map_err(|_| WorkspaceError::InvalidEditRange {
-                path: path.to_path_buf(),
-            })?;
-        let old_end_byte = document.rope.try_char_to_byte(end_character).map_err(|_| {
-            WorkspaceError::InvalidEditRange {
-                path: path.to_path_buf(),
-            }
-        })?;
-
-        document.rope.remove(start_character..end_character);
-        document.rope.insert(start_character, replacement_text);
-
-        let new_end_byte = start_byte + replacement_text.len();
-        let new_end_line = document.rope.try_byte_to_line(new_end_byte).map_err(|_| {
-            WorkspaceError::InvalidEditRange {
-                path: path.to_path_buf(),
-            }
-        })?;
-        let line_start_character = document.rope.try_line_to_char(new_end_line).map_err(|_| {
-            WorkspaceError::InvalidEditRange {
-                path: path.to_path_buf(),
-            }
-        })?;
-        let new_end_character = document.rope.try_byte_to_char(new_end_byte).map_err(|_| {
-            WorkspaceError::InvalidEditRange {
-                path: path.to_path_buf(),
-            }
-        })?;
-
-        document.tree.edit(&InputEdit {
-            start_byte,
-            old_end_byte,
-            new_end_byte,
-            start_position: point_from_text_position(range.start),
-            old_end_position: point_from_text_position(range.end),
-            new_end_position: Point::new(
-                new_end_line,
-                new_end_character.saturating_sub(line_start_character),
-            ),
-        });
-
-        let previous_tree = document.tree.clone();
-        let reparsed_tree =
-            parse_rope(&mut self.parser, &document.rope, Some(&previous_tree), path)?;
-        document.tree = reparsed_tree;
         self.insert_document_at(bucket, path.to_path_buf(), document)
     }
 
@@ -267,7 +188,7 @@ impl Workspace {
                     .packages
                     .get_mut(&package_path)
                     .ok_or(WorkspaceError::PackageNotFound(package_path))?;
-                package.documents.insert(path, document);
+                package.insert_document(path, document);
                 Ok(())
             }
             DocumentBucket::PackageScript(package_path) => {
@@ -275,7 +196,7 @@ impl Workspace {
                     .packages
                     .get_mut(&package_path)
                     .ok_or(WorkspaceError::PackageNotFound(package_path))?;
-                package.scripts.insert(path, document);
+                package.insert_script(path, document);
                 Ok(())
             }
         }
@@ -287,13 +208,13 @@ impl Workspace {
         }
 
         for (package_path, package) in &mut self.packages {
-            if let Some(document) = package.documents.remove(path) {
+            if let Some(document) = package.remove_document(path) {
                 return Some((
                     DocumentBucket::PackageDocument(package_path.clone()),
                     document,
                 ));
             }
-            if let Some(document) = package.scripts.remove(path) {
+            if let Some(document) = package.remove_script(path) {
                 return Some((
                     DocumentBucket::PackageScript(package_path.clone()),
                     document,
@@ -305,37 +226,8 @@ impl Workspace {
     }
 
     fn parse_document(&mut self, source: &str, path: &Path) -> Result<Document, WorkspaceError> {
-        let rope = Rope::from_str(source);
-        let tree = parse_rope(&mut self.parser, &rope, None, path)?;
-        Ok(Document { rope, tree })
-    }
-}
-
-impl Package {
-    pub fn document(&self, path: &Path) -> Option<&Document> {
-        self.documents.get(path).or_else(|| self.scripts.get(path))
-    }
-
-    pub fn documents(&self) -> impl Iterator<Item = (&PathBuf, &Document)> {
-        self.documents.iter()
-    }
-
-    pub fn scripts(&self) -> impl Iterator<Item = (&PathBuf, &Document)> {
-        self.scripts.iter()
-    }
-}
-
-impl Document {
-    pub fn new(rope: Rope, tree: Tree) -> Self {
-        Self { rope, tree }
-    }
-
-    pub fn rope(&self) -> &Rope {
-        &self.rope
-    }
-
-    pub fn tree(&self) -> &Tree {
-        &self.tree
+        Document::parse(&mut self.parser, source)
+            .ok_or_else(|| WorkspaceError::ParseFailed(path.to_path_buf()))
     }
 }
 
@@ -346,40 +238,11 @@ enum DocumentBucket {
     PackageScript(PathBuf),
 }
 
-fn parse_rope(
-    parser: &mut Parser,
-    rope: &Rope,
-    previous_tree: Option<&Tree>,
-    path: &Path,
-) -> Result<Tree, WorkspaceError> {
-    let mut lookup = |byte, _position| {
-        let (chunk, chunk_byte, _, _) = rope.chunk_at_byte(byte);
-        let offset = byte - chunk_byte;
-        &chunk.as_bytes()[offset..]
-    };
-
-    parser
-        .parse_with_options(&mut lookup, previous_tree, None)
-        .ok_or_else(|| WorkspaceError::ParseFailed(path.to_path_buf()))
-}
-
-fn line_character_to_character_index(rope: &Rope, position: TextPosition) -> Option<usize> {
-    let line_start_character = rope.try_line_to_char(position.line_index).ok()?;
-    let line_text = rope.get_line(position.line_index)?;
-    let line_character_count = line_text.len_chars();
-
-    (position.character_index <= line_character_count)
-        .then_some(line_start_character + position.character_index)
-}
-
-fn point_from_text_position(position: TextPosition) -> Point {
-    Point::new(position.line_index, position.character_index)
-}
-
 #[cfg(test)]
 mod tests {
     use {
-        super::{TextPosition, TextRange, Workspace},
+        super::Workspace,
+        crate::text::{TextPosition, TextRange},
         indoc::indoc,
         std::path::PathBuf,
     };

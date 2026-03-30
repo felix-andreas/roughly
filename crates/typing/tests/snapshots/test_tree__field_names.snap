@@ -1,0 +1,25 @@
+---
+source: crates/typing/tests/test_tree.rs
+assertion_line: 62
+expression: "(1u16..=language.field_count() as\nu16).map(|id| format(language.field_name_for_id(id).unwrap(), id)).join(\"\\n\")"
+---
+pub const ALTERNATIVE: u16 = 1; // "alternative"
+pub const ARGUMENT: u16 = 2; // "argument"
+pub const ARGUMENTS: u16 = 3; // "arguments"
+pub const BODY: u16 = 4; // "body"
+pub const CLOSE: u16 = 5; // "close"
+pub const CONDITION: u16 = 6; // "condition"
+pub const CONSEQUENCE: u16 = 7; // "consequence"
+pub const CONTENT: u16 = 8; // "content"
+pub const DEFAULT: u16 = 9; // "default"
+pub const FUNCTION: u16 = 10; // "function"
+pub const LHS: u16 = 11; // "lhs"
+pub const NAME: u16 = 12; // "name"
+pub const OPEN: u16 = 13; // "open"
+pub const OPERATOR: u16 = 14; // "operator"
+pub const PARAMETER: u16 = 15; // "parameter"
+pub const PARAMETERS: u16 = 16; // "parameters"
+pub const RHS: u16 = 17; // "rhs"
+pub const SEQUENCE: u16 = 18; // "sequence"
+pub const VALUE: u16 = 19; // "value"
+pub const VARIABLE: u16 = 20; // "variable"

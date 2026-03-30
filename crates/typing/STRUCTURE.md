@@ -6,11 +6,16 @@ Keep it focused on the intended near-term file split and the role of each file.
 
 ## Desired file split
 
-- `check.rs`
+- `pipeline.rs`
   - top-level orchestration
   - package-level phase wiring
+  - `check`
   - `run_lowering_and_naming`
-  - checked-file result assembly
+  - `run_typecheck`
+
+- `document.rs`
+  - parsed document type
+  - document edit and reparse mechanics
 
 - `hir.rs`
   - HIR data structures
@@ -43,15 +48,28 @@ Keep it focused on the intended near-term file split and the role of each file.
 - `interner.rs`
   - interned symbol storage
 
+- `package.rs`
+  - analysis unit
+  - package document and script buckets
+  - package traversal and fallback policy
+
+- `text.rs`
+  - source-text position and range types
+  - rope-based text helpers
+  - keep only text helpers that are genuinely reused by `typing`
+
+- `tree.rs`
+  - parser construction
+  - rope-to-tree parsing
+  - tree-sitter navigation
+  - `kind` and `field` ids
+  - current implementation may temporarily be narrower than this target shape while the shared tree utility surface settles
+
 - `workspace.rs`
-  - parsed document storage
-  - package and script buckets
-  - incremental text and parse-tree updates
-
-## Not part of the long-term public phase structure
-
-- `parse.rs`
-  - parser setup for tests or external integration only
+  - editor and LSP-facing mutation orchestration
+  - workspace package buckets
+  - detached-script insertion plus document rename, delete, and edit workflows
+  - do not mirror the `Package` mutation API
 
 ## Deferred split
 

@@ -1,9 +1,5 @@
 # Human Notes (!AIs are not allowed to edit!)
 
-1. please explain to me what is prepare_expression?
-2. I thought we should have two phases:
-  * resolve_document. resolves all locals and tells which symbols it exposes and which where unresolved (these are potential globals, imports from other packages or builtins)
-  * resolve_package. takes all resolved document, parsed NAMESPACE information and builtins and consolidates it. creates diagnostics per document (warns if namespace or builtins are shadowed).
 
 - integration into roughly is broken
 
@@ -19,6 +15,9 @@
     - second phase tries to conslidate between multiple files. 
   - add support for <<- (what are the semantics??)
   - support for local
+  - better separation betwen phases:
+    - resolve_document. resolves all locals and tells which symbols it exposes and which where unresolved (these are potential globals, imports from other packages or builtins)
+    - resolve_package. takes all resolved document, parsed NAMESPACE information and builtins and consolidates it. creates diagnostics per document (warns if namespace or builtins are shadowed).
 - state
   - document_store (after parsing)
   - hir (after lowering)
@@ -148,3 +147,18 @@ also if not. shouldn't we render free variables differently in the fixutre ? wha
   - do we need scoping tests?
   - is infer the correct name (wound't typecheck by more appropriate?)
   - how to make type checking incremental: how to handle case if non-opend file depends on type in another file. no only other file changes. how does the type in the other file gets updated?
+
+
+- reasonable fixture split. initially we had this
+  - `type_syntax` - typing-comment syntax and normalized type rendering
+  - `bindings` - top-level binding result types
+  - `diagnostics` - final user-facing errors
+  - `environment` - rebinding, shadowing, and scheme reuse across scopes
+  - `expressions` - checked expression result types
+  - `generalization` - quantified schemes produced at binding boundaries
+  - `instantiation` - fresh reuse of generalized bindings at use sites
+  - `interfaces` - exported per-file interface shapes
+  - `lowering` - syntax-to-HIR lowering output
+  - `naming` - binding introduction and use-site resolution
+  - `substitution` - propagation of solved types through larger shapes
+  - `unification` - solved monotypes during local inference

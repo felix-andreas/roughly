@@ -1,3 +1,6 @@
+// NOTE: most of this is moved to typing crate
+// we should functionality from there
+
 use {
     ropey::{Rope, iter::Chunks},
     tree_sitter::{Node, Parser, Point, Query, QueryCursor, QueryMatches, Range, Tree, TreeCursor},

@@ -13,6 +13,16 @@ This document tracks actionable planned work for the `typing` crate.
 
 ## Current priorities
 
+### Workspace And Package Boundary
+
+- Thin the `workspace` API so it stops mirroring `Package` mutation.
+  - Move package-population APIs onto `Package`.
+  - Remove `Workspace` wrappers that only forward package document and script insertion.
+  - Revisit whether `package_mut` should remain public.
+- Reasoning:
+  - `Package` is the fundamental analysis unit.
+  - The current `workspace` surface is too package-shaped, which blurs the intended module boundary and makes `Workspace` look like a second package API.
+
 ### Split `types.rs` By Phase
 
 - Separate the current mixed type data model into phase-shaped representations.
@@ -44,7 +54,7 @@ This document tracks actionable planned work for the `typing` crate.
 ### Checked File And Interfaces
 
 - Expose checked-file and project-summary boundaries.
-  - Define the checked-file result owned by `check.rs`.
+  - Define the checked-file result owned by `pipeline.rs`.
   - Retain diagnostics, typed results, and any project-summary extraction needed at that boundary.
   - Use those summaries as one possible dependency boundary for later project scheduling and incremental invalidation.
 

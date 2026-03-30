@@ -22,11 +22,11 @@ pub struct FixtureRunFile {
     pub output: String,
 }
 
-pub fn run_fixture_suite<RunFixture>(directory_path: &str, kind: &str, mut run_fixture: RunFixture)
+pub fn run_fixture_suite<RunFixture>(directory_path: &str, mut run_fixture: RunFixture)
 where
     RunFixture: FnMut(&Fixture) -> Result<Vec<FixtureOutput>, String>,
 {
-    let groups = read_fixture_suite(directory_path, kind);
+    let groups = read_fixture_suite(directory_path);
     let maybe_filter = std::env::var("FIXTURE_FILTER").ok();
     let mut snapshot_names = BTreeSet::new();
     let mut failures = Vec::new();
@@ -38,7 +38,7 @@ where
 
             assert!(
                 snapshot_names.insert(fixture_name.clone()),
-                "duplicate typing {kind} test snapshot name `{fixture_name}`"
+                "duplicate fixture snapshot name `{fixture_name}`"
             );
 
             if maybe_filter
@@ -54,7 +54,7 @@ where
                 Ok(expected_outputs) => expected_outputs,
                 Err(error) => {
                     failures.push(format!(
-                        "fixture `{fixture_name}` is invalid for the current typing `{kind}` runner: {error}"
+                        "fixture `{fixture_name}` is invalid for the current runner: {error}"
                     ));
                     continue;
                 }
@@ -64,7 +64,7 @@ where
                 Ok(actual_outputs) => actual_outputs,
                 Err(error) => {
                     failures.push(format!(
-                        "fixture `{fixture_name}` is not supported by the current typing `{kind}` runner: {error}"
+                        "fixture `{fixture_name}` is not supported by the current runner: {error}"
                     ));
                     continue;
                 }
@@ -80,29 +80,29 @@ where
 
     if !failures.is_empty() {
         panic!(
-            "{} {kind} test(s) failed:\n\n{}",
+            "{} fixture test(s) failed:\n\n{}",
             failures.len(),
             failures.join("\n\n")
         );
     }
 
-    eprintln!("{} {kind} fixture(s) passed", executed_fixture_count);
+    eprintln!("{} fixture(s) passed", executed_fixture_count);
 }
 
-pub fn read_fixture_suite(directory_path: &str, kind: &str) -> Vec<FixtureGroup> {
-    let fixture_paths = collect_fixture_paths(directory_path, kind);
+pub fn read_fixture_suite(directory_path: &str) -> Vec<FixtureGroup> {
+    let fixture_paths = collect_fixture_paths(directory_path);
     let mut groups = Vec::new();
 
     for fixture_path in fixture_paths {
         let fixture_text = fs::read_to_string(&fixture_path).unwrap_or_else(|error| {
             panic!(
-                "failed to read {kind} fixture file `{}`: {error}",
+                "failed to read fixture file `{}`: {error}",
                 fixture_path.display()
             )
         });
         let fixture_file = parse_file(&fixture_text).unwrap_or_else(|error| {
             panic!(
-                "failed to parse {kind} fixture file `{}`: {error}",
+                "failed to parse fixture file `{}`: {error}",
                 fixture_path.display()
             )
         });
@@ -401,21 +401,17 @@ fn render_actual_files(files: &[FixtureRunFile]) -> String {
         .join("\n\n")
 }
 
-fn collect_fixture_paths(directory_path: &str, kind: &str) -> Vec<PathBuf> {
+fn collect_fixture_paths(directory_path: &str) -> Vec<PathBuf> {
     let mut fixture_paths = Vec::new();
-    collect_fixture_paths_recursively(Path::new(directory_path), &mut fixture_paths, kind);
+    collect_fixture_paths_recursively(Path::new(directory_path), &mut fixture_paths);
     fixture_paths.sort();
     fixture_paths
 }
 
-fn collect_fixture_paths_recursively(
-    directory_path: &Path,
-    fixture_paths: &mut Vec<PathBuf>,
-    kind: &str,
-) {
+fn collect_fixture_paths_recursively(directory_path: &Path, fixture_paths: &mut Vec<PathBuf>) {
     let entries = fs::read_dir(directory_path).unwrap_or_else(|error| {
         panic!(
-            "failed to read {kind} fixture directory `{}`: {error}",
+            "failed to read fixture directory `{}`: {error}",
             directory_path.display()
         )
     });
@@ -424,7 +420,7 @@ fn collect_fixture_paths_recursively(
         .map(|entry| {
             entry.unwrap_or_else(|error| {
                 panic!(
-                    "failed to read entry in {kind} fixture directory `{}`: {error}",
+                    "failed to read entry in fixture directory `{}`: {error}",
                     directory_path.display()
                 )
             })
@@ -435,7 +431,7 @@ fn collect_fixture_paths_recursively(
 
     for entry_path in entry_paths {
         if entry_path.is_dir() {
-            collect_fixture_paths_recursively(&entry_path, fixture_paths, kind);
+            collect_fixture_paths_recursively(&entry_path, fixture_paths);
             continue;
         }
 
