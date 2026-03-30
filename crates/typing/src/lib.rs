@@ -15,7 +15,7 @@ pub use crate::{
         AnalysisState, CheckResult, PackageLoweringAndNamingResult, check, run_lowering_and_naming,
         run_lowering_and_naming_incremental,
     },
-    diagnostic::{Diagnostic, DiagnosticCode, Severity},
+    diagnostic::{Diagnostic, DiagnosticCode, DocumentDiagnostics, Severity},
     hir::{
         Argument, Definition, DefinitionId, DefinitionItem, DefinitionKind, Expression,
         ExpressionId, ExpressionKind, Module, Parameter,

@@ -1,12 +1,12 @@
 use {
     crate::{
         Interner,
-        diagnostic::Diagnostic,
+        diagnostic::{Diagnostic, DocumentDiagnostics},
         hir::{DefinitionId, DefinitionItem, ExpressionId, ExpressionKind, HirArena, Module},
         lower::{LoweringContext, lower_with_diagnostics},
-        naming::{NamingContext, NamingResult},
+        naming::{NamingResult, resolve_package},
         text,
-        typecheck::{BuiltinKind, InferenceState},
+        typecheck::inference_state_with_builtins,
         workspace::{Document, Package},
     },
     std::{
@@ -39,7 +39,7 @@ impl AnalysisState {
 pub struct PackageLoweringAndNamingResult {
     pub modules: HashMap<PathBuf, Module>,
     pub naming: NamingResult,
-    pub diagnostics: Vec<Diagnostic>,
+    pub diagnostics: Vec<DocumentDiagnostics>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,7 +77,9 @@ pub fn run_lowering_and_naming(
 
     for (path, lowered_document) in &analysis_state.lowered_documents {
         modules.insert(path.clone(), lowered_document.module.clone());
-        diagnostics.extend(lowered_document.diagnostics.clone());
+        if !lowered_document.diagnostics.is_empty() {
+            diagnostics.push((path.clone(), lowered_document.diagnostics.clone()));
+        }
     }
 
     if !diagnostics.is_empty() {
@@ -88,15 +90,8 @@ pub fn run_lowering_and_naming(
         };
     }
 
-    let (merged_module, modules, definition_paths, expression_paths) =
-        merge_modules(sorted_modules(&modules));
-    let naming = NamingContext::new(
-        &merged_module.arena,
-        analysis_state.interner(),
-        &definition_paths,
-        &expression_paths,
-    )
-    .resolve_module(&merged_module);
+    let modules = remap_modules_into_shared_package_arena(sorted_modules(&modules)).modules;
+    let naming = resolve_package(&sorted_modules(&modules), analysis_state.interner());
     diagnostics.extend(naming.diagnostics.clone());
 
     PackageLoweringAndNamingResult {
@@ -118,7 +113,9 @@ pub fn run_lowering_and_naming_incremental(
 
     for (path, lowered_document) in &analysis_state.lowered_documents {
         modules.insert(path.clone(), lowered_document.module.clone());
-        diagnostics.extend(lowered_document.diagnostics.clone());
+        if !lowered_document.diagnostics.is_empty() {
+            diagnostics.push((path.clone(), lowered_document.diagnostics.clone()));
+        }
     }
 
     if !diagnostics.is_empty() {
@@ -129,15 +126,8 @@ pub fn run_lowering_and_naming_incremental(
         };
     }
 
-    let (merged_module, modules, definition_paths, expression_paths) =
-        merge_modules(sorted_modules(&modules));
-    let naming = NamingContext::new(
-        &merged_module.arena,
-        analysis_state.interner(),
-        &definition_paths,
-        &expression_paths,
-    )
-    .resolve_module(&merged_module);
+    let modules = remap_modules_into_shared_package_arena(sorted_modules(&modules)).modules;
+    let naming = resolve_package(&sorted_modules(&modules), analysis_state.interner());
     diagnostics.extend(naming.diagnostics.clone());
 
     PackageLoweringAndNamingResult {
@@ -149,15 +139,24 @@ pub fn run_lowering_and_naming_incremental(
 
 pub fn check(package: &Package, analysis_state: &mut AnalysisState) -> CheckResult {
     let package_result = run_lowering_and_naming(package, analysis_state);
-    if !package_result.diagnostics.is_empty() {
+    let naming_diagnostics = flatten_document_diagnostics(&package_result.diagnostics);
+    let has_blocking_diagnostic = naming_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == crate::diagnostic::Severity::Error);
+    if has_blocking_diagnostic {
         return CheckResult {
-            diagnostics: package_result.diagnostics,
+            diagnostics: naming_diagnostics,
         };
     }
 
-    let (merged_module, _, _, _) = merge_modules(sorted_modules(&package_result.modules));
-    let mut inference_state = InferenceState::new();
-    bind_builtins(&mut inference_state, &mut analysis_state.lowering_context);
+    let remapped_modules =
+        remap_modules_into_shared_package_arena(sorted_modules(&package_result.modules));
+    let merged_module = Module::new(
+        remapped_modules.arena,
+        remapped_modules.definitions,
+        remapped_modules.expressions,
+    );
+    let mut inference_state = inference_state_with_builtins(&mut analysis_state.lowering_context);
 
     let mut diagnostics = Vec::new();
     if let Err(error) = inference_state.infer_module(&merged_module) {
@@ -166,6 +165,10 @@ pub fn check(package: &Package, analysis_state: &mut AnalysisState) -> CheckResu
             fallback_range(package),
             analysis_state.lowering_context.interner(),
         ));
+    }
+
+    if diagnostics.is_empty() {
+        diagnostics = naming_diagnostics;
     }
 
     CheckResult { diagnostics }
@@ -196,38 +199,27 @@ fn refresh_lowered_documents(
         if should_refresh {
             analysis_state.lowered_documents.insert(
                 path.clone(),
-                lower_document(document, &path, &mut analysis_state.lowering_context),
+                lower_document(document, &mut analysis_state.lowering_context),
             );
         }
     }
 }
 
-fn lower_document(
-    document: &Document,
-    path: &Path,
-    lowering_context: &mut LoweringContext,
-) -> LoweredDocument {
+fn lower_document(document: &Document, lowering_context: &mut LoweringContext) -> LoweredDocument {
     let root = document.tree().root_node();
     if root.has_error() {
         let mut diagnostics = Vec::new();
         collect_syntax_errors(root, document.rope(), &mut diagnostics);
         return LoweredDocument {
             module: Module::new(HirArena::new(), Vec::new(), Vec::new()),
-            diagnostics: diagnostics
-                .into_iter()
-                .map(|diagnostic| diagnostic.with_path(path.to_path_buf()))
-                .collect(),
+            diagnostics,
         };
     }
 
     let lowering_result = lower_with_diagnostics(document, lowering_context);
     LoweredDocument {
         module: lowering_result.module,
-        diagnostics: lowering_result
-            .diagnostics
-            .into_iter()
-            .map(|diagnostic| diagnostic.with_path(path.to_path_buf()))
-            .collect(),
+        diagnostics: lowering_result.diagnostics,
     }
 }
 
@@ -257,22 +249,20 @@ fn sorted_modules(modules: &HashMap<PathBuf, Module>) -> Vec<(PathBuf, Module)> 
     sorted_modules
 }
 
-fn merge_modules(
-    modules: Vec<(PathBuf, Module)>,
-) -> (
-    Module,
-    HashMap<PathBuf, Module>,
-    HashMap<DefinitionId, PathBuf>,
-    HashMap<ExpressionId, PathBuf>,
-) {
+struct RemappedModules {
+    arena: HirArena,
+    definitions: Vec<DefinitionItem>,
+    expressions: Vec<ExpressionId>,
+    modules: HashMap<PathBuf, Module>,
+}
+
+fn remap_modules_into_shared_package_arena(modules: Vec<(PathBuf, Module)>) -> RemappedModules {
     let mut arena = HirArena::new();
     let mut definitions = Vec::new();
     let mut expressions = Vec::new();
     let mut next_expression_id = 0u32;
     let mut next_definition_id = 0u32;
     let mut remapped_module_items = Vec::new();
-    let mut definition_paths = HashMap::new();
-    let mut expression_paths = HashMap::new();
 
     for (path, module) in modules {
         let expression_offset = next_expression_id;
@@ -289,9 +279,6 @@ fn merge_modules(
                 expression
             })
             .collect::<Vec<_>>();
-        for expression in &remapped_expressions {
-            expression_paths.insert(expression.id, path.clone());
-        }
         next_expression_id +=
             u32::try_from(remapped_expressions.len()).expect("expression count exceeded u32");
         arena.expressions.extend(remapped_expressions.clone());
@@ -307,9 +294,6 @@ fn merge_modules(
                 )
             })
             .collect::<Vec<_>>();
-        for definition in &remapped_definitions {
-            definition_paths.insert(definition.id, path.clone());
-        }
         next_definition_id +=
             u32::try_from(remapped_definitions.len()).expect("definition count exceeded u32");
         definitions.extend(remapped_definitions.clone());
@@ -323,27 +307,22 @@ fn merge_modules(
         remapped_module_items.push((path, remapped_definitions, remapped_module_expressions));
     }
 
-    let merged_module = Module::new(arena, definitions, expressions);
     let remapped_modules = remapped_module_items
         .into_iter()
         .map(|(path, module_definitions, module_expressions)| {
             (
                 path,
-                Module::new(
-                    merged_module.arena.clone(),
-                    module_definitions,
-                    module_expressions,
-                ),
+                Module::new(arena.clone(), module_definitions, module_expressions),
             )
         })
         .collect::<HashMap<_, _>>();
 
-    (
-        merged_module,
-        remapped_modules,
-        definition_paths,
-        expression_paths,
-    )
+    RemappedModules {
+        arena,
+        definitions,
+        expressions,
+        modules: remapped_modules,
+    }
 }
 
 fn remap_expression_kind(expression_kind: &mut ExpressionKind, expression_offset: u32) {
@@ -405,28 +384,6 @@ fn remap_expression_kind(expression_kind: &mut ExpressionKind, expression_offset
     }
 }
 
-fn bind_builtins(inference_state: &mut InferenceState, lowering_context: &mut LoweringContext) {
-    let plus_symbol = lowering_context.intern("+");
-    let minus_symbol = lowering_context.intern("-");
-    let multiply_symbol = lowering_context.intern("*");
-    let divide_symbol = lowering_context.intern("/");
-    let power_symbol = lowering_context.intern("**");
-    let and_symbol = lowering_context.intern("&&");
-    let or_symbol = lowering_context.intern("||");
-    let combine_symbol = lowering_context.intern("c");
-    let list_symbol = lowering_context.intern("list");
-
-    inference_state.bind_builtin(plus_symbol, BuiltinKind::Plus);
-    inference_state.bind_builtin(minus_symbol, BuiltinKind::Minus);
-    inference_state.bind_builtin(multiply_symbol, BuiltinKind::Multiply);
-    inference_state.bind_builtin(divide_symbol, BuiltinKind::Divide);
-    inference_state.bind_builtin(power_symbol, BuiltinKind::Power);
-    inference_state.bind_builtin(and_symbol, BuiltinKind::And);
-    inference_state.bind_builtin(or_symbol, BuiltinKind::Or);
-    inference_state.bind_builtin(combine_symbol, BuiltinKind::Combine);
-    inference_state.bind_builtin(list_symbol, BuiltinKind::List);
-}
-
 fn collect_syntax_errors(
     node: tree_sitter::Node<'_>,
     rope: &ropey::Rope,
@@ -473,6 +430,16 @@ fn snippet(node: tree_sitter::Node<'_>, rope: &ropey::Rope) -> String {
 
 fn point_label(point: tree_sitter::Point) -> String {
     format!("{}:{}", point.row + 1, point.column + 1)
+}
+
+fn flatten_document_diagnostics(document_diagnostics: &[DocumentDiagnostics]) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    for (_, path_diagnostics) in document_diagnostics {
+        diagnostics.extend(path_diagnostics.clone());
+    }
+
+    diagnostics
 }
 
 fn fallback_range(package: &Package) -> tree_sitter::Range {

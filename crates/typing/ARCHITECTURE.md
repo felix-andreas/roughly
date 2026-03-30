@@ -88,7 +88,7 @@ Responsibilities:
 - resolve value use sites that can be decided from file-local lexical structure
 - collect top-level value declarations and top-level type declarations
 - record unresolved value and type references that require package-global lookup
-- run project-global resolution over the collected per-file artifacts
+- run project-global resolution by updating those per-file naming results in place
 - resolve top-level value names against the package-global project environment
 - build the project-global type namespace from top-level declarations
 - resolve type references in annotations and declarations
@@ -119,6 +119,7 @@ Internally, naming should be split into:
 
 The file-local preparation pass is authoritative for local lexical facts.
 The project-global pass is authoritative for package-visible top-level value and type resolution.
+This split does not require a separate durable intermediate artifact. The project-global pass may update the same naming result built by file-local resolution, leaving still-unresolved names in place when lookup fails.
 
 Top-level declarations should not keep their preliminary file-local binding ids as their final package-visible identities.
 The project-global pass should assign distinct project-level ids for package-visible declarations so cross-file naming facts are owned by the package-level result rather than by incidental file-local traversal order.
@@ -203,7 +204,7 @@ The named representation must distinguish:
 
 The naming representation should preserve both:
 
-- file-local naming artifacts needed to explain lexical resolution within one file
+- file-local naming facts needed to explain lexical resolution within one file
 - project-level naming identities for package-visible declarations and cross-file references
 
 For top-level value declarations, the final package-visible identity should come from the project-global naming pass rather than directly reusing a file-local provisional id.

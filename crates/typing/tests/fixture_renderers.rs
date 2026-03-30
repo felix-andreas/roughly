@@ -166,6 +166,7 @@ pub fn render_named_hir(
     for definition in definitions {
         render_named_definition(definition, interner, 0, &mut lines);
     }
+
     for expression_id in expressions {
         render_named_expression(
             arena,

@@ -2,8 +2,8 @@
 
 Keep newest decisions at the top.
 
-- naming should split into file-local preparation and project-global resolution, and the project-global pass should assign distinct package-visible ids for top-level declarations.
-  - Local lexical resolution and package-global resolution have different invalidation and tooling needs. Keeping them separate preserves explicit per-file artifacts, while remapping top-level declarations onto project-level ids makes cross-file identity owned by the package result rather than by file-local traversal details.
+- naming should split into file-local preparation and project-global resolution, and the project-global pass should assign distinct package-visible ids for top-level declarations while updating the same naming result built by the file-local pass.
+  - Local lexical resolution and package-global resolution have different invalidation and tooling needs. The boundary should stay explicit, but it does not need a separate intermediate artifact. Remapping top-level declarations onto project-level ids still makes cross-file identity owned by the package result rather than by file-local traversal details.
 
 - fixture runners return structured snapshots instead of pre-rendered joined strings.
   - The fixture suite now compares per-snapshot per-file outputs directly, carries expectations

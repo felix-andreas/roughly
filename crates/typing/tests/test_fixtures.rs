@@ -1,3 +1,5 @@
+// Keep this file focused on suite runners and helpers shared across multiple runners.
+// Helper logic that is only used by one runner should be inlined into that runner instead.
 #[path = "fixture_renderers.rs"]
 mod fixture_renderers;
 
@@ -11,12 +13,12 @@ use {
     },
     std::path::{Path, PathBuf},
     typing::{
-        AnalysisState, Diagnostic, Interner,
+        AnalysisState, Interner,
         hir::ExpressionKind,
         lower::{self, LoweringContext},
         run_lowering_and_naming,
         type_syntax::{parse_type_syntax, render_type_syntax},
-        typecheck::{BuiltinKind, InferenceState},
+        typecheck::inference_state_with_builtins,
     },
 };
 
@@ -96,7 +98,14 @@ fn unification() {
 }
 
 fn package_for_fixture(fixture: &Fixture) -> Result<typing::Package, String> {
-    let input_files = input_files_for_fixture(fixture)?;
+    let input_files = match &fixture.kind {
+        FixtureKind::Simple(case) => vec![FixtureInputFile {
+            path: PathBuf::from(FIXTURE_MAIN_DOCUMENT_PATH),
+            contents: case.input.clone(),
+        }],
+        FixtureKind::MultiFile(case) => case.input_files.clone(),
+        _ => return Err("unsupported fixture".to_owned()),
+    };
     let mut workspace = typing::Workspace::new().map_err(|_| "workspace".to_owned())?;
     workspace
         .insert_package(PathBuf::from(FIXTURE_PACKAGE_PATH))
@@ -136,8 +145,7 @@ fn run_bindings_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String>
     let document = document_for_fixture(fixture)?;
     let mut lowering_context = LoweringContext::new();
     let module = lower::lower(&document, &mut lowering_context);
-    let mut inference_state = InferenceState::new();
-    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+    let mut inference_state = inference_state_with_builtins(&mut lowering_context);
     let mut lines = Vec::new();
 
     for expression_id in &module.expressions {
@@ -161,7 +169,13 @@ fn run_bindings_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String>
         }
     }
 
-    Ok(single_snapshot_output(&fixture.name, lines.join("\n")))
+    Ok(vec![FixtureOutput {
+        name: fixture.name.clone(),
+        files: vec![FixtureRunFile {
+            path: PathBuf::new(),
+            output: lines.join("\n"),
+        }],
+    }])
 }
 
 fn run_diagnostics_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
@@ -170,10 +184,13 @@ fn run_diagnostics_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, Stri
     };
     let package = package_for_fixture(fixture)?;
     let mut analysis_state = AnalysisState::new();
-    Ok(single_snapshot_output(
-        &fixture.name,
-        typing::check(&package, &mut analysis_state).render(&case.input),
-    ))
+    Ok(vec![FixtureOutput {
+        name: fixture.name.clone(),
+        files: vec![FixtureRunFile {
+            path: PathBuf::new(),
+            output: typing::check(&package, &mut analysis_state).render(&case.input),
+        }],
+    }])
 }
 
 fn run_environment_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
@@ -183,8 +200,7 @@ fn run_environment_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, Stri
     let document = document_for_fixture(fixture)?;
     let mut lowering_context = LoweringContext::new();
     let module = lower::lower(&document, &mut lowering_context);
-    let mut inference_state = InferenceState::new();
-    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+    let mut inference_state = inference_state_with_builtins(&mut lowering_context);
     let mut lines = Vec::new();
 
     for expression_id in &module.expressions {
@@ -219,7 +235,13 @@ fn run_environment_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, Stri
         }
     }
 
-    Ok(single_snapshot_output(&fixture.name, lines.join("\n")))
+    Ok(vec![FixtureOutput {
+        name: fixture.name.clone(),
+        files: vec![FixtureRunFile {
+            path: PathBuf::new(),
+            output: lines.join("\n"),
+        }],
+    }])
 }
 
 fn run_expressions_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
@@ -229,22 +251,31 @@ fn run_expressions_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, Stri
     let document = document_for_fixture(fixture)?;
     let mut lowering_context = LoweringContext::new();
     let module = lower::lower(&document, &mut lowering_context);
-    let mut inference_state = InferenceState::new();
-    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+    let mut inference_state = inference_state_with_builtins(&mut lowering_context);
     let inferred_types = match inference_state.infer_module(&module) {
         Ok(inferred_types) => inferred_types,
         Err(error) => {
-            return Ok(single_snapshot_output(
-                &fixture.name,
-                render_expression_error_kind(&error).to_owned(),
-            ));
+            return Ok(vec![FixtureOutput {
+                name: fixture.name.clone(),
+                files: vec![FixtureRunFile {
+                    path: PathBuf::new(),
+                    output: render_expression_error_kind(&error).to_owned(),
+                }],
+            }]);
         }
     };
 
-    Ok(single_snapshot_output(
-        &fixture.name,
-        render_expression_types(&mut inference_state, &lowering_context, &inferred_types),
-    ))
+    Ok(vec![FixtureOutput {
+        name: fixture.name.clone(),
+        files: vec![FixtureRunFile {
+            path: PathBuf::new(),
+            output: render_expression_types(
+                &mut inference_state,
+                &lowering_context,
+                &inferred_types,
+            ),
+        }],
+    }])
 }
 
 fn run_generalization_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
@@ -254,8 +285,7 @@ fn run_generalization_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, S
     let document = document_for_fixture(fixture)?;
     let mut lowering_context = LoweringContext::new();
     let module = lower::lower(&document, &mut lowering_context);
-    let mut inference_state = InferenceState::new();
-    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+    let mut inference_state = inference_state_with_builtins(&mut lowering_context);
     let mut lines = Vec::new();
 
     for expression_id in &module.expressions {
@@ -279,7 +309,13 @@ fn run_generalization_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, S
         }
     }
 
-    Ok(single_snapshot_output(&fixture.name, lines.join("\n")))
+    Ok(vec![FixtureOutput {
+        name: fixture.name.clone(),
+        files: vec![FixtureRunFile {
+            path: PathBuf::new(),
+            output: lines.join("\n"),
+        }],
+    }])
 }
 
 fn run_instantiation_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
@@ -289,8 +325,7 @@ fn run_instantiation_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, St
     let document = document_for_fixture(fixture)?;
     let mut lowering_context = LoweringContext::new();
     let module = lower::lower(&document, &mut lowering_context);
-    let mut inference_state = InferenceState::new();
-    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+    let mut inference_state = inference_state_with_builtins(&mut lowering_context);
     let mut lines = Vec::new();
 
     for expression_id in &module.expressions {
@@ -325,7 +360,13 @@ fn run_instantiation_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, St
         }
     }
 
-    Ok(single_snapshot_output(&fixture.name, lines.join("\n")))
+    Ok(vec![FixtureOutput {
+        name: fixture.name.clone(),
+        files: vec![FixtureRunFile {
+            path: PathBuf::new(),
+            output: lines.join("\n"),
+        }],
+    }])
 }
 
 fn run_interfaces_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
@@ -335,20 +376,25 @@ fn run_interfaces_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, Strin
     let document = document_for_fixture(fixture)?;
     let mut lowering_context = LoweringContext::new();
     let module = lower::lower(&document, &mut lowering_context);
-    let mut inference_state = InferenceState::new();
-    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+    let mut inference_state = inference_state_with_builtins(&mut lowering_context);
 
     if inference_state.infer_module(&module).is_err() {
-        return Ok(single_snapshot_output(
-            &fixture.name,
-            "error: inference".to_owned(),
-        ));
+        return Ok(vec![FixtureOutput {
+            name: fixture.name.clone(),
+            files: vec![FixtureRunFile {
+                path: PathBuf::new(),
+                output: "error: inference".to_owned(),
+            }],
+        }]);
     }
 
-    Ok(single_snapshot_output(
-        &fixture.name,
-        render_interface_snapshot(&module, &inference_state, &lowering_context),
-    ))
+    Ok(vec![FixtureOutput {
+        name: fixture.name.clone(),
+        files: vec![FixtureRunFile {
+            path: PathBuf::new(),
+            output: render_interface_snapshot(&module, &inference_state, &lowering_context),
+        }],
+    }])
 }
 
 fn run_lowering_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
@@ -362,24 +408,51 @@ fn run_lowering_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String>
     let interner = lowering_context.interner().clone();
 
     if !diagnostics.is_empty() {
-        return Ok(single_snapshot_output(
-            &fixture.name,
-            render_diagnostics(&case.input, &diagnostics),
-        ));
+        return Ok(vec![FixtureOutput {
+            name: fixture.name.clone(),
+            files: vec![FixtureRunFile {
+                path: PathBuf::new(),
+                output: render_diagnostics(&case.input, &diagnostics),
+            }],
+        }]);
     }
 
-    Ok(single_snapshot_output(
-        &fixture.name,
-        module.render(&interner),
-    ))
+    Ok(vec![FixtureOutput {
+        name: fixture.name.clone(),
+        files: vec![FixtureRunFile {
+            path: PathBuf::new(),
+            output: module.render(&interner),
+        }],
+    }])
 }
 
 fn run_naming_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
-    let output_files = naming_output_files_for_fixture(fixture)?;
+    struct NamingOutputFile {
+        fixture_output_path: PathBuf,
+        package_path: PathBuf,
+        source: String,
+    }
+
+    let output_files = match &fixture.kind {
+        FixtureKind::Simple(case) => vec![NamingOutputFile {
+            fixture_output_path: PathBuf::new(),
+            package_path: PathBuf::from(FIXTURE_MAIN_DOCUMENT_PATH),
+            source: case.input.clone(),
+        }],
+        FixtureKind::MultiFile(case) => case
+            .input_files
+            .iter()
+            .map(|input_file| NamingOutputFile {
+                fixture_output_path: input_file.path.clone(),
+                package_path: input_file.path.clone(),
+                source: input_file.contents.clone(),
+            })
+            .collect(),
+        _ => return Err("unsupported fixture".to_owned()),
+    };
     let package = package_for_fixture(fixture)?;
     let mut analysis_state = AnalysisState::new();
     let package_result = run_lowering_and_naming(&package, &mut analysis_state);
-    let interner = analysis_state.interner().clone();
 
     let mut files = Vec::with_capacity(output_files.len());
     for output_file in output_files {
@@ -393,12 +466,19 @@ fn run_naming_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
                 &module.definitions,
                 &module.expressions,
                 &package_result.naming,
-                &interner,
+                analysis_state.interner(),
             )
         } else {
             render_diagnostics(
                 &output_file.source,
-                &diagnostics_for_path(&package_result.diagnostics, &output_file.package_path)?,
+                &package_result
+                    .diagnostics
+                    .iter()
+                    .find_map(|(diagnostic_path, diagnostics_for_path)| {
+                        (diagnostic_path == &output_file.package_path)
+                            .then(|| diagnostics_for_path.clone())
+                    })
+                    .unwrap_or_default(),
             )
         };
         files.push(FixtureRunFile {
@@ -420,8 +500,7 @@ fn run_substitution_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, Str
     let document = document_for_fixture(fixture)?;
     let mut lowering_context = LoweringContext::new();
     let module = lower::lower(&document, &mut lowering_context);
-    let mut inference_state = InferenceState::new();
-    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+    let mut inference_state = inference_state_with_builtins(&mut lowering_context);
     let mut lines = Vec::new();
 
     for expression_id in &module.expressions {
@@ -456,7 +535,13 @@ fn run_substitution_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, Str
         }
     }
 
-    Ok(single_snapshot_output(&fixture.name, lines.join("\n")))
+    Ok(vec![FixtureOutput {
+        name: fixture.name.clone(),
+        files: vec![FixtureRunFile {
+            path: PathBuf::new(),
+            output: lines.join("\n"),
+        }],
+    }])
 }
 
 fn run_type_syntax_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
@@ -465,13 +550,16 @@ fn run_type_syntax_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, Stri
     };
 
     let mut interner = Interner::new();
-    Ok(single_snapshot_output(
-        &fixture.name,
-        match parse_type_syntax(&case.input, &mut interner) {
-            Ok(item) => render_type_syntax(&item, &interner),
-            Err(error) => format!("{error:?}"),
-        },
-    ))
+    Ok(vec![FixtureOutput {
+        name: fixture.name.clone(),
+        files: vec![FixtureRunFile {
+            path: PathBuf::new(),
+            output: match parse_type_syntax(&case.input, &mut interner) {
+                Ok(item) => render_type_syntax(&item, &interner),
+                Err(error) => format!("{error:?}"),
+            },
+        }],
+    }])
 }
 
 fn run_unification_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
@@ -481,111 +569,29 @@ fn run_unification_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, Stri
     let document = document_for_fixture(fixture)?;
     let mut lowering_context = LoweringContext::new();
     let module = lower::lower(&document, &mut lowering_context);
-    let mut inference_state = InferenceState::new();
-    bind_fixture_builtins(&mut inference_state, &mut lowering_context);
+    let mut inference_state = inference_state_with_builtins(&mut lowering_context);
     let inferred_types = match inference_state.infer_module(&module) {
         Ok(inferred_types) => inferred_types,
         Err(error) => {
-            return Ok(single_snapshot_output(
-                &fixture.name,
-                render_expression_error_kind(&error).to_owned(),
-            ));
+            return Ok(vec![FixtureOutput {
+                name: fixture.name.clone(),
+                files: vec![FixtureRunFile {
+                    path: PathBuf::new(),
+                    output: render_expression_error_kind(&error).to_owned(),
+                }],
+            }]);
         }
     };
 
-    Ok(single_snapshot_output(
-        &fixture.name,
-        render_expression_types(&mut inference_state, &lowering_context, &inferred_types),
-    ))
-}
-
-fn single_snapshot_output(name: &str, output: String) -> Vec<FixtureOutput> {
-    vec![FixtureOutput {
-        name: name.to_owned(),
+    Ok(vec![FixtureOutput {
+        name: fixture.name.clone(),
         files: vec![FixtureRunFile {
             path: PathBuf::new(),
-            output,
+            output: render_expression_types(
+                &mut inference_state,
+                &lowering_context,
+                &inferred_types,
+            ),
         }],
-    }]
-}
-
-fn input_files_for_fixture(fixture: &Fixture) -> Result<Vec<FixtureInputFile>, String> {
-    match &fixture.kind {
-        FixtureKind::Simple(case) => Ok(vec![FixtureInputFile {
-            path: PathBuf::from(FIXTURE_MAIN_DOCUMENT_PATH),
-            contents: case.input.clone(),
-        }]),
-        FixtureKind::MultiFile(case) => Ok(case.input_files.clone()),
-        _ => Err("unsupported fixture".to_owned()),
-    }
-}
-
-fn naming_output_files_for_fixture(fixture: &Fixture) -> Result<Vec<NamingOutputFile>, String> {
-    match &fixture.kind {
-        FixtureKind::Simple(case) => Ok(vec![NamingOutputFile {
-            fixture_output_path: PathBuf::new(),
-            package_path: PathBuf::from(FIXTURE_MAIN_DOCUMENT_PATH),
-            source: case.input.clone(),
-        }]),
-        FixtureKind::MultiFile(case) => Ok(case
-            .input_files
-            .iter()
-            .map(|input_file| NamingOutputFile {
-                fixture_output_path: input_file.path.clone(),
-                package_path: input_file.path.clone(),
-                source: input_file.contents.clone(),
-            })
-            .collect()),
-        _ => Err("unsupported fixture".to_owned()),
-    }
-}
-
-fn diagnostics_for_path(
-    diagnostics: &[Diagnostic],
-    path: &Path,
-) -> Result<Vec<Diagnostic>, String> {
-    let mut diagnostics_for_path = Vec::new();
-
-    for diagnostic in diagnostics {
-        let Some(diagnostic_path) = &diagnostic.path else {
-            return Err("diagnostic path".to_owned());
-        };
-
-        if diagnostic_path == path {
-            diagnostics_for_path.push(diagnostic.clone());
-        }
-    }
-
-    Ok(diagnostics_for_path)
-}
-
-struct NamingOutputFile {
-    fixture_output_path: PathBuf,
-    package_path: PathBuf,
-    source: String,
-}
-
-fn bind_fixture_builtins(
-    inference_state: &mut InferenceState,
-    lowering_context: &mut LoweringContext,
-) {
-    let plus_symbol = lowering_context.intern("+");
-    let minus_symbol = lowering_context.intern("-");
-    let multiply_symbol = lowering_context.intern("*");
-    let divide_symbol = lowering_context.intern("/");
-    let power_symbol = lowering_context.intern("**");
-    let and_symbol = lowering_context.intern("&&");
-    let or_symbol = lowering_context.intern("||");
-    let combine_symbol = lowering_context.intern("c");
-    let list_symbol = lowering_context.intern("list");
-
-    inference_state.bind_builtin(plus_symbol, BuiltinKind::Plus);
-    inference_state.bind_builtin(minus_symbol, BuiltinKind::Minus);
-    inference_state.bind_builtin(multiply_symbol, BuiltinKind::Multiply);
-    inference_state.bind_builtin(divide_symbol, BuiltinKind::Divide);
-    inference_state.bind_builtin(power_symbol, BuiltinKind::Power);
-    inference_state.bind_builtin(and_symbol, BuiltinKind::And);
-    inference_state.bind_builtin(or_symbol, BuiltinKind::Or);
-    inference_state.bind_builtin(combine_symbol, BuiltinKind::Combine);
-    inference_state.bind_builtin(list_symbol, BuiltinKind::List);
+    }])
 }

@@ -1,4 +1,4 @@
-# Project Analysis State And Phase APIs [planning]
+# Project Analysis State And Phase APIs [in-progress]
 
 ## Goal
 
@@ -32,6 +32,7 @@ The design must also leave room for later typechecking and project rechecking.
 - naming results must be reusable for tooling such as go-to-definition and rename
 - naming should split into file-local preparation plus project-global resolution
 - the file-local naming pass should resolve local lexical facts eagerly and leave only package-wide questions unresolved
+- the project-global naming pass should update the file-local naming result in place rather than producing a separate intermediate artifact
 - top-level declarations should receive distinct project-level identities during the project-global naming pass instead of reusing provisional file-local ids
 
 ## State model
@@ -88,7 +89,6 @@ Persistent state should include:
 - shared interner
 - per-document lowered results
 - project-level lowered indexes
-- per-document naming preparation results
 - naming results
 - invalidation metadata
 
@@ -182,7 +182,7 @@ Persistent outputs written:
 
 Transient outputs:
 
-- project-global lookup tables assembled from per-file naming artifacts
+- project-global lookup tables assembled while completing file-local naming results
 - naming walkers and temporary lookup structures
 
 Conceptual API:
@@ -210,7 +210,7 @@ The intended split inside naming is:
    - record unresolved references that may require package-global lookup
 2. project-global resolution
    - build package-global declaration tables
-   - resolve cross-file top-level values and project-global type references
+   - update those same file-local naming results with cross-file top-level value and project-global type resolution
    - assign project-level identities to package-visible declarations
 
 ### Later phases
@@ -260,13 +260,14 @@ That shape is not a hard API requirement, but it captures the intended boundary:
 - store lowered documents in `LoweringState`
 - build a project-level lowered index from the per-document results
 
-### 3. Move multi-file naming assembly into analysis code [pending]
+### 3. Move multi-file naming assembly into analysis code [in-progress]
 
 - remove fixture-harness-specific merge or remap logic from `tests/test_fixtures.rs`
 - build per-file naming preparation results inside analysis state
 - build project-global declaration tables from those per-file artifacts
 - make naming consume analysis-owned project inputs instead of fixture-owned ad hoc ones
 - assign project-level identities during project-global resolution rather than reusing provisional file-local ids
+- Current state: naming now runs as file-local preparation plus project-global resolution inside `typing`, but durable `NamingState.file_results` and the explicit public phase APIs are still pending.
 
 ### 4. Expose normal phase APIs for tests and later consumers [pending]
 

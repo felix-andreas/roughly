@@ -2,6 +2,7 @@ use {
     crate::{
         hir::{Argument, Expression, ExpressionId, ExpressionKind, HirArena, Module},
         interner::Symbol,
+        lower::LoweringContext,
         types::{
             Annotation, Atomic, AttachedAnnotation, CoreType, FunctionType, InferenceVariableId,
             RecordField, SurfaceType, TypeAnnotationKind, TypeScheme,
@@ -24,6 +25,32 @@ pub struct InferenceState {
     entries: BTreeMap<InferenceVariableId, InferenceEntry>,
     environment: BTreeMap<Symbol, Binding>,
     builtins: BTreeMap<Symbol, BuiltinKind>,
+}
+
+pub fn inference_state_with_builtins(lowering_context: &mut LoweringContext) -> InferenceState {
+    let mut inference_state = InferenceState::new();
+
+    let plus_symbol = lowering_context.intern("+");
+    let minus_symbol = lowering_context.intern("-");
+    let multiply_symbol = lowering_context.intern("*");
+    let divide_symbol = lowering_context.intern("/");
+    let power_symbol = lowering_context.intern("**");
+    let and_symbol = lowering_context.intern("&&");
+    let or_symbol = lowering_context.intern("||");
+    let combine_symbol = lowering_context.intern("c");
+    let list_symbol = lowering_context.intern("list");
+
+    inference_state.bind_builtin(plus_symbol, BuiltinKind::Plus);
+    inference_state.bind_builtin(minus_symbol, BuiltinKind::Minus);
+    inference_state.bind_builtin(multiply_symbol, BuiltinKind::Multiply);
+    inference_state.bind_builtin(divide_symbol, BuiltinKind::Divide);
+    inference_state.bind_builtin(power_symbol, BuiltinKind::Power);
+    inference_state.bind_builtin(and_symbol, BuiltinKind::And);
+    inference_state.bind_builtin(or_symbol, BuiltinKind::Or);
+    inference_state.bind_builtin(combine_symbol, BuiltinKind::Combine);
+    inference_state.bind_builtin(list_symbol, BuiltinKind::List);
+
+    inference_state
 }
 
 impl InferenceState {

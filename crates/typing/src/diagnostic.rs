@@ -4,9 +4,11 @@ use {
         typecheck::InferenceError,
         types::{Atomic, CoreType, InferenceVariableId},
     },
-    std::{collections::BTreeMap, fmt, path::PathBuf},
+    std::{collections::BTreeMap, fmt},
     tree_sitter::{Point, Range},
 };
+
+pub type DocumentDiagnostics = (std::path::PathBuf, Vec<Diagnostic>);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckResult {
@@ -34,7 +36,6 @@ impl CheckResult {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
-    pub path: Option<PathBuf>,
     pub severity: Severity,
     pub code: DiagnosticCode,
     pub message: String,
@@ -42,9 +43,17 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
+    pub fn naming_warning(range: Range, message: impl Into<String>) -> Self {
+        Self {
+            severity: Severity::Warning,
+            code: DiagnosticCode::Naming,
+            message: message.into(),
+            range,
+        }
+    }
+
     pub fn syntax_error(range: Range, message: impl Into<String>) -> Self {
         Self {
-            path: None,
             severity: Severity::Error,
             code: DiagnosticCode::SyntaxError,
             message: message.into(),
@@ -54,7 +63,6 @@ impl Diagnostic {
 
     pub fn type_error(range: Range, message: impl Into<String>) -> Self {
         Self {
-            path: None,
             severity: Severity::Error,
             code: DiagnosticCode::TypeError,
             message: message.into(),
@@ -64,7 +72,6 @@ impl Diagnostic {
 
     pub fn annotation_error(range: Range, message: impl Into<String>) -> Self {
         Self {
-            path: None,
             severity: Severity::Error,
             code: DiagnosticCode::AnnotationError,
             message: message.into(),
@@ -96,11 +103,6 @@ impl Diagnostic {
             range,
             "This `#:` type comment cannot be followed by another `#:` type comment.",
         )
-    }
-
-    pub fn with_path(mut self, path: PathBuf) -> Self {
-        self.path = Some(path);
-        self
     }
 
     pub fn from_inference_error(
@@ -267,18 +269,21 @@ impl Diagnostic {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
     Error,
+    Warning,
 }
 
 impl fmt::Display for Severity {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Error => formatter.write_str("error"),
+            Self::Warning => formatter.write_str("warning"),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticCode {
+    Naming,
     SyntaxError,
     TypeError,
     AnnotationError,
@@ -287,6 +292,7 @@ pub enum DiagnosticCode {
 impl fmt::Display for DiagnosticCode {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Naming => formatter.write_str("naming"),
             Self::SyntaxError => formatter.write_str("syntax-error"),
             Self::TypeError => formatter.write_str("type-error"),
             Self::AnnotationError => formatter.write_str("annotation-error"),

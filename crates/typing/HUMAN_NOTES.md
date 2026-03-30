@@ -1,12 +1,22 @@
 # Human Notes (!AIs are not allowed to edit!)
 
+1. please explain to me what is prepare_expression?
+2. I thought we should have two phases:
+  * resolve_document. resolves all locals and tells which symbols it exposes and which where unresolved (these are potential globals, imports from other packages or builtins)
+  * resolve_package. takes all resolved document, parsed NAMESPACE information and builtins and consolidates it. creates diagnostics per document (warns if namespace or builtins are shadowed).
+
 - integration into roughly is broken
+
+- testing:
+  - am i not a fan of attaching attaching path to diagnostic. we should rather have a tuple of (path/document_id, Vec<Diagnostics>)
 
 - naming:
   - we should pass imported symbols, default namespaces, etc
   - should we have two phase: (currently we merge all modules?)
     - per document. resolves all locals (and remaining are assinged as globals)
     - per package. tries to resolve all globals
+    - first phase says which globals are exposed by the module and which globals it expects
+    - second phase tries to conslidate between multiple files. 
   - add support for <<- (what are the semantics??)
   - support for local
 - state
@@ -16,7 +26,6 @@
   - typecheck (after typecheck)
 
 
-why do we have:
 
 pub enum AttachedAnnotation {
     Expression {
