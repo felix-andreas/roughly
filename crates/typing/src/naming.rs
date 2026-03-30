@@ -12,8 +12,12 @@ use {
     tree_sitter::Range,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BindingId(pub u32);
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NamingResult {
+    pub bindings: BTreeMap<BindingId, BindingInfo>,
+    pub resolutions: BTreeMap<ExpressionId, BindingId>,
+    pub diagnostics: Vec<DocumentDiagnostics>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BindingInfo {
@@ -22,46 +26,8 @@ pub struct BindingInfo {
     pub range: Range,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct NamingResult {
-    pub bindings: BTreeMap<BindingId, BindingInfo>,
-    pub resolutions: BTreeMap<ExpressionId, BindingId>,
-    pub diagnostics: Vec<DocumentDiagnostics>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct TypeInfo {
-    kind: DefinitionKind,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct ProvisionalBindingId(u32);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BindingKind {
-    Local,
-    TopLevel,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ProvisionalBindingInfo {
-    symbol: Symbol,
-    range: Range,
-    kind: BindingKind,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ExpressionResolution {
-    Binding(ProvisionalBindingId),
-    UnresolvedValue(Symbol),
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct DocumentNaming {
-    expression_resolutions: BTreeMap<ExpressionId, ExpressionResolution>,
-    function_parameters: BTreeMap<ExpressionId, Vec<ProvisionalBindingId>>,
-    loop_bindings: BTreeMap<ExpressionId, ProvisionalBindingId>,
-}
+pub struct BindingId(pub u32);
 
 pub(crate) fn resolve_package(modules: &[(PathBuf, Module)], interner: &Interner) -> NamingResult {
     let mut context = PackageNamingContext::new(interner);
@@ -77,183 +43,6 @@ pub(crate) fn resolve_package(modules: &[(PathBuf, Module)], interner: &Interner
     }
 
     context.finish()
-}
-
-struct DocumentNamingContext<'a> {
-    arena: &'a HirArena,
-    next_provisional_binding_id: &'a mut u32,
-    provisional_bindings: &'a mut BTreeMap<ProvisionalBindingId, ProvisionalBindingInfo>,
-    local_scopes: Vec<BTreeMap<Symbol, ProvisionalBindingId>>,
-    document_naming: DocumentNaming,
-}
-
-impl<'a> DocumentNamingContext<'a> {
-    fn new(
-        arena: &'a HirArena,
-        next_provisional_binding_id: &'a mut u32,
-        provisional_bindings: &'a mut BTreeMap<ProvisionalBindingId, ProvisionalBindingInfo>,
-    ) -> Self {
-        Self {
-            arena,
-            next_provisional_binding_id,
-            provisional_bindings,
-            local_scopes: Vec::new(),
-            document_naming: DocumentNaming::default(),
-        }
-    }
-
-    fn resolve_module(mut self, module: &Module) -> DocumentNaming {
-        for expression_id in &module.expressions {
-            self.resolve_expression(*expression_id);
-        }
-
-        self.document_naming
-    }
-
-    fn resolve_expression(&mut self, expression_id: ExpressionId) {
-        let expression = self.arena.get(expression_id);
-
-        match &expression.kind {
-            ExpressionKind::Symbol(symbol) => match self.resolve_local_symbol(*symbol) {
-                Some(binding_id) => {
-                    self.document_naming
-                        .expression_resolutions
-                        .insert(expression_id, ExpressionResolution::Binding(binding_id));
-                }
-                None => {
-                    self.document_naming.expression_resolutions.insert(
-                        expression_id,
-                        ExpressionResolution::UnresolvedValue(*symbol),
-                    );
-                }
-            },
-            ExpressionKind::Block { expressions, .. } => {
-                for nested_expression in expressions {
-                    self.resolve_expression(*nested_expression);
-                }
-            }
-            ExpressionKind::Assign { target, value, .. } => {
-                self.resolve_expression(*value);
-                let binding_kind = if self.local_scopes.is_empty() {
-                    BindingKind::TopLevel
-                } else {
-                    BindingKind::Local
-                };
-                let binding_id = self.fresh_binding(*target, expression.range, binding_kind);
-                if let Some(scope) = self.local_scopes.last_mut() {
-                    scope.insert(*target, binding_id);
-                }
-                self.document_naming
-                    .expression_resolutions
-                    .insert(expression_id, ExpressionResolution::Binding(binding_id));
-            }
-            ExpressionKind::Function { parameters, body } => {
-                let mut scope = BTreeMap::new();
-                let mut parameter_bindings = Vec::with_capacity(parameters.len());
-                for parameter in parameters {
-                    let binding_id =
-                        self.fresh_binding(parameter.symbol, parameter.range, BindingKind::Local);
-                    scope.insert(parameter.symbol, binding_id);
-                    parameter_bindings.push(binding_id);
-                }
-                self.document_naming
-                    .function_parameters
-                    .insert(expression_id, parameter_bindings);
-                self.local_scopes.push(scope);
-                self.resolve_expression(*body);
-                self.local_scopes.pop();
-            }
-            ExpressionKind::If {
-                condition,
-                consequence,
-                alternative,
-            } => {
-                self.resolve_expression(*condition);
-                self.resolve_expression(*consequence);
-                if let Some(alternative) = alternative {
-                    self.resolve_expression(*alternative);
-                }
-            }
-            ExpressionKind::For {
-                variable,
-                sequence,
-                body,
-            } => {
-                self.resolve_expression(*sequence);
-                let binding_id =
-                    self.fresh_binding(*variable, expression.range, BindingKind::Local);
-                self.document_naming
-                    .loop_bindings
-                    .insert(expression_id, binding_id);
-                self.local_scopes
-                    .push(BTreeMap::from([(*variable, binding_id)]));
-                self.resolve_expression(*body);
-                self.local_scopes.pop();
-            }
-            ExpressionKind::While { condition, body } => {
-                self.resolve_expression(*condition);
-                self.resolve_expression(*body);
-            }
-            ExpressionKind::Repeat { body } => {
-                self.resolve_expression(*body);
-            }
-            ExpressionKind::UnaryMinus { value } => {
-                self.resolve_expression(*value);
-            }
-            ExpressionKind::Call { callee, arguments } => {
-                self.resolve_expression(*callee);
-                for argument in arguments {
-                    self.resolve_expression(argument.expression);
-                }
-            }
-            ExpressionKind::Subset { value, arguments }
-            | ExpressionKind::Subset2 { value, arguments } => {
-                self.resolve_expression(*value);
-                for argument in arguments {
-                    self.resolve_expression(argument.expression);
-                }
-            }
-            ExpressionKind::Dollar { value, .. } => {
-                self.resolve_expression(*value);
-            }
-            ExpressionKind::Null
-            | ExpressionKind::Logical(_)
-            | ExpressionKind::Integer(_)
-            | ExpressionKind::Double(_)
-            | ExpressionKind::Character(_)
-            | ExpressionKind::StringLiteralName(_)
-            | ExpressionKind::Unsupported => {}
-        }
-    }
-
-    fn fresh_binding(
-        &mut self,
-        symbol: Symbol,
-        range: Range,
-        kind: BindingKind,
-    ) -> ProvisionalBindingId {
-        let binding_id = ProvisionalBindingId(*self.next_provisional_binding_id);
-        *self.next_provisional_binding_id += 1;
-        self.provisional_bindings.insert(
-            binding_id,
-            ProvisionalBindingInfo {
-                symbol,
-                range,
-                kind,
-            },
-        );
-        binding_id
-    }
-
-    fn resolve_local_symbol(&self, symbol: Symbol) -> Option<ProvisionalBindingId> {
-        for scope in self.local_scopes.iter().rev() {
-            if let Some(binding_id) = scope.get(&symbol) {
-                return Some(*binding_id);
-            }
-        }
-
-        None
-    }
 }
 
 struct PackageNamingContext<'a> {
@@ -430,7 +219,9 @@ impl<'a> PackageNamingContext<'a> {
                             path,
                             Diagnostic::naming_warning(
                                 expression.range,
-                                format!("Top-level binding `{name}` shadows an imported namespace symbol."),
+                                format!(
+                                    "Top-level binding `{name}` shadows an imported namespace symbol."
+                                ),
                             ),
                         );
                     }
@@ -683,12 +474,10 @@ impl<'a> PackageNamingContext<'a> {
     }
 
     fn is_namespace_symbol(&self, _symbol: Symbol, _path: &Path) -> bool {
-        // TODO: Parse NAMESPACE files and expose imported symbols during package naming.
         false
     }
 
     fn is_builtin_symbol(&self, symbol: Symbol) -> bool {
-        // TODO: Replace this string-based fallback with a real builtin symbol table.
         matches!(
             self.interner.resolve(symbol),
             Some("+" | "-" | "*" | "/" | "**" | "&&" | "||" | "c" | "list")
@@ -705,4 +494,215 @@ impl<'a> PackageNamingContext<'a> {
             .or_default()
             .push(diagnostic);
     }
+}
+
+struct DocumentNamingContext<'a> {
+    arena: &'a HirArena,
+    next_provisional_binding_id: &'a mut u32,
+    provisional_bindings: &'a mut BTreeMap<ProvisionalBindingId, ProvisionalBindingInfo>,
+    local_scopes: Vec<BTreeMap<Symbol, ProvisionalBindingId>>,
+    document_naming: DocumentNaming,
+}
+
+impl<'a> DocumentNamingContext<'a> {
+    fn new(
+        arena: &'a HirArena,
+        next_provisional_binding_id: &'a mut u32,
+        provisional_bindings: &'a mut BTreeMap<ProvisionalBindingId, ProvisionalBindingInfo>,
+    ) -> Self {
+        Self {
+            arena,
+            next_provisional_binding_id,
+            provisional_bindings,
+            local_scopes: Vec::new(),
+            document_naming: DocumentNaming::default(),
+        }
+    }
+
+    fn resolve_module(mut self, module: &Module) -> DocumentNaming {
+        for expression_id in &module.expressions {
+            self.resolve_expression(*expression_id);
+        }
+
+        self.document_naming
+    }
+
+    fn resolve_expression(&mut self, expression_id: ExpressionId) {
+        let expression = self.arena.get(expression_id);
+
+        match &expression.kind {
+            ExpressionKind::Symbol(symbol) => match self.resolve_local_symbol(*symbol) {
+                Some(binding_id) => {
+                    self.document_naming
+                        .expression_resolutions
+                        .insert(expression_id, ExpressionResolution::Binding(binding_id));
+                }
+                None => {
+                    self.document_naming.expression_resolutions.insert(
+                        expression_id,
+                        ExpressionResolution::UnresolvedValue(*symbol),
+                    );
+                }
+            },
+            ExpressionKind::Block { expressions, .. } => {
+                for nested_expression in expressions {
+                    self.resolve_expression(*nested_expression);
+                }
+            }
+            ExpressionKind::Assign { target, value, .. } => {
+                self.resolve_expression(*value);
+                let binding_kind = if self.local_scopes.is_empty() {
+                    BindingKind::TopLevel
+                } else {
+                    BindingKind::Local
+                };
+                let binding_id = self.fresh_binding(*target, expression.range, binding_kind);
+                if let Some(scope) = self.local_scopes.last_mut() {
+                    scope.insert(*target, binding_id);
+                }
+                self.document_naming
+                    .expression_resolutions
+                    .insert(expression_id, ExpressionResolution::Binding(binding_id));
+            }
+            ExpressionKind::Function { parameters, body } => {
+                let mut scope = BTreeMap::new();
+                let mut parameter_bindings = Vec::with_capacity(parameters.len());
+                for parameter in parameters {
+                    let binding_id =
+                        self.fresh_binding(parameter.symbol, parameter.range, BindingKind::Local);
+                    scope.insert(parameter.symbol, binding_id);
+                    parameter_bindings.push(binding_id);
+                }
+                self.document_naming
+                    .function_parameters
+                    .insert(expression_id, parameter_bindings);
+                self.local_scopes.push(scope);
+                self.resolve_expression(*body);
+                self.local_scopes.pop();
+            }
+            ExpressionKind::If {
+                condition,
+                consequence,
+                alternative,
+            } => {
+                self.resolve_expression(*condition);
+                self.resolve_expression(*consequence);
+                if let Some(alternative) = alternative {
+                    self.resolve_expression(*alternative);
+                }
+            }
+            ExpressionKind::For {
+                variable,
+                sequence,
+                body,
+            } => {
+                self.resolve_expression(*sequence);
+                let binding_id =
+                    self.fresh_binding(*variable, expression.range, BindingKind::Local);
+                self.document_naming
+                    .loop_bindings
+                    .insert(expression_id, binding_id);
+                self.local_scopes
+                    .push(BTreeMap::from([(*variable, binding_id)]));
+                self.resolve_expression(*body);
+                self.local_scopes.pop();
+            }
+            ExpressionKind::While { condition, body } => {
+                self.resolve_expression(*condition);
+                self.resolve_expression(*body);
+            }
+            ExpressionKind::Repeat { body } => {
+                self.resolve_expression(*body);
+            }
+            ExpressionKind::UnaryMinus { value } => {
+                self.resolve_expression(*value);
+            }
+            ExpressionKind::Call { callee, arguments } => {
+                self.resolve_expression(*callee);
+                for argument in arguments {
+                    self.resolve_expression(argument.expression);
+                }
+            }
+            ExpressionKind::Subset { value, arguments }
+            | ExpressionKind::Subset2 { value, arguments } => {
+                self.resolve_expression(*value);
+                for argument in arguments {
+                    self.resolve_expression(argument.expression);
+                }
+            }
+            ExpressionKind::Dollar { value, .. } => {
+                self.resolve_expression(*value);
+            }
+            ExpressionKind::Null
+            | ExpressionKind::Logical(_)
+            | ExpressionKind::Integer(_)
+            | ExpressionKind::Double(_)
+            | ExpressionKind::Character(_)
+            | ExpressionKind::StringLiteralName(_)
+            | ExpressionKind::Unsupported => {}
+        }
+    }
+
+    fn fresh_binding(
+        &mut self,
+        symbol: Symbol,
+        range: Range,
+        kind: BindingKind,
+    ) -> ProvisionalBindingId {
+        let binding_id = ProvisionalBindingId(*self.next_provisional_binding_id);
+        *self.next_provisional_binding_id += 1;
+        self.provisional_bindings.insert(
+            binding_id,
+            ProvisionalBindingInfo {
+                symbol,
+                range,
+                kind,
+            },
+        );
+        binding_id
+    }
+
+    fn resolve_local_symbol(&self, symbol: Symbol) -> Option<ProvisionalBindingId> {
+        for scope in self.local_scopes.iter().rev() {
+            if let Some(binding_id) = scope.get(&symbol) {
+                return Some(*binding_id);
+            }
+        }
+
+        None
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct DocumentNaming {
+    expression_resolutions: BTreeMap<ExpressionId, ExpressionResolution>,
+    function_parameters: BTreeMap<ExpressionId, Vec<ProvisionalBindingId>>,
+    loop_bindings: BTreeMap<ExpressionId, ProvisionalBindingId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ExpressionResolution {
+    Binding(ProvisionalBindingId),
+    UnresolvedValue(Symbol),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProvisionalBindingInfo {
+    symbol: Symbol,
+    range: Range,
+    kind: BindingKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BindingKind {
+    Local,
+    TopLevel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct ProvisionalBindingId(u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TypeInfo {
+    kind: DefinitionKind,
 }
