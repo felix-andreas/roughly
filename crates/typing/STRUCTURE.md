@@ -10,6 +10,8 @@ Keep it focused on the intended near-term file split and the role of each file.
   - top-level orchestration
   - package-level phase wiring
   - `check`
+  - `run_lowering`
+  - `run_naming`
   - `run_lowering_and_naming`
   - `run_typecheck`
 
@@ -66,9 +68,10 @@ Keep it focused on the intended near-term file split and the role of each file.
   - current implementation may temporarily be narrower than this target shape while the shared tree utility surface settles
 
 - `workspace.rs`
-  - editor and LSP-facing mutation orchestration
-  - workspace package buckets
-  - detached-script insertion plus document rename, delete, and edit workflows
+  - possible later editor and LSP-facing abstraction
+  - current implementation may be broader than the desired near-term boundary
+  - `Package` remains the current unit of analysis and should own package contents directly
+  - keep only the minimum workspace-style mutation helpers needed while the package boundary is being clarified
   - do not mirror the `Package` mutation API
 
 ## Deferred split

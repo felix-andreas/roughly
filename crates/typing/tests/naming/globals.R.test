@@ -40,7 +40,7 @@ Assign(x@b0)
 x <- x
 #++++
 Assign(x@b1)
-  Symbol(x@b0)
+  Symbol(x@b1)
 #---- c.R
 x
 #++++

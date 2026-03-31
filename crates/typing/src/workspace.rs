@@ -1,3 +1,5 @@
+// `Workspace` is a possible later editor-facing abstraction.
+// For now, `Package` remains the unit of analysis and should own package contents directly.
 use {
     crate::{
         document::{Document, DocumentEditError},

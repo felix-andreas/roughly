@@ -38,8 +38,8 @@ Use this file for top-level and block-local naming behavior:
 
 - top-level binding referenced later at top level
 - top-level rebinding introducing a fresh binding identity
-- earlier uses staying attached to the earlier top-level binding
-- assignment RHS resolving before the new binding is introduced
+- top-level unresolved uses resolving against the final winning global binding
+- top-level assignment RHS resolving against the final winning global binding
 - nested block using the nearest binding
 - nested block shadowing an outer binding
 - behavior after leaving an inner block
@@ -66,7 +66,7 @@ Use this file for multi-file package-global naming behavior:
 
 - a later file referencing a top-level value from an earlier file
 - a later file resolving both a cross-file callee and a cross-file argument
-- a later file rebinding a top-level value and later files observing the new binding
+- a later file rebinding a top-level value and all global uses observing the final winning binding
 - a function body closing over a package-global value defined in another file
 - an annotation using a nominal type declared in another file
 - an annotation using an alias declared in another file

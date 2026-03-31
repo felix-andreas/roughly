@@ -1,4 +1,4 @@
-# Project Analysis State And Phase APIs [in-progress]
+# Project Analysis State And Phase APIs [abandoned]
 
 ## Goal
 
@@ -23,12 +23,14 @@ The design must also leave room for later typechecking and project rechecking.
 
 ## Settled direction
 
+- `Package` remains the current unit of analysis
+- `Workspace` is not the current architectural center for semantic analysis
 - `Workspace` stays outside `AnalysisState`
-- the likely long-lived owner is `ProjectSession { workspace, analysis }`
+- if a broader editor-facing owner exists later, that can wrap `Package` plus analysis state, but this project should not assume that shape
 - `AnalysisState` is one top-level state object with explicit per-phase caches inside it
 - walkers such as lowering and naming contexts stay transient
 - per-document lowered results are durable cached analysis data
-- project file order is defined by `Workspace`
+- project file order should come from the analyzed `Package` inputs, not from making `Workspace` the semantic owner
 - naming results must be reusable for tooling such as go-to-definition and rename
 - naming should split into file-local preparation plus project-global resolution
 - the file-local naming pass should resolve local lexical facts eagerly and leave only package-wide questions unresolved
@@ -39,7 +41,7 @@ The design must also leave room for later typechecking and project rechecking.
 
 ### Top-level owner
 
-The intended long-lived owner is:
+One possible later editor-facing owner is:
 
 ```rust
 struct ProjectSession {
@@ -48,11 +50,13 @@ struct ProjectSession {
 }
 ```
 
-This owner is suitable for:
+If that owner exists later, it is suitable for:
 
 - fixture tests
 - generation-based fixture updates
 - later editor-style incremental analysis
+
+But this project should not require introducing `Workspace` as the semantic owner now.
 
 ### Persistent state
 
@@ -117,14 +121,14 @@ Input owner:
 - package or standalone membership
 - project file order
 
-`Workspace` is the source of truth for parse state and document membership.
-It is not semantic analysis state.
+`Workspace` may eventually become the source of truth for editor-facing parse state and document membership.
+It is not semantic analysis state, and this project should not require it to become the current semantic owner.
 
 ### Lowering
 
 Inputs:
 
-- `&Workspace`
+- `&Package`
 - `&mut AnalysisState`
 
 Persistent inputs read:
@@ -148,7 +152,7 @@ Conceptual API:
 
 ```rust
 fn run_lowering(
-    workspace: &Workspace,
+    package: &Package,
     analysis: &mut AnalysisState,
 ) -> Result<&LoweringState, AnalysisError>
 ```
@@ -164,14 +168,14 @@ That index may include:
 
 Inputs:
 
-- `&Workspace`
-- `&mut AnalysisState`
+- lowered package result
+- `&AnalysisState`
 
 Persistent inputs read:
 
 - shared interner
 - current lowering cache
-- project file order from `Workspace`
+- project file order from the analyzed `Package`
 - existing naming cache
 
 Persistent outputs written:
@@ -189,8 +193,8 @@ Conceptual API:
 
 ```rust
 fn run_naming(
-    workspace: &Workspace,
-    analysis: &mut AnalysisState,
+    lowering: &LoweringState,
+    analysis: &AnalysisState,
 ) -> Result<&ProjectNamingResult, AnalysisError>
 ```
 
@@ -217,7 +221,7 @@ The intended split inside naming is:
 
 Later phases should follow the same pattern:
 
-- input: `&Workspace`
+- input: package-scoped phase outputs
 - state: `&mut AnalysisState`
 - output: references or handles to durable cached phase results
 
@@ -227,8 +231,8 @@ This project does not need to fully design typechecking, but it should establish
 
 Fixture helpers should only:
 
-- create a workspace from fixture input
-- apply grouped fixture edits to that workspace
+- create the lightest package-scoped input needed for analysis
+- apply grouped fixture edits through the lightest setup needed by the current boundary
 
 Phase execution in tests should use normal typing APIs and stay explicit.
 
@@ -236,13 +240,13 @@ Conceptual test shape:
 
 ```rust
 let mut session = fixture_session(fixture)?;
-run_lowering(&session.workspace, &mut session.analysis)?;
-let naming = run_naming(&session.workspace, &mut session.analysis)?;
+let lowering = run_lowering(&session.package, &mut session.analysis)?;
+let naming = run_naming(&lowering, &session.analysis)?;
 ```
 
 That shape is not a hard API requirement, but it captures the intended boundary:
 
-- setup helpers only manage the workspace
+- setup helpers manage only the current package-scoped input
 - analysis helpers own semantic caches
 - tests call the phases they inspect
 

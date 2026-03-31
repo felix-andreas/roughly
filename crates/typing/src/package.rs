@@ -72,11 +72,11 @@ impl Package {
         self.scripts.iter()
     }
 
-    pub(crate) fn insert_document(&mut self, path: PathBuf, document: Document) {
+    pub fn insert_document(&mut self, path: PathBuf, document: Document) {
         self.documents.insert(path, document);
     }
 
-    pub(crate) fn insert_script(&mut self, path: PathBuf, document: Document) {
+    pub fn insert_script(&mut self, path: PathBuf, document: Document) {
         self.scripts.insert(path, document);
     }
 

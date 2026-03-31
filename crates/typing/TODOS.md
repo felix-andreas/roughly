@@ -102,3 +102,10 @@ This document tracks actionable planned work for the `typing` crate.
 - Introduce a project-level analysis state for lowering and naming.
 - Make fixture tests use normal typing-crate phase APIs instead of fixture-harness-specific multi-file assembly.
 - Keep the design incremental-friendly by separating `Workspace` from durable semantic caches.
+
+### Naming Phase Split And Global Resolution
+
+- Detailed plan: `projects/002_naming_phase_split_and_global_resolution.md`
+- Introduce stable module identity into naming storage.
+- Keep local naming file-scoped and make package-global value resolution use one final symbol table.
+- Store naming results in a tooling-friendly shape instead of relying on package-wide HIR remapping.

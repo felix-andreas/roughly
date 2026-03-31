@@ -10,6 +10,9 @@ use {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ExpressionId(pub u32);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ModuleId(pub u32);
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HirArena {
     pub expressions: Vec<Expression>,

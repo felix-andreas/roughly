@@ -34,7 +34,7 @@ Assign(x@b1)
   Character("\"ok\"")
 Symbol(x@b1)
 
-#---- earlier_use_keeps_earlier_binding
+#---- earlier_use_resolves_to_final_global_binding
 x <- 1L
 x
 x <- "ok"
@@ -42,12 +42,12 @@ x
 #++++
 Assign(x@b0)
   Integer(1L)
-Symbol(x@b0)
+Symbol(x@b1)
 Assign(x@b1)
   Character("\"ok\"")
 Symbol(x@b1)
 
-#---- assignment_rhs_sees_outer_binding
+#---- assignment_rhs_resolves_to_final_global_binding
 x <- 1L
 x <- x
 x
@@ -55,7 +55,7 @@ x
 Assign(x@b0)
   Integer(1L)
 Assign(x@b1)
-  Symbol(x@b0)
+  Symbol(x@b1)
 Symbol(x@b1)
 
 #==== blocks

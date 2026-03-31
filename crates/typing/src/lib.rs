@@ -19,14 +19,14 @@ pub use crate::{
     document::Document,
     hir::{
         Argument, Definition, DefinitionId, DefinitionItem, DefinitionKind, Expression,
-        ExpressionId, ExpressionKind, Module, Parameter,
+        ExpressionId, ExpressionKind, Module, ModuleId, Parameter,
     },
     interner::{Interner, Symbol},
     lower::{LoweringContext, lower},
     package::Package,
     pipeline::{
-        AnalysisState, PackageLoweringAndNamingResult, check, run_lowering_and_naming,
-        run_typecheck,
+        AnalysisState, PackageLoweringAndNamingResult, PackageLoweringResult, check, run_lowering,
+        run_lowering_and_naming, run_naming, run_typecheck,
     },
     text::{TextPosition, TextRange},
     tree::{field, kind},

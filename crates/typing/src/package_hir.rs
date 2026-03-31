@@ -7,7 +7,6 @@ pub(crate) struct RemappedModules {
     pub arena: HirArena,
     pub definitions: Vec<DefinitionItem>,
     pub expressions: Vec<ExpressionId>,
-    pub modules: HashMap<PathBuf, Module>,
 }
 
 pub(crate) fn remap_package_modules(modules: &HashMap<PathBuf, Module>) -> RemappedModules {
@@ -74,7 +73,7 @@ fn remap_modules_into_shared_package_arena(modules: Vec<(PathBuf, Module)>) -> R
         remapped_module_items.push((path, remapped_definitions, remapped_module_expressions));
     }
 
-    let remapped_modules = remapped_module_items
+    let _remapped_modules = remapped_module_items
         .into_iter()
         .map(|(path, module_definitions, module_expressions)| {
             (
@@ -88,7 +87,6 @@ fn remap_modules_into_shared_package_arena(modules: Vec<(PathBuf, Module)>) -> R
         arena,
         definitions,
         expressions,
-        modules: remapped_modules,
     }
 }
 

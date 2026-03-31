@@ -2,6 +2,12 @@
 
 Keep newest decisions at the top.
 
+- `run_naming` should consume lowered package state rather than triggering lowering itself.
+  - The phase boundary should be real so tests, tooling, and incremental scheduling can call lowering and naming separately. `run_lowering_and_naming` can stay as a convenience wrapper, but `run_naming` itself should not hide lowering work.
+
+- package-global value resolution uses one final symbol table built from top-level exports, and the file-local naming pass does not resolve globals even within the same file.
+  - This matches the intended runtime-like package semantics better than preserving earlier top-level bindings at individual use sites, and it gives naming a cleaner split between file-local lexical facts and package-global consolidation. Duplicate top-level value definitions still warn on both the overwritten and overwriting declarations.
+
 - `workspace` should stay thinner than `package` and should not mirror package mutation APIs.
   - `Package` is the analysis unit and should own package contents directly. `Workspace` is the editor-facing registry and mutation helper around packages plus detached scripts, not a second package API surface.
 

@@ -86,10 +86,12 @@ Responsibilities:
 - construct lexical value scopes
 - handle value shadowing
 - resolve value use sites that can be decided from file-local lexical structure
+- leave package-global value references unresolved during file-local naming, even when the declaration is in the same file
 - collect top-level value declarations and top-level type declarations
 - record unresolved value and type references that require package-global lookup
 - run project-global resolution by updating those per-file naming results in place
-- resolve top-level value names against the package-global project environment
+- build one final package-global value table from top-level exports
+- resolve every unresolved top-level value reference against that final package-global table
 - build the project-global type namespace from top-level declarations
 - resolve type references in annotations and declarations
 - resolve type references against that project-global namespace

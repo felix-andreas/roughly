@@ -16,13 +16,12 @@ use {
         AnalysisState, Interner,
         hir::ExpressionKind,
         lower::{self, LoweringContext},
-        run_lowering_and_naming,
+        run_lowering, run_naming,
         type_syntax::{parse_type_syntax, render_type_syntax},
         typecheck::inference_state_with_builtins,
     },
 };
 
-const FIXTURE_PACKAGE_PATH: &str = "/fixture_package";
 const FIXTURE_MAIN_DOCUMENT_PATH: &str = "/fixture_package/main.R";
 
 #[test]
@@ -94,25 +93,16 @@ fn package_for_fixture(fixture: &Fixture) -> Result<typing::Package, String> {
         FixtureKind::MultiFile(case) => case.input_files.clone(),
         _ => return Err("unsupported fixture".to_owned()),
     };
-    let mut workspace = typing::Workspace::new().map_err(|_| "workspace".to_owned())?;
-    workspace
-        .insert_package(PathBuf::from(FIXTURE_PACKAGE_PATH))
-        .map_err(|_| "workspace".to_owned())?;
+    let mut parser = typing::tree::new_parser().map_err(|_| "parser".to_owned())?;
+    let mut package = typing::Package::default();
 
     for input_file in &input_files {
-        workspace
-            .insert_package_document(
-                Path::new(FIXTURE_PACKAGE_PATH),
-                input_file.path.clone(),
-                &input_file.contents,
-            )
-            .map_err(|_| "workspace".to_owned())?;
+        let document = typing::Document::parse(&mut parser, &input_file.contents)
+            .ok_or_else(|| "document".to_owned())?;
+        package.insert_document(input_file.path.clone(), document);
     }
 
-    workspace
-        .package(Path::new(FIXTURE_PACKAGE_PATH))
-        .cloned()
-        .ok_or_else(|| "workspace".to_owned())
+    Ok(package)
 }
 
 fn document_for_fixture(fixture: &Fixture) -> Result<typing::Document, String> {
@@ -123,7 +113,7 @@ fn document_for_fixture(fixture: &Fixture) -> Result<typing::Document, String> {
     package
         .document(Path::new(FIXTURE_MAIN_DOCUMENT_PATH))
         .cloned()
-        .ok_or_else(|| "workspace".to_owned())
+        .ok_or_else(|| "package".to_owned())
 }
 
 fn run_bindings_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
@@ -440,16 +430,34 @@ fn run_naming_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
     };
     let package = package_for_fixture(fixture)?;
     let mut analysis_state = AnalysisState::new();
-    let package_result = run_lowering_and_naming(&package, None, &mut analysis_state);
+    let lowering_result = run_lowering(&package, None, &mut analysis_state);
+    let package_result = run_naming(&lowering_result, &analysis_state);
 
     let mut files = Vec::with_capacity(output_files.len());
     for output_file in output_files {
-        let output = if package_result.diagnostics.is_empty() {
+        let diagnostics_for_file = package_result
+            .diagnostics
+            .iter()
+            .find_map(|(diagnostic_path, diagnostics_for_path)| {
+                (diagnostic_path == &output_file.package_path).then(|| diagnostics_for_path.clone())
+            })
+            .unwrap_or_default();
+        let has_errors = diagnostics_for_file
+            .iter()
+            .any(|diagnostic| diagnostic.severity == typing::Severity::Error);
+
+        let output = if !has_errors {
             let module = package_result
                 .modules
                 .get(&output_file.package_path)
                 .ok_or_else(|| "missing module".to_owned())?;
+            let module_id = package_result
+                .module_ids
+                .get(&output_file.package_path)
+                .copied()
+                .ok_or_else(|| "missing module id".to_owned())?;
             render_named_hir(
+                module_id,
                 &module.arena,
                 &module.definitions,
                 &module.expressions,
@@ -457,17 +465,7 @@ fn run_naming_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
                 analysis_state.interner(),
             )
         } else {
-            render_diagnostics(
-                &output_file.source,
-                &package_result
-                    .diagnostics
-                    .iter()
-                    .find_map(|(diagnostic_path, diagnostics_for_path)| {
-                        (diagnostic_path == &output_file.package_path)
-                            .then(|| diagnostics_for_path.clone())
-                    })
-                    .unwrap_or_default(),
-            )
+            render_diagnostics(&output_file.source, &diagnostics_for_file)
         };
         files.push(FixtureRunFile {
             path: output_file.fixture_output_path,

@@ -1,8 +1,8 @@
 use typing::{
     Diagnostic, Interner,
-    hir::{DefinitionItem, DefinitionKind, ExpressionId, ExpressionKind, HirArena},
+    hir::{DefinitionItem, DefinitionKind, ExpressionId, ExpressionKind, HirArena, ModuleId},
     lower::LoweringContext,
-    naming::{BindingId, NamingResult},
+    naming::{BindingId, ExpressionKey, NamingResult},
     type_syntax::render_surface_type,
     typecheck::{InferenceError, InferenceState},
     types::{Atomic, CoreType, InferenceVariableId, TypeScheme},
@@ -155,6 +155,7 @@ pub fn render_interface_snapshot(
 }
 
 pub fn render_named_hir(
+    module_id: ModuleId,
     arena: &HirArena,
     definitions: &[DefinitionItem],
     expressions: &[ExpressionId],
@@ -169,6 +170,7 @@ pub fn render_named_hir(
 
     for expression_id in expressions {
         render_named_expression(
+            module_id,
             arena,
             *expression_id,
             naming_result,
@@ -336,6 +338,7 @@ fn render_named_definition(
 }
 
 fn render_named_expression(
+    module_id: ModuleId,
     arena: &HirArena,
     expression_id: ExpressionId,
     naming_result: &NamingResult,
@@ -360,7 +363,10 @@ fn render_named_expression(
             let name = interner.resolve(*symbol).unwrap_or("<unknown>");
             let binding = naming_result
                 .resolutions
-                .get(&expression_id)
+                .get(&ExpressionKey {
+                    module_id,
+                    expression_id,
+                })
                 .map(|binding_id| binding_label(*binding_id))
                 .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}Symbol({name}@{binding})"));
@@ -369,6 +375,7 @@ fn render_named_expression(
             lines.push(format!("{prefix}Block"));
             for nested_expression in expressions {
                 render_named_expression(
+                    module_id,
                     arena,
                     *nested_expression,
                     naming_result,
@@ -382,11 +389,22 @@ fn render_named_expression(
             let name = interner.resolve(*target).unwrap_or("<unknown>");
             let binding = naming_result
                 .resolutions
-                .get(&expression_id)
+                .get(&ExpressionKey {
+                    module_id,
+                    expression_id,
+                })
                 .map(|binding_id| binding_label(*binding_id))
                 .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}Assign({name}@{binding})"));
-            render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
+            render_named_expression(
+                module_id,
+                arena,
+                *value,
+                naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
         }
         ExpressionKind::Function { parameters, body } => {
             let rendered_parameters = parameters
@@ -395,6 +413,7 @@ fn render_named_expression(
                     let name = interner.resolve(parameter.symbol).unwrap_or("<unknown>");
                     let binding = find_binding_by_symbol_and_range(
                         naming_result,
+                        module_id,
                         parameter.symbol,
                         parameter.range,
                     )
@@ -405,7 +424,15 @@ fn render_named_expression(
                 .collect::<Vec<_>>()
                 .join(", ");
             lines.push(format!("{prefix}Function({rendered_parameters})"));
-            render_named_expression(arena, *body, naming_result, interner, indent + 1, lines);
+            render_named_expression(
+                module_id,
+                arena,
+                *body,
+                naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
         }
         ExpressionKind::If {
             condition,
@@ -414,6 +441,7 @@ fn render_named_expression(
         } => {
             lines.push(format!("{prefix}If"));
             render_named_expression(
+                module_id,
                 arena,
                 *condition,
                 naming_result,
@@ -422,6 +450,7 @@ fn render_named_expression(
                 lines,
             );
             render_named_expression(
+                module_id,
                 arena,
                 *consequence,
                 naming_result,
@@ -431,6 +460,7 @@ fn render_named_expression(
             );
             if let Some(alternative) = alternative {
                 render_named_expression(
+                    module_id,
                     arena,
                     *alternative,
                     naming_result,
@@ -446,17 +476,38 @@ fn render_named_expression(
             body,
         } => {
             let name = interner.resolve(*variable).unwrap_or("<unknown>");
-            let binding =
-                find_binding_by_symbol_and_range(naming_result, *variable, expression.range)
-                    .map(binding_label)
-                    .unwrap_or_else(|| "?".to_owned());
+            let binding = find_binding_by_symbol_and_range(
+                naming_result,
+                module_id,
+                *variable,
+                expression.range,
+            )
+            .map(binding_label)
+            .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}For({name}@{binding})"));
-            render_named_expression(arena, *sequence, naming_result, interner, indent + 1, lines);
-            render_named_expression(arena, *body, naming_result, interner, indent + 1, lines);
+            render_named_expression(
+                module_id,
+                arena,
+                *sequence,
+                naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+            render_named_expression(
+                module_id,
+                arena,
+                *body,
+                naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
         }
         ExpressionKind::While { condition, body } => {
             lines.push(format!("{prefix}While"));
             render_named_expression(
+                module_id,
                 arena,
                 *condition,
                 naming_result,
@@ -464,19 +515,51 @@ fn render_named_expression(
                 indent + 1,
                 lines,
             );
-            render_named_expression(arena, *body, naming_result, interner, indent + 1, lines);
+            render_named_expression(
+                module_id,
+                arena,
+                *body,
+                naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
         }
         ExpressionKind::Repeat { body } => {
             lines.push(format!("{prefix}Repeat"));
-            render_named_expression(arena, *body, naming_result, interner, indent + 1, lines);
+            render_named_expression(
+                module_id,
+                arena,
+                *body,
+                naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
         }
         ExpressionKind::UnaryMinus { value } => {
             lines.push(format!("{prefix}UnaryMinus"));
-            render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
+            render_named_expression(
+                module_id,
+                arena,
+                *value,
+                naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
         }
         ExpressionKind::Call { callee, arguments } => {
             lines.push(format!("{prefix}Call"));
-            render_named_expression(arena, *callee, naming_result, interner, indent + 1, lines);
+            render_named_expression(
+                module_id,
+                arena,
+                *callee,
+                naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
             for argument in arguments {
                 let argument_prefix = "  ".repeat(indent + 1);
                 if let Some(name) = argument.name {
@@ -486,6 +569,7 @@ fn render_named_expression(
                     lines.push(format!("{argument_prefix}Argument"));
                 }
                 render_named_expression(
+                    module_id,
                     arena,
                     argument.expression,
                     naming_result,
@@ -497,7 +581,15 @@ fn render_named_expression(
         }
         ExpressionKind::Subset { value, arguments } => {
             lines.push(format!("{prefix}Subset"));
-            render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
+            render_named_expression(
+                module_id,
+                arena,
+                *value,
+                naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
             for argument in arguments {
                 let argument_prefix = "  ".repeat(indent + 1);
                 if let Some(name) = argument.name {
@@ -507,6 +599,7 @@ fn render_named_expression(
                     lines.push(format!("{argument_prefix}Argument"));
                 }
                 render_named_expression(
+                    module_id,
                     arena,
                     argument.expression,
                     naming_result,
@@ -518,7 +611,15 @@ fn render_named_expression(
         }
         ExpressionKind::Subset2 { value, arguments } => {
             lines.push(format!("{prefix}Subset2"));
-            render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
+            render_named_expression(
+                module_id,
+                arena,
+                *value,
+                naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
             for argument in arguments {
                 let argument_prefix = "  ".repeat(indent + 1);
                 if let Some(name) = argument.name {
@@ -528,6 +629,7 @@ fn render_named_expression(
                     lines.push(format!("{argument_prefix}Argument"));
                 }
                 render_named_expression(
+                    module_id,
                     arena,
                     argument.expression,
                     naming_result,
@@ -540,7 +642,15 @@ fn render_named_expression(
         ExpressionKind::Dollar { value, name } => {
             let rendered_name = interner.resolve(*name).unwrap_or("<unknown>");
             lines.push(format!("{prefix}Dollar({rendered_name})"));
-            render_named_expression(arena, *value, naming_result, interner, indent + 1, lines);
+            render_named_expression(
+                module_id,
+                arena,
+                *value,
+                naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
         }
         ExpressionKind::Unsupported => lines.push(format!("{prefix}Unsupported")),
     }
@@ -552,13 +662,16 @@ fn binding_label(binding_id: BindingId) -> String {
 
 fn find_binding_by_symbol_and_range(
     naming_result: &NamingResult,
+    module_id: ModuleId,
     symbol: typing::Symbol,
     range: tree_sitter::Range,
 ) -> Option<BindingId> {
     naming_result
         .bindings
         .values()
-        .find(|binding| binding.symbol == symbol && binding.range == range)
+        .find(|binding| {
+            binding.module_id == module_id && binding.symbol == symbol && binding.range == range
+        })
         .map(|binding| binding.id)
 }
 

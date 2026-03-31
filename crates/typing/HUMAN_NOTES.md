@@ -6,6 +6,8 @@
 - testing:
   - am i not a fan of attaching attaching path to diagnostic. we should rather have a tuple of (path/document_id, Vec<Diagnostics>)
 
+- syntax:
+  - copy syntax phase from roughly
 - naming:
   - we should pass imported symbols, default namespaces, etc
   - should we have two phase: (currently we merge all modules?)
