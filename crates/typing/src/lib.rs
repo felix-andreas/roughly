@@ -12,7 +12,6 @@ pub mod tree;
 pub mod type_syntax;
 pub mod typecheck;
 pub mod types;
-pub mod workspace;
 
 pub use crate::{
     diagnostic::{CheckResult, Diagnostic, DiagnosticCode, DocumentDiagnostics, Severity},

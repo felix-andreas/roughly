@@ -13,16 +13,6 @@ This document tracks actionable planned work for the `typing` crate.
 
 ## Current priorities
 
-### Workspace And Package Boundary
-
-- Thin the `workspace` API so it stops mirroring `Package` mutation.
-  - Move package-population APIs onto `Package`.
-  - Remove `Workspace` wrappers that only forward package document and script insertion.
-  - Revisit whether `package_mut` should remain public.
-- Reasoning:
-  - `Package` is the fundamental analysis unit.
-  - The current `workspace` surface is too package-shaped, which blurs the intended module boundary and makes `Workspace` look like a second package API.
-
 ### Split `types.rs` By Phase
 
 - Separate the current mixed type data model into phase-shaped representations.
@@ -96,12 +86,12 @@ This document tracks actionable planned work for the `typing` crate.
   - Reusing the existing incremental tree update path matters for correctness and for later benchmarking of incremental typing.
   - Once the harness gains its own language, it needs direct parser and harness tests so syntax or project-state changes do not silently break the suite.
 
-### Project Analysis State
+### AnalysisState Simplification And Package Removal
 
-- Detailed plan: `projects/001_project_analysis_state.md`
-- Introduce a project-level analysis state for lowering and naming.
-- Make fixture tests use normal typing-crate phase APIs instead of fixture-harness-specific multi-file assembly.
-- Keep the design incremental-friendly by separating `Workspace` from durable semantic caches.
+- Detailed plan: `projects/003_analysis_state_simplification_and_package_removal.md`
+- Make `AnalysisState` the sole owner of documents and durable phase state.
+- Remove `Package` from the typing pipeline.
+- Make fixture tests use `AnalysisState` directly instead of package-specific setup.
 
 ### Naming Phase Split And Global Resolution
 
