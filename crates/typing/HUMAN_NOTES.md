@@ -1,24 +1,11 @@
+
+
+
+
 # Human Notes (!AIs are not allowed to edit!)
 
-
-AnalysisState
-    paths: DocumentId, PathBuf
-    documents: DocumentId, Document
-    modules: DocumentId, Module
-    naming: <need-some-input-here>
-    typecheck: <need-someinput-here>
-    diagnostics: DocuemntId, Diagnostics
-
-
-let state = AnalysisState::new()
-
-state.create_document(path, document) // creates new documentid
-state.edit_document()
-state.delete_document(document_id)
-
-
-state.resolve_locals(Option<Vec<DocumentId>>)
-state.resolve_globals(???)
+- split naming fixtures into two phases:
+  - verify that globals are resolved (even for same file)
 
 
 - integration into roughly is broken

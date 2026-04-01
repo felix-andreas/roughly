@@ -1,11 +1,10 @@
+pub mod analysis;
 pub mod diagnostic;
 pub mod document;
 pub mod hir;
 pub mod interner;
 pub mod lower;
 pub mod naming;
-mod package_hir;
-pub mod analysis;
 pub mod text;
 pub mod tree;
 pub mod type_syntax;
@@ -13,6 +12,10 @@ pub mod typecheck;
 pub mod types;
 
 pub use crate::{
+    analysis::{
+        Analysis, AnalysisError, AnalysisPhase, LoweringResult, NamingRunResult, PhaseDiagnostic,
+        check, run_lowering, run_naming, run_typecheck,
+    },
     diagnostic::{CheckResult, Diagnostic, DiagnosticCode, DocumentDiagnostics, Severity},
     document::{Document, DocumentEditError, DocumentId},
     hir::{
@@ -21,10 +24,6 @@ pub use crate::{
     },
     interner::{Interner, Symbol},
     lower::{LoweringContext, lower},
-    analysis::{
-        AnalysisError, AnalysisPhase, Analysis, LoweringResult, NamingRunResult,
-        PhaseDiagnostic, check, run_lowering, run_lowering_and_naming, run_naming, run_typecheck,
-    },
     text::{TextPosition, TextRange},
     tree::{field, kind},
     type_syntax::{

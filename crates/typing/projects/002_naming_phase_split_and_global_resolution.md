@@ -26,14 +26,12 @@ The result should support:
 ## Settled direction
 
 - `lower` and `naming` stay separate phases
-- `pipeline.rs` should expose a standalone `run_naming`
+- `analysis.rs` should expose a standalone `run_naming`
 - `run_naming` must consume already-lowered package state rather than running lowering internally
 - HIR `Module` stays the structural representation
 - per-file semantic analysis should use stable module identity rather than path-keyed tables
 - introduce a `ModuleId` or equivalent stable file-analysis identity
 - workspace and analysis state may still map paths to modules, but naming storage should not use paths as the primary semantic key
-- `package_hir` is not removed by this project
-- `package_hir` should stay only as a narrow package-order and HIR-remapping utility until a better durable package-level lowered index replaces it
 - naming data may remain side tables rather than a second tree-shaped `NamedModule`
 - the resolved naming state must be stored so tooling can query it
 - file-local naming must not resolve package-global names, even within the same file
@@ -56,8 +54,6 @@ Near-term public orchestration should be:
 - `run_naming`
 - `run_typecheck`
 - `check`
-
-`run_lowering_and_naming` may remain as a temporary convenience wrapper while the phase APIs settle.
 
 ### File-local naming result
 
@@ -98,7 +94,7 @@ That keeps semantic caches stable across rename operations and avoids threading 
 
 ### Why this matters for incremental analysis
 
-The current `package_hir` remapping approach is package-wide work:
+The current package remapping approach is package-wide work:
 
 - clone expressions from every module
 - rewrite embedded local ids
@@ -128,8 +124,8 @@ This avoids full-package HIR remapping as a prerequisite for naming and gives a 
 
 ### 2. Expose a standalone `run_naming` phase entry point [done]
 
-- add `run_naming` in `pipeline.rs`
-- keep `run_lowering_and_naming` as a wrapper for now
+- add `run_naming` in `analysis.rs`
+- keep the public API explicit enough that tests and later tooling can call naming directly
 - keep the public API explicit enough that tests and later tooling can call naming directly
 
 ### 3. Make the file-local pass produce explicit package-resolution artifacts [done]
@@ -172,7 +168,4 @@ This avoids full-package HIR remapping as a prerequisite for naming and gives a 
 
 ### Follow-up after this project [pending]
 
-- decide whether `package_hir` should:
-  - remain as a small remapping helper, or
-  - disappear once `AnalysisState` owns a durable package-level lowered index
 - decide whether `ModuleId` should be owned by lowering state, workspace, or a shared project-analysis identity allocator

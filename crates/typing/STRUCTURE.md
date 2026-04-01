@@ -6,13 +6,14 @@ Keep it focused on the intended near-term file split and the role of each file.
 
 ## Desired file split
 
-- `pipeline.rs`
-  - top-level orchestration
+- `analysis.rs`
+  - top-level analysis owner
+  - document lifecycle and invalidation
   - package-level phase wiring
+  - `Analysis`
   - `check`
   - `run_lowering`
   - `run_naming`
-  - `run_lowering_and_naming`
   - `run_typecheck`
 
 - `document.rs`
@@ -50,11 +51,6 @@ Keep it focused on the intended near-term file split and the role of each file.
 - `interner.rs`
   - interned symbol storage
 
-- `package.rs`
-  - analysis unit
-  - package document and script buckets
-  - package traversal and fallback policy
-
 - `text.rs`
   - source-text position and range types
   - rope-based text helpers
@@ -70,9 +66,7 @@ Keep it focused on the intended near-term file split and the role of each file.
 - `workspace.rs`
   - possible later editor and LSP-facing abstraction
   - current implementation may be broader than the desired near-term boundary
-  - `Package` remains the current unit of analysis and should own package contents directly
-  - keep only the minimum workspace-style mutation helpers needed while the package boundary is being clarified
-  - do not mirror the `Package` mutation API
+  - keep only the minimum workspace-style mutation helpers needed while the analysis boundary is being clarified
 
 ## Deferred split
 

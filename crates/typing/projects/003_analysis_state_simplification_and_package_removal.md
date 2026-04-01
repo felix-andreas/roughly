@@ -1,16 +1,16 @@
-# AnalysisState Simplification And Package Removal [planning]
+# Analysis Simplification And Package Removal [in-progress]
 
 ## Goal
 
-Make `AnalysisState` the sole durable owner of typing inputs and derived phase state.
+Make `Analysis` the sole durable owner of typing inputs and derived phase state.
 
 The target result is:
 
 - no `Package` owner in the typing pipeline
 - one stable internal `DocumentId`
-- path-based document mutation APIs on `AnalysisState`
+- path-based document mutation APIs on `Analysis`
 - separate lowering, naming, and typecheck stores keyed by `DocumentId`
-- per-document diagnostics stored in `AnalysisState`
+- per-document diagnostics stored in `Analysis`
 (one goal is also that this state can be used for roughly, like hovering, rename, goto defintion. please verify if this is viable)
 
 This should remove the current path-keyed duplication and give later phases one coherent state owner.
@@ -28,8 +28,8 @@ This should remove the current path-keyed duplication and give later phases one 
 
 ## Settled direction
 
-- `AnalysisState` owns `Document`
-- `AnalysisState` owns shared parser and interner state
+- `Analysis` owns `Document`
+- `Analysis` owns shared parser and interner state
 - `DocumentId` is the stable internal identity
 - public mutation stays path-based:
   - `add_document`
@@ -39,8 +39,8 @@ This should remove the current path-keyed duplication and give later phases one 
 - one file-local HIR module uses `DocumentId` as its stable identity
 - HIR `Module` remains the structural representation
 - naming and typecheck remain side tables keyed by stable ids
-- diagnostics are stored per document inside `AnalysisState`
-- phase execution is manual; `AnalysisState` does not run phases automatically on edit
+- diagnostics are stored per document inside `Analysis`
+- phase execution is manual; `Analysis` does not run phases automatically on edit
 - sorting is not part of the new design for now
 - `non_package_documents: Set<DocumentId>`
   - every document inside this set does not contribute to the package namespace
@@ -53,7 +53,7 @@ This should remove the current path-keyed duplication and give later phases one 
 The intended top-level shape is:
 
 ```rust
-struct AnalysisState {
+struct Analysis {
     documents: DocumentTable<DocumentId, Document>,
     document_ids_by_path: HashMap<PathBuf, DocumentId>,
     non_package_documents: Set<DocumentId>,
@@ -86,48 +86,48 @@ The important requirement is stable `DocumentId`, not a specific container crate
 
 After this redesign:
 
-- lowering operates on documents owned by `AnalysisState`
-- naming operates on lowered modules owned by `AnalysisState`
-- typecheck operates on naming output owned by `AnalysisState`
-- fixtures build and mutate `AnalysisState` directly
+- lowering operates on documents owned by `Analysis`
+- naming operates on lowered modules owned by `Analysis`
+- typecheck operates on naming output owned by `Analysis`
+- fixtures build and mutate `Analysis` directly
 
-This means the current `Package`-shaped APIs in `pipeline.rs` should disappear.
+This means the current `Package`-shaped APIs in `analysis.rs` should disappear.
 
 ## Migration notes
 
 The main architectural migration is:
 
 - from path-keyed caches plus `Package`
-- to `DocumentId`-keyed caches plus one `AnalysisState`
+- to `DocumentId`-keyed caches plus one `Analysis`
 
 That implies:
 
 - replace path-keyed phase tables with `DocumentId`-keyed tables
 - remove `ModuleId` where it is only mirroring file identity
 - stop reconstructing package order by sorting paths
-- remove `package_hir::sorted_modules` as a concept
+- remove path-sorted package assembly as a concept
 
-If a temporary adapter is needed during the migration, keep it narrow and delete it once all callers use `AnalysisState` directly.
+If a temporary adapter is needed during the migration, keep it narrow and delete it once all callers use `Analysis` directly.
 
 ## Implementation plan
 
 ### 1. Record the redesign and align the working docs [done]
 
-- capture the settled `AnalysisState` direction in `DISCUSS.md`
+- capture the settled `Analysis` direction in `DISCUSS.md`
 - add this project plan
 - update `TODOS.md` so it points at this project instead of the abandoned earlier analysis-state plan
 
-### 2. Introduce the new `AnalysisState` core model [pending]
+### 2. Introduce the new `Analysis` core model [done]
 
 - add stable `DocumentId`
 - replace the current path-keyed lowered-document cache shape
-- add document storage owned by `AnalysisState`
+- add document storage owned by `Analysis`
 - add `document_ids_by_path`
 - add `non_package_documents`
-- move parser ownership onto `AnalysisState`
+- move parser ownership onto `Analysis`
 - expose shared interner access without keeping the current `LoweringContext` as the top-level state owner
 
-### 3. Move document lifecycle APIs onto `AnalysisState` [pending]
+### 3. Move document lifecycle APIs onto `Analysis` [done]
 
 - implement `add_document(path, document) -> DocumentId`
 - implement path-based `edit_document`
@@ -137,18 +137,18 @@ If a temporary adapter is needed during the migration, keep it narrow and delete
   - naming cache
   - typecheck cache
   - diagnostics for the affected document
-  - (at least leave a comment that we must re-check naming and typing for globals that where exposed by this document)
-- keep mutation ownership inside `AnalysisState` so invalidation cannot be bypassed accidentally
+- dependent-document invalidation for changed exported globals remains a later follow-up
+- keep mutation ownership inside `Analysis` so invalidation cannot be bypassed accidentally
 
-### 4. Remove `Package` from `pipeline.rs` [pending]
+### 4. Remove `Package` from `analysis.rs` [done]
 
-- make `check` operate on `AnalysisState`
+- make `check` operate on `Analysis`
 - make `run_lowering` operate on selected `DocumentId`s or all package documents
-- make `run_naming` consume `AnalysisState` lowering results directly
-- make `run_typecheck` consume `AnalysisState` naming results directly
+- make `run_naming` consume `Analysis` lowering results directly
+- make `run_typecheck` consume `Analysis` naming results directly
 - remove temporary package-assembly work that only exists because `Package` currently owns documents
 
-### 5. Rewrite lowering storage around `DocumentId` [pending]
+### 5. Rewrite lowering storage around `DocumentId` [done]
 
 - store lowered `Module`s directly in `LoweringStore.modules`
 - remove path-keyed `LoweredDocument`
@@ -156,7 +156,7 @@ If a temporary adapter is needed during the migration, keep it narrow and delete
 - remove `next_module_id`
 - replace file identity uses with `DocumentId`
 
-### 6. Rewrite naming storage around `DocumentId` [pending]
+### 6. Rewrite naming storage around `DocumentId` [done]
 
 - replace `ModuleId` in naming storage with `DocumentId`
 - keep `LocalNamingResult` per document
@@ -164,16 +164,16 @@ If a temporary adapter is needed during the migration, keep it narrow and delete
 - ensure naming diagnostics attach to `DocumentId`
 - keep the file-local and package-global naming split intact during the migration
 
-### 7. Reshape typecheck inputs and temporary package remapping [pending]
+### 7. Reshape typecheck inputs and temporary package remapping [in-progress]
 
-- update typecheck entry points to consume `AnalysisState` state instead of `Package`
+- update typecheck entry points to consume `Analysis` state instead of `Package`
 - remove path-sorted package assembly
-- either delete `package_hir` or reduce it to the smallest temporary helper that works on `DocumentId`-addressed package documents
+- keep the temporary package remapping logic local to `analysis.rs`
 - do not preserve sorting helpers in the new design
 
-### 8. Update fixtures and tests to use `AnalysisState` directly [pending]
+### 8. Update fixtures and tests to use `Analysis` directly [in-progress]
 
-- construct `AnalysisState` directly in fixture tests
+- construct `Analysis` directly in fixture tests
 - stop using package-specific setup for multi-file typing tests
 - add direct coverage for:
   - package-contributing documents
@@ -181,7 +181,7 @@ If a temporary adapter is needed during the migration, keep it narrow and delete
   - path-based edit and delete invalidation
 - keep phase execution explicit in tests
 
-### 9. Cleanup and remove stale adapters [pending]
+### 9. Cleanup and remove stale adapters [in-progress]
 
 - delete code paths that still assume `Package` owns documents
 - delete remaining path-keyed semantic caches

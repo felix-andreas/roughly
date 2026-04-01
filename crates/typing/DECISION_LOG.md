@@ -3,7 +3,7 @@
 Keep newest decisions at the top.
 
 - `run_naming` should consume lowered package state rather than triggering lowering itself.
-  - The phase boundary should be real so tests, tooling, and incremental scheduling can call lowering and naming separately. `run_lowering_and_naming` can stay as a convenience wrapper, but `run_naming` itself should not hide lowering work.
+  - The phase boundary should be real so tests, tooling, and incremental scheduling can call lowering and naming separately. `run_naming` itself should not hide lowering work behind a combined wrapper.
 
 - package-global value resolution uses one final symbol table built from top-level exports, and the file-local naming pass does not resolve globals even within the same file.
   - This matches the intended runtime-like package semantics better than preserving earlier top-level bindings at individual use sites, and it gives naming a cleaner split between file-local lexical facts and package-global consolidation. Duplicate top-level value definitions still warn on both the overwritten and overwriting declarations.
@@ -25,7 +25,7 @@ Keep newest decisions at the top.
 - package-attached non-contributing files are `scripts`.
   - They are attached to a package, can resolve against the package namespace, and do not contribute back to that namespace.
 
-- `lower` stays file-local, while `pipeline.rs` owns package-scoped `run_lowering_and_naming` and full `check`.
+- `lower` stays file-local, while `analysis.rs` owns package-scoped phase orchestration and full `check`.
   - The package is the unit of naming and later semantic phases, but lowering still needs to run directly on individual parsed documents.
 
 - `type_syntax` simple fixtures compare the parser's rendered success or rendered failure directly, with no `error:` sentinel in fixture input.

@@ -3,10 +3,9 @@ use {
         Interner,
         diagnostic::{CheckResult, Diagnostic, DocumentDiagnostics, Severity},
         document::{Document, DocumentEditError, DocumentId},
-        hir::Module,
+        hir::{DefinitionId, DefinitionItem, ExpressionId, ExpressionKind, HirArena, Module},
         lower::lower_with_shared_interner,
         naming::{LocalNamingResult, NamingResult, resolve_package},
-        package_hir::remap_package_modules,
         tree,
         typecheck::inference_state_with_builtins_in_interner,
     },
@@ -217,14 +216,6 @@ pub fn check(analysis_state: &mut Analysis) -> CheckResult {
     run_lowering(None, analysis_state);
     run_naming(None, analysis_state);
     run_typecheck(None, analysis_state)
-}
-
-pub fn run_lowering_and_naming(
-    changed_documents: Option<&[DocumentId]>,
-    analysis_state: &mut Analysis,
-) -> NamingRunResult {
-    run_lowering(changed_documents, analysis_state);
-    run_naming(None, analysis_state)
 }
 
 pub fn run_lowering(
@@ -487,4 +478,228 @@ fn flatten_document_diagnostics(document_diagnostics: &[DocumentDiagnostics]) ->
     }
 
     diagnostics
+}
+
+struct RemappedModules {
+    arena: HirArena,
+    definitions: Vec<DefinitionItem>,
+    expressions: Vec<ExpressionId>,
+}
+
+fn remap_package_modules(modules: &[&Module]) -> RemappedModules {
+    let mut arena = HirArena::new();
+    let mut definitions = Vec::new();
+    let mut expressions = Vec::new();
+    let mut next_expression_id = 0u32;
+    let mut next_definition_id = 0u32;
+
+    for module in modules {
+        let expression_offset = next_expression_id;
+        let definition_offset = next_definition_id;
+
+        let remapped_expressions = module
+            .arena
+            .expressions()
+            .iter()
+            .cloned()
+            .map(|mut expression| {
+                expression.id = ExpressionId(expression.id.0 + expression_offset);
+                remap_expression_kind(&mut expression.kind, expression_offset);
+                expression
+            })
+            .collect::<Vec<_>>();
+        next_expression_id +=
+            u32::try_from(remapped_expressions.len()).expect("expression count exceeded u32");
+        arena.expressions.extend(remapped_expressions);
+
+        let remapped_definitions = module
+            .definitions
+            .iter()
+            .cloned()
+            .map(|definition| {
+                DefinitionItem::new(
+                    DefinitionId(definition.id.0 + definition_offset),
+                    definition.range,
+                    definition.definition,
+                )
+            })
+            .collect::<Vec<_>>();
+        next_definition_id +=
+            u32::try_from(remapped_definitions.len()).expect("definition count exceeded u32");
+        definitions.extend(remapped_definitions);
+
+        expressions.extend(
+            module
+                .expressions
+                .iter()
+                .map(|expression_id| ExpressionId(expression_id.0 + expression_offset)),
+        );
+    }
+
+    RemappedModules {
+        arena,
+        definitions,
+        expressions,
+    }
+}
+
+fn remap_expression_kind(expression_kind: &mut ExpressionKind, expression_offset: u32) {
+    match expression_kind {
+        ExpressionKind::Block { expressions, .. } => {
+            for expression_id in expressions {
+                *expression_id = ExpressionId(expression_id.0 + expression_offset);
+            }
+        }
+        ExpressionKind::Assign { value, .. }
+        | ExpressionKind::UnaryMinus { value }
+        | ExpressionKind::Dollar { value, .. } => {
+            *value = ExpressionId(value.0 + expression_offset);
+        }
+        ExpressionKind::Function { body, .. } | ExpressionKind::Repeat { body } => {
+            *body = ExpressionId(body.0 + expression_offset);
+        }
+        ExpressionKind::While { condition, body } => {
+            *condition = ExpressionId(condition.0 + expression_offset);
+            *body = ExpressionId(body.0 + expression_offset);
+        }
+        ExpressionKind::For { sequence, body, .. } => {
+            *sequence = ExpressionId(sequence.0 + expression_offset);
+            *body = ExpressionId(body.0 + expression_offset);
+        }
+        ExpressionKind::If {
+            condition,
+            consequence,
+            alternative,
+        } => {
+            *condition = ExpressionId(condition.0 + expression_offset);
+            *consequence = ExpressionId(consequence.0 + expression_offset);
+            if let Some(alternative) = alternative {
+                *alternative = ExpressionId(alternative.0 + expression_offset);
+            }
+        }
+        ExpressionKind::Call { callee, arguments }
+        | ExpressionKind::Subset {
+            value: callee,
+            arguments,
+        }
+        | ExpressionKind::Subset2 {
+            value: callee,
+            arguments,
+        } => {
+            *callee = ExpressionId(callee.0 + expression_offset);
+            for argument in arguments {
+                argument.expression = ExpressionId(argument.expression.0 + expression_offset);
+            }
+        }
+        ExpressionKind::Null
+        | ExpressionKind::Logical(_)
+        | ExpressionKind::Integer(_)
+        | ExpressionKind::Double(_)
+        | ExpressionKind::Character(_)
+        | ExpressionKind::StringLiteralName(_)
+        | ExpressionKind::Symbol(_)
+        | ExpressionKind::Unsupported => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::{Analysis, run_lowering, run_naming},
+        crate::{
+            Severity,
+            text::{TextPosition, TextRange},
+        },
+        std::path::PathBuf,
+    };
+
+    #[test]
+    fn package_document_ids_exclude_non_package_paths() {
+        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        let package_document_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/main.R"), "value <- 1L")
+            .expect("package document should parse");
+        analysis
+            .add_document_from_source(
+                PathBuf::from("/workspace/tests/test-value.R"),
+                "helper <- 1L",
+            )
+            .expect("non-package document should parse");
+
+        assert_eq!(analysis.package_document_ids(), vec![package_document_id]);
+    }
+
+    #[test]
+    fn edit_document_invalidates_lowering_and_naming_state() {
+        let path = PathBuf::from("/workspace/R/main.R");
+        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        let document_id = analysis
+            .add_document_from_source(path.clone(), "value <- 1L")
+            .expect("document should parse");
+
+        run_lowering(None, &mut analysis);
+        run_naming(None, &mut analysis);
+
+        assert!(analysis.lowering.modules.contains_key(&document_id));
+        assert!(analysis.naming.locals.contains_key(&document_id));
+
+        analysis
+            .edit_document(&path, |document, parser| {
+                document.edit_range(
+                    parser,
+                    TextRange {
+                        start: TextPosition {
+                            line_index: 0,
+                            character_index: 0,
+                        },
+                        end: TextPosition {
+                            line_index: 0,
+                            character_index: "value <- 1L".len(),
+                        },
+                    },
+                    "value <-",
+                )
+            })
+            .expect("edit should succeed");
+
+        assert!(!analysis.lowering.modules.contains_key(&document_id));
+        assert!(analysis.naming.locals.is_empty());
+        assert!(analysis.naming.package.bindings.is_empty());
+
+        let lowering_result = run_lowering(None, &mut analysis);
+        let diagnostics = lowering_result
+            .diagnostics
+            .into_iter()
+            .flat_map(|(_, diagnostics)| diagnostics)
+            .collect::<Vec<_>>();
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.severity == Severity::Error)
+        );
+    }
+
+    #[test]
+    fn delete_document_removes_cached_state() {
+        let path = PathBuf::from("/workspace/R/main.R");
+        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        let document_id = analysis
+            .add_document_from_source(path.clone(), "value <- 1L")
+            .expect("document should parse");
+
+        run_lowering(None, &mut analysis);
+
+        assert!(analysis.document(&path).is_some());
+        assert!(analysis.lowering.modules.contains_key(&document_id));
+
+        analysis
+            .delete_document(&path)
+            .expect("delete should succeed");
+
+        assert!(analysis.document(&path).is_none());
+        assert!(analysis.document_id_for_path(&path).is_none());
+        assert!(!analysis.lowering.modules.contains_key(&document_id));
+        assert!(analysis.package_document_ids().is_empty());
+    }
 }

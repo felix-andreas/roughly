@@ -44,7 +44,7 @@ This document tracks actionable planned work for the `typing` crate.
 ### Checked File And Interfaces
 
 - Expose checked-file and project-summary boundaries.
-  - Define the checked-file result owned by `pipeline.rs`.
+  - Define the checked-file result owned by `analysis.rs`.
   - Retain diagnostics, typed results, and any project-summary extraction needed at that boundary.
   - Use those summaries as one possible dependency boundary for later project scheduling and incremental invalidation.
 
@@ -86,12 +86,12 @@ This document tracks actionable planned work for the `typing` crate.
   - Reusing the existing incremental tree update path matters for correctness and for later benchmarking of incremental typing.
   - Once the harness gains its own language, it needs direct parser and harness tests so syntax or project-state changes do not silently break the suite.
 
-### AnalysisState Simplification And Package Removal
+### Analysis Simplification And Package Removal
 
 - Detailed plan: `projects/003_analysis_state_simplification_and_package_removal.md`
-- Make `AnalysisState` the sole owner of documents and durable phase state.
+- Make `Analysis` the sole owner of documents and durable phase state.
 - Remove `Package` from the typing pipeline.
-- Make fixture tests use `AnalysisState` directly instead of package-specific setup.
+- Make fixture tests use `Analysis` directly instead of package-specific setup.
 
 ### Naming Phase Split And Global Resolution
 
