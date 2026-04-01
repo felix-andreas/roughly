@@ -15,11 +15,10 @@ Fixture parsing itself lives in the separate `fixtures` crate.
 
 Some suites may include a local `README.md` with more detailed strategy, coverage expectations, or renderer-specific guidance. Use `TESTING.md` for crate-level test contracts and suite-local README files for suite-specific concepts that would otherwise make this document too long.
 
-The `fixtures` crate currently parses three fixture shapes:
+The `fixtures` crate currently parses two fixture shapes:
 
 - `Simple`
 - `MultiFile`
-- `Generational`
 
 All typing fixture runners should normalize their results to one shared output shape:
 
@@ -28,7 +27,8 @@ Result<Vec<FixtureOutput>, String>
 ```
 
 Where each `FixtureOutput` is one snapshot and each snapshot contains per-file rendered outputs by
-path. `Err(...)` is for runner failure only. Phase failures should still be rendered into normal
+path. Snapshot outputs are matched to expected generations by position, not by a runner-supplied
+name. `Err(...)` is for runner failure only. Phase failures should still be rendered into normal
 fixture output.
 
 ### `Simple`
@@ -55,7 +55,8 @@ For `type_syntax`, invalid cases use the same `Simple` shape as valid cases. Put
 
 ### `MultiFile`
 
-Use `MultiFile` when one case has multiple whole-file inputs and per-file expectations, but no later generations.
+Use `MultiFile` when a case needs explicit file paths. It may have only an initial set of whole-file
+inputs, or it may also include later grouped workspace edits.
 
 ```text
 #==== group_name
@@ -68,21 +69,6 @@ Use `MultiFile` when one case has multiple whole-file inputs and per-file expect
 <file contents>
 #++++
 <expected rendered output for b.R>
-```
-
-Rules:
-
-- each `#---- path` input block is followed immediately by either `#++++` or `#++++ any`
-- `MultiFile` does not use `edit`, `move`, `delete`, or explicit expectation clearing
-- actual outputs are compared by path, not by pre-joined `== path ==` text
-
-### `Generational`
-
-Use `Generational` when a case needs grouped workspace edits across later generations.
-
-```text
-#==== group_name
-#---- case_name
 #.... v1
 #---- a.R
 <file contents>
@@ -103,9 +89,10 @@ Use `Generational` when a case needs grouped workspace edits across later genera
 
 Rules:
 
+- the initial `MultiFile` inputs are the first snapshot
 - each `#.... vN` block describes one grouped workspace edit step
 - each input or operation block is followed immediately by any expectation update for that path
-- bare filenames such as `#---- a.R` mean whole-file contents for that generation
+- bare filenames such as `#---- a.R` mean whole-file contents for that snapshot
 - `edit`, `move`, and `delete` are first-class workspace document operations
 - expectations carry forward by path from one generation to the next unless replaced
 - if a checked path is missing an expectation in the first generation, that is an error
@@ -115,14 +102,18 @@ Rules:
   file is reintroduced
 - moving a document carries the expectation from the source path to the destination path
 - extra actual outputs beyond the expected paths are an error
+- in typing suites, use explicit paths such as `R/a.R` when package behavior matters; the runner
+  does not add package prefixes for you
 
 ### Current migration status
 
-The parser now understands all three fixture shapes.
+The parser now understands both fixture shapes.
 
-The `naming` fixture runner executes `Simple` and `MultiFile` cases.
+`naming_local` uses `Simple` cases and runs only the file-local naming pass.
+`naming_global` uses `MultiFile` cases and runs package-global naming on the initial generation.
 The other typing fixture runners still execute only `Simple` cases.
-Treat `Generational` and the remaining multi-file suite support as parser-level functionality that is still waiting on renderer-side adoption in `typing`.
+Later-generation `MultiFile` support is still waiting on broader renderer-side adoption in
+`typing`.
 
 ### File loading
 
@@ -155,7 +146,8 @@ The intended fixture suites are:
 - `instantiation` - fresh reuse of generalized bindings at use sites
 - `interfaces` - exported per-file interface shapes
 - `lowering` - syntax-to-HIR lowering output
-- `naming` - binding introduction and use-site resolution
+- `naming_local` - file-local binding introduction and lexical use-site resolution
+- `naming_global` - package-global resolution across multiple files
 - `substitution` - propagation of solved types through larger shapes
 - `unification` - solved monotypes during local inference
 
@@ -193,20 +185,21 @@ Expected output should show:
 - attached types on expressions
 - or rendered diagnostics when the suite intentionally targets failures produced by lowering
 
-### `naming`
+### `naming_local`
 
 Purpose:
 
-- binding introduction
-- shadowing
-- use-site resolution
+- binding introduction within one document
+- lexical shadowing
+- use-site resolution within one document
 
 Expected output should show:
 
 - normalized binding identities
 - definition-site and use-site relationships
 
-The naming suite should be organized as a small coverage matrix rather than a grab bag of examples.
+The local naming suite should be organized as a small coverage matrix rather than a grab bag of
+examples.
 
 At minimum, that matrix should cover:
 
@@ -218,6 +211,30 @@ At minimum, that matrix should cover:
 - loop bindings such as `for` variables
 - assignment RHS resolution before the new binding is introduced
 - naming diagnostics for type references that fail during naming
+
+### `naming_global`
+
+Purpose:
+
+- package-global value resolution
+- cross-file type resolution
+- final-symbol-table behavior across multiple files
+- package-level naming diagnostics
+
+Expected output should show:
+
+- normalized binding identities
+- definition-site and use-site relationships across files
+
+At minimum, that matrix should cover:
+
+- cross-file global references
+- cross-file call-site resolution
+- latest-definition-wins global rebinding behavior
+- function bodies closing over globals from other files
+- cross-file nominal and alias type references
+- forward references across files
+- generic parameters shadowing package-global type names
 
 ### `expressions`
 

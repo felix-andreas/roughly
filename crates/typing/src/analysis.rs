@@ -53,18 +53,6 @@ pub struct NamingStore {
 pub struct TypecheckStore {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoweringResult {
-    pub document_ids: Vec<DocumentId>,
-    pub diagnostics: Vec<DocumentDiagnostics>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NamingRunResult {
-    pub naming: NamingResult,
-    pub diagnostics: Vec<DocumentDiagnostics>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PhaseDiagnostic {
     pub phase: AnalysisPhase,
     pub diagnostic: Diagnostic,
@@ -143,7 +131,7 @@ impl Analysis {
         source: &str,
     ) -> Result<DocumentId, AnalysisError> {
         let document = Document::parse(&mut self.parser, source)
-            .ok_or_else(|| AnalysisError::ParseFailed(path.clone()))?;
+            .map_err(|_| AnalysisError::ParseFailed(path.clone()))?;
         Ok(self.add_document(path, document))
     }
 
@@ -210,18 +198,73 @@ impl Analysis {
         document_ids.sort_by_key(|document_id| document_id.0);
         document_ids
     }
+
+    pub fn document_diagnostics(
+        &self,
+        document_ids: &[DocumentId],
+        phases: &[AnalysisPhase],
+    ) -> Vec<DocumentDiagnostics> {
+        let mut diagnostics = Vec::new();
+
+        for document_id in document_ids {
+            let Some(path) = self.path_for_document_id(*document_id) else {
+                continue;
+            };
+            let path_diagnostics = self
+                .diagnostics
+                .get(document_id)
+                .map(|phase_diagnostics| {
+                    phase_diagnostics
+                        .iter()
+                        .filter(|phase_diagnostic| phases.contains(&phase_diagnostic.phase))
+                        .map(|phase_diagnostic| phase_diagnostic.diagnostic.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if !path_diagnostics.is_empty() {
+                diagnostics.push((path.to_path_buf(), path_diagnostics));
+            }
+        }
+
+        diagnostics
+    }
 }
 
 pub fn check(analysis_state: &mut Analysis) -> CheckResult {
+    let document_ids = analysis_state.package_document_ids();
+
     run_lowering(None, analysis_state);
+    let lowering_diagnostics = flatten_document_diagnostics(
+        &analysis_state.document_diagnostics(&document_ids, &[AnalysisPhase::Lowering]),
+    );
+    if has_blocking_diagnostics(&lowering_diagnostics) {
+        return CheckResult {
+            diagnostics: lowering_diagnostics,
+        };
+    }
+
     run_naming(None, analysis_state);
-    run_typecheck(None, analysis_state)
+    let naming_diagnostics = flatten_document_diagnostics(&analysis_state.document_diagnostics(
+        &document_ids,
+        &[AnalysisPhase::Lowering, AnalysisPhase::Naming],
+    ));
+    if has_blocking_diagnostics(&naming_diagnostics) {
+        return CheckResult {
+            diagnostics: naming_diagnostics,
+        };
+    }
+
+    let typecheck_result = run_typecheck(None, analysis_state);
+    if typecheck_result.diagnostics.is_empty() {
+        return CheckResult {
+            diagnostics: naming_diagnostics,
+        };
+    }
+
+    typecheck_result
 }
 
-pub fn run_lowering(
-    changed_documents: Option<&[DocumentId]>,
-    analysis_state: &mut Analysis,
-) -> LoweringResult {
+pub fn run_lowering(changed_documents: Option<&[DocumentId]>, analysis_state: &mut Analysis) {
     let document_ids = match changed_documents {
         None => analysis_state.package_document_ids(),
         Some(changed_documents) => {
@@ -251,29 +294,12 @@ pub fn run_lowering(
             lowering_result.diagnostics,
         );
     }
-
-    LoweringResult {
-        document_ids: document_ids.clone(),
-        diagnostics: analysis_state.document_diagnostics(&document_ids, &[AnalysisPhase::Lowering]),
-    }
 }
 
-pub fn run_naming(
-    _changed_documents: Option<&[DocumentId]>,
-    analysis_state: &mut Analysis,
-) -> NamingRunResult {
+pub fn run_naming(_changed_documents: Option<&[DocumentId]>, analysis_state: &mut Analysis) {
     let document_ids = analysis_state.package_document_ids();
     analysis_state.naming = NamingStore::default();
     analysis_state.clear_phase_diagnostics(AnalysisPhase::Naming);
-
-    let lowering_diagnostics =
-        analysis_state.document_diagnostics(&document_ids, &[AnalysisPhase::Lowering]);
-    if has_blocking_diagnostics(&flatten_document_diagnostics(&lowering_diagnostics)) {
-        return NamingRunResult {
-            naming: NamingResult::default(),
-            diagnostics: lowering_diagnostics,
-        };
-    }
 
     let modules = document_ids
         .iter()
@@ -291,14 +317,6 @@ pub fn run_naming(
     for (document_id, diagnostics) in naming_computation.diagnostics {
         analysis_state.push_phase_diagnostics(document_id, AnalysisPhase::Naming, diagnostics);
     }
-
-    NamingRunResult {
-        naming: analysis_state.naming.package.clone(),
-        diagnostics: analysis_state.document_diagnostics(
-            &document_ids,
-            &[AnalysisPhase::Lowering, AnalysisPhase::Naming],
-        ),
-    }
 }
 
 pub fn run_typecheck(
@@ -307,16 +325,6 @@ pub fn run_typecheck(
 ) -> CheckResult {
     let document_ids = analysis_state.package_document_ids();
     analysis_state.clear_phase_diagnostics(AnalysisPhase::Typecheck);
-
-    let naming_diagnostics = flatten_document_diagnostics(&analysis_state.document_diagnostics(
-        &document_ids,
-        &[AnalysisPhase::Lowering, AnalysisPhase::Naming],
-    ));
-    if has_blocking_diagnostics(&naming_diagnostics) {
-        return CheckResult {
-            diagnostics: naming_diagnostics,
-        };
-    }
 
     let modules = document_ids
         .iter()
@@ -346,10 +354,6 @@ pub fn run_typecheck(
             AnalysisPhase::Typecheck,
             diagnostics.clone(),
         );
-    }
-
-    if diagnostics.is_empty() {
-        diagnostics = naming_diagnostics;
     }
 
     CheckResult { diagnostics }
@@ -402,36 +406,6 @@ impl Analysis {
                 .into_iter()
                 .map(|diagnostic| PhaseDiagnostic { phase, diagnostic }),
         );
-    }
-
-    fn document_diagnostics(
-        &self,
-        document_ids: &[DocumentId],
-        phases: &[AnalysisPhase],
-    ) -> Vec<DocumentDiagnostics> {
-        let mut diagnostics = Vec::new();
-
-        for document_id in document_ids {
-            let Some(path) = self.path_for_document_id(*document_id) else {
-                continue;
-            };
-            let path_diagnostics = self
-                .diagnostics
-                .get(document_id)
-                .map(|phase_diagnostics| {
-                    phase_diagnostics
-                        .iter()
-                        .filter(|phase_diagnostic| phases.contains(&phase_diagnostic.phase))
-                        .map(|phase_diagnostic| phase_diagnostic.diagnostic.clone())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            if !path_diagnostics.is_empty() {
-                diagnostics.push((path.to_path_buf(), path_diagnostics));
-            }
-        }
-
-        diagnostics
     }
 
     fn fallback_range(&self) -> tree_sitter::Range {
@@ -605,7 +579,7 @@ fn remap_expression_kind(expression_kind: &mut ExpressionKind, expression_offset
 #[cfg(test)]
 mod tests {
     use {
-        super::{Analysis, run_lowering, run_naming},
+        super::{Analysis, AnalysisPhase, run_lowering, run_naming},
         crate::{
             Severity,
             text::{TextPosition, TextRange},
@@ -666,9 +640,9 @@ mod tests {
         assert!(analysis.naming.locals.is_empty());
         assert!(analysis.naming.package.bindings.is_empty());
 
-        let lowering_result = run_lowering(None, &mut analysis);
-        let diagnostics = lowering_result
-            .diagnostics
+        run_lowering(None, &mut analysis);
+        let diagnostics = analysis
+            .document_diagnostics(&[document_id], &[AnalysisPhase::Lowering])
             .into_iter()
             .flat_map(|(_, diagnostics)| diagnostics)
             .collect::<Vec<_>>();

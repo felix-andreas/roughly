@@ -16,11 +16,16 @@ pub struct Document {
     tree: Tree,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentParseError {
+    ParseFailed,
+}
+
 impl Document {
-    pub fn parse(parser: &mut Parser, source: &str) -> Option<Self> {
+    pub fn parse(parser: &mut Parser, source: &str) -> Result<Self, DocumentParseError> {
         let rope = Rope::from_str(source);
-        let tree = parse_rope(parser, &rope, None)?;
-        Some(Self { rope, tree })
+        let tree = parse_rope(parser, &rope, None).ok_or(DocumentParseError::ParseFailed)?;
+        Ok(Self { rope, tree })
     }
 
     pub fn new(rope: Rope, tree: Tree) -> Self {

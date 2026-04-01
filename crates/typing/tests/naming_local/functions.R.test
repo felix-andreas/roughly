@@ -14,7 +14,7 @@ Assign(x@b0)
   Integer(1L)
 Assign(f@b1)
   Function()
-    Symbol(x@b0)
+    Symbol(x@?)
 
 #---- parameter_shadows_outer_binding
 x <- 1L

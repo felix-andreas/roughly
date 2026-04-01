@@ -2,7 +2,7 @@ use typing::{
     Diagnostic, Interner,
     hir::{DefinitionItem, DefinitionKind, ExpressionId, ExpressionKind, HirArena, ModuleId},
     lower::LoweringContext,
-    naming::{BindingId, ExpressionKey, NamingResult},
+    naming::{BindingId, ExpressionKey, LocalNamingResult, NamingResult, ProvisionalBindingId},
     type_syntax::render_surface_type,
     typecheck::{InferenceError, InferenceState},
     types::{Atomic, CoreType, InferenceVariableId, TypeScheme},
@@ -174,6 +174,35 @@ pub fn render_named_hir(
             arena,
             *expression_id,
             naming_result,
+            interner,
+            0,
+            &mut lines,
+        );
+    }
+
+    lines.join("\n")
+}
+
+pub fn render_locally_named_hir(
+    module_id: ModuleId,
+    arena: &HirArena,
+    definitions: &[DefinitionItem],
+    expressions: &[ExpressionId],
+    local_naming_result: &LocalNamingResult,
+    interner: &Interner,
+) -> String {
+    let mut lines = Vec::new();
+
+    for definition in definitions {
+        render_named_definition(definition, interner, 0, &mut lines);
+    }
+
+    for expression_id in expressions {
+        render_locally_named_expression(
+            module_id,
+            arena,
+            *expression_id,
+            local_naming_result,
             interner,
             0,
             &mut lines,
@@ -656,7 +685,324 @@ fn render_named_expression(
     }
 }
 
+fn render_locally_named_expression(
+    module_id: ModuleId,
+    arena: &HirArena,
+    expression_id: ExpressionId,
+    local_naming_result: &LocalNamingResult,
+    interner: &Interner,
+    indent: usize,
+    lines: &mut Vec<String>,
+) {
+    let expression = arena.get(expression_id);
+    let prefix = "  ".repeat(indent);
+
+    match &expression.kind {
+        ExpressionKind::Null => lines.push(format!("{prefix}Null")),
+        ExpressionKind::Logical(value) => lines.push(format!("{prefix}Logical({value})")),
+        ExpressionKind::Integer(value) => lines.push(format!("{prefix}Integer({value})")),
+        ExpressionKind::Double(value) => lines.push(format!("{prefix}Double({value})")),
+        ExpressionKind::Character(value) => lines.push(format!("{prefix}Character({value:?})")),
+        ExpressionKind::StringLiteralName(symbol) => {
+            let name = interner.resolve(*symbol).unwrap_or("<unknown>");
+            lines.push(format!("{prefix}StringLiteralName({name:?})"));
+        }
+        ExpressionKind::Symbol(symbol) => {
+            let name = interner.resolve(*symbol).unwrap_or("<unknown>");
+            let binding = local_naming_result
+                .expression_resolutions
+                .get(&expression_id)
+                .map(|binding_id| provisional_binding_label(*binding_id))
+                .unwrap_or_else(|| "?".to_owned());
+            lines.push(format!("{prefix}Symbol({name}@{binding})"));
+        }
+        ExpressionKind::Block { expressions, .. } => {
+            lines.push(format!("{prefix}Block"));
+            for nested_expression in expressions {
+                render_locally_named_expression(
+                    module_id,
+                    arena,
+                    *nested_expression,
+                    local_naming_result,
+                    interner,
+                    indent + 1,
+                    lines,
+                );
+            }
+        }
+        ExpressionKind::Assign { target, value, .. } => {
+            let name = interner.resolve(*target).unwrap_or("<unknown>");
+            let binding = local_naming_result
+                .expression_resolutions
+                .get(&expression_id)
+                .map(|binding_id| provisional_binding_label(*binding_id))
+                .unwrap_or_else(|| "?".to_owned());
+            lines.push(format!("{prefix}Assign({name}@{binding})"));
+            render_locally_named_expression(
+                module_id,
+                arena,
+                *value,
+                local_naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+        }
+        ExpressionKind::Function { parameters, body } => {
+            let rendered_parameters = parameters
+                .iter()
+                .map(|parameter| {
+                    let name = interner.resolve(parameter.symbol).unwrap_or("<unknown>");
+                    let binding = find_local_binding_by_symbol_and_range(
+                        local_naming_result,
+                        module_id,
+                        parameter.symbol,
+                        parameter.range,
+                    )
+                    .map(provisional_binding_label)
+                    .unwrap_or_else(|| "?".to_owned());
+                    format!("{name}@{binding}")
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!("{prefix}Function({rendered_parameters})"));
+            render_locally_named_expression(
+                module_id,
+                arena,
+                *body,
+                local_naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+        }
+        ExpressionKind::If {
+            condition,
+            consequence,
+            alternative,
+        } => {
+            lines.push(format!("{prefix}If"));
+            render_locally_named_expression(
+                module_id,
+                arena,
+                *condition,
+                local_naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+            render_locally_named_expression(
+                module_id,
+                arena,
+                *consequence,
+                local_naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+            if let Some(alternative) = alternative {
+                render_locally_named_expression(
+                    module_id,
+                    arena,
+                    *alternative,
+                    local_naming_result,
+                    interner,
+                    indent + 1,
+                    lines,
+                );
+            }
+        }
+        ExpressionKind::For {
+            variable,
+            sequence,
+            body,
+        } => {
+            let name = interner.resolve(*variable).unwrap_or("<unknown>");
+            let binding = find_local_binding_by_symbol_and_range(
+                local_naming_result,
+                module_id,
+                *variable,
+                expression.range,
+            )
+            .map(provisional_binding_label)
+            .unwrap_or_else(|| "?".to_owned());
+            lines.push(format!("{prefix}For({name}@{binding})"));
+            render_locally_named_expression(
+                module_id,
+                arena,
+                *sequence,
+                local_naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+            render_locally_named_expression(
+                module_id,
+                arena,
+                *body,
+                local_naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+        }
+        ExpressionKind::While { condition, body } => {
+            lines.push(format!("{prefix}While"));
+            render_locally_named_expression(
+                module_id,
+                arena,
+                *condition,
+                local_naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+            render_locally_named_expression(
+                module_id,
+                arena,
+                *body,
+                local_naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+        }
+        ExpressionKind::Repeat { body } => {
+            lines.push(format!("{prefix}Repeat"));
+            render_locally_named_expression(
+                module_id,
+                arena,
+                *body,
+                local_naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+        }
+        ExpressionKind::UnaryMinus { value } => {
+            lines.push(format!("{prefix}UnaryMinus"));
+            render_locally_named_expression(
+                module_id,
+                arena,
+                *value,
+                local_naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+        }
+        ExpressionKind::Call { callee, arguments } => {
+            lines.push(format!("{prefix}Call"));
+            render_locally_named_expression(
+                module_id,
+                arena,
+                *callee,
+                local_naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+            for argument in arguments {
+                let argument_prefix = "  ".repeat(indent + 1);
+                if let Some(name) = argument.name {
+                    let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
+                    lines.push(format!("{argument_prefix}Argument({rendered_name})"));
+                } else {
+                    lines.push(format!("{argument_prefix}Argument"));
+                }
+                render_locally_named_expression(
+                    module_id,
+                    arena,
+                    argument.expression,
+                    local_naming_result,
+                    interner,
+                    indent + 2,
+                    lines,
+                );
+            }
+        }
+        ExpressionKind::Subset { value, arguments } => {
+            lines.push(format!("{prefix}Subset"));
+            render_locally_named_expression(
+                module_id,
+                arena,
+                *value,
+                local_naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+            for argument in arguments {
+                let argument_prefix = "  ".repeat(indent + 1);
+                if let Some(name) = argument.name {
+                    let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
+                    lines.push(format!("{argument_prefix}Argument({rendered_name})"));
+                } else {
+                    lines.push(format!("{argument_prefix}Argument"));
+                }
+                render_locally_named_expression(
+                    module_id,
+                    arena,
+                    argument.expression,
+                    local_naming_result,
+                    interner,
+                    indent + 2,
+                    lines,
+                );
+            }
+        }
+        ExpressionKind::Subset2 { value, arguments } => {
+            lines.push(format!("{prefix}Subset2"));
+            render_locally_named_expression(
+                module_id,
+                arena,
+                *value,
+                local_naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+            for argument in arguments {
+                let argument_prefix = "  ".repeat(indent + 1);
+                if let Some(name) = argument.name {
+                    let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
+                    lines.push(format!("{argument_prefix}Argument({rendered_name})"));
+                } else {
+                    lines.push(format!("{argument_prefix}Argument"));
+                }
+                render_locally_named_expression(
+                    module_id,
+                    arena,
+                    argument.expression,
+                    local_naming_result,
+                    interner,
+                    indent + 2,
+                    lines,
+                );
+            }
+        }
+        ExpressionKind::Dollar { value, name } => {
+            let rendered_name = interner.resolve(*name).unwrap_or("<unknown>");
+            lines.push(format!("{prefix}Dollar({rendered_name})"));
+            render_locally_named_expression(
+                module_id,
+                arena,
+                *value,
+                local_naming_result,
+                interner,
+                indent + 1,
+                lines,
+            );
+        }
+        ExpressionKind::Unsupported => lines.push(format!("{prefix}Unsupported")),
+    }
+}
+
 fn binding_label(binding_id: BindingId) -> String {
+    format!("b{}", binding_id.0)
+}
+
+fn provisional_binding_label(binding_id: ProvisionalBindingId) -> String {
     format!("b{}", binding_id.0)
 }
 
@@ -673,6 +1019,21 @@ fn find_binding_by_symbol_and_range(
             binding.module_id == module_id && binding.symbol == symbol && binding.range == range
         })
         .map(|binding| binding.id)
+}
+
+fn find_local_binding_by_symbol_and_range(
+    local_naming_result: &LocalNamingResult,
+    module_id: ModuleId,
+    symbol: typing::Symbol,
+    range: tree_sitter::Range,
+) -> Option<ProvisionalBindingId> {
+    local_naming_result
+        .bindings
+        .iter()
+        .find(|(_, binding)| {
+            binding.module_id == module_id && binding.symbol == symbol && binding.range == range
+        })
+        .map(|(binding_id, _)| *binding_id)
 }
 
 fn render_atomic(atomic: Atomic) -> &'static str {

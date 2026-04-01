@@ -28,7 +28,7 @@ For(x@b1)
       Integer(1L)
   Block
     Symbol(x@b1)
-Symbol(x@b0)
+Symbol(x@?)
 
 #---- loop_body_resolves_other_outer_binding
 y <- 1L
@@ -44,7 +44,7 @@ For(x@b1)
     Argument
       Integer(1L)
   Block
-    Symbol(y@b0)
+    Symbol(y@?)
 
 #---- assignment_inside_loop_rhs_sees_loop_binding
 x <- 0L
@@ -65,7 +65,7 @@ For(x@b1)
     Assign(x@b2)
       Symbol(x@b1)
     Symbol(x@b2)
-Symbol(x@b0)
+Symbol(x@?)
 
 #---- assignment_inside_loop_rhs_can_use_other_outer_binding
 y <- 0L
@@ -84,6 +84,6 @@ For(x@b1)
       Integer(1L)
   Block
     Assign(y@b2)
-      Symbol(y@b0)
+      Symbol(y@?)
     Symbol(y@b2)
-Symbol(y@b0)
+Symbol(y@?)

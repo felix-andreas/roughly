@@ -13,11 +13,11 @@ pub mod types;
 
 pub use crate::{
     analysis::{
-        Analysis, AnalysisError, AnalysisPhase, LoweringResult, NamingRunResult, PhaseDiagnostic,
-        check, run_lowering, run_naming, run_typecheck,
+        Analysis, AnalysisError, AnalysisPhase, PhaseDiagnostic, check, run_lowering, run_naming,
+        run_typecheck,
     },
     diagnostic::{CheckResult, Diagnostic, DiagnosticCode, DocumentDiagnostics, Severity},
-    document::{Document, DocumentEditError, DocumentId},
+    document::{Document, DocumentEditError, DocumentId, DocumentParseError},
     hir::{
         Argument, Definition, DefinitionId, DefinitionItem, DefinitionKind, Expression,
         ExpressionId, ExpressionKind, Module, ModuleId, Parameter,

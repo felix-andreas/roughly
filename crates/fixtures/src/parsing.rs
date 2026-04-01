@@ -19,44 +19,26 @@ pub struct Fixture {
 
 #[derive(Debug)]
 pub enum FixtureKind {
-    Simple(Simple),
-    MultiFile(MultiFile),
-    Generational(Generational),
+    Simple(SimpleFixture),
+    MultiFile(MultiFileFixture),
 }
 
 #[derive(Debug)]
-pub struct Simple {
+pub struct SimpleFixture {
     pub input: String,
     pub expected: String,
 }
 
 #[derive(Debug)]
-pub struct MultiFile {
-    pub input_files: Vec<FixtureInputFile>,
-    pub expectations: Vec<FixtureOutputExpectation>,
-}
-
-#[derive(Debug)]
-pub struct Generational {
+pub struct MultiFileFixture {
+    pub initial_generation: InitialFixtureGeneration,
     pub generations: Vec<FixtureGeneration>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FixtureExpectedOutput {
-    Exact(String),
-    Any,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FixtureInputFile {
-    pub path: PathBuf,
-    pub contents: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FixtureOutputExpectation {
-    pub path: PathBuf,
-    pub expected: FixtureExpectedOutput,
+pub struct InitialFixtureGeneration {
+    pub name: String,
+    pub documents: Vec<FixtureDocument>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,35 +54,36 @@ pub struct FixtureGenerationEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FixturePath {
-    Main,
-    Path(PathBuf),
+pub struct FixtureDocument {
+    pub path: PathBuf,
+    pub contents: String,
+    pub expected: FixtureExpectedOutput,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FixtureExpectedOutput {
+    Exact(String),
+    Any,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FixtureOperation {
     CreateDocument {
-        path: FixturePath,
+        path: PathBuf,
         contents: String,
     },
     EditDocument {
-        path: FixturePath,
+        path: PathBuf,
         range: FixtureRange,
         replacement_text: String,
     },
     MoveDocument {
-        source_path: FixturePath,
-        destination_path: FixturePath,
+        source_path: PathBuf,
+        destination_path: PathBuf,
     },
     DeleteDocument {
-        path: FixturePath,
+        path: PathBuf,
     },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FixtureExpectation {
-    pub path: FixturePath,
-    pub expected: FixtureExpectedOutput,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,10 +134,10 @@ fn parse_group_cases(text: &str) -> Result<Vec<Fixture>, ParseFixtureError> {
     collect_case_blocks(text)?
         .into_iter()
         .map(|(name, body)| {
-            let kind = if starts_with_directive_line(&body, "#....") {
-                FixtureKind::Generational(parse_generational_multi_file_case(&body)?)
-            } else if starts_with_directive_line(&body, "#----") {
-                FixtureKind::MultiFile(parse_multi_file_case(&body)?)
+            let kind = if starts_with_directive_line(&body, "#----")
+                || starts_with_directive_line(&body, "#....")
+            {
+                FixtureKind::MultiFile(parse_multi_file_case(&name, &body)?)
             } else {
                 FixtureKind::Simple(parse_simple_case(&body)?)
             };
@@ -193,7 +176,7 @@ fn collect_case_blocks(text: &str) -> Result<Vec<(String, String)>, ParseFixture
     Ok(cases)
 }
 
-fn parse_simple_case(text: &str) -> Result<Simple, ParseFixtureError> {
+fn parse_simple_case(text: &str) -> Result<SimpleFixture, ParseFixtureError> {
     if text
         .lines()
         .any(|line| trim_line(line).starts_with("#++++ "))
@@ -207,26 +190,92 @@ fn parse_simple_case(text: &str) -> Result<Simple, ParseFixtureError> {
         invalid_fixture_error("simple fixture cases must include a `#++++` separator")
     })?;
 
-    Ok(Simple {
+    Ok(SimpleFixture {
         input: input.to_owned(),
         expected: expected_block.trim_end().to_owned(),
     })
 }
 
-fn parse_multi_file_case(text: &str) -> Result<MultiFile, ParseFixtureError> {
+fn parse_multi_file_case(
+    fixture_name: &str,
+    text: &str,
+) -> Result<MultiFileFixture, ParseFixtureError> {
     let lines = text.split_inclusive('\n').collect::<Vec<_>>();
     let mut line_index = 0;
-    let mut input_files = Vec::new();
-    let mut expectations = Vec::new();
+    let (initial_generation_name, documents) =
+        if line_index < lines.len() && starts_with_directive(lines[line_index], "#....") {
+            let initial_generation_name =
+                parse_named_directive(&lines, &mut line_index, "#....", "initial generation")?;
+            let entries = parse_generation_entries(&lines, &mut line_index)?;
+            (
+                initial_generation_name,
+                fixture_documents_from_generation_entries(entries)?,
+            )
+        } else {
+            (
+                fixture_name.to_owned(),
+                parse_initial_documents(&lines, &mut line_index)?,
+            )
+        };
+
+    if documents.is_empty() {
+        return Err(invalid_fixture_error(
+            "multi-file fixture cases must include at least one input file",
+        ));
+    }
+
+    Ok(MultiFileFixture {
+        initial_generation: InitialFixtureGeneration {
+            name: initial_generation_name,
+            documents,
+        },
+        generations: parse_remaining_generations(&lines, &mut line_index)?,
+    })
+}
+
+fn parse_remaining_generations(
+    lines: &[&str],
+    line_index: &mut usize,
+) -> Result<Vec<FixtureGeneration>, ParseFixtureError> {
+    let mut generations = Vec::new();
 
     loop {
-        skip_blank_lines(&lines, &mut line_index);
+        skip_blank_lines(lines, line_index);
 
-        if line_index >= lines.len() {
+        if *line_index >= lines.len() {
             break;
         }
 
-        let path = parse_named_directive(&lines, &mut line_index, "#----", "input file")?;
+        if !starts_with_directive(lines[*line_index], "#....") {
+            return Err(invalid_fixture_error("expected generation header"));
+        }
+
+        let generation_name =
+            parse_named_directive(lines, line_index, "#....", "fixture generation")?;
+        let entries = parse_generation_entries(lines, line_index)?;
+        generations.push(FixtureGeneration {
+            name: generation_name,
+            entries,
+        });
+    }
+
+    Ok(generations)
+}
+
+fn parse_initial_documents(
+    lines: &[&str],
+    line_index: &mut usize,
+) -> Result<Vec<FixtureDocument>, ParseFixtureError> {
+    let mut documents = Vec::new();
+
+    loop {
+        skip_blank_lines(lines, line_index);
+
+        if *line_index >= lines.len() || starts_with_directive(lines[*line_index], "#....") {
+            break;
+        }
+
+        let path = parse_named_directive(lines, line_index, "#----", "input file")?;
         if path.starts_with("edit ") || path.starts_with("move ") || path.starts_with("delete ") {
             return Err(invalid_fixture_error(
                 "multi-file fixture cases only allow whole-file inputs",
@@ -234,73 +283,48 @@ fn parse_multi_file_case(text: &str) -> Result<MultiFile, ParseFixtureError> {
         }
 
         let path = parse_required_path(&path, "input file path")?;
-        let contents = collect_body_until_directive(&lines, &mut line_index);
+        let contents = collect_body_until_directive(lines, line_index);
         let expectation = parse_immediate_output_expectation(
-            &lines,
-            &mut line_index,
+            lines,
+            line_index,
             "multi-file fixture inputs must be followed by an output expectation",
         )?;
 
-        input_files.push(FixtureInputFile {
-            path: path.clone(),
-            contents,
-        });
-        expectations.push(FixtureOutputExpectation {
+        documents.push(FixtureDocument {
             path,
+            contents,
             expected: expectation,
         });
     }
 
-    if input_files.is_empty() {
-        return Err(invalid_fixture_error(
-            "multi-file fixture cases must include at least one input file",
-        ));
-    }
-
-    if expectations.is_empty() {
-        return Err(invalid_fixture_error(
-            "multi-file fixture cases must include at least one per-file expectation",
-        ));
-    }
-
-    Ok(MultiFile {
-        input_files,
-        expectations,
-    })
+    Ok(documents)
 }
 
-fn parse_generational_multi_file_case(text: &str) -> Result<Generational, ParseFixtureError> {
-    let generations = text
-        .split("#....")
-        .filter_map(|block| {
-            if block.trim().is_empty() {
-                return None;
+fn fixture_documents_from_generation_entries(
+    entries: Vec<FixtureGenerationEntry>,
+) -> Result<Vec<FixtureDocument>, ParseFixtureError> {
+    entries
+        .into_iter()
+        .map(|entry| match entry.operation {
+            FixtureOperation::CreateDocument { path, contents } => {
+                let expected = entry.expectation.ok_or_else(|| {
+                    invalid_fixture_error(
+                        "initial multi-file generation documents must have an output expectation",
+                    )
+                })?;
+                Ok(FixtureDocument {
+                    path,
+                    contents,
+                    expected,
+                })
             }
-
-            Some(parse_generation_block(block))
+            FixtureOperation::EditDocument { .. }
+            | FixtureOperation::MoveDocument { .. }
+            | FixtureOperation::DeleteDocument { .. } => Err(invalid_fixture_error(
+                "initial multi-file generation may only create whole documents",
+            )),
         })
-        .collect::<Result<Vec<_>, _>>()?;
-
-    if generations.is_empty() {
-        return Err(invalid_fixture_error(
-            "generation-based multi-file cases must include at least one `#....` generation block",
-        ));
-    }
-
-    Ok(Generational { generations })
-}
-
-fn parse_generation_block(block: &str) -> Result<FixtureGeneration, ParseFixtureError> {
-    let (name, body) = block.split_once('\n').ok_or_else(|| {
-        invalid_fixture_error("each fixture generation must have a name line followed by content")
-    })?;
-    let lines = body.split_inclusive('\n').collect::<Vec<_>>();
-    let mut line_index = 0;
-
-    Ok(FixtureGeneration {
-        name: name.trim().to_owned(),
-        entries: parse_generation_entries(&lines, &mut line_index)?,
-    })
+        .collect()
 }
 
 fn parse_generation_entries(
@@ -313,6 +337,10 @@ fn parse_generation_entries(
         skip_blank_lines(lines, line_index);
 
         if *line_index >= lines.len() {
+            break;
+        }
+
+        if starts_with_directive(lines[*line_index], "#....") {
             break;
         }
 
@@ -353,19 +381,22 @@ fn parse_generation_operation(
         })?;
 
         return Ok(FixtureOperation::MoveDocument {
-            source_path: parse_fixture_path(source_path.trim()),
-            destination_path: parse_fixture_path(destination_path.trim()),
+            source_path: parse_required_path(source_path.trim(), "move source path")?,
+            destination_path: parse_required_path(
+                destination_path.trim(),
+                "move destination path",
+            )?,
         });
     }
 
     if let Some(path) = header.strip_prefix("delete ") {
         return Ok(FixtureOperation::DeleteDocument {
-            path: parse_fixture_path(path.trim()),
+            path: parse_required_path(path.trim(), "delete path")?,
         });
     }
 
     Ok(FixtureOperation::CreateDocument {
-        path: parse_fixture_path(header.trim()),
+        path: parse_required_path(header.trim(), "document path")?,
         contents: collect_body_until_directive(lines, line_index),
     })
 }
@@ -389,7 +420,7 @@ fn parse_edit_operation(text: &str) -> Result<FixtureOperation, ParseFixtureErro
     let range_text = path_and_range[split_index + 1..].trim();
 
     Ok(FixtureOperation::EditDocument {
-        path: parse_fixture_path(path),
+        path: parse_required_path(path, "edit path")?,
         range: parse_range(range_text)?,
         replacement_text,
     })
@@ -457,16 +488,6 @@ fn parse_required_path(text: &str, label: &str) -> Result<PathBuf, ParseFixtureE
     Ok(PathBuf::from(trimmed_text))
 }
 
-fn parse_fixture_path(text: &str) -> FixturePath {
-    let trimmed_text = text.trim();
-
-    if trimmed_text.is_empty() {
-        FixturePath::Main
-    } else {
-        FixturePath::Path(PathBuf::from(trimmed_text))
-    }
-}
-
 fn parse_immediate_output_expectation(
     lines: &[&str],
     line_index: &mut usize,
@@ -510,7 +531,7 @@ fn parse_optional_output_expectation(
     )))
 }
 
-fn operation_output_path(operation: &FixtureOperation) -> Option<&FixturePath> {
+fn operation_output_path(operation: &FixtureOperation) -> Option<&PathBuf> {
     match operation {
         FixtureOperation::CreateDocument { path, .. } => Some(path),
         FixtureOperation::EditDocument { path, .. } => Some(path),

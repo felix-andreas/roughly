@@ -22,6 +22,7 @@ pub struct NamingResult {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LocalNamingResult {
+    pub bindings: BTreeMap<ProvisionalBindingId, ProvisionalBindingInfo>,
     pub expression_ranges: BTreeMap<ExpressionId, Range>,
     pub expression_resolutions: BTreeMap<ExpressionId, ProvisionalBindingId>,
     pub top_level_exports: Vec<ProvisionalBindingId>,
@@ -71,6 +72,18 @@ pub(crate) fn resolve_package(
     context.resolve_annotations(modules);
     context.resolve_unresolved_values();
     context.finish()
+}
+
+pub fn resolve_document_locally(document_id: DocumentId, module: &Module) -> LocalNamingResult {
+    let mut next_provisional_binding_id = 0;
+    let mut provisional_bindings = BTreeMap::new();
+    DocumentNamingContext::new(
+        document_id,
+        &module.arena,
+        &mut next_provisional_binding_id,
+        &mut provisional_bindings,
+    )
+    .resolve_module(module)
 }
 
 struct PackageNamingContext<'a> {
@@ -718,14 +731,16 @@ impl<'a> DocumentNamingContext<'a> {
     fn fresh_binding(&mut self, symbol: Symbol, range: Range) -> ProvisionalBindingId {
         let binding_id = ProvisionalBindingId(*self.next_provisional_binding_id);
         *self.next_provisional_binding_id += 1;
-        self.provisional_bindings.insert(
-            binding_id,
-            ProvisionalBindingInfo {
-                module_id: self.document_id,
-                symbol,
-                range,
-            },
-        );
+        let binding_info = ProvisionalBindingInfo {
+            module_id: self.document_id,
+            symbol,
+            range,
+        };
+        self.provisional_bindings
+            .insert(binding_id, binding_info.clone());
+        self.document_naming
+            .bindings
+            .insert(binding_id, binding_info);
         binding_id
     }
 

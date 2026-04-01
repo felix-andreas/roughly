@@ -11,7 +11,6 @@ The target result is:
 - path-based document mutation APIs on `Analysis`
 - separate lowering, naming, and typecheck stores keyed by `DocumentId`
 - per-document diagnostics stored in `Analysis`
-(one goal is also that this state can be used for roughly, like hovering, rename, goto defintion. please verify if this is viable)
 
 This should remove the current path-keyed duplication and give later phases one coherent state owner.
 
@@ -47,8 +46,6 @@ This should remove the current path-keyed duplication and give later phases one 
   - every document not in this set does contribute to the package namespace
 
 ## Target shape
-
-(please verify if this is viable)
 
 The intended top-level shape is:
 
@@ -171,7 +168,7 @@ If a temporary adapter is needed during the migration, keep it narrow and delete
 - keep the temporary package remapping logic local to `analysis.rs`
 - do not preserve sorting helpers in the new design
 
-### 8. Update fixtures and tests to use `Analysis` directly [in-progress]
+### 8. Update fixtures and tests to use `Analysis` directly [done]
 
 - construct `Analysis` directly in fixture tests
 - stop using package-specific setup for multi-file typing tests

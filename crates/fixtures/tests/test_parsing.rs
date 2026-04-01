@@ -1,7 +1,6 @@
 use {
     fixtures::{
-        FixtureExpectedOutput, FixtureKind, FixtureOperation, FixturePath, ParseFixtureError,
-        parse_file,
+        FixtureExpectedOutput, FixtureKind, FixtureOperation, ParseFixtureError, parse_file,
     },
     indoc::indoc,
     std::path::PathBuf,
@@ -89,15 +88,25 @@ fn parses_multi_file_fixture_cases_with_immediate_expectations() {
 
     match &fixture_file.groups[0].cases[0].kind {
         FixtureKind::MultiFile(case) => {
-            assert_eq!(case.input_files.len(), 2);
-            assert_eq!(case.input_files[0].path, PathBuf::from("a.R"));
-            assert_eq!(case.input_files[1].path, PathBuf::from("b.R"));
-            assert_eq!(case.expectations.len(), 2);
+            assert_eq!(case.initial_generation.name, "multi_file");
+            assert_eq!(case.initial_generation.documents.len(), 2);
             assert_eq!(
-                case.expectations[0].expected,
+                case.initial_generation.documents[0].path,
+                PathBuf::from("a.R")
+            );
+            assert_eq!(
+                case.initial_generation.documents[1].path,
+                PathBuf::from("b.R")
+            );
+            assert_eq!(
+                case.initial_generation.documents[0].expected,
                 FixtureExpectedOutput::Exact("a snapshot".to_owned())
             );
-            assert_eq!(case.expectations[1].expected, FixtureExpectedOutput::Any);
+            assert_eq!(
+                case.initial_generation.documents[1].expected,
+                FixtureExpectedOutput::Any
+            );
+            assert!(case.generations.is_empty());
         }
         _ => panic!("expected multi-file fixture case"),
     }
@@ -126,26 +135,27 @@ fn parses_generation_based_fixture_cases_with_ordered_entries() {
     .expect("fixture should parse");
 
     match &fixture_file.groups[0].cases[0].kind {
-        FixtureKind::Generational(case) => {
-            assert_eq!(case.generations.len(), 2);
-            assert_eq!(case.generations[0].name, "v1");
-            assert_eq!(case.generations[0].entries.len(), 2);
+        FixtureKind::MultiFile(case) => {
+            assert_eq!(case.initial_generation.name, "v1");
+            assert_eq!(case.initial_generation.documents.len(), 2);
             assert_eq!(
-                case.generations[0].entries[0].expectation,
-                Some(FixtureExpectedOutput::Exact("a v1".to_owned()))
+                case.initial_generation.documents[0].expected,
+                FixtureExpectedOutput::Exact("a v1".to_owned())
             );
             assert_eq!(
-                case.generations[0].entries[1].expectation,
-                Some(FixtureExpectedOutput::Any)
+                case.initial_generation.documents[1].expected,
+                FixtureExpectedOutput::Any
             );
+            assert_eq!(case.generations.len(), 1);
+            assert_eq!(case.generations[0].name, "v2");
 
-            match &case.generations[1].entries[0].operation {
+            match &case.generations[0].entries[0].operation {
                 FixtureOperation::EditDocument {
                     path,
                     range,
                     replacement_text,
                 } => {
-                    assert_eq!(path, &FixturePath::Path("a.R".into()));
+                    assert_eq!(path, &PathBuf::from("a.R"));
                     assert_eq!(range.start.line_number, 1);
                     assert_eq!(range.start.column_number, 11);
                     assert_eq!(replacement_text, " + 2");
@@ -153,22 +163,22 @@ fn parses_generation_based_fixture_cases_with_ordered_entries() {
                 _ => panic!("expected edit operation"),
             }
 
-            match &case.generations[1].entries[1].operation {
+            match &case.generations[0].entries[1].operation {
                 FixtureOperation::MoveDocument {
                     source_path,
                     destination_path,
                 } => {
-                    assert_eq!(source_path, &FixturePath::Path("b.R".into()));
-                    assert_eq!(destination_path, &FixturePath::Path("subdir/b.R".into()));
+                    assert_eq!(source_path, &PathBuf::from("b.R"));
+                    assert_eq!(destination_path, &PathBuf::from("subdir/b.R"));
                 }
                 _ => panic!("expected move operation"),
             }
 
             assert!(matches!(
-                case.generations[1].entries[2].operation,
+                case.generations[0].entries[2].operation,
                 FixtureOperation::DeleteDocument { .. }
             ));
-            assert!(case.generations[1].entries[2].expectation.is_none());
+            assert!(case.generations[0].entries[2].expectation.is_none());
         }
         _ => panic!("expected generation-based multi-file fixture case"),
     }
@@ -324,9 +334,25 @@ fn rejects_generations_without_name_lines() {
     assert_eq!(
         error,
         ParseFixtureError::InvalidFixture {
-            message:
-                "generation-based multi-file cases must include at least one `#....` generation block"
-                    .to_owned()
+            message: "multi-file fixture cases must include at least one input file".to_owned()
+        }
+    );
+}
+
+#[test]
+fn rejects_initial_generational_edits() {
+    let error = parse_file(indoc! {r#"
+        #==== workspace
+        #---- invalid
+        #.... v1
+        #---- edit a.R 1:1-1:1 -> "x"
+    "#})
+    .expect_err("fixture should fail");
+
+    assert_eq!(
+        error,
+        ParseFixtureError::InvalidFixture {
+            message: "initial multi-file generation may only create whole documents".to_owned()
         }
     );
 }

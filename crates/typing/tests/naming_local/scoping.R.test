@@ -5,7 +5,7 @@ x
 #++++
 Assign(x@b0)
   Integer(1L)
-Symbol(x@b0)
+Symbol(x@?)
 
 #---- top_level_call_resolves_callee_and_argument
 value <- 1L
@@ -18,9 +18,9 @@ Assign(identity@b2)
   Function(x@b1)
     Symbol(x@b1)
 Call
-  Symbol(identity@b2)
+  Symbol(identity@?)
   Argument
-    Symbol(value@b0)
+    Symbol(value@?)
 
 #==== rebinding
 #---- top_level_rebinding_creates_fresh_binding
@@ -32,7 +32,7 @@ Assign(x@b0)
   Integer(1L)
 Assign(x@b1)
   Character("\"ok\"")
-Symbol(x@b1)
+Symbol(x@?)
 
 #---- earlier_use_resolves_to_final_global_binding
 x <- 1L
@@ -42,10 +42,10 @@ x
 #++++
 Assign(x@b0)
   Integer(1L)
-Symbol(x@b1)
+Symbol(x@?)
 Assign(x@b1)
   Character("\"ok\"")
-Symbol(x@b1)
+Symbol(x@?)
 
 #---- assignment_rhs_resolves_to_final_global_binding
 x <- 1L
@@ -55,8 +55,8 @@ x
 Assign(x@b0)
   Integer(1L)
 Assign(x@b1)
-  Symbol(x@b1)
-Symbol(x@b1)
+  Symbol(x@?)
+Symbol(x@?)
 
 #==== blocks
 #---- nested_block_uses_nearest_binding

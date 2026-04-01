@@ -154,8 +154,9 @@ This avoids full-package HIR remapping as a prerequisite for naming and gives a 
 - if needed, collect annotation work items during the local pass so the package pass can avoid a full expression-tree walk
 - stop requiring package-wide HIR remapping for naming
 
-### 6. Update fixtures and diagnostics coverage [pending]
+### 6. Update fixtures and diagnostics coverage [in-progress]
 
+- split naming fixtures into `naming_local` and `naming_global`
 - update naming fixtures to match final-symbol-table semantics
 - add explicit duplicate-global diagnostic coverage
 - make naming snapshots non-blocking in the presence of warnings
