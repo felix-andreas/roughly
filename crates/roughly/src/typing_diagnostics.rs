@@ -1,36 +1,24 @@
 use {
     crate::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range},
     ropey::Rope,
-    std::path::{Path, PathBuf},
+    std::path::PathBuf,
 };
 
 pub fn analyze(
     _node: tree_sitter::Node,
     rope: &Rope,
-    analysis_state: &mut typing::AnalysisState,
+    analysis_state: &mut typing::Analysis,
 ) -> Vec<Diagnostic> {
-    let mut workspace = match typing::Workspace::new() {
-        Ok(workspace) => workspace,
-        Err(_) => return Vec::new(),
-    };
-    let package_path = PathBuf::from("/typing");
-    let document_path = PathBuf::from("/typing/current.R");
+    let document_path = analysis_state.base_path().join("R").join("current.R");
 
-    if workspace.insert_package(package_path.clone()).is_err() {
-        return Vec::new();
-    }
-    if workspace
-        .insert_package_document(&package_path, document_path, &rope.to_string())
+    if analysis_state
+        .add_document_from_source(document_path, &rope.to_string())
         .is_err()
     {
         return Vec::new();
     }
 
-    let Some(package) = workspace.package(Path::new("/typing")) else {
-        return Vec::new();
-    };
-
-    typing::check(package, analysis_state)
+    typing::check(analysis_state)
         .diagnostics
         .into_iter()
         .map(convert_diagnostic)

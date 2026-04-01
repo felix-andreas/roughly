@@ -9,7 +9,7 @@ impl Symbol {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Interner {
     symbols_by_text: HashMap<String, Symbol>,
     text_by_symbol: Vec<String>,
@@ -17,7 +17,10 @@ pub struct Interner {
 
 impl Interner {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            symbols_by_text: HashMap::new(),
+            text_by_symbol: Vec::new(),
+        }
     }
 
     pub fn intern(&mut self, text: &str) -> Symbol {

@@ -11,9 +11,9 @@ use {
     fixtures::{
         Fixture, FixtureInputFile, FixtureKind, FixtureOutput, FixtureRunFile, run_fixture_suite,
     },
-    std::path::{Path, PathBuf},
+    std::path::PathBuf,
     typing::{
-        AnalysisState, Interner,
+        Analysis, Interner,
         hir::ExpressionKind,
         lower::{self, LoweringContext},
         run_lowering, run_naming,
@@ -22,7 +22,8 @@ use {
     },
 };
 
-const FIXTURE_MAIN_DOCUMENT_PATH: &str = "/fixture_package/main.R";
+const FIXTURE_BASE_PATH: &str = "/fixture_package";
+const FIXTURE_MAIN_DOCUMENT_PATH: &str = "/fixture_package/R/main.R";
 
 #[test]
 fn bindings() {
@@ -84,36 +85,41 @@ fn unification() {
     run_fixture_suite("tests/unification", run_unification_fixture);
 }
 
-fn package_for_fixture(fixture: &Fixture) -> Result<typing::Package, String> {
+fn analysis_state_for_fixture(fixture: &Fixture) -> Result<Analysis, String> {
     let input_files = match &fixture.kind {
         FixtureKind::Simple(case) => vec![FixtureInputFile {
             path: PathBuf::from(FIXTURE_MAIN_DOCUMENT_PATH),
             contents: case.input.clone(),
         }],
-        FixtureKind::MultiFile(case) => case.input_files.clone(),
+        FixtureKind::MultiFile(case) => case
+            .input_files
+            .iter()
+            .map(|input_file| FixtureInputFile {
+                path: PathBuf::from(FIXTURE_BASE_PATH)
+                    .join("R")
+                    .join(&input_file.path),
+                contents: input_file.contents.clone(),
+            })
+            .collect(),
         _ => return Err("unsupported fixture".to_owned()),
     };
-    let mut parser = typing::tree::new_parser().map_err(|_| "parser".to_owned())?;
-    let mut package = typing::Package::default();
+    let mut analysis_state = Analysis::new(PathBuf::from(FIXTURE_BASE_PATH));
 
     for input_file in &input_files {
-        let document = typing::Document::parse(&mut parser, &input_file.contents)
-            .ok_or_else(|| "document".to_owned())?;
-        package.insert_document(input_file.path.clone(), document);
+        analysis_state
+            .add_document_from_source(input_file.path.clone(), &input_file.contents)
+            .map_err(|_| "document".to_owned())?;
     }
 
-    Ok(package)
+    Ok(analysis_state)
 }
 
 fn document_for_fixture(fixture: &Fixture) -> Result<typing::Document, String> {
-    let FixtureKind::Simple(_) = &fixture.kind else {
+    let FixtureKind::Simple(case) = &fixture.kind else {
         return Err("unsupported fixture".to_owned());
     };
-    let package = package_for_fixture(fixture)?;
-    package
-        .document(Path::new(FIXTURE_MAIN_DOCUMENT_PATH))
-        .cloned()
-        .ok_or_else(|| "package".to_owned())
+    let mut parser = typing::tree::new_parser().map_err(|_| "parser".to_owned())?;
+    typing::Document::parse(&mut parser, &case.input).ok_or_else(|| "document".to_owned())
 }
 
 fn run_bindings_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
@@ -160,13 +166,12 @@ fn run_diagnostics_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, Stri
     let FixtureKind::Simple(case) = &fixture.kind else {
         return Err("unsupported fixture".to_owned());
     };
-    let package = package_for_fixture(fixture)?;
-    let mut analysis_state = AnalysisState::new();
+    let mut analysis_state = analysis_state_for_fixture(fixture)?;
     Ok(vec![FixtureOutput {
         name: fixture.name.clone(),
         files: vec![FixtureRunFile {
             path: PathBuf::new(),
-            output: typing::check(&package, &mut analysis_state).render(&case.input),
+            output: typing::check(&mut analysis_state).render(&case.input),
         }],
     }])
 }
@@ -422,20 +427,21 @@ fn run_naming_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
             .iter()
             .map(|input_file| NamingOutputFile {
                 fixture_output_path: input_file.path.clone(),
-                package_path: input_file.path.clone(),
+                package_path: PathBuf::from(FIXTURE_BASE_PATH)
+                    .join("R")
+                    .join(&input_file.path),
                 source: input_file.contents.clone(),
             })
             .collect(),
         _ => return Err("unsupported fixture".to_owned()),
     };
-    let package = package_for_fixture(fixture)?;
-    let mut analysis_state = AnalysisState::new();
-    let lowering_result = run_lowering(&package, None, &mut analysis_state);
-    let package_result = run_naming(&lowering_result, &analysis_state);
+    let mut analysis_state = analysis_state_for_fixture(fixture)?;
+    run_lowering(None, &mut analysis_state);
+    let naming_result = run_naming(None, &mut analysis_state);
 
     let mut files = Vec::with_capacity(output_files.len());
     for output_file in output_files {
-        let diagnostics_for_file = package_result
+        let diagnostics_for_file = naming_result
             .diagnostics
             .iter()
             .find_map(|(diagnostic_path, diagnostics_for_path)| {
@@ -447,21 +453,18 @@ fn run_naming_fixture(fixture: &Fixture) -> Result<Vec<FixtureOutput>, String> {
             .any(|diagnostic| diagnostic.severity == typing::Severity::Error);
 
         let output = if !has_errors {
-            let module = package_result
-                .modules
-                .get(&output_file.package_path)
+            let document_id = analysis_state
+                .document_id_for_path(&output_file.package_path)
+                .ok_or_else(|| "missing document id".to_owned())?;
+            let module = analysis_state
+                .module(document_id)
                 .ok_or_else(|| "missing module".to_owned())?;
-            let module_id = package_result
-                .module_ids
-                .get(&output_file.package_path)
-                .copied()
-                .ok_or_else(|| "missing module id".to_owned())?;
             render_named_hir(
-                module_id,
+                document_id,
                 &module.arena,
                 &module.definitions,
                 &module.expressions,
-                &package_result.naming,
+                &naming_result.naming,
                 analysis_state.interner(),
             )
         } else {

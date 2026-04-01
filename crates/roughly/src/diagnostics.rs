@@ -12,7 +12,7 @@ use {
     serde::Deserialize,
     thiserror::Error,
     tree_sitter::Node,
-    typing::AnalysisState,
+    typing::Analysis,
 };
 
 #[derive(Debug, Default, Clone, Copy, Deserialize)]
@@ -28,7 +28,7 @@ pub fn analyze(
     rope: &Rope,
     config: Config,
     full: bool,
-    typing_analysis_state: Option<&mut AnalysisState>,
+    typing_analysis_state: Option<&mut Analysis>,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = syntax::analyze(node, rope);
     let has_syntax_errors = !diagnostics.is_empty();
@@ -66,7 +66,7 @@ pub fn analyze_full(
     node: Node,
     rope: &Rope,
     config: Config,
-    typing_analysis_state: &mut AnalysisState,
+    typing_analysis_state: &mut Analysis,
 ) -> Vec<Diagnostic> {
     analyze(node, rope, config, true, Some(typing_analysis_state))
 }

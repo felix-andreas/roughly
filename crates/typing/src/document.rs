@@ -7,6 +7,9 @@ use {
     tree_sitter::{InputEdit, Parser, Point, Tree},
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DocumentId(pub u32);
+
 #[derive(Debug, Clone)]
 pub struct Document {
     rope: Rope,
@@ -40,7 +43,7 @@ impl Document {
         &mut self.rope
     }
 
-    pub(crate) fn edit_range(
+    pub fn edit_range(
         &mut self,
         parser: &mut Parser,
         range: TextRange,
@@ -102,7 +105,7 @@ impl Document {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DocumentEditError {
+pub enum DocumentEditError {
     InvalidRange,
     ParseFailed,
 }

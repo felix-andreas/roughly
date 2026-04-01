@@ -16,7 +16,7 @@ use {
     tree_sitter::{Node, Range},
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct LoweringContext {
     arena: HirArena,
     diagnostics: Vec<Diagnostic>,
@@ -31,7 +31,23 @@ pub(crate) struct LoweringResult {
 
 impl LoweringContext {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            arena: HirArena::new(),
+            diagnostics: Vec::new(),
+            interner: Interner::new(),
+        }
+    }
+
+    pub fn with_interner(interner: Interner) -> Self {
+        Self {
+            arena: HirArena::new(),
+            diagnostics: Vec::new(),
+            interner,
+        }
+    }
+
+    pub fn into_interner(self) -> Interner {
+        self.interner
     }
 
     pub fn intern(&mut self, text: &str) -> Symbol {
@@ -101,6 +117,17 @@ pub(crate) fn lower_with_diagnostics(
         module,
         diagnostics,
     }
+}
+
+pub(crate) fn lower_with_shared_interner(
+    document: &Document,
+    interner: &mut Interner,
+) -> LoweringResult {
+    let mut lowering_context =
+        LoweringContext::with_interner(std::mem::replace(interner, Interner::new()));
+    let lowering_result = lower_with_diagnostics(document, &mut lowering_context);
+    *interner = lowering_context.into_interner();
+    lowering_result
 }
 
 fn lower_node_with_rope(

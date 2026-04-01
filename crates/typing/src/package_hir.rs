@@ -1,7 +1,4 @@
-use {
-    crate::hir::{DefinitionId, DefinitionItem, ExpressionId, ExpressionKind, HirArena, Module},
-    std::{collections::HashMap, path::PathBuf},
-};
+use crate::hir::{DefinitionId, DefinitionItem, ExpressionId, ExpressionKind, HirArena, Module};
 
 pub(crate) struct RemappedModules {
     pub arena: HirArena,
@@ -9,28 +6,14 @@ pub(crate) struct RemappedModules {
     pub expressions: Vec<ExpressionId>,
 }
 
-pub(crate) fn remap_package_modules(modules: &HashMap<PathBuf, Module>) -> RemappedModules {
-    remap_modules_into_shared_package_arena(sorted_modules(modules))
-}
-
-pub(crate) fn sorted_modules(modules: &HashMap<PathBuf, Module>) -> Vec<(PathBuf, Module)> {
-    let mut sorted_modules = modules
-        .iter()
-        .map(|(path, module)| (path.clone(), module.clone()))
-        .collect::<Vec<_>>();
-    sorted_modules.sort_by(|(left_path, _), (right_path, _)| left_path.cmp(right_path));
-    sorted_modules
-}
-
-fn remap_modules_into_shared_package_arena(modules: Vec<(PathBuf, Module)>) -> RemappedModules {
+pub(crate) fn remap_package_modules(modules: &[&Module]) -> RemappedModules {
     let mut arena = HirArena::new();
     let mut definitions = Vec::new();
     let mut expressions = Vec::new();
     let mut next_expression_id = 0u32;
     let mut next_definition_id = 0u32;
-    let mut remapped_module_items = Vec::new();
 
-    for (path, module) in modules {
+    for module in modules {
         let expression_offset = next_expression_id;
         let definition_offset = next_definition_id;
 
@@ -47,11 +30,12 @@ fn remap_modules_into_shared_package_arena(modules: Vec<(PathBuf, Module)>) -> R
             .collect::<Vec<_>>();
         next_expression_id +=
             u32::try_from(remapped_expressions.len()).expect("expression count exceeded u32");
-        arena.expressions.extend(remapped_expressions.clone());
+        arena.expressions.extend(remapped_expressions);
 
         let remapped_definitions = module
             .definitions
-            .into_iter()
+            .iter()
+            .cloned()
             .map(|definition| {
                 DefinitionItem::new(
                     DefinitionId(definition.id.0 + definition_offset),
@@ -62,26 +46,15 @@ fn remap_modules_into_shared_package_arena(modules: Vec<(PathBuf, Module)>) -> R
             .collect::<Vec<_>>();
         next_definition_id +=
             u32::try_from(remapped_definitions.len()).expect("definition count exceeded u32");
-        definitions.extend(remapped_definitions.clone());
+        definitions.extend(remapped_definitions);
 
-        let remapped_module_expressions = module
-            .expressions
-            .into_iter()
-            .map(|expression_id| ExpressionId(expression_id.0 + expression_offset))
-            .collect::<Vec<_>>();
-        expressions.extend(remapped_module_expressions.iter().copied());
-        remapped_module_items.push((path, remapped_definitions, remapped_module_expressions));
+        expressions.extend(
+            module
+                .expressions
+                .iter()
+                .map(|expression_id| ExpressionId(expression_id.0 + expression_offset)),
+        );
     }
-
-    let _remapped_modules = remapped_module_items
-        .into_iter()
-        .map(|(path, module_definitions, module_expressions)| {
-            (
-                path,
-                Module::new(arena.clone(), module_definitions, module_expressions),
-            )
-        })
-        .collect::<HashMap<_, _>>();
 
     RemappedModules {
         arena,

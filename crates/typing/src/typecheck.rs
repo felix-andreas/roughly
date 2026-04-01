@@ -1,7 +1,7 @@
 use {
     crate::{
         hir::{Argument, Expression, ExpressionId, ExpressionKind, HirArena, Module},
-        interner::Symbol,
+        interner::{Interner, Symbol},
         lower::LoweringContext,
         types::{
             Annotation, Atomic, AttachedAnnotation, CoreType, FunctionType, InferenceVariableId,
@@ -28,17 +28,21 @@ pub struct InferenceState {
 }
 
 pub fn inference_state_with_builtins(lowering_context: &mut LoweringContext) -> InferenceState {
+    inference_state_with_builtins_in_interner(lowering_context.interner_mut())
+}
+
+pub fn inference_state_with_builtins_in_interner(interner: &mut Interner) -> InferenceState {
     let mut inference_state = InferenceState::new();
 
-    let plus_symbol = lowering_context.intern("+");
-    let minus_symbol = lowering_context.intern("-");
-    let multiply_symbol = lowering_context.intern("*");
-    let divide_symbol = lowering_context.intern("/");
-    let power_symbol = lowering_context.intern("**");
-    let and_symbol = lowering_context.intern("&&");
-    let or_symbol = lowering_context.intern("||");
-    let combine_symbol = lowering_context.intern("c");
-    let list_symbol = lowering_context.intern("list");
+    let plus_symbol = interner.intern("+");
+    let minus_symbol = interner.intern("-");
+    let multiply_symbol = interner.intern("*");
+    let divide_symbol = interner.intern("/");
+    let power_symbol = interner.intern("**");
+    let and_symbol = interner.intern("&&");
+    let or_symbol = interner.intern("||");
+    let combine_symbol = interner.intern("c");
+    let list_symbol = interner.intern("list");
 
     inference_state.bind_builtin(plus_symbol, BuiltinKind::Plus);
     inference_state.bind_builtin(minus_symbol, BuiltinKind::Minus);

@@ -12,7 +12,7 @@ use {
         path::{Path, PathBuf},
         time::Duration,
     },
-    typing::AnalysisState,
+    typing::Analysis,
 };
 
 //
@@ -112,7 +112,7 @@ pub fn check(
             };
             let tree = tree::parse(&mut parser, &old, None);
             let rope = Rope::from_str(&old);
-            let mut typing_analysis_state = AnalysisState::new();
+            let mut typing_analysis_state = Analysis::new(std::env::current_dir().unwrap());
 
             for diagnostic in diagnostics::analyze_full(
                 tree.root_node(),

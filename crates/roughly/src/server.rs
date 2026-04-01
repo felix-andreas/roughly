@@ -42,7 +42,7 @@ use {
     },
     tower::ServiceBuilder,
     tree_sitter::{InputEdit, Parser, Point, Tree},
-    typing::AnalysisState as TypingAnalysisState,
+    typing::Analysis as TypingAnalysis,
 };
 
 const CONFIG_FILE_NAME: &str = "roughly.toml";
@@ -104,7 +104,7 @@ struct ServerState {
     /// stores index for all files in R/ folder
     workspace_items: HashMap<PathBuf, Vec<Item>>,
     parser: Parser,
-    typing_analysis_state: TypingAnalysisState,
+    typing_analysis_state: TypingAnalysis,
 }
 
 #[derive(Debug)]
@@ -130,7 +130,7 @@ impl ServerState {
             document_items: HashMap::new(),
             document_map: HashMap::new(),
             parser: tree::new_parser(),
-            typing_analysis_state: TypingAnalysisState::new(),
+            typing_analysis_state: TypingAnalysis::new(workspace_root.clone()),
         })
     }
 

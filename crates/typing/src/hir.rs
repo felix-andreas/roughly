@@ -1,5 +1,6 @@
 use {
     crate::{
+        document::DocumentId,
         interner::Symbol,
         type_syntax::{render_named_type_ref, render_surface_type},
         types::{AttachedAnnotation, SurfaceType},
@@ -10,8 +11,7 @@ use {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ExpressionId(pub u32);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ModuleId(pub u32);
+pub type ModuleId = DocumentId;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HirArena {

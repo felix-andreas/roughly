@@ -4,9 +4,8 @@ pub mod hir;
 pub mod interner;
 pub mod lower;
 pub mod naming;
-pub mod package;
 mod package_hir;
-pub mod pipeline;
+pub mod analysis;
 pub mod text;
 pub mod tree;
 pub mod type_syntax;
@@ -15,17 +14,16 @@ pub mod types;
 
 pub use crate::{
     diagnostic::{CheckResult, Diagnostic, DiagnosticCode, DocumentDiagnostics, Severity},
-    document::Document,
+    document::{Document, DocumentEditError, DocumentId},
     hir::{
         Argument, Definition, DefinitionId, DefinitionItem, DefinitionKind, Expression,
         ExpressionId, ExpressionKind, Module, ModuleId, Parameter,
     },
     interner::{Interner, Symbol},
     lower::{LoweringContext, lower},
-    package::Package,
-    pipeline::{
-        AnalysisState, PackageLoweringAndNamingResult, PackageLoweringResult, check, run_lowering,
-        run_lowering_and_naming, run_naming, run_typecheck,
+    analysis::{
+        AnalysisError, AnalysisPhase, Analysis, LoweringResult, NamingRunResult,
+        PhaseDiagnostic, check, run_lowering, run_lowering_and_naming, run_naming, run_typecheck,
     },
     text::{TextPosition, TextRange},
     tree::{field, kind},
@@ -34,5 +32,4 @@ pub use crate::{
         render_type_syntax,
     },
     types::{Atomic, CoreType, InferenceVariableId, SurfaceType, TypeScheme},
-    workspace::{Workspace, WorkspaceError},
 };

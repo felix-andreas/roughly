@@ -1,6 +1,7 @@
 use {
     crate::{
-        diagnostic::{Diagnostic, DocumentDiagnostics},
+        diagnostic::Diagnostic,
+        document::DocumentId,
         hir::{
             DefinitionItem, DefinitionKind, ExpressionId, ExpressionKind, HirArena, Module,
             ModuleId,
@@ -8,10 +9,7 @@ use {
         interner::{Interner, Symbol},
         types::{Annotation, AttachedAnnotation, NamedTypeRef, SurfaceType},
     },
-    std::{
-        collections::{BTreeMap, BTreeSet, HashMap},
-        path::PathBuf,
-    },
+    std::collections::{BTreeMap, BTreeSet, HashMap},
     tree_sitter::Range,
 };
 
@@ -20,8 +18,15 @@ pub struct NamingResult {
     pub bindings: BTreeMap<BindingId, BindingInfo>,
     pub global_bindings: BTreeMap<Symbol, BindingId>,
     pub resolutions: BTreeMap<ExpressionKey, BindingId>,
-    pub module_paths: BTreeMap<ModuleId, PathBuf>,
-    pub diagnostics: Vec<DocumentDiagnostics>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LocalNamingResult {
+    pub expression_ranges: BTreeMap<ExpressionId, Range>,
+    pub expression_resolutions: BTreeMap<ExpressionId, ProvisionalBindingId>,
+    pub top_level_exports: Vec<ProvisionalBindingId>,
+    pub unresolved_values: BTreeMap<ExpressionId, Symbol>,
+    pub annotated_expressions: Vec<ExpressionId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,14 +46,21 @@ pub struct ExpressionKey {
     pub expression_id: ExpressionId,
 }
 
-pub(crate) fn resolve_package(
-    modules: &[(ModuleId, PathBuf, Module)],
-    interner: &Interner,
-) -> NamingResult {
-    let mut context = PackageNamingContext::new(modules, interner);
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PackageNamingComputation {
+    pub locals: HashMap<DocumentId, LocalNamingResult>,
+    pub naming: NamingResult,
+    pub diagnostics: HashMap<DocumentId, Vec<Diagnostic>>,
+}
 
-    for (module_id, _, module) in modules {
-        context.resolve_document(*module_id, module);
+pub(crate) fn resolve_package(
+    modules: &[(DocumentId, &Module)],
+    interner: &Interner,
+) -> PackageNamingComputation {
+    let mut context = PackageNamingContext::new(interner);
+
+    for (document_id, module) in modules {
+        context.resolve_document(*document_id, module);
     }
 
     context.finalize_all_bindings();
@@ -63,13 +75,12 @@ pub(crate) fn resolve_package(
 
 struct PackageNamingContext<'a> {
     interner: &'a Interner,
-    documents: BTreeMap<ModuleId, DocumentNaming>,
-    module_paths: BTreeMap<ModuleId, PathBuf>,
+    documents: BTreeMap<DocumentId, LocalNamingResult>,
     provisional_bindings: BTreeMap<ProvisionalBindingId, ProvisionalBindingInfo>,
     bindings: BTreeMap<BindingId, BindingInfo>,
     provisional_to_final: HashMap<ProvisionalBindingId, BindingId>,
     resolutions: BTreeMap<ExpressionKey, BindingId>,
-    diagnostics: BTreeMap<PathBuf, Vec<Diagnostic>>,
+    diagnostics: HashMap<DocumentId, Vec<Diagnostic>>,
     global_bindings: BTreeMap<Symbol, BindingId>,
     types: BTreeMap<Symbol, TypeInfo>,
     next_provisional_binding_id: u32,
@@ -77,19 +88,15 @@ struct PackageNamingContext<'a> {
 }
 
 impl<'a> PackageNamingContext<'a> {
-    fn new(modules: &[(ModuleId, PathBuf, Module)], interner: &'a Interner) -> Self {
+    fn new(interner: &'a Interner) -> Self {
         Self {
             interner,
             documents: BTreeMap::new(),
-            module_paths: modules
-                .iter()
-                .map(|(module_id, path, _)| (*module_id, path.clone()))
-                .collect(),
             provisional_bindings: BTreeMap::new(),
             bindings: BTreeMap::new(),
             provisional_to_final: HashMap::new(),
             resolutions: BTreeMap::new(),
-            diagnostics: BTreeMap::new(),
+            diagnostics: HashMap::new(),
             global_bindings: BTreeMap::new(),
             types: BTreeMap::new(),
             next_provisional_binding_id: 0,
@@ -97,42 +104,44 @@ impl<'a> PackageNamingContext<'a> {
         }
     }
 
-    fn finish(self) -> NamingResult {
-        NamingResult {
-            bindings: self.bindings,
-            global_bindings: self.global_bindings,
-            resolutions: self.resolutions,
-            module_paths: self.module_paths,
-            diagnostics: self.diagnostics.into_iter().collect(),
+    fn finish(self) -> PackageNamingComputation {
+        PackageNamingComputation {
+            locals: self.documents.into_iter().collect(),
+            naming: NamingResult {
+                bindings: self.bindings,
+                global_bindings: self.global_bindings,
+                resolutions: self.resolutions,
+            },
+            diagnostics: self.diagnostics,
         }
     }
 
-    fn resolve_document(&mut self, module_id: ModuleId, module: &Module) {
+    fn resolve_document(&mut self, document_id: DocumentId, module: &Module) {
         let document_naming = DocumentNamingContext::new(
-            module_id,
+            document_id,
             &module.arena,
             &mut self.next_provisional_binding_id,
             &mut self.provisional_bindings,
         )
         .resolve_module(module);
-        self.documents.insert(module_id, document_naming);
+        self.documents.insert(document_id, document_naming);
     }
 
     fn record_local_resolutions(&mut self) {
         let documents = self
             .documents
             .iter()
-            .map(|(module_id, document_naming)| {
-                (*module_id, document_naming.expression_resolutions.clone())
+            .map(|(document_id, document_naming)| {
+                (*document_id, document_naming.expression_resolutions.clone())
             })
             .collect::<Vec<_>>();
 
-        for (module_id, expression_resolutions) in documents {
+        for (document_id, expression_resolutions) in documents {
             for (expression_id, provisional_binding_id) in expression_resolutions {
                 let binding_id = self.finalize_binding(provisional_binding_id);
                 self.resolutions.insert(
                     ExpressionKey {
-                        module_id,
+                        module_id: document_id,
                         expression_id,
                     },
                     binding_id,
@@ -141,15 +150,15 @@ impl<'a> PackageNamingContext<'a> {
         }
     }
 
-    fn collect_types(&mut self, modules: &[(ModuleId, PathBuf, Module)]) {
-        for (module_id, _, module) in modules {
+    fn collect_types(&mut self, modules: &[(DocumentId, &Module)]) {
+        for (document_id, module) in modules {
             for definition in &module.definitions {
                 if let Some(existing_type) = self.types.get(&definition.definition.name) {
                     self.push_duplicate_type_definition_diagnostic(
                         definition.definition.name,
                         definition.range,
                         existing_type.kind,
-                        *module_id,
+                        *document_id,
                     );
                     continue;
                 }
@@ -164,9 +173,9 @@ impl<'a> PackageNamingContext<'a> {
         }
     }
 
-    fn build_global_bindings(&mut self, modules: &[(ModuleId, PathBuf, Module)]) {
-        for (module_id, _, _) in modules {
-            let Some(document_naming) = self.documents.get(module_id).cloned() else {
+    fn build_global_bindings(&mut self, modules: &[(DocumentId, &Module)]) {
+        for (document_id, _) in modules {
+            let Some(document_naming) = self.documents.get(document_id).cloned() else {
                 continue;
             };
 
@@ -182,24 +191,24 @@ impl<'a> PackageNamingContext<'a> {
         }
     }
 
-    fn resolve_definitions(&mut self, modules: &[(ModuleId, PathBuf, Module)]) {
-        for (module_id, _, module) in modules {
+    fn resolve_definitions(&mut self, modules: &[(DocumentId, &Module)]) {
+        for (document_id, module) in modules {
             for definition in &module.definitions {
-                self.resolve_definition(definition, *module_id);
+                self.resolve_definition(definition, *document_id);
             }
         }
     }
 
-    fn resolve_annotations(&mut self, modules: &[(ModuleId, PathBuf, Module)]) {
-        for (module_id, _, module) in modules {
-            let Some(document_naming) = self.documents.get(module_id).cloned() else {
+    fn resolve_annotations(&mut self, modules: &[(DocumentId, &Module)]) {
+        for (document_id, module) in modules {
+            let Some(document_naming) = self.documents.get(document_id).cloned() else {
                 continue;
             };
 
             for expression_id in document_naming.annotated_expressions {
                 let expression = module.arena.get(expression_id);
                 if let Some(annotation) = &expression.annotation {
-                    self.resolve_annotation(annotation, *module_id);
+                    self.resolve_annotation(annotation, *document_id);
                 }
             }
         }
@@ -209,17 +218,17 @@ impl<'a> PackageNamingContext<'a> {
         let documents = self
             .documents
             .iter()
-            .map(|(module_id, document_naming)| {
-                (*module_id, document_naming.unresolved_values.clone())
+            .map(|(document_id, document_naming)| {
+                (*document_id, document_naming.unresolved_values.clone())
             })
             .collect::<Vec<_>>();
 
-        for (module_id, unresolved_values) in documents {
+        for (document_id, unresolved_values) in documents {
             for (expression_id, symbol) in unresolved_values {
                 if let Some(binding_id) = self.global_bindings.get(&symbol) {
                     self.resolutions.insert(
                         ExpressionKey {
-                            module_id,
+                            module_id: document_id,
                             expression_id,
                         },
                         *binding_id,
@@ -227,11 +236,12 @@ impl<'a> PackageNamingContext<'a> {
                     continue;
                 }
 
-                if !self.is_namespace_symbol(symbol, module_id) && !self.is_builtin_symbol(symbol) {
+                if !self.is_namespace_symbol(symbol, document_id) && !self.is_builtin_symbol(symbol)
+                {
                     let name = self.interner.resolve(symbol).unwrap_or("<unknown>");
-                    let range = self.module_expression_range(module_id, expression_id);
+                    let range = self.module_expression_range(document_id, expression_id);
                     self.push_diagnostic(
-                        module_id,
+                        document_id,
                         Diagnostic::naming_warning(
                             range,
                             format!(
@@ -256,7 +266,7 @@ impl<'a> PackageNamingContext<'a> {
         }
     }
 
-    fn resolve_definition(&mut self, definition_item: &DefinitionItem, module_id: ModuleId) {
+    fn resolve_definition(&mut self, definition_item: &DefinitionItem, document_id: DocumentId) {
         let local_type_parameters = definition_item
             .definition
             .type_parameters
@@ -268,7 +278,7 @@ impl<'a> PackageNamingContext<'a> {
             &definition_item.definition.surface_type,
             &local_type_parameters,
             definition_item.range,
-            module_id,
+            document_id,
         );
     }
 
@@ -309,18 +319,18 @@ impl<'a> PackageNamingContext<'a> {
             .expect("final binding should exist")
     }
 
-    fn resolve_annotation(&mut self, annotation: &AttachedAnnotation, module_id: ModuleId) {
+    fn resolve_annotation(&mut self, annotation: &AttachedAnnotation, document_id: DocumentId) {
         match annotation.annotation() {
             Annotation::Type { surface_type, .. } => {
                 self.resolve_surface_type(
                     surface_type,
                     &BTreeSet::new(),
                     annotation.range(),
-                    module_id,
+                    document_id,
                 );
             }
             Annotation::New { nominal_type } => {
-                self.resolve_nominal_type_ref(nominal_type, annotation.range(), module_id);
+                self.resolve_nominal_type_ref(nominal_type, annotation.range(), document_id);
             }
         }
     }
@@ -329,7 +339,7 @@ impl<'a> PackageNamingContext<'a> {
         &mut self,
         nominal_type: &NamedTypeRef,
         range: Range,
-        module_id: ModuleId,
+        document_id: DocumentId,
     ) {
         match self.types.get(&nominal_type.name) {
             Some(type_info) if type_info.kind == DefinitionKind::Type => {}
@@ -338,7 +348,7 @@ impl<'a> PackageNamingContext<'a> {
                     .render_type_name(nominal_type.name)
                     .unwrap_or_else(|| "<unknown>".to_owned());
                 self.push_diagnostic(
-                    module_id,
+                    document_id,
                     Diagnostic::syntax_error(
                         range,
                         format!(
@@ -349,12 +359,12 @@ impl<'a> PackageNamingContext<'a> {
             }
             Some(_) => {}
             None => {
-                self.push_unknown_type_diagnostic(nominal_type.name, range, module_id);
+                self.push_unknown_type_diagnostic(nominal_type.name, range, document_id);
             }
         }
 
         for type_argument in &nominal_type.type_arguments {
-            self.resolve_surface_type(type_argument, &BTreeSet::new(), range, module_id);
+            self.resolve_surface_type(type_argument, &BTreeSet::new(), range, document_id);
         }
     }
 
@@ -363,16 +373,16 @@ impl<'a> PackageNamingContext<'a> {
         surface_type: &SurfaceType,
         local_type_parameters: &BTreeSet<Symbol>,
         range: Range,
-        module_id: ModuleId,
+        document_id: DocumentId,
     ) {
         match surface_type {
             SurfaceType::Named(name, arguments) => {
                 if !local_type_parameters.contains(name) && !self.types.contains_key(name) {
-                    self.push_unknown_type_diagnostic(*name, range, module_id);
+                    self.push_unknown_type_diagnostic(*name, range, document_id);
                 }
 
                 for argument in arguments {
-                    self.resolve_surface_type(argument, local_type_parameters, range, module_id);
+                    self.resolve_surface_type(argument, local_type_parameters, range, document_id);
                 }
             }
             SurfaceType::Nullable(inner_type)
@@ -380,7 +390,7 @@ impl<'a> PackageNamingContext<'a> {
             | SurfaceType::NamedVector(inner_type)
             | SurfaceType::List(inner_type)
             | SurfaceType::NamedList(inner_type) => {
-                self.resolve_surface_type(inner_type, local_type_parameters, range, module_id);
+                self.resolve_surface_type(inner_type, local_type_parameters, range, document_id);
             }
             SurfaceType::Record(fields) => {
                 for field in fields {
@@ -388,38 +398,38 @@ impl<'a> PackageNamingContext<'a> {
                         &field.value,
                         local_type_parameters,
                         range,
-                        module_id,
+                        document_id,
                     );
                 }
             }
             SurfaceType::Tuple(items) => {
                 for item in items {
-                    self.resolve_surface_type(item, local_type_parameters, range, module_id);
+                    self.resolve_surface_type(item, local_type_parameters, range, document_id);
                 }
             }
             SurfaceType::Function(function_type) => {
                 for parameter in &function_type.parameters {
-                    self.resolve_surface_type(parameter, local_type_parameters, range, module_id);
+                    self.resolve_surface_type(parameter, local_type_parameters, range, document_id);
                 }
                 for parameter in &function_type.named_parameters {
                     self.resolve_surface_type(
                         &parameter.value,
                         local_type_parameters,
                         range,
-                        module_id,
+                        document_id,
                     );
                 }
                 self.resolve_surface_type(
                     &function_type.return_type,
                     local_type_parameters,
                     range,
-                    module_id,
+                    document_id,
                 );
             }
             SurfaceType::Binders(type_parameters, inner_type) => {
                 let mut nested_type_parameters = local_type_parameters.clone();
                 nested_type_parameters.extend(type_parameters.iter().copied());
-                self.resolve_surface_type(inner_type, &nested_type_parameters, range, module_id);
+                self.resolve_surface_type(inner_type, &nested_type_parameters, range, document_id);
             }
             SurfaceType::Any
             | SurfaceType::Unknown
@@ -428,12 +438,17 @@ impl<'a> PackageNamingContext<'a> {
         }
     }
 
-    fn push_unknown_type_diagnostic(&mut self, symbol: Symbol, range: Range, module_id: ModuleId) {
+    fn push_unknown_type_diagnostic(
+        &mut self,
+        symbol: Symbol,
+        range: Range,
+        document_id: DocumentId,
+    ) {
         let name = self
             .render_type_name(symbol)
             .unwrap_or_else(|| "<unknown>".to_owned());
         self.push_diagnostic(
-            module_id,
+            document_id,
             Diagnostic::syntax_error(range, format!("type syntax error: unknown type `{name}`")),
         );
     }
@@ -443,13 +458,13 @@ impl<'a> PackageNamingContext<'a> {
         symbol: Symbol,
         range: Range,
         existing_kind: DefinitionKind,
-        module_id: ModuleId,
+        document_id: DocumentId,
     ) {
         let name = self
             .render_type_name(symbol)
             .unwrap_or_else(|| "<unknown>".to_owned());
         self.push_diagnostic(
-            module_id,
+            document_id,
             Diagnostic::syntax_error(
                 range,
                 format!(
@@ -517,10 +532,14 @@ impl<'a> PackageNamingContext<'a> {
         }
     }
 
-    fn module_expression_range(&self, module_id: ModuleId, expression_id: ExpressionId) -> Range {
+    fn module_expression_range(
+        &self,
+        document_id: DocumentId,
+        expression_id: ExpressionId,
+    ) -> Range {
         let document_naming = self
             .documents
-            .get(&module_id)
+            .get(&document_id)
             .expect("module naming should exist");
         document_naming
             .expression_ranges
@@ -529,7 +548,7 @@ impl<'a> PackageNamingContext<'a> {
             .expect("expression range should exist")
     }
 
-    fn is_namespace_symbol(&self, _symbol: Symbol, _module_id: ModuleId) -> bool {
+    fn is_namespace_symbol(&self, _symbol: Symbol, _document_id: DocumentId) -> bool {
         false
     }
 
@@ -544,43 +563,41 @@ impl<'a> PackageNamingContext<'a> {
         self.interner.resolve(symbol).map(str::to_owned)
     }
 
-    fn push_diagnostic(&mut self, module_id: ModuleId, diagnostic: Diagnostic) {
-        let path = self
-            .module_paths
-            .get(&module_id)
-            .cloned()
-            .expect("module path should exist");
-        self.diagnostics.entry(path).or_default().push(diagnostic);
+    fn push_diagnostic(&mut self, document_id: DocumentId, diagnostic: Diagnostic) {
+        self.diagnostics
+            .entry(document_id)
+            .or_default()
+            .push(diagnostic);
     }
 }
 
 struct DocumentNamingContext<'a> {
-    module_id: ModuleId,
+    document_id: DocumentId,
     arena: &'a HirArena,
     next_provisional_binding_id: &'a mut u32,
     provisional_bindings: &'a mut BTreeMap<ProvisionalBindingId, ProvisionalBindingInfo>,
     local_scopes: Vec<BTreeMap<Symbol, ProvisionalBindingId>>,
-    document_naming: DocumentNaming,
+    document_naming: LocalNamingResult,
 }
 
 impl<'a> DocumentNamingContext<'a> {
     fn new(
-        module_id: ModuleId,
+        document_id: DocumentId,
         arena: &'a HirArena,
         next_provisional_binding_id: &'a mut u32,
         provisional_bindings: &'a mut BTreeMap<ProvisionalBindingId, ProvisionalBindingInfo>,
     ) -> Self {
         Self {
-            module_id,
+            document_id,
             arena,
             next_provisional_binding_id,
             provisional_bindings,
             local_scopes: Vec::new(),
-            document_naming: DocumentNaming::default(),
+            document_naming: LocalNamingResult::default(),
         }
     }
 
-    fn resolve_module(mut self, module: &Module) -> DocumentNaming {
+    fn resolve_module(mut self, module: &Module) -> LocalNamingResult {
         for expression_id in &module.expressions {
             self.resolve_expression(*expression_id);
         }
@@ -704,7 +721,7 @@ impl<'a> DocumentNamingContext<'a> {
         self.provisional_bindings.insert(
             binding_id,
             ProvisionalBindingInfo {
-                module_id: self.module_id,
+                module_id: self.document_id,
                 symbol,
                 range,
             },
@@ -723,24 +740,15 @@ impl<'a> DocumentNamingContext<'a> {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct DocumentNaming {
-    expression_ranges: BTreeMap<ExpressionId, Range>,
-    expression_resolutions: BTreeMap<ExpressionId, ProvisionalBindingId>,
-    top_level_exports: Vec<ProvisionalBindingId>,
-    unresolved_values: BTreeMap<ExpressionId, Symbol>,
-    annotated_expressions: Vec<ExpressionId>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ProvisionalBindingInfo {
-    module_id: ModuleId,
-    symbol: Symbol,
-    range: Range,
+pub struct ProvisionalBindingInfo {
+    pub module_id: ModuleId,
+    pub symbol: Symbol,
+    pub range: Range,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct ProvisionalBindingId(u32);
+pub struct ProvisionalBindingId(pub u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct TypeInfo {
