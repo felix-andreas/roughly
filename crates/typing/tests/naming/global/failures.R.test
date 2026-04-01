@@ -1,0 +1,34 @@
+#==== unknown_values
+#---- top_level_unknown_value_in_package
+#---- R/main.R
+x
+#++++
+Symbol(x@?)
+
+warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+--> 1:1-1:2
+| x
+
+#---- nested_function_unknown_value_in_package
+#---- R/main.R
+f <- function() x
+#++++
+Assign(f@b0)
+  Function()
+    Symbol(x@?)
+
+warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+--> 1:17-1:18
+| f <- function() x
+
+#==== global_warnings
+#---- top_level_binding_shadows_builtin
+#---- R/main.R
+list <- 1L
+#++++
+Assign(list@b0)
+  Integer(1L)
+
+warning[naming] Top-level binding `list` shadows a builtin.
+--> 1:1-1:11
+| list <- 1L

@@ -228,26 +228,33 @@ impl Analysis {
 
         diagnostics
     }
+
+    pub fn document_phase_diagnostics<'a>(
+        &'a self,
+        document_id: DocumentId,
+        phases: &'a [AnalysisPhase],
+    ) -> impl Iterator<Item = &'a Diagnostic> + 'a {
+        self.diagnostics
+            .get(&document_id)
+            .into_iter()
+            .flat_map(move |phase_diagnostics| {
+                phase_diagnostics
+                    .iter()
+                    .filter(move |phase_diagnostic| phases.contains(&phase_diagnostic.phase))
+                    .map(|phase_diagnostic| &phase_diagnostic.diagnostic)
+            })
+    }
 }
 
 pub fn check(analysis_state: &mut Analysis) -> CheckResult {
     let document_ids = analysis_state.package_document_ids();
 
     run_lowering(None, analysis_state);
-    let lowering_diagnostics = flatten_document_diagnostics(
-        &analysis_state.document_diagnostics(&document_ids, &[AnalysisPhase::Lowering]),
-    );
-    if has_blocking_diagnostics(&lowering_diagnostics) {
-        return CheckResult {
-            diagnostics: lowering_diagnostics,
-        };
-    }
-
     run_naming(None, analysis_state);
-    let naming_diagnostics = flatten_document_diagnostics(&analysis_state.document_diagnostics(
+    let naming_diagnostics = analysis_state.collect_phase_diagnostics(
         &document_ids,
         &[AnalysisPhase::Lowering, AnalysisPhase::Naming],
-    ));
+    );
     if has_blocking_diagnostics(&naming_diagnostics) {
         return CheckResult {
             diagnostics: naming_diagnostics,
@@ -266,7 +273,7 @@ pub fn check(analysis_state: &mut Analysis) -> CheckResult {
 
 pub fn run_lowering(changed_documents: Option<&[DocumentId]>, analysis_state: &mut Analysis) {
     let document_ids = match changed_documents {
-        None => analysis_state.package_document_ids(),
+        None => analysis_state.all_document_ids(),
         Some(changed_documents) => {
             let mut document_ids = changed_documents
                 .iter()
@@ -297,11 +304,12 @@ pub fn run_lowering(changed_documents: Option<&[DocumentId]>, analysis_state: &m
 }
 
 pub fn run_naming(_changed_documents: Option<&[DocumentId]>, analysis_state: &mut Analysis) {
-    let document_ids = analysis_state.package_document_ids();
+    let package_document_ids = analysis_state.package_document_ids();
+    let all_document_ids = analysis_state.all_document_ids();
     analysis_state.naming = NamingStore::default();
     analysis_state.clear_phase_diagnostics(AnalysisPhase::Naming);
 
-    let modules = document_ids
+    let package_modules = package_document_ids
         .iter()
         .filter_map(|document_id| {
             analysis_state
@@ -311,7 +319,22 @@ pub fn run_naming(_changed_documents: Option<&[DocumentId]>, analysis_state: &mu
                 .map(|module| (*document_id, module))
         })
         .collect::<Vec<_>>();
-    let naming_computation = resolve_package(&modules, analysis_state.interner());
+    let non_package_modules = all_document_ids
+        .iter()
+        .filter(|document_id| !package_document_ids.contains(document_id))
+        .filter_map(|document_id| {
+            analysis_state
+                .lowering
+                .modules
+                .get(document_id)
+                .map(|module| (*document_id, module))
+        })
+        .collect::<Vec<_>>();
+    let naming_computation = resolve_package(
+        &package_modules,
+        &non_package_modules,
+        analysis_state.interner(),
+    );
     analysis_state.naming.locals = naming_computation.locals;
     analysis_state.naming.package = naming_computation.naming;
     for (document_id, diagnostics) in naming_computation.diagnostics {
@@ -360,6 +383,29 @@ pub fn run_typecheck(
 }
 
 impl Analysis {
+    fn all_document_ids(&self) -> Vec<DocumentId> {
+        let mut document_ids = self.documents.keys().copied().collect::<Vec<_>>();
+        document_ids.sort_by_key(|document_id| document_id.0);
+        document_ids
+    }
+
+    fn collect_phase_diagnostics(
+        &self,
+        document_ids: &[DocumentId],
+        phases: &[AnalysisPhase],
+    ) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+
+        for document_id in document_ids {
+            diagnostics.extend(
+                self.document_phase_diagnostics(*document_id, phases)
+                    .cloned(),
+            );
+        }
+
+        diagnostics
+    }
+
     fn invalidate_document(&mut self, document_id: DocumentId) {
         self.lowering.modules.remove(&document_id);
         self.diagnostics.remove(&document_id);
@@ -442,16 +488,6 @@ fn has_blocking_diagnostics(diagnostics: &[Diagnostic]) -> bool {
     diagnostics
         .iter()
         .any(|diagnostic| diagnostic.severity == Severity::Error)
-}
-
-fn flatten_document_diagnostics(document_diagnostics: &[DocumentDiagnostics]) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-
-    for (_, path_diagnostics) in document_diagnostics {
-        diagnostics.extend(path_diagnostics.clone());
-    }
-
-    diagnostics
 }
 
 struct RemappedModules {
@@ -579,7 +615,7 @@ fn remap_expression_kind(expression_kind: &mut ExpressionKind, expression_offset
 #[cfg(test)]
 mod tests {
     use {
-        super::{Analysis, AnalysisPhase, run_lowering, run_naming},
+        super::{Analysis, AnalysisPhase, check, run_lowering, run_naming},
         crate::{
             Severity,
             text::{TextPosition, TextRange},
@@ -675,5 +711,25 @@ mod tests {
         assert!(analysis.document_id_for_path(&path).is_none());
         assert!(!analysis.lowering.modules.contains_key(&document_id));
         assert!(analysis.package_document_ids().is_empty());
+    }
+
+    #[test]
+    fn check_runs_naming_even_when_lowering_reports_errors() {
+        let path = PathBuf::from("/workspace/R/main.R");
+        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        let document_id = analysis
+            .add_document_from_source(path, "value <-")
+            .expect("document should parse");
+
+        let result = check(&mut analysis);
+
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.severity == Severity::Error)
+        );
+        assert!(analysis.lowering.modules.contains_key(&document_id));
+        assert!(analysis.naming.locals.contains_key(&document_id));
     }
 }

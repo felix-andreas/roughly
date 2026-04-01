@@ -7,6 +7,18 @@ Assign(x@b0)
   Integer(1L)
 Symbol(x@?)
 
+No diagnostics.
+
+#---- top_level_reference_before_first_binding
+x
+x <- 1L
+#++++
+Symbol(x@?)
+Assign(x@b0)
+  Integer(1L)
+
+No diagnostics.
+
 #---- top_level_call_resolves_callee_and_argument
 value <- 1L
 identity <- function(x) x
@@ -22,6 +34,8 @@ Call
   Argument
     Symbol(value@?)
 
+No diagnostics.
+
 #==== rebinding
 #---- top_level_rebinding_creates_fresh_binding
 x <- 1L
@@ -33,6 +47,8 @@ Assign(x@b0)
 Assign(x@b1)
   Character("\"ok\"")
 Symbol(x@?)
+
+No diagnostics.
 
 #---- earlier_use_resolves_to_final_global_binding
 x <- 1L
@@ -47,6 +63,8 @@ Assign(x@b1)
   Character("\"ok\"")
 Symbol(x@?)
 
+No diagnostics.
+
 #---- assignment_rhs_resolves_to_final_global_binding
 x <- 1L
 x <- x
@@ -58,60 +76,4 @@ Assign(x@b1)
   Symbol(x@?)
 Symbol(x@?)
 
-#==== blocks
-#---- nested_block_uses_nearest_binding
-x <- 1L
-f <- function() {
-  x <- "ok"
-  {
-    x
-  }
-}
-#++++
-Assign(x@b0)
-  Integer(1L)
-Assign(f@b2)
-  Function()
-    Block
-      Assign(x@b1)
-        Character("\"ok\"")
-      Block
-        Symbol(x@b1)
-
-#---- nested_block_shadows_outer_binding
-x <- 1L
-f <- function() {
-  {
-    x <- "ok"
-    x
-  }
-}
-#++++
-Assign(x@b0)
-  Integer(1L)
-Assign(f@b2)
-  Function()
-    Block
-      Block
-        Assign(x@b1)
-          Character("\"ok\"")
-        Symbol(x@b1)
-
-#---- braces_do_not_restore_outer_binding
-x <- 1L
-f <- function() {
-  {
-    x <- "ok"
-  }
-  x
-}
-#++++
-Assign(x@b0)
-  Integer(1L)
-Assign(f@b2)
-  Function()
-    Block
-      Block
-        Assign(x@b1)
-          Character("\"ok\"")
-      Symbol(x@b1)
+No diagnostics.

@@ -1,0 +1,97 @@
+#==== top_level
+#---- top_level_reference
+#---- R/main.R
+x <- 1L
+x
+#++++
+Assign(x@b0)
+  Integer(1L)
+Symbol(x@b0)
+
+#---- top_level_reference_before_first_binding
+#---- R/main.R
+x
+x <- 1L
+#++++
+Symbol(x@b0)
+Assign(x@b0)
+  Integer(1L)
+
+#---- top_level_call_resolves_callee_and_argument
+#---- R/main.R
+value <- 1L
+identity <- function(x) x
+identity(value)
+#++++
+Assign(value@b0)
+  Integer(1L)
+Assign(identity@b2)
+  Function(x@b1)
+    Symbol(x@b1)
+Call
+  Symbol(identity@b2)
+  Argument
+    Symbol(value@b0)
+
+#==== rebinding
+#---- top_level_rebinding_creates_fresh_binding
+#---- R/main.R
+x <- 1L
+x <- "ok"
+x
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(x@b1)
+  Character("\"ok\"")
+Symbol(x@b1)
+
+warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
+--> 1:1-1:8
+| x <- 1L
+
+warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
+--> 2:1-2:10
+| x <- "ok"
+
+#---- earlier_use_resolves_to_final_global_binding
+#---- R/main.R
+x <- 1L
+x
+x <- "ok"
+x
+#++++
+Assign(x@b0)
+  Integer(1L)
+Symbol(x@b1)
+Assign(x@b1)
+  Character("\"ok\"")
+Symbol(x@b1)
+
+warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
+--> 1:1-1:8
+| x <- 1L
+
+warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
+--> 3:1-3:10
+| x <- "ok"
+
+#---- assignment_rhs_resolves_to_final_global_binding
+#---- R/main.R
+x <- 1L
+x <- x
+x
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(x@b1)
+  Symbol(x@b1)
+Symbol(x@b1)
+
+warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
+--> 1:1-1:8
+| x <- 1L
+
+warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
+--> 2:1-2:7
+| x <- x

@@ -1,13 +1,24 @@
-Fixture
-  Simple
-  MultiFile
-  Generational
-
 # Human Notes (!AIs are not allowed to edit!)
 
-- split naming fixtures into two phases:
-  - verify that globals are resolved (even for same file)
+- migrate roughly to AnalysisState
 
+* rename
+* goto defintion
+* completion
+* defintion
+* hover
+  * get closest
+  * should show
+  * lowered hir (also for typing comments)
+  * naming
+  * type checking
+* references
+* rename
+* document symbol
+  * seems like it is executed before didSave. so we must have a fast method here for global sections. (maybe full ast based as it is currently - not part of analysis)
+* symbol
+
+- what about pull diagnostics??
 
 - integration into roughly is broken
 
@@ -24,7 +35,7 @@ Fixture
     - first phase says which globals are exposed by the module and which globals it expects
     - second phase tries to conslidate between multiple files. 
   - add support for <<- (what are the semantics??)
-  - support for local
+  - support for local(...) expression
   - better separation betwen phases:
     - resolve_document. resolves all locals and tells which symbols it exposes and which where unresolved (these are potential globals, imports from other packages or builtins)
     - resolve_package. takes all resolved document, parsed NAMESPACE information and builtins and consolidates it. creates diagnostics per document (warns if namespace or builtins are shadowed).

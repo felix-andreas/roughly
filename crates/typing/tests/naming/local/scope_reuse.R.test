@@ -1,0 +1,130 @@
+#==== blocks
+#---- nested_block_uses_nearest_binding
+x <- 1L
+f <- function() {
+  x <- "ok"
+  {
+    x
+  }
+}
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(f@b2)
+  Function()
+    Block
+      Assign(x@b1)
+        Character("\"ok\"")
+      Block
+        Symbol(x@b1)
+
+No diagnostics.
+
+#---- braces_do_not_restore_outer_binding
+x <- 1L
+f <- function() {
+  {
+    x <- "ok"
+  }
+  x
+}
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(f@b2)
+  Function()
+    Block
+      Block
+        Assign(x@b1)
+          Character("\"ok\"")
+      Symbol(x@b1)
+
+No diagnostics.
+
+#---- nested_braces_reuse_same_scope_chain
+f <- function() {
+  {
+    x <- 1L
+    {
+      x
+    }
+  }
+  x
+}
+#++++
+Assign(f@b1)
+  Function()
+    Block
+      Block
+        Assign(x@b0)
+          Integer(1L)
+        Block
+          Symbol(x@b0)
+      Symbol(x@b0)
+
+No diagnostics.
+
+#---- braces_inside_loop_do_not_restore_pre_loop_binding
+x <- 0L
+for (x in list(1L)) {
+  {
+    x <- 2L
+  }
+  x
+}
+x
+#++++
+Assign(x@b0)
+  Integer(0L)
+For(x@b1)
+  Call
+    Symbol(list@?)
+    Argument
+      Integer(1L)
+  Block
+    Block
+      Assign(x@b2)
+        Integer(2L)
+    Symbol(x@b2)
+Symbol(x@?)
+
+No diagnostics.
+
+#---- while_body_reuses_enclosing_scope
+f <- function() {
+  while (TRUE) {
+    x <- 1L
+  }
+  x
+}
+#++++
+Assign(f@b1)
+  Function()
+    Block
+      While
+        Logical(true)
+        Block
+          Assign(x@b0)
+            Integer(1L)
+      Symbol(x@b0)
+
+No diagnostics.
+
+#---- repeat_body_reuses_enclosing_scope
+f <- function() {
+  repeat {
+    x <- 1L
+  }
+  x
+}
+#++++
+Assign(f@b1)
+  Function()
+    Block
+      Repeat
+        Block
+          Assign(x@b0)
+            Integer(1L)
+      Symbol(x@b0)
+
+No diagnostics.

@@ -11,11 +11,6 @@ use {
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FixtureOutput {
-    pub files: Vec<FixtureRunFile>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FixtureRunFile {
     pub path: PathBuf,
     pub output: String,
@@ -29,7 +24,7 @@ pub struct FixtureExpectedPaths {
 
 pub fn run_fixture_suite<RunFixture>(directory_path: &str, mut run_fixture: RunFixture)
 where
-    RunFixture: FnMut(&Fixture) -> Result<Vec<FixtureOutput>, String>,
+    RunFixture: FnMut(&Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String>,
 {
     let groups = read_fixture_suite(directory_path);
     let maybe_filter = std::env::var("FIXTURE_FILTER").ok();
@@ -230,7 +225,7 @@ fn compare_fixture_outputs(
     fixture: &Fixture,
     fixture_name: &str,
     expected_outputs: &[ExpectedFixtureOutput],
-    actual_outputs: &[FixtureOutput],
+    actual_outputs: &[Vec<FixtureRunFile>],
 ) -> Option<String> {
     if actual_outputs.len() != expected_outputs.len() {
         return Some(format!(
@@ -243,7 +238,7 @@ fn compare_fixture_outputs(
 
     for (expected_output, actual_output) in expected_outputs.iter().zip(actual_outputs) {
         let mut actual_files = BTreeMap::new();
-        for file in &actual_output.files {
+        for file in actual_output {
             let replaced =
                 actual_files.insert(file.path.clone(), file.output.trim_end().to_owned());
             if replaced.is_some() {
@@ -308,7 +303,7 @@ fn render_output_mismatch(
     fixture: &Fixture,
     fixture_name: &str,
     expected_outputs: &[ExpectedFixtureOutput],
-    actual_outputs: &[FixtureOutput],
+    actual_outputs: &[Vec<FixtureRunFile>],
     message: &str,
 ) -> String {
     let mut rendered = format!(
@@ -379,7 +374,7 @@ fn render_expected_file_output(expected_output: &ExpectedFileOutput) -> String {
 
 fn render_actual_outputs(
     expected_outputs: &[ExpectedFixtureOutput],
-    actual_outputs: &[FixtureOutput],
+    actual_outputs: &[Vec<FixtureRunFile>],
 ) -> String {
     expected_outputs
         .iter()
@@ -391,8 +386,8 @@ fn render_actual_outputs(
         .join("\n\n")
 }
 
-fn render_actual_snapshot(snapshot_name: &str, output: &FixtureOutput) -> String {
-    let rendered_files = render_actual_files(&output.files);
+fn render_actual_snapshot(snapshot_name: &str, output: &[FixtureRunFile]) -> String {
+    let rendered_files = render_actual_files(output);
     if snapshot_name.is_empty() {
         return rendered_files;
     }

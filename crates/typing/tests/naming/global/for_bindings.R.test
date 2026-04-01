@@ -1,0 +1,91 @@
+#==== for_loops
+#---- for_variable_introduces_fresh_binding
+#---- R/main.R
+for (x in list(1L)) {
+  x
+}
+#++++
+For(x@b0)
+  Call
+    Symbol(list@?)
+    Argument
+      Integer(1L)
+  Block
+    Symbol(x@b0)
+
+#---- loop_body_resolves_other_outer_binding
+#---- R/main.R
+y <- 1L
+for (x in list(1L)) {
+  y
+}
+#++++
+Assign(y@b0)
+  Integer(1L)
+For(x@b1)
+  Call
+    Symbol(list@?)
+    Argument
+      Integer(1L)
+  Block
+    Symbol(y@b0)
+
+#---- assignment_inside_loop_rhs_sees_loop_binding
+#---- R/main.R
+x <- 0L
+for (x in list(1L)) {
+  x <- x
+  x
+}
+x
+#++++
+Assign(x@b0)
+  Integer(0L)
+For(x@b1)
+  Call
+    Symbol(list@?)
+    Argument
+      Integer(1L)
+  Block
+    Assign(x@b2)
+      Symbol(x@b1)
+    Symbol(x@b2)
+Symbol(x@b0)
+
+#---- assignment_inside_loop_rhs_can_use_other_outer_binding
+#---- R/main.R
+y <- 0L
+for (x in list(1L)) {
+  y <- y
+  y
+}
+y
+#++++
+Assign(y@b0)
+  Integer(0L)
+For(x@b1)
+  Call
+    Symbol(list@?)
+    Argument
+      Integer(1L)
+  Block
+    Assign(y@b2)
+      Symbol(y@b0)
+    Symbol(y@b2)
+Symbol(y@b0)
+
+#---- nested_closure_inside_loop_captures_loop_binding
+#---- R/main.R
+for (x in list(1L)) {
+  g <- function() x
+}
+#++++
+For(x@b0)
+  Call
+    Symbol(list@?)
+    Argument
+      Integer(1L)
+  Block
+    Assign(g@b1)
+      Function()
+        Symbol(x@b0)

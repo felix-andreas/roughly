@@ -15,6 +15,10 @@ Fixture parsing itself lives in the separate `fixtures` crate.
 
 Some suites may include a local `README.md` with more detailed strategy, coverage expectations, or renderer-specific guidance. Use `TESTING.md` for crate-level test contracts and suite-local README files for suite-specific concepts that would otherwise make this document too long.
 
+The shared naming suite README at `tests/naming/README.md` is authoritative for the naming fixture
+matrix and the local-versus-global suite split. Keep it in sync with naming fixture changes in the
+same session.
+
 The `fixtures` crate currently parses two fixture shapes:
 
 - `Simple`
@@ -23,13 +27,13 @@ The `fixtures` crate currently parses two fixture shapes:
 All typing fixture runners should normalize their results to one shared output shape:
 
 ```rust
-Result<Vec<FixtureOutput>, String>
+Result<Vec<Vec<FixtureRunFile>>, String>
 ```
 
-Where each `FixtureOutput` is one snapshot and each snapshot contains per-file rendered outputs by
-path. Snapshot outputs are matched to expected generations by position, not by a runner-supplied
-name. `Err(...)` is for runner failure only. Phase failures should still be rendered into normal
-fixture output.
+Where each inner `Vec<FixtureRunFile>` is one snapshot and each snapshot contains per-file rendered
+outputs by path. Snapshot outputs are matched to expected generations by position, not by a
+runner-supplied name. `Err(...)` is for runner failure only. Phase failures should still be
+rendered into normal fixture output.
 
 ### `Simple`
 
@@ -109,8 +113,8 @@ Rules:
 
 The parser now understands both fixture shapes.
 
-`naming_local` uses `Simple` cases and runs only the file-local naming pass.
-`naming_global` uses `MultiFile` cases and runs package-global naming on the initial generation.
+`naming/local` uses `Simple` cases and runs only the file-local naming pass.
+`naming/global` uses `MultiFile` cases and runs package-global naming on the initial generation.
 The other typing fixture runners still execute only `Simple` cases.
 Later-generation `MultiFile` support is still waiting on broader renderer-side adoption in
 `typing`.
@@ -146,8 +150,8 @@ The intended fixture suites are:
 - `instantiation` - fresh reuse of generalized bindings at use sites
 - `interfaces` - exported per-file interface shapes
 - `lowering` - syntax-to-HIR lowering output
-- `naming_local` - file-local binding introduction and lexical use-site resolution
-- `naming_global` - package-global resolution across multiple files
+- `naming/local` - file-local binding introduction and lexical use-site resolution
+- `naming/global` - package-global resolution across multiple files
 - `substitution` - propagation of solved types through larger shapes
 - `unification` - solved monotypes during local inference
 
@@ -185,56 +189,35 @@ Expected output should show:
 - attached types on expressions
 - or rendered diagnostics when the suite intentionally targets failures produced by lowering
 
-### `naming_local`
+### Naming
 
 Purpose:
 
 - binding introduction within one document
 - lexical shadowing
 - use-site resolution within one document
+- package-global resolution after the local pass
+- project-global type-name resolution
+
+The detailed naming matrix lives in `tests/naming/README.md`.
 
 Expected output should show:
 
 - normalized binding identities
 - definition-site and use-site relationships
+- and diagnostics when the case intentionally targets naming failure behavior
 
-The local naming suite should be organized as a small coverage matrix rather than a grab bag of
-examples.
+Rules:
 
-At minimum, that matrix should cover:
-
-- top-level bindings
-- function parameters
-- local rebinding inside blocks
-- nested functions closing over outer bindings
-- inner bindings shadowing outer bindings
-- loop bindings such as `for` variables
-- assignment RHS resolution before the new binding is introduced
-- naming diagnostics for type references that fail during naming
-
-### `naming_global`
-
-Purpose:
-
-- package-global value resolution
-- cross-file type resolution
-- final-symbol-table behavior across multiple files
-- package-level naming diagnostics
-
-Expected output should show:
-
-- normalized binding identities
-- definition-site and use-site relationships across files
-
-At minimum, that matrix should cover:
-
-- cross-file global references
-- cross-file call-site resolution
-- latest-definition-wins global rebinding behavior
-- function bodies closing over globals from other files
-- cross-file nominal and alias type references
-- forward references across files
-- generic parameters shadowing package-global type names
+- `tests/naming/local/` covers the file-local lexical view before package-global resolution
+- `tests/naming/global/` is the primary contract and should mirror the local lexical cases while
+  also covering package-only behavior
+- mirrored global cases should preserve the same group/case names as their local counterparts
+- mirrored global cases should use `MultiFile`, even when the package has one file
+- project-global type-name cases belong in `tests/naming/global/`, not a dedicated local type suite
+- package-only naming coverage currently lives in `cross_file_values`, `type_lookup`,
+  `type_shadowing`, `type_failures`, `scripts`, and `failures`
+- keep the shared naming README updated whenever the naming matrix changes
 
 ### `expressions`
 

@@ -1,7 +1,7 @@
 use {
     fixtures::{
-        FixtureKind, FixtureOutput, FixtureRunFile, expected_output_paths_for_generation,
-        parse_file, run_fixture_suite,
+        FixtureKind, FixtureRunFile, expected_output_paths_for_generation, parse_file,
+        run_fixture_suite,
     },
     indoc::indoc,
     std::{
@@ -23,12 +23,10 @@ fn runs_simple_fixtures_with_structured_output() {
     "});
 
     run_fixture_suite(path_to_string(&fixture_directory).as_str(), |_fixture| {
-        Ok(vec![FixtureOutput {
-            files: vec![FixtureRunFile {
-                path: PathBuf::new(),
-                output: "value: integer".to_owned(),
-            }],
-        }])
+        Ok(vec![vec![FixtureRunFile {
+            path: PathBuf::new(),
+            output: "value: integer".to_owned(),
+        }]])
     });
 }
 
@@ -86,18 +84,16 @@ fn compares_multi_file_outputs_by_path() {
     "});
 
     run_fixture_suite(path_to_string(&fixture_directory).as_str(), |_fixture| {
-        Ok(vec![FixtureOutput {
-            files: vec![
-                FixtureRunFile {
-                    path: PathBuf::from("b.R"),
-                    output: "b snapshot".to_owned(),
-                },
-                FixtureRunFile {
-                    path: PathBuf::from("a.R"),
-                    output: "a snapshot".to_owned(),
-                },
-            ],
-        }])
+        Ok(vec![vec![
+            FixtureRunFile {
+                path: PathBuf::from("b.R"),
+                output: "b snapshot".to_owned(),
+            },
+            FixtureRunFile {
+                path: PathBuf::from("a.R"),
+                output: "a snapshot".to_owned(),
+            },
+        ]])
     });
 }
 
@@ -124,30 +120,26 @@ fn carries_expectations_forward_across_generations() {
 
     run_fixture_suite(path_to_string(&fixture_directory).as_str(), |_fixture| {
         Ok(vec![
-            FixtureOutput {
-                files: vec![
-                    FixtureRunFile {
-                        path: PathBuf::from("a.R"),
-                        output: "a v1".to_owned(),
-                    },
-                    FixtureRunFile {
-                        path: PathBuf::from("b.R"),
-                        output: "anything".to_owned(),
-                    },
-                ],
-            },
-            FixtureOutput {
-                files: vec![
-                    FixtureRunFile {
-                        path: PathBuf::from("a.R"),
-                        output: "a v2".to_owned(),
-                    },
-                    FixtureRunFile {
-                        path: PathBuf::from("c.R"),
-                        output: "still anything".to_owned(),
-                    },
-                ],
-            },
+            vec![
+                FixtureRunFile {
+                    path: PathBuf::from("a.R"),
+                    output: "a v1".to_owned(),
+                },
+                FixtureRunFile {
+                    path: PathBuf::from("b.R"),
+                    output: "anything".to_owned(),
+                },
+            ],
+            vec![
+                FixtureRunFile {
+                    path: PathBuf::from("a.R"),
+                    output: "a v2".to_owned(),
+                },
+                FixtureRunFile {
+                    path: PathBuf::from("c.R"),
+                    output: "still anything".to_owned(),
+                },
+            ],
         ])
     });
 }
@@ -164,18 +156,16 @@ fn rejects_extra_actual_outputs() {
 
     let panic = catch_unwind(AssertUnwindSafe(|| {
         run_fixture_suite(path_to_string(&fixture_directory).as_str(), |_fixture| {
-            Ok(vec![FixtureOutput {
-                files: vec![
-                    FixtureRunFile {
-                        path: PathBuf::new(),
-                        output: "value: integer".to_owned(),
-                    },
-                    FixtureRunFile {
-                        path: PathBuf::from("extra.R"),
-                        output: "extra".to_owned(),
-                    },
-                ],
-            }])
+            Ok(vec![vec![
+                FixtureRunFile {
+                    path: PathBuf::new(),
+                    output: "value: integer".to_owned(),
+                },
+                FixtureRunFile {
+                    path: PathBuf::from("extra.R"),
+                    output: "extra".to_owned(),
+                },
+            ]])
         });
     }))
     .expect_err("fixture suite should fail");
@@ -198,7 +188,7 @@ fn rejects_missing_outputs_even_for_any_expectations() {
 
     let panic = catch_unwind(AssertUnwindSafe(|| {
         run_fixture_suite(path_to_string(&fixture_directory).as_str(), |_fixture| {
-            Ok(vec![FixtureOutput { files: Vec::new() }])
+            Ok(vec![Vec::new()])
         });
     }))
     .expect_err("fixture suite should fail");
@@ -220,12 +210,10 @@ fn rejects_exact_output_mismatches() {
 
     let panic = catch_unwind(AssertUnwindSafe(|| {
         run_fixture_suite(path_to_string(&fixture_directory).as_str(), |_fixture| {
-            Ok(vec![FixtureOutput {
-                files: vec![FixtureRunFile {
-                    path: PathBuf::new(),
-                    output: "value: character".to_owned(),
-                }],
-            }])
+            Ok(vec![vec![FixtureRunFile {
+                path: PathBuf::new(),
+                output: "value: character".to_owned(),
+            }]])
         });
     }))
     .expect_err("fixture suite should fail");
@@ -249,18 +237,16 @@ fn rejects_duplicate_actual_paths_within_one_snapshot() {
 
     let panic = catch_unwind(AssertUnwindSafe(|| {
         run_fixture_suite(path_to_string(&fixture_directory).as_str(), |_fixture| {
-            Ok(vec![FixtureOutput {
-                files: vec![
-                    FixtureRunFile {
-                        path: PathBuf::from("a.R"),
-                        output: "a snapshot".to_owned(),
-                    },
-                    FixtureRunFile {
-                        path: PathBuf::from("a.R"),
-                        output: "other".to_owned(),
-                    },
-                ],
-            }])
+            Ok(vec![vec![
+                FixtureRunFile {
+                    path: PathBuf::from("a.R"),
+                    output: "a snapshot".to_owned(),
+                },
+                FixtureRunFile {
+                    path: PathBuf::from("a.R"),
+                    output: "other".to_owned(),
+                },
+            ]])
         });
     }))
     .expect_err("fixture suite should fail");
@@ -288,12 +274,10 @@ fn rejects_snapshot_count_mismatches() {
 
     let panic = catch_unwind(AssertUnwindSafe(|| {
         run_fixture_suite(path_to_string(&fixture_directory).as_str(), |_fixture| {
-            Ok(vec![FixtureOutput {
-                files: vec![FixtureRunFile {
-                    path: PathBuf::from("a.R"),
-                    output: "a v1".to_owned(),
-                }],
-            }])
+            Ok(vec![vec![FixtureRunFile {
+                path: PathBuf::from("a.R"),
+                output: "a v1".to_owned(),
+            }]])
         });
     }))
     .expect_err("fixture suite should fail");
@@ -320,13 +304,11 @@ fn rejects_missing_first_generation_expectations() {
     let panic = catch_unwind(AssertUnwindSafe(|| {
         run_fixture_suite(path_to_string(&fixture_directory).as_str(), |_fixture| {
             Ok(vec![
-                FixtureOutput { files: Vec::new() },
-                FixtureOutput {
-                    files: vec![FixtureRunFile {
-                        path: PathBuf::from("a.R"),
-                        output: "a v2".to_owned(),
-                    }],
-                },
+                Vec::new(),
+                vec![FixtureRunFile {
+                    path: PathBuf::from("a.R"),
+                    output: "a v2".to_owned(),
+                }],
             ])
         });
     }))
@@ -377,12 +359,10 @@ fn rejects_duplicate_fixture_names() {
 
     let panic = catch_unwind(AssertUnwindSafe(|| {
         run_fixture_suite(path_to_string(&fixture_directory).as_str(), |_fixture| {
-            Ok(vec![FixtureOutput {
-                files: vec![FixtureRunFile {
-                    path: PathBuf::new(),
-                    output: "one".to_owned(),
-                }],
-            }])
+            Ok(vec![vec![FixtureRunFile {
+                path: PathBuf::new(),
+                output: "one".to_owned(),
+            }]])
         });
     }))
     .expect_err("fixture suite should fail");
@@ -404,12 +384,10 @@ fn rejects_empty_paths_in_generational_initial_generation() {
 
     let panic = catch_unwind(AssertUnwindSafe(|| {
         run_fixture_suite(path_to_string(&fixture_directory).as_str(), |_fixture| {
-            Ok(vec![FixtureOutput {
-                files: vec![FixtureRunFile {
-                    path: PathBuf::from("a.R"),
-                    output: "a v1".to_owned(),
-                }],
-            }])
+            Ok(vec![vec![FixtureRunFile {
+                path: PathBuf::from("a.R"),
+                output: "a v1".to_owned(),
+            }]])
         });
     }))
     .expect_err("fixture suite should fail");

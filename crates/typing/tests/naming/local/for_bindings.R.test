@@ -12,23 +12,7 @@ For(x@b0)
   Block
     Symbol(x@b0)
 
-#---- for_variable_shadows_outer_binding_inside_loop
-x <- 1L
-for (x in list(1L)) {
-  x
-}
-x
-#++++
-Assign(x@b0)
-  Integer(1L)
-For(x@b1)
-  Call
-    Symbol(list@?)
-    Argument
-      Integer(1L)
-  Block
-    Symbol(x@b1)
-Symbol(x@?)
+No diagnostics.
 
 #---- loop_body_resolves_other_outer_binding
 y <- 1L
@@ -45,6 +29,8 @@ For(x@b1)
       Integer(1L)
   Block
     Symbol(y@?)
+
+No diagnostics.
 
 #---- assignment_inside_loop_rhs_sees_loop_binding
 x <- 0L
@@ -67,6 +53,8 @@ For(x@b1)
     Symbol(x@b2)
 Symbol(x@?)
 
+No diagnostics.
+
 #---- assignment_inside_loop_rhs_can_use_other_outer_binding
 y <- 0L
 for (x in list(1L)) {
@@ -87,3 +75,22 @@ For(x@b1)
       Symbol(y@?)
     Symbol(y@b2)
 Symbol(y@?)
+
+No diagnostics.
+
+#---- nested_closure_inside_loop_captures_loop_binding
+for (x in list(1L)) {
+  g <- function() x
+}
+#++++
+For(x@b0)
+  Call
+    Symbol(list@?)
+    Argument
+      Integer(1L)
+  Block
+    Assign(g@b1)
+      Function()
+        Symbol(x@b0)
+
+No diagnostics.

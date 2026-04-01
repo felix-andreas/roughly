@@ -1,0 +1,83 @@
+#==== function_globals
+#---- top_level_binding_used_inside_function
+x <- 1L
+f <- function() x
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(f@b1)
+  Function()
+    Symbol(x@?)
+
+No diagnostics.
+
+#==== nested_functions
+#---- nested_function_closes_over_outer_local
+f <- function() {
+  x <- 1L
+  g <- function() x
+}
+#++++
+Assign(f@b2)
+  Function()
+    Block
+      Assign(x@b0)
+        Integer(1L)
+      Assign(g@b1)
+        Function()
+          Symbol(x@b0)
+
+No diagnostics.
+
+#---- nested_function_closes_over_outer_parameter
+f <- function(x) {
+  g <- function() x
+}
+#++++
+Assign(f@b2)
+  Function(x@b0)
+    Block
+      Assign(g@b1)
+        Function()
+          Symbol(x@b0)
+
+No diagnostics.
+
+#---- nested_function_closes_over_top_level_global
+x <- 1L
+f <- function() {
+  g <- function() x
+}
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(f@b2)
+  Function()
+    Block
+      Assign(g@b1)
+        Function()
+          Symbol(x@?)
+
+No diagnostics.
+
+#---- multi_hop_nested_function_closes_over_outer_local
+f <- function() {
+  x <- 1L
+  g <- function() {
+    h <- function() x
+  }
+}
+#++++
+Assign(f@b3)
+  Function()
+    Block
+      Assign(x@b0)
+        Integer(1L)
+      Assign(g@b2)
+        Function()
+          Block
+            Assign(h@b1)
+              Function()
+                Symbol(x@b0)
+
+No diagnostics.

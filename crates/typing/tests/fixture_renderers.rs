@@ -1,29 +1,14 @@
 use typing::{
-    Diagnostic, Interner,
-    hir::{DefinitionItem, DefinitionKind, ExpressionId, ExpressionKind, HirArena, ModuleId},
+    Interner,
+    hir::{
+        DefinitionItem, DefinitionKind, ExpressionId, ExpressionKind, HirArena, Module, ModuleId,
+    },
     lower::LoweringContext,
     naming::{BindingId, ExpressionKey, LocalNamingResult, NamingResult, ProvisionalBindingId},
     type_syntax::render_surface_type,
     typecheck::{InferenceError, InferenceState},
     types::{Atomic, CoreType, InferenceVariableId, TypeScheme},
 };
-
-pub fn render_diagnostics(source: &str, diagnostics: &[Diagnostic]) -> String {
-    if diagnostics.is_empty() {
-        return "No diagnostics.\n".to_owned();
-    }
-
-    let mut rendered = String::new();
-
-    for (index, diagnostic) in diagnostics.iter().enumerate() {
-        if index > 0 {
-            rendered.push('\n');
-        }
-        rendered.push_str(&diagnostic.render(source));
-    }
-
-    rendered
-}
 
 pub fn render_expression_error_kind(error: &InferenceError) -> &'static str {
     match error {
@@ -156,22 +141,20 @@ pub fn render_interface_snapshot(
 
 pub fn render_named_hir(
     module_id: ModuleId,
-    arena: &HirArena,
-    definitions: &[DefinitionItem],
-    expressions: &[ExpressionId],
+    module: &Module,
     naming_result: &NamingResult,
     interner: &Interner,
 ) -> String {
     let mut lines = Vec::new();
 
-    for definition in definitions {
+    for definition in &module.definitions {
         render_named_definition(definition, interner, 0, &mut lines);
     }
 
-    for expression_id in expressions {
+    for expression_id in &module.expressions {
         render_named_expression(
             module_id,
-            arena,
+            &module.arena,
             *expression_id,
             naming_result,
             interner,
@@ -185,22 +168,20 @@ pub fn render_named_hir(
 
 pub fn render_locally_named_hir(
     module_id: ModuleId,
-    arena: &HirArena,
-    definitions: &[DefinitionItem],
-    expressions: &[ExpressionId],
+    module: &Module,
     local_naming_result: &LocalNamingResult,
     interner: &Interner,
 ) -> String {
     let mut lines = Vec::new();
 
-    for definition in definitions {
+    for definition in &module.definitions {
         render_named_definition(definition, interner, 0, &mut lines);
     }
 
-    for expression_id in expressions {
+    for expression_id in &module.expressions {
         render_locally_named_expression(
             module_id,
-            arena,
+            &module.arena,
             *expression_id,
             local_naming_result,
             interner,

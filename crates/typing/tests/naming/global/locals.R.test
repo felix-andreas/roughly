@@ -1,0 +1,45 @@
+#==== locals
+#---- local_assignment_introduces_fresh_binding
+#---- R/main.R
+f <- function() {
+  value <- 1L
+  value
+}
+#++++
+Assign(f@b1)
+  Function()
+    Block
+      Assign(value@b0)
+        Integer(1L)
+      Symbol(value@b0)
+
+#---- local_rebinding_creates_fresh_binding
+#---- R/main.R
+f <- function() {
+  value <- 1L
+  value <- "ok"
+  value
+}
+#++++
+Assign(f@b2)
+  Function()
+    Block
+      Assign(value@b0)
+        Integer(1L)
+      Assign(value@b1)
+        Character("\"ok\"")
+      Symbol(value@b1)
+
+#---- assignment_rhs_sees_outer_parameter_before_local_rebinding
+#---- R/main.R
+f <- function(x) {
+  x <- x
+  x
+}
+#++++
+Assign(f@b2)
+  Function(x@b0)
+    Block
+      Assign(x@b1)
+        Symbol(x@b0)
+      Symbol(x@b1)

@@ -1,0 +1,55 @@
+#==== value_lookup
+#---- script_can_consume_package_global_value
+#---- R/main.R
+x <- 1L
+#++++
+Assign(x@b0)
+  Integer(1L)
+#---- inst/scripts/helper.R
+x
+#++++
+Symbol(x@b0)
+
+#---- script_value_does_not_contribute_package_global
+#---- inst/scripts/helper.R
+x <- 1L
+#++++
+Assign(x@b0)
+  Integer(1L)
+#---- R/main.R
+x
+#++++
+Symbol(x@?)
+
+warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+--> 1:1-1:2
+| x
+
+#==== type_lookup
+#---- script_can_consume_package_global_type
+#---- R/main.R
+#: @type Person {integer}
+#++++
+TypeDefinition(Person = integer)
+#---- inst/scripts/helper.R
+#: Person
+value <- 1L
+#++++
+Assign(value@b0)
+  Integer(1L)
+
+#---- script_type_does_not_contribute_project_global
+#---- inst/scripts/helper.R
+#: @type Person {integer}
+#++++
+TypeDefinition(Person = integer)
+#---- R/main.R
+#: Person
+value <- 1L
+#++++
+Assign(value@b0)
+  Integer(1L)
+
+error[syntax-error] type syntax error: unknown type `Person`
+--> 1:1-1:10
+| #: Person

@@ -55,21 +55,27 @@ pub(crate) struct PackageNamingComputation {
 }
 
 pub(crate) fn resolve_package(
-    modules: &[(DocumentId, &Module)],
+    package_modules: &[(DocumentId, &Module)],
+    extra_modules: &[(DocumentId, &Module)],
     interner: &Interner,
 ) -> PackageNamingComputation {
     let mut context = PackageNamingContext::new(interner);
+    let all_modules = package_modules
+        .iter()
+        .chain(extra_modules.iter())
+        .copied()
+        .collect::<Vec<_>>();
 
-    for (document_id, module) in modules {
+    for (document_id, module) in &all_modules {
         context.resolve_document(*document_id, module);
     }
 
     context.finalize_all_bindings();
     context.record_local_resolutions();
-    context.collect_types(modules);
-    context.build_global_bindings(modules);
-    context.resolve_definitions(modules);
-    context.resolve_annotations(modules);
+    context.collect_types(package_modules);
+    context.build_global_bindings(package_modules);
+    context.resolve_definitions(&all_modules);
+    context.resolve_annotations(&all_modules);
     context.resolve_unresolved_values();
     context.finish()
 }
@@ -164,23 +170,43 @@ impl<'a> PackageNamingContext<'a> {
     }
 
     fn collect_types(&mut self, modules: &[(DocumentId, &Module)]) {
+        let mut definitions_by_symbol = BTreeMap::<Symbol, Vec<TypeDefinitionSite>>::new();
+
         for (document_id, module) in modules {
             for definition in &module.definitions {
-                if let Some(existing_type) = self.types.get(&definition.definition.name) {
-                    self.push_duplicate_type_definition_diagnostic(
-                        definition.definition.name,
-                        definition.range,
-                        existing_type.kind,
-                        *document_id,
-                    );
-                    continue;
-                }
-
-                self.types.insert(
-                    definition.definition.name,
-                    TypeInfo {
+                definitions_by_symbol
+                    .entry(definition.definition.name)
+                    .or_default()
+                    .push(TypeDefinitionSite {
+                        document_id: *document_id,
+                        range: definition.range,
                         kind: definition.definition.kind,
+                        arity: definition.definition.type_parameters.len(),
+                    });
+            }
+        }
+
+        for (symbol, definition_sites) in definitions_by_symbol {
+            if definition_sites.len() == 1 {
+                let definition_site = definition_sites
+                    .into_iter()
+                    .next()
+                    .expect("single-site type definition should exist");
+                self.types.insert(
+                    symbol,
+                    TypeInfo {
+                        kind: definition_site.kind,
+                        arity: definition_site.arity,
                     },
+                );
+                continue;
+            }
+
+            for definition_site in definition_sites {
+                self.push_duplicate_type_definition_diagnostic(
+                    symbol,
+                    definition_site.range,
+                    definition_site.document_id,
                 );
             }
         }
@@ -355,8 +381,28 @@ impl<'a> PackageNamingContext<'a> {
         document_id: DocumentId,
     ) {
         match self.types.get(&nominal_type.name) {
-            Some(type_info) if type_info.kind == DefinitionKind::Type => {}
-            Some(type_info) if type_info.kind == DefinitionKind::Alias => {
+            Some(type_info) => {
+                let kind = type_info.kind;
+                let arity = type_info.arity;
+                self.push_type_argument_arity_diagnostic(
+                    nominal_type.name,
+                    arity,
+                    nominal_type.type_arguments.len(),
+                    range,
+                    document_id,
+                );
+                if kind == DefinitionKind::Type {
+                    for type_argument in &nominal_type.type_arguments {
+                        self.resolve_surface_type(
+                            type_argument,
+                            &BTreeSet::new(),
+                            range,
+                            document_id,
+                        );
+                    }
+                    return;
+                }
+
                 let name = self
                     .render_type_name(nominal_type.name)
                     .unwrap_or_else(|| "<unknown>".to_owned());
@@ -370,7 +416,6 @@ impl<'a> PackageNamingContext<'a> {
                     ),
                 );
             }
-            Some(_) => {}
             None => {
                 self.push_unknown_type_diagnostic(nominal_type.name, range, document_id);
             }
@@ -390,7 +435,20 @@ impl<'a> PackageNamingContext<'a> {
     ) {
         match surface_type {
             SurfaceType::Named(name, arguments) => {
-                if !local_type_parameters.contains(name) && !self.types.contains_key(name) {
+                if local_type_parameters.contains(name) {
+                    return;
+                }
+
+                if let Some(type_info) = self.types.get(name) {
+                    let arity = type_info.arity;
+                    self.push_type_argument_arity_diagnostic(
+                        *name,
+                        arity,
+                        arguments.len(),
+                        range,
+                        document_id,
+                    );
+                } else {
                     self.push_unknown_type_diagnostic(*name, range, document_id);
                 }
 
@@ -470,7 +528,6 @@ impl<'a> PackageNamingContext<'a> {
         &mut self,
         symbol: Symbol,
         range: Range,
-        existing_kind: DefinitionKind,
         document_id: DocumentId,
     ) {
         let name = self
@@ -481,11 +538,33 @@ impl<'a> PackageNamingContext<'a> {
             Diagnostic::syntax_error(
                 range,
                 format!(
-                    "invalid semantics: type name `{name}` is already defined by an earlier {} declaration.",
-                    existing_kind.directive_name()
+                    "invalid semantics: type name `{name}` is already defined by another top-level @type or @alias declaration in this package."
                 ),
             ),
         );
+    }
+
+    fn push_type_argument_arity_diagnostic(
+        &mut self,
+        symbol: Symbol,
+        expected: usize,
+        found: usize,
+        range: Range,
+        document_id: DocumentId,
+    ) {
+        if expected == found {
+            return;
+        }
+
+        let name = self
+            .render_type_name(symbol)
+            .unwrap_or_else(|| "<unknown>".to_owned());
+        let message = if expected == 0 {
+            format!("type `{name}` does not take type arguments, but found {found}.")
+        } else {
+            format!("generic type `{name}` expects {expected} type argument(s), but found {found}.")
+        };
+        self.push_diagnostic(document_id, Diagnostic::syntax_error(range, message));
     }
 
     fn push_duplicate_global_binding_diagnostics(
@@ -768,4 +847,13 @@ pub struct ProvisionalBindingId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct TypeInfo {
     kind: DefinitionKind,
+    arity: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TypeDefinitionSite {
+    document_id: DocumentId,
+    range: Range,
+    kind: DefinitionKind,
+    arity: usize,
 }
