@@ -128,13 +128,13 @@ The fixture runner only loads files with the `.test` extension, so suite-local `
 Run one focused fixture case with:
 
 ```sh
-FIXTURE_FILTER=group__case cargo test -p typing --test test_fixtures <suite> -- --nocapture
+FIXTURE_FILTER=group__case cargo test -p analysis --test test_fixtures <suite> -- --nocapture
 ```
 
 Default crate test command:
 
 ```sh
-cargo test -p typing
+cargo test -p analysis
 ```
 
 ## Suite direction

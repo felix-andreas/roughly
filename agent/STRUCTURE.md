@@ -1,6 +1,6 @@
 # Structure
 
-This document is the authoritative desired file structure for the `typing` crate.
+This document is the authoritative desired file structure for the `analysis` crate.
 
 Keep it focused on the intended near-term file split and the role of each file.
 

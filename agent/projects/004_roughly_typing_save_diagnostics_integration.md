@@ -2,7 +2,7 @@
 
 ## Goal
 
-Integrate the `typing` crate into `roughly` for a first usable milestone that publishes typing
+Integrate the `analysis` crate into `roughly` for a first usable milestone that publishes typing
 diagnostics on save while leaving the existing fast `roughly` diagnostics path in place during
 editing.
 

@@ -5,13 +5,7 @@
 mod fixture_renderers;
 
 use {
-    fixture_renderers::{
-        render_core_type, render_expression_error_kind, render_expression_types,
-        render_interface_snapshot, render_locally_named_hir, render_named_hir, render_type_scheme,
-    },
-    fixtures::{Fixture, FixtureKind, FixtureRunFile, run_fixture_suite},
-    std::path::PathBuf,
-    typing::{
+    analysis::{
         Analysis, AnalysisPhase, Document, DocumentId, Interner, check,
         hir::ExpressionKind,
         lower::{self, LoweringContext},
@@ -21,6 +15,12 @@ use {
         type_syntax::{parse_type_syntax, render_type_syntax},
         typecheck::inference_state_with_builtins,
     },
+    fixture_renderers::{
+        render_core_type, render_expression_error_kind, render_expression_types,
+        render_interface_snapshot, render_locally_named_hir, render_named_hir, render_type_scheme,
+    },
+    fixtures::{Fixture, FixtureKind, FixtureRunFile, run_fixture_suite},
+    std::path::PathBuf,
 };
 
 #[test]

@@ -1,4 +1,4 @@
-# Typing Crate Discussion
+# Discussion
 
 This file is scratch space for active design discussion.
 

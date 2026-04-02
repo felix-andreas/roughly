@@ -1,6 +1,6 @@
-# `typing` Memory
+# `analysis` Memory
 
-This document stores cross-session context for the `typing` crate.
+This document stores cross-session context for the `analysis` crate.
 
 Keep this file compact and aggressively pruned. It should preserve only high-value continuity that is likely to matter in a later session.
 

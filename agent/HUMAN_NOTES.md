@@ -165,7 +165,7 @@ pub enum AttachedAnnotation {
   - must lowering support all syntax??
   - do we need lowering?
   
-- unify usage of rope helpers in roughly and typing crate
+- unify usage of rope helpers in roughly and analysis crate
   - shared tree helpers
   - shared rope helpers (maybe hide behind opaque struct)
   

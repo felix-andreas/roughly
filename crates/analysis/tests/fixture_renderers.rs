@@ -1,4 +1,4 @@
-use typing::{
+use analysis::{
     Interner,
     hir::{
         DefinitionItem, DefinitionKind, ExpressionId, ExpressionKind, HirArena, Module, ModuleId,
@@ -57,11 +57,11 @@ pub fn render_type_scheme(interner: &Interner, type_scheme: &TypeScheme) -> Stri
 }
 
 pub fn render_interface_snapshot(
-    module: &typing::Module,
+    module: &analysis::Module,
     inference_state: &InferenceState,
     lowering_context: &LoweringContext,
 ) -> String {
-    let mut exported_entries = Vec::<(usize, typing::Symbol, String)>::new();
+    let mut exported_entries = Vec::<(usize, analysis::Symbol, String)>::new();
 
     for (index, definition_item) in module.definitions.iter().enumerate() {
         let definition = &definition_item.definition;
@@ -990,7 +990,7 @@ fn provisional_binding_label(binding_id: ProvisionalBindingId) -> String {
 fn find_binding_by_symbol_and_range(
     naming_result: &NamingResult,
     module_id: ModuleId,
-    symbol: typing::Symbol,
+    symbol: analysis::Symbol,
     range: tree_sitter::Range,
 ) -> Option<BindingId> {
     naming_result
@@ -1005,7 +1005,7 @@ fn find_binding_by_symbol_and_range(
 fn find_local_binding_by_symbol_and_range(
     local_naming_result: &LocalNamingResult,
     module_id: ModuleId,
-    symbol: typing::Symbol,
+    symbol: analysis::Symbol,
     range: tree_sitter::Range,
 ) -> Option<ProvisionalBindingId> {
     local_naming_result

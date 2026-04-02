@@ -1,4 +1,4 @@
-// NOTE: most of this is moved to typing crate
+// NOTE: most of this is moved to analysis crate
 // we should functionality from there
 
 use {

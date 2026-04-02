@@ -1,6 +1,6 @@
 # Initial Design
 
-This document preserves early, non-authoritative semantics ideas for the `typing` crate.
+This document preserves early, non-authoritative semantics ideas for the `analysis` crate.
 
 It exists as a staging area for ideas that may be useful in future design discussions but have **not** been formalized into `SEMANTICS.md`.
 
@@ -39,7 +39,7 @@ This document aims to serve as a design specification for the semantics of a sta
 User-visible diagnostics and source-driven inference behavior in `crates/typing` are currently tested with fixture files rather than external snapshot files.
 
 Recommended flow:
-- run focused `typing` tests while iterating, usually `cargo test -p typing`
+- run focused `analysis` tests while iterating, usually `cargo test -p analysis`
 - update expected output in `tests/fixtures/diagnostics.R.test` only when behavior or wording intentionally changes
 - update expected inference output in `tests/fixtures/inference.R.test` only when behavior intentionally changes
 - review fixture diffs deliberately instead of treating them as routine churn

@@ -17,8 +17,8 @@ test *args:
 test-docs:
     cargo test --test test_format -- --no-capture docs
 
-test-typing filter="" *args:
-    FIXTURE_FILTER={{ filter }} cargo nextest run -p typing --test test_fixtures {{ args }}
+test-analysis filter="" *args:
+    FIXTURE_FILTER={{ filter }} cargo nextest run -p analysis --test test_fixtures {{ args }}
 
 snapshot *args:
     cargo insta test --review -- --nocapture {{ args }}

@@ -1,4 +1,4 @@
-use {crate::config::ExperimentalFeatures, typing::HoverInfo};
+use {crate::config::ExperimentalFeatures, analysis::HoverInfo};
 
 pub fn markdown(hover_info: &HoverInfo, experimental_features: ExperimentalFeatures) -> String {
     let mut sections = hover_info

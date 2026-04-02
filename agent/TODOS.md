@@ -1,6 +1,6 @@
-# `typing` TODOs
+# `analysis` TODOs
 
-This document tracks actionable planned work for the `typing` crate.
+This document tracks actionable planned work for the `analysis` crate.
 
 `SEMANTICS.md` is the user-facing contract. `ARCHITECTURE.md` describes implementation constraints. Keep this file focused on unfinished work.
 

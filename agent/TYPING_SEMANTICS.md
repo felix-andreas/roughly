@@ -1,6 +1,6 @@
-# Semantics
+# TYPING_SEMANTICS
 
-This document is the user-facing semantics contract for the `typing` crate.
+This document defines the user-facing typing semantics contract.
 
 Over time, semantic content should move here from older design documents. Until that migration is complete, keep this document focused, high signal, and authoritative for the areas it covers.
 

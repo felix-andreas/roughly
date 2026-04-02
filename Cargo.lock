@@ -27,6 +27,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "analysis"
+version = "0.1.1"
+dependencies = [
+ "fixtures",
+ "indoc",
+ "insta",
+ "itertools 0.14.0",
+ "ropey",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tree-sitter",
+ "tree-sitter-r",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1201,6 +1217,7 @@ dependencies = [
 name = "roughly"
 version = "0.1.1"
 dependencies = [
+ "analysis",
  "async-lsp",
  "clap",
  "console 0.16.1",
@@ -1225,7 +1242,6 @@ dependencies = [
  "tracing-tree",
  "tree-sitter",
  "tree-sitter-r",
- "typing",
 ]
 
 [[package]]
@@ -1788,22 +1804,6 @@ source = "git+https://github.com/felix-andreas/tree-sitter-r?rev=1e4506387a93739
 dependencies = [
  "cc",
  "tree-sitter-language",
-]
-
-[[package]]
-name = "typing"
-version = "0.1.1"
-dependencies = [
- "fixtures",
- "indoc",
- "insta",
- "itertools 0.14.0",
- "ropey",
- "serde",
- "serde_json",
- "thiserror",
- "tree-sitter",
- "tree-sitter-r",
 ]
 
 [[package]]

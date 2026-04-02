@@ -5,6 +5,7 @@ use {
         lsp_types::DiagnosticSeverity,
         server, tree, utils,
     },
+    analysis::Analysis,
     console::style,
     ignore::Walk,
     ropey::Rope,
@@ -12,7 +13,6 @@ use {
         path::{Path, PathBuf},
         time::Duration,
     },
-    typing::Analysis,
 };
 
 //

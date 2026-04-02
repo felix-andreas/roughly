@@ -1,4 +1,4 @@
-# Typing Crate Decision Log
+# Decision Log
 
 Keep newest decisions at the top.
 
@@ -66,7 +66,7 @@ Keep newest decisions at the top.
 - `check` remains the top-level orchestration entry point.
   - This keeps the public entry point aligned with the full checking pipeline instead of exposing internal phases.
 
-- `parser` is not a real `typing` crate phase and should not remain on the public crate surface.
+- `parser` is not a real `analysis` crate phase and should not remain on the public crate surface.
   - Syntax parsing is external integration or test support, while the checker should be able to consume already-parsed syntax.
 
 - `naming` is the agreed phase name.

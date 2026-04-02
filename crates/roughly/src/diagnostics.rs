@@ -8,11 +8,11 @@ use {
         lsp_types::{Diagnostic, DiagnosticSeverity},
         typing_diagnostics, utils,
     },
+    analysis::Analysis,
     ropey::Rope,
     serde::Deserialize,
     thiserror::Error,
     tree_sitter::Node,
-    typing::Analysis,
 };
 
 #[derive(Debug, Default, Clone, Copy, Deserialize)]

@@ -22,6 +22,7 @@ use {
         },
         symbols, typing_diagnostics as analysis_diagnostics, utils,
     },
+    analysis::{Analysis, AnalysisPhase, TextPosition, TextRange},
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
         client_monitor::ClientProcessMonitorLayer,
@@ -41,7 +42,6 @@ use {
     },
     tower::ServiceBuilder,
     tree_sitter::Point,
-    typing::{Analysis, AnalysisPhase, TextPosition, TextRange},
 };
 
 const CONFIG_FILE_NAME: &str = "roughly.toml";
@@ -123,11 +123,11 @@ impl ServerState {
         self.workspace_root.join("R")
     }
 
-    fn document(&self, path: &Path) -> Option<&typing::Document> {
+    fn document(&self, path: &Path) -> Option<&analysis::Document> {
         self.analysis_state.document(path)
     }
 
-    fn opened_document(&self, path: &Path) -> Option<&typing::Document> {
+    fn opened_document(&self, path: &Path) -> Option<&analysis::Document> {
         self.open_documents
             .contains(path)
             .then(|| self.document(path))
@@ -494,7 +494,7 @@ impl LanguageServer for ServerState {
 
         if self.config.lint.experimental_typing && path.starts_with(self.workspace_r_path()) {
             self.sync_dirty_documents();
-            typing::check(&mut self.analysis_state);
+            analysis::check(&mut self.analysis_state);
 
             if let Some(document_id) = self.analysis_state.document_id_for_path(&path) {
                 diagnostics.extend(analysis_diagnostics::convert_diagnostics(
@@ -578,7 +578,7 @@ impl LanguageServer for ServerState {
                             self.analysis_state
                                 .delete_document(&path)
                                 .or_else(|error| match error {
-                                    typing::AnalysisError::DocumentNotFound(_) => Ok(()),
+                                    analysis::AnalysisError::DocumentNotFound(_) => Ok(()),
                                     error => Err(error),
                                 })
                                 .expect(&format!(

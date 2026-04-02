@@ -1,6 +1,6 @@
 # Technical Debt
 
-This document records current structural debt in the `typing` crate.
+This document records current structural debt in the `analysis` crate.
 
 It is not the architecture contract and not the action plan. `ARCHITECTURE.md` remains authoritative for intended design, and `TODOS.md` remains the actionable plan. This file exists to capture important implementation debt that is already present and should be paid down deliberately.
 
@@ -29,7 +29,7 @@ This creates drift risk and makes tests depend on setup that is not owned by a s
 
 ### Rope and tree-sitter helper logic overlaps with `roughly`
 
-The `typing` crate currently carries rope and tree-sitter helper code that overlaps with helper logic in the `roughly` crate.
+The `analysis` crate currently carries rope and tree-sitter helper code that overlaps with helper logic in the `roughly` crate.
 
 This includes text extraction and source-position helper functionality that is conceptually shared infrastructure rather than checker-specific behavior.
 

@@ -6,7 +6,7 @@ use {
 pub fn analyze(
     _node: tree_sitter::Node,
     rope: &Rope,
-    analysis_state: &mut typing::Analysis,
+    analysis_state: &mut analysis::Analysis,
 ) -> Vec<Diagnostic> {
     let document_path = analysis_state.base_path().join("R").join("current.R");
 
@@ -17,16 +17,16 @@ pub fn analyze(
         return Vec::new();
     }
 
-    convert_diagnostics(typing::check(analysis_state).diagnostics)
+    convert_diagnostics(analysis::check(analysis_state).diagnostics)
 }
 
 pub fn convert_diagnostics(
-    diagnostics: impl IntoIterator<Item = typing::Diagnostic>,
+    diagnostics: impl IntoIterator<Item = analysis::Diagnostic>,
 ) -> Vec<Diagnostic> {
     diagnostics.into_iter().map(convert_diagnostic).collect()
 }
 
-pub fn convert_diagnostic(diagnostic: typing::Diagnostic) -> Diagnostic {
+pub fn convert_diagnostic(diagnostic: analysis::Diagnostic) -> Diagnostic {
     Diagnostic {
         range: convert_range(diagnostic.range),
         severity: Some(convert_severity(diagnostic.severity)),
@@ -40,10 +40,10 @@ pub fn convert_diagnostic(diagnostic: typing::Diagnostic) -> Diagnostic {
     }
 }
 
-fn convert_severity(severity: typing::Severity) -> DiagnosticSeverity {
+fn convert_severity(severity: analysis::Severity) -> DiagnosticSeverity {
     match severity {
-        typing::Severity::Error => DiagnosticSeverity::ERROR,
-        typing::Severity::Warning => DiagnosticSeverity::WARNING,
+        analysis::Severity::Error => DiagnosticSeverity::ERROR,
+        analysis::Severity::Warning => DiagnosticSeverity::WARNING,
     }
 }
 

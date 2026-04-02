@@ -1,8 +1,8 @@
 use {
+    analysis::tree::{field, kind},
     itertools::Itertools,
     serde_json::Value,
     tree_sitter::Language,
-    typing::tree::{field, kind},
 };
 
 #[test]

@@ -1,6 +1,6 @@
 # Fixtures
 
-This crate parses the `.test` fixture language used by the `typing` crate.
+This crate parses the `.test` fixture language used by the `analysis` crate.
 
 The crate currently parses two author-facing fixture shapes:
 

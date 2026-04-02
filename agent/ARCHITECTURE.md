@@ -1,6 +1,6 @@
 # Architecture
 
-This document is the authoritative implementation architecture for the `typing` crate.
+This document is the authoritative implementation architecture for the `analysis` crate.
 
 `SEMANTICS.md` is the authoritative user-facing typing contract. This file defines the implementation boundaries needed to realize that contract. Keep it focused on durable phase boundaries and representation boundaries.
 
@@ -27,7 +27,7 @@ parsed syntax -> `lower` -> `naming` -> `typecheck` -> checked-file results and 
 
 `check` is the orchestration entry point around that pipeline. It wires phases together and returns file results, but it is not itself a semantic phase.
 
-Syntax parsing is not a `typing` crate phase. The checker may receive already-parsed syntax from `roughly` or from tests.
+Syntax parsing is not a `analysis` crate phase. The checker may receive already-parsed syntax from `roughly` or from tests.
 
 Diagnostics are not a separate phase. They are structured outputs produced by lowering, naming, and typechecking.
 

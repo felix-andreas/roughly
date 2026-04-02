@@ -1,4 +1,4 @@
-use typing::{
+use analysis::{
     typecheck::{InferenceEntry, InferenceState},
     types::{Atomic, CoreType},
 };
