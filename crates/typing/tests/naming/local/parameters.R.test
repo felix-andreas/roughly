@@ -45,3 +45,44 @@ Assign(identity@b2)
       Symbol(x@b0)
 
 No diagnostics.
+
+#---- parameter_shadows_top_level_binding
+x <- 1L
+f <- function(x) x
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(f@b2)
+  Function(x@b1)
+    Symbol(x@b1)
+
+No diagnostics.
+
+#---- nested_function_closes_over_enclosing_parameter
+f <- function(x) {
+  g <- function() x
+}
+#++++
+Assign(f@b2)
+  Function(x@b0)
+    Block
+      Assign(g@b1)
+        Function()
+          Symbol(x@b0)
+
+No diagnostics.
+
+#---- local_assignment_later_shadows_parameter
+f <- function(x) {
+  x <- "ok"
+  x
+}
+#++++
+Assign(f@b2)
+  Function(x@b0)
+    Block
+      Assign(x@b1)
+        Character("\"ok\"")
+      Symbol(x@b1)
+
+No diagnostics.

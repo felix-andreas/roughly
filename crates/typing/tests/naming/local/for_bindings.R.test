@@ -94,3 +94,23 @@ For(x@b0)
         Symbol(x@b0)
 
 No diagnostics.
+
+#---- for_variable_shadows_outer_top_level_binding
+x <- 1L
+for (x in list(1L)) {
+  x
+}
+x
+#++++
+Assign(x@b0)
+  Integer(1L)
+For(x@b1)
+  Call
+    Symbol(list@?)
+    Argument
+      Integer(1L)
+  Block
+    Symbol(x@b1)
+Symbol(x@?)
+
+No diagnostics.

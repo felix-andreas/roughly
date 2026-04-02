@@ -33,6 +33,20 @@ Call
   Argument
     Symbol(value@b0)
 
+#---- distinct_top_level_bindings_have_distinct_uses
+#---- R/main.R
+x <- 1L
+y <- "ok"
+x
+y
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(y@b1)
+  Character("\"ok\"")
+Symbol(x@b0)
+Symbol(y@b1)
+
 #==== rebinding
 #---- top_level_rebinding_creates_fresh_binding
 #---- R/main.R

@@ -81,3 +81,68 @@ Assign(f@b3)
                 Symbol(x@b0)
 
 No diagnostics.
+
+#---- closure_parameter_shadows_enclosing_binding
+f <- function() {
+  x <- 1L
+  g <- function(x) x
+}
+#++++
+Assign(f@b3)
+  Function()
+    Block
+      Assign(x@b0)
+        Integer(1L)
+      Assign(g@b2)
+        Function(x@b1)
+          Symbol(x@b1)
+
+No diagnostics.
+
+#---- closure_local_shadows_enclosing_binding
+f <- function(x) {
+  g <- function() {
+    x <- "ok"
+    x
+  }
+}
+#++++
+Assign(f@b3)
+  Function(x@b0)
+    Block
+      Assign(g@b2)
+        Function()
+          Block
+            Assign(x@b1)
+              Character("\"ok\"")
+            Symbol(x@b1)
+
+No diagnostics.
+
+#---- closure_uses_nearest_shadowing_binding_across_hops
+x <- 1L
+f <- function() {
+  x <- "outer"
+  g <- function() {
+    x <- TRUE
+    h <- function() x
+  }
+}
+#++++
+Assign(x@b0)
+  Integer(1L)
+Assign(f@b5)
+  Function()
+    Block
+      Assign(x@b1)
+        Character("\"outer\"")
+      Assign(g@b4)
+        Function()
+          Block
+            Assign(x@b2)
+              Logical(true)
+            Assign(h@b3)
+              Function()
+                Symbol(x@b2)
+
+No diagnostics.

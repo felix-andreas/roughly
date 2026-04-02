@@ -32,3 +32,154 @@ Assign(list@b0)
 warning[naming] Top-level binding `list` shadows a builtin.
 --> 1:1-1:11
 | list <- 1L
+
+#==== duplicate_values
+#---- duplicate_top_level_value_names_across_two_files_warn_at_both_sites
+#---- R/a.R
+x <- 1L
+#++++
+Assign(x@b0)
+  Integer(1L)
+
+warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
+--> 1:1-1:8
+| x <- 1L
+#---- R/b.R
+x <- 2L
+#++++
+Assign(x@b1)
+  Integer(2L)
+
+warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
+--> 1:1-1:8
+| x <- 2L
+
+#---- duplicate_top_level_value_names_across_three_files_produce_full_warning_chain
+#---- R/a.R
+x <- 1L
+#++++
+Assign(x@b0)
+  Integer(1L)
+
+warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
+--> 1:1-1:8
+| x <- 1L
+#---- R/b.R
+x <- 2L
+#++++
+Assign(x@b1)
+  Integer(2L)
+
+warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
+--> 1:1-1:8
+| x <- 2L
+
+warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
+--> 1:1-1:8
+| x <- 2L
+#---- R/c.R
+x <- 3L
+#++++
+Assign(x@b2)
+  Integer(3L)
+
+warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
+--> 1:1-1:8
+| x <- 3L
+
+#==== type_conflicts
+#---- duplicate_type_names_across_several_files_mark_every_conflicting_declaration
+#---- R/a.R
+#: @type Person {integer}
+#++++
+TypeDefinition(Person = integer)
+
+error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+--> 1:1-1:26
+| #: @type Person {integer}
+#---- R/b.R
+#: @type Person {double}
+#++++
+TypeDefinition(Person = double)
+
+error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+--> 1:1-1:25
+| #: @type Person {double}
+#---- R/c.R
+#: @alias Person {character}
+#++++
+TypeAlias(Person = character)
+
+error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+--> 1:1-1:29
+| #: @alias Person {character}
+
+#==== mixed_package_failures
+#---- later_package_winner_does_not_beat_local_shadow
+#---- R/a.R
+x <- 1L
+#++++
+Assign(x@b0)
+  Integer(1L)
+
+warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
+--> 1:1-1:8
+| x <- 1L
+#---- R/b.R
+x <- 2L
+#++++
+Assign(x@b1)
+  Integer(2L)
+
+warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
+--> 1:1-1:8
+| x <- 2L
+#---- R/c.R
+f <- function() {
+  x <- 3L
+  x
+}
+#++++
+Assign(f@b3)
+  Function()
+    Block
+      Assign(x@b2)
+        Integer(3L)
+      Symbol(x@b2)
+
+#---- cross_file_value_lookup_and_type_failure_in_same_package
+#---- R/a.R
+x <- 1L
+#++++
+Assign(x@b0)
+  Integer(1L)
+#---- R/b.R
+#: Person
+x
+#++++
+Symbol(x@b0)
+
+error[syntax-error] type syntax error: unknown type `Person`
+--> 1:1-1:10
+| #: Person
+
+#==== package_and_scripts
+#---- package_and_script_diagnostics_render_on_both_sides
+#---- R/main.R
+x
+#++++
+Symbol(x@?)
+
+warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+--> 1:1-1:2
+| x
+#---- inst/scripts/helper.R
+#: Person
+value <- 1L
+#++++
+Assign(value@b0)
+  Integer(1L)
+
+error[syntax-error] type syntax error: unknown type `Person`
+--> 1:1-1:10
+| #: Person

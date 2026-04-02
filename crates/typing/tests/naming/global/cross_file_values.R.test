@@ -69,6 +69,30 @@ Assign(f@b1)
   Function()
     Symbol(x@b0)
 
+#---- fixture_document_order_controls_package_winner
+#---- R/b.R
+x <- 1L
+#++++
+Assign(x@b0)
+  Integer(1L)
+
+warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
+--> 1:1-1:8
+| x <- 1L
+#---- R/a.R
+x <- 2L
+#++++
+Assign(x@b1)
+  Integer(2L)
+
+warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
+--> 1:1-1:8
+| x <- 2L
+#---- R/c.R
+x
+#++++
+Symbol(x@b1)
+
 #---- three_file_rebinding_chain_uses_final_winner
 #---- R/a.R
 x <- 1L
@@ -100,6 +124,47 @@ Assign(x@b2)
 
 warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
 --> 1:1-1:8
+| x <- 3L
+#---- R/d.R
+x
+#++++
+Symbol(x@b2)
+
+#---- rebinding_chain_with_intermediate_consumers
+#---- R/a.R
+x <- 1L
+#++++
+Assign(x@b0)
+  Integer(1L)
+
+warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
+--> 1:1-1:8
+| x <- 1L
+#---- R/b.R
+x
+x <- 2L
+#++++
+Symbol(x@b2)
+Assign(x@b1)
+  Integer(2L)
+
+warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
+--> 2:1-2:8
+| x <- 2L
+
+warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
+--> 2:1-2:8
+| x <- 2L
+#---- R/c.R
+x
+x <- 3L
+#++++
+Symbol(x@b2)
+Assign(x@b2)
+  Integer(3L)
+
+warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
+--> 2:1-2:8
 | x <- 3L
 #---- R/d.R
 x

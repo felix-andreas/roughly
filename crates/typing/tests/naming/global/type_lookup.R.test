@@ -93,6 +93,18 @@ value <- 1L
 Assign(value@b0)
   Integer(1L)
 
+#---- annotation_forward_reference_resolves_across_files
+#---- R/a.R
+#: Person
+value <- 1L
+#++++
+Assign(value@b0)
+  Integer(1L)
+#---- R/b.R
+#: @type Person {integer}
+#++++
+TypeDefinition(Person = integer)
+
 #==== nominal_introduction
 #---- nominal_introduction_accepts_nominal_type
 #---- R/main.R
@@ -122,3 +134,17 @@ Assign(value@b0)
     Symbol(list@?)
     Argument(name)
       Character("\"bob\"")
+
+#---- nominal_introduction_accepts_fully_applied_generic_type
+#---- R/main.R
+#: @type Person<T> {list{value: T}}
+
+#: @new Person<integer>
+value <- list(value = 1L)
+#++++
+TypeDefinition(Person<T> = list{value: T})
+Assign(value@b0)
+  Call
+    Symbol(list@?)
+    Argument(value)
+      Integer(1L)
