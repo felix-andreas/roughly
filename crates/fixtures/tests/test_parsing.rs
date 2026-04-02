@@ -1,6 +1,7 @@
 use {
     fixtures::{
-        FixtureExpectedOutput, FixtureKind, FixtureOperation, ParseFixtureError, parse_file,
+        FixtureExpectedOutput, FixtureGenerationExpectation, FixtureKind, FixtureOperation,
+        ParseFixtureError, parse_file,
     },
     indoc::indoc,
     std::path::PathBuf,
@@ -284,26 +285,52 @@ fn rejects_multi_file_empty_paths() {
 }
 
 #[test]
-fn rejects_delete_operations_with_expectations() {
-    let error = parse_file(indoc! {"
+fn parses_generation_expectations_with_explicit_target_paths() {
+    let fixture_file = parse_file(indoc! {"
         #==== workspace
-        #---- invalid
+        #---- generational
         #.... v1
-        #---- delete a.R
-        #++++ any
+        #---- a.R
+        alpha <- 1
+        #++++
+        a v1
+        #---- lookup.hover
+        R/a.R:1:1
+        #++++
+        hover v1
+        #.... v2
+        #---- move a.R -> b.R
+        #++++ lookup.hover
+        hover v2
+        #---- delete b.R
+        #++++ lookup.hover
+        no hover
     "})
-    .expect_err("fixture should fail");
+    .expect("fixture should parse");
 
+    let FixtureKind::MultiFile(case) = &fixture_file.groups[0].cases[0].kind else {
+        panic!("expected multi-file fixture case");
+    };
+
+    assert_eq!(case.generations.len(), 1);
     assert_eq!(
-        error,
-        ParseFixtureError::InvalidFixture {
-            message: "delete operations must not be followed by an output expectation".to_owned()
-        }
+        case.generations[0].entries[0].expectation,
+        Some(FixtureGenerationExpectation {
+            path: PathBuf::from("lookup.hover"),
+            output: FixtureExpectedOutput::Exact("hover v2".to_owned()),
+        })
+    );
+    assert_eq!(
+        case.generations[0].entries[1].expectation,
+        Some(FixtureGenerationExpectation {
+            path: PathBuf::from("lookup.hover"),
+            output: FixtureExpectedOutput::Exact("no hover".to_owned()),
+        })
     );
 }
 
 #[test]
-fn rejects_non_bare_multi_file_expectation_headers() {
+fn rejects_non_bare_initial_multi_file_expectation_headers() {
     let error = parse_file(indoc! {"
         #==== workspace
         #---- invalid
@@ -318,6 +345,33 @@ fn rejects_non_bare_multi_file_expectation_headers() {
         error,
         ParseFixtureError::InvalidFixture {
             message: "output expectations must use bare `#++++` or `#++++ any`".to_owned()
+        }
+    );
+}
+
+#[test]
+fn rejects_untargeted_generation_expectations_for_delete_operations() {
+    let error = parse_file(indoc! {"
+        #==== workspace
+        #---- invalid
+        #.... v1
+        #---- a.R
+        alpha <- 1
+        #++++
+        a v1
+        #.... v2
+        #---- delete a.R
+        #++++
+        gone
+    "})
+    .expect_err("fixture should fail");
+
+    assert_eq!(
+        error,
+        ParseFixtureError::InvalidFixture {
+            message:
+                "output expectations without a target path require an operation with an output path"
+                    .to_owned()
         }
     );
 }

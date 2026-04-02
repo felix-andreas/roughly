@@ -37,7 +37,7 @@ That overlap increases maintenance cost and creates drift risk between the synta
 
 ### Tree-sitter node matching is string-based in hot front-end code
 
-The `typing` front end currently matches tree-sitter node kinds and fields through string-based APIs such as `kind()` and `child_by_field_name()`.
+The `analysis` front end currently matches tree-sitter node kinds and fields through string-based APIs such as `kind()` and `child_by_field_name()`.
 
 `roughly` already uses `kind_id()` and `field_id()` style access in several places. That difference suggests an opportunity to consolidate syntax constants and traversal helpers into reusable shared infrastructure.
 

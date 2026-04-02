@@ -44,6 +44,8 @@ fn computes_expected_output_paths_for_multi_file_generations() {
         #++++ any
         #.... v2
         #---- move R/b.R -> R/c.R
+        #++++ hover.request
+        hover v2
     "})
     .expect("fixture should parse");
 
@@ -64,7 +66,11 @@ fn computes_expected_output_paths_for_multi_file_generations() {
     assert_eq!(second_paths.name, "v2");
     assert_eq!(
         second_paths.paths,
-        vec![PathBuf::from("R/a.R"), PathBuf::from("R/c.R")]
+        vec![
+            PathBuf::from("R/a.R"),
+            PathBuf::from("R/c.R"),
+            PathBuf::from("hover.request"),
+        ]
     );
 }
 
@@ -110,11 +116,17 @@ fn carries_expectations_forward_across_generations() {
         #---- b.R
         beta <- alpha
         #++++ any
+        #---- lookup.hover
+        a hover v1
+        #++++
+        hover v1
         #.... v2
         #---- edit a.R 1:11-1:11 -> \" + 2\"
         #++++
         a v2
         #---- move b.R -> c.R
+        #++++ lookup.hover
+        hover v2
         #---- delete old.R
     "});
 
@@ -129,6 +141,10 @@ fn carries_expectations_forward_across_generations() {
                     path: PathBuf::from("b.R"),
                     output: "anything".to_owned(),
                 },
+                FixtureRunFile {
+                    path: PathBuf::from("lookup.hover"),
+                    output: "hover v1".to_owned(),
+                },
             ],
             vec![
                 FixtureRunFile {
@@ -139,7 +155,50 @@ fn carries_expectations_forward_across_generations() {
                     path: PathBuf::from("c.R"),
                     output: "still anything".to_owned(),
                 },
+                FixtureRunFile {
+                    path: PathBuf::from("lookup.hover"),
+                    output: "hover v2".to_owned(),
+                },
             ],
+        ])
+    });
+}
+
+#[test]
+fn allows_delete_operations_to_assert_other_paths() {
+    let fixture_directory = write_fixture_suite(indoc! {"
+        #==== workspace
+        #---- generational
+        #.... v1
+        #---- a.R
+        alpha <- 1
+        #++++ any
+        #---- lookup.hover
+        R/a.R:1:1
+        #++++
+        hover v1
+        #.... v2
+        #---- delete a.R
+        #++++ lookup.hover
+        no hover
+    "});
+
+    run_fixture_suite(path_to_string(&fixture_directory).as_str(), |_fixture| {
+        Ok(vec![
+            vec![
+                FixtureRunFile {
+                    path: PathBuf::from("a.R"),
+                    output: "anything".to_owned(),
+                },
+                FixtureRunFile {
+                    path: PathBuf::from("lookup.hover"),
+                    output: "hover v1".to_owned(),
+                },
+            ],
+            vec![FixtureRunFile {
+                path: PathBuf::from("lookup.hover"),
+                output: "no hover".to_owned(),
+            }],
         ])
     });
 }

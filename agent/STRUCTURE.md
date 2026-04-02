@@ -28,7 +28,6 @@ Keep it focused on the intended near-term file split and the role of each file.
 - `ide.rs`
   - editor-facing semantic queries over analysis state
   - hover and later goto-definition / references-style lookups
-  - keep presentation-neutral; return structured data rather than markdown
 
 - `type_syntax.rs`
   - typing-comment and type-declaration parsing

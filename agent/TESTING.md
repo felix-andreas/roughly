@@ -10,7 +10,7 @@ Use ordinary Rust tests only when the behavior is awkward to express as a render
 
 ## Fixture format
 
-The current typing fixture runner lives in `tests/test_fixtures.rs`.
+The current analysis fixture runner lives in `tests/test_fixtures.rs`.
 Fixture parsing itself lives in the separate `fixtures` crate.
 
 Some suites may include a local `README.md` with more detailed strategy, coverage expectations, or renderer-specific guidance. Use `TESTING.md` for crate-level test contracts and suite-local README files for suite-specific concepts that would otherwise make this document too long.
@@ -24,7 +24,7 @@ The `fixtures` crate currently parses two fixture shapes:
 - `Simple`
 - `MultiFile`
 
-All typing fixture runners should normalize their results to one shared output shape:
+All analysis fixture runners should normalize their results to one shared output shape:
 
 ```rust
 Result<Vec<Vec<FixtureRunFile>>, String>
@@ -106,8 +106,9 @@ Rules:
   file is reintroduced
 - moving a document carries the expectation from the source path to the destination path
 - extra actual outputs beyond the expected paths are an error
-- in typing suites, use explicit paths such as `R/a.R` when package behavior matters; the runner
+- in analysis suites, use explicit paths such as `R/a.R` when package behavior matters; the runner
   does not add package prefixes for you
+- generation entries may also retarget the asserted output with `#++++ path`
 
 ### Current migration status
 
@@ -115,9 +116,9 @@ The parser now understands both fixture shapes.
 
 `naming/local` uses `Simple` cases and runs only the file-local naming pass.
 `naming/global` uses `MultiFile` cases and runs package-global naming on the initial generation.
-The other typing fixture runners still execute only `Simple` cases.
+The other analysis fixture runners still execute only `Simple` cases.
 Later-generation `MultiFile` support is still waiting on broader renderer-side adoption in
-`typing`.
+`analysis`.
 
 ### File loading
 
@@ -149,6 +150,7 @@ The intended fixture suites are:
 - `generalization` - quantified schemes produced at binding boundaries
 - `instantiation` - fresh reuse of generalized bindings at use sites
 - `interfaces` - exported per-file interface shapes
+- `ide/hover` - hover rendering over multi-file workspace state
 - `lowering` - syntax-to-HIR lowering output
 - `naming/local` - file-local binding introduction and lexical use-site resolution
 - `naming/global` - package-global resolution across multiple files
@@ -156,6 +158,32 @@ The intended fixture suites are:
 - `unification` - solved monotypes during local inference
 
 Keep focused test-running guidance minimal in this document. Exact suite adoption may lag behind the intended split while implementation and fixture migration are still in progress.
+
+## IDE fixture direction
+
+The current hover suite lives under `tests/ide/hover` and uses ordinary `MultiFile` fixtures plus
+`.hover` request files. The shared fixture grammar now supports `#++++ path` on generation entries,
+which lets one workspace mutation update the expectation for a different request file.
+
+Use that low-level shape when a suite only needs one request kind and one assertion after each
+workspace step.
+
+Reasoning:
+
+- IDE requests such as hover are assertions over the current workspace state, not always over the
+  mutated source file itself.
+- The lower-level `fixtures` crate should support this pattern generally because it is also useful
+  outside hover.
+
+Longer-term IDE direction:
+
+- If IDE coverage expands to `rename`, `goto_definition`, and `assert_content`, prefer one combined
+  IDE fixture runner rather than forcing every request through path-targeted `#++++`.
+- The likely split is:
+  - `#----` for workspace mutations
+  - `#!!!!` for IDE requests such as `hover`, `rename`, `goto_definition`, and `assert_content`
+- Keep `#++++ path` as the shared low-level fixture capability even if IDE suites later standardize
+  on `#!!!!`.
 
 ## Suite contracts
 

@@ -2,12 +2,12 @@
 
 This document tracks actionable planned work for the `analysis` crate.
 
-`SEMANTICS.md` is the user-facing contract. `ARCHITECTURE.md` describes implementation constraints. Keep this file focused on unfinished work.
+`TYPING_SEMANTICS.md` is the user-facing contract. `ARCHITECTURE.md` describes implementation constraints. Keep this file focused on unfinished work.
 
 ## Planning rules
 
 - Discuss important semantic changes with the user before implementation.
-- Keep `SEMANTICS.md`, `ARCHITECTURE.md`, and fixture expectations aligned when behavior changes.
+- Keep `TYPING_SEMANTICS.md`, `ARCHITECTURE.md`, and fixture expectations aligned when behavior changes.
 - Prefer concrete unfinished tasks over phase narration.
 - Delete or rewrite stale tasks instead of preserving historical plans.
 
@@ -59,8 +59,8 @@ This document tracks actionable planned work for the `analysis` crate.
 ### Roughly Typing Save Diagnostics Integration
 
 - Detailed plan: `projects/004_roughly_typing_save_diagnostics_integration.md`
-- Integrate `typing::Analysis` into `roughly` using real document paths and retained package
+- Integrate `analysis::Analysis` into `roughly` using real document paths and retained package
   context.
 - Keep current fast `roughly` diagnostics on `did_change`.
 - Publish full package-aware typing diagnostics on `did_save`.
-- Synchronize non-open watched package file changes into typing state before full typing runs.
+- Synchronize non-open watched package file changes into analysis state before full typing runs.

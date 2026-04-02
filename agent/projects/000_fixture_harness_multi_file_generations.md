@@ -4,29 +4,29 @@
 
 Extend the fixture harness so one test case can describe a `workspace`, not only a single file, and so grouped generations can model incremental document edits across package-attached and standalone files.
 
-This work should reuse the same incremental tree update path already used by `roughly` instead of reimplementing rope and tree-sitter edit logic inside the typing fixture harness.
+This work should reuse the same incremental tree update path already used by `roughly` instead of reimplementing rope and tree-sitter edit logic inside the analysis fixture harness.
 
 The intended direction is now:
 
-- a `typing::workspace` module for workspace/package/document state plus incremental parsing
+- a `analysis::workspace` module for workspace/package/document state plus incremental parsing
 - a separate fixture crate that can use that workspace model later
 - a workspace model that can contain multiple packages plus standalone documents
 
-The first implementation step is the parsed-document workspace model inside `typing`.
+The first implementation step is the parsed-document workspace model inside `analysis`.
 
 ## Current status
 
-- [done] Implemented the parsed-document workspace model in `typing::workspace`.
+- [done] Implemented the parsed-document workspace model in `analysis::workspace`.
 - [done] The module owns parser state, package buckets, standalone script buckets, and incremental text/tree updates.
 - [done] Direct tests cover package registration, bucket invariants, range edits, rename/delete, and tree reuse across incremental edits.
 - [done] Implemented a new `fixtures` crate at `crates/fixtures` that parses single-file, multi-file, and generation-based workspace cases.
 - [done] The `fixtures` crate runner now compares structured per-snapshot per-file outputs and has direct parsing and running tests.
-- [in-progress] `typing` now reads fixtures through the `fixtures` crate. `naming` executes `Simple` and `MultiFile` cases; the remaining suites still execute only `Simple` cases.
+- [in-progress] `analysis` now reads fixtures through the `fixtures` crate. `naming` executes `Simple` and `MultiFile` cases; the remaining suites still execute only `Simple` cases.
 - [planning] Adoption in `roughly` is still pending.
 
 ## First milestone
 
-The first milestone is the `typing::workspace` module.
+The first milestone is the `analysis::workspace` module.
 
 That module is responsible for:
 
@@ -48,7 +48,7 @@ That module is not responsible for:
 
 ## Settled direction
 
-- Use `workspace` as the top-level abstraction inside `typing`.
+- Use `workspace` as the top-level abstraction inside `analysis`.
 - Model analysis around `Package` rather than `Project`.
 - Keep `Package` as a semantic unit of analysis rather than a filesystem-root owner.
 - Store package roots in `Workspace`, not in `Package`.
@@ -61,7 +61,7 @@ That module is not responsible for:
 - Start with an R-specific reusable workspace/document layer.
 - Let the `workspace` module own its parser state.
 - The first implementation step only handles workspace/package/document state and incremental parse updates.
-- Keep direct tests for the workspace model next to its implementation in `typing`.
+- Keep direct tests for the workspace model next to its implementation in `analysis`.
 - A separate fixture crate will parse the fixture mini-language.
 - In the later testing framework built on top of that parsing:
   - expectations attach to the immediately preceding file or operation
@@ -214,7 +214,7 @@ The API should not require consumers such as `roughly::ServerState` to manage a 
 - Treat each generation as one grouped workspace edit step.
 - Keep single-file cases as the default when no generation block is present.
 - `fixtures` now parses the legacy and generation-based formats and has direct parser tests plus structured runner tests.
-- `typing/tests/test_fixtures.rs` now uses the `fixtures` crate for parsing and still executes legacy cases unchanged.
+- `analysis/tests/test_fixtures.rs` now uses the `fixtures` crate for parsing and still executes legacy cases unchanged.
 - `type_syntax` simple fixtures now compare rendered parser success or failure directly, with no `error:` sentinel embedded in fixture input.
 - Run analysis after each generation.
 - Prefer full-file restatement in small tests.
@@ -243,5 +243,5 @@ The API should not require consumers such as `roughly::ServerState` to manage a 
 - Package-global naming semantics cannot be tested properly with the current single-file fixture shape.
 - Later incremental package rechecking behavior also needs generation-based fixture cases.
 - Reusing the existing incremental tree update path matters for correctness and for later benchmarking of incremental typing.
-- The workspace/package/document split must be precise before implementation so `typing`, the future fixture crate, and `roughly` can all reuse the same model instead of growing slightly different state layers.
+- The workspace/package/document split must be precise before implementation so `analysis`, the future fixture crate, and `roughly` can all reuse the same model instead of growing slightly different state layers.
 - Once the harness gains its own language, it needs direct parser and harness tests so syntax or project-state changes do not silently break the suite.

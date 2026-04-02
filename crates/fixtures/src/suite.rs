@@ -173,17 +173,18 @@ fn expected_outputs_for_multi_file_fixture(
         for entry in &generation.entries {
             apply_generation_operation(&mut carried_outputs, &entry.operation);
 
+            if let Some(expectation) = &entry.expectation {
+                carried_outputs.insert(
+                    expectation.path.clone(),
+                    ExpectedFileOutput::from_fixture(&expectation.output),
+                );
+            }
+
             let Some(path) = output_path_for_operation(&entry.operation) else {
                 continue;
             };
-            let path = path.clone();
 
-            if let Some(expectation) = &entry.expectation {
-                carried_outputs.insert(path, ExpectedFileOutput::from_fixture(expectation));
-                continue;
-            }
-
-            if !carried_outputs.contains_key(&path) {
+            if !carried_outputs.contains_key(path) {
                 return Err(format!(
                     "generation `{}` uses `{}` without an explicit first expectation",
                     generation.name,

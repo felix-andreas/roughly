@@ -28,7 +28,7 @@ It also has clear non-goals for v1:
 - NSE and metaprogramming completeness
 - environment and reference semantics
 
-For the current supported semantics, see `TYPING_SEMANTICS.md`. Today the checker focuses on a small set of ideas:
+For the current supported semantics, see [`agent/TYPING_SEMANTICS.md`](../../agent/TYPING_SEMANTICS.md). Today the checker focuses on a small set of ideas:
 
 - atomic R types such as `logical`, `integer`, `double`, and `character`
 - scalar-like, array-like, and map-like vector shapes

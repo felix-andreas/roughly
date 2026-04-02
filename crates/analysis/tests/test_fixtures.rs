@@ -6,7 +6,8 @@ mod fixture_renderers;
 
 use {
     analysis::{
-        Analysis, AnalysisPhase, Document, DocumentId, Interner, check,
+        Analysis, AnalysisPhase, Document, DocumentId, HoverInfo, Interner, TextPosition,
+        TextRange, check,
         hir::ExpressionKind,
         lower::{self, LoweringContext},
         naming::resolve_document_locally,
@@ -19,8 +20,12 @@ use {
         render_core_type, render_expression_error_kind, render_expression_types,
         render_interface_snapshot, render_locally_named_hir, render_named_hir, render_type_scheme,
     },
-    fixtures::{Fixture, FixtureKind, FixtureRunFile, run_fixture_suite},
-    std::path::PathBuf,
+    fixtures::{Fixture, FixtureKind, FixtureOperation, FixtureRunFile, run_fixture_suite},
+    ropey::Rope,
+    std::{
+        collections::BTreeMap,
+        path::{Path, PathBuf},
+    },
 };
 
 #[test]
@@ -56,6 +61,11 @@ fn instantiation() {
 #[test]
 fn interfaces() {
     run_fixture_suite("tests/interfaces", run_interfaces_fixture);
+}
+
+#[test]
+fn ide_hover() {
+    run_fixture_suite("tests/ide/hover", run_ide_hover_fixture);
 }
 
 #[test]
@@ -324,6 +334,42 @@ fn run_interfaces_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>,
     }]])
 }
 
+fn run_ide_hover_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String> {
+    let FixtureKind::MultiFile(case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+
+    let mut analysis_state = Analysis::new(PathBuf::new());
+    let mut hover_requests = BTreeMap::new();
+    for document in &case.initial_generation.documents {
+        if is_hover_fixture_path(&document.path) {
+            hover_requests.insert(document.path.clone(), document.contents.clone());
+            continue;
+        }
+
+        analysis_state
+            .add_document_from_source(document.path.clone(), &document.contents)
+            .map_err(|error| format!("failed to add `{}`: {error:?}", document.path.display()))?;
+    }
+
+    let mut outputs = vec![render_ide_hover_snapshot(
+        &mut analysis_state,
+        &hover_requests,
+    )?];
+    for generation in &case.generations {
+        for entry in &generation.entries {
+            apply_ide_hover_operation(&mut analysis_state, &mut hover_requests, &entry.operation)?;
+        }
+
+        outputs.push(render_ide_hover_snapshot(
+            &mut analysis_state,
+            &hover_requests,
+        )?);
+    }
+
+    Ok(outputs)
+}
+
 fn run_lowering_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String> {
     let FixtureKind::Simple(case) = &fixture.kind else {
         return Err("unsupported fixture".to_owned());
@@ -539,4 +585,209 @@ fn run_unification_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>
         path: PathBuf::new(),
         output: render_expression_types(&mut inference_state, &lowering_context, &inferred_types),
     }]])
+}
+
+fn render_ide_hover_snapshot(
+    analysis_state: &mut Analysis,
+    hover_requests: &BTreeMap<PathBuf, String>,
+) -> Result<Vec<FixtureRunFile>, String> {
+    let mut outputs = analysis_state
+        .package_document_ids()
+        .into_iter()
+        .map(|document_id| {
+            let path = analysis_state
+                .path_for_document_id(document_id)
+                .ok_or_else(|| "missing path for document".to_owned())?;
+            Ok(FixtureRunFile {
+                path: path.to_path_buf(),
+                output: String::new(),
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    for (path, contents) in hover_requests {
+        let request = parse_hover_request(contents)?;
+        let hover = analysis_state.hover(&request.path, request.position);
+        outputs.push(FixtureRunFile {
+            path: path.clone(),
+            output: render_hover_output(hover),
+        });
+    }
+
+    outputs.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(outputs)
+}
+
+fn apply_ide_hover_operation(
+    analysis_state: &mut Analysis,
+    hover_requests: &mut BTreeMap<PathBuf, String>,
+    operation: &FixtureOperation,
+) -> Result<(), String> {
+    match operation {
+        FixtureOperation::CreateDocument { path, contents } => {
+            if is_hover_fixture_path(path) {
+                hover_requests.insert(path.clone(), contents.clone());
+                return Ok(());
+            }
+
+            analysis_state
+                .add_document_from_source(path.clone(), contents)
+                .map_err(|error| format!("failed to add `{}`: {error:?}", path.display()))?;
+            Ok(())
+        }
+        FixtureOperation::EditDocument {
+            path,
+            range,
+            replacement_text,
+        } => {
+            if is_hover_fixture_path(path) {
+                let contents = hover_requests.get_mut(path).ok_or_else(|| {
+                    format!("missing hover fixture document `{}`", path.display())
+                })?;
+                edit_text(contents, hover_text_range(*range), replacement_text, path)?;
+                return Ok(());
+            }
+
+            analysis_state
+                .edit_document(path, |document, parser| {
+                    document.edit_range(parser, hover_text_range(*range), replacement_text)
+                })
+                .map_err(|error| format!("failed to edit `{}`: {error:?}", path.display()))
+        }
+        FixtureOperation::MoveDocument {
+            source_path,
+            destination_path,
+        } => {
+            if is_hover_fixture_path(source_path) || is_hover_fixture_path(destination_path) {
+                let contents = hover_requests.remove(source_path).ok_or_else(|| {
+                    format!("missing hover fixture document `{}`", source_path.display())
+                })?;
+                hover_requests.insert(destination_path.clone(), contents);
+                return Ok(());
+            }
+
+            let source = analysis_state
+                .document(source_path)
+                .ok_or_else(|| format!("missing source document `{}`", source_path.display()))?
+                .rope()
+                .to_string();
+            analysis_state
+                .add_document_from_source(destination_path.clone(), &source)
+                .map_err(|error| {
+                    format!("failed to move `{}`: {error:?}", destination_path.display())
+                })?;
+            analysis_state
+                .delete_document(source_path)
+                .map_err(|error| format!("failed to delete `{}`: {error:?}", source_path.display()))
+        }
+        FixtureOperation::DeleteDocument { path } => {
+            if is_hover_fixture_path(path) {
+                hover_requests.remove(path).ok_or_else(|| {
+                    format!("missing hover fixture document `{}`", path.display())
+                })?;
+                return Ok(());
+            }
+
+            analysis_state
+                .delete_document(path)
+                .map_err(|error| format!("failed to delete `{}`: {error:?}", path.display()))
+        }
+    }
+}
+
+fn is_hover_fixture_path(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension == "hover")
+}
+
+fn hover_text_range(range: fixtures::FixtureRange) -> TextRange {
+    TextRange {
+        start: TextPosition {
+            line_index: range.start.line_number - 1,
+            character_index: range.start.column_number - 1,
+        },
+        end: TextPosition {
+            line_index: range.end.line_number - 1,
+            character_index: range.end.column_number - 1,
+        },
+    }
+}
+
+fn edit_text(
+    contents: &mut String,
+    range: TextRange,
+    replacement_text: &str,
+    path: &Path,
+) -> Result<(), String> {
+    let mut rope = Rope::from_str(contents);
+    let start_character = analysis::text::line_character_to_character_index(&rope, range.start)
+        .ok_or_else(|| format!("invalid edit range start in `{}`", path.display()))?;
+    let end_character = analysis::text::line_character_to_character_index(&rope, range.end)
+        .ok_or_else(|| format!("invalid edit range end in `{}`", path.display()))?;
+
+    if start_character > end_character {
+        return Err(format!("invalid edit range in `{}`", path.display()));
+    }
+
+    rope.remove(start_character..end_character);
+    rope.insert(start_character, replacement_text);
+    *contents = rope.to_string();
+    Ok(())
+}
+
+fn parse_hover_request(contents: &str) -> Result<HoverRequest, String> {
+    let request = contents.trim();
+    let (path_and_line, column_number) = request
+        .rsplit_once(':')
+        .ok_or_else(|| "hover request must use `path:line:column`".to_owned())?;
+    let (path, line_number) = path_and_line
+        .rsplit_once(':')
+        .ok_or_else(|| "hover request must use `path:line:column`".to_owned())?;
+    let line_number = parse_hover_request_number(line_number, "line")?;
+    let column_number = parse_hover_request_number(column_number, "column")?;
+
+    Ok(HoverRequest {
+        path: PathBuf::from(path),
+        position: TextPosition {
+            line_index: line_number - 1,
+            character_index: column_number - 1,
+        },
+    })
+}
+
+fn parse_hover_request_number(text: &str, label: &str) -> Result<usize, String> {
+    let value = text
+        .parse::<usize>()
+        .map_err(|error| format!("invalid hover request {label} `{text}`: {error}"))?;
+    if value == 0 {
+        return Err(format!("hover request {label} values are 1-based"));
+    }
+    Ok(value)
+}
+
+fn render_hover_output(hover: Option<HoverInfo>) -> String {
+    let Some(hover) = hover else {
+        return "no hover".to_owned();
+    };
+
+    let mut lines = vec![format!(
+        "range: {}:{}-{}:{}",
+        hover.range.start.line_index + 1,
+        hover.range.start.character_index + 1,
+        hover.range.end.line_index + 1,
+        hover.range.end.character_index + 1
+    )];
+
+    for section in hover.sections {
+        lines.push(String::new());
+        lines.push(format!("[{}]", section.phase.title()));
+        lines.push(section.value);
+    }
+
+    lines.join("\n")
+}
+
+struct HoverRequest {
+    path: PathBuf,
+    position: TextPosition,
 }

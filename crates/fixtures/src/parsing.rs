@@ -50,7 +50,13 @@ pub struct FixtureGeneration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FixtureGenerationEntry {
     pub operation: FixtureOperation,
-    pub expectation: Option<FixtureExpectedOutput>,
+    pub expectation: Option<FixtureGenerationExpectation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FixtureGenerationExpectation {
+    pub path: PathBuf,
+    pub output: FixtureExpectedOutput,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -307,15 +313,20 @@ fn fixture_documents_from_generation_entries(
         .into_iter()
         .map(|entry| match entry.operation {
             FixtureOperation::CreateDocument { path, contents } => {
-                let expected = entry.expectation.ok_or_else(|| {
+                let expectation = entry.expectation.ok_or_else(|| {
                     invalid_fixture_error(
                         "initial multi-file generation documents must have an output expectation",
                     )
                 })?;
+                if expectation.path != path {
+                    return Err(invalid_fixture_error(
+                        "initial multi-file generation expectations must target the created document",
+                    ));
+                }
                 Ok(FixtureDocument {
                     path,
                     contents,
-                    expected,
+                    expected: expectation.output,
                 })
             }
             FixtureOperation::EditDocument { .. }
@@ -346,17 +357,11 @@ fn parse_generation_entries(
 
         let header = parse_named_directive(lines, line_index, "#----", "generation entry")?;
         let operation = parse_generation_operation(lines, line_index, &header)?;
-        let expectation = match operation_output_path(&operation) {
-            Some(_) => parse_optional_output_expectation(lines, line_index)?,
-            None => {
-                if *line_index < lines.len() && starts_with_directive(lines[*line_index], "#++++") {
-                    return Err(invalid_fixture_error(
-                        "delete operations must not be followed by an output expectation",
-                    ));
-                }
-                None
-            }
-        };
+        let expectation = parse_optional_generation_expectation(
+            lines,
+            line_index,
+            operation_output_path(&operation),
+        )?;
         entries.push(FixtureGenerationEntry {
             operation,
             expectation,
@@ -529,6 +534,50 @@ fn parse_optional_output_expectation(
             .trim_end()
             .to_owned(),
     )))
+}
+
+fn parse_optional_generation_expectation(
+    lines: &[&str],
+    line_index: &mut usize,
+    default_path: Option<&PathBuf>,
+) -> Result<Option<FixtureGenerationExpectation>, ParseFixtureError> {
+    skip_blank_lines(lines, line_index);
+
+    if *line_index >= lines.len() || !starts_with_directive(lines[*line_index], "#++++") {
+        return Ok(None);
+    }
+
+    let header = parse_named_directive(lines, line_index, "#++++", "output expectation")?;
+    let expected_output = if header == "any" {
+        let body = collect_body_until_directive(lines, line_index);
+        if !body.trim().is_empty() {
+            return Err(invalid_fixture_error(
+                "`#++++ any` must not have an expectation body",
+            ));
+        }
+        FixtureExpectedOutput::Any
+    } else {
+        FixtureExpectedOutput::Exact(
+            collect_body_until_directive(lines, line_index)
+                .trim_end()
+                .to_owned(),
+        )
+    };
+
+    let path = if header.is_empty() || header == "any" {
+        default_path.cloned().ok_or_else(|| {
+            invalid_fixture_error(
+                "output expectations without a target path require an operation with an output path",
+            )
+        })?
+    } else {
+        parse_required_path(&header, "output expectation path")?
+    };
+
+    Ok(Some(FixtureGenerationExpectation {
+        path,
+        output: expected_output,
+    }))
 }
 
 fn operation_output_path(operation: &FixtureOperation) -> Option<&PathBuf> {

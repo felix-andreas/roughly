@@ -2,11 +2,11 @@
 
 ## Goal
 
-Introduce a better project-level analysis state for `typing` so that:
+Introduce a better project-level analysis state for `analysis` so that:
 
 - multi-file analysis does not require fixture-harness-specific merge logic
 - repeated analysis after fixture generations has one coherent state owner
-- fixture tests can use normal typing-crate APIs with small explicit phase calls
+- fixture tests can use normal analysis-crate APIs with small explicit phase calls
 
 The immediate target is lowering and naming.
 The design must also leave room for later typechecking and project rechecking.
@@ -15,7 +15,7 @@ The design must also leave room for later typechecking and project rechecking.
 
 - redesign the full typechecking architecture in this project
 - settle every later incremental scheduling detail up front
-- force fixture tests into one exact helper shape beyond using normal typing APIs
+- force fixture tests into one exact helper shape beyond using normal analysis APIs
 
 ## Unresolved questions
 
@@ -234,7 +234,7 @@ Fixture helpers should only:
 - create the lightest package-scoped input needed for analysis
 - apply grouped fixture edits through the lightest setup needed by the current boundary
 
-Phase execution in tests should use normal typing APIs and stay explicit.
+Phase execution in tests should use normal analysis APIs and stay explicit.
 
 Conceptual test shape:
 
@@ -271,7 +271,7 @@ That shape is not a hard API requirement, but it captures the intended boundary:
 - build project-global declaration tables from those per-file artifacts
 - make naming consume analysis-owned project inputs instead of fixture-owned ad hoc ones
 - assign project-level identities during project-global resolution rather than reusing provisional file-local ids
-- Current state: naming now runs as file-local preparation plus project-global resolution inside `typing`, but durable `NamingState.file_results` and the explicit public phase APIs are still pending.
+- Current state: naming now runs as file-local preparation plus project-global resolution inside `analysis`, but durable `NamingState.file_results` and the explicit public phase APIs are still pending.
 
 ### 4. Expose normal phase APIs for tests and later consumers [pending]
 

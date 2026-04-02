@@ -2,7 +2,7 @@
 
 This document is the authoritative implementation architecture for the `analysis` crate.
 
-`SEMANTICS.md` is the authoritative user-facing typing contract. This file defines the implementation boundaries needed to realize that contract. Keep it focused on durable phase boundaries and representation boundaries.
+`TYPING_SEMANTICS.md` is the authoritative user-facing typing contract. This file defines the implementation boundaries needed to realize that contract. Keep it focused on durable phase boundaries and representation boundaries.
 
 ## Role of this document
 

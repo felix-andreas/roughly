@@ -41,7 +41,7 @@ Roughly aims to support the following language server features (some are experim
   - Warning for unused variables *(🧪 experimental)*
   - Error for undefined variable *(⚠️ missing)*
   - Argument validation for function calls *(⚠️ missing)*
-  - Type checking *([💡 early design phase](crates/typing/README.md))*
+  - Type checking *([💡 early design phase](crates/analysis/README.md))*
 
 - **Editing**
   - Autocomplete local and global variables

@@ -46,7 +46,7 @@ Avoid architectural descriptions of a crate (module layout, data flow, key types
 
 # Analysis Crate
 
-This crate is written by AI under human guidance and supervision. The markdown documents in this crate are the primary means for steering the AI: they are where intent, contracts, design decisions, and reviewable plans must be made explicit so the human can validate and redirect the work. Keep these documents aligned with the implementation. If behavior, design, or plans change, update the relevant documents in the same session.
+This crate is written by AI under human guidance and supervision. The markdown documents in `agent/` are the primary means for steering the AI: they are where intent, contracts, design decisions, and reviewable plans must be made explicit so the human can validate and redirect the work. Keep these documents aligned with the implementation. If behavior, design, or plans change, update the relevant documents in the same session.
 
 ## Goals
 
@@ -114,7 +114,7 @@ Use these documents to surface uncertainty and record agreed decisions, not to s
 
 ### Working documents
 
-Update working documents proactively during the session (located in `agents/`):
+Update working documents proactively during the session (located in `agent/`):
 
 - `TECHNICAL_DEBT.md`
   - Current structural debt and implementation seams that should be paid down deliberately.

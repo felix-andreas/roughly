@@ -4,7 +4,7 @@ Keep newest decisions at the top.
 
 - non-package documents can resolve package-global value and type names, but they do not contribute
   back to those namespaces or conflict with package files on same-name declarations.
-  - This matches the script-file naming contract now captured in `SEMANTICS.md` and the naming
+  - This matches the script-file naming contract now captured in `TYPING_SEMANTICS.md` and the naming
     fixtures: package-attached scripts are consumers of package-global namespaces, not producers.
 
 - `run_naming` should consume lowered package state rather than triggering lowering itself.
@@ -24,8 +24,8 @@ Keep newest decisions at the top.
     forward across generations, uses `#++++ any` for unchecked contents, and treats extra actual
     outputs as failures.
 
-- parsed-document storage lives in `typing::workspace`, not in a separate `workspace` crate.
-  - The package and script bucket model is now part of the typing phase boundary, and keeping it inside `typing` simplifies the API and removes stale cross-crate surface area.
+- parsed-document storage lives in `analysis::workspace`, not in a separate `workspace` crate.
+  - The package and script bucket model is now part of the analysis phase boundary, and keeping it inside `analysis` simplifies the API and removes stale cross-crate surface area.
 
 - package-attached non-contributing files are `scripts`.
   - They are attached to a package, can resolve against the package namespace, and do not contribute back to that namespace.
