@@ -80,6 +80,8 @@ This document tracks actionable planned work for the `typing` crate.
 - Teach `typing` suite renderers to execute workspace-style generations instead of only `Simple`
   cases and current `naming` `MultiFile` cases.
 - Then adopt those APIs in more `typing` fixture cases and in `roughly`.
+- Add real package file-order fixture coverage driven by package collation rules instead of the
+  current fixture-order workaround in naming tests once `DESCRIPTION`/`Collate` is modelled.
 - Reasoning:
   - Package-global naming semantics cannot be tested properly with the current single-file fixture shape.
   - Later incremental package-recheck behavior will also need generation-based fixture cases.

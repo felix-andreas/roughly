@@ -2,6 +2,11 @@
 
 Keep newest decisions at the top.
 
+- non-package documents can resolve package-global value and type names, but they do not contribute
+  back to those namespaces or conflict with package files on same-name declarations.
+  - This matches the script-file naming contract now captured in `SEMANTICS.md` and the naming
+    fixtures: package-attached scripts are consumers of package-global namespaces, not producers.
+
 - `run_naming` should consume lowered package state rather than triggering lowering itself.
   - The phase boundary should be real so tests, tooling, and incremental scheduling can call lowering and naming separately. `run_naming` itself should not hide lowering work behind a combined wrapper.
 
