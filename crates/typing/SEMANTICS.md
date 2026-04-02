@@ -138,6 +138,21 @@ Top-level `@type` and `@alias` declarations share one project-global namespace.
 
 All current `@type` and `@alias` declarations are top-level and project-global.
 
+### Non-package documents
+
+Files that are not package source files, such as script-like documents under `scripts/`, do
+not contribute to the package-global value or type namespaces.
+
+- a non-package document may still resolve package-global value names from package files
+- a non-package document may still resolve project-global `@type` and `@alias` names from package
+  files
+- top-level value bindings in a non-package document are not visible to package files or to other
+  non-package documents through package-global naming
+- top-level `@type` and `@alias` declarations in a non-package document are not visible to package
+  files or to other non-package documents through the project-global type namespace
+- a package file and a non-package document may reuse the same top-level value or type name without
+  a package-global name conflict
+
 ### Future direction
 
 The current semantics use one project-global type namespace.

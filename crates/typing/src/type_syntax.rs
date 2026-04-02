@@ -488,7 +488,13 @@ fn parse_directive_syntax(
                 ));
             }
 
-            let nominal_type = parse_named_type_ref(directive_body, interner)?;
+            let nominal_type =
+                parse_named_type_ref(directive_body, interner).map_err(|error| match error {
+                    TypeParseError::InvalidSyntax { message } if message == "expected a type." => {
+                        invalid_syntax("expected a nominal type reference after `@new`.")
+                    }
+                    other_error => other_error,
+                })?;
 
             Ok(TypeSyntax::Annotation(Annotation::new(nominal_type)))
         }

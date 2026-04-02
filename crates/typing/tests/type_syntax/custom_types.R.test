@@ -55,22 +55,22 @@ InvalidSyntax { message: "expected a type after the annotation prefix." }
 #---- invalid_nominal_introduction_scalar_payload
 @new integer
 #++++
-InvalidSyntax { message: "expected a type." }
+InvalidSyntax { message: "expected a nominal type reference after `@new`." }
 
 #---- invalid_nominal_introduction_structural_payload
 @new list{name: character}
 #++++
-InvalidSyntax { message: "expected a type." }
+InvalidSyntax { message: "expected a nominal type reference after `@new`." }
 
 #---- invalid_nominal_introduction_nullable_payload
 @new Person | NULL
 #++++
-InvalidSyntax { message: "expected a type." }
+InvalidSyntax { message: "expected a nominal type reference after `@new`." }
 
 #---- invalid_nominal_introduction_function_payload
 @new fn(integer) -> integer
 #++++
-InvalidSyntax { message: "expected a type." }
+InvalidSyntax { message: "expected a nominal type reference after `@new`." }
 
 #==== named_type_references
 #---- bare_named_type_reference

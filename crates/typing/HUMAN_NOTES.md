@@ -1,22 +1,25 @@
 # Human Notes (!AIs are not allowed to edit!)
 
-- migrate roughly to AnalysisState
-
-* rename
-* goto defintion
-* completion
-* defintion
-* hover
-  * get closest
-  * should show
-  * lowered hir (also for typing comments)
-  * naming
-  * type checking
-* references
-* rename
-* document symbol
-  * seems like it is executed before didSave. so we must have a fast method here for global sections. (maybe full ast based as it is currently - not part of analysis)
-* symbol
+* lsp features
+  * rename
+  * goto defintion
+  * completion
+  * defintion
+  * hover
+    * get closest
+    * should show
+    * lowered hir (also for typing comments)
+    * naming
+    * type checking
+  * references
+  * rename
+  * document symbol
+    * seems like it is executed before didSave. so we must have a fast method here for global sections. (maybe full ast based as it is currently - not part of analysis)
+  * symbol
+* migrate roughly to AnalysisState
+* scripts behaviour
+  * what about type defintions and globals in this file (do they leak) 
+  * we cannot just use a fresh analysis state per script as it needs access to analysis state of package.
 
 - what about pull diagnostics??
 
@@ -170,7 +173,7 @@ also if not. shouldn't we render free variables differently in the fixutre ? wha
   - how to make type checking incremental: how to handle case if non-opend file depends on type in another file. no only other file changes. how does the type in the other file gets updated?
 
 
-- reasonable fixture split. initially we had this
+- reasonable fixture split. initially we had this:
   - `type_syntax` - typing-comment syntax and normalized type rendering
   - `bindings` - top-level binding result types
   - `diagnostics` - final user-facing errors

@@ -291,7 +291,7 @@ Assign(value@b0)
     Argument(name)
       Character("\"bob\"")
 
-error[syntax-error] type syntax error: expected a type.
+error[syntax-error] type syntax error: expected a nominal type reference after `@new`.
 --> 1:1-1:30
 | #: @new list{name: character}
 
