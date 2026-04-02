@@ -95,14 +95,8 @@ impl SymbolsMap for HashMap<PathBuf, Vec<Item>> {
 #[derive(Debug)]
 pub struct IndexError;
 
-pub fn index_dir(
-    base_path: &Path,
-    parser: &mut Parser,
-) -> Result<Vec<(PathBuf, Vec<Item>)>, IndexError> {
-    let start = std::time::Instant::now();
-
-    let mut n = 0;
-    let paths = std::fs::read_dir(base_path)
+pub fn source_file_paths(base_path: &Path) -> Result<Vec<PathBuf>, IndexError> {
+    let mut paths = std::fs::read_dir(base_path)
         .and_then(|read_dir| {
             read_dir
                 .map(|entries| entries.map(|entry| entry.path()))
@@ -112,12 +106,24 @@ pub fn index_dir(
             tracing::error!(?error, "failed to index");
             IndexError
         })?;
+    paths.retain(|path| {
+        path.is_file() && path.extension().is_some_and(|ext| ext == "R" || ext == "r")
+    });
+    paths.sort();
+    Ok(paths)
+}
+
+pub fn index_dir(
+    base_path: &Path,
+    parser: &mut Parser,
+) -> Result<Vec<(PathBuf, Vec<Item>)>, IndexError> {
+    let start = std::time::Instant::now();
+
+    let mut n = 0;
+    let paths = source_file_paths(base_path)?;
 
     let symbols = paths
         .into_iter()
-        .filter(|path| {
-            path.is_file() && path.extension().is_some_and(|ext| ext == "R" || ext == "r")
-        })
         .map(|path| {
             let symbols = index_file(&path, parser);
             n += symbols.len();

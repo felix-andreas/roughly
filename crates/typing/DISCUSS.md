@@ -52,6 +52,83 @@ Deferred until after the first milestone:
 - storing tree-sitter node ids on lowered HIR for typing-backed editor lookups
 - moving outline/indexing from `roughly` into `typing`
 
+## Hover by phase
+
+Target:
+
+- hover should be able to show layered information from:
+  - lowering
+  - naming
+  - typing
+- the natural output shape is a stacked markdown view with one section per phase that has useful
+  information for the hovered syntax
+
+What already exists:
+
+- lowering already stores HIR per document in `Analysis.lowering.modules`
+- HIR expressions and definitions already carry source ranges
+- naming already stores:
+  - local expression-to-binding resolutions
+  - final package resolutions
+  - binding metadata including module and source range
+- `roughly` hover already knows how to find the tree-sitter node at a document position and render
+  markdown
+
+Main gap:
+
+- typecheck results are thrown away today
+- `TypecheckStore` is empty, so after `typing::check` finishes there is no persistent
+  expression-to-type map for hover to read
+
+Needed for a useful first hover:
+
+1. A stable way to map a hover position to the relevant lowered item
+   - initial version: use the smallest HIR expression or definition whose range contains the point
+   - later version: store tree-sitter node ids on HIR once typing-backed editor lookups need the
+     extra stability
+
+2. A persistent typecheck result store
+   - store inferred type per expression id
+   - likely also store binding/type scheme information for bound names
+   - this should be written during `run_typecheck`, not reconstructed ad hoc by hover
+
+3. A hover-facing analysis API
+   - something like `analysis.hover(path, point)` returning a structured `HoverInfo`
+   - `roughly` should render that, rather than poking through several internal maps directly
+
+Recommended section contents:
+
+- lowering
+  - HIR kind for the hovered expression or definition
+  - for symbols: the lowered symbol name
+- naming
+  - resolved binding id
+  - binder kind and binder source range
+  - whether the resolution is local or package-global
+  - unresolved name if naming failed
+- typing
+  - inferred type for the hovered expression
+  - type scheme for bindings when relevant
+  - clear “not available because typing failed” state when typecheck did not complete
+
+Recommended implementation order:
+
+1. Add `HoverInfo` data types in `typing`
+2. Add range-based lookup from source point to lowered expression/definition
+3. Expose lowering + naming hover first
+4. Make `TypecheckStore` real and persist inferred types
+5. Add typing hover section
+6. Re-enable `roughly` hover using the new analysis API
+
+Likely blockers:
+
+- range-only lookup can be ambiguous for nested expressions, so the selection rule must be explicit
+  and stable
+- type inference currently reports diagnostics but does not preserve intermediate results, so some
+  refactoring in `typecheck.rs` is required before hover can show types
+- if we want hover on annotations or type definitions, we may also want definition-oriented hover
+  data, not only expression-oriented hover
+
 ## Open decisions
 
 1. How should `roughly` populate package files into `typing::Analysis` for the first milestone?

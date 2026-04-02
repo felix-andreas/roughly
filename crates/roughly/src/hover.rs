@@ -1,6 +1,7 @@
 use {
-    crate::{config::ExperimentalFeatures, server::Document, tree},
+    crate::{config::ExperimentalFeatures, tree},
     tree_sitter::Node,
+    typing::Document,
 };
 
 pub fn markdown(
@@ -81,7 +82,7 @@ pub fn markdown(
 }
 
 fn identifier_markdown(document: &Document, node: Node, debug: bool) -> String {
-    let name = document.rope.byte_slice(node.byte_range()).to_string();
+    let name = document.rope().byte_slice(node.byte_range()).to_string();
     let mut markup = fenced_block("text", &name);
 
     if debug {
@@ -103,7 +104,7 @@ fn keyword_markdown(node: Node, keyword: &str, description: &str, debug: bool) -
 
 fn literal_markdown(document: &Document, node: Node, debug: bool) -> String {
     let literal_source = document
-        .rope
+        .rope()
         .byte_slice(node.byte_range())
         .to_string()
         .chars()
@@ -139,11 +140,11 @@ fn literal_value(document: &Document, node: Node) -> String {
     match node.kind_id() {
         tree::kind::STRING => node
             .child_by_field_id(tree::field::CONTENT)
-            .map(|content| document.rope.byte_slice(content.byte_range()).to_string())
+            .map(|content| document.rope().byte_slice(content.byte_range()).to_string())
             .unwrap_or_default(),
         tree::kind::INTEGER => {
             let integer_text = document
-                .rope
+                .rope()
                 .byte_slice(node.byte_range())
                 .to_string()
                 .replace('_', "");
@@ -153,11 +154,11 @@ fn literal_value(document: &Document, node: Node) -> String {
             }
         }
         tree::kind::FLOAT | tree::kind::COMPLEX => document
-            .rope
+            .rope()
             .byte_slice(node.byte_range())
             .to_string()
             .replace('_', ""),
-        _ => document.rope.byte_slice(node.byte_range()).to_string(),
+        _ => document.rope().byte_slice(node.byte_range()).to_string(),
     }
 }
 

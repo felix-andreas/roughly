@@ -9,8 +9,11 @@ use {
         tree,
         typecheck::inference_state_with_builtins_in_interner,
     },
+    ropey::Rope,
     std::{
         collections::{HashMap, HashSet},
+        fs::File,
+        io::BufReader,
         path::{Path, PathBuf},
     },
     tree_sitter::Parser,
@@ -25,6 +28,7 @@ pub struct Analysis {
     document_ids_by_path: HashMap<PathBuf, DocumentId>,
     document_paths: HashMap<DocumentId, PathBuf>,
     non_package_documents: HashSet<DocumentId>,
+    dirty_package_documents: HashMap<PathBuf, DirtyPackageDocument>,
     pub lowering: LoweringStore,
     pub naming: NamingStore,
     pub typecheck: TypecheckStore,
@@ -35,7 +39,14 @@ pub struct Analysis {
 pub enum AnalysisError {
     DocumentNotFound(PathBuf),
     ParseFailed(PathBuf),
+    DocumentRead(PathBuf, String),
     DocumentEdit(DocumentEditError),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DirtyPackageDocument {
+    ReloadFromDisk,
+    Delete,
 }
 
 #[derive(Debug, Default)]
@@ -76,6 +87,7 @@ impl Analysis {
             document_ids_by_path: HashMap::new(),
             document_paths: HashMap::new(),
             non_package_documents: HashSet::new(),
+            dirty_package_documents: HashMap::new(),
             lowering: LoweringStore::default(),
             naming: NamingStore::default(),
             typecheck: TypecheckStore::default(),
@@ -96,9 +108,12 @@ impl Analysis {
     }
 
     pub fn add_document(&mut self, path: PathBuf, document: Document) -> DocumentId {
+        let is_package_path = self.is_package_path(&path);
+        self.dirty_package_documents.remove(&path);
+
         if let Some(document_id) = self.document_ids_by_path.get(&path).copied() {
             self.documents.insert(document_id, document);
-            if path.starts_with(self.base_path.join("R")) {
+            if is_package_path {
                 self.non_package_documents.remove(&document_id);
             } else {
                 self.non_package_documents.insert(document_id);
@@ -112,11 +127,7 @@ impl Analysis {
         self.document_ids_by_path.insert(path.clone(), document_id);
         self.document_paths.insert(document_id, path);
         self.documents.insert(document_id, document);
-        let path = self
-            .document_paths
-            .get(&document_id)
-            .expect("document path should exist");
-        if path.starts_with(self.base_path.join("R")) {
+        if is_package_path {
             self.non_package_documents.remove(&document_id);
         } else {
             self.non_package_documents.insert(document_id);
@@ -135,6 +146,11 @@ impl Analysis {
         Ok(self.add_document(path, document))
     }
 
+    pub fn add_document_from_disk(&mut self, path: PathBuf) -> Result<DocumentId, AnalysisError> {
+        self.read_document_from_disk(&path)
+            .map(|document| self.add_document(path, document))
+    }
+
     pub fn edit_document(
         &mut self,
         path: &Path,
@@ -150,6 +166,7 @@ impl Analysis {
             .get_mut(&document_id)
             .expect("document should exist");
         edit(document, &mut self.parser).map_err(AnalysisError::DocumentEdit)?;
+        self.dirty_package_documents.remove(path);
         self.invalidate_document(document_id);
         Ok(())
     }
@@ -162,6 +179,7 @@ impl Analysis {
         self.documents.remove(&document_id);
         self.document_paths.remove(&document_id);
         self.non_package_documents.remove(&document_id);
+        self.dirty_package_documents.remove(path);
         self.invalidate_document(document_id);
         Ok(())
     }
@@ -195,8 +213,52 @@ impl Analysis {
             .copied()
             .filter(|document_id| !self.non_package_documents.contains(document_id))
             .collect::<Vec<_>>();
-        document_ids.sort_by_key(|document_id| document_id.0);
+        document_ids.sort_by(|left_document_id, right_document_id| {
+            self.document_path_order_key(*left_document_id)
+                .cmp(&self.document_path_order_key(*right_document_id))
+        });
         document_ids
+    }
+
+    pub fn mark_document_dirty(&mut self, path: &Path) {
+        if self.is_package_path(path) {
+            self.dirty_package_documents
+                .insert(path.to_path_buf(), DirtyPackageDocument::ReloadFromDisk);
+        }
+    }
+
+    pub fn mark_document_deleted(&mut self, path: &Path) {
+        if self.is_package_path(path) {
+            self.dirty_package_documents
+                .insert(path.to_path_buf(), DirtyPackageDocument::Delete);
+        }
+    }
+
+    pub fn sync_dirty_documents(&mut self) -> Vec<AnalysisError> {
+        let mut dirty_documents = self
+            .dirty_package_documents
+            .drain()
+            .collect::<Vec<(PathBuf, DirtyPackageDocument)>>();
+        dirty_documents.sort_by(|(left_path, _), (right_path, _)| {
+            self.path_order_key(left_path)
+                .cmp(&self.path_order_key(right_path))
+        });
+
+        let mut errors = Vec::new();
+
+        for (path, dirty_document) in dirty_documents {
+            let result = match dirty_document {
+                DirtyPackageDocument::ReloadFromDisk => self.reload_document_from_disk(&path),
+                DirtyPackageDocument::Delete => self.delete_document_if_loaded(&path),
+            };
+
+            if let Err(error) = result {
+                self.dirty_package_documents.insert(path, dirty_document);
+                errors.push(error);
+            }
+        }
+
+        errors
     }
 
     pub fn document_diagnostics(
@@ -383,6 +445,46 @@ pub fn run_typecheck(
 }
 
 impl Analysis {
+    fn is_package_path(&self, path: &Path) -> bool {
+        path.starts_with(self.base_path.join("R"))
+    }
+
+    fn document_path_order_key(&self, document_id: DocumentId) -> String {
+        self.path_for_document_id(document_id)
+            .map(|path| self.path_order_key(path))
+            .unwrap_or_default()
+    }
+
+    fn path_order_key(&self, path: &Path) -> String {
+        path.strip_prefix(&self.base_path)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/")
+    }
+
+    fn reload_document_from_disk(&mut self, path: &Path) -> Result<(), AnalysisError> {
+        let document = self.read_document_from_disk(path)?;
+        self.add_document(path.to_path_buf(), document);
+        Ok(())
+    }
+
+    fn read_document_from_disk(&mut self, path: &Path) -> Result<Document, AnalysisError> {
+        let file = File::open(path)
+            .map_err(|error| AnalysisError::DocumentRead(path.to_path_buf(), error.to_string()))?;
+        let rope = Rope::from_reader(BufReader::new(file))
+            .map_err(|error| AnalysisError::DocumentRead(path.to_path_buf(), error.to_string()))?;
+        let tree = tree::parse_rope(&mut self.parser, &rope, None)
+            .ok_or_else(|| AnalysisError::ParseFailed(path.to_path_buf()))?;
+        Ok(Document::new(rope, tree))
+    }
+
+    fn delete_document_if_loaded(&mut self, path: &Path) -> Result<(), AnalysisError> {
+        if self.document_ids_by_path.contains_key(path) {
+            self.delete_document(path)?;
+        }
+        Ok(())
+    }
+
     fn all_document_ids(&self) -> Vec<DocumentId> {
         let mut document_ids = self.documents.keys().copied().collect::<Vec<_>>();
         document_ids.sort_by_key(|document_id| document_id.0);
@@ -620,7 +722,12 @@ mod tests {
             Severity,
             text::{TextPosition, TextRange},
         },
-        std::path::PathBuf,
+        std::{
+            fs,
+            path::{Path, PathBuf},
+            sync::atomic::{AtomicU64, Ordering},
+            time::{SystemTime, UNIX_EPOCH},
+        },
     };
 
     #[test]
@@ -637,6 +744,22 @@ mod tests {
             .expect("non-package document should parse");
 
         assert_eq!(analysis.package_document_ids(), vec![package_document_id]);
+    }
+
+    #[test]
+    fn package_document_ids_follow_package_path_order() {
+        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        let first_document_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/zeta.R"), "zeta <- 1L")
+            .expect("package document should parse");
+        let second_document_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/alpha.R"), "alpha <- 1L")
+            .expect("package document should parse");
+
+        assert_eq!(
+            analysis.package_document_ids(),
+            vec![second_document_id, first_document_id]
+        );
     }
 
     #[test]
@@ -731,5 +854,82 @@ mod tests {
         );
         assert!(analysis.lowering.modules.contains_key(&document_id));
         assert!(analysis.naming.locals.contains_key(&document_id));
+    }
+
+    #[test]
+    fn sync_dirty_documents_reloads_package_file_from_disk() {
+        let workspace_path = unique_temp_workspace_path();
+        let package_root = workspace_path.join("R");
+        let document_path = package_root.join("main.R");
+        fs::create_dir_all(&package_root).expect("workspace package root should be created");
+        fs::write(&document_path, "value <- 1L\n").expect("document should be written");
+
+        let mut analysis = Analysis::new(workspace_path.clone());
+        analysis
+            .add_document_from_source(document_path.clone(), "value <- 1L\n")
+            .expect("document should parse");
+
+        fs::write(&document_path, "value <- 2L\n").expect("document should be updated");
+        analysis.mark_document_dirty(&document_path);
+
+        let errors = analysis.sync_dirty_documents();
+
+        assert!(errors.is_empty());
+        assert_eq!(
+            analysis
+                .document(&document_path)
+                .expect("document should be present")
+                .rope()
+                .to_string(),
+            "value <- 2L\n"
+        );
+
+        remove_workspace_path(&workspace_path);
+    }
+
+    #[test]
+    fn sync_dirty_documents_deletes_removed_package_file() {
+        let workspace_path = unique_temp_workspace_path();
+        let package_root = workspace_path.join("R");
+        let document_path = package_root.join("main.R");
+        fs::create_dir_all(&package_root).expect("workspace package root should be created");
+        fs::write(&document_path, "value <- 1L\n").expect("document should be written");
+
+        let mut analysis = Analysis::new(workspace_path.clone());
+        analysis
+            .add_document_from_source(document_path.clone(), "value <- 1L\n")
+            .expect("document should parse");
+
+        fs::remove_file(&document_path).expect("document should be removed");
+        analysis.mark_document_deleted(&document_path);
+
+        let errors = analysis.sync_dirty_documents();
+
+        assert!(errors.is_empty());
+        assert!(analysis.document(&document_path).is_none());
+
+        remove_workspace_path(&workspace_path);
+    }
+
+    fn unique_temp_workspace_path() -> PathBuf {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+        let unique_suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "typing-analysis-test-{}-{}",
+            unique_suffix,
+            NEXT_ID.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    fn remove_workspace_path(workspace_path: &Path) {
+        if let Err(error) = fs::remove_dir_all(workspace_path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                panic!("failed to remove test workspace: {error}");
+            }
+        }
     }
 }

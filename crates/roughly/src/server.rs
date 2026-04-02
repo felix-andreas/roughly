@@ -2,7 +2,7 @@ use {
     crate::{
         cli, completion,
         config::{Config, ExperimentalFeatures},
-        definition, diagnostics, format, hover,
+        diagnostics, format,
         index::{self, IndexError, Item},
         lsp_types::{
             CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
@@ -10,17 +10,16 @@ use {
             DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
             DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol,
             DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
-            GlobPattern, Hover, HoverContents, HoverParams, HoverProviderCapability,
-            InitializeParams, InitializeResult, InitializedParams, Location, MarkupContent,
-            MarkupKind, MessageType, OneOf, Position, PublishDiagnosticsParams, Range,
-            ReferenceParams, Registration, RegistrationParams, RelativePattern, RenameParams,
-            SaveOptions, ServerCapabilities, ServerInfo, ShowMessageParams,
-            TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-            TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceEdit, WorkspaceSymbolParams,
-            WorkspaceSymbolResponse,
+            GlobPattern, Hover, HoverParams, HoverProviderCapability, InitializeParams,
+            InitializeResult, InitializedParams, Location, MessageType, OneOf, Position,
+            PublishDiagnosticsParams, Range, ReferenceParams, Registration, RegistrationParams,
+            RelativePattern, RenameParams, SaveOptions, ServerCapabilities, ServerInfo,
+            ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind,
+            TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceEdit,
+            WorkspaceSymbolParams, WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
         },
-        references, rename, symbols, tree, utils,
+        symbols, typing_diagnostics as analysis_diagnostics, utils,
     },
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
@@ -33,16 +32,15 @@ use {
         tracing::TracingLayer,
     },
     futures::future::BoxFuture,
-    ropey::Rope,
     std::{
-        collections::HashMap,
+        collections::{HashMap, HashSet},
         ops::ControlFlow,
         path::{Path, PathBuf},
         time::Instant,
     },
     tower::ServiceBuilder,
-    tree_sitter::{InputEdit, Parser, Point, Tree},
-    typing::Analysis as TypingAnalysis,
+    tree_sitter::Point,
+    typing::{Analysis, AnalysisPhase, TextPosition, TextRange},
 };
 
 const CONFIG_FILE_NAME: &str = "roughly.toml";
@@ -98,19 +96,8 @@ struct ServerState {
     config: Config,
     experimental_features: ExperimentalFeatures,
     workspace_root: PathBuf,
-    document_map: HashMap<PathBuf, Document>,
-    /// stores symbolds for all other files
-    document_items: HashMap<PathBuf, Vec<Item>>,
-    /// stores index for all files in R/ folder
-    workspace_items: HashMap<PathBuf, Vec<Item>>,
-    parser: Parser,
-    typing_analysis_state: TypingAnalysis,
-}
-
-#[derive(Debug)]
-pub struct Document {
-    pub rope: Rope,
-    pub tree: Tree,
+    open_documents: HashSet<PathBuf>,
+    analysis_state: Analysis,
 }
 
 impl ServerState {
@@ -125,12 +112,9 @@ impl ServerState {
             client,
             config,
             experimental_features,
-            workspace_root,
-            workspace_items: HashMap::new(),
-            document_items: HashMap::new(),
-            document_map: HashMap::new(),
-            parser: tree::new_parser(),
-            typing_analysis_state: TypingAnalysis::new(workspace_root.clone()),
+            workspace_root: workspace_root.clone(),
+            open_documents: HashSet::new(),
+            analysis_state: Analysis::new(workspace_root.clone()),
         })
     }
 
@@ -138,20 +122,53 @@ impl ServerState {
         self.workspace_root.join("R")
     }
 
-    fn reload_config(&mut self, config_path: &Path) {
-        match Config::from_path(config_path, self.experimental_features) {
-            Ok(config) => {
-                self.config = config;
-            }
-            Err(error) => {
-                self.client
-                    .show_message(ShowMessageParams {
-                        typ: MessageType::ERROR,
-                        message: format!("failed to reload config: {error}"),
-                    })
-                    .unwrap();
-            }
-        }
+    fn document(&self, path: &Path) -> Option<&typing::Document> {
+        self.analysis_state.document(path)
+    }
+
+    fn opened_document(&self, path: &Path) -> Option<&typing::Document> {
+        self.open_documents
+            .contains(path)
+            .then(|| self.document(path))
+            .flatten()
+    }
+
+    fn package_items_map(&mut self) -> HashMap<PathBuf, Vec<Item>> {
+        self.sync_dirty_documents();
+
+        self.analysis_state
+            .package_document_ids()
+            .into_iter()
+            .filter_map(|document_id| {
+                let path = self
+                    .analysis_state
+                    .path_for_document_id(document_id)?
+                    .to_path_buf();
+                let document = self.analysis_state.document_by_id(document_id)?;
+                Some((
+                    path,
+                    index::index(document.tree().root_node(), document.rope(), false, false),
+                ))
+            })
+            .collect()
+    }
+
+    fn sync_dirty_documents(&mut self) {
+        let sync_errors = self.analysis_state.sync_dirty_documents();
+        assert!(
+            sync_errors.is_empty(),
+            "failed to synchronize analysis documents from disk: {sync_errors:?}"
+        );
+    }
+
+    fn continue_with_error(&mut self, message: String) -> ControlFlow<async_lsp::Result<()>> {
+        self.client
+            .show_message(ShowMessageParams {
+                typ: MessageType::ERROR,
+                message,
+            })
+            .unwrap();
+        ControlFlow::Continue(())
     }
 }
 
@@ -168,15 +185,23 @@ impl LanguageServer for ServerState {
         let workspace_r_path = self.workspace_r_path();
 
         if workspace_r_path.is_dir() {
-            match index::index_dir(&workspace_r_path, &mut self.parser) {
-                Ok(items) => self.workspace_items.extend(items),
-                Err(IndexError) => self
-                    .client
-                    .show_message(ShowMessageParams {
-                        typ: MessageType::ERROR,
-                        message: "failed to index files".into(),
-                    })
-                    .unwrap(),
+            match index::source_file_paths(&workspace_r_path) {
+                Ok(paths) => {
+                    for path in paths {
+                        self.analysis_state
+                            .add_document_from_disk(path.clone())
+                            .expect(&format!(
+                                "failed to preload analysis document {}",
+                                path.display()
+                            ));
+                    }
+                }
+                Err(IndexError) => {
+                    panic!(
+                        "failed to list package source files in {}",
+                        workspace_r_path.display()
+                    );
+                }
             }
         }
 
@@ -285,25 +310,27 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(?path, "did open");
 
-        let rope = Rope::from_str(text);
-        let tree = tree::parse(&mut self.parser, text, None);
+        self.analysis_state
+            .add_document_from_source(path.clone(), text)
+            .expect(&format!(
+                "failed to sync analysis document from source {}",
+                path.display()
+            ));
+        self.open_documents.insert(path.clone());
 
-        let diagnostics = diagnostics::analyze_full(
-            tree.root_node(),
-            &rope,
-            self.config.lint,
-            &mut self.typing_analysis_state,
-        );
-
-        let items = index::index(tree.root_node(), &rope, false, false);
-        if path.starts_with(self.workspace_r_path()) {
-            // note: we need to insert into workspace in case a new file is created
-            self.workspace_items.insert(path.clone(), items);
-        } else {
-            self.document_items.insert(path.clone(), items);
-        }
-
-        self.document_map.insert(path, Document { rope, tree });
+        let diagnostics = {
+            let document = self.opened_document(&path).expect(&format!(
+                "analysis document missing after open: {}",
+                path.display()
+            ));
+            diagnostics::analyze(
+                document.tree().root_node(),
+                document.rope(),
+                self.config.lint,
+                true,
+                None,
+            )
+        };
 
         if let Err(error) = self
             .client
@@ -328,7 +355,14 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(?path, "did close");
 
-        self.document_map.remove(&path);
+        self.open_documents.remove(&path);
+        if path.starts_with(self.workspace_r_path()) {
+            if path.exists() {
+                self.analysis_state.mark_document_dirty(&path);
+            } else {
+                self.analysis_state.mark_document_deleted(&path);
+            }
+        }
 
         ControlFlow::Continue(())
     }
@@ -345,59 +379,70 @@ impl LanguageServer for ServerState {
 
         let start = Instant::now();
 
-        let Some(document) = self.document_map.get_mut(&path) else {
-            tracing::error!(?path, "document not found");
-            return ControlFlow::Continue(());
-        };
-
-        // UPDATE ROPE AND TREE
-        // based on: https://github.com/marceline-cramer/saturn-v/blob/93d1c8fd02/lsp/src/lib.rs
-        let (rope, tree) = (&mut document.rope, &mut document.tree);
-        for change in content_changes {
-            let range = change.range.unwrap();
-
-            let start_line = range.start.line as usize;
-            let start_col = range.start.character as usize;
-            let end_line = range.end.line as usize;
-            let end_col = range.end.character as usize;
-
-            let start_char = rope.line_to_char(start_line) + start_col;
-            let end_char = rope.line_to_char(end_line) + end_col;
-
-            let start_byte = rope.char_to_byte(start_char);
-            let old_end_byte = rope.char_to_byte(end_char);
-            let new_end_byte = start_byte + change.text.len();
-
-            rope.remove(start_char..end_char);
-            rope.insert(start_char, &change.text);
-
-            let new_end_line = rope.byte_to_line(new_end_byte);
-            let new_end_col = rope.byte_to_char(new_end_byte) - rope.line_to_char(new_end_line);
-
-            tree.edit(&InputEdit {
-                start_byte,
-                old_end_byte,
-                new_end_byte,
-                start_position: Point::new(start_line, start_col),
-                old_end_position: Point::new(end_line, end_col),
-                new_end_position: Point::new(new_end_line, new_end_col),
-            });
+        if !self.open_documents.contains(&path) {
+            return self.continue_with_error(format!(
+                "received did_change for non-open document {}",
+                path.display()
+            ));
         }
 
-        *tree = tree::parse_rope(&mut self.parser, rope, Some(tree));
+        self.document(&path).expect(&format!(
+            "analysis document not found for {}",
+            path.display()
+        ));
+
+        for change in &content_changes {
+            if let Some(range) = change.range.as_ref() {
+                let edit_range = TextRange {
+                    start: TextPosition {
+                        line_index: range.start.line as usize,
+                        character_index: range.start.character as usize,
+                    },
+                    end: TextPosition {
+                        line_index: range.end.line as usize,
+                        character_index: range.end.character as usize,
+                    },
+                };
+                if let Err(error) = self
+                    .analysis_state
+                    .edit_document(&path, |document, parser| {
+                        document.edit_range(parser, edit_range, &change.text)
+                    })
+                {
+                    panic!(
+                        "failed to edit analysis document {} incrementally: {error:?}",
+                        path.display()
+                    );
+                }
+                continue;
+            }
+
+            assert_eq!(
+                content_changes.len(),
+                1,
+                "full-document did_change for {} should contain exactly one content change",
+                path.display()
+            );
+            self.analysis_state
+                .add_document_from_source(path.clone(), &change.text)
+                .expect(&format!(
+                    "failed to replace analysis document from source {}",
+                    path.display()
+                ));
+            break;
+        }
+
+        let document = self.opened_document(&path).expect(&format!(
+            "analysis document missing after change: {}",
+            path.display()
+        ));
 
         // UPDATE DIAGNOSTICS
-        let diagnostics = diagnostics::analyze_fast(tree.root_node(), rope, self.config.lint);
-
-        // UPDATE ITEMS
-        // note: We must re-index on every change (not just on save)
-        // because textDocument/documentSymbol is triggered before textDocument/didSave.
-        let items = index::index(tree.root_node(), rope, false, false);
-        if path.starts_with(self.workspace_r_path()) {
-            self.workspace_items.insert(path, items);
-        } else {
-            self.document_items.insert(path, items);
-        }
+        let diagnostics = diagnostics::analyze_fast(
+            document.tree().root_node(),
+            document.rope(),
+            self.config.lint,
+        );
 
         if let Err(error) = self
             .client
@@ -424,19 +469,51 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(?path, "did save");
 
-        let Some(document) = self.document_map.get(&path) else {
-            tracing::error!(?path, "document not found");
-            return ControlFlow::Continue(());
+        if !self.open_documents.contains(&path) {
+            return self.continue_with_error(format!(
+                "received did_save for non-open document {}",
+                path.display()
+            ));
+        }
+
+        let mut diagnostics = {
+            let document = self.opened_document(&path).expect(&format!(
+                "analysis document missing before save: {}",
+                path.display()
+            ));
+
+            diagnostics::analyze(
+                document.tree().root_node(),
+                document.rope(),
+                self.config.lint,
+                true,
+                None,
+            )
         };
 
-        let (rope, root_node) = (&document.rope, document.tree.root_node());
+        if self.config.lint.experimental_typing && path.starts_with(self.workspace_r_path()) {
+            self.sync_dirty_documents();
+            typing::check(&mut self.analysis_state);
 
-        let diagnostics = diagnostics::analyze_full(
-            root_node,
-            rope,
-            self.config.lint,
-            &mut self.typing_analysis_state,
-        );
+            if let Some(document_id) = self.analysis_state.document_id_for_path(&path) {
+                diagnostics.extend(analysis_diagnostics::convert_diagnostics(
+                    self.analysis_state
+                        .document_phase_diagnostics(
+                            document_id,
+                            &[
+                                AnalysisPhase::Lowering,
+                                AnalysisPhase::Naming,
+                                AnalysisPhase::Typecheck,
+                            ],
+                        )
+                        .cloned(),
+                ));
+            }
+        }
+
+        if diagnostics.is_empty() {
+            tracing::debug!(?uri, "save produced no diagnostics");
+        }
 
         if let Err(error) = self
             .client
@@ -467,19 +544,47 @@ impl LanguageServer for ServerState {
             tracing::info!(?path, ?typ, "watched file changed");
 
             if path == config_path {
-                self.reload_config(&config_path);
+                match Config::from_path(&config_path, self.experimental_features) {
+                    Ok(config) => {
+                        self.config = config;
+                    }
+                    Err(error) => {
+                        self.client
+                            .show_message(ShowMessageParams {
+                                typ: MessageType::ERROR,
+                                message: format!("failed to reload config: {error}"),
+                            })
+                            .unwrap();
+                    }
+                }
                 continue;
             }
 
             if path.starts_with(&workspace_r_path) {
                 match change.typ {
                     FileChangeType::CREATED | FileChangeType::CHANGED => {
-                        // note: potential race condition if the user already has the file open and begins editing immediately.
-                        let items = index::index_file(&path, &mut self.parser);
-                        self.workspace_items.insert(path.clone(), items);
+                        if !self.open_documents.contains(&path) {
+                            self.analysis_state
+                                .add_document_from_disk(path.clone())
+                                .expect(&format!(
+                                    "failed to update analysis document from disk {}",
+                                    path.display()
+                                ));
+                        }
                     }
                     FileChangeType::DELETED => {
-                        self.workspace_items.remove(&path);
+                        if !self.open_documents.contains(&path) {
+                            self.analysis_state
+                                .delete_document(&path)
+                                .or_else(|error| match error {
+                                    typing::AnalysisError::DocumentNotFound(_) => Ok(()),
+                                    error => Err(error),
+                                })
+                                .expect(&format!(
+                                    "failed to delete analysis document {}",
+                                    path.display()
+                                ));
+                        }
                     }
                     _ => unreachable!(),
                 }
@@ -511,17 +616,14 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(?path, "completion");
 
-        let Some(document) = self.document_map.get(&path) else {
+        let Some(document) = self.opened_document(&path).cloned() else {
             tracing::error!(?path, "document not found");
             return box_future(Err(path_not_found_error(&path)));
         };
+        let workspace_items = self.package_items_map();
 
-        let completions = completion::get(
-            position,
-            &document.rope,
-            &document.tree,
-            &self.workspace_items,
-        );
+        let completions =
+            completion::get(position, document.rope(), document.tree(), &workspace_items);
 
         box_future(Ok(completions))
     }
@@ -534,27 +636,33 @@ impl LanguageServer for ServerState {
         &mut self,
         params: GotoDefinitionParams,
     ) -> BoxFuture<'static, Result<Option<GotoDefinitionResponse>, ResponseError>> {
+        /*
+        let _ = params;
         let uri = params.text_document_position_params.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let position = params.text_document_position_params.position;
 
         tracing::debug!(?path, "goto definition");
 
-        let Some(document) = self.document_map.get(&path) else {
+        let Some(document) = self.opened_document(&path) else {
             tracing::info!(?path, "document not found");
             return box_future(Err(path_not_found_error(&path)));
         };
+        let workspace_items = self.package_items_map();
 
         let definitions = definition::goto(
             &uri,
             position.line as usize,
             position.character as usize,
-            &document.rope,
-            &document.tree,
-            &self.workspace_items,
+            document.rope(),
+            document.tree(),
+            &workspace_items,
         );
 
-        box_future(Ok(definitions))
+        return box_future(Ok(definitions));
+        */
+        let _ = params;
+        box_future(Err(unsupported_feature_error("goto definition")))
     }
 
     //
@@ -565,19 +673,21 @@ impl LanguageServer for ServerState {
         &mut self,
         params: HoverParams,
     ) -> BoxFuture<'static, Result<Option<Hover>, ResponseError>> {
+        /*
+        let _ = params;
         let uri = params.text_document_position_params.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let position = params.text_document_position_params.position;
 
         tracing::debug!(?path, ?position, "hover");
 
-        let Some(document) = self.document_map.get(&path) else {
+        let Some(document) = self.opened_document(&path) else {
             tracing::info!(?path, "document not found");
             return box_future(Err(path_not_found_error(&path)));
         };
 
-        let Some(node) = tree::node_at_position(
-            &document.tree,
+        let Some(node) = typing::tree::node_at_position(
+            document.tree(),
             Point::new(position.line as usize, position.character as usize),
         ) else {
             tracing::debug!(?position, "node not found");
@@ -596,7 +706,10 @@ impl LanguageServer for ServerState {
             range: Some(utils::node_range(node)),
         };
 
-        box_future(Ok(Some(hover)))
+        return box_future(Ok(Some(hover)));
+        */
+        let _ = params;
+        box_future(Err(unsupported_feature_error("hover")))
     }
 
     //
@@ -612,13 +725,16 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(?path, "format");
 
-        let Some(document) = self.document_map.get(&path) else {
+        let Some(document) = self.opened_document(&path) else {
             tracing::info!(?path, "document not found");
             return box_future(Err(path_not_found_error(&path)));
         };
 
-        let (rope, tree) = (&document.rope, &document.tree);
-        let new_text = match format::format(tree.root_node(), rope, self.config.format) {
+        let new_text = match format::format(
+            document.tree().root_node(),
+            document.rope(),
+            self.config.format,
+        ) {
             Ok(text) => text,
             Err(error) => {
                 tracing::error!(?error, "failed to format");
@@ -631,8 +747,12 @@ impl LanguageServer for ServerState {
             range: Range::new(
                 Position::new(0, 0),
                 Position::new(
-                    (rope.len_lines() - 1) as u32,
-                    (rope.len_chars() - rope.line_to_char(rope.len_lines() - 1)) as u32,
+                    (document.rope().len_lines() - 1) as u32,
+                    (document.rope().len_chars()
+                        - document
+                            .rope()
+                            .line_to_char(document.rope().len_lines() - 1))
+                        as u32,
                 ),
             ),
         }];
@@ -650,13 +770,12 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(?path, "format");
 
-        let Some(document) = self.document_map.get(&path) else {
+        let Some(document) = self.opened_document(&path) else {
             tracing::info!(?path, "document not found");
             return box_future(Err(path_not_found_error(&path)));
         };
 
-        let (rope, tree) = (&document.rope, &document.tree);
-        let Some(node) = tree.root_node().descendant_for_point_range(
+        let Some(node) = document.tree().root_node().descendant_for_point_range(
             Point::new(range.start.line as usize, range.start.character as usize),
             Point::new(range.end.line as usize, range.end.character as usize),
         ) else {
@@ -664,7 +783,7 @@ impl LanguageServer for ServerState {
             return box_future(Ok(None));
         };
 
-        let new_text = match format::format(node, rope, self.config.format) {
+        let new_text = match format::format(node, document.rope(), self.config.format) {
             Ok(text) => text,
             Err(error) => {
                 tracing::error!(?error, "failed to format");
@@ -688,6 +807,8 @@ impl LanguageServer for ServerState {
         &mut self,
         params: ReferenceParams,
     ) -> BoxFuture<'static, Result<Option<Vec<Location>>, ResponseError>> {
+        /*
+        let _ = params;
         let uri = params.text_document_position.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let position = params.text_document_position.position;
@@ -695,22 +816,26 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(?path, ?position, ?include_declaration, "find references");
 
-        let Some(document) = self.document_map.get(&path) else {
+        let Some(document) = self.opened_document(&path) else {
             tracing::info!(?path, "document not found");
             return box_future(Err(path_not_found_error(&path)));
         };
+        let workspace_items = self.package_items_map();
 
         let references = references::find_references(
             &uri,
             position.line as usize,
             position.character as usize,
             include_declaration,
-            &document.rope,
-            &document.tree,
-            &self.workspace_items,
+            document.rope(),
+            document.tree(),
+            &workspace_items,
         );
 
-        box_future(Ok(references))
+        return box_future(Ok(references));
+        */
+        let _ = params;
+        box_future(Err(unsupported_feature_error("references")))
     }
 
     //
@@ -721,6 +846,8 @@ impl LanguageServer for ServerState {
         &mut self,
         params: RenameParams,
     ) -> BoxFuture<'static, Result<Option<WorkspaceEdit>, ResponseError>> {
+        /*
+        let _ = params;
         let uri = params.text_document_position.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let position = params.text_document_position.position;
@@ -728,7 +855,7 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(?path, ?position, ?new_name, "rename");
 
-        let Some(document) = self.document_map.get(&path) else {
+        let Some(document) = self.opened_document(&path) else {
             tracing::info!(?path, "document not found");
             return box_future(Err(path_not_found_error(&path)));
         };
@@ -738,11 +865,14 @@ impl LanguageServer for ServerState {
             position.line as usize,
             position.character as usize,
             &new_name,
-            &document.rope,
-            &document.tree,
+            document.rope(),
+            document.tree(),
         );
 
-        box_future(Ok(workspace_edit))
+        return box_future(Ok(workspace_edit));
+        */
+        let _ = params;
+        box_future(Err(unsupported_feature_error("rename")))
     }
 
     //
@@ -756,17 +886,12 @@ impl LanguageServer for ServerState {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
-        let items_map = if path.starts_with(self.workspace_r_path()) {
-            &self.workspace_items
-        } else {
-            &self.document_items
-        };
-
-        let Some(items) = items_map.get(&path) else {
+        let Some(document) = self.document(&path) else {
             tracing::error!(?path, "symbols not found");
             return box_future(Err(path_not_found_error(&path)));
         };
-        let symbols: Vec<DocumentSymbol> = symbols::document(items);
+        let items = index::index(document.tree().root_node(), document.rope(), false, false);
+        let symbols: Vec<DocumentSymbol> = symbols::document(&items);
 
         box_future(Ok(Some(DocumentSymbolResponse::Nested(symbols))))
     }
@@ -779,7 +904,8 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(?query);
 
-        let symbols = symbols::workspace(&query, &self.workspace_items);
+        let workspace_items = self.package_items_map();
+        let symbols = symbols::workspace(&query, &workspace_items);
 
         box_future(Ok(Some(WorkspaceSymbolResponse::Nested(symbols))))
     }
@@ -794,5 +920,12 @@ fn path_not_found_error(path: &Path) -> ResponseError {
     ResponseError::new(
         ErrorCode::REQUEST_FAILED,
         format!("path not found '{}'", path.display()),
+    )
+}
+
+fn unsupported_feature_error(feature_name: &str) -> ResponseError {
+    ResponseError::new(
+        ErrorCode::REQUEST_FAILED,
+        format!("{feature_name} is temporarily disabled during analysis integration"),
     )
 }

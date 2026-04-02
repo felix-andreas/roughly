@@ -1,7 +1,6 @@
 use {
     crate::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range},
     ropey::Rope,
-    std::path::PathBuf,
 };
 
 pub fn analyze(
@@ -18,14 +17,16 @@ pub fn analyze(
         return Vec::new();
     }
 
-    typing::check(analysis_state)
-        .diagnostics
-        .into_iter()
-        .map(convert_diagnostic)
-        .collect()
+    convert_diagnostics(typing::check(analysis_state).diagnostics)
 }
 
-fn convert_diagnostic(diagnostic: typing::Diagnostic) -> Diagnostic {
+pub fn convert_diagnostics(
+    diagnostics: impl IntoIterator<Item = typing::Diagnostic>,
+) -> Vec<Diagnostic> {
+    diagnostics.into_iter().map(convert_diagnostic).collect()
+}
+
+pub fn convert_diagnostic(diagnostic: typing::Diagnostic) -> Diagnostic {
     Diagnostic {
         range: convert_range(diagnostic.range),
         severity: Some(convert_severity(diagnostic.severity)),
@@ -42,6 +43,7 @@ fn convert_diagnostic(diagnostic: typing::Diagnostic) -> Diagnostic {
 fn convert_severity(severity: typing::Severity) -> DiagnosticSeverity {
     match severity {
         typing::Severity::Error => DiagnosticSeverity::ERROR,
+        typing::Severity::Warning => DiagnosticSeverity::WARNING,
     }
 }
 
