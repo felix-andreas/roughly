@@ -2,7 +2,7 @@ use {
     crate::{
         cli, completion,
         config::{Config, ExperimentalFeatures},
-        diagnostics, format,
+        diagnostics, format, hover,
         index::{self, IndexError, Item},
         lsp_types::{
             CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
@@ -10,13 +10,14 @@ use {
             DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
             DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol,
             DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
-            GlobPattern, Hover, HoverParams, HoverProviderCapability, InitializeParams,
-            InitializeResult, InitializedParams, Location, MessageType, OneOf, Position,
-            PublishDiagnosticsParams, Range, ReferenceParams, Registration, RegistrationParams,
-            RelativePattern, RenameParams, SaveOptions, ServerCapabilities, ServerInfo,
-            ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind,
-            TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceEdit,
-            WorkspaceSymbolParams, WorkspaceSymbolResponse,
+            GlobPattern, Hover, HoverContents, HoverParams, HoverProviderCapability,
+            InitializeParams, InitializeResult, InitializedParams, Location, MarkupContent,
+            MarkupKind, MessageType, OneOf, Position, PublishDiagnosticsParams, Range,
+            ReferenceParams, Registration, RegistrationParams, RelativePattern, RenameParams,
+            SaveOptions, ServerCapabilities, ServerInfo, ShowMessageParams,
+            TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+            TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceEdit, WorkspaceSymbolParams,
+            WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
         },
         symbols, typing_diagnostics as analysis_diagnostics, utils,
@@ -644,10 +645,10 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(?path, "goto definition");
 
-        let Some(document) = self.opened_document(&path) else {
+        if self.opened_document(&path).is_none() {
             tracing::info!(?path, "document not found");
             return box_future(Err(path_not_found_error(&path)));
-        };
+        }
         let workspace_items = self.package_items_map();
 
         let definitions = definition::goto(
@@ -673,43 +674,50 @@ impl LanguageServer for ServerState {
         &mut self,
         params: HoverParams,
     ) -> BoxFuture<'static, Result<Option<Hover>, ResponseError>> {
-        /*
-        let _ = params;
         let uri = params.text_document_position_params.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let position = params.text_document_position_params.position;
 
         tracing::debug!(?path, ?position, "hover");
 
-        let Some(document) = self.opened_document(&path) else {
+        if self.opened_document(&path).is_none() {
             tracing::info!(?path, "document not found");
             return box_future(Err(path_not_found_error(&path)));
-        };
+        }
 
-        let Some(node) = typing::tree::node_at_position(
-            document.tree(),
-            Point::new(position.line as usize, position.character as usize),
+        self.sync_dirty_documents();
+
+        let Some(hover_info) = self.analysis_state.hover(
+            &path,
+            TextPosition {
+                line_index: position.line as usize,
+                character_index: position.character as usize,
+            },
         ) else {
-            tracing::debug!(?position, "node not found");
+            tracing::debug!(?position, "hover target not found");
             return box_future(Ok(None));
         };
 
-        let Some(value) = hover::markdown(document, node, self.experimental_features) else {
-            return box_future(Ok(None));
-        };
+        let value = hover::markdown(&hover_info, self.experimental_features);
 
         let hover = Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
                 value,
             }),
-            range: Some(utils::node_range(node)),
+            range: Some(Range::new(
+                Position::new(
+                    hover_info.range.start.line_index as u32,
+                    hover_info.range.start.character_index as u32,
+                ),
+                Position::new(
+                    hover_info.range.end.line_index as u32,
+                    hover_info.range.end.character_index as u32,
+                ),
+            )),
         };
 
-        return box_future(Ok(Some(hover)));
-        */
-        let _ = params;
-        box_future(Err(unsupported_feature_error("hover")))
+        box_future(Ok(Some(hover)))
     }
 
     //

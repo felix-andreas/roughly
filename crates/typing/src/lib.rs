@@ -2,6 +2,7 @@ pub mod analysis;
 pub mod diagnostic;
 pub mod document;
 pub mod hir;
+pub mod ide;
 pub mod interner;
 pub mod lower;
 pub mod naming;
@@ -22,6 +23,7 @@ pub use crate::{
         Argument, Definition, DefinitionId, DefinitionItem, DefinitionKind, Expression,
         ExpressionId, ExpressionKind, Module, ModuleId, Parameter,
     },
+    ide::{HoverInfo, HoverPhase, HoverSection},
     interner::{Interner, Symbol},
     lower::{LoweringContext, lower},
     text::{TextPosition, TextRange},

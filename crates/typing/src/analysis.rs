@@ -720,6 +720,7 @@ mod tests {
         super::{Analysis, AnalysisPhase, check, run_lowering, run_naming},
         crate::{
             Severity,
+            ide::HoverPhase,
             text::{TextPosition, TextRange},
         },
         std::{
@@ -909,6 +910,75 @@ mod tests {
         assert!(analysis.document(&document_path).is_none());
 
         remove_workspace_path(&workspace_path);
+    }
+
+    #[test]
+    fn hover_reports_lowering_and_local_naming_for_symbol_use() {
+        let path = PathBuf::from("/workspace/R/main.R");
+        let source = "value <- function(parameter) parameter";
+        let hover_character = source
+            .rfind("parameter")
+            .expect("hover target should exist");
+        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        analysis
+            .add_document_from_source(path.clone(), source)
+            .expect("document should parse");
+
+        let hover = analysis
+            .hover(
+                &path,
+                TextPosition {
+                    line_index: 0,
+                    character_index: hover_character,
+                },
+            )
+            .expect("hover target should exist");
+
+        assert_eq!(hover.sections[0].phase, HoverPhase::Lowering);
+        assert_eq!(hover.sections[0].value, "Symbol(parameter)");
+        assert_eq!(hover.sections[1].phase, HoverPhase::Naming);
+        assert!(
+            hover.sections[1]
+                .value
+                .contains("local resolution: binding `parameter` at R/main.R:1:19")
+        );
+    }
+
+    #[test]
+    fn hover_reports_package_resolution_for_cross_file_symbol_use() {
+        let definition_path = PathBuf::from("/workspace/R/a.R");
+        let use_path = PathBuf::from("/workspace/R/b.R");
+        let source = "result <- value";
+        let hover_character = source.rfind("value").expect("hover target should exist");
+        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        analysis
+            .add_document_from_source(definition_path, "value <- 1L")
+            .expect("definition document should parse");
+        analysis
+            .add_document_from_source(use_path.clone(), source)
+            .expect("use document should parse");
+
+        let hover = analysis
+            .hover(
+                &use_path,
+                TextPosition {
+                    line_index: 0,
+                    character_index: hover_character,
+                },
+            )
+            .expect("hover target should exist");
+
+        assert_eq!(hover.sections[0].value, "Symbol(value)");
+        assert!(
+            hover.sections[1]
+                .value
+                .contains("local resolution: unresolved `value`")
+        );
+        assert!(
+            hover.sections[1]
+                .value
+                .contains("package resolution: binding `value` at R/a.R:1:1")
+        );
     }
 
     fn unique_temp_workspace_path() -> PathBuf {

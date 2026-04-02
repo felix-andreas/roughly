@@ -1,5 +1,30 @@
 # Human Notes (!AIs are not allowed to edit!)
 
+in structure mention that ide.rs contains all related functionality like functionality.
+
+I would like to introduce hovering test fixture suite. it should look similar to normal multi-file fixture but has special files: test-case-name.hover another-case.hover
+
+this contain hover position and expecation is hover output. is it easy to implemtn this? let's get the basic test-uite in order (and then we will discuss testing matrix)
+
+test suite should be ide/hover &  and test_fixtures ide_hover
+
+* rename typing to analysis
+  * combine AGENTS.md
+  
+* easy to move:
+  * ARCHITECTURE.md -> Analysis phases
+  * DECISION_LOG
+  * DISCUSS
+  * MEMORY.md
+  * SEMANTICS.md (-> TYPING_SEMANTICS.md)
+  * TESTING.md
+  * TODOS.md
+
+* not easy
+  * STRUCTURE.md (maybe local AGENTS.md)
+  * TECHNICAL_DEBT.md
+  
+
 * lsp features
   * rename
   * goto defintion

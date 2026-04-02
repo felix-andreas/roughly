@@ -80,6 +80,16 @@ Main gap:
 - `TypecheckStore` is empty, so after `typing::check` finishes there is no persistent
   expression-to-type map for hover to read
 
+Current state:
+
+- `typing::Analysis::hover(path, position)` now exists
+- hover lookup uses the smallest HIR expression or definition whose range contains the position
+- hover already exposes:
+  - lowering information
+  - naming information for expressions
+- `roughly` hover now renders that layered analysis output
+- typing hover is still blocked on persisted typecheck results
+
 Needed for a useful first hover:
 
 1. A stable way to map a hover position to the relevant lowered item
@@ -113,12 +123,9 @@ Recommended section contents:
 
 Recommended implementation order:
 
-1. Add `HoverInfo` data types in `typing`
-2. Add range-based lookup from source point to lowered expression/definition
-3. Expose lowering + naming hover first
-4. Make `TypecheckStore` real and persist inferred types
-5. Add typing hover section
-6. Re-enable `roughly` hover using the new analysis API
+1. Make `TypecheckStore` real and persist inferred types
+2. Add typing hover section
+3. Extend hover target coverage if we want richer type-definition or annotation hover
 
 Likely blockers:
 
