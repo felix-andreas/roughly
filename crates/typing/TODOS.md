@@ -56,48 +56,11 @@ This document tracks actionable planned work for the `typing` crate.
   - Ensure dependent files can be rechecked when earlier project-visible names change, even if those dependent files are not open.
   - Avoid committing yet to reuse of inference or unification state across edits.
 
-### Project-Global Type Namespace
+### Roughly Typing Save Diagnostics Integration
 
-- Add project-level type declaration collection and resolution.
-  - Decide and document the exact semantics for same-file forward references and cross-file type references.
-  - Collect top-level `@type` and `@alias` declarations across the project before resolving type references.
-  - Make duplicate type-name diagnostics project-wide rather than file-local.
-  - Feed that project-wide type namespace into naming without changing value-name semantics.
-  - Keep room for incremental recomputation when one file changes.
-- Expand the fixture harness for multi-file naming and diagnostics cases.
-  - Define a fixture input format that can represent more than one file.
-  - Add naming fixtures for cross-file type references and cross-file duplicate declarations once semantics are settled.
-  - Keep single-file fixtures simple; multi-file syntax should be opt-in rather than forced on every suite.
-- Reasoning:
-  - If type names become project-global and order-independent, file-local naming is no longer enough for type resolution.
-  - The current fixture harness only models one file at a time, so it cannot express the intended cross-file behavior.
-  - This work is a prerequisite for discussing project-global type tooling behavior with confidence.
-
-### Fixture Harness Multi-File Generations
-
-- Detailed plan: `projects/000_fixture_harness_multi_file_generations.md`
-- `typing::workspace` and the `fixtures` crate parser/runner milestones are implemented.
-- Teach `typing` suite renderers to execute workspace-style generations instead of only `Simple`
-  cases and current `naming` `MultiFile` cases.
-- Then adopt those APIs in more `typing` fixture cases and in `roughly`.
-- Add real package file-order fixture coverage driven by package collation rules instead of the
-  current fixture-order workaround in naming tests once `DESCRIPTION`/`Collate` is modelled.
-- Reasoning:
-  - Package-global naming semantics cannot be tested properly with the current single-file fixture shape.
-  - Later incremental package-recheck behavior will also need generation-based fixture cases.
-  - Reusing the existing incremental tree update path matters for correctness and for later benchmarking of incremental typing.
-  - Once the harness gains its own language, it needs direct parser and harness tests so syntax or project-state changes do not silently break the suite.
-
-### Analysis Simplification And Package Removal
-
-- Detailed plan: `projects/003_analysis_state_simplification_and_package_removal.md`
-- Make `Analysis` the sole owner of documents and durable phase state.
-- Remove `Package` from the typing pipeline.
-- Make fixture tests use `Analysis` directly instead of package-specific setup.
-
-### Naming Phase Split And Global Resolution
-
-- Detailed plan: `projects/002_naming_phase_split_and_global_resolution.md`
-- Introduce stable module identity into naming storage.
-- Keep local naming file-scoped and make package-global value resolution use one final symbol table.
-- Store naming results in a tooling-friendly shape instead of relying on package-wide HIR remapping.
+- Detailed plan: `projects/004_roughly_typing_save_diagnostics_integration.md`
+- Integrate `typing::Analysis` into `roughly` using real document paths and retained package
+  context.
+- Keep current fast `roughly` diagnostics on `did_change`.
+- Publish full package-aware typing diagnostics on `did_save`.
+- Synchronize non-open watched package file changes into typing state before full typing runs.
