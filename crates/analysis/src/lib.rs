@@ -23,7 +23,7 @@ pub use crate::{
         Argument, Definition, DefinitionId, DefinitionItem, DefinitionKind, Expression,
         ExpressionId, ExpressionKind, Module, ModuleId, Parameter,
     },
-    ide::{HoverInfo, HoverPhase, HoverSection},
+    ide::{HoverInfo, HoverPhase, HoverSection, render_hover_markdown},
     interner::{Interner, Symbol},
     lower::{LoweringContext, lower},
     text::{TextPosition, TextRange},

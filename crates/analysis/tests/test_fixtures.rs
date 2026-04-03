@@ -6,12 +6,12 @@ mod fixture_renderers;
 
 use {
     analysis::{
-        Analysis, AnalysisPhase, Document, DocumentId, HoverInfo, Interner, TextPosition,
-        TextRange, check,
+        Analysis, AnalysisPhase, Document, DocumentId, Interner, TextPosition, TextRange, check,
         hir::ExpressionKind,
+        ide,
         lower::{self, LoweringContext},
         naming::resolve_document_locally,
-        run_lowering, run_naming,
+        render_hover_markdown, run_lowering, run_naming,
         tree::new_parser,
         type_syntax::{parse_type_syntax, render_type_syntax},
         typecheck::inference_state_with_builtins,
@@ -432,8 +432,11 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
             let output = match action.as_str() {
                 "hover" => {
                     let request = parse_hover_request(contents)?;
-                    let hover = analysis_state.hover(&request.path, request.position);
-                    render_hover_output(hover)
+                    let hover = ide::hover(analysis_state, &request.path, request.position);
+                    match hover.as_ref() {
+                        Some(hover) => render_hover_markdown(hover, false),
+                        None => "no hover".to_owned(),
+                    }
                 }
                 "rename" => {
                     panic!("IDE action `rename` is not implemented yet")
@@ -504,28 +507,6 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
                 character_index: column_number - 1,
             },
         })
-    }
-
-    fn render_hover_output(hover: Option<HoverInfo>) -> String {
-        let Some(hover) = hover else {
-            return "no hover".to_owned();
-        };
-
-        let mut lines = vec![format!(
-            "range: {}:{}-{}:{}",
-            hover.range.start.line_index + 1,
-            hover.range.start.character_index + 1,
-            hover.range.end.line_index + 1,
-            hover.range.end.character_index + 1
-        )];
-
-        for section in hover.sections {
-            lines.push(String::new());
-            lines.push(format!("[{}]", section.phase.title()));
-            lines.push(section.value);
-        }
-
-        lines.join("\n")
     }
 }
 

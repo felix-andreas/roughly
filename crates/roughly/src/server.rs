@@ -22,7 +22,7 @@ use {
         },
         symbols, typing_diagnostics as analysis_diagnostics, utils,
     },
-    analysis::{Analysis, AnalysisPhase, TextPosition, TextRange},
+    analysis::{Analysis, AnalysisPhase, TextPosition, TextRange, ide},
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
         client_monitor::ClientProcessMonitorLayer,
@@ -687,7 +687,8 @@ impl LanguageServer for ServerState {
 
         self.sync_dirty_documents();
 
-        let Some(hover_info) = self.analysis_state.hover(
+        let Some(hover_info) = ide::hover(
+            &mut self.analysis_state,
             &path,
             TextPosition {
                 line_index: position.line as usize,

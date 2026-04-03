@@ -6,14 +6,20 @@ value <- function(parameter) parameter
 #!!!! hover parameter.hover
 R/main.R:1:30
 #++++
-range: 1:30-1:39
+### Lowering
 
-[Lowering]
+```text
 Symbol(parameter)
+```
 
-[Naming]
+---
+
+### Naming
+
+```text
 local resolution: binding `parameter` at R/main.R:1:19
 package resolution: binding `parameter` at R/main.R:1:19
+```
 
 #---- cross_file_use_updates_after_move
 #---- R/a.R
@@ -25,24 +31,36 @@ result <- value
 #!!!! hover lookup.hover
 R/b.R:1:11
 #++++
-range: 1:11-1:16
+### Lowering
 
-[Lowering]
+```text
 Symbol(value)
+```
 
-[Naming]
+---
+
+### Naming
+
+```text
 local resolution: unresolved `value`
 package resolution: binding `value` at R/a.R:1:1
+```
 #.... after_move
 #---- move R/a.R -> R/c.R
 #!!!! hover lookup.hover
 R/b.R:1:11
 #++++
-range: 1:11-1:16
+### Lowering
 
-[Lowering]
+```text
 Symbol(value)
+```
 
-[Naming]
+---
+
+### Naming
+
+```text
 local resolution: unresolved `value`
 package resolution: binding `value` at R/c.R:1:1
+```

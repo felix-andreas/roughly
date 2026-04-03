@@ -40,55 +40,79 @@ impl HoverPhase {
     }
 }
 
-impl Analysis {
-    pub fn hover(&mut self, path: &Path, position: TextPosition) -> Option<HoverInfo> {
-        let document_id = self.document_id_for_path(path)?;
+pub fn render_hover_markdown(hover_info: &HoverInfo, include_debug: bool) -> String {
+    let mut sections = hover_info
+        .sections
+        .iter()
+        .map(|section| {
+            format!(
+                "### {}\n\n{}",
+                section.phase.title(),
+                fenced_block("text", &section.value)
+            )
+        })
+        .collect::<Vec<_>>();
 
-        run_lowering(None, self);
-        run_naming(None, self);
+    if include_debug {
+        sections.push(format!(
+            "### Parsing\n\n- range: {}:{} to {}:{}",
+            hover_info.range.start.line_index + 1,
+            hover_info.range.start.character_index + 1,
+            hover_info.range.end.line_index + 1,
+            hover_info.range.end.character_index + 1,
+        ));
+    }
 
-        let target = hover_target(self, document_id, position)?;
-        let mut sections = Vec::new();
+    sections.join("\n\n---\n\n")
+}
 
-        match target {
-            HoverTarget::Expression(expression_id, range) => {
-                let module = self.module(document_id)?;
-                let expression = module.arena.get(expression_id);
+pub fn hover(analysis: &mut Analysis, path: &Path, position: TextPosition) -> Option<HoverInfo> {
+    let document_id = analysis.document_id_for_path(path)?;
+
+    run_lowering(None, analysis);
+    run_naming(None, analysis);
+
+    let target = hover_target(analysis, document_id, position)?;
+    let mut sections = Vec::new();
+
+    match target {
+        HoverTarget::Expression(expression_id, range) => {
+            let module = analysis.module(document_id)?;
+            let expression = module.arena.get(expression_id);
+            sections.push(HoverSection {
+                phase: HoverPhase::Lowering,
+                value: render_expression_hover(analysis, expression),
+            });
+
+            if let Some(value) =
+                render_expression_naming_hover(analysis, document_id, expression_id)
+            {
                 sections.push(HoverSection {
-                    phase: HoverPhase::Lowering,
-                    value: render_expression_hover(self, expression),
+                    phase: HoverPhase::Naming,
+                    value,
                 });
-
-                if let Some(value) =
-                    render_expression_naming_hover(self, document_id, expression_id)
-                {
-                    sections.push(HoverSection {
-                        phase: HoverPhase::Naming,
-                        value,
-                    });
-                }
-
-                Some(HoverInfo {
-                    range: text_range(range),
-                    sections,
-                })
             }
-            HoverTarget::Definition(definition_id, range) => {
-                let module = self.module(document_id)?;
-                let definition = module
-                    .definitions
-                    .iter()
-                    .find(|definition| definition.id == definition_id)?;
-                sections.push(HoverSection {
-                    phase: HoverPhase::Lowering,
-                    value: render_definition_hover(self, definition),
-                });
 
-                Some(HoverInfo {
-                    range: text_range(range),
-                    sections,
-                })
-            }
+            Some(HoverInfo {
+                range: text_range(range),
+                sections,
+            })
+        }
+        HoverTarget::Definition(definition_id, range) => {
+            let module = analysis.module(document_id)?;
+            let definition = module
+                .definitions
+                .iter()
+                .find(|definition| definition.id == definition_id)?;
+            sections.push(HoverSection {
+                phase: HoverPhase::Lowering,
+                value: render_definition_hover(analysis, definition),
+            });
+
+            Some(HoverInfo {
+                range: text_range(range),
+                sections,
+            })
         }
     }
 }
@@ -97,6 +121,10 @@ impl Analysis {
 enum HoverTarget {
     Expression(ExpressionId, tree_sitter::Range),
     Definition(DefinitionId, tree_sitter::Range),
+}
+
+fn fenced_block(language: &str, contents: &str) -> String {
+    format!("```{language}\n{contents}\n```")
 }
 
 impl HoverTarget {

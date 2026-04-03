@@ -924,15 +924,15 @@ mod tests {
             .add_document_from_source(path.clone(), source)
             .expect("document should parse");
 
-        let hover = analysis
-            .hover(
-                &path,
-                TextPosition {
-                    line_index: 0,
-                    character_index: hover_character,
-                },
-            )
-            .expect("hover target should exist");
+        let hover = crate::ide::hover(
+            &mut analysis,
+            &path,
+            TextPosition {
+                line_index: 0,
+                character_index: hover_character,
+            },
+        )
+        .expect("hover target should exist");
 
         assert_eq!(hover.sections[0].phase, HoverPhase::Lowering);
         assert_eq!(hover.sections[0].value, "Symbol(parameter)");
@@ -958,15 +958,15 @@ mod tests {
             .add_document_from_source(use_path.clone(), source)
             .expect("use document should parse");
 
-        let hover = analysis
-            .hover(
-                &use_path,
-                TextPosition {
-                    line_index: 0,
-                    character_index: hover_character,
-                },
-            )
-            .expect("hover target should exist");
+        let hover = crate::ide::hover(
+            &mut analysis,
+            &use_path,
+            TextPosition {
+                line_index: 0,
+                character_index: hover_character,
+            },
+        )
+        .expect("hover target should exist");
 
         assert_eq!(hover.sections[0].value, "Symbol(value)");
         assert!(

@@ -372,8 +372,8 @@ async fn hover_returns_identifier_name_without_debug_by_default() {
         "expected hover to include the identifier name in a fenced block, got: {value}"
     );
     assert!(
-        !value.contains("### Debug"),
-        "expected hover to omit debug section by default, got: {value}"
+        !value.contains("### Parsing"),
+        "expected hover to omit parsing section by default, got: {value}"
     );
 
     context.shutdown().await;
@@ -410,8 +410,8 @@ async fn hover_returns_identifier_debug_info_when_debug_enabled() {
         "expected hover to include the identifier name in a fenced block, got: {value}"
     );
     assert!(
-        value.contains("### Debug"),
-        "expected hover to include a debug section when enabled, got: {value}"
+        value.contains("### Parsing"),
+        "expected hover to include a parsing section when enabled, got: {value}"
     );
     assert!(
         value.contains("- kind: `identifier`"),
@@ -460,8 +460,8 @@ async fn hover_truncates_literal_value_at_newline() {
         "expected truncated literal value in hover, got: {value}"
     );
     assert!(
-        !value.contains("### Debug"),
-        "expected hover to omit debug section by default, got: {value}"
+        !value.contains("### Parsing"),
+        "expected hover to omit parsing section by default, got: {value}"
     );
 
     context.shutdown().await;
@@ -494,8 +494,8 @@ async fn hover_literal_includes_debug_when_debug_enabled() {
     };
     let value = markup.value;
     assert!(
-        value.contains("### Debug"),
-        "expected hover to include a debug section when enabled, got: {value}"
+        value.contains("### Parsing"),
+        "expected hover to include a parsing section when enabled, got: {value}"
     );
     assert!(
         value.contains("- kind: `string`"),
@@ -546,8 +546,8 @@ async fn hover_returns_keyword_information_for_if() {
         "expected keyword description, got: {value}"
     );
     assert!(
-        !value.contains("### Debug"),
-        "expected hover to omit debug section by default, got: {value}"
+        !value.contains("### Parsing"),
+        "expected hover to omit parsing section by default, got: {value}"
     );
 
     context.shutdown().await;
@@ -582,8 +582,8 @@ async fn hover_keyword_includes_debug_when_debug_enabled() {
     };
     let value = markup.value;
     assert!(
-        value.contains("### Debug"),
-        "expected hover to include a debug section when enabled, got: {value}"
+        value.contains("### Parsing"),
+        "expected hover to include a parsing section when enabled, got: {value}"
     );
     assert!(
         value.contains("- kind: `if`"),
