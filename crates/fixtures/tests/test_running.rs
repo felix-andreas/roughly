@@ -165,6 +165,42 @@ fn carries_expectations_forward_across_generations() {
 }
 
 #[test]
+fn does_not_carry_ide_action_expectations_forward_across_generations() {
+    let fixture_directory = write_fixture_suite(indoc! {"
+        #==== workspace
+        #---- ide
+        #---- a.R
+        alpha <- 1
+        #++++ any
+        #!!!! hover lookup.hover
+        a.R:1:1
+        #++++
+        hover v1
+        #.... v2
+        #---- edit a.R 1:11-1:11 -> \" + 2\"
+    "});
+
+    run_fixture_suite(path_to_string(&fixture_directory).as_str(), |_fixture| {
+        Ok(vec![
+            vec![
+                FixtureRunFile {
+                    path: PathBuf::from("a.R"),
+                    output: "anything".to_owned(),
+                },
+                FixtureRunFile {
+                    path: PathBuf::from("lookup.hover"),
+                    output: "hover v1".to_owned(),
+                },
+            ],
+            vec![FixtureRunFile {
+                path: PathBuf::from("a.R"),
+                output: "still anything".to_owned(),
+            }],
+        ])
+    });
+}
+
+#[test]
 fn allows_delete_operations_to_assert_other_paths() {
     let fixture_directory = write_fixture_suite(indoc! {"
         #==== workspace
@@ -375,7 +411,7 @@ fn rejects_missing_first_generation_expectations() {
 
     assert!(
         panic_message(panic)
-            .contains("initial multi-file generation documents must have an output expectation")
+            .contains("initial multi-file generation entries must have an output expectation")
     );
 }
 

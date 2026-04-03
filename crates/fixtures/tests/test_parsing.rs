@@ -1,7 +1,7 @@
 use {
     fixtures::{
-        FixtureExpectedOutput, FixtureGenerationExpectation, FixtureKind, FixtureOperation,
-        ParseFixtureError, parse_file,
+        FixtureExpectedOutput, FixtureGenerationEntry, FixtureGenerationExpectation, FixtureKind,
+        FixtureOperation, ParseFixtureError, parse_file,
     },
     indoc::indoc,
     std::path::PathBuf,
@@ -90,22 +90,32 @@ fn parses_multi_file_fixture_cases_with_immediate_expectations() {
     match &fixture_file.groups[0].cases[0].kind {
         FixtureKind::MultiFile(case) => {
             assert_eq!(case.initial_generation.name, "multi_file");
-            assert_eq!(case.initial_generation.documents.len(), 2);
+            assert_eq!(case.initial_generation.entries.len(), 2);
             assert_eq!(
-                case.initial_generation.documents[0].path,
-                PathBuf::from("a.R")
+                case.initial_generation.entries[0],
+                FixtureGenerationEntry {
+                    operation: FixtureOperation::CreateDocument {
+                        path: PathBuf::from("a.R"),
+                        contents: "alpha <- 1\n".to_owned(),
+                    },
+                    expectation: Some(FixtureGenerationExpectation {
+                        path: PathBuf::from("a.R"),
+                        output: FixtureExpectedOutput::Exact("a snapshot".to_owned()),
+                    }),
+                }
             );
             assert_eq!(
-                case.initial_generation.documents[1].path,
-                PathBuf::from("b.R")
-            );
-            assert_eq!(
-                case.initial_generation.documents[0].expected,
-                FixtureExpectedOutput::Exact("a snapshot".to_owned())
-            );
-            assert_eq!(
-                case.initial_generation.documents[1].expected,
-                FixtureExpectedOutput::Any
+                case.initial_generation.entries[1],
+                FixtureGenerationEntry {
+                    operation: FixtureOperation::CreateDocument {
+                        path: PathBuf::from("b.R"),
+                        contents: "beta <- alpha\n".to_owned(),
+                    },
+                    expectation: Some(FixtureGenerationExpectation {
+                        path: PathBuf::from("b.R"),
+                        output: FixtureExpectedOutput::Any,
+                    }),
+                }
             );
             assert!(case.generations.is_empty());
         }
@@ -138,14 +148,20 @@ fn parses_generation_based_fixture_cases_with_ordered_entries() {
     match &fixture_file.groups[0].cases[0].kind {
         FixtureKind::MultiFile(case) => {
             assert_eq!(case.initial_generation.name, "v1");
-            assert_eq!(case.initial_generation.documents.len(), 2);
+            assert_eq!(case.initial_generation.entries.len(), 2);
             assert_eq!(
-                case.initial_generation.documents[0].expected,
-                FixtureExpectedOutput::Exact("a v1".to_owned())
+                case.initial_generation.entries[0].expectation,
+                Some(FixtureGenerationExpectation {
+                    path: PathBuf::from("a.R"),
+                    output: FixtureExpectedOutput::Exact("a v1".to_owned()),
+                })
             );
             assert_eq!(
-                case.initial_generation.documents[1].expected,
-                FixtureExpectedOutput::Any
+                case.initial_generation.entries[1].expectation,
+                Some(FixtureGenerationExpectation {
+                    path: PathBuf::from("b.R"),
+                    output: FixtureExpectedOutput::Any,
+                })
             );
             assert_eq!(case.generations.len(), 1);
             assert_eq!(case.generations[0].name, "v2");
@@ -183,6 +199,42 @@ fn parses_generation_based_fixture_cases_with_ordered_entries() {
         }
         _ => panic!("expected generation-based multi-file fixture case"),
     }
+}
+
+#[test]
+fn parses_initial_ide_actions() {
+    let fixture_file = parse_file(indoc! {"
+        #==== workspace
+        #---- ide
+        #---- R/main.R
+        value <- function(parameter) parameter
+        #++++ any
+        #!!!! hover lookup.hover
+        R/main.R:1:30
+        #++++
+        hover output
+    "})
+    .expect("fixture should parse");
+
+    let FixtureKind::MultiFile(case) = &fixture_file.groups[0].cases[0].kind else {
+        panic!("expected multi-file fixture case");
+    };
+
+    assert_eq!(case.initial_generation.entries.len(), 2);
+    assert_eq!(
+        case.initial_generation.entries[1],
+        FixtureGenerationEntry {
+            operation: FixtureOperation::Action {
+                action: "hover".to_owned(),
+                path: PathBuf::from("lookup.hover"),
+                contents: "R/main.R:1:30\n".to_owned(),
+            },
+            expectation: Some(FixtureGenerationExpectation {
+                path: PathBuf::from("lookup.hover"),
+                output: FixtureExpectedOutput::Exact("hover output".to_owned()),
+            }),
+        }
+    );
 }
 
 #[test]
@@ -239,7 +291,7 @@ fn rejects_multi_file_inputs_without_immediate_expectations() {
     assert_eq!(
         error,
         ParseFixtureError::InvalidFixture {
-            message: "multi-file fixture inputs must be followed by an output expectation"
+            message: "initial multi-file generation entries must have an output expectation"
                 .to_owned()
         }
     );
@@ -259,7 +311,8 @@ fn rejects_multi_file_operations() {
     assert_eq!(
         error,
         ParseFixtureError::InvalidFixture {
-            message: "multi-file fixture cases only allow whole-file inputs".to_owned()
+            message: "initial multi-file generation may only create whole documents or actions"
+                .to_owned()
         }
     );
 }
@@ -279,7 +332,7 @@ fn rejects_multi_file_empty_paths() {
     assert_eq!(
         error,
         ParseFixtureError::InvalidFixture {
-            message: "input file path must not be empty".to_owned()
+            message: "document path must not be empty".to_owned()
         }
     );
 }
@@ -330,23 +383,16 @@ fn parses_generation_expectations_with_explicit_target_paths() {
 }
 
 #[test]
-fn rejects_non_bare_initial_multi_file_expectation_headers() {
-    let error = parse_file(indoc! {"
+fn allows_targeted_initial_multi_file_expectation_headers() {
+    parse_file(indoc! {"
         #==== workspace
-        #---- invalid
+        #---- allowed
         #---- a.R
         alpha <- 1
         #++++ a.R
         a snapshot
     "})
-    .expect_err("fixture should fail");
-
-    assert_eq!(
-        error,
-        ParseFixtureError::InvalidFixture {
-            message: "output expectations must use bare `#++++` or `#++++ any`".to_owned()
-        }
-    );
+    .expect("fixture should parse");
 }
 
 #[test]
@@ -406,7 +452,43 @@ fn rejects_initial_generational_edits() {
     assert_eq!(
         error,
         ParseFixtureError::InvalidFixture {
-            message: "initial multi-file generation may only create whole documents".to_owned()
+            message: "initial multi-file generation entries must have an output expectation"
+                .to_owned()
+        }
+    );
+}
+
+#[test]
+fn parses_unknown_ide_actions_without_runner_validation() {
+    let fixture_file = parse_file(indoc! {"
+        #==== workspace
+        #---- ide
+        #---- a.R
+        alpha <- 1
+        #++++ any
+        #!!!! references refs.request
+        alpha
+        #++++
+        anything
+    "})
+    .expect("fixture should parse");
+
+    let FixtureKind::MultiFile(case) = &fixture_file.groups[0].cases[0].kind else {
+        panic!("expected multi-file fixture case");
+    };
+
+    assert_eq!(
+        case.initial_generation.entries[1],
+        FixtureGenerationEntry {
+            operation: FixtureOperation::Action {
+                action: "references".to_owned(),
+                path: PathBuf::from("refs.request"),
+                contents: "alpha\n".to_owned(),
+            },
+            expectation: Some(FixtureGenerationExpectation {
+                path: PathBuf::from("refs.request"),
+                output: FixtureExpectedOutput::Exact("anything".to_owned()),
+            }),
         }
     );
 }

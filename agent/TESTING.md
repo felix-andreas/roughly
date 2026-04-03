@@ -110,6 +110,27 @@ Rules:
   does not add package prefixes for you
 - generation entries may also retarget the asserted output with `#++++ path`
 
+IDE-style suites may also use action operations:
+
+```text
+#!!!! hover lookup.hover
+R/main.R:1:30
+#++++
+<expected hover output>
+```
+
+Rules:
+
+- `#!!!!` introduces an IDE action, not a workspace document
+- the action body is the runner-defined action input
+- the following `#++++` block is the rendered output for that action path
+- actions are snapshot-local and do not carry forward into later generations
+- the shared fixture parser only records the action name and path; the suite runner defines what
+  each action means
+- use this shape for focused IDE suites such as `hover`
+- if IDE coverage expands to `rename`, `goto_definition`, and `assert_content`, keep one shared
+  `ide` fixture runner rather than per-action suite-specific conventions
+
 ### Current migration status
 
 The parser now understands both fixture shapes.
@@ -158,32 +179,6 @@ The intended fixture suites are:
 - `unification` - solved monotypes during local inference
 
 Keep focused test-running guidance minimal in this document. Exact suite adoption may lag behind the intended split while implementation and fixture migration are still in progress.
-
-## IDE fixture direction
-
-The current hover suite lives under `tests/ide/hover` and uses ordinary `MultiFile` fixtures plus
-`.hover` request files. The shared fixture grammar now supports `#++++ path` on generation entries,
-which lets one workspace mutation update the expectation for a different request file.
-
-Use that low-level shape when a suite only needs one request kind and one assertion after each
-workspace step.
-
-Reasoning:
-
-- IDE requests such as hover are assertions over the current workspace state, not always over the
-  mutated source file itself.
-- The lower-level `fixtures` crate should support this pattern generally because it is also useful
-  outside hover.
-
-Longer-term IDE direction:
-
-- If IDE coverage expands to `rename`, `goto_definition`, and `assert_content`, prefer one combined
-  IDE fixture runner rather than forcing every request through path-targeted `#++++`.
-- The likely split is:
-  - `#----` for workspace mutations
-  - `#!!!!` for IDE requests such as `hover`, `rename`, `goto_definition`, and `assert_content`
-- Keep `#++++ path` as the shared low-level fixture capability even if IDE suites later standardize
-  on `#!!!!`.
 
 ## Suite contracts
 

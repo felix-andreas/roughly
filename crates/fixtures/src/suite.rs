@@ -157,49 +157,75 @@ fn expected_outputs_for_multi_file_fixture(
     let mut carried_outputs = BTreeMap::<PathBuf, ExpectedFileOutput>::new();
     let mut expected_outputs = Vec::with_capacity(fixture.generations.len() + 1);
 
-    for document in &fixture.initial_generation.documents {
-        carried_outputs.insert(
-            document.path.clone(),
-            ExpectedFileOutput::from_fixture(&document.expected),
-        );
-    }
-
     expected_outputs.push(ExpectedFixtureOutput {
         name: fixture.initial_generation.name.clone(),
-        files: carried_outputs.clone(),
+        files: expected_outputs_for_generation_entries(
+            &mut carried_outputs,
+            &fixture.initial_generation.name,
+            &fixture.initial_generation.entries,
+        )?,
     });
 
     for generation in &fixture.generations {
-        for entry in &generation.entries {
-            apply_generation_operation(&mut carried_outputs, &entry.operation);
-
-            if let Some(expectation) = &entry.expectation {
-                carried_outputs.insert(
-                    expectation.path.clone(),
-                    ExpectedFileOutput::from_fixture(&expectation.output),
-                );
-            }
-
-            let Some(path) = output_path_for_operation(&entry.operation) else {
-                continue;
-            };
-
-            if !carried_outputs.contains_key(path) {
-                return Err(format!(
-                    "generation `{}` uses `{}` without an explicit first expectation",
-                    generation.name,
-                    path.display()
-                ));
-            }
-        }
-
         expected_outputs.push(ExpectedFixtureOutput {
             name: generation.name.clone(),
-            files: carried_outputs.clone(),
+            files: expected_outputs_for_generation_entries(
+                &mut carried_outputs,
+                &generation.name,
+                &generation.entries,
+            )?,
         });
     }
 
     Ok(expected_outputs)
+}
+
+fn expected_outputs_for_generation_entries(
+    carried_outputs: &mut BTreeMap<PathBuf, ExpectedFileOutput>,
+    generation_name: &str,
+    entries: &[crate::FixtureGenerationEntry],
+) -> Result<BTreeMap<PathBuf, ExpectedFileOutput>, String> {
+    let mut action_outputs = BTreeMap::new();
+
+    for entry in entries {
+        apply_generation_operation(carried_outputs, &entry.operation);
+
+        if matches!(entry.operation, FixtureOperation::Action { .. }) {
+            let expectation = entry.expectation.as_ref().ok_or_else(|| {
+                format!("generation `{generation_name}` actions must have an output expectation")
+            })?;
+            action_outputs.insert(
+                expectation.path.clone(),
+                ExpectedFileOutput::from_fixture(&expectation.output),
+            );
+        } else if let Some(expectation) = &entry.expectation {
+            carried_outputs.insert(
+                expectation.path.clone(),
+                ExpectedFileOutput::from_fixture(&expectation.output),
+            );
+        }
+
+        let Some(path) = output_path_for_operation(&entry.operation) else {
+            continue;
+        };
+
+        let has_expectation = if matches!(entry.operation, FixtureOperation::Action { .. }) {
+            action_outputs.contains_key(path)
+        } else {
+            carried_outputs.contains_key(path)
+        };
+
+        if !has_expectation {
+            return Err(format!(
+                "generation `{generation_name}` uses `{}` without an explicit first expectation",
+                path.display()
+            ));
+        }
+    }
+
+    let mut snapshot_outputs = carried_outputs.clone();
+    snapshot_outputs.extend(action_outputs);
+    Ok(snapshot_outputs)
 }
 
 fn apply_generation_operation(
@@ -207,7 +233,9 @@ fn apply_generation_operation(
     operation: &FixtureOperation,
 ) {
     match operation {
-        FixtureOperation::CreateDocument { .. } | FixtureOperation::EditDocument { .. } => {}
+        FixtureOperation::CreateDocument { .. }
+        | FixtureOperation::EditDocument { .. }
+        | FixtureOperation::Action { .. } => {}
         FixtureOperation::MoveDocument {
             source_path,
             destination_path,
@@ -465,6 +493,7 @@ fn output_path_for_operation(operation: &FixtureOperation) -> Option<&PathBuf> {
             destination_path, ..
         } => Some(destination_path),
         FixtureOperation::DeleteDocument { .. } => None,
+        FixtureOperation::Action { path, .. } => Some(path),
     }
 }
 
