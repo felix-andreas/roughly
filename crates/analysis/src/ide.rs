@@ -1,8 +1,11 @@
+// Keep one `// Section` block per IDE action, followed by one `// Utils` block for shared helpers.
 use {
     crate::{
         analysis::{Analysis, run_lowering, run_naming},
         document::DocumentId,
-        hir::{DefinitionId, DefinitionItem, ExpressionId, ExpressionKind},
+        hir::{
+            DefinitionId, DefinitionItem, DefinitionKind, Expression, ExpressionId, ExpressionKind,
+        },
         naming::{BindingInfo, ExpressionKey, ProvisionalBindingInfo},
         text::{TextPosition, TextRange},
         type_syntax::{render_named_type_ref, render_surface_type},
@@ -10,6 +13,10 @@ use {
     },
     std::path::Path,
 };
+
+//
+// Hover
+//
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HoverInfo {
@@ -30,54 +37,69 @@ pub enum HoverPhase {
     Typing,
 }
 
-impl HoverPhase {
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::Lowering => "Lowering",
-            Self::Naming => "Naming",
-            Self::Typing => "Typing",
-        }
-    }
-}
-
-pub fn render_hover_markdown(hover_info: &HoverInfo, include_debug: bool) -> String {
-    let mut sections = hover_info
-        .sections
-        .iter()
-        .map(|section| {
-            format!(
-                "### {}\n\n{}",
-                section.phase.title(),
-                fenced_block("text", &section.value)
-            )
-        })
-        .collect::<Vec<_>>();
-
-    if include_debug {
-        sections.push(format!(
-            "### Parsing\n\n- range: {}:{} to {}:{}",
-            hover_info.range.start.line_index + 1,
-            hover_info.range.start.character_index + 1,
-            hover_info.range.end.line_index + 1,
-            hover_info.range.end.character_index + 1,
-        ));
-    }
-
-    sections.join("\n\n---\n\n")
-}
-
 pub fn hover(analysis: &mut Analysis, path: &Path, position: TextPosition) -> Option<HoverInfo> {
     let document_id = analysis.document_id_for_path(path)?;
 
     run_lowering(None, analysis);
     run_naming(None, analysis);
 
-    let target = hover_target(analysis, document_id, position)?;
+    let module = analysis.module(document_id)?;
+    let point = tree_sitter::Point::new(position.line_index, position.character_index);
+    let mut target: Option<HoverTarget> = None;
+
+    for definition in &module.definitions {
+        if !range_contains_position(definition.range, point) {
+            continue;
+        }
+
+        let candidate = HoverTarget::Definition(definition.id, definition.range);
+        let replace = target
+            .map(|current| {
+                let current_range = current.range();
+                let candidate_range = candidate.range();
+                let current_width = current_range.end_byte - current_range.start_byte;
+                let candidate_width = candidate_range.end_byte - candidate_range.start_byte;
+
+                candidate_width < current_width
+                    || (candidate_width == current_width
+                        && candidate.tie_breaker() < current.tie_breaker())
+            })
+            .unwrap_or(true);
+
+        if replace {
+            target = Some(candidate);
+        }
+    }
+
+    for expression in module.arena.expressions() {
+        if !range_contains_position(expression.range, point) {
+            continue;
+        }
+
+        let candidate = HoverTarget::Expression(expression.id, expression.range);
+        let replace = target
+            .map(|current| {
+                let current_range = current.range();
+                let candidate_range = candidate.range();
+                let current_width = current_range.end_byte - current_range.start_byte;
+                let candidate_width = candidate_range.end_byte - candidate_range.start_byte;
+
+                candidate_width < current_width
+                    || (candidate_width == current_width
+                        && candidate.tie_breaker() < current.tie_breaker())
+            })
+            .unwrap_or(true);
+
+        if replace {
+            target = Some(candidate);
+        }
+    }
+
+    let target = target?;
     let mut sections = Vec::new();
 
     match target {
         HoverTarget::Expression(expression_id, range) => {
-            let module = analysis.module(document_id)?;
             let expression = module.arena.get(expression_id);
             sections.push(HoverSection {
                 phase: HoverPhase::Lowering,
@@ -99,7 +121,6 @@ pub fn hover(analysis: &mut Analysis, path: &Path, position: TextPosition) -> Op
             })
         }
         HoverTarget::Definition(definition_id, range) => {
-            let module = analysis.module(document_id)?;
             let definition = module
                 .definitions
                 .iter()
@@ -117,14 +138,37 @@ pub fn hover(analysis: &mut Analysis, path: &Path, position: TextPosition) -> Op
     }
 }
 
+pub fn render_hover_markdown(hover_info: &HoverInfo, include_parsing: bool) -> String {
+    let mut sections = hover_info
+        .sections
+        .iter()
+        .map(|section| {
+            let title = match section.phase {
+                HoverPhase::Lowering => "Lowering",
+                HoverPhase::Naming => "Naming",
+                HoverPhase::Typing => "Typing",
+            };
+            format!("### {}\n\n```text\n{}\n```", title, section.value)
+        })
+        .collect::<Vec<_>>();
+
+    if include_parsing {
+        sections.push(format!(
+            "### Parsing\n\n- range: {}:{} to {}:{}",
+            hover_info.range.start.line_index + 1,
+            hover_info.range.start.character_index + 1,
+            hover_info.range.end.line_index + 1,
+            hover_info.range.end.character_index + 1,
+        ));
+    }
+
+    sections.join("\n\n---\n\n")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HoverTarget {
     Expression(ExpressionId, tree_sitter::Range),
     Definition(DefinitionId, tree_sitter::Range),
-}
-
-fn fenced_block(language: &str, contents: &str) -> String {
-    format!("```{language}\n{contents}\n```")
 }
 
 impl HoverTarget {
@@ -142,37 +186,7 @@ impl HoverTarget {
     }
 }
 
-fn hover_target(
-    analysis: &Analysis,
-    document_id: DocumentId,
-    position: TextPosition,
-) -> Option<HoverTarget> {
-    let module = analysis.module(document_id)?;
-    let point = tree_sitter::Point::new(position.line_index, position.character_index);
-    let mut target = None;
-
-    for definition in &module.definitions {
-        if range_contains_position(definition.range, point) {
-            record_hover_target(
-                &mut target,
-                HoverTarget::Definition(definition.id, definition.range),
-            );
-        }
-    }
-
-    for expression in module.arena.expressions() {
-        if range_contains_position(expression.range, point) {
-            record_hover_target(
-                &mut target,
-                HoverTarget::Expression(expression.id, expression.range),
-            );
-        }
-    }
-
-    target
-}
-
-fn render_expression_hover(analysis: &Analysis, expression: &crate::hir::Expression) -> String {
+fn render_expression_hover(analysis: &Analysis, expression: &Expression) -> String {
     let mut lines = Vec::new();
 
     if let Some(annotation) = &expression.annotation {
@@ -293,8 +307,8 @@ fn render_definition_hover(analysis: &Analysis, definition: &DefinitionItem) -> 
     };
 
     let kind = match definition.definition.kind {
-        crate::hir::DefinitionKind::Type => "TypeDefinition",
-        crate::hir::DefinitionKind::Alias => "TypeAlias",
+        DefinitionKind::Type => "TypeDefinition",
+        DefinitionKind::Alias => "TypeAlias",
     };
 
     format!(
@@ -391,24 +405,9 @@ fn render_source_location(
     )
 }
 
-fn record_hover_target(target: &mut Option<HoverTarget>, candidate: HoverTarget) {
-    let replace = target
-        .map(|current| {
-            let current_range = current.range();
-            let candidate_range = candidate.range();
-            let current_width = current_range.end_byte - current_range.start_byte;
-            let candidate_width = candidate_range.end_byte - candidate_range.start_byte;
-
-            candidate_width < current_width
-                || (candidate_width == current_width
-                    && candidate.tie_breaker() < current.tie_breaker())
-        })
-        .unwrap_or(true);
-
-    if replace {
-        *target = Some(candidate);
-    }
-}
+//
+// Utils
+//
 
 fn range_contains_position(range: tree_sitter::Range, position: tree_sitter::Point) -> bool {
     !point_before(position, range.start_point) && point_before(position, range.end_point)

@@ -65,6 +65,7 @@ If the user says:
 
 - `get started`: read the relevant steering documents and `MEMORY.md`, then continue with the next actionable item in `TODOS.md` (assume fresh context unless the documents indicate otherwise).
 - `cleanup memory`: aggressively remove resolved, stale, or low-value session-specific details, while preserving this purpose section and any continuity that will still matter next session.
+- `code check`: review the relevant code for compliance with local coding guidelines. Report findings first and explicitly verify top-down module ordering plus the preferred `use` qualification style; in Rust, types should usually be imported directly, and functions should usually have at least one module-level import instead of repeated fully qualified calls unless ambiguity requires qualification.
 - `discuss`: move the active design discussion into `DISCUSS.md` and continue answering it there in later turns, not only in chat; remove resolved points as they are settled, and keep only concise open decisions rephrased so the unresolved question is easy to answer.
 - `authorative check`: compare the authoritative documents against the fixture suites and report contradictions, stale wording, or missing documented coverage.
 - `implementation check`: compare the implementation against the authoritative documents and report contract or architecture mismatches.
