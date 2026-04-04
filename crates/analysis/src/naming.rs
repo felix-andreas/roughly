@@ -16,15 +16,16 @@ use {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NamesGlobal {
     pub bindings: BTreeMap<BindingId, BindingInfo>,
-    pub global_bindings: BTreeMap<Symbol, BindingId>,
+    pub global_bindings: BTreeMap<Symbol, DocumentId>,
     pub resolutions: BTreeMap<ExpressionKey, BindingId>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NamesLocal {
-    pub bindings: BTreeMap<ProvisionalBindingId, ProvisionalBindingInfo>,
-    pub expression_resolutions: BTreeMap<ExpressionId, ProvisionalBindingId>,
-    pub top_level_exports: Vec<ProvisionalBindingId>,
+    pub bindings: BTreeMap<BindingId, BindingInfo>,
+    pub expression_resolutions: BTreeMap<ExpressionId, BindingId>,
+    pub top_level_exports: Vec<BindingId>,
+    pub global_exports: BTreeMap<Symbol, BindingId>,
     pub unresolved_values: BTreeMap<ExpressionId, Symbol>,
     pub annotated_expressions: Vec<ExpressionId>,
 }
@@ -69,7 +70,6 @@ pub(crate) fn resolve_package(
         context.resolve_document(*document_id, module);
     }
 
-    context.finalize_all_bindings();
     context.record_local_resolutions();
     context.collect_types(package_modules);
     context.build_global_bindings(package_modules);
@@ -80,29 +80,20 @@ pub(crate) fn resolve_package(
 }
 
 pub fn resolve_document_locally(document_id: DocumentId, module: &Module) -> NamesLocal {
-    let mut next_provisional_binding_id = 0;
-    let mut provisional_bindings = BTreeMap::new();
-    DocumentNamingContext::new(
-        document_id,
-        &module.arena,
-        &mut next_provisional_binding_id,
-        &mut provisional_bindings,
-    )
-    .resolve_module(module)
+    let mut next_binding_id = 0;
+    DocumentNamingContext::new(document_id, &module.arena, &mut next_binding_id)
+        .resolve_module(module)
 }
 
 struct PackageNamingContext<'a> {
     interner: &'a Interner,
     modules: BTreeMap<DocumentId, &'a Module>,
     documents: BTreeMap<DocumentId, NamesLocal>,
-    provisional_bindings: BTreeMap<ProvisionalBindingId, ProvisionalBindingInfo>,
     bindings: BTreeMap<BindingId, BindingInfo>,
-    provisional_to_final: HashMap<ProvisionalBindingId, BindingId>,
     resolutions: BTreeMap<ExpressionKey, BindingId>,
     diagnostics: HashMap<DocumentId, Vec<Diagnostic>>,
-    global_bindings: BTreeMap<Symbol, BindingId>,
+    global_bindings: BTreeMap<Symbol, DocumentId>,
     types: BTreeMap<Symbol, TypeInfo>,
-    next_provisional_binding_id: u32,
     next_binding_id: u32,
 }
 
@@ -112,14 +103,11 @@ impl<'a> PackageNamingContext<'a> {
             interner,
             modules: modules.iter().copied().collect(),
             documents: BTreeMap::new(),
-            provisional_bindings: BTreeMap::new(),
             bindings: BTreeMap::new(),
-            provisional_to_final: HashMap::new(),
             resolutions: BTreeMap::new(),
             diagnostics: HashMap::new(),
             global_bindings: BTreeMap::new(),
             types: BTreeMap::new(),
-            next_provisional_binding_id: 0,
             next_binding_id: 0,
         }
     }
@@ -137,13 +125,15 @@ impl<'a> PackageNamingContext<'a> {
     }
 
     fn resolve_document(&mut self, document_id: DocumentId, module: &Module) {
-        let document_naming = DocumentNamingContext::new(
-            document_id,
-            &module.arena,
-            &mut self.next_provisional_binding_id,
-            &mut self.provisional_bindings,
-        )
-        .resolve_module(module);
+        let document_naming =
+            DocumentNamingContext::new(document_id, &module.arena, &mut self.next_binding_id)
+                .resolve_module(module);
+        self.bindings.extend(
+            document_naming
+                .bindings
+                .iter()
+                .map(|(binding_id, binding)| (*binding_id, binding.clone())),
+        );
         self.documents.insert(document_id, document_naming);
     }
 
@@ -157,8 +147,7 @@ impl<'a> PackageNamingContext<'a> {
             .collect::<Vec<_>>();
 
         for (document_id, expression_resolutions) in documents {
-            for (expression_id, provisional_binding_id) in expression_resolutions {
-                let binding_id = self.finalize_binding(provisional_binding_id);
+            for (expression_id, binding_id) in expression_resolutions {
                 self.resolutions.insert(
                     ExpressionKey {
                         module_id: document_id,
@@ -214,19 +203,27 @@ impl<'a> PackageNamingContext<'a> {
     }
 
     fn build_global_bindings(&mut self, modules: &[(DocumentId, &Module)]) {
+        let mut effective_binding_by_symbol = BTreeMap::<Symbol, BindingId>::new();
+
         for (document_id, _) in modules {
             let Some(document_naming) = self.documents.get(document_id).cloned() else {
                 continue;
             };
 
-            for provisional_binding_id in document_naming.top_level_exports {
-                let binding_id = self.finalize_binding(provisional_binding_id);
+            for binding_id in document_naming.top_level_exports {
                 self.push_global_shadowing_diagnostics(binding_id);
 
-                let symbol = self.binding_info(provisional_binding_id).symbol;
-                if let Some(previous_binding_id) = self.global_bindings.insert(symbol, binding_id) {
+                let symbol = self
+                    .binding(binding_id)
+                    .expect("top-level binding should exist")
+                    .symbol;
+                if let Some(previous_binding_id) =
+                    effective_binding_by_symbol.insert(symbol, binding_id)
+                {
                     self.push_duplicate_global_binding_diagnostics(previous_binding_id, binding_id);
                 }
+
+                self.global_bindings.insert(symbol, *document_id);
             }
         }
     }
@@ -265,7 +262,10 @@ impl<'a> PackageNamingContext<'a> {
 
         for (document_id, unresolved_values) in documents {
             for (expression_id, symbol) in unresolved_values {
-                if let Some(binding_id) = self.global_bindings.get(&symbol) {
+                if let Some(export_document_id) = self.global_bindings.get(&symbol)
+                    && let Some(export_document_naming) = self.documents.get(export_document_id)
+                    && let Some(binding_id) = export_document_naming.global_exports.get(&symbol)
+                {
                     self.resolutions.insert(
                         ExpressionKey {
                             module_id: document_id,
@@ -294,18 +294,6 @@ impl<'a> PackageNamingContext<'a> {
         }
     }
 
-    fn finalize_all_bindings(&mut self) {
-        let provisional_binding_ids = self
-            .provisional_bindings
-            .keys()
-            .copied()
-            .collect::<Vec<_>>();
-
-        for provisional_binding_id in provisional_binding_ids {
-            self.finalize_binding(provisional_binding_id);
-        }
-    }
-
     fn resolve_definition(&mut self, definition_item: &DefinitionItem, document_id: DocumentId) {
         let local_type_parameters = definition_item
             .definition
@@ -322,41 +310,8 @@ impl<'a> PackageNamingContext<'a> {
         );
     }
 
-    fn finalize_binding(&mut self, provisional_binding_id: ProvisionalBindingId) -> BindingId {
-        if let Some(binding_id) = self.provisional_to_final.get(&provisional_binding_id) {
-            return *binding_id;
-        }
-
-        let binding_id = BindingId(self.next_binding_id);
-        self.next_binding_id += 1;
-        let binding_info = self.binding_info(provisional_binding_id);
-        self.bindings.insert(
-            binding_id,
-            BindingInfo {
-                id: binding_id,
-                module_id: binding_info.module_id,
-                symbol: binding_info.symbol,
-                range: binding_info.range,
-            },
-        );
-        self.provisional_to_final
-            .insert(provisional_binding_id, binding_id);
-        binding_id
-    }
-
-    fn binding_info(
-        &self,
-        provisional_binding_id: ProvisionalBindingId,
-    ) -> &ProvisionalBindingInfo {
-        self.provisional_bindings
-            .get(&provisional_binding_id)
-            .expect("provisional binding should exist")
-    }
-
-    fn binding(&self, binding_id: BindingId) -> &BindingInfo {
-        self.bindings
-            .get(&binding_id)
-            .expect("final binding should exist")
+    fn binding(&self, binding_id: BindingId) -> Option<&BindingInfo> {
+        self.bindings.get(&binding_id)
     }
 
     fn resolve_annotation(&mut self, annotation: &AttachedAnnotation, document_id: DocumentId) {
@@ -573,8 +528,14 @@ impl<'a> PackageNamingContext<'a> {
         previous_binding_id: BindingId,
         current_binding_id: BindingId,
     ) {
-        let previous_binding = self.binding(previous_binding_id).clone();
-        let current_binding = self.binding(current_binding_id).clone();
+        let previous_binding = self
+            .binding(previous_binding_id)
+            .expect("overwritten binding should exist")
+            .clone();
+        let current_binding = self
+            .binding(current_binding_id)
+            .expect("overwriting binding should exist")
+            .clone();
         let name = self
             .interner
             .resolve(current_binding.symbol)
@@ -602,7 +563,10 @@ impl<'a> PackageNamingContext<'a> {
     }
 
     fn push_global_shadowing_diagnostics(&mut self, binding_id: BindingId) {
-        let binding = self.binding(binding_id).clone();
+        let binding = self
+            .binding(binding_id)
+            .expect("global binding should exist")
+            .clone();
         if self.is_namespace_symbol(binding.symbol, binding.module_id) {
             let name = self.interner.resolve(binding.symbol).unwrap_or("<unknown>");
             self.push_diagnostic(
@@ -664,24 +628,17 @@ impl<'a> PackageNamingContext<'a> {
 struct DocumentNamingContext<'a> {
     document_id: DocumentId,
     arena: &'a HirArena,
-    next_provisional_binding_id: &'a mut u32,
-    provisional_bindings: &'a mut BTreeMap<ProvisionalBindingId, ProvisionalBindingInfo>,
-    local_scopes: Vec<BTreeMap<Symbol, ProvisionalBindingId>>,
+    next_binding_id: &'a mut u32,
+    local_scopes: Vec<BTreeMap<Symbol, BindingId>>,
     document_naming: NamesLocal,
 }
 
 impl<'a> DocumentNamingContext<'a> {
-    fn new(
-        document_id: DocumentId,
-        arena: &'a HirArena,
-        next_provisional_binding_id: &'a mut u32,
-        provisional_bindings: &'a mut BTreeMap<ProvisionalBindingId, ProvisionalBindingInfo>,
-    ) -> Self {
+    fn new(document_id: DocumentId, arena: &'a HirArena, next_binding_id: &'a mut u32) -> Self {
         Self {
             document_id,
             arena,
-            next_provisional_binding_id,
-            provisional_bindings,
+            next_binding_id,
             local_scopes: Vec::new(),
             document_naming: NamesLocal::default(),
         }
@@ -728,6 +685,9 @@ impl<'a> DocumentNamingContext<'a> {
                     scope.insert(*target, binding_id);
                 } else {
                     self.document_naming.top_level_exports.push(binding_id);
+                    self.document_naming
+                        .global_exports
+                        .insert(*target, binding_id);
                 }
                 self.document_naming
                     .expression_resolutions
@@ -802,23 +762,22 @@ impl<'a> DocumentNamingContext<'a> {
         }
     }
 
-    fn fresh_binding(&mut self, symbol: Symbol, range: Range) -> ProvisionalBindingId {
-        let binding_id = ProvisionalBindingId(*self.next_provisional_binding_id);
-        *self.next_provisional_binding_id += 1;
-        let binding_info = ProvisionalBindingInfo {
+    fn fresh_binding(&mut self, symbol: Symbol, range: Range) -> BindingId {
+        let binding_id = BindingId(*self.next_binding_id);
+        *self.next_binding_id += 1;
+        let binding_info = BindingInfo {
+            id: binding_id,
             module_id: self.document_id,
             symbol,
             range,
         };
-        self.provisional_bindings
-            .insert(binding_id, binding_info.clone());
         self.document_naming
             .bindings
             .insert(binding_id, binding_info);
         binding_id
     }
 
-    fn resolve_local_symbol(&self, symbol: Symbol) -> Option<ProvisionalBindingId> {
+    fn resolve_local_symbol(&self, symbol: Symbol) -> Option<BindingId> {
         for scope in self.local_scopes.iter().rev() {
             if let Some(binding_id) = scope.get(&symbol) {
                 return Some(*binding_id);
@@ -828,16 +787,6 @@ impl<'a> DocumentNamingContext<'a> {
         None
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProvisionalBindingInfo {
-    pub module_id: ModuleId,
-    pub symbol: Symbol,
-    pub range: Range,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ProvisionalBindingId(pub u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct TypeInfo {

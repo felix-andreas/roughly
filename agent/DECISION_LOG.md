@@ -2,6 +2,9 @@
 
 Keep newest decisions at the top.
 
+- naming should use one local `BindingId` space directly and drop `ProvisionalBindingId`, and package-global symbol tables should point to defining modules without redundantly storing module-local binding ids.
+  - Provisional ids were a migration seam, not a semantic requirement. Keeping package tables symbol-keyed plus module-keyed improves incremental recomputation boundaries while module-local `global_exports` remains the source of concrete local binding ids.
+
 - non-package documents can resolve package-global value and type names, but they do not contribute
   back to those namespaces or conflict with package files on same-name declarations.
   - This matches the script-file naming contract now captured in `TYPING_SEMANTICS.md` and the naming
@@ -15,9 +18,6 @@ Keep newest decisions at the top.
 
 - `workspace` should stay thinner than `package` and should not mirror package mutation APIs.
   - `Package` is the analysis unit and should own package contents directly. `Workspace` is the editor-facing registry and mutation helper around packages plus detached scripts, not a second package API surface.
-
-- naming should split into file-local preparation and project-global resolution, and the project-global pass should assign distinct package-visible ids for top-level declarations while updating the same naming result built by the file-local pass.
-  - Local lexical resolution and package-global resolution have different invalidation and tooling needs. The boundary should stay explicit, but it does not need a separate intermediate artifact. Remapping top-level declarations onto project-level ids still makes cross-file identity owned by the package result rather than by file-local traversal details.
 
 - fixture runners return structured snapshots instead of pre-rendered joined strings.
   - The fixture suite now compares per-snapshot per-file outputs directly, carries expectations

@@ -1,10 +1,9 @@
-[planning] Naming Data Model Shape
+[in-progress] Naming Data Model Shape
 
-Concept phase only. Not ready to be implemented.
+Active implementation and validation in progress.
 
 ## Unresolved questions
 
-- Should local naming use one real `BindingId` space immediately, rather than `ProvisionalBindingId` plus later remapping?
 - What is the smallest honest `LocalNames` shape that still supports:
   - local lexical resolution
   - duplicate top-level export diagnostics
@@ -15,6 +14,98 @@ Concept phase only. Not ready to be implemented.
 - How should annotation/type-name resolution be represented in naming:
   - as a side list like `annotated_expressions`
   - or by normal walked structures / later explicit ids?
+- For incremental naming, should cross-file non-local references stay symbol-keyed until the defining module is queried, instead of being eagerly rewritten to package-global ids?
+
+## Discussion pass (2026-04-04)
+
+### 1) Do we need provisional ids? What is the point?
+
+Current point of `ProvisionalBindingId` in `naming.rs`:
+
+- local pass can allocate bindings before package-global ordering is known
+- package pass can later allocate a separate final `BindingId`
+- the current code uses this as a staging bridge (`provisional_to_final`)
+
+Assessment:
+
+- This is an implementation staging device, not a semantic requirement.
+- If local naming and package naming are separated by stable contracts, provisional ids are optional.
+
+Recommendation:
+
+- remove `ProvisionalBindingId` from the model
+- use one local binding identity in local naming
+- let package-global naming reference locals via `(DocumentId, LocalBindingId)` or export-only global ids
+
+This keeps local facts stable within the local result and removes the remap layer entirely.
+
+### 2) Can we simplify `PackageNamingContext`?
+
+Yes. The current context carries both phase data and temporary remap machinery:
+
+- `provisional_bindings`
+- `provisional_to_final`
+- `next_provisional_binding_id`
+- `next_binding_id`
+
+These exist mostly because of the two-id staging model. If we drop that model, the package context can shrink to:
+
+- immutable inputs (modules/local names/interner)
+- package indexes (`global_exports`, `types`)
+- outputs (`resolutions`, `diagnostics`)
+
+Suggested direction:
+
+```rust
+pub struct LocalBindingId(pub u32);
+
+pub struct LocalNames {
+    pub bindings: BTreeMap<LocalBindingId, BindingInfo>,
+    pub resolutions: BTreeMap<ExpressionId, LocalBindingId>,
+    pub non_locals: BTreeMap<ExpressionId, Symbol>,
+    pub global_exports: BTreeMap<Symbol, LocalBindingId>,
+}
+
+pub struct GlobalBindingRef {
+    pub document_id: DocumentId,
+}
+
+pub struct GlobalNames {
+    pub symbol_to_binding: BTreeMap<Symbol, GlobalBindingRef>,
+    pub resolutions: BTreeMap<ExpressionKey, GlobalBindingRef>,
+}
+```
+
+This removes id remapping and keeps package-global lookup symbol-keyed.
+The local binding id is recovered from the defining module's `global_exports` map.
+
+### 3) Can we make naming less OOP and reduce helper-function sprawl?
+
+Yes. In this file, context objects currently own many tiny methods, including one-off wrappers. A flatter phase-first layout would align better with current coding rules:
+
+- keep `resolve_document_locally` as a focused stateful walker
+- make package pass explicit free functions in top-down order:
+  - `build_type_index`
+  - `build_global_exports`
+  - `resolve_non_locals`
+  - `resolve_annotations_and_definitions`
+- keep only helpers reused in multiple places (for example shared diagnostic formatting)
+- inline one-off wrappers (`binding`, `binding_info`, `module_expression_range`) where used
+
+The result is fewer tiny methods, less mutable global context state, and clearer incremental invalidation boundaries.
+
+## Proposed decision direction
+
+- Decide that provisional ids are a temporary migration seam and should be removed in project 5.
+- Make local naming own one local id space only.
+- Keep package-global lookup symbol-keyed, with package-level references pointing to the defining module only and local binding ids read from that module's `global_exports`.
+- Delay distinct stable global declaration ids until hover/goto-definition requirements force them.
+
+## Settled in this session
+
+- Implemented: removed `ProvisionalBindingId` from naming data and code paths.
+- Implemented: local naming now uses one `BindingId` space directly.
+- Implemented: package-global export table stores `Symbol -> DocumentId`; concrete binding ids are recovered from each module's `global_exports`.
 
 ## Current discussion summary
 
@@ -188,6 +279,6 @@ With the proposed split:
 
 ## Tasks
 
-- [pending] Decide whether to replace `ProvisionalBindingId` with one local binding id space in the data model.
-- [pending] Decide the package-global naming shape and whether stable global ids are part of that contract immediately.
+- [done] Decide whether to replace `ProvisionalBindingId` with one local binding id space in the data model.
+- [done] Decide package-global naming should be symbol-keyed at package level and module-local-id keyed inside each module.
 - [pending] Decide whether annotation resolution needs explicit stored ids or only a different traversal strategy.

@@ -4,7 +4,7 @@ use analysis::{
         DefinitionItem, DefinitionKind, ExpressionId, ExpressionKind, HirArena, Module, ModuleId,
     },
     lower::LoweringContext,
-    naming::{BindingId, ExpressionKey, NamesLocal, NamesGlobal, ProvisionalBindingId},
+    naming::{BindingId, ExpressionKey, NamesGlobal, NamesLocal},
     type_syntax::render_surface_type,
     typecheck::{InferenceError, InferenceState},
     types::{Atomic, CoreType, InferenceVariableId, TypeScheme},
@@ -693,7 +693,7 @@ fn render_locally_named_expression(
             let binding = local_naming_result
                 .expression_resolutions
                 .get(&expression_id)
-                .map(|binding_id| provisional_binding_label(*binding_id))
+                .map(|binding_id| binding_label(*binding_id))
                 .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}Symbol({name}@{binding})"));
         }
@@ -716,7 +716,7 @@ fn render_locally_named_expression(
             let binding = local_naming_result
                 .expression_resolutions
                 .get(&expression_id)
-                .map(|binding_id| provisional_binding_label(*binding_id))
+                .map(|binding_id| binding_label(*binding_id))
                 .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}Assign({name}@{binding})"));
             render_locally_named_expression(
@@ -740,7 +740,7 @@ fn render_locally_named_expression(
                         parameter.symbol,
                         parameter.range,
                     )
-                    .map(provisional_binding_label)
+                    .map(binding_label)
                     .unwrap_or_else(|| "?".to_owned());
                     format!("{name}@{binding}")
                 })
@@ -805,7 +805,7 @@ fn render_locally_named_expression(
                 *variable,
                 expression.range,
             )
-            .map(provisional_binding_label)
+            .map(binding_label)
             .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}For({name}@{binding})"));
             render_locally_named_expression(
@@ -983,10 +983,6 @@ fn binding_label(binding_id: BindingId) -> String {
     format!("b{}", binding_id.0)
 }
 
-fn provisional_binding_label(binding_id: ProvisionalBindingId) -> String {
-    format!("b{}", binding_id.0)
-}
-
 fn find_binding_by_symbol_and_range(
     naming_result: &NamesGlobal,
     module_id: ModuleId,
@@ -1007,7 +1003,7 @@ fn find_local_binding_by_symbol_and_range(
     module_id: ModuleId,
     symbol: analysis::Symbol,
     range: tree_sitter::Range,
-) -> Option<ProvisionalBindingId> {
+) -> Option<BindingId> {
     local_naming_result
         .bindings
         .iter()

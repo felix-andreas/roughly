@@ -6,7 +6,7 @@ use {
         hir::{
             DefinitionId, DefinitionItem, DefinitionKind, Expression, ExpressionId, ExpressionKind,
         },
-        naming::{BindingInfo, ExpressionKey, ProvisionalBindingInfo},
+        naming::{BindingInfo, ExpressionKey},
         text::{TextPosition, TextRange},
         type_syntax::{render_named_type_ref, render_surface_type},
         types::{Annotation, TypeAnnotationKind},
@@ -332,7 +332,7 @@ fn render_expression_naming_hover(
             .expect("local hover binding should exist");
         lines.push(format!(
             "local resolution: {}",
-            render_provisional_binding_site(analysis, binding)
+            render_binding_site(analysis, binding)
         ));
     } else if let Some(symbol) = local_naming.unresolved_values.get(&expression_id) {
         let name = analysis.interner().resolve(*symbol).unwrap_or("<unknown>");
@@ -356,20 +356,6 @@ fn render_expression_naming_hover(
     }
 
     (!lines.is_empty()).then_some(lines.join("\n"))
-}
-
-fn render_provisional_binding_site(
-    analysis: &Analysis,
-    binding: &ProvisionalBindingInfo,
-) -> String {
-    let name = analysis
-        .interner()
-        .resolve(binding.symbol)
-        .unwrap_or("<unknown>");
-    format!(
-        "binding `{name}` at {}",
-        render_source_location(analysis, binding.module_id, binding.range)
-    )
 }
 
 fn render_binding_site(analysis: &Analysis, binding: &BindingInfo) -> String {
