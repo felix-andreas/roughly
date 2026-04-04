@@ -5,7 +5,7 @@ use {
         document::{Document, DocumentEditError, DocumentId},
         hir::{DefinitionId, DefinitionItem, ExpressionId, ExpressionKind, HirArena, Module},
         lower::lower_with_shared_interner,
-        naming::{LocalNamingResult, NamingResult, resolve_package},
+        naming::{NamesGlobal, NamesLocal, resolve_package},
         tree,
         typecheck::inference_state_with_builtins_in_interner,
     },
@@ -56,8 +56,8 @@ pub struct LoweringStore {
 
 #[derive(Debug, Default)]
 pub struct NamingStore {
-    pub locals: HashMap<DocumentId, LocalNamingResult>,
-    pub package: NamingResult,
+    pub locals: HashMap<DocumentId, NamesLocal>,
+    pub package: NamesGlobal,
 }
 
 #[derive(Debug, Default)]

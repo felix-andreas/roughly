@@ -4,7 +4,7 @@ use analysis::{
         DefinitionItem, DefinitionKind, ExpressionId, ExpressionKind, HirArena, Module, ModuleId,
     },
     lower::LoweringContext,
-    naming::{BindingId, ExpressionKey, LocalNamingResult, NamingResult, ProvisionalBindingId},
+    naming::{BindingId, ExpressionKey, NamesLocal, NamesGlobal, ProvisionalBindingId},
     type_syntax::render_surface_type,
     typecheck::{InferenceError, InferenceState},
     types::{Atomic, CoreType, InferenceVariableId, TypeScheme},
@@ -142,7 +142,7 @@ pub fn render_interface_snapshot(
 pub fn render_named_hir(
     module_id: ModuleId,
     module: &Module,
-    naming_result: &NamingResult,
+    naming_result: &NamesGlobal,
     interner: &Interner,
 ) -> String {
     let mut lines = Vec::new();
@@ -169,7 +169,7 @@ pub fn render_named_hir(
 pub fn render_locally_named_hir(
     module_id: ModuleId,
     module: &Module,
-    local_naming_result: &LocalNamingResult,
+    local_naming_result: &NamesLocal,
     interner: &Interner,
 ) -> String {
     let mut lines = Vec::new();
@@ -351,7 +351,7 @@ fn render_named_expression(
     module_id: ModuleId,
     arena: &HirArena,
     expression_id: ExpressionId,
-    naming_result: &NamingResult,
+    naming_result: &NamesGlobal,
     interner: &Interner,
     indent: usize,
     lines: &mut Vec<String>,
@@ -670,7 +670,7 @@ fn render_locally_named_expression(
     module_id: ModuleId,
     arena: &HirArena,
     expression_id: ExpressionId,
-    local_naming_result: &LocalNamingResult,
+    local_naming_result: &NamesLocal,
     interner: &Interner,
     indent: usize,
     lines: &mut Vec<String>,
@@ -988,7 +988,7 @@ fn provisional_binding_label(binding_id: ProvisionalBindingId) -> String {
 }
 
 fn find_binding_by_symbol_and_range(
-    naming_result: &NamingResult,
+    naming_result: &NamesGlobal,
     module_id: ModuleId,
     symbol: analysis::Symbol,
     range: tree_sitter::Range,
@@ -1003,7 +1003,7 @@ fn find_binding_by_symbol_and_range(
 }
 
 fn find_local_binding_by_symbol_and_range(
-    local_naming_result: &LocalNamingResult,
+    local_naming_result: &NamesLocal,
     module_id: ModuleId,
     symbol: analysis::Symbol,
     range: tree_sitter::Range,

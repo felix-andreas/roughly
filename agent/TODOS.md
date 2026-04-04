@@ -1,8 +1,4 @@
-# `analysis` TODOs
-
-This document tracks actionable planned work for the `analysis` crate.
-
-`TYPING_SEMANTICS.md` is the user-facing contract. `ARCHITECTURE.md` describes implementation constraints. Keep this file focused on unfinished work.
+# TODOs
 
 ## Planning rules
 
@@ -12,6 +8,13 @@ This document tracks actionable planned work for the `analysis` crate.
 - Delete or rewrite stale tasks instead of preserving historical plans.
 
 ## Current priorities
+
+### Concept Work
+
+- Naming data model concept discussion:
+  `projects/005_naming_data_model_shape.md`
+- IDE diagnostics and hover freshness concept discussion:
+  `projects/006_ide_diagnostics_and_hover_freshness.md`
 
 ### Split `types.rs` By Phase
 

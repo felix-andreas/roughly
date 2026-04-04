@@ -1,8 +1,13 @@
 # Human Notes (!AIs are not allowed to edit!)
 
+* should we store a globals table (by interened symbol id)? 
+  * we distinghisuh between local binding and global binding?
+  * when a file is changed we now all it dependents because can just check which file consumes it, or if a file get's delete we just need to diff globals
+
 I would like to introduce hovering test fixture suite. it should look similar to normal multi-file fixture but has special files: test-case-name.hover another-case.hover
 
-this contain hover position and expecation is hover output. is it easy to implemtn this? let's get the basic test-uite in order (and then we will discuss testing matrix)
+this contain hover position and expecation is hover output. is it easy to implemtn this? let's get the basic test-uite in order (and then we will discuss * should we store a globals table (by interened symbol id)? 
+testing matrix)
 
 test suite should be ide/hover &  and test_fixtures ide_hover
 

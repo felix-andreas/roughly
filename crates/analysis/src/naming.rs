@@ -14,16 +14,15 @@ use {
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct NamingResult {
+pub struct NamesGlobal {
     pub bindings: BTreeMap<BindingId, BindingInfo>,
     pub global_bindings: BTreeMap<Symbol, BindingId>,
     pub resolutions: BTreeMap<ExpressionKey, BindingId>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct LocalNamingResult {
+pub struct NamesLocal {
     pub bindings: BTreeMap<ProvisionalBindingId, ProvisionalBindingInfo>,
-    pub expression_ranges: BTreeMap<ExpressionId, Range>,
     pub expression_resolutions: BTreeMap<ExpressionId, ProvisionalBindingId>,
     pub top_level_exports: Vec<ProvisionalBindingId>,
     pub unresolved_values: BTreeMap<ExpressionId, Symbol>,
@@ -49,8 +48,8 @@ pub struct ExpressionKey {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct PackageNamingComputation {
-    pub locals: HashMap<DocumentId, LocalNamingResult>,
-    pub naming: NamingResult,
+    pub locals: HashMap<DocumentId, NamesLocal>,
+    pub naming: NamesGlobal,
     pub diagnostics: HashMap<DocumentId, Vec<Diagnostic>>,
 }
 
@@ -59,12 +58,12 @@ pub(crate) fn resolve_package(
     extra_modules: &[(DocumentId, &Module)],
     interner: &Interner,
 ) -> PackageNamingComputation {
-    let mut context = PackageNamingContext::new(interner);
     let all_modules = package_modules
         .iter()
         .chain(extra_modules.iter())
         .copied()
         .collect::<Vec<_>>();
+    let mut context = PackageNamingContext::new(interner, &all_modules);
 
     for (document_id, module) in &all_modules {
         context.resolve_document(*document_id, module);
@@ -80,7 +79,7 @@ pub(crate) fn resolve_package(
     context.finish()
 }
 
-pub fn resolve_document_locally(document_id: DocumentId, module: &Module) -> LocalNamingResult {
+pub fn resolve_document_locally(document_id: DocumentId, module: &Module) -> NamesLocal {
     let mut next_provisional_binding_id = 0;
     let mut provisional_bindings = BTreeMap::new();
     DocumentNamingContext::new(
@@ -94,7 +93,8 @@ pub fn resolve_document_locally(document_id: DocumentId, module: &Module) -> Loc
 
 struct PackageNamingContext<'a> {
     interner: &'a Interner,
-    documents: BTreeMap<DocumentId, LocalNamingResult>,
+    modules: BTreeMap<DocumentId, &'a Module>,
+    documents: BTreeMap<DocumentId, NamesLocal>,
     provisional_bindings: BTreeMap<ProvisionalBindingId, ProvisionalBindingInfo>,
     bindings: BTreeMap<BindingId, BindingInfo>,
     provisional_to_final: HashMap<ProvisionalBindingId, BindingId>,
@@ -107,9 +107,10 @@ struct PackageNamingContext<'a> {
 }
 
 impl<'a> PackageNamingContext<'a> {
-    fn new(interner: &'a Interner) -> Self {
+    fn new(interner: &'a Interner, modules: &[(DocumentId, &'a Module)]) -> Self {
         Self {
             interner,
+            modules: modules.iter().copied().collect(),
             documents: BTreeMap::new(),
             provisional_bindings: BTreeMap::new(),
             bindings: BTreeMap::new(),
@@ -126,7 +127,7 @@ impl<'a> PackageNamingContext<'a> {
     fn finish(self) -> PackageNamingComputation {
         PackageNamingComputation {
             locals: self.documents.into_iter().collect(),
-            naming: NamingResult {
+            naming: NamesGlobal {
                 bindings: self.bindings,
                 global_bindings: self.global_bindings,
                 resolutions: self.resolutions,
@@ -629,15 +630,12 @@ impl<'a> PackageNamingContext<'a> {
         document_id: DocumentId,
         expression_id: ExpressionId,
     ) -> Range {
-        let document_naming = self
-            .documents
+        self.modules
             .get(&document_id)
-            .expect("module naming should exist");
-        document_naming
-            .expression_ranges
-            .get(&expression_id)
-            .copied()
-            .expect("expression range should exist")
+            .expect("module should exist")
+            .arena
+            .get(expression_id)
+            .range
     }
 
     fn is_namespace_symbol(&self, _symbol: Symbol, _document_id: DocumentId) -> bool {
@@ -669,7 +667,7 @@ struct DocumentNamingContext<'a> {
     next_provisional_binding_id: &'a mut u32,
     provisional_bindings: &'a mut BTreeMap<ProvisionalBindingId, ProvisionalBindingInfo>,
     local_scopes: Vec<BTreeMap<Symbol, ProvisionalBindingId>>,
-    document_naming: LocalNamingResult,
+    document_naming: NamesLocal,
 }
 
 impl<'a> DocumentNamingContext<'a> {
@@ -685,11 +683,11 @@ impl<'a> DocumentNamingContext<'a> {
             next_provisional_binding_id,
             provisional_bindings,
             local_scopes: Vec::new(),
-            document_naming: LocalNamingResult::default(),
+            document_naming: NamesLocal::default(),
         }
     }
 
-    fn resolve_module(mut self, module: &Module) -> LocalNamingResult {
+    fn resolve_module(mut self, module: &Module) -> NamesLocal {
         for expression_id in &module.expressions {
             self.resolve_expression(*expression_id);
         }
@@ -699,9 +697,6 @@ impl<'a> DocumentNamingContext<'a> {
 
     fn resolve_expression(&mut self, expression_id: ExpressionId) {
         let expression = self.arena.get(expression_id);
-        self.document_naming
-            .expression_ranges
-            .insert(expression_id, expression.range);
         if expression.annotation.is_some() {
             self.document_naming
                 .annotated_expressions
