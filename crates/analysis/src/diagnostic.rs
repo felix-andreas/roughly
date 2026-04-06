@@ -2,7 +2,7 @@ use {
     crate::{
         interner::{Interner, Symbol},
         typecheck::InferenceError,
-        types::{Atomic, CoreType, InferenceVariableId},
+        types::{Atomic, CoreType, InferenceVariableId, TypeScheme},
     },
     std::{collections::BTreeMap, fmt},
     tree_sitter::{Point, Range},
@@ -26,6 +26,16 @@ pub fn render_diagnostics(source: &str, diagnostics: &[Diagnostic]) -> String {
     }
 
     rendered
+}
+
+pub fn render_core_type(interner: &Interner, core_type: &CoreType) -> String {
+    let mut renderer = TypeRenderer::fixture(interner);
+    renderer.render_core_type(core_type)
+}
+
+pub fn render_type_scheme(interner: &Interner, type_scheme: &TypeScheme) -> String {
+    let mut renderer = TypeRenderer::fixture(interner);
+    renderer.render_type_scheme(type_scheme)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,7 +158,7 @@ impl Diagnostic {
                 range,
                 expression_id: _,
             } => {
-                let mut type_renderer = TypeRenderer::new(interner);
+                let mut type_renderer = TypeRenderer::diagnostic(interner);
                 (
                     *range,
                     format!(
@@ -163,7 +173,7 @@ impl Diagnostic {
                 range,
                 expression_id: _,
             } => {
-                let mut type_renderer = TypeRenderer::new(interner);
+                let mut type_renderer = TypeRenderer::diagnostic(interner);
                 let variable_name = type_renderer.render_variable(*variable);
                 (
                     range.unwrap_or(fallback_range),
@@ -179,7 +189,7 @@ impl Diagnostic {
                 range,
                 expression_id: _,
             } => {
-                let mut type_renderer = TypeRenderer::new(interner);
+                let mut type_renderer = TypeRenderer::diagnostic(interner);
                 (
                     range.unwrap_or(fallback_range),
                     format!(
@@ -194,7 +204,7 @@ impl Diagnostic {
                 range,
                 expression_id: _,
             } => {
-                let mut type_renderer = TypeRenderer::new(interner);
+                let mut type_renderer = TypeRenderer::diagnostic(interner);
                 (
                     *range,
                     format!(
@@ -348,25 +358,58 @@ fn render_symbols(symbols: &[Symbol], interner: &Interner) -> String {
 
 struct TypeRenderer<'a> {
     interner: &'a Interner,
+    variable_style: VariableRenderStyle,
     variable_names: BTreeMap<InferenceVariableId, String>,
+    quantified_variable_names: BTreeMap<InferenceVariableId, String>,
     next_variable_index: usize,
 }
 
+#[derive(Clone, Copy)]
+enum VariableRenderStyle {
+    Diagnostic,
+    Fixture,
+}
+
 impl<'a> TypeRenderer<'a> {
-    fn new(interner: &'a Interner) -> Self {
+    fn diagnostic(interner: &'a Interner) -> Self {
         Self {
             interner,
+            variable_style: VariableRenderStyle::Diagnostic,
             variable_names: BTreeMap::new(),
+            quantified_variable_names: BTreeMap::new(),
             next_variable_index: 0,
         }
     }
 
-    fn render(&mut self, core_type: &CoreType) -> String {
-        self.render_core_type(core_type)
+    fn fixture(interner: &'a Interner) -> Self {
+        Self {
+            interner,
+            variable_style: VariableRenderStyle::Fixture,
+            variable_names: BTreeMap::new(),
+            quantified_variable_names: BTreeMap::new(),
+            next_variable_index: 0,
+        }
     }
 
-    fn render_variable(&mut self, variable: InferenceVariableId) -> String {
-        self.variable_name(variable).to_owned()
+    fn render_type_scheme(&mut self, type_scheme: &TypeScheme) -> String {
+        let quantified_names = type_scheme
+            .quantified_variables
+            .iter()
+            .enumerate()
+            .map(|(index, variable)| {
+                let name = quantified_variable_name(index);
+                self.quantified_variable_names
+                    .insert(*variable, name.clone());
+                name
+            })
+            .collect::<Vec<_>>();
+        let rendered_body = self.render_core_type(&type_scheme.body);
+
+        if quantified_names.is_empty() {
+            rendered_body
+        } else {
+            format!("<{}> {rendered_body}", quantified_names.join(", "))
+        }
     }
 
     fn render_core_type(&mut self, core_type: &CoreType) -> String {
@@ -380,9 +423,7 @@ impl<'a> TypeRenderer<'a> {
             CoreType::Scalar(atomic) => render_atomic(*atomic).to_owned(),
             CoreType::Vector(atomic) => format!("{}[]", render_atomic(*atomic)),
             CoreType::NamedVector(atomic) => format!("{}[named]", render_atomic(*atomic)),
-            CoreType::List(item_type) => {
-                format!("list[{}]", self.render_core_type(item_type))
-            }
+            CoreType::List(item_type) => format!("list[{}]", self.render_core_type(item_type)),
             CoreType::NamedList(item_type) => {
                 format!("list[named: {}]", self.render_core_type(item_type))
             }
@@ -421,10 +462,7 @@ impl<'a> TypeRenderer<'a> {
                         } else {
                             name.to_owned()
                         };
-                        format!(
-                            "{rendered_name}: {}",
-                            self.render_core_type(&parameter.value)
-                        )
+                        format!("{rendered_name}: {}", self.render_core_type(&parameter.value))
                     })
                     .collect::<Vec<_>>();
                 let mut rendered_parts = rendered_parameters;
@@ -435,21 +473,35 @@ impl<'a> TypeRenderer<'a> {
                     self.render_core_type(&function_type.return_type)
                 )
             }
-            CoreType::Variable(variable) => self.variable_name(*variable).to_owned(),
+            CoreType::Variable(variable) => self.render_variable(*variable),
         }
     }
 
-    fn variable_name(&mut self, variable: InferenceVariableId) -> &str {
+    fn render_variable(&mut self, variable: InferenceVariableId) -> String {
+        if let Some(name) = self.quantified_variable_names.get(&variable) {
+            return name.clone();
+        }
+
         if !self.variable_names.contains_key(&variable) {
-            let name = format!("type{}", self.next_variable_index + 1);
+            let name = match self.variable_style {
+                VariableRenderStyle::Diagnostic => format!("type{}", self.next_variable_index + 1),
+                VariableRenderStyle::Fixture => format!("?{}", self.next_variable_index + 1),
+            };
             self.next_variable_index += 1;
             self.variable_names.insert(variable, name);
         }
 
         self.variable_names
             .get(&variable)
-            .map(String::as_str)
-            .unwrap_or("type")
+            .cloned()
+            .unwrap_or_else(|| match self.variable_style {
+                VariableRenderStyle::Diagnostic => "type".to_owned(),
+                VariableRenderStyle::Fixture => "?".to_owned(),
+            })
+    }
+
+    fn render(&mut self, core_type: &CoreType) -> String {
+        self.render_core_type(core_type)
     }
 }
 
@@ -462,4 +514,13 @@ fn render_atomic(atomic: Atomic) -> &'static str {
         Atomic::Character => "character",
         Atomic::Raw => "raw",
     }
+}
+
+fn quantified_variable_name(index: usize) -> String {
+    const QUANTIFIED_NAMES: [&str; 7] = ["T", "U", "V", "W", "X", "Y", "Z"];
+
+    QUANTIFIED_NAMES
+        .get(index)
+        .map(|name| (*name).to_owned())
+        .unwrap_or_else(|| format!("T{}", index + 1))
 }

@@ -1,4 +1,4 @@
-[done] Naming Data Model Shape
+# Naming Data Model Shape [done]
 
 Reshape naming around document-local facts plus one compact package winner table.
 

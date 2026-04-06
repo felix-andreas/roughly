@@ -8,7 +8,7 @@ use analysis::{
     naming::{BindingId, NamesGlobal, NamesLocal},
     type_syntax::render_surface_type,
     typecheck::{InferenceError, InferenceState},
-    types::{Atomic, CoreType, InferenceVariableId, TypeScheme},
+    types::CoreType,
 };
 
 pub fn render_expression_error_kind(error: &InferenceError) -> &'static str {
@@ -40,21 +40,13 @@ pub fn render_expression_types(
             .unwrap_or_else(|error| {
                 panic!("inference result should resolve for rendering: {error:?}")
             });
-        let mut renderer = SimpleTypeRenderer::new(lowering_context.interner());
-        lines.push(renderer.render(&resolved_type));
+        lines.push(analysis::render_core_type(
+            lowering_context.interner(),
+            &resolved_type,
+        ));
     }
 
     lines.join("\n")
-}
-
-pub fn render_core_type(interner: &Interner, core_type: &CoreType) -> String {
-    let mut renderer = SimpleTypeRenderer::new(interner);
-    renderer.render(core_type)
-}
-
-pub fn render_type_scheme(interner: &Interner, type_scheme: &TypeScheme) -> String {
-    let mut renderer = SimpleTypeRenderer::new(interner);
-    renderer.render_type_scheme(type_scheme)
 }
 
 pub fn render_interface_snapshot(
@@ -114,13 +106,12 @@ pub fn render_interface_snapshot(
             let binding = inference_state
                 .lookup_name(*target)
                 .unwrap_or_else(|| panic!("binding `{name}` should be present after inference"));
-            let mut renderer = SimpleTypeRenderer::new(lowering_context.interner());
             exported_entries.push((
                 definition_count + expression_index,
                 *target,
                 format!(
                     "{name}: {}",
-                    renderer.render_type_scheme(&binding.type_scheme)
+                    analysis::render_type_scheme(lowering_context.interner(), &binding.type_scheme)
                 ),
             ));
         }
@@ -200,123 +191,6 @@ pub fn render_locally_named_hir(
     lines.join("\n")
 }
 
-struct SimpleTypeRenderer<'a> {
-    interner: &'a Interner,
-    variable_names: std::collections::BTreeMap<InferenceVariableId, String>,
-    quantified_variable_names: std::collections::BTreeMap<InferenceVariableId, String>,
-    next_variable_index: usize,
-}
-
-impl<'a> SimpleTypeRenderer<'a> {
-    fn new(interner: &'a Interner) -> Self {
-        Self {
-            interner,
-            variable_names: std::collections::BTreeMap::new(),
-            quantified_variable_names: std::collections::BTreeMap::new(),
-            next_variable_index: 0,
-        }
-    }
-
-    fn render_type_scheme(&mut self, type_scheme: &TypeScheme) -> String {
-        let quantified_names = type_scheme
-            .quantified_variables
-            .iter()
-            .enumerate()
-            .map(|(index, variable)| {
-                let name = quantified_variable_name(index);
-                self.quantified_variable_names
-                    .insert(*variable, name.clone());
-                name
-            })
-            .collect::<Vec<_>>();
-        let rendered_body = self.render(&type_scheme.body);
-
-        if quantified_names.is_empty() {
-            rendered_body
-        } else {
-            format!("<{}> {}", quantified_names.join(", "), rendered_body)
-        }
-    }
-
-    fn render(&mut self, core_type: &CoreType) -> String {
-        match core_type {
-            CoreType::Any => "Any".to_owned(),
-            CoreType::Unknown => "Unknown".to_owned(),
-            CoreType::Null => "NULL".to_owned(),
-            CoreType::Nullable(inner_type) => format!("{} | NULL", self.render(inner_type)),
-            CoreType::Scalar(atomic) => render_atomic(*atomic).to_owned(),
-            CoreType::Vector(atomic) => format!("{}[]", render_atomic(*atomic)),
-            CoreType::NamedVector(atomic) => format!("{}[named]", render_atomic(*atomic)),
-            CoreType::List(item_type) => format!("list[{}]", self.render(item_type)),
-            CoreType::NamedList(item_type) => format!("list[named: {}]", self.render(item_type)),
-            CoreType::Record(fields) => {
-                let rendered_fields = fields
-                    .iter()
-                    .map(|field| {
-                        let name = self.interner.resolve(field.name).unwrap_or("<unknown>");
-                        format!("{name}: {}", self.render(&field.value))
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("list{{{rendered_fields}}}")
-            }
-            CoreType::Tuple(items) => {
-                let rendered_items = items
-                    .iter()
-                    .map(|item| self.render(item))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("list{{{rendered_items}}}")
-            }
-            CoreType::Function(function_type) => {
-                let rendered_parameters = function_type
-                    .parameters
-                    .iter()
-                    .map(|parameter| self.render(parameter))
-                    .collect::<Vec<_>>();
-                let rendered_named_parameters = function_type
-                    .named_parameters
-                    .iter()
-                    .map(|parameter| {
-                        let name = self.interner.resolve(parameter.name).unwrap_or("<unknown>");
-                        let rendered_name = if parameter.optional {
-                            format!("[{name}]")
-                        } else {
-                            name.to_owned()
-                        };
-                        format!("{rendered_name}: {}", self.render(&parameter.value))
-                    })
-                    .collect::<Vec<_>>();
-                let mut rendered_parts = rendered_parameters;
-                rendered_parts.extend(rendered_named_parameters);
-                format!(
-                    "fn({}) -> {}",
-                    rendered_parts.join(", "),
-                    self.render(&function_type.return_type)
-                )
-            }
-            CoreType::Variable(variable) => self.render_variable(*variable),
-        }
-    }
-
-    fn render_variable(&mut self, variable: InferenceVariableId) -> String {
-        if let Some(name) = self.quantified_variable_names.get(&variable) {
-            return name.clone();
-        }
-
-        if !self.variable_names.contains_key(&variable) {
-            let name = format!("?{}", self.next_variable_index + 1);
-            self.next_variable_index += 1;
-            self.variable_names.insert(variable, name);
-        }
-
-        self.variable_names
-            .get(&variable)
-            .cloned()
-            .unwrap_or_else(|| "?".to_owned())
-    }
-}
-
 fn render_named_definition(
     definition_item: &DefinitionItem,
     interner: &Interner,
@@ -368,6 +242,53 @@ fn render_named_expression(
 ) {
     let expression = arena.get(expression_id);
     let prefix = "  ".repeat(indent);
+    let render_binding_label = |resolved_document_id, binding_id| {
+        binding_display_labels
+            .get(&(resolved_document_id, binding_id))
+            .cloned()
+            .unwrap_or_else(|| format!("b{}", binding_id.0))
+    };
+    let find_expression_binding = || {
+        if let Some(binding_id) = local_naming_result.expression_resolutions.get(&expression_id) {
+            let binding_document_id = local_naming_result.bindings.get(binding_id)?.module_id;
+            return Some((binding_document_id, *binding_id));
+        }
+
+        let symbol = *local_naming_result.non_locals.get(&expression_id)?;
+        let export_document_id = *global_naming_result.global_bindings.get(&symbol)?;
+        let export_document_naming = all_local_naming.get(&export_document_id)?;
+        export_document_naming
+            .global_exports
+            .get(&symbol)
+            .copied()
+            .map(|binding_id| (export_document_id, binding_id))
+    };
+    let render_nested = |nested_expression_id, nested_indent, lines: &mut Vec<String>| {
+        render_named_expression(
+            document_id,
+            arena,
+            nested_expression_id,
+            local_naming_result,
+            all_local_naming,
+            global_naming_result,
+            binding_display_labels,
+            interner,
+            nested_indent,
+            lines,
+        );
+    };
+    let render_arguments = |arguments: &[analysis::hir::Argument], lines: &mut Vec<String>| {
+        for argument in arguments {
+            let argument_prefix = "  ".repeat(indent + 1);
+            if let Some(name) = argument.name {
+                let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
+                lines.push(format!("{argument_prefix}Argument({rendered_name})"));
+            } else {
+                lines.push(format!("{argument_prefix}Argument"));
+            }
+            render_nested(argument.expression, indent + 2, lines);
+        }
+    };
 
     match &expression.kind {
         ExpressionKind::Null => lines.push(format!("{prefix}Null")),
@@ -381,60 +302,28 @@ fn render_named_expression(
         }
         ExpressionKind::Symbol(symbol) => {
             let name = interner.resolve(*symbol).unwrap_or("<unknown>");
-            let binding = find_package_binding_for_expression(
-                expression_id,
-                local_naming_result,
-                all_local_naming,
-                global_naming_result,
-            )
-            .map(|(binding_document_id, binding_id)| {
-                binding_label(binding_display_labels, binding_document_id, binding_id)
-            })
-            .unwrap_or_else(|| "?".to_owned());
+            let binding = find_expression_binding()
+                .map(|(binding_document_id, binding_id)| {
+                    render_binding_label(binding_document_id, binding_id)
+                })
+                .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}Symbol({name}@{binding})"));
         }
         ExpressionKind::Block { expressions, .. } => {
             lines.push(format!("{prefix}Block"));
             for nested_expression in expressions {
-                render_named_expression(
-                    document_id,
-                    arena,
-                    *nested_expression,
-                    local_naming_result,
-                    all_local_naming,
-                    global_naming_result,
-                    binding_display_labels,
-                    interner,
-                    indent + 1,
-                    lines,
-                );
+                render_nested(*nested_expression, indent + 1, lines);
             }
         }
         ExpressionKind::Assign { target, value, .. } => {
             let name = interner.resolve(*target).unwrap_or("<unknown>");
-            let binding = find_package_binding_for_expression(
-                expression_id,
-                local_naming_result,
-                all_local_naming,
-                global_naming_result,
-            )
-            .map(|(binding_document_id, binding_id)| {
-                binding_label(binding_display_labels, binding_document_id, binding_id)
-            })
-            .unwrap_or_else(|| "?".to_owned());
+            let binding = find_expression_binding()
+                .map(|(binding_document_id, binding_id)| {
+                    render_binding_label(binding_document_id, binding_id)
+                })
+                .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}Assign({name}@{binding})"));
-            render_named_expression(
-                document_id,
-                arena,
-                *value,
-                local_naming_result,
-                all_local_naming,
-                global_naming_result,
-                binding_display_labels,
-                interner,
-                indent + 1,
-                lines,
-            );
+            render_nested(*value, indent + 1, lines);
         }
         ExpressionKind::Function { parameters, body } => {
             let rendered_parameters = parameters
@@ -447,27 +336,14 @@ fn render_named_expression(
                         parameter.symbol,
                         parameter.range,
                     )
-                    .map(|binding_id| {
-                        binding_label(binding_display_labels, document_id, binding_id)
-                    })
+                    .map(|binding_id| render_binding_label(document_id, binding_id))
                     .unwrap_or_else(|| "?".to_owned());
                     format!("{name}@{binding}")
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
             lines.push(format!("{prefix}Function({rendered_parameters})"));
-            render_named_expression(
-                document_id,
-                arena,
-                *body,
-                local_naming_result,
-                all_local_naming,
-                global_naming_result,
-                binding_display_labels,
-                interner,
-                indent + 1,
-                lines,
-            );
+            render_nested(*body, indent + 1, lines);
         }
         ExpressionKind::If {
             condition,
@@ -475,43 +351,10 @@ fn render_named_expression(
             alternative,
         } => {
             lines.push(format!("{prefix}If"));
-            render_named_expression(
-                document_id,
-                arena,
-                *condition,
-                local_naming_result,
-                all_local_naming,
-                global_naming_result,
-                binding_display_labels,
-                interner,
-                indent + 1,
-                lines,
-            );
-            render_named_expression(
-                document_id,
-                arena,
-                *consequence,
-                local_naming_result,
-                all_local_naming,
-                global_naming_result,
-                binding_display_labels,
-                interner,
-                indent + 1,
-                lines,
-            );
+            render_nested(*condition, indent + 1, lines);
+            render_nested(*consequence, indent + 1, lines);
             if let Some(alternative) = alternative {
-                render_named_expression(
-                    document_id,
-                    arena,
-                    *alternative,
-                    local_naming_result,
-                    all_local_naming,
-                    global_naming_result,
-                    binding_display_labels,
-                    interner,
-                    indent + 1,
-                    lines,
-                );
+                render_nested(*alternative, indent + 1, lines);
             }
         }
         ExpressionKind::For {
@@ -526,214 +369,44 @@ fn render_named_expression(
                 *variable,
                 expression.range,
             )
-            .map(|binding_id| binding_label(binding_display_labels, document_id, binding_id))
+            .map(|binding_id| render_binding_label(document_id, binding_id))
             .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}For({name}@{binding})"));
-            render_named_expression(
-                document_id,
-                arena,
-                *sequence,
-                local_naming_result,
-                all_local_naming,
-                global_naming_result,
-                binding_display_labels,
-                interner,
-                indent + 1,
-                lines,
-            );
-            render_named_expression(
-                document_id,
-                arena,
-                *body,
-                local_naming_result,
-                all_local_naming,
-                global_naming_result,
-                binding_display_labels,
-                interner,
-                indent + 1,
-                lines,
-            );
+            render_nested(*sequence, indent + 1, lines);
+            render_nested(*body, indent + 1, lines);
         }
         ExpressionKind::While { condition, body } => {
             lines.push(format!("{prefix}While"));
-            render_named_expression(
-                document_id,
-                arena,
-                *condition,
-                local_naming_result,
-                all_local_naming,
-                global_naming_result,
-                binding_display_labels,
-                interner,
-                indent + 1,
-                lines,
-            );
-            render_named_expression(
-                document_id,
-                arena,
-                *body,
-                local_naming_result,
-                all_local_naming,
-                global_naming_result,
-                binding_display_labels,
-                interner,
-                indent + 1,
-                lines,
-            );
+            render_nested(*condition, indent + 1, lines);
+            render_nested(*body, indent + 1, lines);
         }
         ExpressionKind::Repeat { body } => {
             lines.push(format!("{prefix}Repeat"));
-            render_named_expression(
-                document_id,
-                arena,
-                *body,
-                local_naming_result,
-                all_local_naming,
-                global_naming_result,
-                binding_display_labels,
-                interner,
-                indent + 1,
-                lines,
-            );
+            render_nested(*body, indent + 1, lines);
         }
         ExpressionKind::UnaryMinus { value } => {
             lines.push(format!("{prefix}UnaryMinus"));
-            render_named_expression(
-                document_id,
-                arena,
-                *value,
-                local_naming_result,
-                all_local_naming,
-                global_naming_result,
-                binding_display_labels,
-                interner,
-                indent + 1,
-                lines,
-            );
+            render_nested(*value, indent + 1, lines);
         }
         ExpressionKind::Call { callee, arguments } => {
             lines.push(format!("{prefix}Call"));
-            render_named_expression(
-                document_id,
-                arena,
-                *callee,
-                local_naming_result,
-                all_local_naming,
-                global_naming_result,
-                binding_display_labels,
-                interner,
-                indent + 1,
-                lines,
-            );
-            for argument in arguments {
-                let argument_prefix = "  ".repeat(indent + 1);
-                if let Some(name) = argument.name {
-                    let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
-                    lines.push(format!("{argument_prefix}Argument({rendered_name})"));
-                } else {
-                    lines.push(format!("{argument_prefix}Argument"));
-                }
-                render_named_expression(
-                    document_id,
-                    arena,
-                    argument.expression,
-                    local_naming_result,
-                    all_local_naming,
-                    global_naming_result,
-                    binding_display_labels,
-                    interner,
-                    indent + 2,
-                    lines,
-                );
-            }
+            render_nested(*callee, indent + 1, lines);
+            render_arguments(arguments, lines);
         }
         ExpressionKind::Subset { value, arguments } => {
             lines.push(format!("{prefix}Subset"));
-            render_named_expression(
-                document_id,
-                arena,
-                *value,
-                local_naming_result,
-                all_local_naming,
-                global_naming_result,
-                binding_display_labels,
-                interner,
-                indent + 1,
-                lines,
-            );
-            for argument in arguments {
-                let argument_prefix = "  ".repeat(indent + 1);
-                if let Some(name) = argument.name {
-                    let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
-                    lines.push(format!("{argument_prefix}Argument({rendered_name})"));
-                } else {
-                    lines.push(format!("{argument_prefix}Argument"));
-                }
-                render_named_expression(
-                    document_id,
-                    arena,
-                    argument.expression,
-                    local_naming_result,
-                    all_local_naming,
-                    global_naming_result,
-                    binding_display_labels,
-                    interner,
-                    indent + 2,
-                    lines,
-                );
-            }
+            render_nested(*value, indent + 1, lines);
+            render_arguments(arguments, lines);
         }
         ExpressionKind::Subset2 { value, arguments } => {
             lines.push(format!("{prefix}Subset2"));
-            render_named_expression(
-                document_id,
-                arena,
-                *value,
-                local_naming_result,
-                all_local_naming,
-                global_naming_result,
-                binding_display_labels,
-                interner,
-                indent + 1,
-                lines,
-            );
-            for argument in arguments {
-                let argument_prefix = "  ".repeat(indent + 1);
-                if let Some(name) = argument.name {
-                    let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
-                    lines.push(format!("{argument_prefix}Argument({rendered_name})"));
-                } else {
-                    lines.push(format!("{argument_prefix}Argument"));
-                }
-                render_named_expression(
-                    document_id,
-                    arena,
-                    argument.expression,
-                    local_naming_result,
-                    all_local_naming,
-                    global_naming_result,
-                    binding_display_labels,
-                    interner,
-                    indent + 2,
-                    lines,
-                );
-            }
+            render_nested(*value, indent + 1, lines);
+            render_arguments(arguments, lines);
         }
         ExpressionKind::Dollar { value, name } => {
             let rendered_name = interner.resolve(*name).unwrap_or("<unknown>");
             lines.push(format!("{prefix}Dollar({rendered_name})"));
-            render_named_expression(
-                document_id,
-                arena,
-                *value,
-                local_naming_result,
-                all_local_naming,
-                global_naming_result,
-                binding_display_labels,
-                interner,
-                indent + 1,
-                lines,
-            );
+            render_nested(*value, indent + 1, lines);
         }
         ExpressionKind::Unsupported => lines.push(format!("{prefix}Unsupported")),
     }
@@ -750,6 +423,30 @@ fn render_locally_named_expression(
 ) {
     let expression = arena.get(expression_id);
     let prefix = "  ".repeat(indent);
+    let render_binding_label = |binding_id: BindingId| format!("b{}", binding_id.0);
+    let render_nested = |nested_expression_id, nested_indent, lines: &mut Vec<String>| {
+        render_locally_named_expression(
+            module_id,
+            arena,
+            nested_expression_id,
+            local_naming_result,
+            interner,
+            nested_indent,
+            lines,
+        );
+    };
+    let render_arguments = |arguments: &[analysis::hir::Argument], lines: &mut Vec<String>| {
+        for argument in arguments {
+            let argument_prefix = "  ".repeat(indent + 1);
+            if let Some(name) = argument.name {
+                let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
+                lines.push(format!("{argument_prefix}Argument({rendered_name})"));
+            } else {
+                lines.push(format!("{argument_prefix}Argument"));
+            }
+            render_nested(argument.expression, indent + 2, lines);
+        }
+    };
 
     match &expression.kind {
         ExpressionKind::Null => lines.push(format!("{prefix}Null")),
@@ -766,22 +463,14 @@ fn render_locally_named_expression(
             let binding = local_naming_result
                 .expression_resolutions
                 .get(&expression_id)
-                .map(|binding_id| local_binding_label(*binding_id))
+                .map(|binding_id| render_binding_label(*binding_id))
                 .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}Symbol({name}@{binding})"));
         }
         ExpressionKind::Block { expressions, .. } => {
             lines.push(format!("{prefix}Block"));
             for nested_expression in expressions {
-                render_locally_named_expression(
-                    module_id,
-                    arena,
-                    *nested_expression,
-                    local_naming_result,
-                    interner,
-                    indent + 1,
-                    lines,
-                );
+                render_nested(*nested_expression, indent + 1, lines);
             }
         }
         ExpressionKind::Assign { target, value, .. } => {
@@ -789,18 +478,10 @@ fn render_locally_named_expression(
             let binding = local_naming_result
                 .expression_resolutions
                 .get(&expression_id)
-                .map(|binding_id| local_binding_label(*binding_id))
+                .map(|binding_id| render_binding_label(*binding_id))
                 .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}Assign({name}@{binding})"));
-            render_locally_named_expression(
-                module_id,
-                arena,
-                *value,
-                local_naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
+            render_nested(*value, indent + 1, lines);
         }
         ExpressionKind::Function { parameters, body } => {
             let rendered_parameters = parameters
@@ -813,22 +494,14 @@ fn render_locally_named_expression(
                         parameter.symbol,
                         parameter.range,
                     )
-                    .map(local_binding_label)
+                    .map(render_binding_label)
                     .unwrap_or_else(|| "?".to_owned());
                     format!("{name}@{binding}")
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
             lines.push(format!("{prefix}Function({rendered_parameters})"));
-            render_locally_named_expression(
-                module_id,
-                arena,
-                *body,
-                local_naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
+            render_nested(*body, indent + 1, lines);
         }
         ExpressionKind::If {
             condition,
@@ -836,34 +509,10 @@ fn render_locally_named_expression(
             alternative,
         } => {
             lines.push(format!("{prefix}If"));
-            render_locally_named_expression(
-                module_id,
-                arena,
-                *condition,
-                local_naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
-            render_locally_named_expression(
-                module_id,
-                arena,
-                *consequence,
-                local_naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
+            render_nested(*condition, indent + 1, lines);
+            render_nested(*consequence, indent + 1, lines);
             if let Some(alternative) = alternative {
-                render_locally_named_expression(
-                    module_id,
-                    arena,
-                    *alternative,
-                    local_naming_result,
-                    interner,
-                    indent + 1,
-                    lines,
-                );
+                render_nested(*alternative, indent + 1, lines);
             }
         }
         ExpressionKind::For {
@@ -878,193 +527,47 @@ fn render_locally_named_expression(
                 *variable,
                 expression.range,
             )
-            .map(local_binding_label)
+            .map(render_binding_label)
             .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}For({name}@{binding})"));
-            render_locally_named_expression(
-                module_id,
-                arena,
-                *sequence,
-                local_naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
-            render_locally_named_expression(
-                module_id,
-                arena,
-                *body,
-                local_naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
+            render_nested(*sequence, indent + 1, lines);
+            render_nested(*body, indent + 1, lines);
         }
         ExpressionKind::While { condition, body } => {
             lines.push(format!("{prefix}While"));
-            render_locally_named_expression(
-                module_id,
-                arena,
-                *condition,
-                local_naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
-            render_locally_named_expression(
-                module_id,
-                arena,
-                *body,
-                local_naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
+            render_nested(*condition, indent + 1, lines);
+            render_nested(*body, indent + 1, lines);
         }
         ExpressionKind::Repeat { body } => {
             lines.push(format!("{prefix}Repeat"));
-            render_locally_named_expression(
-                module_id,
-                arena,
-                *body,
-                local_naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
+            render_nested(*body, indent + 1, lines);
         }
         ExpressionKind::UnaryMinus { value } => {
             lines.push(format!("{prefix}UnaryMinus"));
-            render_locally_named_expression(
-                module_id,
-                arena,
-                *value,
-                local_naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
+            render_nested(*value, indent + 1, lines);
         }
         ExpressionKind::Call { callee, arguments } => {
             lines.push(format!("{prefix}Call"));
-            render_locally_named_expression(
-                module_id,
-                arena,
-                *callee,
-                local_naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
-            for argument in arguments {
-                let argument_prefix = "  ".repeat(indent + 1);
-                if let Some(name) = argument.name {
-                    let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
-                    lines.push(format!("{argument_prefix}Argument({rendered_name})"));
-                } else {
-                    lines.push(format!("{argument_prefix}Argument"));
-                }
-                render_locally_named_expression(
-                    module_id,
-                    arena,
-                    argument.expression,
-                    local_naming_result,
-                    interner,
-                    indent + 2,
-                    lines,
-                );
-            }
+            render_nested(*callee, indent + 1, lines);
+            render_arguments(arguments, lines);
         }
         ExpressionKind::Subset { value, arguments } => {
             lines.push(format!("{prefix}Subset"));
-            render_locally_named_expression(
-                module_id,
-                arena,
-                *value,
-                local_naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
-            for argument in arguments {
-                let argument_prefix = "  ".repeat(indent + 1);
-                if let Some(name) = argument.name {
-                    let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
-                    lines.push(format!("{argument_prefix}Argument({rendered_name})"));
-                } else {
-                    lines.push(format!("{argument_prefix}Argument"));
-                }
-                render_locally_named_expression(
-                    module_id,
-                    arena,
-                    argument.expression,
-                    local_naming_result,
-                    interner,
-                    indent + 2,
-                    lines,
-                );
-            }
+            render_nested(*value, indent + 1, lines);
+            render_arguments(arguments, lines);
         }
         ExpressionKind::Subset2 { value, arguments } => {
             lines.push(format!("{prefix}Subset2"));
-            render_locally_named_expression(
-                module_id,
-                arena,
-                *value,
-                local_naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
-            for argument in arguments {
-                let argument_prefix = "  ".repeat(indent + 1);
-                if let Some(name) = argument.name {
-                    let rendered_name = interner.resolve(name).unwrap_or("<unknown>");
-                    lines.push(format!("{argument_prefix}Argument({rendered_name})"));
-                } else {
-                    lines.push(format!("{argument_prefix}Argument"));
-                }
-                render_locally_named_expression(
-                    module_id,
-                    arena,
-                    argument.expression,
-                    local_naming_result,
-                    interner,
-                    indent + 2,
-                    lines,
-                );
-            }
+            render_nested(*value, indent + 1, lines);
+            render_arguments(arguments, lines);
         }
         ExpressionKind::Dollar { value, name } => {
             let rendered_name = interner.resolve(*name).unwrap_or("<unknown>");
             lines.push(format!("{prefix}Dollar({rendered_name})"));
-            render_locally_named_expression(
-                module_id,
-                arena,
-                *value,
-                local_naming_result,
-                interner,
-                indent + 1,
-                lines,
-            );
+            render_nested(*value, indent + 1, lines);
         }
         ExpressionKind::Unsupported => lines.push(format!("{prefix}Unsupported")),
     }
-}
-
-fn binding_label(
-    binding_display_labels: &std::collections::BTreeMap<(DocumentId, BindingId), String>,
-    document_id: DocumentId,
-    binding_id: BindingId,
-) -> String {
-    binding_display_labels
-        .get(&(document_id, binding_id))
-        .cloned()
-        .unwrap_or_else(|| format!("b{}", binding_id.0))
-}
-
-fn local_binding_label(binding_id: BindingId) -> String {
-    format!("b{}", binding_id.0)
 }
 
 fn find_binding_by_symbol_and_range(
@@ -1080,48 +583,4 @@ fn find_binding_by_symbol_and_range(
             binding.module_id == document_id && binding.symbol == symbol && binding.range == range
         })
         .map(|binding| binding.id)
-}
-
-fn find_package_binding_for_expression(
-    expression_id: ExpressionId,
-    local_naming_result: &NamesLocal,
-    all_local_naming: &std::collections::HashMap<DocumentId, NamesLocal>,
-    global_naming_result: &NamesGlobal,
-) -> Option<(DocumentId, BindingId)> {
-    if let Some(binding_id) = local_naming_result
-        .expression_resolutions
-        .get(&expression_id)
-    {
-        let binding_document_id = local_naming_result.bindings.get(binding_id)?.module_id;
-        return Some((binding_document_id, *binding_id));
-    }
-
-    let symbol = *local_naming_result.non_locals.get(&expression_id)?;
-    let export_document_id = *global_naming_result.global_bindings.get(&symbol)?;
-    let export_document_naming = all_local_naming.get(&export_document_id)?;
-    export_document_naming
-        .global_exports
-        .get(&symbol)
-        .copied()
-        .map(|binding_id| (export_document_id, binding_id))
-}
-
-fn render_atomic(atomic: Atomic) -> &'static str {
-    match atomic {
-        Atomic::Logical => "logical",
-        Atomic::Integer => "integer",
-        Atomic::Double => "double",
-        Atomic::Complex => "complex",
-        Atomic::Character => "character",
-        Atomic::Raw => "raw",
-    }
-}
-
-fn quantified_variable_name(index: usize) -> String {
-    const QUANTIFIED_NAMES: [&str; 7] = ["T", "U", "V", "W", "X", "Y", "Z"];
-
-    QUANTIFIED_NAMES
-        .get(index)
-        .map(|name| (*name).to_owned())
-        .unwrap_or_else(|| format!("T{}", index + 1))
 }
