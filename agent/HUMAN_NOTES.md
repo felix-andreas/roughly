@@ -1,5 +1,7 @@
 # Human Notes (!AIs are not allowed to edit!)
 
+* resolve_package is to complicated
+
 * should we store a globals table (by interened symbol id)? 
   * we distinghisuh between local binding and global binding?
   * when a file is changed we now all it dependents because can just check which file consumes it, or if a file get's delete we just need to diff globals

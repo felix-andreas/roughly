@@ -2,6 +2,21 @@
 
 Keep newest decisions at the top.
 
+- project 005 should rebuild `global_bindings` package-wide from local export tables on each naming run, rather than trying to maintain that winner table incrementally now.
+  - This keeps the implementation simple while naming is still package-wide, avoids repeated lazy package scans for cross-file lookups, and leaves a clean future upgrade path to a reverse `Symbol -> ordered exporters` index once package naming itself becomes incremental.
+
+- local naming should use `non_locals` for value references outside file-local lexical resolution, and the type-side equivalent should move from `annotated_expressions` toward an explicit `referenced_type_names`-style work-item table.
+  - `unresolved_values` is misleading because many of those names are only unresolved in the file-local pass, not after package-global lookup. `annotated_expressions` is too coarse because it records that an annotation exists, not the actual type-name references naming still needs to resolve.
+
+- stable exported declaration identity is out of scope for project 005.
+  - Project 005 only needs a cleaner naming data model and better incremental boundaries. Durable declaration identity matters later for tooling features across edits, not for this naming cleanup.
+
+- package-global non-local lookup should not be eagerly materialized as `ExpressionKey -> BindingId`; it should stay symbol-keyed until a later consumer resolves through package exports.
+  - Eager materialization ties naming results to snapshot-local binding ids and makes incremental reuse worse. The symbol-keyed package export table is the more stable boundary for project 005.
+
+- duplicate top-level value names should warn only when they conflict in package-visible naming; non-package documents may reuse those names without the package-global duplicate-binding warning.
+  - Package files contribute to one package-global value namespace, so conflicts there are meaningful and should warn. Non-package documents do not contribute to that namespace, so their top-level rebinding should stay script-local.
+
 - naming should use one local `BindingId` space directly and drop `ProvisionalBindingId`, and package-global symbol tables should point to defining modules without redundantly storing module-local binding ids.
   - Provisional ids were a migration seam, not a semantic requirement. Keeping package tables symbol-keyed plus module-keyed improves incremental recomputation boundaries while module-local `global_exports` remains the source of concrete local binding ids.
 

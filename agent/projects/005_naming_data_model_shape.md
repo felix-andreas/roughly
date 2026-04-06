@@ -1,284 +1,203 @@
 [in-progress] Naming Data Model Shape
 
-Active implementation and validation in progress.
+Reshape naming data around the current incremental direction and remove leftover snapshot-shaped state.
 
-## Unresolved questions
+## Goal
 
-- What is the smallest honest `LocalNames` shape that still supports:
-  - local lexical resolution
-  - duplicate top-level export diagnostics
-  - package-global resolution
-  - later hover / goto-definition work
-- Should package-visible globals get stable identities before any attempt to stabilize `ExpressionId`?
-- How should top-level exported declarations be represented so duplicate symbols remain diagnosable?
-- How should annotation/type-name resolution be represented in naming:
-  - as a side list like `annotated_expressions`
-  - or by normal walked structures / later explicit ids?
-- For incremental naming, should cross-file non-local references stay symbol-keyed until the defining module is queried, instead of being eagerly rewritten to package-global ids?
+Make naming store semantic facts in the shape we actually want:
 
-## Discussion pass (2026-04-04)
+- one local binding id space
+- symbol-keyed package-global lookup
+- no persisted duplicate-detection-only data
+- no eagerly materialized package-global value resolutions
+- explicit naming work items for type-name lookup instead of coarse re-walk lists
 
-### 1) Do we need provisional ids? What is the point?
+## Settled direction
 
-Current point of `ProvisionalBindingId` in `naming.rs`:
+- Local naming uses one `BindingId` space directly.
+- Package-global value lookup is symbol-keyed at package level:
+  - `Symbol -> DocumentId`
+- The defining module's local export table remains the source of the concrete exported `BindingId`.
+- Persist only effective exported bindings per symbol in local naming:
+  - `global_exports`
+- Duplicate top-level bindings in package files should warn, but naming does not need to remember overwritten exports after diagnostics are produced.
+- Duplicate top-level bindings in non-package documents do not produce the package-global duplicate-binding warning.
+- Package-global non-local lookup should not be eagerly materialized as `ExpressionKey -> BindingId`.
+- Stable exported declaration identity is out of scope for project 005.
+- Prefer `non_locals` over `unresolved_values` for the value-side local naming table.
+- Rebuild `global_bindings` from all local export tables whenever naming runs in project 005.
 
-- local pass can allocate bindings before package-global ordering is known
-- package pass can later allocate a separate final `BindingId`
-- the current code uses this as a staging bridge (`provisional_to_final`)
+## Discussion pass (2026-04-06)
 
-Assessment:
+- Type-side explicit work items should cover annotations, not top-level definitions.
+  - Lowering already collects top-level definitions in `Module.definitions`.
+  - The package pass can read definitions directly from lowered HIR without storing duplicate definition work items in naming.
+  - The real gap is annotation-owned type references, because they currently require the coarse `annotated_expressions` re-walk.
+- `NamesGlobal` should be slimmer than the current implementation.
+  - `NamesGlobal.bindings` is duplicated binding metadata.
+  - `NamesGlobal.resolutions` is duplicated derived state.
+  - Under the current design bar, both are design failures because they create multiple sources of truth.
+  - The more robust shape is:
+    - local binding facts live in `NamesLocal`
+    - package-global symbol indirection lives in `NamesGlobal`
+    - package-global resolutions are derived on demand from local `non_locals` plus package `global_bindings` plus the winning document's `global_exports`
 
-- This is an implementation staging device, not a semantic requirement.
-- If local naming and package naming are separated by stable contracts, provisional ids are optional.
-
-Recommendation:
-
-- remove `ProvisionalBindingId` from the model
-- use one local binding identity in local naming
-- let package-global naming reference locals via `(DocumentId, LocalBindingId)` or export-only global ids
-
-This keeps local facts stable within the local result and removes the remap layer entirely.
-
-### 2) Can we simplify `PackageNamingContext`?
-
-Yes. The current context carries both phase data and temporary remap machinery:
-
-- `provisional_bindings`
-- `provisional_to_final`
-- `next_provisional_binding_id`
-- `next_binding_id`
-
-These exist mostly because of the two-id staging model. If we drop that model, the package context can shrink to:
-
-- immutable inputs (modules/local names/interner)
-- package indexes (`global_exports`, `types`)
-- outputs (`resolutions`, `diagnostics`)
-
-Suggested direction:
+## Target shape
 
 ```rust
-pub struct LocalBindingId(pub u32);
-
-pub struct LocalNames {
-    pub bindings: BTreeMap<LocalBindingId, BindingInfo>,
-    pub resolutions: BTreeMap<ExpressionId, LocalBindingId>,
-    pub non_locals: BTreeMap<ExpressionId, Symbol>,
-    pub global_exports: BTreeMap<Symbol, LocalBindingId>,
-}
-
-pub struct GlobalBindingRef {
-    pub document_id: DocumentId,
-}
-
-pub struct GlobalNames {
-    pub symbol_to_binding: BTreeMap<Symbol, GlobalBindingRef>,
-    pub resolutions: BTreeMap<ExpressionKey, GlobalBindingRef>,
-}
-```
-
-This removes id remapping and keeps package-global lookup symbol-keyed.
-The local binding id is recovered from the defining module's `global_exports` map.
-
-### 3) Can we make naming less OOP and reduce helper-function sprawl?
-
-Yes. In this file, context objects currently own many tiny methods, including one-off wrappers. A flatter phase-first layout would align better with current coding rules:
-
-- keep `resolve_document_locally` as a focused stateful walker
-- make package pass explicit free functions in top-down order:
-  - `build_type_index`
-  - `build_global_exports`
-  - `resolve_non_locals`
-  - `resolve_annotations_and_definitions`
-- keep only helpers reused in multiple places (for example shared diagnostic formatting)
-- inline one-off wrappers (`binding`, `binding_info`, `module_expression_range`) where used
-
-The result is fewer tiny methods, less mutable global context state, and clearer incremental invalidation boundaries.
-
-## Proposed decision direction
-
-- Decide that provisional ids are a temporary migration seam and should be removed in project 5.
-- Make local naming own one local id space only.
-- Keep package-global lookup symbol-keyed, with package-level references pointing to the defining module only and local binding ids read from that module's `global_exports`.
-- Delay distinct stable global declaration ids until hover/goto-definition requirements force them.
-
-## Settled in this session
-
-- Implemented: removed `ProvisionalBindingId` from naming data and code paths.
-- Implemented: local naming now uses one `BindingId` space directly.
-- Implemented: package-global export table stores `Symbol -> DocumentId`; concrete binding ids are recovered from each module's `global_exports`.
-
-## Current discussion summary
-
-- The preferred working names in this project are `LocalNames` and `GlobalNames`.
-- `expression_ranges` has been removed from the current local naming data because ranges already exist in lowered HIR.
-- `annotated_expressions` may be the wrong storage shape even though resolving type names inside annotations still belongs to naming.
-- `ProvisionalBindingId` reflects the current implementation shape more than the semantic model.
-- Local lexical facts should not semantically change during package-global naming.
-- A simpler local result is attractive:
-  - local bindings by one real binding id
-  - local resolutions as `ExpressionId -> BindingId`
-  - unresolved non-locals as `ExpressionId -> Symbol`
-- `global_exports` should represent the effective exported binding per symbol.
-- Export identity still needs the symbol, because symbol lookup drives package-global resolution.
-- If the same symbol is exported multiple times in one file, local naming should warn and keep only the last binding in `global_exports`.
-- Package-visible globals are a good target for stable identities.
-- `ExpressionId` is not currently durable across relowering, so globals should be stabilized first if we pursue stable ids incrementally.
-- A symbol-keyed global export table is attractive because symbol lookup stays stable across relowering even when expression or local binding ids change.
-- That means changing one file does not require patching other files' non-local references just because local lowering ids were rebuilt.
-- In that model, cross-file global references can stay keyed by symbol during package-global resolution.
-
-## Working direction
-
-- Reshape the current local naming result toward a `LocalNames` data model based on semantic facts rather than implementation staging details.
-- Keep duplicate top-level exports representable until package-global diagnostics have run.
-- Keep a real package-global naming result rather than collapsing everything to ad hoc symbol lookup.
-- Treat stable package-visible global identity and local lexical identity as separate concerns.
-
-## Candidate shape
-
-```rust
-pub struct LocalNames {
+pub struct NamesLocal {
     pub bindings: BTreeMap<BindingId, BindingInfo>,
-    pub resolutions: BTreeMap<ExpressionId, BindingId>,
+    pub expression_resolutions: BTreeMap<ExpressionId, BindingId>,
     pub global_exports: BTreeMap<Symbol, BindingId>,
     pub non_locals: BTreeMap<ExpressionId, Symbol>,
+    pub named_type_annotations: Vec<ExpressionId>,
+}
+
+pub struct NamesGlobal {
+    pub global_bindings: BTreeMap<Symbol, DocumentId>,
 }
 ```
 
-Why this is attractive:
+Constraints:
 
-- one local binding identity model
-- export symbol access is explicit
-- package-global resolution can consume the effective export table directly
-- duplicate same-symbol exports can still be diagnosed while constructing the map
-- symbol-keyed exports avoid coupling cross-file lookup to unstable expression ids
+- `global_exports` stores only the effective exported binding per symbol for one document.
+- Duplicate-export diagnostics are emitted during naming, not preserved as exported-history data.
+- Cross-file value lookup should go through:
+  - local `non_locals`
+  - package-global `global_bindings`
+  - defining module `global_exports`
+- Type-name lookup should use explicit stored annotation ids with named type references, not "revisit every annotated expression".
 
-Rule:
+Why `NamesGlobal` has this shape:
 
-- `global_exports` means effective exported binding per symbol
-- if a later top-level binding exports the same symbol, local naming emits the warning and overwrites the earlier entry
+- `global_bindings` is the package-global indirection layer:
+  - it tells us which document currently wins for a symbol
+- concrete `BindingInfo` remains owned by the defining document's `NamesLocal.bindings`
+- this avoids duplicated binding metadata between local and global naming results
+- `global_bindings` is rebuilt from local exports whenever naming runs
+- keeping this compact winner table is justified because otherwise every cross-file global lookup would need to rescan all local export maps
+- `NamesGlobal` should not store package-wide `ExpressionKey -> BindingId` resolutions because those are snapshot-local derived data
 
-### Possible package result
+Incremental-update tradeoff:
 
-```rust
-pub struct NamingResult {
-    pub local: HashMap<DocumentId, LocalNames>,
-    pub globals: GlobalNames,
-}
+- `Symbol -> DocumentId` is a good package winner table.
+- It is not, by itself, a complete incremental-maintenance structure.
+- If one document changes or is removed, this table alone does not tell us which earlier document should become the new winner for affected symbols.
 
-pub struct GlobalNames {
-    pub bindings: BTreeMap<GlobalBindingId, BindingInfo>,
-    pub symbol_to_binding: BTreeMap<Symbol, GlobalBindingId>,
-    pub resolutions: BTreeMap<ExpressionKey, GlobalBindingId>,
-}
-```
+That leaves three options:
 
-Why this is attractive:
+1. Rebuild `global_bindings` from all local `global_exports` whenever package naming runs.
+   - simplest
+   - robust
+   - the right choice while naming is still effectively package-wide
 
-- separates local lexical facts from package-visible identity explicitly
-- leaves room for stable global ids without forcing local ids to become durable
+2. Keep `global_bindings` and later add a reverse incremental index.
+   - example:
+     - `Symbol -> ordered exporters`
+   - then add/change/remove only updates affected symbols
+   - this is the right next step once package naming itself becomes incremental
 
-## Stable globals
+3. Drop `global_bindings` and resolve lazily by scanning all local export tables.
+   - simpler persisted shape
+   - but every cross-file lookup becomes a package scan unless another cache is introduced
+   - that is likely worse once there are many non-local references
 
-- Stable package-visible globals are worth pursuing.
-- First target:
-  - stable top-level exported bindings only
-- Not first target:
-  - local bindings
-  - `ExpressionId`
+Current decision:
 
-Possible first key:
+- Keep `global_bindings`.
+- Rebuild it from all local exports during package naming for project 005.
+- Do not try to maintain it incrementally yet.
+- When we later build true incremental package naming, add a reverse symbol-to-exporters index instead of replacing `global_bindings` with repeated lazy scans.
 
-```rust
-pub struct GlobalBindingKey {
-    pub document_id: DocumentId,
-    pub symbol: Symbol,
-    pub top_level_index: u32,
-}
-```
+Why this is the right choice for now:
 
-Known limitation:
+- it keeps the current implementation simple
+- it avoids introducing a second incremental-maintenance structure before naming itself is incremental
+- it gives constant-time winner lookup after naming has run
+- it avoids repeated lazy scans across all documents for every cross-file reference
+- it keeps the future upgrade path clear:
+  - later add `Symbol -> ordered exporters`
+  - then update only affected symbols on document add/change/remove
+  - without changing the higher-level lookup model
 
-- `top_level_index` shifts when earlier exports are inserted
+Comparison with other high-quality language tools:
 
-Longer-term direction:
+- rust-analyzer keeps compact derived summaries and global scope structures rather than lazily rescanning source on each query.
+  - `ItemTree` is a per-file summary that acts as an invalidation barrier.
+  - `DefMap` stores module scopes.
+  - The system is explicitly designed so body edits do not invalidate global derived data.
+- clangd keeps explicit indexes rather than repeated lazy scans.
+  - `FileIndex` stores symbols from files separately.
+  - `MergedIndex` layers dynamic and background indexes.
+  - Queries use those indexes instead of rescanning all files.
+- TypeScript keeps symbol tables plus incremental builder programs.
+  - the binder populates local/export/member symbol tables
+  - builder programs cache and update affected results incrementally
 
-- replace `top_level_index` with crate-owned top-level syntax provenance
+Takeaway:
 
-## Important distinction
+- the common pattern is:
+  - per-file summaries
+  - a compact global index derived from those summaries
+  - incremental rebuild or merge of the index
+- the common pattern is not:
+  - repeated lazy package-wide scans for each non-local lookup
 
-- A symbol-keyed global table is a good stable lookup mechanism.
-- It is not automatically a full stable declaration identity model.
-- Those are different jobs:
-  - symbol-keyed lookup helps cross-file name resolution survive relowering
-  - stable declaration identity helps tooling and invalidation distinguish one declaration site from another
+Implication for this project:
 
-## Symbol-keyed globals and incremental analysis
+- `global_bindings` is the right kind of data structure.
+- The real design question is not whether to keep a compact winner table.
+- The real design question is when to rebuild it package-wide versus when to add the reverse index needed for fine-grained incremental maintenance.
 
-### Proposed split
+## Current mismatches
 
-- Package-global lookup:
-  - `Symbol -> ModuleId`
-- Per-module export lookup:
-  - `ModuleId -> Symbol -> BindingId`
-  - or `ModuleId -> Symbol -> ExpressionId`
+Current implementation still carries state we want to remove or rename:
 
-Then resolving a non-local symbol works in two steps:
+- `NamesLocal.top_level_exports`
+  - should become package-pass-only temporary state or disappear entirely
+- `NamesLocal.unresolved_values`
+  - should be renamed to `non_locals`
+- `NamesLocal.annotated_expressions`
+  - should be replaced by `named_type_annotations`
+- `NamesGlobal.resolutions`
+  - should be removed so package-global lookup stays symbol-keyed instead of snapshot-local
+- `NamesGlobal.bindings`
+  - should be removed so binding metadata has one owner: the local naming result of the defining document
 
-1. use the package-global table to find which module currently exports the symbol
-2. use that module's local export table to find the actual exported binding/expression inside the module
+## Type-side work items
 
-### Why this helps incrementality
+`annotated_expressions` is too weak because it only records that an expression had an annotation.
+It does not record the semantic naming work that remains.
 
-- Cross-file references stay keyed by symbol.
-- Symbols are stable across relowering in a way `ExpressionId` is not.
-- If file `A` changes and gets relowered, its local export ids may change.
-- But files `B`, `C`, and `D` that refer to global symbol `foo` do not need to be patched just because `A` rebuilt local ids.
-- Only file `A`'s local export table and the package-global symbol table need recomputation.
+The replacement should record type-name references that need naming-owned lookup.
 
-### Difference from the current approach
+That table should be analogous to value-side `non_locals`:
 
-Current naming shape:
+- value side:
+  - "this expression refers to symbol `x` outside file-local lexical scope"
+- type side:
+  - "this annotation expression still needs project-global type-name lookup"
 
-- package-global resolutions end up as `ExpressionKey -> BindingId`
-- final `BindingId` values are allocated fresh during each naming run
-- `ExpressionId` values are also snapshot-local
+Why the replacement should be `named_type_annotations: Vec<ExpressionId>`:
 
-Practical consequence today:
+- top-level definitions are already directly available in lowered HIR
+- nested type syntax does not currently have stable inner ids
+- a one-field wrapper type adds abstraction without adding information
+- storing per-type-name items would invent a second representation of annotation type syntax before we have a clear downstream need
+- `named_type_annotations` is explicit about why these expression ids are stored, unlike `annotated_expressions`
 
-- a full rerun can change ids even when the user-visible global symbol relationships did not change
-- cross-file naming facts are therefore tied to one naming snapshot
-- this makes incremental reuse harder because there is no naturally stable package-global lookup key
+## Remaining tasks
 
-With the proposed split:
+- [pending] Remove stored `top_level_exports` from persisted naming state and keep any duplicate-detection-only data temporary to the package pass.
+- [pending] Rename `unresolved_values` to `non_locals`.
+- [pending] Replace `annotated_expressions` with `named_type_annotations`.
+- [pending] Remove duplicated package-global binding metadata and keep binding ownership local to each document's `NamesLocal`.
+- [pending] Remove eagerly materialized package-global `ExpressionKey -> BindingId` resolutions.
+- [done] Decide how to maintain `global_bindings` for project 005.
+- [pending] Keep or tighten fixture coverage around same-file and cross-file package duplicate bindings as the data model changes.
+- [pending] Add or tighten fixtures around the final non-package duplicate-binding behavior if the naming shape changes there.
 
-- package-global lookup is stable at the symbol layer
-- local exported identities can be rebuilt per changed module
-- dependent files can continue to say "I reference symbol `foo`" without being rewritten just because `foo`'s defining file got new local ids
+## Out of scope
 
-### Important limitation
-
-- This helps incremental name resolution.
-- It does not by itself solve all tooling identity problems.
-- If we need durable "go to this exact declaration site" identity across edits, we still want a stable declaration identity model on top of symbol lookup.
-
-### Recommendation
-
-- Use symbol-keyed tables as the package-global indirection layer.
-- Keep id-based detail inside the defining module.
-- Treat that split as an incremental-analysis optimization and a cleaner semantic boundary, even if we later add stable declaration ids on top.
-
-### Hint for definitions
-
-- Apply the same split to top-level definitions.
-- Package-global definition lookup should stay symbol-keyed.
-- The defining module should then map that symbol to the concrete local definition/binding id.
-- This keeps cross-file references to definitions stable across relowering for the same reason as global value lookup:
-  - other files keep referring to the symbol
-  - only the defining module has to rebuild its local ids
-
-## Tasks
-
-- [done] Decide whether to replace `ProvisionalBindingId` with one local binding id space in the data model.
-- [done] Decide package-global naming should be symbol-keyed at package level and module-local-id keyed inside each module.
-- [pending] Decide whether annotation resolution needs explicit stored ids or only a different traversal strategy.
+- durable exported declaration identity across edits
+- solving later tooling identity problems beyond what symbol-keyed lookup already needs

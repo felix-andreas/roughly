@@ -115,7 +115,8 @@ Top-level value names are package-global across files.
 
 - a top-level binding may be referenced from another file
 - if several files define the same top-level value name, the later file wins
-- both the overwritten earlier definition and the overwriting later definition should warn
+- if several package files define the same top-level value name, both the overwritten earlier
+  definition and the overwriting later definition should warn
 
 Inside executable code, value naming remains lexical.
 
@@ -152,6 +153,10 @@ not contribute to the package-global value or type namespaces.
   files or to other non-package documents through the project-global type namespace
 - a package file and a non-package document may reuse the same top-level value or type name without
   a package-global name conflict
+- duplicate top-level value names inside a non-package document do not produce the package-global
+  duplicate-binding warning; they behave like ordinary script-local rebinding
+  - Reasoning: R scripts commonly rely on the global namespace, so warning on top-level rebinding in
+    non-package documents would add unnecessary noise outside package-visible naming
 
 ### Future direction
 

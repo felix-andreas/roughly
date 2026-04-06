@@ -18,6 +18,37 @@ We are currenlty in an ongoing migration. The entire anlysis from roughly was re
 * Do not optimize for the smallest safe fix. When you touch an area, bring it to the intended shape for that change, remove dead paths or temporary seams, and pay down nearby technical debt needed to keep the code coherent. You are responsible for code quality, not just feature delivery.
 * Avoid helper-function indirection when logic is only used once and does not materially improve testability or readability. Prefer inlining small one-off solutions unless doing so would create large duplication.
 
+## Design bar
+
+- We require world-class implementation quality, not merely passing behavior.
+- Use the simplest correct data model and implementation that can express the required semantics.
+- Do not introduce complicated abstractions unless they remove real complexity.
+- Make illegal states unrepresentable whenever practical.
+- Maintain a single source of truth for each semantic fact whenever practical.
+- If a fact is cheaply and reliably derivable from an existing source of truth, do not store it separately unless there is a clear performance reason.
+- Do not introduce duplicated state, mirrored tables, or cached derived data that can drift out of sync without clear justification.
+- Use designs that minimize cloning, copying, and whole-structure rebuilding.
+- Optimize for very fast incremental analysis and low memory churn.
+- If you notice a structural design problem, you must surface it early and explicitly instead of working around it.
+
+## Design review trigger
+
+If you see any of the following, you must stop and call it out to the user before continuing implementation:
+
+- multiple sources of truth
+- duplicated metadata
+- derived state being persisted without clear justification
+- snapshot-local ids where stable indirection would suffice
+- repeated cloning or copying introduced only to maintain convenience state
+- a design that feels more complicated than the semantics require
+
+When surfacing such a problem, you must explain:
+
+- the current source of truth
+- what is duplicated or structurally weak
+- the simpler target shape
+- the expected impact on correctness, simplicity, performance, and incremental analysis
+
 ## Error handling
 
 - Do not swallow analysis, synchronization, or document-loading errors in this crate or its integrations.
@@ -64,7 +95,7 @@ If the user says:
 - `get started`: read the relevant steering documents and `MEMORY.md`, then continue with the next actionable item in `TODOS.md` (assume fresh context unless the documents indicate otherwise).
 - `cleanup memory`: aggressively remove resolved, stale, or low-value session-specific details, while preserving this purpose section and any continuity that will still matter next session.
 - `code check`: review the relevant code for compliance with local coding guidelines. Report findings first and explicitly verify top-down module ordering plus the preferred `use` qualification style; in Rust, types should usually be imported directly, and functions should usually have at least one module-level import instead of repeated fully qualified calls unless ambiguity requires qualification.
-- `discuss`: move the active design discussion into `DISCUSS.md`, or into the relevant `projects/` file if the topic already has a project; continue the discussion there in later turns, not only in chat, and remove resolved points as they are settled.
+- `discuss`: move the active design discussion into `DISCUSS.md` and remove resolved points as they are settled. If a relevant `projects/` file exists, continue the discussion there in later turns, not only in chat.
 - `authorative check`: compare the authoritative documents against the fixture suites and report contradictions, stale wording, or missing documented coverage.
 - `implementation check`: compare the implementation against the authoritative documents and report contract or architecture mismatches.
 - `session check`: do an end-of-session closure pass. Verify that decisions, open questions, and new work discovered during the session are either resolved or captured in the right documents; look especially for thread sprawl where side investigations created uncaptured follow-up work. Check that `TODOS.md`, `projects/`, `DISCUSS.md`, and the authoritative documents are consistent, then report anything still hanging.
@@ -126,6 +157,7 @@ Update working documents proactively during the session (located in `agent/`):
   - Detailed project plans for larger multi-step efforts that would make `TODOS.md` too crowded.
   - Name project files with a three-digit numeric prefix followed by a short snake_case title, for example `000_fixture_harness_multi_file_generations.md`.
   - Each project file should declare one top-level project state: `[planning]`, `[in-progress]`, `[done]`, or `[discarded]`.
+  - Remove stale or superseded material, but do not trim away still-relevant context just because it was discussed earlier.
   - Put unresolved questions near the top of each project file, before the implementation plan, so they are easy to notice.
   - Discuss and settle those unresolved questions with the user before starting implementation work on that project.
   - Individual tasks inside a project should also carry explicit state markers so progress is visible within the file.

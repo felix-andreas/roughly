@@ -1,4 +1,4 @@
-# Analysis Simplification And Package Removal [in-progress]
+# Analysis Simplification And Package Removal [done]
 
 ## Goal
 

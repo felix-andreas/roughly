@@ -1,4 +1,4 @@
-# Naming Phase Split And Global Resolution [in-progress]
+# Naming Phase Split And Global Resolution [abandoned]
 
 ## Goal
 
