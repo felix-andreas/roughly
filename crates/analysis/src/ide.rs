@@ -5,6 +5,7 @@ use {
         document::DocumentId,
         hir::{
             DefinitionId, DefinitionItem, DefinitionKind, Expression, ExpressionId, ExpressionKind,
+            Module,
         },
         naming::BindingInfo,
         text::{TextPosition, TextRange},
@@ -45,57 +46,8 @@ pub fn hover(analysis: &mut Analysis, path: &Path, position: TextPosition) -> Op
 
     let module = analysis.module(document_id)?;
     let point = tree_sitter::Point::new(position.line_index, position.character_index);
-    let mut target: Option<HoverTarget> = None;
-
-    for definition in &module.definitions {
-        if !range_contains_position(definition.range, point) {
-            continue;
-        }
-
-        let candidate = HoverTarget::Definition(definition.id, definition.range);
-        let replace = target
-            .map(|current| {
-                let current_range = current.range();
-                let candidate_range = candidate.range();
-                let current_width = current_range.end_byte - current_range.start_byte;
-                let candidate_width = candidate_range.end_byte - candidate_range.start_byte;
-
-                candidate_width < current_width
-                    || (candidate_width == current_width
-                        && candidate.tie_breaker() < current.tie_breaker())
-            })
-            .unwrap_or(true);
-
-        if replace {
-            target = Some(candidate);
-        }
-    }
-
-    for expression in module.arena.expressions() {
-        if !range_contains_position(expression.range, point) {
-            continue;
-        }
-
-        let candidate = HoverTarget::Expression(expression.id, expression.range);
-        let replace = target
-            .map(|current| {
-                let current_range = current.range();
-                let candidate_range = candidate.range();
-                let current_width = current_range.end_byte - current_range.start_byte;
-                let candidate_width = candidate_range.end_byte - candidate_range.start_byte;
-
-                candidate_width < current_width
-                    || (candidate_width == current_width
-                        && candidate.tie_breaker() < current.tie_breaker())
-            })
-            .unwrap_or(true);
-
-        if replace {
-            target = Some(candidate);
-        }
-    }
-
-    let target = target?;
+    let target = smallest_expression_hover_target(module, point)
+        .or_else(|| smallest_definition_hover_target(module, point))?;
     let mut sections = Vec::new();
 
     match target {
@@ -169,21 +121,6 @@ pub fn render_hover_markdown(hover_info: &HoverInfo, include_parsing: bool) -> S
 enum HoverTarget {
     Expression(ExpressionId, tree_sitter::Range),
     Definition(DefinitionId, tree_sitter::Range),
-}
-
-impl HoverTarget {
-    fn range(self) -> tree_sitter::Range {
-        match self {
-            Self::Expression(_, range) | Self::Definition(_, range) => range,
-        }
-    }
-
-    fn tie_breaker(self) -> u8 {
-        match self {
-            Self::Expression(_, _) => 0,
-            Self::Definition(_, _) => 1,
-        }
-    }
 }
 
 fn render_expression_hover(analysis: &Analysis, expression: &Expression) -> String {
@@ -392,6 +329,47 @@ fn render_source_location(
 //
 // Utils
 //
+
+fn smallest_expression_hover_target(
+    module: &Module,
+    position: tree_sitter::Point,
+) -> Option<HoverTarget> {
+    module
+        .arena
+        .expressions()
+        .iter()
+        .filter(|expression| range_contains_position(expression.range, position))
+        .min_by_key(|expression| {
+            (
+                hover_target_width(expression.range),
+                expression.range.start_byte,
+                expression.id.0,
+            )
+        })
+        .map(|expression| HoverTarget::Expression(expression.id, expression.range))
+}
+
+fn smallest_definition_hover_target(
+    module: &Module,
+    position: tree_sitter::Point,
+) -> Option<HoverTarget> {
+    module
+        .definitions
+        .iter()
+        .filter(|definition| range_contains_position(definition.range, position))
+        .min_by_key(|definition| {
+            (
+                hover_target_width(definition.range),
+                definition.range.start_byte,
+                definition.id.0,
+            )
+        })
+        .map(|definition| HoverTarget::Definition(definition.id, definition.range))
+}
+
+fn hover_target_width(range: tree_sitter::Range) -> usize {
+    range.end_byte - range.start_byte
+}
 
 fn range_contains_position(range: tree_sitter::Range, position: tree_sitter::Point) -> bool {
     !point_before(position, range.start_point) && point_before(position, range.end_point)
