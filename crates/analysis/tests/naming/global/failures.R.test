@@ -94,7 +94,7 @@ warning[naming] Top-level binding `x` overwrites an earlier top-level binding in
 #++++
 TypeDefinition(Person = integer)
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:26
 | #: @type Person {integer}
 #---- R/b.R
@@ -102,7 +102,7 @@ error[syntax-error] invalid semantics: type name `Person` is already defined by 
 #++++
 TypeDefinition(Person = double)
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:25
 | #: @type Person {double}
 #---- R/c.R
@@ -110,7 +110,7 @@ error[syntax-error] invalid semantics: type name `Person` is already defined by 
 #++++
 TypeAlias(Person = character)
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:29
 | #: @alias Person {character}
 
@@ -159,7 +159,7 @@ x
 #++++
 Symbol(x@b0)
 
-error[syntax-error] type syntax error: unknown type `Person`
+error[syntax-error] Syntax Error: type syntax error: unknown type `Person`
 --> 1:1-1:10
 | #: Person
 
@@ -180,6 +180,6 @@ value <- 1L
 Assign(value@b0)
   Integer(1L)
 
-error[syntax-error] type syntax error: unknown type `Person`
+error[syntax-error] Syntax Error: type syntax error: unknown type `Person`
 --> 1:1-1:10
 | #: Person

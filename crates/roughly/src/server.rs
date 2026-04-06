@@ -2,8 +2,7 @@ use {
     crate::{
         cli, completion,
         config::{Config, ExperimentalFeatures},
-        diagnostics,
-        format, hover,
+        diagnostics, format, hover,
         index::{self, IndexError, Item},
         lsp_types::{
             CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
@@ -673,7 +672,7 @@ impl LanguageServer for ServerState {
             return box_future(Ok(None));
         };
 
-        let value = hover::markdown(&hover_info, self.experimental_features);
+        let value = ide::render_hover_markdown(&hover_info, self.experimental_features.debug);
 
         let hover = Hover {
             contents: HoverContents::Markup(MarkupContent {

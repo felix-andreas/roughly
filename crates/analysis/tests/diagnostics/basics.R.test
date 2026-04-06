@@ -11,7 +11,7 @@ No diagnostics.
 #---- invalid_syntax
 value <-
 #++++
-error[syntax-error] missing rhs for operator <-
+error[syntax-error] Syntax Error: missing rhs for operator <-
 --> 1:7-1:9
 | value <-
 

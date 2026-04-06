@@ -10,11 +10,11 @@ TypeDefinition(Person = double)
 Assign(value@b0)
   Integer(1L)
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:26
 | #: @type Person {integer}
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 2:1-2:25
 | #: @type Person {double}
 
@@ -29,11 +29,11 @@ TypeAlias(Person = double)
 Assign(value@b0)
   Integer(1L)
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:27
 | #: @alias Person {integer}
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 2:1-2:26
 | #: @alias Person {double}
 
@@ -48,11 +48,11 @@ TypeAlias(Person = double)
 Assign(value@b0)
   Integer(1L)
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:26
 | #: @type Person {integer}
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 2:1-2:26
 | #: @alias Person {double}
 
@@ -67,11 +67,11 @@ TypeDefinition(Person = double)
 Assign(value@b0)
   Integer(1L)
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:27
 | #: @alias Person {integer}
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 2:1-2:25
 | #: @type Person {double}
 
@@ -84,7 +84,7 @@ TypeDefinition(Team = list{owner: Person})
 Assign(value@b0)
   Integer(1L)
 
-error[syntax-error] type syntax error: unknown type `Person`
+error[syntax-error] Syntax Error: type syntax error: unknown type `Person`
 --> 1:1-1:36
 | #: @type Team {list{owner: Person}}
 
@@ -94,7 +94,7 @@ error[syntax-error] type syntax error: unknown type `Person`
 #++++
 TypeDefinition(Person = integer)
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:26
 | #: @type Person {integer}
 #---- R/b.R
@@ -102,7 +102,7 @@ error[syntax-error] invalid semantics: type name `Person` is already defined by 
 #++++
 TypeDefinition(Person = double)
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:25
 | #: @type Person {double}
 
@@ -112,7 +112,7 @@ error[syntax-error] invalid semantics: type name `Person` is already defined by 
 #++++
 TypeAlias(Person = integer)
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:27
 | #: @alias Person {integer}
 #---- R/b.R
@@ -120,7 +120,7 @@ error[syntax-error] invalid semantics: type name `Person` is already defined by 
 #++++
 TypeAlias(Person = double)
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:26
 | #: @alias Person {double}
 
@@ -130,7 +130,7 @@ error[syntax-error] invalid semantics: type name `Person` is already defined by 
 #++++
 TypeDefinition(Person = integer)
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:26
 | #: @type Person {integer}
 #---- R/b.R
@@ -138,7 +138,7 @@ error[syntax-error] invalid semantics: type name `Person` is already defined by 
 #++++
 TypeAlias(Person = double)
 
-error[syntax-error] invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:26
 | #: @alias Person {double}
 
@@ -151,7 +151,7 @@ value <- 1L
 Assign(value@b0)
   Integer(1L)
 
-error[syntax-error] type syntax error: unknown type `Person`
+error[syntax-error] Syntax Error: type syntax error: unknown type `Person`
 --> 1:1-1:10
 | #: Person
 
@@ -169,7 +169,7 @@ Assign(value@b0)
     Argument(value)
       Integer(1L)
 
-error[syntax-error] type syntax error: unknown type `Person`
+error[syntax-error] Syntax Error: type syntax error: unknown type `Person`
 --> 3:1-3:15
 | #: Box<Person>
 
@@ -189,7 +189,7 @@ Assign(value@b0)
     Argument(right)
       Integer(2L)
 
-error[syntax-error] invalid semantics: generic type `Pair` expects 2 type argument(s), but found 1.
+error[syntax-error] Syntax Error: invalid semantics: generic type `Pair` expects 2 type argument(s), but found 1.
 --> 3:1-3:17
 | #: Pair<integer>
 
@@ -207,7 +207,7 @@ Assign(value@b0)
     Argument(value)
       Integer(1L)
 
-error[syntax-error] generic type `Person` expects 1 type argument(s), but found 2.
+error[syntax-error] Syntax Error: generic type `Person` expects 1 type argument(s), but found 2.
 --> 3:1-3:30
 | #: Person<integer, character>
 
@@ -222,7 +222,7 @@ TypeDefinition(Person = integer)
 Assign(value@b0)
   Integer(1L)
 
-error[syntax-error] type `Person` does not take type arguments, but found 1.
+error[syntax-error] Syntax Error: type `Person` does not take type arguments, but found 1.
 --> 3:1-3:19
 | #: Person<integer>
 
@@ -243,7 +243,7 @@ Assign(other@b1)
     Argument(name)
       Character("\"bob\"")
 
-error[syntax-error] invalid semantics: `@new` requires a nominal type declared with `@type`, but `Person` is an alias.
+error[syntax-error] Syntax Error: invalid semantics: `@new` requires a nominal type declared with `@type`, but `Person` is an alias.
 --> 3:1-3:15
 | #: @new Person
 
@@ -258,7 +258,7 @@ Assign(value@b0)
     Argument(name)
       Character("\"bob\"")
 
-error[syntax-error] type syntax error: unknown type `Person`
+error[syntax-error] Syntax Error: type syntax error: unknown type `Person`
 --> 1:1-1:15
 | #: @new Person
 
@@ -276,7 +276,7 @@ Assign(value@b0)
     Argument(value)
       Integer(1L)
 
-error[syntax-error] generic type `Person` expects 1 type argument(s), but found 0.
+error[syntax-error] Syntax Error: generic type `Person` expects 1 type argument(s), but found 0.
 --> 3:1-3:15
 | #: @new Person
 
@@ -291,7 +291,7 @@ Assign(value@b0)
     Argument(name)
       Character("\"bob\"")
 
-error[syntax-error] type syntax error: expected a nominal type reference after `@new`.
+error[syntax-error] Syntax Error: type syntax error: expected a nominal type reference after `@new`.
 --> 1:1-1:30
 | #: @new list{name: character}
 
@@ -309,6 +309,6 @@ Assign(value@b0)
     Argument(value)
       Integer(1L)
 
-error[syntax-error] generic type `Person` expects 1 type argument(s), but found 2.
+error[syntax-error] Syntax Error: generic type `Person` expects 1 type argument(s), but found 2.
 --> 3:1-3:35
 | #: @new Person<integer, character>

@@ -71,10 +71,15 @@ impl Diagnostic {
     }
 
     pub fn syntax_error(range: Range, message: impl Into<String>) -> Self {
+        let mut message = message.into();
+        if !message.starts_with("Syntax Error: ") {
+            message = format!("Syntax Error: {message}");
+        }
+
         Self {
             severity: Severity::Error,
             code: DiagnosticCode::SyntaxError,
-            message: message.into(),
+            message,
             range,
         }
     }
