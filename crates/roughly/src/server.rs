@@ -2,7 +2,8 @@ use {
     crate::{
         cli, completion,
         config::{Config, ExperimentalFeatures},
-        diagnostics, format, hover,
+        diagnostics,
+        format, hover,
         index::{self, IndexError, Item},
         lsp_types::{
             CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
@@ -20,9 +21,9 @@ use {
             WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
         },
-        symbols, typing_diagnostics as analysis_diagnostics, utils,
+        symbols, utils,
     },
-    analysis::{Analysis, AnalysisPhase, TextPosition, TextRange, ide},
+    analysis::{Analysis, TextPosition, TextRange, ide},
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
         client_monitor::ClientProcessMonitorLayer,
@@ -320,16 +321,11 @@ impl LanguageServer for ServerState {
         self.open_documents.insert(path.clone());
 
         let diagnostics = {
-            let document = self.opened_document(&path).expect(&format!(
-                "analysis document missing after open: {}",
-                path.display()
-            ));
-            diagnostics::analyze(
-                document.tree().root_node(),
-                document.rope(),
+            diagnostics::saved_document_diagnostics(
+                &mut self.analysis_state,
+                &path,
                 self.config.lint,
-                true,
-                None,
+                false,
             )
         };
 
@@ -433,15 +429,9 @@ impl LanguageServer for ServerState {
             break;
         }
 
-        let document = self.opened_document(&path).expect(&format!(
-            "analysis document missing after change: {}",
-            path.display()
-        ));
-
-        // UPDATE DIAGNOSTICS
-        let diagnostics = diagnostics::analyze_fast(
-            document.tree().root_node(),
-            document.rope(),
+        let diagnostics = diagnostics::current_document_diagnostics(
+            &mut self.analysis_state,
+            &path,
             self.config.lint,
         );
 
@@ -478,38 +468,22 @@ impl LanguageServer for ServerState {
         }
 
         let mut diagnostics = {
-            let document = self.opened_document(&path).expect(&format!(
-                "analysis document missing before save: {}",
-                path.display()
-            ));
-
-            diagnostics::analyze(
-                document.tree().root_node(),
-                document.rope(),
+            diagnostics::saved_document_diagnostics(
+                &mut self.analysis_state,
+                &path,
                 self.config.lint,
-                true,
-                None,
+                false,
             )
         };
 
         if self.config.lint.experimental_typing && path.starts_with(self.workspace_r_path()) {
             self.sync_dirty_documents();
-            analysis::check(&mut self.analysis_state);
-
-            if let Some(document_id) = self.analysis_state.document_id_for_path(&path) {
-                diagnostics.extend(analysis_diagnostics::convert_diagnostics(
-                    self.analysis_state
-                        .document_phase_diagnostics(
-                            document_id,
-                            &[
-                                AnalysisPhase::Lowering,
-                                AnalysisPhase::Naming,
-                                AnalysisPhase::Typecheck,
-                            ],
-                        )
-                        .cloned(),
-                ));
-            }
+            diagnostics = diagnostics::saved_document_diagnostics(
+                &mut self.analysis_state,
+                &path,
+                self.config.lint,
+                true,
+            );
         }
 
         if diagnostics.is_empty() {

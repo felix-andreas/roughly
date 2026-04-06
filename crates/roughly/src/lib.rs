@@ -11,7 +11,6 @@ pub mod rename;
 pub mod server;
 pub mod symbols;
 pub mod tree;
-pub mod typing_diagnostics;
 pub mod utils;
 
 pub use async_lsp::lsp_types;

@@ -1,5 +1,5 @@
 use {
-    crate::{diagnostics::Config as LintConfig, format::Config as FormatConfig},
+    crate::format::Config as FormatConfig,
     serde::Deserialize,
     std::{io, path::Path},
     thiserror::Error,
@@ -28,6 +28,14 @@ impl Config {
     pub fn from_str(text: &str, experimental: ExperimentalFeatures) -> Result<Config, ConfigError> {
         Ok(toml::from_str::<ConfigToml>(text)?.to_config(experimental))
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct LintConfig {
+    pub naming_style: Option<Case>,
+    pub experimental_unused: bool,
+    pub experimental_typing: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

@@ -1,117 +1,120 @@
-mod fast;
-mod syntax;
-mod unused;
-
 use {
     crate::{
-        config::Case,
-        lsp_types::{Diagnostic, DiagnosticSeverity},
-        typing_diagnostics, utils,
+        config::{Case, LintConfig},
+        lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range},
     },
-    analysis::Analysis,
-    ropey::Rope,
-    serde::Deserialize,
-    thiserror::Error,
-    tree_sitter::Node,
+    analysis::{self, Analysis, AnalysisPhase, DocumentId},
+    std::path::Path,
 };
 
-#[derive(Debug, Default, Clone, Copy, Deserialize)]
-#[serde(default, rename_all = "kebab-case")]
-pub struct Config {
-    pub naming_style: Option<Case>,
-    pub experimental_unused: bool,
-    pub experimental_typing: bool,
-}
-
-pub fn analyze(
-    node: Node,
-    rope: &Rope,
-    config: Config,
-    full: bool,
-    typing_analysis_state: Option<&mut Analysis>,
+pub fn current_document_diagnostics(
+    analysis_state: &mut Analysis,
+    path: &Path,
+    lint_config: LintConfig,
 ) -> Vec<Diagnostic> {
-    let mut diagnostics = syntax::analyze(node, rope);
-    let has_syntax_errors = !diagnostics.is_empty();
+    let Some(document_id) = analysis_state.document_id_for_path(path) else {
+        return Vec::new();
+    };
 
-    diagnostics.extend(fast::analyze(node, rope, config));
+    analysis::run_lowering(Some(&[document_id]), analysis_state);
 
-    if config.experimental_unused && full && !has_syntax_errors {
-        match unused::analyze(node, rope) {
-            Ok(diags) => diagnostics.extend(diags),
-            Err(error) => {
-                tracing::warn!("error while diagnostics {error}");
-            }
-        }
-    }
-
-    if config.experimental_typing
-        && full
-        && let Some(typing_analysis_state) = typing_analysis_state
-    {
-        diagnostics.extend(typing_diagnostics::analyze(
-            node,
-            rope,
-            typing_analysis_state,
-        ));
-    }
-
-    diagnostics
+    let mut diagnostics = analysis_state
+        .document_phase_diagnostics(document_id, &[AnalysisPhase::Lowering])
+        .cloned()
+        .collect::<Vec<_>>();
+    diagnostics.extend(document_lint_diagnostics(analysis_state, document_id, lint_config));
+    convert_diagnostics(diagnostics)
 }
 
-pub fn analyze_fast(node: Node, rope: &Rope, config: Config) -> Vec<Diagnostic> {
-    analyze(node, rope, config, false, None)
-}
-
-pub fn analyze_full(
-    node: Node,
-    rope: &Rope,
-    config: Config,
-    typing_analysis_state: &mut Analysis,
+pub fn saved_document_diagnostics(
+    analysis_state: &mut Analysis,
+    path: &Path,
+    lint_config: LintConfig,
+    include_typecheck: bool,
 ) -> Vec<Diagnostic> {
-    analyze(node, rope, config, true, Some(typing_analysis_state))
+    let Some(document_id) = analysis_state.document_id_for_path(path) else {
+        return Vec::new();
+    };
+
+    let mut diagnostics = if include_typecheck {
+        analysis::check(analysis_state);
+        analysis_state
+            .document_phase_diagnostics(
+                document_id,
+                &[
+                    AnalysisPhase::Lowering,
+                    AnalysisPhase::Naming,
+                    AnalysisPhase::Typecheck,
+                ],
+            )
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        analysis::run_lowering(Some(&[document_id]), analysis_state);
+        analysis_state
+            .document_phase_diagnostics(document_id, &[AnalysisPhase::Lowering])
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+
+    diagnostics.extend(document_lint_diagnostics(analysis_state, document_id, lint_config));
+    convert_diagnostics(diagnostics)
 }
 
-fn error(node: Node, message: String) -> Diagnostic {
-    diag(node, message, DiagnosticSeverity::ERROR)
+fn document_lint_diagnostics(
+    analysis_state: &Analysis,
+    document_id: DocumentId,
+    lint_config: LintConfig,
+) -> Vec<analysis::Diagnostic> {
+    let Some(document) = analysis_state.document_by_id(document_id) else {
+        return Vec::new();
+    };
+
+    analysis::lint::analyze(document, convert_lint_config(lint_config))
 }
 
-fn warning(node: Node, message: String) -> Diagnostic {
-    diag(node, message, DiagnosticSeverity::WARNING)
+fn convert_lint_config(config: LintConfig) -> analysis::LintConfig {
+    analysis::LintConfig {
+        naming_style: config.naming_style.map(|naming_style| match naming_style {
+            Case::Camel => analysis::NameStyle::Camel,
+            Case::Snake => analysis::NameStyle::Snake,
+        }),
+    }
 }
 
-fn diag(node: Node, message: String, severity: DiagnosticSeverity) -> Diagnostic {
+pub fn convert_diagnostics(
+    diagnostics: impl IntoIterator<Item = analysis::Diagnostic>,
+) -> Vec<Diagnostic> {
+    diagnostics.into_iter().map(convert_diagnostic).collect()
+}
+
+pub fn convert_diagnostic(diagnostic: analysis::Diagnostic) -> Diagnostic {
     Diagnostic {
-        message,
-        severity: Some(severity),
-        range: utils::node_range(node),
-        code: None,
+        range: convert_range(diagnostic.range),
+        severity: Some(convert_severity(diagnostic.severity)),
+        code: Some(NumberOrString::String(diagnostic.code.to_string())),
         code_description: None,
-        source: None,
+        source: Some("typing".into()),
+        message: diagnostic.message,
         related_information: None,
         tags: None,
         data: None,
     }
 }
 
-#[derive(Error, Debug)]
-pub enum DiagnosticsError {
-    #[error("Syntax error: Unexpected {kind} at line {line}, column {col}")]
-    SyntaxError {
-        kind: &'static str,
-        line: usize,
-        col: usize,
-    },
+fn convert_severity(severity: analysis::Severity) -> DiagnosticSeverity {
+    match severity {
+        analysis::Severity::Error => DiagnosticSeverity::ERROR,
+        analysis::Severity::Warning => DiagnosticSeverity::WARNING,
+    }
 }
 
-pub fn field<'a>(node: Node<'a>, field_name: &'static str) -> Result<Node<'a>, DiagnosticsError> {
-    node.child_by_field_name(field_name)
-        .ok_or(DiagnosticsError::SyntaxError {
-            kind: node.kind(),
-            line: node.start_position().row,
-            col: node.start_position().column,
-        })
-}
-
-pub fn field_optional<'a>(node: Node<'a>, field_name: &'static str) -> Option<Node<'a>> {
-    node.child_by_field_name(field_name)
+fn convert_range(range: tree_sitter::Range) -> Range {
+    Range::new(
+        Position::new(
+            range.start_point.row as u32,
+            range.start_point.column as u32,
+        ),
+        Position::new(range.end_point.row as u32, range.end_point.column as u32),
+    )
 }

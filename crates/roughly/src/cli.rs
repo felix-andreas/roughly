@@ -1,7 +1,8 @@
 use {
     crate::{
         config::{self, ExperimentalFeatures},
-        diagnostics, format, index,
+        diagnostics,
+        format, index,
         lsp_types::DiagnosticSeverity,
         server, tree, utils,
     },
@@ -61,8 +62,6 @@ pub fn check(
     maybe_files: Option<&[PathBuf]>,
     experimental_features: ExperimentalFeatures,
 ) -> Result<(), CheckError> {
-    let mut parser = tree::new_parser();
-
     let root: Vec<PathBuf> = vec![".".into()];
     let files = maybe_files.unwrap_or(&root);
 
@@ -110,16 +109,27 @@ pub fn check(
                     continue;
                 }
             };
-            let tree = tree::parse(&mut parser, &old, None);
-            let rope = Rope::from_str(&old);
-            let mut typing_analysis_state = Analysis::new(std::env::current_dir().unwrap());
+            let mut analysis_state = Analysis::new(std::env::current_dir().unwrap());
+            if analysis_state
+                .add_document_from_source(path.clone(), &old)
+                .is_err()
+            {
+                n_errors += 1;
+                error(&format!(
+                    "failed to sync analysis document from source {}",
+                    path.display()
+                ));
+                continue;
+            }
 
-            for diagnostic in diagnostics::analyze_full(
-                tree.root_node(),
-                &rope,
+            let diagnostics = diagnostics::saved_document_diagnostics(
+                &mut analysis_state,
+                &path,
                 config.lint,
-                &mut typing_analysis_state,
-            ) {
+                config.lint.experimental_typing,
+            );
+
+            for diagnostic in diagnostics {
                 n_errors += 1;
                 log(
                     match diagnostic.severity {
@@ -142,6 +152,10 @@ pub fn check(
                 );
 
                 let line_start = usize::max(1, range.start.line as usize) - 1;
+                let document = analysis_state
+                    .document(&path)
+                    .unwrap_or_else(|| panic!("analysis document missing for {}", path.display()));
+                let rope = document.rope();
                 let lines = {
                     let start = rope.line_to_char(line_start);
                     let end =
