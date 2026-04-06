@@ -2,7 +2,7 @@ use {
     crate::{
         cli, completion,
         config::{Config, ExperimentalFeatures},
-        diagnostics, format, hover,
+        diagnostics, format,
         index::{self, IndexError, Item},
         lsp_types::{
             CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,

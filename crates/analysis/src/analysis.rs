@@ -1,7 +1,7 @@
 use {
     crate::{
         Interner,
-        diagnostic::{CheckResult, Diagnostic, DocumentDiagnostics, Severity},
+        diagnostic::{Diagnostic, Diagnostics, DocumentDiagnostics, Severity},
         document::{Document, DocumentEditError, DocumentId},
         hir::{DefinitionId, DefinitionItem, ExpressionId, ExpressionKind, HirArena, Module},
         lower::lower_with_shared_interner,
@@ -308,7 +308,7 @@ impl Analysis {
     }
 }
 
-pub fn check(analysis_state: &mut Analysis) -> CheckResult {
+pub fn check(analysis_state: &mut Analysis) -> Diagnostics {
     let document_ids = analysis_state.package_document_ids();
 
     run_lowering(None, analysis_state);
@@ -318,16 +318,12 @@ pub fn check(analysis_state: &mut Analysis) -> CheckResult {
         &[AnalysisPhase::Lowering, AnalysisPhase::Naming],
     );
     if has_blocking_diagnostics(&naming_diagnostics) {
-        return CheckResult {
-            diagnostics: naming_diagnostics,
-        };
+        return naming_diagnostics;
     }
 
     let typecheck_result = run_typecheck(None, analysis_state);
-    if typecheck_result.diagnostics.is_empty() {
-        return CheckResult {
-            diagnostics: naming_diagnostics,
-        };
+    if typecheck_result.is_empty() {
+        return naming_diagnostics;
     }
 
     typecheck_result
@@ -436,7 +432,7 @@ pub fn run_naming(changed_documents: Option<&[DocumentId]>, analysis_state: &mut
 pub fn run_typecheck(
     _changed_documents: Option<&[DocumentId]>,
     analysis_state: &mut Analysis,
-) -> CheckResult {
+) -> Diagnostics {
     let document_ids = analysis_state.package_document_ids();
     analysis_state.clear_phase_diagnostics(AnalysisPhase::Typecheck);
 
@@ -470,7 +466,7 @@ pub fn run_typecheck(
         );
     }
 
-    CheckResult { diagnostics }
+    diagnostics
 }
 
 impl Analysis {
@@ -879,7 +875,6 @@ mod tests {
 
         assert!(
             result
-                .diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic.severity == Severity::Error)
         );

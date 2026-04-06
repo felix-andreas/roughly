@@ -18,7 +18,7 @@ pub use crate::{
         Analysis, AnalysisError, AnalysisPhase, PhaseDiagnostic, check, run_lowering, run_naming,
         run_typecheck,
     },
-    diagnostic::{CheckResult, Diagnostic, DiagnosticCode, DocumentDiagnostics, Severity},
+    diagnostic::{Diagnostic, DiagnosticCode, Diagnostics, DocumentDiagnostics, Severity, render_diagnostics},
     document::{Document, DocumentEditError, DocumentId, DocumentParseError},
     hir::{
         Argument, Definition, DefinitionId, DefinitionItem, DefinitionKind, Expression,

@@ -1,10 +1,6 @@
 # Human Notes (!AIs are not allowed to edit!)
 
-* 
-
-> The authoritative docs are not under `crates/analysis/`; I’m locating the actual analysis-crate steering files now, then I’ll move on to parser-shape reproduction.
-
-why did you think this? was there anything that suggested so? 
+before that can we add a coding guideline, which states that functions in general should be preferred over methods. impl blocks shouldn't only be used if the struct really manges some states. (or if we need a lot of constructors e.g. diagnostic struct). but not as a general means to organzie code in an OOP style. (useless abstraction and coupling whihc makes testing harder) prefer procedual code or functional (if reasonable and no performance trade-off)
 
 
 * we should keep track of what needs to be run

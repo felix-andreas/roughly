@@ -9,29 +9,23 @@ use {
 };
 
 pub type DocumentDiagnostics = (std::path::PathBuf, Vec<Diagnostic>);
+pub type Diagnostics = Vec<Diagnostic>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CheckResult {
-    pub diagnostics: Vec<Diagnostic>,
-}
-
-impl CheckResult {
-    pub fn render(&self, source: &str) -> String {
-        if self.diagnostics.is_empty() {
-            return "No diagnostics.\n".to_owned();
-        }
-
-        let mut rendered = String::new();
-
-        for (index, diagnostic) in self.diagnostics.iter().enumerate() {
-            if index > 0 {
-                rendered.push('\n');
-            }
-            rendered.push_str(&diagnostic.render(source));
-        }
-
-        rendered
+pub fn render_diagnostics(source: &str, diagnostics: &[Diagnostic]) -> String {
+    if diagnostics.is_empty() {
+        return "No diagnostics.\n".to_owned();
     }
+
+    let mut rendered = String::new();
+
+    for (index, diagnostic) in diagnostics.iter().enumerate() {
+        if index > 0 {
+            rendered.push('\n');
+        }
+        rendered.push_str(&diagnostic.render(source));
+    }
+
+    rendered
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

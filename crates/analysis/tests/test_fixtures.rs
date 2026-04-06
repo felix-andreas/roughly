@@ -12,6 +12,7 @@ use {
         lint::{self, Config as LintConfig, NameStyle},
         lower::{self, LoweringContext},
         naming::resolve_document_locally,
+        render_diagnostics,
         render_hover_markdown, run_lowering, run_naming,
         tree::new_parser,
         type_syntax::{parse_type_syntax, render_type_syntax},
@@ -148,7 +149,7 @@ fn run_diagnostics_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>
     analysis_state.add_document(PathBuf::from("R/main.R"), document);
     Ok(vec![vec![FixtureRunFile {
         path: PathBuf::new(),
-        output: check(&mut analysis_state).render(&case.input),
+        output: render_diagnostics(&case.input, &check(&mut analysis_state)),
     }]])
 }
 
@@ -216,7 +217,7 @@ fn run_lint_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, Strin
 
     Ok(vec![vec![FixtureRunFile {
         path: PathBuf::new(),
-        output: analysis::CheckResult { diagnostics }.render(&case.input),
+        output: render_diagnostics(&case.input, &diagnostics),
     }]])
 }
 
