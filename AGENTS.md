@@ -162,6 +162,7 @@ Update working documents proactively during the session (located in `agent/`):
   - Name project files with a three-digit numeric prefix followed by a short snake_case title, for example `000_fixture_harness_multi_file_generations.md`.
   - Each project file should declare one top-level project state: `[planning]`, `[in-progress]`, `[done]`, or `[discarded]`.
   - Remove stale or superseded material, but do not trim away still-relevant context just because it was discussed earlier.
+  - When a turn is planning or design work for a project that already has a `projects/` file, put the substantive answer, proposals, and resolved points in that project file during the turn, not only in chat.
   - Put unresolved questions near the top of each project file, before the implementation plan, so they are easy to notice.
   - Discuss and settle those unresolved questions with the user before starting implementation work on that project.
   - Individual tasks inside a project should also carry explicit state markers so progress is visible within the file.

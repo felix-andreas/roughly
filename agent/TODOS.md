@@ -13,7 +13,7 @@
 
 - Naming data model concept discussion:
   `projects/005_naming_data_model_shape.md`
-- IDE diagnostics and hover freshness concept discussion:
+- IDE diagnostics and hover freshness planning and implementation:
   `projects/006_ide_diagnostics_and_hover_freshness.md`
 
 ### Split `types.rs` By Phase

@@ -42,6 +42,9 @@ test suite should be ide/hover &  and test_fixtures ide_hover
 * scripts behaviour
   * what about type defintions and globals in this file (do they leak) 
   * we cannot just use a fresh analysis state per script as it needs access to analysis state of package.
+  
+* fixutres:
+  * add possiblity to simulate (did_change, did_save, did_close and did_watched_files_change)
 
 - what about pull diagnostics??
 
