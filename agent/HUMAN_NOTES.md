@@ -20,6 +20,8 @@ testing matrix)
 
 test suite should be ide/hover &  and test_fixtures ide_hover
 
+* duplicate symbols should use DiagnosticRelatedInformation
+
 * lsp features
   * rename
   * goto defintion
