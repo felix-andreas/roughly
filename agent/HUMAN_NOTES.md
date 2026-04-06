@@ -1,5 +1,9 @@
 # Human Notes (!AIs are not allowed to edit!)
 
+* we should keep track of what needs to be run
+* should global naming test render global ids or tuple (document_id, binding_id)
+* add wording inherent complexity and irreducible form to agents.md design bar
+
 * resolve_package is to complicated
 
 * should we store a globals table (by interened symbol id)? 

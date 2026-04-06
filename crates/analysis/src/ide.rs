@@ -6,7 +6,7 @@ use {
         hir::{
             DefinitionId, DefinitionItem, DefinitionKind, Expression, ExpressionId, ExpressionKind,
         },
-        naming::{BindingInfo, ExpressionKey},
+        naming::BindingInfo,
         text::{TextPosition, TextRange},
         type_syntax::{render_named_type_ref, render_surface_type},
         types::{Annotation, TypeAnnotationKind},
@@ -324,6 +324,7 @@ fn render_expression_naming_hover(
 ) -> Option<String> {
     let mut lines = Vec::new();
     let local_naming = analysis.naming.locals.get(&document_id)?;
+    let mut non_local_symbol = None;
 
     if let Some(binding_id) = local_naming.expression_resolutions.get(&expression_id) {
         let binding = local_naming
@@ -334,21 +335,18 @@ fn render_expression_naming_hover(
             "local resolution: {}",
             render_binding_site(analysis, binding)
         ));
-    } else if let Some(symbol) = local_naming.unresolved_values.get(&expression_id) {
+    } else if let Some(symbol) = local_naming.non_locals.get(&expression_id) {
         let name = analysis.interner().resolve(*symbol).unwrap_or("<unknown>");
         lines.push(format!("local resolution: unresolved `{name}`"));
+        non_local_symbol = Some(*symbol);
     }
 
-    if let Some(binding_id) = analysis.naming.package.resolutions.get(&ExpressionKey {
-        module_id: document_id,
-        expression_id,
-    }) {
-        let binding = analysis
-            .naming
-            .package
-            .bindings
-            .get(binding_id)
-            .expect("package hover binding should exist");
+    if let Some(symbol) = non_local_symbol
+        && let Some(export_document_id) = analysis.naming.package.global_bindings.get(&symbol)
+        && let Some(export_document_naming) = analysis.naming.locals.get(export_document_id)
+        && let Some(binding_id) = export_document_naming.global_exports.get(&symbol)
+        && let Some(binding) = export_document_naming.bindings.get(binding_id)
+    {
         lines.push(format!(
             "package resolution: {}",
             render_binding_site(analysis, binding)

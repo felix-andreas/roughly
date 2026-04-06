@@ -594,7 +594,52 @@ fn run_naming_global_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile
     run_lowering(None, &mut analysis_state);
     run_naming(None, &mut analysis_state);
 
-    let files = case
+    let mut ordered_document_ids = analysis_state.package_document_ids();
+    let mut non_package_document_ids = case
+        .initial_generation
+        .entries
+        .iter()
+        .filter_map(|entry| {
+            let FixtureOperation::CreateDocument { path, .. } = &entry.operation else {
+                return None;
+            };
+            analysis_state.document_id_for_path(path)
+        })
+        .filter(|document_id| !ordered_document_ids.contains(document_id))
+        .collect::<Vec<_>>();
+    non_package_document_ids.sort_by(|left_document_id, right_document_id| {
+        let left_path = analysis_state
+            .path_for_document_id(*left_document_id)
+            .expect("document path should exist")
+            .to_path_buf();
+        let right_path = analysis_state
+            .path_for_document_id(*right_document_id)
+            .expect("document path should exist")
+            .to_path_buf();
+        left_path.cmp(&right_path)
+    });
+    ordered_document_ids.extend(non_package_document_ids);
+
+    let mut next_display_binding_id = 0u32;
+    let mut binding_display_labels = BTreeMap::new();
+    for document_id in &ordered_document_ids {
+        let local_naming = analysis_state
+            .naming
+            .locals
+            .get(document_id)
+            .ok_or_else(|| "missing local naming".to_owned())?;
+        let mut binding_ids = local_naming.bindings.keys().copied().collect::<Vec<_>>();
+        binding_ids.sort_by_key(|binding_id| binding_id.0);
+        for binding_id in binding_ids {
+            binding_display_labels.insert(
+                (*document_id, binding_id),
+                format!("b{next_display_binding_id}"),
+            );
+            next_display_binding_id += 1;
+        }
+    }
+
+    let mut files = case
         .initial_generation
         .entries
         .iter()
@@ -611,10 +656,18 @@ fn run_naming_global_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile
             let module = analysis_state
                 .module(document_id)
                 .ok_or_else(|| "missing module".to_owned())?;
+            let local_naming = analysis_state
+                .naming
+                .locals
+                .get(&document_id)
+                .ok_or_else(|| "missing local naming".to_owned())?;
             let rendered_hir = render_named_hir(
                 document_id,
                 module,
+                local_naming,
+                &analysis_state.naming.locals,
                 &analysis_state.naming.package,
+                &binding_display_labels,
                 analysis_state.interner(),
             );
             let diagnostics = analysis_state
@@ -643,6 +696,7 @@ fn run_naming_global_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
+    files.sort_by(|left, right| left.path.cmp(&right.path));
 
     Ok(vec![files])
 }

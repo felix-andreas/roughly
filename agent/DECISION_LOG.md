@@ -2,6 +2,9 @@
 
 Keep newest decisions at the top.
 
+- binding ids should stay document-local, and `run_naming` should preserve unchanged local naming results while rerunning only changed or missing documents.
+  - Package-global binding ids drift under incremental recomputation and create the wrong dependency shape. Document-local ids keep binding ownership local, make the incremental boundary real, and let package lookup resolve through `global_bindings` plus the winning document's `global_exports`.
+
 - project 005 should rebuild `global_bindings` package-wide from local export tables on each naming run, rather than trying to maintain that winner table incrementally now.
   - This keeps the implementation simple while naming is still package-wide, avoids repeated lazy package scans for cross-file lookups, and leaves a clean future upgrade path to a reverse `Symbol -> ordered exporters` index once package naming itself becomes incremental.
 

@@ -5,7 +5,7 @@ use {
         document::{Document, DocumentEditError, DocumentId},
         hir::{DefinitionId, DefinitionItem, ExpressionId, ExpressionKind, HirArena, Module},
         lower::lower_with_shared_interner,
-        naming::{NamesGlobal, NamesLocal, resolve_package},
+        naming::{NamesGlobal, NamesLocal, rebuild_package_naming, resolve_document_locally},
         tree,
         typecheck::inference_state_with_builtins_in_interner,
     },
@@ -365,11 +365,40 @@ pub fn run_lowering(changed_documents: Option<&[DocumentId]>, analysis_state: &m
     }
 }
 
-pub fn run_naming(_changed_documents: Option<&[DocumentId]>, analysis_state: &mut Analysis) {
+pub fn run_naming(changed_documents: Option<&[DocumentId]>, analysis_state: &mut Analysis) {
+    let changed_documents = changed_documents
+        .map(|document_ids| document_ids.to_vec())
+        .unwrap_or_default();
     let package_document_ids = analysis_state.package_document_ids();
     let all_document_ids = analysis_state.all_document_ids();
-    analysis_state.naming = NamingStore::default();
     analysis_state.clear_phase_diagnostics(AnalysisPhase::Naming);
+
+    let mut documents_to_resolve_locally = changed_documents
+        .into_iter()
+        .filter(|document_id| analysis_state.lowering.modules.contains_key(document_id))
+        .collect::<Vec<_>>();
+    for document_id in &all_document_ids {
+        if analysis_state.lowering.modules.contains_key(document_id)
+            && !analysis_state.naming.locals.contains_key(document_id)
+        {
+            documents_to_resolve_locally.push(*document_id);
+        }
+    }
+    documents_to_resolve_locally.sort_by_key(|document_id| document_id.0);
+    documents_to_resolve_locally.dedup();
+
+    for document_id in &documents_to_resolve_locally {
+        let module = analysis_state
+            .lowering
+            .modules
+            .get(document_id)
+            .unwrap_or_else(|| panic!("missing lowered module for naming {document_id:?}"));
+        let local_naming = resolve_document_locally(*document_id, module);
+        analysis_state
+            .naming
+            .locals
+            .insert(*document_id, local_naming);
+    }
 
     let package_modules = package_document_ids
         .iter()
@@ -392,12 +421,12 @@ pub fn run_naming(_changed_documents: Option<&[DocumentId]>, analysis_state: &mu
                 .map(|module| (*document_id, module))
         })
         .collect::<Vec<_>>();
-    let naming_computation = resolve_package(
+    let naming_computation = rebuild_package_naming(
         &package_modules,
         &non_package_modules,
+        &analysis_state.naming.locals,
         analysis_state.interner(),
     );
-    analysis_state.naming.locals = naming_computation.locals;
     analysis_state.naming.package = naming_computation.naming;
     for (document_id, diagnostics) in naming_computation.diagnostics {
         analysis_state.push_phase_diagnostics(document_id, AnalysisPhase::Naming, diagnostics);
@@ -510,12 +539,13 @@ impl Analysis {
 
     fn invalidate_document(&mut self, document_id: DocumentId) {
         self.lowering.modules.remove(&document_id);
+        self.naming.locals.remove(&document_id);
         self.diagnostics.remove(&document_id);
         self.invalidate_package_semantics();
     }
 
     fn invalidate_package_semantics(&mut self) {
-        self.naming = NamingStore::default();
+        self.naming.package = NamesGlobal::default();
         self.typecheck = TypecheckStore::default();
         self.clear_phase_diagnostics(AnalysisPhase::Naming);
         self.clear_phase_diagnostics(AnalysisPhase::Typecheck);
@@ -798,7 +828,7 @@ mod tests {
 
         assert!(!analysis.lowering.modules.contains_key(&document_id));
         assert!(analysis.naming.locals.is_empty());
-        assert!(analysis.naming.package.bindings.is_empty());
+        assert!(analysis.naming.package.global_bindings.is_empty());
 
         run_lowering(None, &mut analysis);
         let diagnostics = analysis

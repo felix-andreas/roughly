@@ -1,10 +1,11 @@
 use analysis::{
     Interner,
+    document::DocumentId,
     hir::{
         DefinitionItem, DefinitionKind, ExpressionId, ExpressionKind, HirArena, Module, ModuleId,
     },
     lower::LoweringContext,
-    naming::{BindingId, ExpressionKey, NamesGlobal, NamesLocal},
+    naming::{BindingId, NamesGlobal, NamesLocal},
     type_syntax::render_surface_type,
     typecheck::{InferenceError, InferenceState},
     types::{Atomic, CoreType, InferenceVariableId, TypeScheme},
@@ -140,9 +141,12 @@ pub fn render_interface_snapshot(
 }
 
 pub fn render_named_hir(
-    module_id: ModuleId,
+    document_id: ModuleId,
     module: &Module,
-    naming_result: &NamesGlobal,
+    local_naming_result: &NamesLocal,
+    all_local_naming: &std::collections::HashMap<DocumentId, NamesLocal>,
+    global_naming_result: &NamesGlobal,
+    binding_display_labels: &std::collections::BTreeMap<(DocumentId, BindingId), String>,
     interner: &Interner,
 ) -> String {
     let mut lines = Vec::new();
@@ -153,10 +157,13 @@ pub fn render_named_hir(
 
     for expression_id in &module.expressions {
         render_named_expression(
-            module_id,
+            document_id,
             &module.arena,
             *expression_id,
-            naming_result,
+            local_naming_result,
+            all_local_naming,
+            global_naming_result,
+            binding_display_labels,
             interner,
             0,
             &mut lines,
@@ -348,10 +355,13 @@ fn render_named_definition(
 }
 
 fn render_named_expression(
-    module_id: ModuleId,
+    document_id: DocumentId,
     arena: &HirArena,
     expression_id: ExpressionId,
-    naming_result: &NamesGlobal,
+    local_naming_result: &NamesLocal,
+    all_local_naming: &std::collections::HashMap<DocumentId, NamesLocal>,
+    global_naming_result: &NamesGlobal,
+    binding_display_labels: &std::collections::BTreeMap<(DocumentId, BindingId), String>,
     interner: &Interner,
     indent: usize,
     lines: &mut Vec<String>,
@@ -371,24 +381,29 @@ fn render_named_expression(
         }
         ExpressionKind::Symbol(symbol) => {
             let name = interner.resolve(*symbol).unwrap_or("<unknown>");
-            let binding = naming_result
-                .resolutions
-                .get(&ExpressionKey {
-                    module_id,
-                    expression_id,
-                })
-                .map(|binding_id| binding_label(*binding_id))
-                .unwrap_or_else(|| "?".to_owned());
+            let binding = find_package_binding_for_expression(
+                expression_id,
+                local_naming_result,
+                all_local_naming,
+                global_naming_result,
+            )
+            .map(|(binding_document_id, binding_id)| {
+                binding_label(binding_display_labels, binding_document_id, binding_id)
+            })
+            .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}Symbol({name}@{binding})"));
         }
         ExpressionKind::Block { expressions, .. } => {
             lines.push(format!("{prefix}Block"));
             for nested_expression in expressions {
                 render_named_expression(
-                    module_id,
+                    document_id,
                     arena,
                     *nested_expression,
-                    naming_result,
+                    local_naming_result,
+                    all_local_naming,
+                    global_naming_result,
+                    binding_display_labels,
                     interner,
                     indent + 1,
                     lines,
@@ -397,20 +412,25 @@ fn render_named_expression(
         }
         ExpressionKind::Assign { target, value, .. } => {
             let name = interner.resolve(*target).unwrap_or("<unknown>");
-            let binding = naming_result
-                .resolutions
-                .get(&ExpressionKey {
-                    module_id,
-                    expression_id,
-                })
-                .map(|binding_id| binding_label(*binding_id))
-                .unwrap_or_else(|| "?".to_owned());
+            let binding = find_package_binding_for_expression(
+                expression_id,
+                local_naming_result,
+                all_local_naming,
+                global_naming_result,
+            )
+            .map(|(binding_document_id, binding_id)| {
+                binding_label(binding_display_labels, binding_document_id, binding_id)
+            })
+            .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}Assign({name}@{binding})"));
             render_named_expression(
-                module_id,
+                document_id,
                 arena,
                 *value,
-                naming_result,
+                local_naming_result,
+                all_local_naming,
+                global_naming_result,
+                binding_display_labels,
                 interner,
                 indent + 1,
                 lines,
@@ -422,12 +442,14 @@ fn render_named_expression(
                 .map(|parameter| {
                     let name = interner.resolve(parameter.symbol).unwrap_or("<unknown>");
                     let binding = find_binding_by_symbol_and_range(
-                        naming_result,
-                        module_id,
+                        local_naming_result,
+                        document_id,
                         parameter.symbol,
                         parameter.range,
                     )
-                    .map(binding_label)
+                    .map(|binding_id| {
+                        binding_label(binding_display_labels, document_id, binding_id)
+                    })
                     .unwrap_or_else(|| "?".to_owned());
                     format!("{name}@{binding}")
                 })
@@ -435,10 +457,13 @@ fn render_named_expression(
                 .join(", ");
             lines.push(format!("{prefix}Function({rendered_parameters})"));
             render_named_expression(
-                module_id,
+                document_id,
                 arena,
                 *body,
-                naming_result,
+                local_naming_result,
+                all_local_naming,
+                global_naming_result,
+                binding_display_labels,
                 interner,
                 indent + 1,
                 lines,
@@ -451,29 +476,38 @@ fn render_named_expression(
         } => {
             lines.push(format!("{prefix}If"));
             render_named_expression(
-                module_id,
+                document_id,
                 arena,
                 *condition,
-                naming_result,
+                local_naming_result,
+                all_local_naming,
+                global_naming_result,
+                binding_display_labels,
                 interner,
                 indent + 1,
                 lines,
             );
             render_named_expression(
-                module_id,
+                document_id,
                 arena,
                 *consequence,
-                naming_result,
+                local_naming_result,
+                all_local_naming,
+                global_naming_result,
+                binding_display_labels,
                 interner,
                 indent + 1,
                 lines,
             );
             if let Some(alternative) = alternative {
                 render_named_expression(
-                    module_id,
+                    document_id,
                     arena,
                     *alternative,
-                    naming_result,
+                    local_naming_result,
+                    all_local_naming,
+                    global_naming_result,
+                    binding_display_labels,
                     interner,
                     indent + 1,
                     lines,
@@ -487,28 +521,34 @@ fn render_named_expression(
         } => {
             let name = interner.resolve(*variable).unwrap_or("<unknown>");
             let binding = find_binding_by_symbol_and_range(
-                naming_result,
-                module_id,
+                local_naming_result,
+                document_id,
                 *variable,
                 expression.range,
             )
-            .map(binding_label)
+            .map(|binding_id| binding_label(binding_display_labels, document_id, binding_id))
             .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}For({name}@{binding})"));
             render_named_expression(
-                module_id,
+                document_id,
                 arena,
                 *sequence,
-                naming_result,
+                local_naming_result,
+                all_local_naming,
+                global_naming_result,
+                binding_display_labels,
                 interner,
                 indent + 1,
                 lines,
             );
             render_named_expression(
-                module_id,
+                document_id,
                 arena,
                 *body,
-                naming_result,
+                local_naming_result,
+                all_local_naming,
+                global_naming_result,
+                binding_display_labels,
                 interner,
                 indent + 1,
                 lines,
@@ -517,19 +557,25 @@ fn render_named_expression(
         ExpressionKind::While { condition, body } => {
             lines.push(format!("{prefix}While"));
             render_named_expression(
-                module_id,
+                document_id,
                 arena,
                 *condition,
-                naming_result,
+                local_naming_result,
+                all_local_naming,
+                global_naming_result,
+                binding_display_labels,
                 interner,
                 indent + 1,
                 lines,
             );
             render_named_expression(
-                module_id,
+                document_id,
                 arena,
                 *body,
-                naming_result,
+                local_naming_result,
+                all_local_naming,
+                global_naming_result,
+                binding_display_labels,
                 interner,
                 indent + 1,
                 lines,
@@ -538,10 +584,13 @@ fn render_named_expression(
         ExpressionKind::Repeat { body } => {
             lines.push(format!("{prefix}Repeat"));
             render_named_expression(
-                module_id,
+                document_id,
                 arena,
                 *body,
-                naming_result,
+                local_naming_result,
+                all_local_naming,
+                global_naming_result,
+                binding_display_labels,
                 interner,
                 indent + 1,
                 lines,
@@ -550,10 +599,13 @@ fn render_named_expression(
         ExpressionKind::UnaryMinus { value } => {
             lines.push(format!("{prefix}UnaryMinus"));
             render_named_expression(
-                module_id,
+                document_id,
                 arena,
                 *value,
-                naming_result,
+                local_naming_result,
+                all_local_naming,
+                global_naming_result,
+                binding_display_labels,
                 interner,
                 indent + 1,
                 lines,
@@ -562,10 +614,13 @@ fn render_named_expression(
         ExpressionKind::Call { callee, arguments } => {
             lines.push(format!("{prefix}Call"));
             render_named_expression(
-                module_id,
+                document_id,
                 arena,
                 *callee,
-                naming_result,
+                local_naming_result,
+                all_local_naming,
+                global_naming_result,
+                binding_display_labels,
                 interner,
                 indent + 1,
                 lines,
@@ -579,10 +634,13 @@ fn render_named_expression(
                     lines.push(format!("{argument_prefix}Argument"));
                 }
                 render_named_expression(
-                    module_id,
+                    document_id,
                     arena,
                     argument.expression,
-                    naming_result,
+                    local_naming_result,
+                    all_local_naming,
+                    global_naming_result,
+                    binding_display_labels,
                     interner,
                     indent + 2,
                     lines,
@@ -592,10 +650,13 @@ fn render_named_expression(
         ExpressionKind::Subset { value, arguments } => {
             lines.push(format!("{prefix}Subset"));
             render_named_expression(
-                module_id,
+                document_id,
                 arena,
                 *value,
-                naming_result,
+                local_naming_result,
+                all_local_naming,
+                global_naming_result,
+                binding_display_labels,
                 interner,
                 indent + 1,
                 lines,
@@ -609,10 +670,13 @@ fn render_named_expression(
                     lines.push(format!("{argument_prefix}Argument"));
                 }
                 render_named_expression(
-                    module_id,
+                    document_id,
                     arena,
                     argument.expression,
-                    naming_result,
+                    local_naming_result,
+                    all_local_naming,
+                    global_naming_result,
+                    binding_display_labels,
                     interner,
                     indent + 2,
                     lines,
@@ -622,10 +686,13 @@ fn render_named_expression(
         ExpressionKind::Subset2 { value, arguments } => {
             lines.push(format!("{prefix}Subset2"));
             render_named_expression(
-                module_id,
+                document_id,
                 arena,
                 *value,
-                naming_result,
+                local_naming_result,
+                all_local_naming,
+                global_naming_result,
+                binding_display_labels,
                 interner,
                 indent + 1,
                 lines,
@@ -639,10 +706,13 @@ fn render_named_expression(
                     lines.push(format!("{argument_prefix}Argument"));
                 }
                 render_named_expression(
-                    module_id,
+                    document_id,
                     arena,
                     argument.expression,
-                    naming_result,
+                    local_naming_result,
+                    all_local_naming,
+                    global_naming_result,
+                    binding_display_labels,
                     interner,
                     indent + 2,
                     lines,
@@ -653,10 +723,13 @@ fn render_named_expression(
             let rendered_name = interner.resolve(*name).unwrap_or("<unknown>");
             lines.push(format!("{prefix}Dollar({rendered_name})"));
             render_named_expression(
-                module_id,
+                document_id,
                 arena,
                 *value,
-                naming_result,
+                local_naming_result,
+                all_local_naming,
+                global_naming_result,
+                binding_display_labels,
                 interner,
                 indent + 1,
                 lines,
@@ -693,7 +766,7 @@ fn render_locally_named_expression(
             let binding = local_naming_result
                 .expression_resolutions
                 .get(&expression_id)
-                .map(|binding_id| binding_label(*binding_id))
+                .map(|binding_id| local_binding_label(*binding_id))
                 .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}Symbol({name}@{binding})"));
         }
@@ -716,7 +789,7 @@ fn render_locally_named_expression(
             let binding = local_naming_result
                 .expression_resolutions
                 .get(&expression_id)
-                .map(|binding_id| binding_label(*binding_id))
+                .map(|binding_id| local_binding_label(*binding_id))
                 .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}Assign({name}@{binding})"));
             render_locally_named_expression(
@@ -734,13 +807,13 @@ fn render_locally_named_expression(
                 .iter()
                 .map(|parameter| {
                     let name = interner.resolve(parameter.symbol).unwrap_or("<unknown>");
-                    let binding = find_local_binding_by_symbol_and_range(
+                    let binding = find_binding_by_symbol_and_range(
                         local_naming_result,
                         module_id,
                         parameter.symbol,
                         parameter.range,
                     )
-                    .map(binding_label)
+                    .map(local_binding_label)
                     .unwrap_or_else(|| "?".to_owned());
                     format!("{name}@{binding}")
                 })
@@ -799,13 +872,13 @@ fn render_locally_named_expression(
             body,
         } => {
             let name = interner.resolve(*variable).unwrap_or("<unknown>");
-            let binding = find_local_binding_by_symbol_and_range(
+            let binding = find_binding_by_symbol_and_range(
                 local_naming_result,
                 module_id,
                 *variable,
                 expression.range,
             )
-            .map(binding_label)
+            .map(local_binding_label)
             .unwrap_or_else(|| "?".to_owned());
             lines.push(format!("{prefix}For({name}@{binding})"));
             render_locally_named_expression(
@@ -979,38 +1052,58 @@ fn render_locally_named_expression(
     }
 }
 
-fn binding_label(binding_id: BindingId) -> String {
+fn binding_label(
+    binding_display_labels: &std::collections::BTreeMap<(DocumentId, BindingId), String>,
+    document_id: DocumentId,
+    binding_id: BindingId,
+) -> String {
+    binding_display_labels
+        .get(&(document_id, binding_id))
+        .cloned()
+        .unwrap_or_else(|| format!("b{}", binding_id.0))
+}
+
+fn local_binding_label(binding_id: BindingId) -> String {
     format!("b{}", binding_id.0)
 }
 
 fn find_binding_by_symbol_and_range(
-    naming_result: &NamesGlobal,
-    module_id: ModuleId,
-    symbol: analysis::Symbol,
-    range: tree_sitter::Range,
-) -> Option<BindingId> {
-    naming_result
-        .bindings
-        .values()
-        .find(|binding| {
-            binding.module_id == module_id && binding.symbol == symbol && binding.range == range
-        })
-        .map(|binding| binding.id)
-}
-
-fn find_local_binding_by_symbol_and_range(
     local_naming_result: &NamesLocal,
-    module_id: ModuleId,
+    document_id: DocumentId,
     symbol: analysis::Symbol,
     range: tree_sitter::Range,
 ) -> Option<BindingId> {
     local_naming_result
         .bindings
-        .iter()
-        .find(|(_, binding)| {
-            binding.module_id == module_id && binding.symbol == symbol && binding.range == range
+        .values()
+        .find(|binding| {
+            binding.module_id == document_id && binding.symbol == symbol && binding.range == range
         })
-        .map(|(binding_id, _)| *binding_id)
+        .map(|binding| binding.id)
+}
+
+fn find_package_binding_for_expression(
+    expression_id: ExpressionId,
+    local_naming_result: &NamesLocal,
+    all_local_naming: &std::collections::HashMap<DocumentId, NamesLocal>,
+    global_naming_result: &NamesGlobal,
+) -> Option<(DocumentId, BindingId)> {
+    if let Some(binding_id) = local_naming_result
+        .expression_resolutions
+        .get(&expression_id)
+    {
+        let binding_document_id = local_naming_result.bindings.get(binding_id)?.module_id;
+        return Some((binding_document_id, *binding_id));
+    }
+
+    let symbol = *local_naming_result.non_locals.get(&expression_id)?;
+    let export_document_id = *global_naming_result.global_bindings.get(&symbol)?;
+    let export_document_naming = all_local_naming.get(&export_document_id)?;
+    export_document_naming
+        .global_exports
+        .get(&symbol)
+        .copied()
+        .map(|binding_id| (export_document_id, binding_id))
 }
 
 fn render_atomic(atomic: Atomic) -> &'static str {
