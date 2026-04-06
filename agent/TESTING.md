@@ -172,6 +172,7 @@ The intended fixture suites are:
 - `instantiation` - fresh reuse of generalized bindings at use sites
 - `interfaces` - exported per-file interface shapes
 - `ide/hover` - hover rendering over multi-file workspace state
+- `lint` - file-local lint diagnostics
 - `lowering` - syntax-to-HIR lowering output
 - `naming/local` - file-local binding introduction and lexical use-site resolution
 - `naming/global` - package-global resolution across multiple files
@@ -211,6 +212,18 @@ Expected output should show:
 - rendered AST-like dump of the HIR module
 - attached types on expressions
 - or rendered diagnostics when the suite intentionally targets failures produced by lowering
+
+### `lint`
+
+Purpose:
+
+- file-local lint diagnostics
+- style checks that depend only on parsed tree structure and source text
+
+Expected output should show:
+
+- rendered lint diagnostics directly
+- no lowering, naming, or typechecking output mixed into the suite
 
 ### Naming
 

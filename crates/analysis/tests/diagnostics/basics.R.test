@@ -11,9 +11,9 @@ No diagnostics.
 #---- invalid_syntax
 value <-
 #++++
-error[syntax-error] Missing syntax near 2:1
---> 2:1-2:1
-| <empty line>
+error[syntax-error] missing rhs for operator <-
+--> 1:7-1:9
+| value <-
 
 #==== names
 #---- unknown_name

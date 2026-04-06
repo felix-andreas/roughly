@@ -1,5 +1,12 @@
 # Human Notes (!AIs are not allowed to edit!)
 
+* 
+
+> The authoritative docs are not under `crates/analysis/`; I’m locating the actual analysis-crate steering files now, then I’ll move on to parser-shape reproduction.
+
+why did you think this? was there anything that suggested so? 
+
+
 * we should keep track of what needs to be run
 * should global naming test render global ids or tuple (document_id, binding_id)
 * add wording inherent complexity and irreducible form to agents.md design bar

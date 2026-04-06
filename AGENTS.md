@@ -76,6 +76,7 @@ Avoid architectural descriptions of a crate (module layout, data flow, key types
 # Analysis Crate
 
 This crate is written by AI under human guidance and supervision. The markdown documents in `agent/` are the primary means for steering the AI: they are where intent, contracts, design decisions, and reviewable plans must be made explicit so the human can validate and redirect the work. Keep these documents aligned with the implementation. If behavior, design, or plans change, update the relevant documents in the same session.
+The `analysis` steering documents were intentionally moved to the repo-root `agent/` directory; do not look for crate-local copies under `crates/analysis/`.
 
 ## Goals
 
@@ -115,6 +116,8 @@ Document kinds:
 Before making significant changes in this crate, review these files and keep them aligned.
 
 ### Persistent authoritative documents
+
+These authoritative documents live in the repo-root `agent/` directory, not under `crates/analysis/`.
 
 Request or discuss changes to persistent authoritative documents before editing them.
 

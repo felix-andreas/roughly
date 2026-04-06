@@ -4,6 +4,7 @@ pub mod document;
 pub mod hir;
 pub mod ide;
 pub mod interner;
+pub mod lint;
 pub mod lower;
 pub mod naming;
 pub mod text;
@@ -25,6 +26,7 @@ pub use crate::{
     },
     ide::{HoverInfo, HoverPhase, HoverSection, render_hover_markdown},
     interner::{Interner, Symbol},
+    lint::{Config as LintConfig, NameStyle},
     lower::{LoweringContext, lower},
     text::{TextPosition, TextRange},
     tree::{field, kind},

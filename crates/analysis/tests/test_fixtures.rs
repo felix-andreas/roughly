@@ -9,6 +9,7 @@ use {
         Analysis, AnalysisPhase, Document, DocumentId, Interner, TextPosition, TextRange, check,
         hir::ExpressionKind,
         ide,
+        lint::{self, Config as LintConfig, NameStyle},
         lower::{self, LoweringContext},
         naming::resolve_document_locally,
         render_hover_markdown, run_lowering, run_naming,
@@ -57,6 +58,11 @@ fn instantiation() {
 #[test]
 fn interfaces() {
     run_fixture_suite("tests/interfaces", run_interfaces_fixture);
+}
+
+#[test]
+fn lint() {
+    run_fixture_suite("tests/lint", run_lint_fixture);
 }
 
 #[test]
@@ -192,6 +198,25 @@ fn run_environment_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>
     Ok(vec![vec![FixtureRunFile {
         path: PathBuf::new(),
         output: lines.join("\n"),
+    }]])
+}
+
+fn run_lint_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String> {
+    let FixtureKind::Simple(case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+    let mut parser = new_parser().unwrap();
+    let document = Document::parse(&mut parser, &case.input).expect("parse fixture");
+    let diagnostics = lint::analyze(
+        &document,
+        LintConfig {
+            naming_style: Some(NameStyle::Snake),
+        },
+    );
+
+    Ok(vec![vec![FixtureRunFile {
+        path: PathBuf::new(),
+        output: analysis::CheckResult { diagnostics }.render(&case.input),
     }]])
 }
 
@@ -516,10 +541,13 @@ fn run_lowering_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, S
     };
     let mut parser = new_parser().unwrap();
     let document = Document::parse(&mut parser, &case.input).expect("parse fixture");
-    let mut lowering_context = LoweringContext::new();
-    let module = lower::lower(&document, &mut lowering_context);
-    let diagnostics = lowering_context.take_diagnostics();
-    let interner = lowering_context.interner().clone();
+    let mut analysis_state = Analysis::new(PathBuf::new());
+    let document_id = analysis_state.add_document(PathBuf::from("R/main.R"), document);
+    run_lowering(None, &mut analysis_state);
+    let diagnostics = analysis_state
+        .document_phase_diagnostics(document_id, &[AnalysisPhase::Lowering])
+        .cloned()
+        .collect::<Vec<_>>();
 
     if !diagnostics.is_empty() {
         return Ok(vec![vec![FixtureRunFile {
@@ -534,7 +562,10 @@ fn run_lowering_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, S
 
     Ok(vec![vec![FixtureRunFile {
         path: PathBuf::new(),
-        output: module.render(&interner),
+        output: analysis_state
+            .module(document_id)
+            .expect("lowered module should exist")
+            .render(analysis_state.interner()),
     }]])
 }
 

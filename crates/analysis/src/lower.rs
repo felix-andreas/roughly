@@ -1,6 +1,6 @@
 use {
     crate::{
-        diagnostic::{Diagnostic, point_label},
+        diagnostic::Diagnostic,
         document::Document,
         hir::{
             Argument, Definition, DefinitionId, DefinitionItem, Expression, ExpressionId,
@@ -13,7 +13,7 @@ use {
         types::{Annotation, AttachedAnnotation},
     },
     ropey::Rope,
-    tree_sitter::{Node, Range},
+    tree_sitter::{Node, Range, TreeCursor},
 };
 
 #[derive(Debug)]
@@ -865,46 +865,170 @@ fn annotation_parse_diagnostic(range: Range, error: TypeParseError) -> Diagnosti
 
 fn collect_syntax_errors(node: Node<'_>, rope: &Rope) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    collect_syntax_errors_recursive(node, rope, &mut diagnostics);
+    collect_syntax_errors_recursive(&mut node.walk(), rope, &mut diagnostics);
     diagnostics
 }
 
-fn collect_syntax_errors_recursive(node: Node<'_>, rope: &Rope, diagnostics: &mut Vec<Diagnostic>) {
-    if node.is_error() {
-        diagnostics.push(Diagnostic::syntax_error(
-            node.range(),
-            format!("Unexpected syntax: {}", syntax_error_snippet(node, rope)),
-        ));
-        return;
+fn collect_syntax_errors_recursive(
+    cursor: &mut TreeCursor<'_>,
+    rope: &Rope,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let node = cursor.node();
+    if !(node.is_error() || node.has_error()) {
+        return false;
     }
 
-    if node.is_missing() {
-        diagnostics.push(Diagnostic::syntax_error(
-            node.range(),
-            format!(
-                "Missing syntax near {}",
-                point_label(node.range().start_point)
-            ),
-        ));
-        return;
+    match node.kind_id() {
+        kind::ARGUMENTS
+        | kind::BRACED_EXPRESSION
+        | kind::PARAMETERS
+        | kind::PARENTHESIZED_EXPRESSION => {
+            if let Some(open) = node.child_by_field_id(field::OPEN)
+                && let Some(close) = node.child_by_field_id(field::CLOSE)
+                && close.is_missing()
+            {
+                diagnostics.push(Diagnostic::syntax_error(
+                    open.range(),
+                    format!("missing closing delimiter {}", close.kind()),
+                ));
+            }
+        }
+        kind::BINARY_OPERATOR => {
+            if let Some(operator) = node.child_by_field_id(field::OPERATOR)
+                && let Some(right_hand_side) = node.child_by_field_id(field::RHS)
+                && right_hand_side.is_missing()
+            {
+                diagnostics.push(Diagnostic::syntax_error(
+                    operator.range(),
+                    format!("missing rhs for operator {}", operator.kind()),
+                ));
+            }
+        }
+        kind::FUNCTION_DEFINITION => {
+            if let Some(body) = node.child_by_field_id(field::BODY)
+                && body.is_missing()
+            {
+                diagnostics.push(Diagnostic::syntax_error(
+                    node.range(),
+                    "missing function body",
+                ));
+            }
+        }
+        kind::IF_STATEMENT => {
+            if let Some(consequence) = node.child_by_field_id(field::CONSEQUENCE)
+                && consequence.is_missing()
+            {
+                diagnostics.push(Diagnostic::syntax_error(node.range(), "missing if body"));
+            }
+        }
+        kind::FOR_STATEMENT => {
+            if let Some(body) = node.child_by_field_id(field::BODY)
+                && body.is_missing()
+            {
+                diagnostics.push(Diagnostic::syntax_error(node.range(), "missing for body"));
+            }
+        }
+        kind::WHILE_STATEMENT => {
+            if let Some(body) = node.child_by_field_id(field::BODY)
+                && body.is_missing()
+            {
+                diagnostics.push(Diagnostic::syntax_error(node.range(), "missing while body"));
+            }
+        }
+        _ => {}
     }
 
-    let child_count = node.child_count();
-    for child_index in 0..child_count {
-        if let Some(child) = node.child(child_index) {
-            collect_syntax_errors_recursive(child, rope, diagnostics);
+    if node.is_error()
+        && let Some((range, message)) = control_flow_head_syntax_error(node, rope)
+    {
+        diagnostics.push(Diagnostic::syntax_error(range, message));
+        return true;
+    }
+
+    let mut handled_error = false;
+    if cursor.goto_first_child() {
+        if node.is_error() {
+            let child = cursor.node();
+            match child.kind_id() {
+                kind::LPAREN | kind::LBRACE | kind::LBRACKET | kind::DOUBLE_LBRACKET => {
+                    diagnostics.push(Diagnostic::syntax_error(
+                        child.range(),
+                        format!("missing closing delimiter {}", child.kind()),
+                    ));
+                }
+                _ => {}
+            }
+        }
+
+        loop {
+            handled_error |= collect_syntax_errors_recursive(cursor, rope, diagnostics);
+
+            if !cursor.goto_next_sibling() {
+                cursor.goto_parent();
+                break;
+            }
         }
     }
+
+    if !handled_error && node.is_error() {
+        handled_error = true;
+        let raw = rope.byte_slice(node.byte_range()).to_string();
+        match raw.as_str() {
+            "(" | "{" | "[" | "[[" => diagnostics.push(Diagnostic::syntax_error(
+                node.range(),
+                format!("unexpected opening delimiter {raw}"),
+            )),
+            ")" | "}" | "]" | "]]" => diagnostics.push(Diagnostic::syntax_error(
+                node.range(),
+                format!("unexpected closing delimiter {raw}"),
+            )),
+            _ => diagnostics.push(Diagnostic::syntax_error(
+                node.range(),
+                format!("Syntax Error: unexpected {raw:?}"),
+            )),
+        }
+    }
+
+    handled_error
 }
 
-fn syntax_error_snippet(node: Node<'_>, rope: &Rope) -> String {
-    let compact = text::compact_node_text(rope, node);
+fn control_flow_head_syntax_error(node: Node<'_>, rope: &Rope) -> Option<(Range, &'static str)> {
+    let mut tree_cursor = node.walk();
+    let mut children = node.children(&mut tree_cursor);
+    let keyword = children.next()?;
+    let open = children.next()?;
 
-    if compact == "<empty>" || compact == "<unavailable>" {
-        compact
-    } else if compact.len() > 40 {
-        format!("{:?}…", &compact[..40])
-    } else {
-        format!("{compact:?}")
+    match keyword.kind_id() {
+        kind::FOR | kind::IF | kind::WHILE => {}
+        _ => return None,
+    }
+
+    if open.kind_id() != kind::LPAREN {
+        return None;
+    }
+
+    let head_text = rope
+        .byte_slice(open.end_byte()..node.byte_range().end)
+        .to_string();
+    let head_line_text = head_text.lines().next().unwrap_or("");
+
+    if !head_line_text.contains(')') {
+        return Some((open.range(), "missing closing delimiter )"));
+    }
+
+    match keyword.kind_id() {
+        kind::IF | kind::WHILE if head_line_text.trim_start().starts_with(')') => {
+            Some((open.range(), "missing condition"))
+        }
+        kind::FOR => {
+            let head_prefix = head_line_text
+                .split_once(')')
+                .map(|(before_close, _)| before_close.trim_end())?;
+            head_prefix
+                .ends_with(" in")
+                .then_some((open.range(), "missing sequence in for statement"))
+        }
+        _ => None,
     }
 }

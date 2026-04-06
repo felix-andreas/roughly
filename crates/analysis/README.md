@@ -28,6 +28,7 @@ It also has clear non-goals for v1:
 - NSE and metaprogramming completeness
 - environment and reference semantics
 
+The `analysis` steering documents live in the repo-root [`agent/`](../../agent/) directory rather than under `crates/analysis/`.
 For the current supported semantics, see [`agent/TYPING_SEMANTICS.md`](../../agent/TYPING_SEMANTICS.md). Today the checker focuses on a small set of ideas:
 
 - atomic R types such as `logical`, `integer`, `double`, and `character`

@@ -55,6 +55,10 @@ Keep it focused on the intended near-term file split and the role of each file.
 - `interner.rs`
   - interned symbol storage
 
+- `lint.rs`
+  - file-local non-semantic lint diagnostics
+  - style and surface checks over parsed trees
+
 - `text.rs`
   - source-text position and range types
   - rope-based text helpers

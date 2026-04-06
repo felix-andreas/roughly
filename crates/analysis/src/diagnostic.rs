@@ -43,6 +43,24 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
+    pub fn lint_error(range: Range, message: impl Into<String>) -> Self {
+        Self {
+            severity: Severity::Error,
+            code: DiagnosticCode::Lint,
+            message: message.into(),
+            range,
+        }
+    }
+
+    pub fn lint_warning(range: Range, message: impl Into<String>) -> Self {
+        Self {
+            severity: Severity::Warning,
+            code: DiagnosticCode::Lint,
+            message: message.into(),
+            range,
+        }
+    }
+
     pub fn naming_warning(range: Range, message: impl Into<String>) -> Self {
         Self {
             severity: Severity::Warning,
@@ -283,6 +301,7 @@ impl fmt::Display for Severity {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticCode {
+    Lint,
     Naming,
     SyntaxError,
     TypeError,
@@ -292,6 +311,7 @@ pub enum DiagnosticCode {
 impl fmt::Display for DiagnosticCode {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Lint => formatter.write_str("lint"),
             Self::Naming => formatter.write_str("naming"),
             Self::SyntaxError => formatter.write_str("syntax-error"),
             Self::TypeError => formatter.write_str("type-error"),

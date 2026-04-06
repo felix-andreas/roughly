@@ -2,6 +2,9 @@
 
 Keep newest decisions at the top.
 
+- `lint` should be a separate file-local phase and test suite, rather than being folded into `lower`.
+  - Lint rules depend only on parsed tree structure and source text, but they are not part of HIR construction. Keeping `lint` separate preserves a cleaner structural boundary while still letting `analysis` own all diagnostic production.
+
 - binding ids should stay document-local, and `run_naming` should preserve unchanged local naming results while rerunning only changed or missing documents.
   - Package-global binding ids drift under incremental recomputation and create the wrong dependency shape. Document-local ids keep binding ownership local, make the incremental boundary real, and let package lookup resolve through `global_bindings` plus the winning document's `global_exports`.
 
