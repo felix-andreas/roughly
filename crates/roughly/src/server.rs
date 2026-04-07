@@ -135,8 +135,6 @@ impl ServerState {
     }
 
     fn package_items_map(&mut self) -> HashMap<PathBuf, Vec<Item>> {
-        self.sync_dirty_documents();
-
         self.analysis_state
             .package_document_ids()
             .into_iter()
@@ -152,14 +150,6 @@ impl ServerState {
                 ))
             })
             .collect()
-    }
-
-    fn sync_dirty_documents(&mut self) {
-        let sync_errors = self.analysis_state.sync_dirty_documents();
-        assert!(
-            sync_errors.is_empty(),
-            "failed to synchronize analysis documents from disk: {sync_errors:?}"
-        );
     }
 
     fn continue_with_error(&mut self, message: String) -> ControlFlow<async_lsp::Result<()>> {
@@ -354,9 +344,27 @@ impl LanguageServer for ServerState {
         self.open_documents.remove(&path);
         if path.starts_with(self.workspace_r_path()) {
             if path.exists() {
-                self.analysis_state.mark_document_dirty(&path);
+                self.analysis_state
+                    .add_document_from_disk(path.clone())
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "failed to reload analysis document from disk on close {}: {error:?}",
+                            path.display()
+                        )
+                    });
             } else {
-                self.analysis_state.mark_document_deleted(&path);
+                self.analysis_state
+                    .delete_document(&path)
+                    .or_else(|error| match error {
+                        analysis::AnalysisError::DocumentNotFound(_) => Ok(()),
+                        error => Err(error),
+                    })
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "failed to delete analysis document on close {}: {error:?}",
+                            path.display()
+                        )
+                    });
             }
         }
 
@@ -387,6 +395,7 @@ impl LanguageServer for ServerState {
             path.display()
         ));
 
+        // todo: this implementation is to complicated
         for change in &content_changes {
             if let Some(range) = change.range.as_ref() {
                 let edit_range = TextRange {
@@ -476,7 +485,6 @@ impl LanguageServer for ServerState {
         };
 
         if self.config.lint.experimental_typing && path.starts_with(self.workspace_r_path()) {
-            self.sync_dirty_documents();
             diagnostics = diagnostics::saved_document_diagnostics(
                 &mut self.analysis_state,
                 &path,
@@ -657,8 +665,6 @@ impl LanguageServer for ServerState {
             tracing::info!(?path, "document not found");
             return box_future(Err(path_not_found_error(&path)));
         }
-
-        self.sync_dirty_documents();
 
         let Some(hover_info) = ide::hover(
             &mut self.analysis_state,

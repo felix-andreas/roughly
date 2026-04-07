@@ -1,4 +1,22 @@
-[planning] Incremental Analysis Pipeline
+[in-progress] Incremental Analysis Pipeline
+
+## Current Status
+
+The first implementation slice is complete.
+
+Completed in this slice:
+
+- internal version-based freshness owned by `Analysis`
+- simplified public phase entry points with no caller-supplied changed-document sets
+- retained document-scoped and package-scoped phase outputs
+- retained lint outputs owned by `Analysis`
+- immediate close/watch synchronization instead of pending dirty-document sync
+- replacement of direct phase-store access in hover and fixtures with `Analysis` query methods
+- simplified retained-diagnostics query surface on `Analysis`
+- version-based package invalidation without clearing retained package outputs as the freshness signal
+- regression coverage for retained naming diagnostics and unchanged-version typecheck cache reuse
+
+The project remains in progress because follow-up work is still needed around retained typed results and later package/typecheck refinement.
 
 ## Goal
 
@@ -73,8 +91,8 @@ Lowering and file-local naming compare against that document version:
 
 Package-global naming and typecheck are package-level work, so in the first slice they can use one coarse package version.
 
-- package version advances when package-visible analysis inputs change
-- first slice: increment it on any package document add, edit, reload, or delete
+- package version advances when package-level analysis inputs change
+- first slice: increment it on any loaded document add, edit, reload, or delete
 - package-global naming records the package version it was built from
 - package typecheck records the package version it was built from
 - rerun package-global naming when `global_naming_version != package_version`
@@ -158,8 +176,7 @@ That state should remain internal to `Analysis`. The public API should expose qu
 - cached phase internals are not public API
 - the first replacement query surface lives directly on `Analysis`
 - `close` must restore the on-disk version if the open document was not saved, so close handling changes analysis state immediately rather than queueing later sync work
-- keep one package version in the first slice, incremented whenever any package document add, edit, reload, or delete changes package analysis inputs
-- `lint` should use the same retained output shape as the other phases, with `output: ()`
+- keep one package version in the first slice, incremented whenever any loaded document add, edit, reload, or delete changes package-resolution inputs
 - first-slice typecheck diagnostic ownership stays package-scoped as it is today; improving per-document ownership is deferred follow-up work
 - version bump rules:
   - add a document: create the retained document state with a fresh document version
@@ -255,29 +272,22 @@ This is not a blocker for the first slice. The first slice keeps package-scoped 
 
 ## First implementation slice
 
-- [pending] Remove `changed_documents` from the public phase API.
-- [pending] Add version tracking for document-scoped and package-scoped analysis artifacts.
-- [pending] Make lowering and local naming rerun from document-version comparisons.
-- [pending] Make global naming and typecheck rerun from one coarse package-version comparison.
-- [pending] Replace pending package-document sync with immediate analysis-state updates on close and watched-file changes.
-- [pending] Retain diagnostics per phase and version inside analysis.
-- [pending] Update `roughly` diagnostics and hover call sites to use the simpler API.
+- [done] Remove `changed_documents` from the public phase API.
+- [done] Add version tracking for document-scoped and package-scoped analysis artifacts.
+- [done] Make lowering and local naming rerun from document-version comparisons.
+- [done] Make global naming and typecheck rerun from one coarse package-version comparison.
+- [done] Replace pending package-document sync with immediate analysis-state updates on close and watched-file changes.
+- [done] Retain diagnostics per phase and version inside analysis.
+- [done] Retain lint outputs inside `Analysis` instead of computing lint ad hoc in `roughly`.
+- [done] Update `roughly` diagnostics and hover call sites to use the simpler API.
+- [done] Replace direct phase-store access in hover and fixture code with `Analysis` query methods.
 
 ## Next steps
 
-- [pending] Refine the version model into concrete fields on analysis state and phase artifacts.
-- [pending] Implement the first slice in `analysis.rs`:
-  - internal versions
-  - internal phase stores
-  - new phase entry points
-  - retained phase diagnostics
-  - `DocumentOutput<T>` and `PackageOutput<T>` storage
-- [pending] Update `roughly` to use the new phase API and immediate sync behavior.
-- [pending] Add focused tests for:
-  - lowering reruns after edit
-  - package resolution reruns after package file changes
-  - typecheck stays cached when versions have not changed
-  - semantic diagnostics remain retained while typing until rerun
+- [pending] Replace the remaining direct query dependencies on internal phase layout with narrower `Analysis` query methods as new IDE features are added.
+- [pending] Add explicit tests for:
+  - broader retained semantic diagnostics behavior beyond the current naming-retention and typecheck-cache regressions
+- [pending] Revisit package-scoped typecheck diagnostics and add per-document/source mapping when typed IDE features need it.
 
 ## Code-backed constraints
 
@@ -287,16 +297,16 @@ The current code shows one important constraint for the implementation plan:
 
 That is because semantic artifacts are already consumed directly by IDE and test code:
 
-- hover reads lowered modules through `Analysis::module` and naming data through `analysis.naming.locals` and `analysis.naming.package`
+- hover reads lowered modules and naming data through `Analysis` query methods
 - fixtures render lowered and named artifacts directly rather than only reading diagnostics
 
 So artifact freshness must be tracked independently of diagnostic freshness. Diagnostics can carry their own produced-at version, but they cannot be the only freshness record.
 
 The current code also shows the main migration dependencies:
 
-- removing the public phase stores is not blocked, but hover and fixture code will need `Analysis` query methods to replace direct field access
-- removing pending dirty-document sync is not blocked, because `did_change_watched_files` already updates closed files immediately; the remaining special case is `did_close`
-- retained per-phase diagnostics will need a richer internal shape than the current `Vec<PhaseDiagnostic>` because the current representation stores phase tags but not produced-at versions
+- removing the public phase stores was not blocked; hover and fixture code now use `Analysis` query methods instead of direct field access
+- removing pending dirty-document sync is done; `did_change_watched_files` and `did_close` now update analysis state immediately
+- retained per-phase diagnostics now live inside retained document-scoped and package-scoped outputs instead of one phase-tagged vector
 - typecheck currently has no retained semantic result, only diagnostics, so the first slice can version its execution cheaply, but later typing-powered IDE features will need a real retained typed artifact
 
 ## Later work

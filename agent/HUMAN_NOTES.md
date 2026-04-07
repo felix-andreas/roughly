@@ -1,7 +1,17 @@
 # Human Notes (!AIs are not allowed to edit!)
 
-before that can we add a coding guideline, which states that functions in general should be preferred over methods. impl blocks shouldn't only be used if the struct really manges some states. (or if we need a lot of constructors e.g. diagnostic struct). but not as a general means to organzie code in an OOP style. (useless abstraction and coupling whihc makes testing harder) prefer procedual code or functional (if reasonable and no performance trade-off)
+* saved_document_diagnostics is called twice (not needed)
+* current_document_diagnostics and saved_document_diagnostics and document_diagnostics is way to complidated. we always want to show all diags (and merge them) we should leave commetn why this the case (see LSP Contraints in 006)
 
+* server.rs did_change doucment sync is too complicated
+* currently doesn't support lowering operators like >= (we need to test custom operators)
+* invalidate removes outputs (do we want this?)
+* we must have a format for builtins (like a .rtypes file or something)
+* simplify check function (is it used by server.rs? shouldn't return diags)
+
+* we should somehow pass config into analysis (e.g. if typecheck or not and if strict or not or if debug (show lowering and parsing on hover))
+
+* question: how do we know if we need to re-run package phases based of document ids?? (if the idea is to do this incrementallys)
 
 * we should keep track of what needs to be run
 * should global naming test render global ids or tuple (document_id, binding_id)

@@ -15,8 +15,8 @@ pub mod types;
 
 pub use crate::{
     analysis::{
-        Analysis, AnalysisError, AnalysisPhase, PhaseDiagnostic, check, run_lowering, run_naming,
-        run_typecheck,
+        Analysis, AnalysisError, AnalysisPhase, check, lint, lower, resolve_document,
+        resolve_package, typecheck,
     },
     diagnostic::{
         Diagnostic, DiagnosticCode, Diagnostics, DocumentDiagnostics, Severity, render_core_type,
@@ -30,7 +30,7 @@ pub use crate::{
     ide::{HoverInfo, HoverPhase, HoverSection, render_hover_markdown},
     interner::{Interner, Symbol},
     lint::{Config as LintConfig, NameStyle},
-    lower::{LoweringContext, lower},
+    lower::LoweringContext,
     text::{TextPosition, TextRange},
     tree::{field, kind},
     type_syntax::{

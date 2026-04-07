@@ -14,7 +14,7 @@ use {
         naming::resolve_document_locally,
         render_core_type,
         render_diagnostics,
-        render_hover_markdown, render_type_scheme, run_lowering, run_naming,
+        render_hover_markdown, render_type_scheme, lower as run_lower_phase, resolve_package,
         tree::new_parser,
         type_syntax::{parse_type_syntax, render_type_syntax},
         typecheck::inference_state_with_builtins,
@@ -24,7 +24,10 @@ use {
         render_locally_named_hir, render_named_hir,
     },
     fixtures::{Fixture, FixtureKind, FixtureOperation, FixtureRunFile, run_fixture_suite},
-    std::{collections::BTreeMap, path::PathBuf},
+    std::{
+        collections::{BTreeMap, HashMap},
+        path::PathBuf,
+    },
 };
 
 #[test]
@@ -545,11 +548,8 @@ fn run_lowering_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, S
     let document = Document::parse(&mut parser, &case.input).expect("parse fixture");
     let mut analysis_state = Analysis::new(PathBuf::new());
     let document_id = analysis_state.add_document(PathBuf::from("R/main.R"), document);
-    run_lowering(None, &mut analysis_state);
-    let diagnostics = analysis_state
-        .document_phase_diagnostics(document_id, &[AnalysisPhase::Lowering])
-        .cloned()
-        .collect::<Vec<_>>();
+    run_lower_phase(&mut analysis_state);
+    let diagnostics = analysis_state.document_diagnostics(document_id, &[AnalysisPhase::Lowering]);
 
     if !diagnostics.is_empty() {
         return Ok(vec![vec![FixtureRunFile {
@@ -624,8 +624,8 @@ fn run_naming_global_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile
         analysis_state.add_document(path.clone(), parsed_document);
     }
 
-    run_lowering(None, &mut analysis_state);
-    run_naming(None, &mut analysis_state);
+    run_lower_phase(&mut analysis_state);
+    resolve_package(&mut analysis_state);
 
     let mut ordered_document_ids = analysis_state.package_document_ids();
     let mut non_package_document_ids = case
@@ -655,10 +655,18 @@ fn run_naming_global_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile
 
     let mut next_display_binding_id = 0u32;
     let mut binding_display_labels = BTreeMap::new();
+    let all_local_naming = ordered_document_ids
+        .iter()
+        .map(|document_id| {
+            analysis_state
+                .document_naming(*document_id)
+                .cloned()
+                .map(|local_naming| (*document_id, local_naming))
+                .ok_or_else(|| "missing local naming".to_owned())
+        })
+        .collect::<Result<HashMap<_, _>, _>>()?;
     for document_id in &ordered_document_ids {
-        let local_naming = analysis_state
-            .naming
-            .locals
+        let local_naming = all_local_naming
             .get(document_id)
             .ok_or_else(|| "missing local naming".to_owned())?;
         let mut binding_ids = local_naming.bindings.keys().copied().collect::<Vec<_>>();
@@ -690,25 +698,25 @@ fn run_naming_global_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile
                 .module(document_id)
                 .ok_or_else(|| "missing module".to_owned())?;
             let local_naming = analysis_state
-                .naming
-                .locals
-                .get(&document_id)
+                .document_naming(document_id)
                 .ok_or_else(|| "missing local naming".to_owned())?;
             let rendered_hir = render_named_hir(
                 document_id,
                 module,
                 local_naming,
-                &analysis_state.naming.locals,
-                &analysis_state.naming.package,
+                &all_local_naming,
+                analysis_state
+                    .package_naming()
+                    .ok_or_else(|| "missing package naming".to_owned())?,
                 &binding_display_labels,
                 analysis_state.interner(),
             );
             let diagnostics = analysis_state
-                .document_phase_diagnostics(
+                .document_diagnostics(
                     document_id,
                     &[AnalysisPhase::Lowering, AnalysisPhase::Naming],
                 )
-                .collect::<Vec<_>>();
+                ;
             let rendered_diagnostics = if diagnostics.is_empty() {
                 String::new()
             } else {

@@ -3,7 +3,7 @@ use {
         config::{Case, LintConfig},
         lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range},
     },
-    analysis::{self, Analysis, AnalysisPhase, DocumentId},
+    analysis::{self, Analysis, AnalysisPhase},
     std::path::Path,
 };
 
@@ -15,14 +15,13 @@ pub fn current_document_diagnostics(
     let Some(document_id) = analysis_state.document_id_for_path(path) else {
         return Vec::new();
     };
+    let lint_config = convert_lint_config(lint_config);
 
-    analysis::run_lowering(Some(&[document_id]), analysis_state);
+    analysis::lint(analysis_state, lint_config);
+    analysis::lower(analysis_state);
 
-    let mut diagnostics = analysis_state
-        .document_phase_diagnostics(document_id, &[AnalysisPhase::Lowering])
-        .cloned()
-        .collect::<Vec<_>>();
-    diagnostics.extend(document_lint_diagnostics(analysis_state, document_id, lint_config));
+    let diagnostics =
+        analysis_state.document_diagnostics(document_id, &[AnalysisPhase::Lint, AnalysisPhase::Lowering]);
     convert_diagnostics(diagnostics)
 }
 
@@ -35,42 +34,29 @@ pub fn saved_document_diagnostics(
     let Some(document_id) = analysis_state.document_id_for_path(path) else {
         return Vec::new();
     };
+    let lint_config = convert_lint_config(lint_config);
 
-    let mut diagnostics = if include_typecheck {
+    analysis::lint(analysis_state, lint_config);
+
+    let diagnostics = if include_typecheck {
         analysis::check(analysis_state);
-        analysis_state
-            .document_phase_diagnostics(
-                document_id,
-                &[
-                    AnalysisPhase::Lowering,
-                    AnalysisPhase::Naming,
-                    AnalysisPhase::Typecheck,
-                ],
-            )
-            .cloned()
-            .collect::<Vec<_>>()
+        analysis_state.document_diagnostics(
+            document_id,
+            &[
+                AnalysisPhase::Lint,
+                AnalysisPhase::Lowering,
+                AnalysisPhase::Naming,
+                AnalysisPhase::Typecheck,
+            ],
+        )
     } else {
-        analysis::run_lowering(Some(&[document_id]), analysis_state);
-        analysis_state
-            .document_phase_diagnostics(document_id, &[AnalysisPhase::Lowering])
-            .cloned()
-            .collect::<Vec<_>>()
+        analysis::lower(analysis_state);
+        analysis_state.document_diagnostics(
+            document_id,
+            &[AnalysisPhase::Lint, AnalysisPhase::Lowering],
+        )
     };
-
-    diagnostics.extend(document_lint_diagnostics(analysis_state, document_id, lint_config));
     convert_diagnostics(diagnostics)
-}
-
-fn document_lint_diagnostics(
-    analysis_state: &Analysis,
-    document_id: DocumentId,
-    lint_config: LintConfig,
-) -> Vec<analysis::Diagnostic> {
-    let Some(document) = analysis_state.document_by_id(document_id) else {
-        return Vec::new();
-    };
-
-    analysis::lint::analyze(document, convert_lint_config(lint_config))
 }
 
 fn convert_lint_config(config: LintConfig) -> analysis::LintConfig {

@@ -1,7 +1,7 @@
 // Keep one `// Section` block per IDE action, followed by one `// Utils` block for shared helpers.
 use {
     crate::{
-        analysis::{Analysis, run_lowering, run_naming},
+        analysis::{Analysis, lower, resolve_package},
         document::DocumentId,
         hir::{
             DefinitionId, DefinitionItem, DefinitionKind, Expression, ExpressionId, ExpressionKind,
@@ -41,8 +41,8 @@ pub enum HoverPhase {
 pub fn hover(analysis: &mut Analysis, path: &Path, position: TextPosition) -> Option<HoverInfo> {
     let document_id = analysis.document_id_for_path(path)?;
 
-    run_lowering(None, analysis);
-    run_naming(None, analysis);
+    lower(analysis);
+    resolve_package(analysis);
 
     let module = analysis.module(document_id)?;
     let point = tree_sitter::Point::new(position.line_index, position.character_index);
@@ -260,7 +260,7 @@ fn render_expression_naming_hover(
     expression_id: ExpressionId,
 ) -> Option<String> {
     let mut lines = Vec::new();
-    let local_naming = analysis.naming.locals.get(&document_id)?;
+    let local_naming = analysis.document_naming(document_id)?;
     let mut non_local_symbol = None;
 
     if let Some(binding_id) = local_naming.expression_resolutions.get(&expression_id) {
@@ -279,8 +279,9 @@ fn render_expression_naming_hover(
     }
 
     if let Some(symbol) = non_local_symbol
-        && let Some(export_document_id) = analysis.naming.package.global_bindings.get(&symbol)
-        && let Some(export_document_naming) = analysis.naming.locals.get(export_document_id)
+        && let Some(package_naming) = analysis.package_naming()
+        && let Some(export_document_id) = package_naming.global_bindings.get(&symbol)
+        && let Some(export_document_naming) = analysis.document_naming(*export_document_id)
         && let Some(binding_id) = export_document_naming.global_exports.get(&symbol)
         && let Some(binding) = export_document_naming.bindings.get(binding_id)
     {
