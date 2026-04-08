@@ -1,12 +1,11 @@
 use {
     crate::{
         config::{self, ExperimentalFeatures},
-        diagnostics,
-        format, index,
+        diagnostics, format, index,
         lsp_types::DiagnosticSeverity,
         server, tree, utils,
     },
-    analysis::Analysis,
+    analysis::{self, Analysis},
     console::style,
     ignore::Walk,
     ropey::Rope,
@@ -122,12 +121,22 @@ pub fn check(
                 continue;
             }
 
-            let diagnostics = diagnostics::saved_document_diagnostics(
-                &mut analysis_state,
-                &path,
-                config.lint,
-                config.lint.experimental_typing,
-            );
+            let Some(document_id) = analysis_state.document_id_for_path(&path) else {
+                n_errors += 1;
+                error(&format!(
+                    "analysis document not found after sync {}",
+                    path.display()
+                ));
+                continue;
+            };
+            analysis::lint(&mut analysis_state, config.lint.analysis);
+            if config.lint.experimental_typing {
+                analysis::typecheck(&mut analysis_state);
+            } else {
+                analysis::lower(&mut analysis_state);
+            }
+            let diagnostics =
+                diagnostics::convert_diagnostics(analysis_state.document_diagnostics(document_id));
 
             for diagnostic in diagnostics {
                 n_errors += 1;

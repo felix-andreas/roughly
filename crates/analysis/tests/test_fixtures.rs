@@ -6,15 +6,14 @@ mod fixture_renderers;
 
 use {
     analysis::{
-        Analysis, AnalysisPhase, Document, DocumentId, Interner, TextPosition, TextRange, check,
+        Analysis, Document, DocumentId, Interner, TextPosition, TextRange, check,
         hir::ExpressionKind,
         ide,
         lint::{self, Config as LintConfig, NameStyle},
         lower::{self, LoweringContext},
         naming::resolve_document_locally,
-        render_core_type,
-        render_diagnostics,
-        render_hover_markdown, render_type_scheme, lower as run_lower_phase, resolve_package,
+        render_core_type, render_diagnostics, render_hover_markdown, render_type_scheme,
+        resolve_package,
         tree::new_parser,
         type_syntax::{parse_type_syntax, render_type_syntax},
         typecheck::inference_state_with_builtins,
@@ -548,8 +547,8 @@ fn run_lowering_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, S
     let document = Document::parse(&mut parser, &case.input).expect("parse fixture");
     let mut analysis_state = Analysis::new(PathBuf::new());
     let document_id = analysis_state.add_document(PathBuf::from("R/main.R"), document);
-    run_lower_phase(&mut analysis_state);
-    let diagnostics = analysis_state.document_diagnostics(document_id, &[AnalysisPhase::Lowering]);
+    analysis::lower(&mut analysis_state);
+    let diagnostics = analysis_state.document_diagnostics(document_id);
 
     if !diagnostics.is_empty() {
         return Ok(vec![vec![FixtureRunFile {
@@ -624,7 +623,7 @@ fn run_naming_global_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile
         analysis_state.add_document(path.clone(), parsed_document);
     }
 
-    run_lower_phase(&mut analysis_state);
+    analysis::lower(&mut analysis_state);
     resolve_package(&mut analysis_state);
 
     let mut ordered_document_ids = analysis_state.package_document_ids();
@@ -711,12 +710,7 @@ fn run_naming_global_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile
                 &binding_display_labels,
                 analysis_state.interner(),
             );
-            let diagnostics = analysis_state
-                .document_diagnostics(
-                    document_id,
-                    &[AnalysisPhase::Lowering, AnalysisPhase::Naming],
-                )
-                ;
+            let diagnostics = analysis_state.document_diagnostics(document_id);
             let rendered_diagnostics = if diagnostics.is_empty() {
                 String::new()
             } else {

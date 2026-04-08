@@ -22,7 +22,7 @@ use {
         },
         symbols, utils,
     },
-    analysis::{Analysis, TextPosition, TextRange, ide},
+    analysis::{self, Analysis, TextPosition, TextRange, ide},
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
         client_monitor::ClientProcessMonitorLayer,
@@ -309,14 +309,17 @@ impl LanguageServer for ServerState {
             ));
         self.open_documents.insert(path.clone());
 
-        let diagnostics = {
-            diagnostics::saved_document_diagnostics(
-                &mut self.analysis_state,
-                &path,
-                self.config.lint,
-                false,
-            )
-        };
+        let diagnostics = self
+            .analysis_state
+            .document_id_for_path(&path)
+            .map(|document_id| {
+                analysis::lint(&mut self.analysis_state, self.config.lint.analysis);
+                analysis::lower(&mut self.analysis_state);
+                diagnostics::convert_diagnostics(
+                    self.analysis_state.document_diagnostics(document_id),
+                )
+            })
+            .unwrap_or_default();
 
         if let Err(error) = self
             .client
@@ -437,11 +440,17 @@ impl LanguageServer for ServerState {
             break;
         }
 
-        let diagnostics = diagnostics::current_document_diagnostics(
-            &mut self.analysis_state,
-            &path,
-            self.config.lint,
-        );
+        let diagnostics = self
+            .analysis_state
+            .document_id_for_path(&path)
+            .map(|document_id| {
+                analysis::lint(&mut self.analysis_state, self.config.lint.analysis);
+                analysis::lower(&mut self.analysis_state);
+                diagnostics::convert_diagnostics(
+                    self.analysis_state.document_diagnostics(document_id),
+                )
+            })
+            .unwrap_or_default();
 
         if let Err(error) = self
             .client
@@ -475,23 +484,23 @@ impl LanguageServer for ServerState {
             ));
         }
 
-        let mut diagnostics = {
-            diagnostics::saved_document_diagnostics(
-                &mut self.analysis_state,
-                &path,
-                self.config.lint,
-                false,
-            )
-        };
-
-        if self.config.lint.experimental_typing && path.starts_with(self.workspace_r_path()) {
-            diagnostics = diagnostics::saved_document_diagnostics(
-                &mut self.analysis_state,
-                &path,
-                self.config.lint,
-                true,
-            );
-        }
+        let include_typecheck =
+            self.config.lint.experimental_typing && path.starts_with(self.workspace_r_path());
+        let diagnostics = self
+            .analysis_state
+            .document_id_for_path(&path)
+            .map(|document_id| {
+                analysis::lint(&mut self.analysis_state, self.config.lint.analysis);
+                if include_typecheck {
+                    analysis::typecheck(&mut self.analysis_state);
+                } else {
+                    analysis::lower(&mut self.analysis_state);
+                }
+                diagnostics::convert_diagnostics(
+                    self.analysis_state.document_diagnostics(document_id),
+                )
+            })
+            .unwrap_or_default();
 
         if diagnostics.is_empty() {
             tracing::debug!(?uri, "save produced no diagnostics");

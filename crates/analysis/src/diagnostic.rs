@@ -462,7 +462,10 @@ impl<'a> TypeRenderer<'a> {
                         } else {
                             name.to_owned()
                         };
-                        format!("{rendered_name}: {}", self.render_core_type(&parameter.value))
+                        format!(
+                            "{rendered_name}: {}",
+                            self.render_core_type(&parameter.value)
+                        )
                     })
                     .collect::<Vec<_>>();
                 let mut rendered_parts = rendered_parameters;

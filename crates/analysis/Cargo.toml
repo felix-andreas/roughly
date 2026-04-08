@@ -8,6 +8,7 @@ path = "src/lib.rs"
 
 [dependencies]
 ropey.workspace = true
+serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 tree-sitter.workspace = true
 tree-sitter-r.workspace = true

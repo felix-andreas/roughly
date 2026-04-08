@@ -5,17 +5,21 @@ use {
         tree::{field, kind},
     },
     ropey::Rope,
+    serde::Deserialize,
     tree_sitter::{Node, TreeCursor},
 };
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
 pub struct Config {
     pub naming_style: Option<NameStyle>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum NameStyle {
+    #[serde(alias = "camelCase")]
     Camel,
+    #[serde(alias = "snake_case")]
     Snake,
 }
 

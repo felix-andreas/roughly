@@ -70,14 +70,6 @@ struct PackageOutput<T> {
     diagnostics: HashMap<DocumentId, Vec<Diagnostic>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AnalysisPhase {
-    Lint,
-    Lowering,
-    Naming,
-    Typecheck,
-}
-
 impl Analysis {
     pub fn new(base_path: PathBuf) -> Self {
         Self {
@@ -216,7 +208,9 @@ impl Analysis {
     }
 
     pub fn module(&self, document_id: DocumentId) -> Option<&Module> {
-        self.lowering_outputs.get(&document_id).map(|output| &output.output)
+        self.lowering_outputs
+            .get(&document_id)
+            .map(|output| &output.output)
     }
 
     pub fn document_naming(&self, document_id: DocumentId) -> Option<&NamesLocal> {
@@ -226,7 +220,9 @@ impl Analysis {
     }
 
     pub fn package_naming(&self) -> Option<&NamesGlobal> {
-        self.package_naming_output.as_ref().map(|output| &output.output)
+        self.package_naming_output
+            .as_ref()
+            .map(|output| &output.output)
     }
 
     pub fn package_document_ids(&self) -> Vec<DocumentId> {
@@ -255,43 +251,12 @@ impl Analysis {
             .unwrap_or_default()
     }
 
-    pub fn document_diagnostics(
-        &self,
-        document_id: DocumentId,
-        phases: &[AnalysisPhase],
-    ) -> Vec<Diagnostic> {
+    pub fn document_diagnostics(&self, document_id: DocumentId) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-
-        if phases.contains(&AnalysisPhase::Lint)
-            && let Some(output) = self.lint_outputs.get(&document_id)
-        {
-            diagnostics.extend(output.diagnostics.iter().cloned());
-        }
-
-        if phases.contains(&AnalysisPhase::Lowering)
-            && let Some(output) = self.lowering_outputs.get(&document_id)
-        {
-            diagnostics.extend(output.diagnostics.iter().cloned());
-        }
-
-        if phases.contains(&AnalysisPhase::Naming) {
-            if let Some(output) = self.document_naming_outputs.get(&document_id) {
-                diagnostics.extend(output.diagnostics.iter().cloned());
-            }
-            if let Some(output) = &self.package_naming_output
-                && let Some(package_diagnostics) = output.diagnostics.get(&document_id)
-            {
-                diagnostics.extend(package_diagnostics.iter().cloned());
-            }
-        }
-
-        if phases.contains(&AnalysisPhase::Typecheck)
-            && let Some(output) = &self.typecheck_output
-            && let Some(typecheck_diagnostics) = output.diagnostics.get(&document_id)
-        {
-            diagnostics.extend(typecheck_diagnostics.iter().cloned());
-        }
-
+        self.extend_retained_lint_diagnostics(document_id, &mut diagnostics);
+        self.extend_lowering_diagnostics(document_id, &mut diagnostics);
+        self.extend_naming_diagnostics(document_id, &mut diagnostics);
+        self.extend_typecheck_diagnostics(document_id, &mut diagnostics);
         diagnostics
     }
 }
@@ -300,10 +265,7 @@ pub fn check(analysis_state: &mut Analysis) -> Diagnostics {
     let document_ids = analysis_state.package_document_ids();
 
     resolve_package(analysis_state);
-    let naming_diagnostics = analysis_state.collect_phase_diagnostics(
-        &document_ids,
-        &[AnalysisPhase::Lowering, AnalysisPhase::Naming],
-    );
+    let naming_diagnostics = analysis_state.collect_semantic_diagnostics(&document_ids);
     if has_blocking_diagnostics(&naming_diagnostics) {
         return naming_diagnostics;
     }
@@ -391,9 +353,9 @@ pub fn resolve_document(analysis_state: &mut Analysis) {
             continue;
         }
 
-        let module = analysis_state
-            .module(*document_id)
-            .unwrap_or_else(|| panic!("missing lowered module for document naming {document_id:?}"));
+        let module = analysis_state.module(*document_id).unwrap_or_else(|| {
+            panic!("missing lowered module for document naming {document_id:?}")
+        });
         let local_naming = resolve_document_locally(*document_id, module);
         analysis_state.document_naming_outputs.insert(
             *document_id,
@@ -421,12 +383,20 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
     let all_document_ids = analysis_state.all_document_ids();
     let package_modules = document_ids
         .iter()
-        .filter_map(|document_id| analysis_state.module(*document_id).map(|module| (*document_id, module)))
+        .filter_map(|document_id| {
+            analysis_state
+                .module(*document_id)
+                .map(|module| (*document_id, module))
+        })
         .collect::<Vec<_>>();
     let extra_modules = all_document_ids
         .iter()
         .filter(|document_id| !document_ids.contains(document_id))
-        .filter_map(|document_id| analysis_state.module(*document_id).map(|module| (*document_id, module)))
+        .filter_map(|document_id| {
+            analysis_state
+                .module(*document_id)
+                .map(|module| (*document_id, module))
+        })
         .collect::<Vec<_>>();
     let naming_locals = analysis_state
         .document_naming_outputs
@@ -454,16 +424,12 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Diagnostics {
         .as_ref()
         .is_some_and(|output| output.version == analysis_state.package_version)
     {
-        return analysis_state.collect_phase_diagnostics(
-            &analysis_state.package_document_ids(),
-            &[AnalysisPhase::Typecheck],
-        );
+        return analysis_state
+            .collect_typecheck_diagnostics(&analysis_state.package_document_ids());
     }
 
-    let naming_diagnostics = analysis_state.collect_phase_diagnostics(
-        &analysis_state.package_document_ids(),
-        &[AnalysisPhase::Lowering, AnalysisPhase::Naming],
-    );
+    let naming_diagnostics =
+        analysis_state.collect_semantic_diagnostics(&analysis_state.package_document_ids());
     if has_blocking_diagnostics(&naming_diagnostics) {
         analysis_state.typecheck_output = Some(PackageOutput {
             version: analysis_state.package_version,
@@ -548,18 +514,72 @@ impl Analysis {
         self.document_versions.get(&document_id).copied()
     }
 
-    fn collect_phase_diagnostics(
-        &self,
-        document_ids: &[DocumentId],
-        phases: &[AnalysisPhase],
-    ) -> Vec<Diagnostic> {
+    fn collect_semantic_diagnostics(&self, document_ids: &[DocumentId]) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
 
         for document_id in document_ids {
-            diagnostics.extend(self.document_diagnostics(*document_id, phases));
+            self.extend_lowering_diagnostics(*document_id, &mut diagnostics);
+            self.extend_naming_diagnostics(*document_id, &mut diagnostics);
         }
 
         diagnostics
+    }
+
+    fn collect_typecheck_diagnostics(&self, document_ids: &[DocumentId]) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+
+        for document_id in document_ids {
+            self.extend_typecheck_diagnostics(*document_id, &mut diagnostics);
+        }
+
+        diagnostics
+    }
+
+    fn extend_retained_lint_diagnostics(
+        &self,
+        document_id: DocumentId,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        if let Some(output) = self.lint_outputs.get(&document_id) {
+            diagnostics.extend(output.diagnostics.iter().cloned());
+        }
+    }
+
+    fn extend_lowering_diagnostics(
+        &self,
+        document_id: DocumentId,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        if let Some(output) = self.lowering_outputs.get(&document_id) {
+            diagnostics.extend(output.diagnostics.iter().cloned());
+        }
+    }
+
+    fn extend_naming_diagnostics(
+        &self,
+        document_id: DocumentId,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        if let Some(output) = self.document_naming_outputs.get(&document_id) {
+            diagnostics.extend(output.diagnostics.iter().cloned());
+        }
+        if let Some(output) = &self.package_naming_output
+            && let Some(package_diagnostics) = output.diagnostics.get(&document_id)
+        {
+            diagnostics.extend(package_diagnostics.iter().cloned());
+        }
+    }
+
+    fn extend_typecheck_diagnostics(
+        &self,
+        document_id: DocumentId,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        if let Some(output) = &self.typecheck_output
+            && let Some(typecheck_diagnostics) = output.diagnostics.get(&document_id)
+        {
+            diagnostics.extend(typecheck_diagnostics.iter().cloned());
+        }
     }
 
     fn invalidate_document(&mut self, document_id: DocumentId) {
@@ -757,10 +777,9 @@ fn remap_expression_kind(expression_kind: &mut ExpressionKind, expression_offset
 #[cfg(test)]
 mod tests {
     use {
-        super::{Analysis, AnalysisPhase, check, lint, lower, resolve_package},
+        super::{Analysis, check, lint, lower, resolve_package},
         crate::{
-            Diagnostic,
-            Severity,
+            Diagnostic, Severity,
             ide::HoverPhase,
             lint::{Config as LintConfig, NameStyle},
             text::{TextPosition, TextRange},
@@ -843,7 +862,7 @@ mod tests {
         assert!(analysis.document_naming(document_id).is_none());
 
         lower(&mut analysis);
-        let diagnostics = analysis.document_diagnostics(document_id, &[AnalysisPhase::Lowering]);
+        let diagnostics = analysis.document_diagnostics(document_id);
 
         assert!(
             diagnostics
@@ -908,7 +927,11 @@ mod tests {
                 naming_style: Some(NameStyle::Snake),
             },
         );
-        assert!(analysis.lint_diagnostics(document_id, LintConfig::default()).is_empty());
+        assert!(
+            analysis
+                .lint_diagnostics(document_id, LintConfig::default())
+                .is_empty()
+        );
         assert!(
             analysis
                 .lint_diagnostics(
@@ -948,7 +971,7 @@ mod tests {
             .expect("document should parse");
 
         resolve_package(&mut analysis);
-        let retained_naming = analysis.document_diagnostics(document_id, &[AnalysisPhase::Naming]);
+        let retained_naming = analysis.document_diagnostics(document_id);
         assert!(
             retained_naming
                 .iter()
@@ -975,10 +998,7 @@ mod tests {
             .expect("edit should succeed");
         lower(&mut analysis);
 
-        let retained_diagnostics = analysis.document_diagnostics(
-            document_id,
-            &[AnalysisPhase::Lowering, AnalysisPhase::Naming],
-        );
+        let retained_diagnostics = analysis.document_diagnostics(document_id);
         assert!(
             retained_diagnostics
                 .iter()
@@ -1001,10 +1021,8 @@ mod tests {
         let initial_diagnostics = super::typecheck(&mut analysis);
         assert!(!initial_diagnostics.is_empty());
 
-        let sentinel = Diagnostic::type_error(
-            initial_diagnostics[0].range,
-            "cached typecheck sentinel",
-        );
+        let sentinel =
+            Diagnostic::type_error(initial_diagnostics[0].range, "cached typecheck sentinel");
         analysis
             .typecheck_output
             .as_mut()

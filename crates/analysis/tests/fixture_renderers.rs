@@ -249,7 +249,10 @@ fn render_named_expression(
             .unwrap_or_else(|| format!("b{}", binding_id.0))
     };
     let find_expression_binding = || {
-        if let Some(binding_id) = local_naming_result.expression_resolutions.get(&expression_id) {
+        if let Some(binding_id) = local_naming_result
+            .expression_resolutions
+            .get(&expression_id)
+        {
             let binding_document_id = local_naming_result.bindings.get(binding_id)?.module_id;
             return Some((binding_document_id, *binding_id));
         }

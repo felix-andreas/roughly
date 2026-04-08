@@ -1,5 +1,6 @@
 use {
     crate::format::Config as FormatConfig,
+    analysis::{LintConfig as AnalysisLintConfig, NameStyle},
     serde::Deserialize,
     std::{io, path::Path},
     thiserror::Error,
@@ -33,17 +34,10 @@ impl Config {
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct LintConfig {
-    pub naming_style: Option<Case>,
+    #[serde(flatten)]
+    pub analysis: AnalysisLintConfig,
     pub experimental_unused: bool,
     pub experimental_typing: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-pub enum Case {
-    #[serde(alias = "camelCase")]
-    Camel,
-    #[serde(alias = "snake_case")]
-    Snake,
 }
 
 #[derive(Error, Debug)]
@@ -62,8 +56,8 @@ pub enum ConfigError {
 #[serde(default)]
 #[derive(Default)]
 pub struct ConfigToml {
-    pub case: Option<Case>,    // kept for backwards compatibility
-    pub spaces: Option<usize>, // kept for backwards compatibility
+    pub case: Option<NameStyle>, // kept for backwards compatibility
+    pub spaces: Option<usize>,   // kept for backwards compatibility
     pub format: FormatConfig,
     pub lint: LintConfig,
 }
@@ -75,7 +69,7 @@ impl ConfigToml {
         }
 
         if let Some(case) = self.case {
-            self.lint.naming_style = Some(case);
+            self.lint.analysis.naming_style = Some(case);
         }
 
         self.lint.experimental_unused |= experimental.unused;
@@ -124,7 +118,7 @@ mod tests {
         let config = parse(toml);
         assert_eq!(config.format.indent_width, 4);
         assert_eq!(config.format.line_ending, LineEnding::Auto);
-        assert_eq!(config.lint.naming_style, Some(Case::Snake));
+        assert_eq!(config.lint.analysis.naming_style, Some(NameStyle::Snake));
     }
 
     #[test]
@@ -144,7 +138,7 @@ mod tests {
         let config = parse(toml);
         assert_eq!(config.format.indent_width, 6);
         assert_eq!(config.format.line_ending, LineEnding::CrLf);
-        assert_eq!(config.lint.naming_style, Some(Case::Snake));
+        assert_eq!(config.lint.analysis.naming_style, Some(NameStyle::Snake));
         assert!(config.lint.experimental_unused);
     }
 
@@ -157,6 +151,6 @@ mod tests {
         let config = parse(toml);
         assert_eq!(config.format.indent_width, 2);
         assert_eq!(config.format.line_ending, LineEnding::Auto);
-        assert_eq!(config.lint.naming_style, None);
+        assert_eq!(config.lint.analysis.naming_style, None);
     }
 }
