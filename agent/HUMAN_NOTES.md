@@ -1,7 +1,9 @@
 # Human Notes (!AIs are not allowed to edit!)
 
+* we should only have run_full and run_fast (not check)
 * can we get rid of tree.rs in roughly?
 * saved_document_diagnostics is called twice (not needed)
+* must we publish diags for all documents (on change)??
 * current_document_diagnostics and saved_document_diagnostics and document_diagnostics is way to complidated. we always want to show all diags (and merge them) we should leave commetn why this the case (see LSP Contraints in 006)
 
 * server.rs did_change doucment sync is too complicated

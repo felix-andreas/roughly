@@ -49,18 +49,12 @@ const CONFIG_FILE_NAME: &str = "roughly.toml";
 // #[tokio::main] # TODO: understand if this makes a difference???
 #[tokio::main(flavor = "current_thread")]
 pub async fn run(experimental_features: ExperimentalFeatures) {
-    let (server, _) = async_lsp::MainLoop::new_server(|mut client| {
-        let config = match Config::from_path(Path::new(CONFIG_FILE_NAME), experimental_features) {
-            Ok(config) => config,
-            Err(err) => {
-                let _ = client.show_message(ShowMessageParams {
-                    typ: MessageType::ERROR,
-                    message: format!("failed to load config: {err}"),
-                });
-                cli::error(&err.to_string());
-                panic!("fixme");
-            }
-        };
+    let (server, _) = async_lsp::MainLoop::new_server(|client| {
+        let config = Config::from_path(Path::new(CONFIG_FILE_NAME), experimental_features)
+            .unwrap_or_else(|error| {
+                cli::error(&error.to_string());
+                panic!("failed to load config: {error}");
+            });
 
         ServiceBuilder::new()
             .layer(TracingLayer::default())
@@ -280,6 +274,7 @@ impl LanguageServer for ServerState {
                         message: format!("failed to watch R files: {err:#}"),
                     })
                     .unwrap();
+                return;
             }
             tracing::info!("registered file watching for R files");
         });
@@ -359,10 +354,6 @@ impl LanguageServer for ServerState {
             } else {
                 self.analysis_state
                     .delete_document(&path)
-                    .or_else(|error| match error {
-                        analysis::AnalysisError::DocumentNotFound(_) => Ok(()),
-                        error => Err(error),
-                    })
                     .unwrap_or_else(|error| {
                         panic!(
                             "failed to delete analysis document on close {}: {error:?}",
@@ -550,16 +541,10 @@ impl LanguageServer for ServerState {
                     }
                     FileChangeType::DELETED => {
                         if !self.open_documents.contains(&path) {
-                            self.analysis_state
-                                .delete_document(&path)
-                                .or_else(|error| match error {
-                                    analysis::AnalysisError::DocumentNotFound(_) => Ok(()),
-                                    error => Err(error),
-                                })
-                                .expect(&format!(
-                                    "failed to delete analysis document {}",
-                                    path.display()
-                                ));
+                            self.analysis_state.delete_document(&path).expect(&format!(
+                                "failed to delete analysis document {}",
+                                path.display()
+                            ));
                         }
                     }
                     _ => unreachable!(),
