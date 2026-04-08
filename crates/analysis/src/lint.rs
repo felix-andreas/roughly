@@ -1,21 +1,15 @@
 use {
     crate::{
+        analysis::LintConfig,
         diagnostic::Diagnostic,
         document::Document,
         tree::{field, kind},
     },
     ropey::Rope,
-    serde::Deserialize,
     tree_sitter::{Node, TreeCursor},
 };
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(default, rename_all = "kebab-case")]
-pub struct Config {
-    pub naming_style: Option<NameStyle>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 pub enum NameStyle {
     #[serde(alias = "camelCase")]
     Camel,
@@ -29,7 +23,7 @@ struct TraversalState {
     check_name_style: bool,
 }
 
-pub fn analyze(document: &Document, config: Config) -> Vec<Diagnostic> {
+pub fn analyze(document: &Document, config: LintConfig) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     traverse(
         &mut document.tree().root_node().walk(),
@@ -45,7 +39,7 @@ fn traverse(
     cursor: &mut TreeCursor<'_>,
     diagnostics: &mut Vec<Diagnostic>,
     rope: &Rope,
-    config: Config,
+    config: LintConfig,
     mut state: TraversalState,
 ) {
     let node = cursor.node();

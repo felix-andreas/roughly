@@ -1,6 +1,6 @@
 use {
     crate::format::Config as FormatConfig,
-    analysis::{LintConfig as AnalysisLintConfig, NameStyle},
+    analysis::{CheckConfig, LintConfig, NameStyle},
     serde::Deserialize,
     std::{io, path::Path},
     thiserror::Error,
@@ -10,6 +10,7 @@ use {
 pub struct Config {
     pub format: FormatConfig,
     pub lint: LintConfig,
+    pub check: CheckConfig,
 }
 
 impl Config {
@@ -29,15 +30,6 @@ impl Config {
     pub fn from_str(text: &str, experimental: ExperimentalFeatures) -> Result<Config, ConfigError> {
         Ok(toml::from_str::<ConfigToml>(text)?.to_config(experimental))
     }
-}
-
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
-#[serde(default, rename_all = "kebab-case")]
-pub struct LintConfig {
-    #[serde(flatten)]
-    pub analysis: AnalysisLintConfig,
-    pub experimental_unused: bool,
-    pub experimental_typing: bool,
 }
 
 #[derive(Error, Debug)]
@@ -60,6 +52,7 @@ pub struct ConfigToml {
     pub spaces: Option<usize>,   // kept for backwards compatibility
     pub format: FormatConfig,
     pub lint: LintConfig,
+    pub check: CheckConfig,
 }
 
 impl ConfigToml {
@@ -69,15 +62,16 @@ impl ConfigToml {
         }
 
         if let Some(case) = self.case {
-            self.lint.analysis.naming_style = Some(case);
+            self.lint.naming_style = Some(case);
         }
 
-        self.lint.experimental_unused |= experimental.unused;
-        self.lint.experimental_typing |= experimental.typing;
+        self.check.unused |= experimental.unused;
+        self.check.typing |= experimental.typing;
 
         Config {
             format: self.format,
             lint: self.lint,
+            check: self.check,
         }
     }
 }
@@ -118,7 +112,7 @@ mod tests {
         let config = parse(toml);
         assert_eq!(config.format.indent_width, 4);
         assert_eq!(config.format.line_ending, LineEnding::Auto);
-        assert_eq!(config.lint.analysis.naming_style, Some(NameStyle::Snake));
+        assert_eq!(config.lint.naming_style, Some(NameStyle::Snake));
     }
 
     #[test]
@@ -133,13 +127,15 @@ mod tests {
 
             [lint]
             naming-style = "camelCase"
-            experimental-unused = true
+
+            [check]
+            unused = true
         "#};
         let config = parse(toml);
         assert_eq!(config.format.indent_width, 6);
         assert_eq!(config.format.line_ending, LineEnding::CrLf);
-        assert_eq!(config.lint.analysis.naming_style, Some(NameStyle::Snake));
-        assert!(config.lint.experimental_unused);
+        assert_eq!(config.lint.naming_style, Some(NameStyle::Snake));
+        assert!(config.check.unused);
     }
 
     #[test]
@@ -151,6 +147,8 @@ mod tests {
         let config = parse(toml);
         assert_eq!(config.format.indent_width, 2);
         assert_eq!(config.format.line_ending, LineEnding::Auto);
-        assert_eq!(config.lint.analysis.naming_style, None);
+        assert_eq!(config.lint.naming_style, None);
+        assert!(!config.check.unused);
+        assert!(!config.check.typing);
     }
 }

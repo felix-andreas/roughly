@@ -108,7 +108,8 @@ pub fn check(
                     continue;
                 }
             };
-            let mut analysis_state = Analysis::new(std::env::current_dir().unwrap());
+            let mut analysis_state =
+                Analysis::new(std::env::current_dir().unwrap(), config.lint, config.check);
             if analysis_state
                 .add_document_from_source(path.clone(), &old)
                 .is_err()
@@ -129,12 +130,7 @@ pub fn check(
                 ));
                 continue;
             };
-            analysis::lint(&mut analysis_state, config.lint.analysis);
-            if config.lint.experimental_typing {
-                analysis::typecheck(&mut analysis_state);
-            } else {
-                analysis::lower(&mut analysis_state);
-            }
+            analysis::run_full(&mut analysis_state);
             let diagnostics =
                 diagnostics::convert_diagnostics(analysis_state.document_diagnostics(document_id));
 

@@ -22,7 +22,7 @@ use {
         },
         symbols, utils,
     },
-    analysis::{self, Analysis, TextPosition, TextRange, ide},
+    analysis::{self, Analysis, DocumentChange, TextPosition, TextRange, ide},
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
         client_monitor::ClientProcessMonitorLayer,
@@ -115,7 +115,7 @@ impl ServerState {
             experimental_features,
             workspace_root: workspace_root.clone(),
             open_documents: HashSet::new(),
-            analysis_state: Analysis::new(workspace_root.clone()),
+            analysis_state: Analysis::new(workspace_root.clone(), config.lint, config.check),
         })
     }
 
@@ -309,17 +309,18 @@ impl LanguageServer for ServerState {
             ));
         self.open_documents.insert(path.clone());
 
-        let diagnostics = self
+        let document_id = self
             .analysis_state
             .document_id_for_path(&path)
-            .map(|document_id| {
-                analysis::lint(&mut self.analysis_state, self.config.lint.analysis);
-                analysis::lower(&mut self.analysis_state);
-                diagnostics::convert_diagnostics(
-                    self.analysis_state.document_diagnostics(document_id),
+            .unwrap_or_else(|| {
+                panic!(
+                    "analysis document not found after did_open sync {}",
+                    path.display()
                 )
-            })
-            .unwrap_or_default();
+            });
+        analysis::run_fast(&mut self.analysis_state);
+        let diagnostics =
+            diagnostics::convert_diagnostics(self.analysis_state.document_diagnostics(document_id));
 
         if let Err(error) = self
             .client
@@ -398,59 +399,51 @@ impl LanguageServer for ServerState {
             path.display()
         ));
 
-        // todo: this implementation is to complicated
-        for change in &content_changes {
-            if let Some(range) = change.range.as_ref() {
-                let edit_range = TextRange {
-                    start: TextPosition {
-                        line_index: range.start.line as usize,
-                        character_index: range.start.character as usize,
-                    },
-                    end: TextPosition {
-                        line_index: range.end.line as usize,
-                        character_index: range.end.character as usize,
-                    },
-                };
-                if let Err(error) = self
-                    .analysis_state
-                    .edit_document(&path, |document, parser| {
-                        document.edit_range(parser, edit_range, &change.text)
-                    })
-                {
+        let changes = content_changes
+            .into_iter()
+            .map(|change| {
+                let range = change.range.unwrap_or_else(|| {
                     panic!(
-                        "failed to edit analysis document {} incrementally: {error:?}",
+                        "incremental did_change for {} must include a range",
                         path.display()
-                    );
+                    )
+                });
+                DocumentChange {
+                    range: TextRange {
+                        start: TextPosition {
+                            line_index: range.start.line as usize,
+                            character_index: range.start.character as usize,
+                        },
+                        end: TextPosition {
+                            line_index: range.end.line as usize,
+                            character_index: range.end.character as usize,
+                        },
+                    },
+                    text: change.text,
                 }
-                continue;
-            }
-
-            assert_eq!(
-                content_changes.len(),
-                1,
-                "full-document did_change for {} should contain exactly one content change",
-                path.display()
-            );
-            self.analysis_state
-                .add_document_from_source(path.clone(), &change.text)
-                .expect(&format!(
-                    "failed to replace analysis document from source {}",
+            })
+            .collect::<Vec<_>>();
+        self.analysis_state
+            .edit_document(&path, &changes)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "failed to edit analysis document {} incrementally: {error:?}",
                     path.display()
-                ));
-            break;
-        }
+                )
+            });
 
-        let diagnostics = self
+        let document_id = self
             .analysis_state
             .document_id_for_path(&path)
-            .map(|document_id| {
-                analysis::lint(&mut self.analysis_state, self.config.lint.analysis);
-                analysis::lower(&mut self.analysis_state);
-                diagnostics::convert_diagnostics(
-                    self.analysis_state.document_diagnostics(document_id),
+            .unwrap_or_else(|| {
+                panic!(
+                    "analysis document not found after did_change sync {}",
+                    path.display()
                 )
-            })
-            .unwrap_or_default();
+            });
+        analysis::run_fast(&mut self.analysis_state);
+        let diagnostics =
+            diagnostics::convert_diagnostics(self.analysis_state.document_diagnostics(document_id));
 
         if let Err(error) = self
             .client
@@ -484,27 +477,18 @@ impl LanguageServer for ServerState {
             ));
         }
 
-        let include_typecheck =
-            self.config.lint.experimental_typing && path.starts_with(self.workspace_r_path());
-        let diagnostics = self
+        let document_id = self
             .analysis_state
             .document_id_for_path(&path)
-            .map(|document_id| {
-                analysis::lint(&mut self.analysis_state, self.config.lint.analysis);
-                if include_typecheck {
-                    analysis::typecheck(&mut self.analysis_state);
-                } else {
-                    analysis::lower(&mut self.analysis_state);
-                }
-                diagnostics::convert_diagnostics(
-                    self.analysis_state.document_diagnostics(document_id),
+            .unwrap_or_else(|| {
+                panic!(
+                    "analysis document not found after did_save sync {}",
+                    path.display()
                 )
-            })
-            .unwrap_or_default();
-
-        if diagnostics.is_empty() {
-            tracing::debug!(?uri, "save produced no diagnostics");
-        }
+            });
+        analysis::run_full(&mut self.analysis_state);
+        let diagnostics =
+            diagnostics::convert_diagnostics(self.analysis_state.document_diagnostics(document_id));
 
         if let Err(error) = self
             .client
@@ -537,6 +521,7 @@ impl LanguageServer for ServerState {
             if path == config_path {
                 match Config::from_path(&config_path, self.experimental_features) {
                     Ok(config) => {
+                        self.analysis_state.set_configs(config.lint, config.check);
                         self.config = config;
                     }
                     Err(error) => {

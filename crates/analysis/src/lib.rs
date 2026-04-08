@@ -15,20 +15,21 @@ pub mod types;
 
 pub use crate::{
     analysis::{
-        Analysis, AnalysisError, check, lint, lower, resolve_document, resolve_package, typecheck,
+        Analysis, AnalysisError, CheckConfig, LintConfig, check, lint, lower, resolve_document,
+        resolve_package, run_fast, run_full, typecheck,
     },
     diagnostic::{
         Diagnostic, DiagnosticCode, Diagnostics, DocumentDiagnostics, Severity, render_core_type,
         render_diagnostics, render_type_scheme,
     },
-    document::{Document, DocumentEditError, DocumentId, DocumentParseError},
+    document::{Document, DocumentChange, DocumentId, DocumentParseError},
     hir::{
         Argument, Definition, DefinitionId, DefinitionItem, DefinitionKind, Expression,
         ExpressionId, ExpressionKind, Module, ModuleId, Parameter,
     },
     ide::{HoverInfo, HoverPhase, HoverSection, render_hover_markdown},
     interner::{Interner, Symbol},
-    lint::{Config as LintConfig, NameStyle},
+    lint::NameStyle,
     lower::LoweringContext,
     text::{TextPosition, TextRange},
     tree::{field, kind},

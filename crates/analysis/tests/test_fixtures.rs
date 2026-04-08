@@ -6,10 +6,11 @@ mod fixture_renderers;
 
 use {
     analysis::{
-        Analysis, Document, DocumentId, Interner, TextPosition, TextRange, check,
+        Analysis, CheckConfig, Document, DocumentChange, DocumentId, Interner, LintConfig,
+        TextPosition, TextRange, check,
         hir::ExpressionKind,
         ide,
-        lint::{self, Config as LintConfig, NameStyle},
+        lint::{self, NameStyle},
         lower::{self, LoweringContext},
         naming::resolve_document_locally,
         render_core_type, render_diagnostics, render_hover_markdown, render_type_scheme,
@@ -148,7 +149,11 @@ fn run_diagnostics_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>
     };
     let mut parser = new_parser().unwrap();
     let document = Document::parse(&mut parser, &case.input).expect("parse fixture");
-    let mut analysis_state = Analysis::new(PathBuf::new());
+    let mut analysis_state = Analysis::new(
+        PathBuf::new(),
+        LintConfig::default(),
+        CheckConfig::default(),
+    );
     analysis_state.add_document(PathBuf::from("R/main.R"), document);
     Ok(vec![vec![FixtureRunFile {
         path: PathBuf::new(),
@@ -364,7 +369,11 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
         return Err("unsupported fixture".to_owned());
     };
 
-    let mut analysis_state = Analysis::new(PathBuf::new());
+    let mut analysis_state = Analysis::new(
+        PathBuf::new(),
+        LintConfig::default(),
+        CheckConfig::default(),
+    );
     for entry in &case.initial_generation.entries {
         apply_ide_operation(&mut analysis_state, &entry.operation)?;
     }
@@ -402,9 +411,13 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
                 range,
                 replacement_text,
             } => analysis_state
-                .edit_document(path, |document, parser| {
-                    document.edit_range(parser, hover_text_range(*range), replacement_text)
-                })
+                .edit_document(
+                    path,
+                    &[DocumentChange {
+                        range: hover_text_range(*range),
+                        text: replacement_text.clone(),
+                    }],
+                )
                 .map_err(|error| format!("failed to edit `{}`: {error:?}", path.display())),
             FixtureOperation::MoveDocument {
                 source_path,
@@ -545,7 +558,11 @@ fn run_lowering_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, S
     };
     let mut parser = new_parser().unwrap();
     let document = Document::parse(&mut parser, &case.input).expect("parse fixture");
-    let mut analysis_state = Analysis::new(PathBuf::new());
+    let mut analysis_state = Analysis::new(
+        PathBuf::new(),
+        LintConfig::default(),
+        CheckConfig::default(),
+    );
     let document_id = analysis_state.add_document(PathBuf::from("R/main.R"), document);
     analysis::lower(&mut analysis_state);
     let diagnostics = analysis_state.document_diagnostics(document_id);
@@ -613,7 +630,11 @@ fn run_naming_global_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile
         return Err("unsupported fixture".to_owned());
     };
     let mut parser = new_parser().unwrap();
-    let mut analysis_state = Analysis::new(PathBuf::new());
+    let mut analysis_state = Analysis::new(
+        PathBuf::new(),
+        LintConfig::default(),
+        CheckConfig::default(),
+    );
     for entry in &case.initial_generation.entries {
         let FixtureOperation::CreateDocument { path, contents } = &entry.operation else {
             continue;

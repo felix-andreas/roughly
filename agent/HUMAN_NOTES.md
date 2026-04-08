@@ -1,7 +1,6 @@
 # Human Notes (!AIs are not allowed to edit!)
 
 * can we get rid of tree.rs in roughly?
-* source is still (typing(naming) should be something else)
 * saved_document_diagnostics is called twice (not needed)
 * current_document_diagnostics and saved_document_diagnostics and document_diagnostics is way to complidated. we always want to show all diags (and merge them) we should leave commetn why this the case (see LSP Contraints in 006)
 

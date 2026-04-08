@@ -2,9 +2,9 @@ use {
     crate::{
         Interner,
         diagnostic::{Diagnostic, Diagnostics, Severity},
-        document::{Document, DocumentEditError, DocumentId},
+        document::{Document, DocumentChange, DocumentId},
         hir::{DefinitionId, DefinitionItem, ExpressionId, ExpressionKind, HirArena, Module},
-        lint as lint_phase,
+        lint::{self as lint_phase, NameStyle},
         lower::lower_with_shared_interner,
         naming::{NamesGlobal, NamesLocal, rebuild_package_naming, resolve_document_locally},
         tree,
@@ -22,6 +22,8 @@ use {
 
 pub struct Analysis {
     base_path: PathBuf,
+    lint_config: LintConfig,
+    check_config: CheckConfig,
     parser: Parser,
     interner: Interner,
     next_document_id: u32,
@@ -44,7 +46,19 @@ pub enum AnalysisError {
     DocumentNotFound(PathBuf),
     ParseFailed(PathBuf),
     DocumentRead(PathBuf, String),
-    DocumentEdit(DocumentEditError),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct LintConfig {
+    pub naming_style: Option<NameStyle>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct CheckConfig {
+    pub unused: bool,
+    pub typing: bool,
 }
 
 type Version = u64;
@@ -59,7 +73,7 @@ struct DocumentOutput<T> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LintOutput {
     version: Version,
-    config: lint_phase::Config,
+    config: LintConfig,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -71,9 +85,11 @@ struct PackageOutput<T> {
 }
 
 impl Analysis {
-    pub fn new(base_path: PathBuf) -> Self {
+    pub fn new(base_path: PathBuf, lint_config: LintConfig, check_config: CheckConfig) -> Self {
         Self {
             base_path,
+            lint_config,
+            check_config,
             parser: tree::new_parser().expect("typing parser should initialize"),
             interner: Interner::new(),
             next_document_id: 0,
@@ -90,6 +106,11 @@ impl Analysis {
             package_naming_output: None,
             typecheck_output: None,
         }
+    }
+
+    pub fn set_configs(&mut self, lint_config: LintConfig, check_config: CheckConfig) {
+        self.lint_config = lint_config;
+        self.check_config = check_config;
     }
 
     pub fn interner(&self) -> &Interner {
@@ -157,7 +178,7 @@ impl Analysis {
     pub fn edit_document(
         &mut self,
         path: &Path,
-        edit: impl FnOnce(&mut Document, &mut Parser) -> Result<(), DocumentEditError>,
+        changes: &[DocumentChange],
     ) -> Result<(), AnalysisError> {
         let document_id = self
             .document_ids_by_path
@@ -168,7 +189,7 @@ impl Analysis {
             .documents
             .get_mut(&document_id)
             .expect("document should exist");
-        edit(document, &mut self.parser).map_err(AnalysisError::DocumentEdit)?;
+        document.edit(&mut self.parser, changes);
         self.bump_document_version(document_id);
         self.bump_package_version();
         self.invalidate_document(document_id);
@@ -239,14 +260,9 @@ impl Analysis {
         document_ids
     }
 
-    pub fn lint_diagnostics(
-        &self,
-        document_id: DocumentId,
-        config: lint_phase::Config,
-    ) -> Vec<Diagnostic> {
+    pub fn lint_diagnostics(&self, document_id: DocumentId) -> Vec<Diagnostic> {
         self.lint_outputs
             .get(&document_id)
-            .filter(|output| output.config == config)
             .map(|output| output.diagnostics.clone())
             .unwrap_or_default()
     }
@@ -256,7 +272,9 @@ impl Analysis {
         self.extend_retained_lint_diagnostics(document_id, &mut diagnostics);
         self.extend_lowering_diagnostics(document_id, &mut diagnostics);
         self.extend_naming_diagnostics(document_id, &mut diagnostics);
-        self.extend_typecheck_diagnostics(document_id, &mut diagnostics);
+        if self.check_config.typing {
+            self.extend_typecheck_diagnostics(document_id, &mut diagnostics);
+        }
         diagnostics
     }
 }
@@ -270,6 +288,10 @@ pub fn check(analysis_state: &mut Analysis) -> Diagnostics {
         return naming_diagnostics;
     }
 
+    if !analysis_state.check_config.typing {
+        return naming_diagnostics;
+    }
+
     let typecheck_diagnostics = typecheck(analysis_state);
     if typecheck_diagnostics.is_empty() {
         return naming_diagnostics;
@@ -278,8 +300,19 @@ pub fn check(analysis_state: &mut Analysis) -> Diagnostics {
     typecheck_diagnostics
 }
 
-pub fn lint(analysis_state: &mut Analysis, config: lint_phase::Config) {
+pub fn run_fast(analysis_state: &mut Analysis) {
+    lint(analysis_state);
+    lower(analysis_state);
+}
+
+pub fn run_full(analysis_state: &mut Analysis) {
+    lint(analysis_state);
+    check(analysis_state);
+}
+
+pub fn lint(analysis_state: &mut Analysis) {
     let document_ids = analysis_state.all_document_ids();
+    let config = analysis_state.lint_config;
 
     for document_id in &document_ids {
         let Some(document_version) = analysis_state.document_version(*document_id) else {
@@ -777,11 +810,13 @@ fn remap_expression_kind(expression_kind: &mut ExpressionKind, expression_offset
 #[cfg(test)]
 mod tests {
     use {
-        super::{Analysis, check, lint, lower, resolve_package},
+        super::{
+            Analysis, CheckConfig, DocumentChange, LintConfig, check, lint, lower, resolve_package,
+        },
         crate::{
             Diagnostic, Severity,
             ide::HoverPhase,
-            lint::{Config as LintConfig, NameStyle},
+            lint::NameStyle,
             text::{TextPosition, TextRange},
         },
         std::{
@@ -795,7 +830,11 @@ mod tests {
 
     #[test]
     fn package_document_ids_exclude_non_package_paths() {
-        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
         let package_document_id = analysis
             .add_document_from_source(PathBuf::from("/workspace/R/main.R"), "value <- 1L")
             .expect("package document should parse");
@@ -811,7 +850,11 @@ mod tests {
 
     #[test]
     fn package_document_ids_follow_package_path_order() {
-        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
         let first_document_id = analysis
             .add_document_from_source(PathBuf::from("/workspace/R/zeta.R"), "zeta <- 1L")
             .expect("package document should parse");
@@ -828,7 +871,11 @@ mod tests {
     #[test]
     fn edit_document_invalidates_lowering_and_naming_state() {
         let path = PathBuf::from("/workspace/R/main.R");
-        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
         let document_id = analysis
             .add_document_from_source(path.clone(), "value <- 1L")
             .expect("document should parse");
@@ -840,10 +887,10 @@ mod tests {
         assert!(analysis.document_naming(document_id).is_some());
 
         analysis
-            .edit_document(&path, |document, parser| {
-                document.edit_range(
-                    parser,
-                    TextRange {
+            .edit_document(
+                &path,
+                &[DocumentChange {
+                    range: TextRange {
                         start: TextPosition {
                             line_index: 0,
                             character_index: 0,
@@ -853,9 +900,9 @@ mod tests {
                             character_index: "value <- 1L".len(),
                         },
                     },
-                    "value <-",
-                )
-            })
+                    text: "value <-".to_owned(),
+                }],
+            )
             .expect("edit should succeed");
 
         assert!(analysis.module(document_id).is_none());
@@ -874,7 +921,11 @@ mod tests {
     #[test]
     fn delete_document_removes_cached_state() {
         let path = PathBuf::from("/workspace/R/main.R");
-        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
         let document_id = analysis
             .add_document_from_source(path.clone(), "value <- 1L")
             .expect("document should parse");
@@ -897,7 +948,11 @@ mod tests {
     #[test]
     fn check_runs_naming_even_when_lowering_reports_errors() {
         let path = PathBuf::from("/workspace/R/main.R");
-        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
         let document_id = analysis
             .add_document_from_source(path, "value <-")
             .expect("document should parse");
@@ -916,47 +971,30 @@ mod tests {
     #[test]
     fn lint_is_retained_in_analysis_and_reruns_when_config_changes() {
         let path = PathBuf::from("/workspace/R/main.R");
-        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig {
+                naming_style: Some(NameStyle::Snake),
+            },
+            CheckConfig::default(),
+        );
         let document_id = analysis
             .add_document_from_source(path.clone(), "value <- function(snake_name) snake_name")
             .expect("document should parse");
 
-        lint(
-            &mut analysis,
-            LintConfig {
-                naming_style: Some(NameStyle::Snake),
-            },
-        );
-        assert!(
-            analysis
-                .lint_diagnostics(document_id, LintConfig::default())
-                .is_empty()
-        );
-        assert!(
-            analysis
-                .lint_diagnostics(
-                    document_id,
-                    LintConfig {
-                        naming_style: Some(NameStyle::Snake),
-                    },
-                )
-                .is_empty()
-        );
+        lint(&mut analysis);
+        assert!(analysis.lint_diagnostics(document_id).is_empty());
 
-        lint(
-            &mut analysis,
+        analysis.set_configs(
             LintConfig {
                 naming_style: Some(NameStyle::Camel),
             },
+            CheckConfig::default(),
         );
+        lint(&mut analysis);
         assert!(
             analysis
-                .lint_diagnostics(
-                    document_id,
-                    LintConfig {
-                        naming_style: Some(NameStyle::Camel),
-                    },
-                )
+                .lint_diagnostics(document_id)
                 .iter()
                 .any(|diagnostic| diagnostic.severity == Severity::Warning)
         );
@@ -965,7 +1003,11 @@ mod tests {
     #[test]
     fn package_diagnostics_remain_retained_until_package_resolution_reruns() {
         let path = PathBuf::from("/workspace/R/main.R");
-        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
         let document_id = analysis
             .add_document_from_source(path.clone(), "missing")
             .expect("document should parse");
@@ -979,10 +1021,10 @@ mod tests {
         );
 
         analysis
-            .edit_document(&path, |document, parser| {
-                document.edit_range(
-                    parser,
-                    TextRange {
+            .edit_document(
+                &path,
+                &[DocumentChange {
+                    range: TextRange {
                         start: TextPosition {
                             line_index: 0,
                             character_index: 0,
@@ -992,9 +1034,9 @@ mod tests {
                             character_index: "missing".len(),
                         },
                     },
-                    "missing(",
-                )
-            })
+                    text: "missing(".to_owned(),
+                }],
+            )
             .expect("edit should succeed");
         lower(&mut analysis);
 
@@ -1013,7 +1055,11 @@ mod tests {
 
     #[test]
     fn typecheck_uses_cached_output_when_package_version_is_unchanged() {
-        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
         let document_id = analysis
             .add_document_from_source(PathBuf::from("/workspace/R/main.R"), "1L + \"text\"")
             .expect("document should parse");
@@ -1042,7 +1088,11 @@ mod tests {
         fs::create_dir_all(&package_root).expect("workspace package root should be created");
         fs::write(&document_path, "value <- 1L\n").expect("document should be written");
 
-        let mut analysis = Analysis::new(workspace_path.clone());
+        let mut analysis = Analysis::new(
+            workspace_path.clone(),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
         analysis
             .add_document_from_source(document_path.clone(), "value <- 1L\n")
             .expect("document should parse");
@@ -1071,7 +1121,11 @@ mod tests {
         fs::create_dir_all(&package_root).expect("workspace package root should be created");
         fs::write(&document_path, "value <- 1L\n").expect("document should be written");
 
-        let mut analysis = Analysis::new(workspace_path.clone());
+        let mut analysis = Analysis::new(
+            workspace_path.clone(),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
         analysis
             .add_document_from_source(document_path.clone(), "value <- 1L\n")
             .expect("document should parse");
@@ -1092,7 +1146,14 @@ mod tests {
         let hover_character = source
             .rfind("parameter")
             .expect("hover target should exist");
-        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig {
+                unused: false,
+                typing: true,
+            },
+        );
         analysis
             .add_document_from_source(path.clone(), source)
             .expect("document should parse");
@@ -1123,7 +1184,11 @@ mod tests {
         let use_path = PathBuf::from("/workspace/R/b.R");
         let source = "result <- value";
         let hover_character = source.rfind("value").expect("hover target should exist");
-        let mut analysis = Analysis::new(PathBuf::from("/workspace"));
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
         analysis
             .add_document_from_source(definition_path, "value <- 1L")
             .expect("definition document should parse");
