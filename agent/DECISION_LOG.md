@@ -2,6 +2,9 @@
 
 Keep newest decisions at the top.
 
+- typecheck should consume naming outputs instead of performing a second symbol-based name-resolution pass for package/global references.
+  - Naming is the source of truth for unresolved/global value resolution, and typecheck now treats naming-missing references as `Unknown` instead of emitting duplicate unknown-name diagnostics. The current implementation keeps local lexical binding lookup symbol-based for now, but package/global lookup and top-level winner binding behavior come from naming.
+
 - `lint` should be a separate file-local phase and test suite, rather than being folded into `lower`.
   - Lint rules depend only on parsed tree structure and source text, but they are not part of HIR construction. Keeping `lint` separate preserves a cleaner structural boundary while still letting `analysis` own all diagnostic production.
 

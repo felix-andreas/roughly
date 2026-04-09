@@ -18,7 +18,7 @@ error[type-error] This call passes 2 positional argument(s), but the function ac
 #---- unknown_callee_in_call
 missing(1L)
 #++++
-error[type-error] I could not find `missing` in scope.
+warning[naming] I could not resolve `missing` in this package, its imports, or builtins.
 --> 1:1-1:8
 | missing(1L)
 
@@ -27,6 +27,6 @@ identity <- function(x) x
 identity(1L)
 missing(identity("ok"))
 #++++
-error[type-error] I could not find `missing` in scope.
+warning[naming] I could not resolve `missing` in this package, its imports, or builtins.
 --> 3:1-3:8
 | missing(identity("ok"))

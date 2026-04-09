@@ -1,8 +1,10 @@
 use {
     crate::{
+        document::DocumentId,
         hir::{Argument, Expression, ExpressionId, ExpressionKind, HirArena, Module},
         interner::{Interner, Symbol},
         lower::LoweringContext,
+        naming::{NamesGlobal, NamesLocal},
         types::{
             Annotation, Atomic, AttachedAnnotation, CoreType, FunctionType, InferenceVariableId,
             RecordField, SurfaceType, TypeAnnotationKind, TypeScheme,
@@ -25,6 +27,13 @@ pub struct InferenceState {
     entries: BTreeMap<InferenceVariableId, InferenceEntry>,
     environment: BTreeMap<Symbol, Binding>,
     builtins: BTreeMap<Symbol, BuiltinKind>,
+}
+
+struct ResolutionContext<'a> {
+    document_id: DocumentId,
+    top_level_expression_ids: &'a [ExpressionId],
+    local_naming: &'a NamesLocal,
+    package_naming: &'a NamesGlobal,
 }
 
 pub fn inference_state_with_builtins(lowering_context: &mut LoweringContext) -> InferenceState {
@@ -91,11 +100,41 @@ impl InferenceState {
     }
 
     pub fn infer_module(&mut self, module: &Module) -> Result<Vec<CoreType>, InferenceError> {
+        self.infer_module_with_context(module, None)
+    }
+
+    pub fn infer_module_with_naming(
+        &mut self,
+        document_id: DocumentId,
+        module: &Module,
+        local_naming: &NamesLocal,
+        package_naming: &NamesGlobal,
+    ) -> Result<Vec<CoreType>, InferenceError> {
+        self.infer_module_with_context(
+            module,
+            Some(&ResolutionContext {
+                document_id,
+                top_level_expression_ids: &module.expressions,
+                local_naming,
+                package_naming,
+            }),
+        )
+    }
+
+    fn infer_module_with_context(
+        &mut self,
+        module: &Module,
+        resolution_context: Option<&ResolutionContext<'_>>,
+    ) -> Result<Vec<CoreType>, InferenceError> {
         let mut inferred_types = Vec::with_capacity(module.expressions.len());
 
         for expression_id in &module.expressions {
             let expression = module.arena.get(*expression_id);
-            inferred_types.push(self.infer_expression(expression, &module.arena)?);
+            inferred_types.push(self.infer_expression_with_context(
+                expression,
+                &module.arena,
+                resolution_context,
+            )?);
         }
 
         Ok(inferred_types)
@@ -106,6 +145,15 @@ impl InferenceState {
         expression: &Expression,
         arena: &HirArena,
     ) -> Result<CoreType, InferenceError> {
+        self.infer_expression_with_context(expression, arena, None)
+    }
+
+    fn infer_expression_with_context(
+        &mut self,
+        expression: &Expression,
+        arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
+    ) -> Result<CoreType, InferenceError> {
         match &expression.kind {
             ExpressionKind::Null => Ok(CoreType::Null),
             ExpressionKind::Logical(_) => Ok(CoreType::Scalar(Atomic::Logical)),
@@ -113,20 +161,53 @@ impl InferenceState {
             ExpressionKind::Double(_) => Ok(CoreType::Scalar(Atomic::Double)),
             ExpressionKind::Character(_) => Ok(CoreType::Scalar(Atomic::Character)),
             ExpressionKind::StringLiteralName(_) => Ok(CoreType::Scalar(Atomic::Character)),
-            ExpressionKind::Symbol(symbol) => self
-                .lookup_name(*symbol)
-                .cloned()
-                .map(|binding| self.instantiate_type_scheme(&binding.type_scheme))
-                .transpose()?
-                .ok_or(InferenceError::UnknownName {
-                    symbol: *symbol,
-                    range: expression.range,
-                    expression_id: expression.id,
-                }),
+            ExpressionKind::Symbol(symbol) => {
+                if let Some(resolution_context) = resolution_context
+                    && resolution_context
+                        .local_naming
+                        .non_locals
+                        .contains_key(&expression.id)
+                {
+                    if resolution_context
+                        .package_naming
+                        .global_bindings
+                        .contains_key(symbol)
+                    {
+                        let type_scheme = self
+                            .lookup_name(*symbol)
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "package global symbol {:?} should be prebound for typecheck",
+                                    symbol
+                                )
+                            })
+                            .type_scheme
+                            .clone();
+                        return self.instantiate_type_scheme(&type_scheme);
+                    }
+
+                    return Ok(CoreType::Unknown);
+                }
+
+                self.lookup_name(*symbol)
+                    .cloned()
+                    .map(|binding| self.instantiate_type_scheme(&binding.type_scheme))
+                    .transpose()?
+                    .ok_or(InferenceError::UnknownName {
+                        symbol: *symbol,
+                        range: expression.range,
+                        expression_id: expression.id,
+                    })
+            }
             ExpressionKind::Block {
                 expressions,
                 has_trailing_semicolon,
-            } => self.infer_block(expressions, *has_trailing_semicolon, arena),
+            } => self.infer_block(
+                expressions,
+                *has_trailing_semicolon,
+                arena,
+                resolution_context,
+            ),
             ExpressionKind::Assign { target, value } => {
                 let annotation = expression.annotation.as_ref();
                 let value_expression = arena.get(*value);
@@ -140,12 +221,17 @@ impl InferenceState {
                             Some(expected_function_type),
                             expression,
                             arena,
+                            resolution_context,
                         )?
                     } else {
-                        self.infer_expression(value_expression, arena)?
+                        self.infer_expression_with_context(
+                            value_expression,
+                            arena,
+                            resolution_context,
+                        )?
                     }
                 } else {
-                    self.infer_expression(value_expression, arena)?
+                    self.infer_expression_with_context(value_expression, arena, resolution_context)?
                 };
                 let binding_type = if let Some(annotation) = annotation {
                     if annotation.applies_to_binding() {
@@ -156,13 +242,60 @@ impl InferenceState {
                 } else {
                     inferred_value
                 };
+                if let Some(resolution_context) = resolution_context
+                    && resolution_context
+                        .top_level_expression_ids
+                        .contains(&expression.id)
+                {
+                    let is_current_document_winner = resolution_context
+                        .local_naming
+                        .expression_resolutions
+                        .get(&expression.id)
+                        .zip(resolution_context.local_naming.global_exports.get(target))
+                        .is_some_and(|(binding_id, export_binding_id)| {
+                            binding_id == export_binding_id
+                        })
+                        && resolution_context
+                            .package_naming
+                            .global_bindings
+                            .get(target)
+                            == Some(&resolution_context.document_id);
+
+                    if !is_current_document_winner {
+                        return Ok(binding_type);
+                    }
+
+                    let type_scheme = self
+                        .lookup_name(*target)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "package winner symbol {:?} should be prebound for typecheck",
+                                target
+                            )
+                        })
+                        .type_scheme
+                        .clone();
+                    let existing_type = self.instantiate_type_scheme(&type_scheme)?;
+                    let binding_type =
+                        self.unify_with_context(existing_type, binding_type, expression)?;
+                    self.environment.remove(target);
+                    let generalized_scheme = self.generalize(binding_type.clone())?;
+                    self.bind_scheme(*target, generalized_scheme, expression.range);
+                    return Ok(binding_type);
+                }
+
                 let generalized_scheme = self.generalize(binding_type.clone())?;
                 self.bind_scheme(*target, generalized_scheme, expression.range);
                 Ok(binding_type)
             }
-            ExpressionKind::Function { parameters, body } => {
-                self.infer_function_expression(parameters, *body, None, expression, arena)
-            }
+            ExpressionKind::Function { parameters, body } => self.infer_function_expression(
+                parameters,
+                *body,
+                None,
+                expression,
+                arena,
+                resolution_context,
+            ),
             ExpressionKind::If {
                 condition,
                 consequence,
@@ -173,6 +306,7 @@ impl InferenceState {
                 alternative.as_ref().map(|id| arena.get(*id)),
                 expression,
                 arena,
+                resolution_context,
             ),
             ExpressionKind::For {
                 variable,
@@ -184,36 +318,63 @@ impl InferenceState {
                 arena.get(*body),
                 expression.range,
                 arena,
+                resolution_context,
             ),
-            ExpressionKind::While { condition, body } => {
-                self.infer_while_expression(arena.get(*condition), arena.get(*body), arena)
-            }
+            ExpressionKind::While { condition, body } => self.infer_while_expression(
+                arena.get(*condition),
+                arena.get(*body),
+                arena,
+                resolution_context,
+            ),
             ExpressionKind::Repeat { body } => {
-                self.infer_repeat_expression(arena.get(*body), arena)
+                self.infer_repeat_expression(arena.get(*body), arena, resolution_context)
             }
             ExpressionKind::UnaryMinus { value } => {
-                self.infer_unary_minus(arena.get(*value), arena)
+                self.infer_unary_minus(arena.get(*value), arena, resolution_context)
             }
             ExpressionKind::Call { callee, arguments } => {
                 let callee_expr = arena.get(*callee);
                 if let ExpressionKind::Symbol(symbol) = &callee_expr.kind
-                    && let Some(inferred_type) =
-                        self.infer_builtin_call(*symbol, arguments, expression, arena)?
+                    && let Some(inferred_type) = self.infer_builtin_call(
+                        *symbol,
+                        arguments,
+                        expression,
+                        arena,
+                        resolution_context,
+                    )?
                 {
                     return Ok(inferred_type);
                 }
 
-                self.infer_function_call_expression(callee_expr, arguments, expression, arena)
+                self.infer_function_call_expression(
+                    callee_expr,
+                    arguments,
+                    expression,
+                    arena,
+                    resolution_context,
+                )
             }
-            ExpressionKind::Subset { value, arguments } => {
-                self.infer_subset_expression(arena.get(*value), arguments, expression, arena)
-            }
-            ExpressionKind::Subset2 { value, arguments } => {
-                self.infer_subset2_expression(arena.get(*value), arguments, expression, arena)
-            }
-            ExpressionKind::Dollar { value, name } => {
-                self.infer_dollar_expression(arena.get(*value), *name, expression, arena)
-            }
+            ExpressionKind::Subset { value, arguments } => self.infer_subset_expression(
+                arena.get(*value),
+                arguments,
+                expression,
+                arena,
+                resolution_context,
+            ),
+            ExpressionKind::Subset2 { value, arguments } => self.infer_subset2_expression(
+                arena.get(*value),
+                arguments,
+                expression,
+                arena,
+                resolution_context,
+            ),
+            ExpressionKind::Dollar { value, name } => self.infer_dollar_expression(
+                arena.get(*value),
+                *name,
+                expression,
+                arena,
+                resolution_context,
+            ),
             ExpressionKind::Unsupported => Ok(CoreType::Unknown),
         }
     }
@@ -223,17 +384,26 @@ impl InferenceState {
         expressions: &[ExpressionId],
         has_trailing_semicolon: bool,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
         if expressions.is_empty() || has_trailing_semicolon {
             for expression_id in expressions {
-                self.infer_expression(arena.get(*expression_id), arena)?;
+                self.infer_expression_with_context(
+                    arena.get(*expression_id),
+                    arena,
+                    resolution_context,
+                )?;
             }
             return Ok(CoreType::Null);
         }
 
         let mut last_type = CoreType::Null;
         for expression_id in expressions {
-            last_type = self.infer_expression(arena.get(*expression_id), arena)?;
+            last_type = self.infer_expression_with_context(
+                arena.get(*expression_id),
+                arena,
+                resolution_context,
+            )?;
         }
 
         Ok(last_type)
@@ -246,6 +416,7 @@ impl InferenceState {
         expected_function_type: Option<FunctionType<CoreType>>,
         expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
         let parent_environment = self.environment.clone();
 
@@ -267,7 +438,8 @@ impl InferenceState {
             parameter_types.push(parameter_type);
         }
 
-        let inferred_return_type = self.infer_expression(arena.get(body), arena)?;
+        let inferred_return_type =
+            self.infer_expression_with_context(arena.get(body), arena, resolution_context)?;
         let return_type = if let Some(expected_return_type) = expected_return_type {
             self.unify_with_context(expected_return_type, inferred_return_type, expression)?
         } else {
@@ -288,16 +460,19 @@ impl InferenceState {
         alternative: Option<&Expression>,
         expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
-        self.expect_scalar_logical(condition, arena)?;
+        self.expect_scalar_logical(condition, arena, resolution_context)?;
 
-        let inferred_consequence = self.infer_expression(consequence, arena)?;
+        let inferred_consequence =
+            self.infer_expression_with_context(consequence, arena, resolution_context)?;
         let consequence_type = self.resolve(inferred_consequence)?;
         let Some(alternative) = alternative else {
             return Ok(nullable_type(consequence_type));
         };
 
-        let inferred_alternative = self.infer_expression(alternative, arena)?;
+        let inferred_alternative =
+            self.infer_expression_with_context(alternative, arena, resolution_context)?;
         let alternative_type = self.resolve(inferred_alternative)?;
         if consequence_type == alternative_type {
             return Ok(consequence_type);
@@ -323,8 +498,10 @@ impl InferenceState {
         body: &Expression,
         range: Range,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
-        let inferred_sequence = self.infer_expression(sequence, arena)?;
+        let inferred_sequence =
+            self.infer_expression_with_context(sequence, arena, resolution_context)?;
         let sequence_type = self.resolve(inferred_sequence)?;
         let Some(item_type) = iterable_item_type(&sequence_type) else {
             return Err(InferenceError::TypeMismatch {
@@ -337,7 +514,7 @@ impl InferenceState {
 
         let previous_binding = self.environment.get(&variable).cloned();
         self.bind_name(variable, item_type, range);
-        self.infer_expression(body, arena)?;
+        self.infer_expression_with_context(body, arena, resolution_context)?;
 
         if let Some(previous_binding) = previous_binding {
             self.environment.insert(variable, previous_binding);
@@ -353,9 +530,10 @@ impl InferenceState {
         condition: &Expression,
         body: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
-        self.expect_scalar_logical(condition, arena)?;
-        self.infer_expression(body, arena)?;
+        self.expect_scalar_logical(condition, arena, resolution_context)?;
+        self.infer_expression_with_context(body, arena, resolution_context)?;
         Ok(CoreType::Null)
     }
 
@@ -363,8 +541,9 @@ impl InferenceState {
         &mut self,
         body: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
-        self.infer_expression(body, arena)?;
+        self.infer_expression_with_context(body, arena, resolution_context)?;
         Ok(CoreType::Null)
     }
 
@@ -372,8 +551,10 @@ impl InferenceState {
         &mut self,
         expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<(), InferenceError> {
-        let inferred_type = self.infer_expression(expression, arena)?;
+        let inferred_type =
+            self.infer_expression_with_context(expression, arena, resolution_context)?;
         self.unify_with_context(CoreType::Scalar(Atomic::Logical), inferred_type, expression)?;
         Ok(())
     }
@@ -721,6 +902,7 @@ impl InferenceState {
         arguments: &[Argument],
         expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<Option<CoreType>, InferenceError> {
         let Some(builtin_kind) = self.builtins.get(&symbol).copied() else {
             return Ok(None);
@@ -728,31 +910,31 @@ impl InferenceState {
 
         match builtin_kind {
             BuiltinKind::Plus => self
-                .infer_builtin_plus(arguments, expression, arena)
+                .infer_builtin_plus(arguments, expression, arena, resolution_context)
                 .map(Some),
             BuiltinKind::Minus => self
-                .infer_builtin_minus(arguments, expression, arena)
+                .infer_builtin_minus(arguments, expression, arena, resolution_context)
                 .map(Some),
             BuiltinKind::Multiply => self
-                .infer_builtin_multiply(arguments, expression, arena)
+                .infer_builtin_multiply(arguments, expression, arena, resolution_context)
                 .map(Some),
             BuiltinKind::Divide => self
-                .infer_builtin_divide(arguments, expression, arena)
+                .infer_builtin_divide(arguments, expression, arena, resolution_context)
                 .map(Some),
             BuiltinKind::Power => self
-                .infer_builtin_power(arguments, expression, arena)
+                .infer_builtin_power(arguments, expression, arena, resolution_context)
                 .map(Some),
             BuiltinKind::And => self
-                .infer_builtin_boolean_binary(arguments, expression, arena)
+                .infer_builtin_boolean_binary(arguments, expression, arena, resolution_context)
                 .map(Some),
             BuiltinKind::Or => self
-                .infer_builtin_boolean_binary(arguments, expression, arena)
+                .infer_builtin_boolean_binary(arguments, expression, arena, resolution_context)
                 .map(Some),
             BuiltinKind::Combine => self
-                .infer_builtin_combine(arguments, expression, arena)
+                .infer_builtin_combine(arguments, expression, arena, resolution_context)
                 .map(Some),
             BuiltinKind::List => self
-                .infer_builtin_list(arguments, expression, arena)
+                .infer_builtin_list(arguments, expression, arena, resolution_context)
                 .map(Some),
         }
     }
@@ -762,8 +944,15 @@ impl InferenceState {
         arguments: &[Argument],
         expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
-        self.infer_binary_numeric(arguments, expression, NumericResultAtomic::Promote, arena)
+        self.infer_binary_numeric(
+            arguments,
+            expression,
+            NumericResultAtomic::Promote,
+            arena,
+            resolution_context,
+        )
     }
 
     fn infer_builtin_minus(
@@ -771,8 +960,15 @@ impl InferenceState {
         arguments: &[Argument],
         expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
-        self.infer_binary_numeric(arguments, expression, NumericResultAtomic::Promote, arena)
+        self.infer_binary_numeric(
+            arguments,
+            expression,
+            NumericResultAtomic::Promote,
+            arena,
+            resolution_context,
+        )
     }
 
     fn infer_builtin_multiply(
@@ -780,8 +976,15 @@ impl InferenceState {
         arguments: &[Argument],
         expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
-        self.infer_binary_numeric(arguments, expression, NumericResultAtomic::Promote, arena)
+        self.infer_binary_numeric(
+            arguments,
+            expression,
+            NumericResultAtomic::Promote,
+            arena,
+            resolution_context,
+        )
     }
 
     fn infer_builtin_divide(
@@ -789,12 +992,14 @@ impl InferenceState {
         arguments: &[Argument],
         expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
         self.infer_binary_numeric(
             arguments,
             expression,
             NumericResultAtomic::AlwaysDouble,
             arena,
+            resolution_context,
         )
     }
 
@@ -803,12 +1008,14 @@ impl InferenceState {
         arguments: &[Argument],
         expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
         self.infer_binary_numeric(
             arguments,
             expression,
             NumericResultAtomic::AlwaysDouble,
             arena,
+            resolution_context,
         )
     }
 
@@ -818,6 +1025,7 @@ impl InferenceState {
         expression: &Expression,
         numeric_result_atomic: NumericResultAtomic,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
         if arguments.len() != 2 {
             return Err(InferenceError::FunctionArityMismatch {
@@ -831,8 +1039,8 @@ impl InferenceState {
         let arg0 = arena.get(arguments[0].expression);
         let arg1 = arena.get(arguments[1].expression);
 
-        let left_type = self.infer_expression(arg0, arena)?;
-        let right_type = self.infer_expression(arg1, arena)?;
+        let left_type = self.infer_expression_with_context(arg0, arena, resolution_context)?;
+        let right_type = self.infer_expression_with_context(arg1, arena, resolution_context)?;
 
         let resolved_left = self.resolve(left_type)?;
         let resolved_right = self.resolve(right_type)?;
@@ -901,8 +1109,9 @@ impl InferenceState {
         &mut self,
         value: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
-        let inferred_type = self.infer_expression(value, arena)?;
+        let inferred_type = self.infer_expression_with_context(value, arena, resolution_context)?;
         let resolved_type = self.resolve(inferred_type)?;
 
         match numeric_operand_parts(&resolved_type) {
@@ -931,8 +1140,10 @@ impl InferenceState {
         arguments: &[Argument],
         expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
-        let inferred_callee = self.infer_expression(callee, arena)?;
+        let inferred_callee =
+            self.infer_expression_with_context(callee, arena, resolution_context)?;
         let resolved_callee = self.resolve(inferred_callee)?;
 
         match resolved_callee {
@@ -943,8 +1154,11 @@ impl InferenceState {
                 let mut named_arguments = Vec::new();
 
                 for argument in arguments {
-                    let inferred_argument =
-                        self.infer_expression(arena.get(argument.expression), arena)?;
+                    let inferred_argument = self.infer_expression_with_context(
+                        arena.get(argument.expression),
+                        arena,
+                        resolution_context,
+                    )?;
                     if let Some(name) = argument.name {
                         named_arguments.push(RecordField::new(name, inferred_argument));
                     } else {
@@ -964,9 +1178,14 @@ impl InferenceState {
                 )?;
                 self.resolve(CoreType::Variable(return_variable))
             }
-            CoreType::Function(function_type) => {
-                self.infer_function_call(function_type, arguments, callee, expression, arena)
-            }
+            CoreType::Function(function_type) => self.infer_function_call(
+                function_type,
+                arguments,
+                callee,
+                expression,
+                arena,
+                resolution_context,
+            ),
             other_type => Err(InferenceError::ExpectedFunction {
                 actual_type: other_type,
                 range: callee.range,
@@ -982,6 +1201,7 @@ impl InferenceState {
         callee: &Expression,
         expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
         let total_parameters =
             function_type.parameters.len() + function_type.named_parameters.len();
@@ -1008,7 +1228,8 @@ impl InferenceState {
 
         for argument in arguments {
             let arg_expr = arena.get(argument.expression);
-            let inferred_argument = self.infer_expression(arg_expr, arena)?;
+            let inferred_argument =
+                self.infer_expression_with_context(arg_expr, arena, resolution_context)?;
             if let Some(name) = argument.name {
                 let Some(parameter_index) = remaining_named_parameters
                     .iter()
@@ -1069,6 +1290,7 @@ impl InferenceState {
         arguments: &[Argument],
         expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
         if arguments.len() != 1 || arguments[0].name.is_some() {
             return Err(InferenceError::FunctionArityMismatch {
@@ -1079,10 +1301,12 @@ impl InferenceState {
             });
         }
 
-        let inferred_value = self.infer_expression(value, arena)?;
+        let inferred_value =
+            self.infer_expression_with_context(value, arena, resolution_context)?;
         let value_type = self.resolve(inferred_value)?;
         let arg0_expr = arena.get(arguments[0].expression);
-        let inferred_index = self.infer_expression(arg0_expr, arena)?;
+        let inferred_index =
+            self.infer_expression_with_context(arg0_expr, arena, resolution_context)?;
         let index_type = self.resolve(inferred_index)?;
 
         match value_type {
@@ -1124,6 +1348,7 @@ impl InferenceState {
         arguments: &[Argument],
         expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
         if arguments.len() != 1 || arguments[0].name.is_some() {
             return Err(InferenceError::FunctionArityMismatch {
@@ -1134,10 +1359,12 @@ impl InferenceState {
             });
         }
 
-        let inferred_value = self.infer_expression(value, arena)?;
+        let inferred_value =
+            self.infer_expression_with_context(value, arena, resolution_context)?;
         let value_type = self.resolve(inferred_value)?;
         let index_expression = arena.get(arguments[0].expression);
-        let inferred_index = self.infer_expression(index_expression, arena)?;
+        let inferred_index =
+            self.infer_expression_with_context(index_expression, arena, resolution_context)?;
         let index_type = self.resolve(inferred_index)?;
 
         match value_type {
@@ -1211,8 +1438,10 @@ impl InferenceState {
         name: Symbol,
         expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
-        let inferred_value = self.infer_expression(value, arena)?;
+        let inferred_value =
+            self.infer_expression_with_context(value, arena, resolution_context)?;
         let value_type = self.resolve(inferred_value)?;
 
         match value_type {
@@ -1243,6 +1472,7 @@ impl InferenceState {
         arguments: &[Argument],
         expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
         if arguments.len() != 2 {
             return Err(InferenceError::FunctionArityMismatch {
@@ -1253,8 +1483,16 @@ impl InferenceState {
             });
         }
 
-        self.expect_scalar_logical(arena.get(arguments[0].expression), arena)?;
-        self.expect_scalar_logical(arena.get(arguments[1].expression), arena)?;
+        self.expect_scalar_logical(
+            arena.get(arguments[0].expression),
+            arena,
+            resolution_context,
+        )?;
+        self.expect_scalar_logical(
+            arena.get(arguments[1].expression),
+            arena,
+            resolution_context,
+        )?;
         Ok(CoreType::Scalar(Atomic::Logical))
     }
 
@@ -1263,6 +1501,7 @@ impl InferenceState {
         arguments: &[Argument],
         _expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
         if arguments.is_empty() {
             return Ok(CoreType::Unknown);
@@ -1275,7 +1514,8 @@ impl InferenceState {
             all_arguments_are_named &= argument.name.is_some();
 
             let arg_expr = arena.get(argument.expression);
-            let inferred_argument = self.infer_expression(arg_expr, arena)?;
+            let inferred_argument =
+                self.infer_expression_with_context(arg_expr, arena, resolution_context)?;
             let resolved_argument = self.resolve(inferred_argument)?;
 
             let Some(current_atomic) = combine_operand_atomic(&resolved_argument) else {
@@ -1312,6 +1552,7 @@ impl InferenceState {
         arguments: &[Argument],
         expression: &Expression,
         arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<CoreType, InferenceError> {
         if arguments.is_empty() {
             return Ok(CoreType::Tuple(Vec::new()));
@@ -1330,7 +1571,11 @@ impl InferenceState {
         if all_arguments_are_named {
             let mut fields = Vec::with_capacity(arguments.len());
             for argument in arguments {
-                let inferred_type = self.infer_expression(arena.get(argument.expression), arena)?;
+                let inferred_type = self.infer_expression_with_context(
+                    arena.get(argument.expression),
+                    arena,
+                    resolution_context,
+                )?;
                 let inferred_type = self.resolve(inferred_type)?;
                 fields.push(RecordField::new(
                     argument
@@ -1343,7 +1588,11 @@ impl InferenceState {
         } else {
             let mut items = Vec::with_capacity(arguments.len());
             for argument in arguments {
-                let inferred_type = self.infer_expression(arena.get(argument.expression), arena)?;
+                let inferred_type = self.infer_expression_with_context(
+                    arena.get(argument.expression),
+                    arena,
+                    resolution_context,
+                )?;
                 items.push(self.resolve(inferred_type)?);
             }
             Ok(CoreType::Tuple(items))

@@ -7,7 +7,7 @@ mod fixture_renderers;
 use {
     analysis::{
         Analysis, CheckConfig, Document, DocumentChange, DocumentId, Interner, LintConfig,
-        TextPosition, TextRange, check,
+        TextPosition, TextRange,
         hir::ExpressionKind,
         ide,
         lint::{self, NameStyle},
@@ -26,7 +26,7 @@ use {
     fixtures::{Fixture, FixtureKind, FixtureOperation, FixtureRunFile, run_fixture_suite},
     std::{
         collections::{BTreeMap, HashMap},
-        path::PathBuf,
+        path::{Path, PathBuf},
     },
 };
 
@@ -152,12 +152,22 @@ fn run_diagnostics_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>
     let mut analysis_state = Analysis::new(
         PathBuf::new(),
         LintConfig::default(),
-        CheckConfig::default(),
+        CheckConfig {
+            unused: false,
+            typing: true,
+        },
     );
     analysis_state.add_document(PathBuf::from("R/main.R"), document);
+    analysis::run_full(&mut analysis_state);
+    let document_id = analysis_state
+        .document_id_for_path(Path::new("R/main.R"))
+        .ok_or_else(|| "missing document id".to_owned())?;
     Ok(vec![vec![FixtureRunFile {
         path: PathBuf::new(),
-        output: render_diagnostics(&case.input, &check(&mut analysis_state)),
+        output: render_diagnostics(
+            &case.input,
+            &analysis_state.document_diagnostics(document_id),
+        ),
     }]])
 }
 

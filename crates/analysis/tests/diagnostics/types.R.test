@@ -72,6 +72,10 @@ error[syntax-error] Syntax Error: type syntax error: unknown type `user_id`
 --> 1:1-1:11
 | #: user_id
 
+error[type-error] expected `Unknown`, found `integer`
+--> 2:1-2:12
+| value <- 1L
+
 #==== expanded_typing_comments
 #---- expanded_missing_following_expression
 #: @param {integer} count
