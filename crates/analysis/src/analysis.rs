@@ -1,7 +1,7 @@
 use {
     crate::{
         Interner,
-        diagnostic::{Diagnostic, Diagnostics, Severity},
+        diagnostic::Diagnostic,
         document::{Document, DocumentChange, DocumentId},
         hir::{DefinitionId, DefinitionItem, ExpressionId, ExpressionKind, HirArena, Module},
         lint::{self as lint_phase, NameStyle},
@@ -129,14 +129,23 @@ impl Analysis {
         let is_package_path = self.is_package_path(&path);
 
         if let Some(document_id) = self.document_ids_by_path.get(&path).copied() {
-            let changed = self.replace_document(document_id, document);
+            let current_text = self
+                .documents
+                .get(&document_id)
+                .map(|current_document| current_document.rope().to_string());
+            let next_text = document.rope().to_string();
+            let changed = current_text.as_deref() != Some(next_text.as_str());
+            if changed {
+                self.documents.insert(document_id, document);
+            }
             if is_package_path {
                 self.non_package_documents.remove(&document_id);
             } else {
                 self.non_package_documents.insert(document_id);
             }
             if changed {
-                self.bump_document_version(document_id);
+                let version = self.bump_version();
+                self.document_versions.insert(document_id, version);
                 self.bump_package_version();
                 self.invalidate_document(document_id);
             }
@@ -171,8 +180,13 @@ impl Analysis {
     }
 
     pub fn add_document_from_disk(&mut self, path: PathBuf) -> Result<DocumentId, AnalysisError> {
-        self.read_document_from_disk(&path)
-            .map(|document| self.add_document(path, document))
+        let file = File::open(&path)
+            .map_err(|error| AnalysisError::DocumentRead(path.clone(), error.to_string()))?;
+        let rope = Rope::from_reader(BufReader::new(file))
+            .map_err(|error| AnalysisError::DocumentRead(path.clone(), error.to_string()))?;
+        let tree = tree::parse_rope(&mut self.parser, &rope, None)
+            .ok_or_else(|| AnalysisError::ParseFailed(path.clone()))?;
+        Ok(self.add_document(path, Document::new(rope, tree)))
     }
 
     pub fn edit_document(
@@ -190,7 +204,8 @@ impl Analysis {
             .get_mut(&document_id)
             .expect("document should exist");
         document.edit(&mut self.parser, changes);
-        self.bump_document_version(document_id);
+        let version = self.bump_version();
+        self.document_versions.insert(document_id, version);
         self.bump_package_version();
         self.invalidate_document(document_id);
         Ok(())
@@ -254,8 +269,25 @@ impl Analysis {
             .filter(|document_id| !self.non_package_documents.contains(document_id))
             .collect::<Vec<_>>();
         document_ids.sort_by(|left_document_id, right_document_id| {
-            self.document_path_order_key(*left_document_id)
-                .cmp(&self.document_path_order_key(*right_document_id))
+            let left_path = self
+                .path_for_document_id(*left_document_id)
+                .map(|path| {
+                    path.strip_prefix(&self.base_path)
+                        .unwrap_or(path)
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                })
+                .unwrap_or_default();
+            let right_path = self
+                .path_for_document_id(*right_document_id)
+                .map(|path| {
+                    path.strip_prefix(&self.base_path)
+                        .unwrap_or(path)
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                })
+                .unwrap_or_default();
+            left_path.cmp(&right_path)
         });
         document_ids
     }
@@ -269,45 +301,44 @@ impl Analysis {
 
     pub fn document_diagnostics(&self, document_id: DocumentId) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-        self.extend_retained_lint_diagnostics(document_id, &mut diagnostics);
-        self.extend_lowering_diagnostics(document_id, &mut diagnostics);
-        self.extend_naming_diagnostics(document_id, &mut diagnostics);
+        if let Some(output) = self.lint_outputs.get(&document_id) {
+            diagnostics.extend(output.diagnostics.iter().cloned());
+        }
+        if let Some(output) = self.lowering_outputs.get(&document_id) {
+            diagnostics.extend(output.diagnostics.iter().cloned());
+        }
+        if let Some(output) = self.document_naming_outputs.get(&document_id) {
+            diagnostics.extend(output.diagnostics.iter().cloned());
+        }
+        if let Some(output) = &self.package_naming_output
+            && let Some(package_diagnostics) = output.diagnostics.get(&document_id)
+        {
+            diagnostics.extend(package_diagnostics.iter().cloned());
+        }
         if self.check_config.typing {
-            self.extend_typecheck_diagnostics(document_id, &mut diagnostics);
+            if let Some(output) = &self.typecheck_output
+                && let Some(typecheck_diagnostics) = output.diagnostics.get(&document_id)
+            {
+                diagnostics.extend(typecheck_diagnostics.iter().cloned());
+            }
         }
         diagnostics
     }
 }
 
-pub fn check(analysis_state: &mut Analysis) -> Diagnostics {
-    let document_ids = analysis_state.package_document_ids();
+pub fn run_full(analysis_state: &mut Analysis) {
+    lint(analysis_state);
 
-    resolve_package(analysis_state);
-    let naming_diagnostics = analysis_state.collect_semantic_diagnostics(&document_ids);
-    if has_blocking_diagnostics(&naming_diagnostics) {
-        return naming_diagnostics;
+    if analysis_state.check_config.typing {
+        typecheck(analysis_state);
+    } else {
+        resolve_package(analysis_state);
     }
-
-    if !analysis_state.check_config.typing {
-        return naming_diagnostics;
-    }
-
-    let typecheck_diagnostics = typecheck(analysis_state);
-    if typecheck_diagnostics.is_empty() {
-        return naming_diagnostics;
-    }
-
-    typecheck_diagnostics
 }
 
 pub fn run_fast(analysis_state: &mut Analysis) {
     lint(analysis_state);
     lower(analysis_state);
-}
-
-pub fn run_full(analysis_state: &mut Analysis) {
-    lint(analysis_state);
-    check(analysis_state);
 }
 
 pub fn lint(analysis_state: &mut Analysis) {
@@ -370,7 +401,7 @@ pub fn lower(analysis_state: &mut Analysis) {
     }
 }
 
-pub fn resolve_document(analysis_state: &mut Analysis) {
+pub fn resolve_package(analysis_state: &mut Analysis) {
     lower(analysis_state);
 
     let document_ids = analysis_state.all_document_ids();
@@ -399,10 +430,6 @@ pub fn resolve_document(analysis_state: &mut Analysis) {
             },
         );
     }
-}
-
-pub fn resolve_package(analysis_state: &mut Analysis) {
-    resolve_document(analysis_state);
 
     if analysis_state
         .package_naming_output
@@ -449,7 +476,7 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
     });
 }
 
-pub fn typecheck(analysis_state: &mut Analysis) -> Diagnostics {
+pub fn typecheck(analysis_state: &mut Analysis) {
     resolve_package(analysis_state);
 
     if analysis_state
@@ -457,19 +484,7 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Diagnostics {
         .as_ref()
         .is_some_and(|output| output.version == analysis_state.package_version)
     {
-        return analysis_state
-            .collect_typecheck_diagnostics(&analysis_state.package_document_ids());
-    }
-
-    let naming_diagnostics =
-        analysis_state.collect_semantic_diagnostics(&analysis_state.package_document_ids());
-    if has_blocking_diagnostics(&naming_diagnostics) {
-        analysis_state.typecheck_output = Some(PackageOutput {
-            version: analysis_state.package_version,
-            output: (),
-            diagnostics: HashMap::new(),
-        });
-        return Vec::new();
+        return;
     }
 
     let document_ids = analysis_state.package_document_ids();
@@ -505,36 +520,11 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Diagnostics {
         output: (),
         diagnostics: typecheck_diagnostics,
     });
-
-    diagnostics
 }
 
 impl Analysis {
     fn is_package_path(&self, path: &Path) -> bool {
         path.starts_with(self.base_path.join("R"))
-    }
-
-    fn document_path_order_key(&self, document_id: DocumentId) -> String {
-        self.path_for_document_id(document_id)
-            .map(|path| self.path_order_key(path))
-            .unwrap_or_default()
-    }
-
-    fn path_order_key(&self, path: &Path) -> String {
-        path.strip_prefix(&self.base_path)
-            .unwrap_or(path)
-            .to_string_lossy()
-            .replace('\\', "/")
-    }
-
-    fn read_document_from_disk(&mut self, path: &Path) -> Result<Document, AnalysisError> {
-        let file = File::open(path)
-            .map_err(|error| AnalysisError::DocumentRead(path.to_path_buf(), error.to_string()))?;
-        let rope = Rope::from_reader(BufReader::new(file))
-            .map_err(|error| AnalysisError::DocumentRead(path.to_path_buf(), error.to_string()))?;
-        let tree = tree::parse_rope(&mut self.parser, &rope, None)
-            .ok_or_else(|| AnalysisError::ParseFailed(path.to_path_buf()))?;
-        Ok(Document::new(rope, tree))
     }
 
     fn all_document_ids(&self) -> Vec<DocumentId> {
@@ -545,74 +535,6 @@ impl Analysis {
 
     fn document_version(&self, document_id: DocumentId) -> Option<Version> {
         self.document_versions.get(&document_id).copied()
-    }
-
-    fn collect_semantic_diagnostics(&self, document_ids: &[DocumentId]) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
-
-        for document_id in document_ids {
-            self.extend_lowering_diagnostics(*document_id, &mut diagnostics);
-            self.extend_naming_diagnostics(*document_id, &mut diagnostics);
-        }
-
-        diagnostics
-    }
-
-    fn collect_typecheck_diagnostics(&self, document_ids: &[DocumentId]) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
-
-        for document_id in document_ids {
-            self.extend_typecheck_diagnostics(*document_id, &mut diagnostics);
-        }
-
-        diagnostics
-    }
-
-    fn extend_retained_lint_diagnostics(
-        &self,
-        document_id: DocumentId,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) {
-        if let Some(output) = self.lint_outputs.get(&document_id) {
-            diagnostics.extend(output.diagnostics.iter().cloned());
-        }
-    }
-
-    fn extend_lowering_diagnostics(
-        &self,
-        document_id: DocumentId,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) {
-        if let Some(output) = self.lowering_outputs.get(&document_id) {
-            diagnostics.extend(output.diagnostics.iter().cloned());
-        }
-    }
-
-    fn extend_naming_diagnostics(
-        &self,
-        document_id: DocumentId,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) {
-        if let Some(output) = self.document_naming_outputs.get(&document_id) {
-            diagnostics.extend(output.diagnostics.iter().cloned());
-        }
-        if let Some(output) = &self.package_naming_output
-            && let Some(package_diagnostics) = output.diagnostics.get(&document_id)
-        {
-            diagnostics.extend(package_diagnostics.iter().cloned());
-        }
-    }
-
-    fn extend_typecheck_diagnostics(
-        &self,
-        document_id: DocumentId,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) {
-        if let Some(output) = &self.typecheck_output
-            && let Some(typecheck_diagnostics) = output.diagnostics.get(&document_id)
-        {
-            diagnostics.extend(typecheck_diagnostics.iter().cloned());
-        }
     }
 
     fn invalidate_document(&mut self, document_id: DocumentId) {
@@ -627,26 +549,8 @@ impl Analysis {
         version
     }
 
-    fn bump_document_version(&mut self, document_id: DocumentId) {
-        let version = self.bump_version();
-        self.document_versions.insert(document_id, version);
-    }
-
     fn bump_package_version(&mut self) {
         self.package_version = self.bump_version();
-    }
-
-    fn replace_document(&mut self, document_id: DocumentId, document: Document) -> bool {
-        let current_text = self
-            .documents
-            .get(&document_id)
-            .map(|current_document| current_document.rope().to_string());
-        let next_text = document.rope().to_string();
-        if current_text.as_deref() == Some(next_text.as_str()) {
-            return false;
-        }
-        self.documents.insert(document_id, document);
-        true
     }
 
     fn fallback_range(&self) -> tree_sitter::Range {
@@ -677,12 +581,6 @@ impl Analysis {
             end_point: tree_sitter::Point { row: 0, column: 0 },
         }
     }
-}
-
-fn has_blocking_diagnostics(diagnostics: &[Diagnostic]) -> bool {
-    diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.severity == Severity::Error)
 }
 
 struct RemappedModules {
@@ -811,7 +709,8 @@ fn remap_expression_kind(expression_kind: &mut ExpressionKind, expression_offset
 mod tests {
     use {
         super::{
-            Analysis, CheckConfig, DocumentChange, LintConfig, check, lint, lower, resolve_package,
+            Analysis, CheckConfig, DocumentChange, LintConfig, lint, lower, resolve_package,
+            run_full,
         },
         crate::{
             Diagnostic, Severity,
@@ -946,7 +845,7 @@ mod tests {
     }
 
     #[test]
-    fn check_runs_naming_even_when_lowering_reports_errors() {
+    fn run_full_runs_naming_even_when_lowering_reports_errors() {
         let path = PathBuf::from("/workspace/R/main.R");
         let mut analysis = Analysis::new(
             PathBuf::from("/workspace"),
@@ -957,7 +856,8 @@ mod tests {
             .add_document_from_source(path, "value <-")
             .expect("document should parse");
 
-        let result = check(&mut analysis);
+        run_full(&mut analysis);
+        let result = analysis.document_diagnostics(document_id);
 
         assert!(
             result
@@ -1064,7 +964,13 @@ mod tests {
             .add_document_from_source(PathBuf::from("/workspace/R/main.R"), "1L + \"text\"")
             .expect("document should parse");
 
-        let initial_diagnostics = super::typecheck(&mut analysis);
+        super::typecheck(&mut analysis);
+        let initial_diagnostics = analysis
+            .typecheck_output
+            .as_ref()
+            .and_then(|output| output.diagnostics.get(&document_id))
+            .cloned()
+            .unwrap_or_default();
         assert!(!initial_diagnostics.is_empty());
 
         let sentinel =
@@ -1075,7 +981,13 @@ mod tests {
             .expect("typecheck output should exist")
             .diagnostics = HashMap::from([(document_id, vec![sentinel.clone()])]);
 
-        let cached_diagnostics = super::typecheck(&mut analysis);
+        super::typecheck(&mut analysis);
+        let cached_diagnostics = analysis
+            .typecheck_output
+            .as_ref()
+            .and_then(|output| output.diagnostics.get(&document_id))
+            .cloned()
+            .unwrap_or_default();
 
         assert_eq!(cached_diagnostics, vec![sentinel]);
     }
