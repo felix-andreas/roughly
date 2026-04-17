@@ -31,38 +31,8 @@ use {
 };
 
 #[test]
-fn bindings() {
-    run_fixture_suite("tests/bindings", run_bindings_fixture);
-}
-
-#[test]
 fn diagnostics() {
     run_fixture_suite("tests/diagnostics", run_diagnostics_fixture);
-}
-
-#[test]
-fn environment() {
-    run_fixture_suite("tests/environment", run_environment_fixture);
-}
-
-#[test]
-fn expressions() {
-    run_fixture_suite("tests/expressions", run_expressions_fixture);
-}
-
-#[test]
-fn generalization() {
-    run_fixture_suite("tests/generalization", run_generalization_fixture);
-}
-
-#[test]
-fn instantiation() {
-    run_fixture_suite("tests/instantiation", run_instantiation_fixture);
-}
-
-#[test]
-fn interfaces() {
-    run_fixture_suite("tests/interfaces", run_interfaces_fixture);
 }
 
 #[test]
@@ -91,18 +61,48 @@ fn naming_local() {
 }
 
 #[test]
-fn substitution() {
-    run_fixture_suite("tests/substitution", run_substitution_fixture);
-}
-
-#[test]
 fn type_syntax() {
     run_fixture_suite("tests/type_syntax", run_type_syntax_fixture);
 }
 
 #[test]
-fn unification() {
-    run_fixture_suite("tests/unification", run_unification_fixture);
+fn typecheck_bindings() {
+    run_fixture_suite("tests/typecheck/bindings", run_bindings_fixture);
+}
+
+#[test]
+fn typecheck_environment() {
+    run_fixture_suite("tests/typecheck/environment", run_environment_fixture);
+}
+
+#[test]
+fn typecheck_expressions() {
+    run_fixture_suite("tests/typecheck/expressions", run_expressions_fixture);
+}
+
+#[test]
+fn typing_generalization() {
+    run_fixture_suite("tests/typecheck/generalization", run_generalization_fixture);
+}
+
+#[test]
+fn typecheck_instantiation() {
+    run_fixture_suite("tests/typecheck/instantiation", run_instantiation_fixture);
+}
+
+#[test]
+fn typecheck_interfaces() {
+    run_fixture_suite("tests/typecheck/interfaces", run_interfaces_fixture);
+}
+
+#[test]
+fn typecheck_substitution() {
+    run_fixture_suite("tests/typecheck/substitution", run_substitution_fixture);
+}
+
+#[test]
+fn typecheck_unification() {
+    run_fixture_suite("tests/typecheck/unification", run_unification_fixture);
 }
 
 fn run_bindings_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String> {
