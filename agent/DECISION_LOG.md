@@ -2,6 +2,9 @@
 
 Keep newest decisions at the top.
 
+- typing-time analysis should eagerly refresh `lint`, `lower`, and `resolve_document`, while package resolution and typecheck stay lazy until save or an IDE action needs them.
+  - This keeps local diagnostics and local tooling current in the unsaved buffer without paying package-scoped semantic cost on every keystroke. One versioned phase cache remains the only source of truth, so save and IDE actions request broader freshness over the same retained artifacts instead of building separate caches.
+
 - maybe-undefined value diagnostics should be emitted by local naming while preserving local binding resolution.
   - The semantic fact is file-local control-flow availability, not package-global lookup failure. Local naming preserves the local `BindingId` for tooling and typecheck and emits the warning at the local use site.
 

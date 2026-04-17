@@ -9,12 +9,15 @@ Keep it focused on the intended near-term file split and the role of each file.
 - `analysis.rs`
   - top-level analysis owner
   - document lifecycle and invalidation
+  - versioned retained phase outputs
   - package-level phase wiring
   - `Analysis`
   - `check`
-  - `run_lowering`
-  - `run_naming`
-  - `run_typecheck`
+  - `lint`
+  - `lower`
+  - `resolve_document`
+  - `resolve_package`
+  - `typecheck`
 
 - `document.rs`
   - parsed document type

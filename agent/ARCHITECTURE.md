@@ -10,6 +10,7 @@ Use this document for:
 
 - phase boundaries
 - representation boundaries
+- lint architecture
 - naming and scope architecture
 - typechecking architecture
 
@@ -21,17 +22,42 @@ Do not use this document for:
 
 ## Pipeline
 
-The file-local checking pipeline is:
+The analysis phase surface is:
 
-parsed syntax -> `lower` -> `naming` -> `typecheck` -> checked-file results and diagnostics
+parsed syntax -> `lint` -> `lower` -> `naming` -> `typecheck` -> checked-file results and diagnostics
 
 `check` is the orchestration entry point around that pipeline. It wires phases together and returns file results, but it is not itself a semantic phase.
 
 Syntax parsing is not a `analysis` crate phase. The checker may receive already-parsed syntax from `roughly` or from tests.
 
-Diagnostics are not a separate phase. They are structured outputs produced by lowering, naming, and typechecking.
+Diagnostics are not a separate phase. They are structured outputs produced by lint, lowering, naming, and typechecking.
 
 ## Phase contracts
+
+### `lint`
+
+Input:
+
+- one `workspace::Document`
+- lint configuration
+
+Output:
+
+- lint diagnostics
+
+Responsibilities:
+
+- run file-local style and surface checks over parsed syntax and source text
+- produce diagnostics that do not require HIR, naming, or type information
+
+Non-responsibilities:
+
+- HIR construction
+- value-name resolution
+- type-name resolution
+- typechecking
+
+Lint is a separate file-local phase.
 
 ### `lower`
 
@@ -263,6 +289,36 @@ The intended later project-level stages are:
 The architecture should not assume that only full-file rechecking is possible, but it should also not commit yet to reusing unification or inference state across edits.
 
 The desired near-term file split is recorded in `STRUCTURE.md`.
+
+## Incremental analysis
+
+Analysis should be operation-driven rather than running one fixed whole-package pipeline on every
+edit.
+
+The single source of truth is one set of versioned retained phase outputs owned by `Analysis`.
+Different operations request different freshness floors over those retained artifacts. They must not
+create separate semantic caches per IDE action.
+
+Freshness is split by scope:
+
+- document-scoped phases compare their retained outputs against a document version
+- package-scoped phases compare their retained outputs against a package version
+
+The intended trigger policy is:
+
+- on edit or keystroke, refresh document-scoped phases for the current document: `lint`, `lower`,
+  and file-local naming preparation
+- on hover, rename, and similar IDE actions, first ensure current document-scoped phases for the
+  unsaved buffer, then request only the minimum package-scoped naming or typecheck work that action
+  requires
+- on save, request full semantic diagnostics for the saved package snapshot, while still rerunning
+  only the package-scoped work whose retained outputs are stale
+
+This model should preserve two boundaries:
+
+- phase boundaries remain stable even if scheduling changes later
+- future finer-grained invalidation should refine package-scoped work, not replace the retained
+  artifact model
 
 ## Diagnostics
 

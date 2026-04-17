@@ -24,7 +24,7 @@ Make the analysis pipeline simpler and more incrementally correct for IDE use.
 
 - `Analysis` should own freshness and rerun decisions internally.
 - Callers should request the phase or IDE action they need without passing changed-document sets.
-- Lowering should stay eager enough for fast syntax and structural diagnostics while typing.
+- `lint`, `lower`, and `resolve_document` should stay eager enough for fast typing-time diagnostics and local tooling.
 - Naming and typecheck should run lazily, but they should still run on save and when required by IDE actions such as hover and later rename.
 - The design should support retaining diagnostics by phase and version so save-time semantic diagnostics are not unnecessarily discarded while typing.
 
@@ -49,8 +49,8 @@ LSP diagnostics are published per file as one full list. The protocol does not l
 
 That matters for IDE behavior:
 
-- lowering should refresh while the user is typing
-- naming and typecheck should not necessarily rerun on every change
+- document-scoped phases should refresh while the user is typing
+- package-scoped naming and typecheck should not necessarily rerun on every change
 - but we may still want to keep showing the last semantic diagnostics until a later save or IDE action reruns those phases
 
 So analysis needs to retain diagnostics per phase and per version internally, then merge the retained phase diagnostics into one LSP list when publishing diagnostics for a file.
@@ -165,7 +165,7 @@ That state should remain internal to `Analysis`. The public API should expose qu
 
 - freshness is version-based only
 - analysis state stays current immediately as edits and watched file changes happen
-- lowering remains the eager typing-time phase
+- `lint`, `lower`, and `resolve_document` are the eager typing-time phases
 - package resolution and typecheck run lazily, but they still run on save and when required by IDE actions
 - keep the naming split public for now as `resolve_document` and `resolve_package`
 - `resolve_package` still runs even if some files have lowering errors
@@ -202,9 +202,27 @@ With that model, later phase requests only need version checks. They do not need
 
 ## Open decisions
 
-There are no remaining design blockers for the first implementation slice.
+- For hover on unsaved buffers, should we require current document-scoped naming before pulling any package-scoped semantic data?
+- Should save eagerly request package resolution and typecheck, or should save only publish diagnostics by requesting the same minimal semantic operations the diagnostics surface needs?
 
 If implementation exposes new structural issues, record them here before widening the design.
+
+## Follow-up design direction
+
+Likely trigger split:
+
+- edit / keystroke:
+  - always refresh `lint`
+  - always refresh `lower`
+  - always refresh `resolve_document`
+- hover / rename:
+  - ensure current document-scoped phases for the unsaved buffer
+  - then request only the minimum package-scoped work needed for that operation
+- save:
+  - ensure semantic diagnostics are refreshed for the saved package snapshot
+  - still reuse versioned caches so only stale package work reruns
+
+This matches the retained-diagnostics model already chosen here. The remaining open questions are about exact save orchestration and how aggressively hover or rename should force package-scoped freshness.
 
 ## Stored phase result shape
 

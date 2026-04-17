@@ -2,22 +2,6 @@
 
 what we are working on:
 
-* refactoring naming to support conditionals name introduction
-
-* check if the naming maybe_undefined include all of these (an if exhaustive):
-  - for` introduces a maybe-undefined name after the loop
-  - `while` introduces a maybe-undefined name after the loop
-  - `repeat` does not warn after the loop
-  - name introduced only in `if` branch warns after the conditional
-  - name introduced only in `else` branch warns after the conditional
-  - name introduced in both branches does not warn afterward
-  - same name introduced in both branches resolves as intended if you decide that shape is allowed
-  - nested `if`/`else` with one missing path still warns
-  - nested loops still warn when execution can skip the introducing path
-  - use inside the conditional body does not warn
-  - outer already-defined name is not downgraded by a conditional inner rebinding
-  - package-global fallback still works in global mode when the name is not actually a conditional local
-  
 
 * naming:
   * in conditionals (should the binding still be resolved correctly?). in current fixture tests they are kept unresolved
@@ -41,6 +25,9 @@ what we are working on:
 * we should somehow pass config into analysis (e.g. if typecheck or not and if strict or not or if debug (show lowering and parsing on hover))
 
 * question: how do we know if we need to re-run package phases based of document ids?? (if the idea is to do this incrementallys)
+
+* incremental analysis
+  * we need a test-suite (we can use multi-file and a dedicated save action)
 
 * we should keep track of what needs to be run
 * should global naming test render global ids or tuple (document_id, binding_id)
