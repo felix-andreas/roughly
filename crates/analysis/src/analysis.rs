@@ -6,7 +6,10 @@ use {
         hir::Module,
         lint::{self as lint_phase, NameStyle},
         lower::lower_with_shared_interner,
-        naming::{NamesGlobal, NamesLocal, rebuild_package_naming, resolve_document_locally},
+        naming::{
+            NamesGlobal, NamesLocal, find_exported_binding, rebuild_package_naming,
+            resolve_document_locally,
+        },
         tree,
         typecheck::inference_state_with_builtins_in_interner,
     },
@@ -420,13 +423,14 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
         let module = analysis_state.module(*document_id).unwrap_or_else(|| {
             panic!("missing lowered module for document naming {document_id:?}")
         });
-        let local_naming = resolve_document_locally(*document_id, module);
+        let local_naming =
+            resolve_document_locally(*document_id, module, analysis_state.interner());
         analysis_state.document_naming_outputs.insert(
             *document_id,
             DocumentOutput {
                 version: document_version,
-                output: local_naming,
-                diagnostics: Vec::new(),
+                output: local_naming.naming,
+                diagnostics: local_naming.diagnostics,
             },
         );
     }
@@ -501,22 +505,22 @@ pub fn typecheck(analysis_state: &mut Analysis) {
             .unwrap_or_else(|| {
                 panic!("missing local naming output for package winner {document_id:?}")
             });
-        let binding_id = local_naming
-            .output
-            .global_exports
-            .get(symbol)
+        let module = analysis_state
+            .module(*document_id)
+            .unwrap_or_else(|| panic!("missing lowered module for package winner {document_id:?}"));
+        let binding_id = find_exported_binding(module, &local_naming.output, *symbol)
             .unwrap_or_else(|| {
                 panic!("missing exported binding for package winner {document_id:?}:{symbol:?}")
             });
         let binding = local_naming
             .output
             .bindings
-            .get(binding_id)
+            .get(&binding_id)
             .unwrap_or_else(|| {
                 panic!("missing binding info for package winner {document_id:?}:{binding_id:?}")
             });
         let variable = inference_state.fresh_variable();
-        inference_state.bind_name(
+        inference_state.bind_global_name(
             *symbol,
             crate::types::CoreType::Variable(variable),
             binding.range,

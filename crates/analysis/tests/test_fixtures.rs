@@ -607,17 +607,19 @@ fn run_naming_local_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>
     let module = lower::lower(&document, &mut lowering_context);
     let lowering_diagnostics = lowering_context.take_diagnostics();
     let document_id = DocumentId(0);
-    let local_naming_result = resolve_document_locally(document_id, &module);
+    let local_naming = resolve_document_locally(document_id, &module, lowering_context.interner());
     let rendered_hir = render_locally_named_hir(
         document_id,
         &module,
-        &local_naming_result,
+        &local_naming.naming,
         lowering_context.interner(),
     );
-    let rendered_diagnostics = if lowering_diagnostics.is_empty() {
+    let mut diagnostics = lowering_diagnostics;
+    diagnostics.extend(local_naming.diagnostics);
+    let rendered_diagnostics = if diagnostics.is_empty() {
         "No diagnostics.\n".to_owned()
     } else {
-        lowering_diagnostics
+        diagnostics
             .iter()
             .map(|diagnostic| diagnostic.render(&case.input))
             .collect::<Vec<_>>()
@@ -731,6 +733,7 @@ fn run_naming_global_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile
                 .document_naming(document_id)
                 .ok_or_else(|| "missing local naming".to_owned())?;
             let rendered_hir = render_named_hir(
+                &analysis_state,
                 document_id,
                 module,
                 local_naming,

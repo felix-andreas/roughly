@@ -217,4 +217,6 @@ When in doubt, delete weak context instead of preserving it.
 - Keep fixture `group__case` names stable as the test identity.
 - Reject duplicate fixture `group__case` names across the suite instead of silently shadowing one case with another.
 - Review fixture expectation changes deliberately when output changes.
+- Treat fixtures as the desired semantics contract, not as a regression suite for preserving known-wrong behavior. Do not commit expectations with an intentionally wrong outcome just to keep the suite green.
+- Some fixture cases may be unreasonable or no longer worth preserving. If you encounter one, clean it up instead of treating it as authoritative by default.
 - Do not reintroduce end-to-end named-argument mismatch fixtures until function-parameter lowering can represent the needed semantics.

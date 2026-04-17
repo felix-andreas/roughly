@@ -1,12 +1,38 @@
 # Human Notes (!AIs are not allowed to edit!)
 
+what we are working on:
+
+* refactoring naming to support conditionals name introduction
+
+* check if the naming maybe_undefined include all of these (an if exhaustive):
+  - for` introduces a maybe-undefined name after the loop
+  - `while` introduces a maybe-undefined name after the loop
+  - `repeat` does not warn after the loop
+  - name introduced only in `if` branch warns after the conditional
+  - name introduced only in `else` branch warns after the conditional
+  - name introduced in both branches does not warn afterward
+  - same name introduced in both branches resolves as intended if you decide that shape is allowed
+  - nested `if`/`else` with one missing path still warns
+  - nested loops still warn when execution can skip the introducing path
+  - use inside the conditional body does not warn
+  - outer already-defined name is not downgraded by a conditional inner rebinding
+  - package-global fallback still works in global mode when the name is not actually a conditional local
+  
+
+* naming:
+  * in conditionals (should the binding still be resolved correctly?). in current fixture tests they are kept unresolved
+  * make conditional test fixture exhaustive
+  - (update semantics) maybe later support local types. @new would work only in the same file. also can only be edited in local file (opaque like type)
+* typing
+  * do we need: environment: BTreeMap<EnvironmentKey, Binding>,
+* type syntax errors should be more local
+  * list {age: intgr} <- this should only underline intgr
 * we should only have run_full and run_fast (not check)
 * can we get rid of tree.rs in roughly?
 * saved_document_diagnostics is called twice (not needed)
 * must we publish diags for all documents (on change)??
 * current_document_diagnostics and saved_document_diagnostics and document_diagnostics is way to complidated. we always want to show all diags (and merge them) we should leave commetn why this the case (see LSP Contraints in 006)
 
-* server.rs did_change doucment sync is too complicated
 * currently doesn't support lowering operators like >= (we need to test custom operators)
 * invalidate removes outputs (do we want this?)
 * we must have a format for builtins (like a .rtypes file or something)
@@ -64,9 +90,6 @@ test suite should be ide/hover &  and test_fixtures ide_hover
 
 - integration into roughly is broken
 
-- testing:
-  - am i not a fan of attaching attaching path to diagnostic. we should rather have a tuple of (path/document_id, Vec<Diagnostics>)
-
 - syntax:
   - copy syntax phase from roughly
 - naming:
@@ -89,24 +112,6 @@ test suite should be ide/hover &  and test_fixtures ide_hover
 
 
 
-pub enum AttachedAnnotation {
-    Expression {
-        annotation: Annotation,
-        range: Range,
-    },
-    BindingAndExpression {
-        annotation: Annotation,
-        range: Range,
-    },
-}
-
-- bind_fixture_builtins <- we shouldn't do this in fixtures
-
-- the test_fixtures is in a very bad shape. finish it
-- bind_fixture_builtins. 
-
-- (update semantics) maybe later support local types. @new would work only in the same file. also can only be edited in local file (opaque like type)
-
 - better document split: (https://chatgpt.com/c/69c5985f-f050-8332-bf70-4834bc44b3c4)
   - Overview / Goals
   - Requirements
@@ -118,19 +123,6 @@ pub enum AttachedAnnotation {
   - Interfaces
   - Constraints
   - Testing / Acceptance
-
-- errors of earlier phases should be shown first.
-    atm we have this bug:
-    
-    A `#:` typing comment must be followed immediately by an expression. (typing syntax-error)
-    
-    for an expression like this:
-    
-    [@typing.R (18:19)](file:///home/felix/Projects/roughly/R/typing.R#L18:19) 
-    
-    we shouldn't errors of the previous phase first. i think the problem here is that we first
-
-
 
 - hir only supports attaching annotations to assignment
 

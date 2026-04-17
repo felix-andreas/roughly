@@ -80,7 +80,8 @@ The naming suite should explicitly cover:
 fresh value scope. `shadowing.R.test` is for cases where several binders exist and we need to prove
 which one wins.
 
-`while` and `repeat` scope-reuse fixtures already exist today and belong under `scope_reuse`.
+`maybe_undefined.R.test` is the explicit home for proving that names introduced only by
+conditionally executed code remain locally resolved but should warn as maybe undefined afterward.
 
 ## Local files
 
@@ -185,8 +186,25 @@ Required coverage:
 - loop body does not introduce a fresh scope beyond the loop-variable binder
 - braces inside a loop body do not restore the pre-loop binding
 - assignment inside a loop body remains visible later in that same body
-- `while` body reuses the enclosing scope
-- `repeat` body reuses the enclosing scope
+
+### `maybe_undefined.R.test`
+
+Purpose:
+
+- prove when a local name stays resolved to a local binding but should warn because control flow may
+  skip the introduction site
+
+Required coverage:
+
+- binding introduced only inside a `for` body is maybe undefined after the loop
+- binding introduced only inside a `while` body is maybe undefined after the loop
+- binding introduced inside a `repeat` body is defined after the loop because `repeat` runs at
+  least once
+- binding introduced only in the `if` branch is maybe undefined after the conditional
+- binding introduced only in the `else` branch is maybe undefined after the conditional
+- nested conditional introduction still warns after the outer construct
+- nested loop introduction still warns after the outer construct
+- no warning is produced when an already-defined local name is assigned in all branches
 
 ### `shadowing.R.test`
 
@@ -281,6 +299,17 @@ Required coverage:
 
 - the mirrored local `scope_reuse` cases
 - unresolved globals in local mode become resolved globals here when not shadowed
+
+### `maybe_undefined.R.test`
+
+Purpose:
+
+- mirrored conditional-availability cases with package globals resolved
+
+Required coverage:
+
+- the mirrored local `maybe_undefined` cases
+- package-global lookup does not replace a maybe-undefined local binding
 
 ### `shadowing.R.test`
 

@@ -22,7 +22,7 @@ pub struct NamesGlobal {
 pub struct NamesLocal {
     pub bindings: BTreeMap<BindingId, BindingInfo>,
     pub expression_resolutions: BTreeMap<ExpressionId, BindingId>,
-    pub global_exports: BTreeMap<Symbol, BindingId>,
+    pub maybe_undefined_expressions: BTreeSet<ExpressionId>,
     pub non_locals: BTreeMap<ExpressionId, Symbol>,
     pub named_type_annotations: Vec<ExpressionId>,
 }
@@ -37,6 +37,12 @@ pub struct BindingInfo {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BindingId(pub u32);
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DocumentNamingComputation {
+    pub naming: NamesLocal,
+    pub diagnostics: Vec<Diagnostic>,
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct PackageNamingComputation {
@@ -123,8 +129,57 @@ pub(crate) fn rebuild_package_naming(
     }
 }
 
-pub fn resolve_document_locally(document_id: DocumentId, module: &Module) -> NamesLocal {
-    DocumentNamingContext::new(document_id, &module.arena).resolve_module(module)
+pub fn resolve_document_locally(
+    document_id: DocumentId,
+    module: &Module,
+    interner: &Interner,
+) -> DocumentNamingComputation {
+    DocumentNamingContext::new(document_id, &module.arena, interner).resolve_module(module)
+}
+
+pub fn is_maybe_undefined_expression(
+    local_naming: &NamesLocal,
+    expression_id: ExpressionId,
+) -> bool {
+    local_naming
+        .maybe_undefined_expressions
+        .contains(&expression_id)
+}
+
+pub fn find_binding(
+    local_naming: &NamesLocal,
+    module_id: ModuleId,
+    symbol: Symbol,
+    range: Range,
+) -> Option<BindingId> {
+    local_naming
+        .bindings
+        .values()
+        .find(|binding| {
+            binding.module_id == module_id && binding.symbol == symbol && binding.range == range
+        })
+        .map(|binding| binding.id)
+}
+
+pub fn find_exported_binding(
+    module: &Module,
+    local_naming: &NamesLocal,
+    symbol: Symbol,
+) -> Option<BindingId> {
+    module.expressions.iter().rev().find_map(|expression_id| {
+        let expression = module.arena.get(*expression_id);
+        let ExpressionKind::Assign { target, .. } = expression.kind else {
+            return None;
+        };
+        (target == symbol)
+            .then(|| {
+                local_naming
+                    .expression_resolutions
+                    .get(expression_id)
+                    .copied()
+            })
+            .flatten()
+    })
 }
 
 fn build_type_index(
@@ -567,27 +622,38 @@ impl<'a> TypeResolver<'a> {
 struct DocumentNamingContext<'a> {
     document_id: DocumentId,
     arena: &'a HirArena,
+    interner: &'a Interner,
     next_binding_id: u32,
     local_scopes: Vec<BTreeMap<Symbol, BindingId>>,
+    maybe_defined_scopes: Vec<BTreeMap<Symbol, BindingId>>,
+    top_level_bindings: BTreeMap<Symbol, BindingId>,
+    diagnostics: Vec<Diagnostic>,
     document_naming: NamesLocal,
 }
 
 impl<'a> DocumentNamingContext<'a> {
-    fn new(document_id: DocumentId, arena: &'a HirArena) -> Self {
+    fn new(document_id: DocumentId, arena: &'a HirArena, interner: &'a Interner) -> Self {
         Self {
             document_id,
             arena,
+            interner,
             next_binding_id: 0,
             local_scopes: Vec::new(),
+            maybe_defined_scopes: vec![BTreeMap::new()],
+            top_level_bindings: BTreeMap::new(),
+            diagnostics: Vec::new(),
             document_naming: NamesLocal::default(),
         }
     }
 
-    fn resolve_module(mut self, module: &Module) -> NamesLocal {
+    fn resolve_module(mut self, module: &Module) -> DocumentNamingComputation {
         for expression_id in &module.expressions {
             self.resolve_expression(*expression_id);
         }
-        self.document_naming
+        DocumentNamingComputation {
+            naming: self.document_naming,
+            diagnostics: self.diagnostics,
+        }
     }
 
     fn resolve_expression(&mut self, expression_id: ExpressionId) {
@@ -608,9 +674,25 @@ impl<'a> DocumentNamingContext<'a> {
                         .insert(expression_id, binding_id);
                 }
                 None => {
-                    self.document_naming
-                        .non_locals
-                        .insert(expression_id, *symbol);
+                    if let Some(binding_id) = self.resolve_maybe_defined_symbol(*symbol) {
+                        self.document_naming
+                            .expression_resolutions
+                            .insert(expression_id, binding_id);
+                        self.document_naming
+                            .maybe_undefined_expressions
+                            .insert(expression_id);
+                        self.diagnostics.push(Diagnostic::naming_warning(
+                        expression.range,
+                        format!(
+                            "`{}` might be undefined here because it is introduced only in conditionally executed code.",
+                            self.interner.resolve(*symbol).unwrap_or("<unknown>")
+                        ),
+                    ));
+                    } else {
+                        self.document_naming
+                            .non_locals
+                            .insert(expression_id, *symbol);
+                    }
                 }
             },
             ExpressionKind::Block { expressions, .. } => {
@@ -624,9 +706,7 @@ impl<'a> DocumentNamingContext<'a> {
                 if let Some(scope) = self.local_scopes.last_mut() {
                     scope.insert(*target, binding_id);
                 } else {
-                    self.document_naming
-                        .global_exports
-                        .insert(*target, binding_id);
+                    self.top_level_bindings.insert(*target, binding_id);
                 }
                 self.document_naming
                     .expression_resolutions
@@ -639,8 +719,10 @@ impl<'a> DocumentNamingContext<'a> {
                     scope.insert(parameter.symbol, binding_id);
                 }
                 self.local_scopes.push(scope);
+                self.maybe_defined_scopes.push(BTreeMap::new());
                 self.resolve_expression(*body);
                 self.local_scopes.pop();
+                self.maybe_defined_scopes.pop();
             }
             ExpressionKind::If {
                 condition,
@@ -648,9 +730,25 @@ impl<'a> DocumentNamingContext<'a> {
                 alternative,
             } => {
                 self.resolve_expression(*condition);
-                self.resolve_expression(*consequence);
+                let consequence_bindings =
+                    self.resolve_conditionally_executed_expression(*consequence);
                 if let Some(alternative) = alternative {
-                    self.resolve_expression(*alternative);
+                    let alternative_bindings =
+                        self.resolve_conditionally_executed_expression(*alternative);
+                    for (symbol, binding_id) in &consequence_bindings {
+                        if !alternative_bindings.contains_key(symbol) {
+                            self.mark_symbol_maybe_defined(*symbol, *binding_id);
+                        }
+                    }
+                    for (symbol, binding_id) in &alternative_bindings {
+                        if !consequence_bindings.contains_key(symbol) {
+                            self.mark_symbol_maybe_defined(*symbol, *binding_id);
+                        }
+                    }
+                } else {
+                    for (symbol, binding_id) in consequence_bindings {
+                        self.mark_symbol_maybe_defined(symbol, binding_id);
+                    }
                 }
             }
             ExpressionKind::For {
@@ -662,12 +760,20 @@ impl<'a> DocumentNamingContext<'a> {
                 let binding_id = self.fresh_binding(*variable, expression.range);
                 self.local_scopes
                     .push(BTreeMap::from([(*variable, binding_id)]));
-                self.resolve_expression(*body);
-                self.local_scopes.pop();
+                let body_bindings = self.resolve_conditionally_executed_expression(*body);
+                self.local_scopes
+                    .pop()
+                    .unwrap_or_else(|| panic!("for loop scope should exist for {expression_id:?}"));
+                for (symbol, binding_id) in body_bindings {
+                    self.mark_symbol_maybe_defined(symbol, binding_id);
+                }
             }
             ExpressionKind::While { condition, body } => {
                 self.resolve_expression(*condition);
-                self.resolve_expression(*body);
+                let body_bindings = self.resolve_conditionally_executed_expression(*body);
+                for (symbol, binding_id) in body_bindings {
+                    self.mark_symbol_maybe_defined(symbol, binding_id);
+                }
             }
             ExpressionKind::Repeat { body } => {
                 self.resolve_expression(*body);
@@ -724,6 +830,89 @@ impl<'a> DocumentNamingContext<'a> {
         }
         None
     }
+
+    fn resolve_maybe_defined_symbol(&self, symbol: Symbol) -> Option<BindingId> {
+        self.maybe_defined_scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(&symbol).copied())
+    }
+
+    fn mark_symbol_maybe_defined(&mut self, symbol: Symbol, binding_id: BindingId) {
+        let Some(scope) = self.maybe_defined_scopes.last_mut() else {
+            panic!("maybe-defined scope should exist for {symbol:?}");
+        };
+        scope.insert(symbol, binding_id);
+    }
+
+    fn resolve_conditionally_executed_expression(
+        &mut self,
+        expression_id: ExpressionId,
+    ) -> BTreeMap<Symbol, BindingId> {
+        let local_scope_snapshot = self.local_scopes.clone();
+        let maybe_defined_scopes_snapshot = self.maybe_defined_scopes.clone();
+        let top_level_bindings_snapshot = self.top_level_bindings.clone();
+        self.resolve_expression(expression_id);
+        let introduced_symbols = collect_new_symbols(
+            &self.local_scopes,
+            &local_scope_snapshot,
+            &self.maybe_defined_scopes,
+            &maybe_defined_scopes_snapshot,
+            &self.top_level_bindings,
+            &top_level_bindings_snapshot,
+        );
+        self.local_scopes = local_scope_snapshot;
+        self.maybe_defined_scopes = maybe_defined_scopes_snapshot;
+        self.top_level_bindings = top_level_bindings_snapshot;
+        introduced_symbols
+    }
+}
+
+fn collect_new_symbols(
+    current_local_scopes: &[BTreeMap<Symbol, BindingId>],
+    local_scope_snapshot: &[BTreeMap<Symbol, BindingId>],
+    current_maybe_defined_scopes: &[BTreeMap<Symbol, BindingId>],
+    maybe_defined_scopes_snapshot: &[BTreeMap<Symbol, BindingId>],
+    current_top_level_bindings: &BTreeMap<Symbol, BindingId>,
+    top_level_bindings_snapshot: &BTreeMap<Symbol, BindingId>,
+) -> BTreeMap<Symbol, BindingId> {
+    let mut introduced_symbols = BTreeMap::new();
+    let symbol_existed_before = |symbol: Symbol| {
+        local_scope_snapshot
+            .iter()
+            .any(|scope| scope.contains_key(&symbol))
+            || maybe_defined_scopes_snapshot
+                .iter()
+                .any(|scope| scope.contains_key(&symbol))
+            || top_level_bindings_snapshot.contains_key(&symbol)
+    };
+
+    for (current_scope, snapshot_scope) in current_local_scopes.iter().zip(local_scope_snapshot) {
+        for (symbol, binding_id) in current_scope {
+            if !snapshot_scope.contains_key(symbol) && !symbol_existed_before(*symbol) {
+                introduced_symbols.insert(*symbol, *binding_id);
+            }
+        }
+    }
+
+    for (current_scope, snapshot_scope) in current_maybe_defined_scopes
+        .iter()
+        .zip(maybe_defined_scopes_snapshot)
+    {
+        for (symbol, binding_id) in current_scope {
+            if !snapshot_scope.contains_key(symbol) && !symbol_existed_before(*symbol) {
+                introduced_symbols.insert(*symbol, *binding_id);
+            }
+        }
+    }
+
+    for (symbol, binding_id) in current_top_level_bindings {
+        if !top_level_bindings_snapshot.contains_key(symbol) && !symbol_existed_before(*symbol) {
+            introduced_symbols.insert(*symbol, *binding_id);
+        }
+    }
+
+    introduced_symbols
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

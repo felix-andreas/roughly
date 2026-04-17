@@ -23,6 +23,21 @@ warning[naming] I could not resolve `value` in this package, its imports, or bui
 --> 1:1-1:6
 | value
 
+#---- loop_body_binding_does_not_escape_loop_scope
+for (item in list(1L)) {
+  value <- "hello"
+}
+#: integer
+other <- value
+#++++
+warning[naming] `value` might be undefined here because it is introduced only in conditionally executed code.
+--> 5:10-5:15
+| other <- value
+
+error[type-error] expected `integer`, found `character`
+--> 5:1-5:15
+| other <- value
+
 #---- duplicate_top_level_binding
 x <- 1L
 x <- 2L

@@ -4,7 +4,10 @@ use {
         hir::{Argument, Expression, ExpressionId, ExpressionKind, HirArena, Module},
         interner::{Interner, Symbol},
         lower::LoweringContext,
-        naming::{NamesGlobal, NamesLocal},
+        naming::{
+            BindingId, NamesGlobal, NamesLocal, find_binding, find_exported_binding,
+            is_maybe_undefined_expression,
+        },
         types::{
             Annotation, Atomic, AttachedAnnotation, CoreType, FunctionType, InferenceVariableId,
             RecordField, SurfaceType, TypeAnnotationKind, TypeScheme,
@@ -25,12 +28,19 @@ pub enum InferenceEntry {
 pub struct InferenceState {
     next_variable_id: u32,
     entries: BTreeMap<InferenceVariableId, InferenceEntry>,
-    environment: BTreeMap<Symbol, Binding>,
+    environment: BTreeMap<EnvironmentKey, Binding>,
     builtins: BTreeMap<Symbol, BuiltinKind>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum EnvironmentKey {
+    Local(BindingId),
+    Global(Symbol),
 }
 
 struct ResolutionContext<'a> {
     document_id: DocumentId,
+    module: &'a Module,
     top_level_expression_ids: &'a [ExpressionId],
     local_naming: &'a NamesLocal,
     package_naming: &'a NamesGlobal,
@@ -82,21 +92,50 @@ impl InferenceState {
         self.entries.get(&variable)
     }
 
+    pub fn bind_global_name(&mut self, symbol: Symbol, core_type: CoreType, range: Range) {
+        self.bind_global_scheme(symbol, TypeScheme::monomorphic(core_type), range);
+    }
+
     pub fn bind_name(&mut self, symbol: Symbol, core_type: CoreType, range: Range) {
-        self.bind_scheme(symbol, TypeScheme::monomorphic(core_type), range);
+        self.bind_global_name(symbol, core_type, range);
+    }
+
+    pub fn bind_global_scheme(&mut self, symbol: Symbol, type_scheme: TypeScheme, range: Range) {
+        self.environment.insert(
+            EnvironmentKey::Global(symbol),
+            Binding { type_scheme, range },
+        );
     }
 
     pub fn bind_scheme(&mut self, symbol: Symbol, type_scheme: TypeScheme, range: Range) {
-        self.environment
-            .insert(symbol, Binding { type_scheme, range });
+        self.bind_global_scheme(symbol, type_scheme, range);
+    }
+
+    fn bind_local_name(&mut self, binding_id: BindingId, core_type: CoreType, range: Range) {
+        self.bind_local_scheme(binding_id, TypeScheme::monomorphic(core_type), range);
+    }
+
+    fn bind_local_scheme(&mut self, binding_id: BindingId, type_scheme: TypeScheme, range: Range) {
+        self.environment.insert(
+            EnvironmentKey::Local(binding_id),
+            Binding { type_scheme, range },
+        );
     }
 
     pub fn bind_builtin(&mut self, symbol: Symbol, builtin_kind: BuiltinKind) {
         self.builtins.insert(symbol, builtin_kind);
     }
 
+    fn lookup_local_name(&self, binding_id: BindingId) -> Option<&Binding> {
+        self.environment.get(&EnvironmentKey::Local(binding_id))
+    }
+
+    pub fn lookup_global_name(&self, symbol: Symbol) -> Option<&Binding> {
+        self.environment.get(&EnvironmentKey::Global(symbol))
+    }
+
     pub fn lookup_name(&self, symbol: Symbol) -> Option<&Binding> {
-        self.environment.get(&symbol)
+        self.lookup_global_name(symbol)
     }
 
     pub fn infer_module(&mut self, module: &Module) -> Result<Vec<CoreType>, InferenceError> {
@@ -114,6 +153,7 @@ impl InferenceState {
             module,
             Some(&ResolutionContext {
                 document_id,
+                module,
                 top_level_expression_ids: &module.expressions,
                 local_naming,
                 package_naming,
@@ -162,23 +202,24 @@ impl InferenceState {
             ExpressionKind::Character(_) => Ok(CoreType::Scalar(Atomic::Character)),
             ExpressionKind::StringLiteralName(_) => Ok(CoreType::Scalar(Atomic::Character)),
             ExpressionKind::Symbol(symbol) => {
-                if let Some(resolution_context) = resolution_context
-                    && resolution_context
+                if let Some(resolution_context) = resolution_context {
+                    if let Some(binding_id) = resolution_context
                         .local_naming
-                        .non_locals
-                        .contains_key(&expression.id)
-                {
-                    if resolution_context
-                        .package_naming
-                        .global_bindings
-                        .contains_key(symbol)
+                        .expression_resolutions
+                        .get(&expression.id)
+                        .filter(|_| {
+                            !is_maybe_undefined_expression(
+                                resolution_context.local_naming,
+                                expression.id,
+                            )
+                        })
                     {
                         let type_scheme = self
-                            .lookup_name(*symbol)
+                            .lookup_local_name(*binding_id)
                             .unwrap_or_else(|| {
                                 panic!(
-                                    "package global symbol {:?} should be prebound for typecheck",
-                                    symbol
+                                    "local binding {:?} should be prebound for typecheck",
+                                    binding_id
                                 )
                             })
                             .type_scheme
@@ -186,10 +227,58 @@ impl InferenceState {
                         return self.instantiate_type_scheme(&type_scheme);
                     }
 
-                    return Ok(CoreType::Unknown);
+                    if let Some(binding_id) = resolution_context
+                        .local_naming
+                        .expression_resolutions
+                        .get(&expression.id)
+                        .filter(|_| {
+                            is_maybe_undefined_expression(
+                                resolution_context.local_naming,
+                                expression.id,
+                            )
+                        })
+                    {
+                        let type_scheme = self
+                            .lookup_local_name(*binding_id)
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "maybe-undefined local binding {:?} should be prebound for typecheck",
+                                    binding_id
+                                )
+                            })
+                            .type_scheme
+                            .clone();
+                        return self.instantiate_type_scheme(&type_scheme);
+                    }
+
+                    if resolution_context
+                        .local_naming
+                        .non_locals
+                        .contains_key(&expression.id)
+                    {
+                        if resolution_context
+                            .package_naming
+                            .global_bindings
+                            .contains_key(symbol)
+                        {
+                            let type_scheme = self
+                                .lookup_global_name(*symbol)
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "package global symbol {:?} should be prebound for typecheck",
+                                        symbol
+                                    )
+                                })
+                                .type_scheme
+                                .clone();
+                            return self.instantiate_type_scheme(&type_scheme);
+                        }
+
+                        return Ok(CoreType::Unknown);
+                    }
                 }
 
-                self.lookup_name(*symbol)
+                self.lookup_global_name(*symbol)
                     .cloned()
                     .map(|binding| self.instantiate_type_scheme(&binding.type_scheme))
                     .transpose()?
@@ -216,6 +305,7 @@ impl InferenceState {
                 {
                     if let ExpressionKind::Function { parameters, body } = &value_expression.kind {
                         self.infer_function_expression(
+                            value_expression.id,
                             parameters,
                             *body,
                             Some(expected_function_type),
@@ -251,9 +341,13 @@ impl InferenceState {
                         .local_naming
                         .expression_resolutions
                         .get(&expression.id)
-                        .zip(resolution_context.local_naming.global_exports.get(target))
+                        .zip(find_exported_binding(
+                            resolution_context.module,
+                            resolution_context.local_naming,
+                            *target,
+                        ))
                         .is_some_and(|(binding_id, export_binding_id)| {
-                            binding_id == export_binding_id
+                            *binding_id == export_binding_id
                         })
                         && resolution_context
                             .package_naming
@@ -262,11 +356,26 @@ impl InferenceState {
                             == Some(&resolution_context.document_id);
 
                     if !is_current_document_winner {
+                        if let Some(binding_id) = resolution_context
+                            .local_naming
+                            .expression_resolutions
+                            .get(&expression.id)
+                            .copied()
+                        {
+                            let generalized_scheme = self.generalize(binding_type.clone())?;
+                            self.bind_local_scheme(
+                                binding_id,
+                                generalized_scheme,
+                                expression.range,
+                            );
+                            return Ok(binding_type);
+                        }
+
                         return Ok(binding_type);
                     }
 
                     let type_scheme = self
-                        .lookup_name(*target)
+                        .lookup_global_name(*target)
                         .unwrap_or_else(|| {
                             panic!(
                                 "package winner symbol {:?} should be prebound for typecheck",
@@ -278,17 +387,28 @@ impl InferenceState {
                     let existing_type = self.instantiate_type_scheme(&type_scheme)?;
                     let binding_type =
                         self.unify_with_context(existing_type, binding_type, expression)?;
-                    self.environment.remove(target);
+                    self.environment.remove(&EnvironmentKey::Global(*target));
                     let generalized_scheme = self.generalize(binding_type.clone())?;
-                    self.bind_scheme(*target, generalized_scheme, expression.range);
+                    self.bind_global_scheme(*target, generalized_scheme, expression.range);
                     return Ok(binding_type);
                 }
 
                 let generalized_scheme = self.generalize(binding_type.clone())?;
-                self.bind_scheme(*target, generalized_scheme, expression.range);
+                if let Some(resolution_context) = resolution_context
+                    && let Some(binding_id) = resolution_context
+                        .local_naming
+                        .expression_resolutions
+                        .get(&expression.id)
+                        .copied()
+                {
+                    self.bind_local_scheme(binding_id, generalized_scheme, expression.range);
+                } else {
+                    self.bind_global_scheme(*target, generalized_scheme, expression.range);
+                }
                 Ok(binding_type)
             }
             ExpressionKind::Function { parameters, body } => self.infer_function_expression(
+                expression.id,
                 parameters,
                 *body,
                 None,
@@ -313,6 +433,7 @@ impl InferenceState {
                 sequence,
                 body,
             } => self.infer_for_expression(
+                expression.id,
                 *variable,
                 arena.get(*sequence),
                 arena.get(*body),
@@ -411,6 +532,7 @@ impl InferenceState {
 
     fn infer_function_expression(
         &mut self,
+        function_expression_id: ExpressionId,
         parameters: &[crate::hir::Parameter],
         body: ExpressionId,
         expected_function_type: Option<FunctionType<CoreType>>,
@@ -426,6 +548,27 @@ impl InferenceState {
             .filter(|types| types.len() == parameters.len());
         let expected_return_type =
             expected_function_type.map(|function_type| *function_type.return_type);
+        let parameter_binding_ids = resolution_context.and_then(|context| {
+            (!parameters.is_empty()).then(|| {
+                parameters
+                    .iter()
+                    .map(|parameter| {
+                        find_binding(
+                            context.local_naming,
+                            context.document_id,
+                            parameter.symbol,
+                            parameter.range,
+                        )
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "missing parameter binding for function {:?} at {:?}",
+                                function_expression_id, parameter.range
+                            )
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+        });
 
         let mut parameter_types = Vec::with_capacity(parameters.len());
         for (index, parameter) in parameters.iter().enumerate() {
@@ -434,7 +577,20 @@ impl InferenceState {
                 .and_then(|types| types.get(index))
                 .cloned()
                 .unwrap_or_else(|| CoreType::Variable(self.fresh_variable()));
-            self.bind_name(parameter.symbol, parameter_type.clone(), parameter.range);
+            if let Some(parameter_binding_ids) = &parameter_binding_ids {
+                let binding_id = parameter_binding_ids
+                    .get(index)
+                    .copied()
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "missing parameter binding {} for function {:?}",
+                            index, function_expression_id
+                        )
+                    });
+                self.bind_local_name(binding_id, parameter_type.clone(), parameter.range);
+            } else {
+                self.bind_global_name(parameter.symbol, parameter_type.clone(), parameter.range);
+            }
             parameter_types.push(parameter_type);
         }
 
@@ -493,6 +649,7 @@ impl InferenceState {
 
     fn infer_for_expression(
         &mut self,
+        _expression_id: ExpressionId,
         variable: Symbol,
         sequence: &Expression,
         body: &Expression,
@@ -512,14 +669,27 @@ impl InferenceState {
             });
         };
 
-        let previous_binding = self.environment.get(&variable).cloned();
-        self.bind_name(variable, item_type, range);
+        if let Some(binding_id) = resolution_context.and_then(|context| {
+            find_binding(context.local_naming, context.document_id, variable, range)
+        }) {
+            self.bind_local_name(binding_id, item_type, range);
+            self.infer_expression_with_context(body, arena, resolution_context)?;
+            self.environment.remove(&EnvironmentKey::Local(binding_id));
+            return Ok(CoreType::Null);
+        }
+
+        let previous_binding = self
+            .environment
+            .get(&EnvironmentKey::Global(variable))
+            .cloned();
+        self.bind_global_name(variable, item_type, range);
         self.infer_expression_with_context(body, arena, resolution_context)?;
 
         if let Some(previous_binding) = previous_binding {
-            self.environment.insert(variable, previous_binding);
+            self.environment
+                .insert(EnvironmentKey::Global(variable), previous_binding);
         } else {
-            self.environment.remove(&variable);
+            self.environment.remove(&EnvironmentKey::Global(variable));
         }
 
         Ok(CoreType::Null)

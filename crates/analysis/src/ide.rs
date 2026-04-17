@@ -7,7 +7,7 @@ use {
             DefinitionId, DefinitionItem, DefinitionKind, Expression, ExpressionId, ExpressionKind,
             Module,
         },
-        naming::BindingInfo,
+        naming::{BindingInfo, find_exported_binding, is_maybe_undefined_expression},
         text::{TextPosition, TextRange},
         type_syntax::{render_named_type_ref, render_surface_type},
         types::{Annotation, TypeAnnotationKind},
@@ -272,6 +272,9 @@ fn render_expression_naming_hover(
             "local resolution: {}",
             render_binding_site(analysis, binding)
         ));
+        if is_maybe_undefined_expression(local_naming, expression_id) {
+            lines.push("local warning: might be undefined".to_owned());
+        }
     } else if let Some(symbol) = local_naming.non_locals.get(&expression_id) {
         let name = analysis.interner().resolve(*symbol).unwrap_or("<unknown>");
         lines.push(format!("local resolution: unresolved `{name}`"));
@@ -281,9 +284,11 @@ fn render_expression_naming_hover(
     if let Some(symbol) = non_local_symbol
         && let Some(package_naming) = analysis.package_naming()
         && let Some(export_document_id) = package_naming.global_bindings.get(&symbol)
+        && let Some(export_module) = analysis.module(*export_document_id)
         && let Some(export_document_naming) = analysis.document_naming(*export_document_id)
-        && let Some(binding_id) = export_document_naming.global_exports.get(&symbol)
-        && let Some(binding) = export_document_naming.bindings.get(binding_id)
+        && let Some(binding_id) =
+            find_exported_binding(export_module, export_document_naming, symbol)
+        && let Some(binding) = export_document_naming.bindings.get(&binding_id)
     {
         lines.push(format!(
             "package resolution: {}",

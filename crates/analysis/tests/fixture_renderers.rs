@@ -1,11 +1,11 @@
 use analysis::{
-    Interner,
+    Analysis, Interner,
     document::DocumentId,
     hir::{
         DefinitionItem, DefinitionKind, ExpressionId, ExpressionKind, HirArena, Module, ModuleId,
     },
     lower::LoweringContext,
-    naming::{BindingId, NamesGlobal, NamesLocal},
+    naming::{BindingId, NamesGlobal, NamesLocal, find_binding, find_exported_binding},
     type_syntax::render_surface_type,
     typecheck::{InferenceError, InferenceState},
     types::CoreType,
@@ -132,6 +132,7 @@ pub fn render_interface_snapshot(
 }
 
 pub fn render_named_hir(
+    analysis: &Analysis,
     document_id: ModuleId,
     module: &Module,
     local_naming_result: &NamesLocal,
@@ -148,6 +149,7 @@ pub fn render_named_hir(
 
     for expression_id in &module.expressions {
         render_named_expression(
+            analysis,
             document_id,
             &module.arena,
             *expression_id,
@@ -229,6 +231,7 @@ fn render_named_definition(
 }
 
 fn render_named_expression(
+    analysis: &Analysis,
     document_id: DocumentId,
     arena: &HirArena,
     expression_id: ExpressionId,
@@ -253,21 +256,20 @@ fn render_named_expression(
             .expression_resolutions
             .get(&expression_id)
         {
-            let binding_document_id = local_naming_result.bindings.get(binding_id)?.module_id;
+            let binding_document_id = local_naming_result.bindings.get(&binding_id)?.module_id;
             return Some((binding_document_id, *binding_id));
         }
 
         let symbol = *local_naming_result.non_locals.get(&expression_id)?;
         let export_document_id = *global_naming_result.global_bindings.get(&symbol)?;
         let export_document_naming = all_local_naming.get(&export_document_id)?;
-        export_document_naming
-            .global_exports
-            .get(&symbol)
-            .copied()
+        let export_module = analysis.module(export_document_id)?;
+        find_exported_binding(export_module, export_document_naming, symbol)
             .map(|binding_id| (export_document_id, binding_id))
     };
     let render_nested = |nested_expression_id, nested_indent, lines: &mut Vec<String>| {
         render_named_expression(
+            analysis,
             document_id,
             arena,
             nested_expression_id,
@@ -579,11 +581,5 @@ fn find_binding_by_symbol_and_range(
     symbol: analysis::Symbol,
     range: tree_sitter::Range,
 ) -> Option<BindingId> {
-    local_naming_result
-        .bindings
-        .values()
-        .find(|binding| {
-            binding.module_id == document_id && binding.symbol == symbol && binding.range == range
-        })
-        .map(|binding| binding.id)
+    find_binding(local_naming_result, document_id, symbol, range)
 }

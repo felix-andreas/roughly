@@ -19,9 +19,19 @@ Naming now stores:
 pub struct NamesLocal {
     pub bindings: BTreeMap<BindingId, BindingInfo>,
     pub expression_resolutions: BTreeMap<ExpressionId, BindingId>,
+    pub maybe_undefined_resolutions: BTreeMap<ExpressionId, BindingId>,
+    pub binder_bindings: BTreeMap<BinderKey, BindingId>,
     pub global_exports: BTreeMap<Symbol, BindingId>,
     pub non_locals: BTreeMap<ExpressionId, Symbol>,
     pub named_type_annotations: Vec<ExpressionId>,
+}
+
+pub enum BinderKey {
+    FunctionParameter {
+        function_expression_id: ExpressionId,
+        index: usize,
+    },
+    ForVariable(ExpressionId),
 }
 
 pub struct NamesGlobal {
@@ -39,6 +49,10 @@ pub struct NamesGlobal {
   - local `non_locals`
   - package `global_bindings`
   - winning document `global_exports`
+- conditionally introduced local names are not treated as non-local misses.
+  - They stay local through `maybe_undefined_resolutions` and produce local diagnostics instead.
+- binder-site local ids are stored once in `binder_bindings`.
+  - Function parameters and `for` variables are both binder ownership facts, so they no longer need separate tables.
 - Binding metadata has one owner:
   - the defining document's `NamesLocal.bindings`
 - Type-side naming work items are annotation-only:

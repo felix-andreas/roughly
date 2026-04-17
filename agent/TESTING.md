@@ -248,6 +248,8 @@ Rules:
 - `tests/naming/local/` covers the file-local lexical view before package-global resolution
 - `tests/naming/global/` is the primary contract and should mirror the local lexical cases while
   also covering package-only behavior
+- control-flow-sensitive local availability belongs in `maybe_undefined.R.test`, where names remain
+  locally resolved but carry a naming warning when introduction is conditional
 - mirrored global cases should preserve the same group/case names as their local counterparts
 - mirrored global cases should use `MultiFile`, even when the package has one file
 - project-global type-name cases belong in `tests/naming/global/`, not a dedicated local type suite

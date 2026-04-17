@@ -1,0 +1,200 @@
+#==== loops
+#---- for_body_introduction_might_be_undefined_after_loop
+f <- function() {
+  for (item in list(1L)) {
+    value <- 1L
+  }
+  value
+}
+#++++
+Assign(f@b2)
+  Function()
+    Block
+      For(item@b0)
+        Call
+          Symbol(list@?)
+          Argument
+            Integer(1L)
+        Block
+          Assign(value@b1)
+            Integer(1L)
+      Symbol(value@b1)
+
+warning[naming] `value` might be undefined here because it is introduced only in conditionally executed code.
+--> 5:3-5:8
+|   value
+
+#---- while_body_introduction_might_be_undefined_after_loop
+f <- function() {
+  while (TRUE) {
+    x <- 1L
+  }
+  x
+}
+#++++
+Assign(f@b1)
+  Function()
+    Block
+      While
+        Logical(true)
+        Block
+          Assign(x@b0)
+            Integer(1L)
+      Symbol(x@b0)
+
+warning[naming] `x` might be undefined here because it is introduced only in conditionally executed code.
+--> 5:3-5:4
+|   x
+
+#---- repeat_body_introduction_is_defined_after_loop
+f <- function() {
+  repeat {
+    x <- 1L
+  }
+  x
+}
+#++++
+Assign(f@b1)
+  Function()
+    Block
+      Repeat
+        Block
+          Assign(x@b0)
+            Integer(1L)
+      Symbol(x@b0)
+
+No diagnostics.
+
+#==== conditionals
+#---- if_branch_introduction_might_be_undefined_after_conditional
+f <- function(cond) {
+  if (cond) {
+    x <- 1L
+  }
+  x
+}
+#++++
+Assign(f@b2)
+  Function(cond@b0)
+    Block
+      If
+        Symbol(cond@b0)
+        Block
+          Assign(x@b1)
+            Integer(1L)
+      Symbol(x@b1)
+
+warning[naming] `x` might be undefined here because it is introduced only in conditionally executed code.
+--> 5:3-5:4
+|   x
+
+#---- else_branch_introduction_might_be_undefined_after_conditional
+f <- function(cond) {
+  if (cond) {
+    1L
+  } else {
+    x <- 2L
+  }
+  x
+}
+#++++
+Assign(f@b2)
+  Function(cond@b0)
+    Block
+      If
+        Symbol(cond@b0)
+        Block
+          Integer(1L)
+        Block
+          Assign(x@b1)
+            Integer(2L)
+      Symbol(x@b1)
+
+warning[naming] `x` might be undefined here because it is introduced only in conditionally executed code.
+--> 7:3-7:4
+|   x
+
+#---- nested_if_introduction_might_be_undefined_after_outer_conditional
+f <- function(cond) {
+  if (cond) {
+    if (cond) {
+      x <- 1L
+    }
+  }
+  x
+}
+#++++
+Assign(f@b2)
+  Function(cond@b0)
+    Block
+      If
+        Symbol(cond@b0)
+        Block
+          If
+            Symbol(cond@b0)
+            Block
+              Assign(x@b1)
+                Integer(1L)
+      Symbol(x@b1)
+
+warning[naming] `x` might be undefined here because it is introduced only in conditionally executed code.
+--> 7:3-7:4
+|   x
+
+#---- nested_loop_introduction_might_be_undefined_after_conditional
+f <- function(cond) {
+  if (cond) {
+    for (item in list(1L)) {
+      x <- 1L
+    }
+  }
+  x
+}
+#++++
+Assign(f@b3)
+  Function(cond@b0)
+    Block
+      If
+        Symbol(cond@b0)
+        Block
+          For(item@b1)
+            Call
+              Symbol(list@?)
+              Argument
+                Integer(1L)
+            Block
+              Assign(x@b2)
+                Integer(1L)
+      Symbol(x@b2)
+
+warning[naming] `x` might be undefined here because it is introduced only in conditionally executed code.
+--> 7:3-7:4
+|   x
+
+#---- no_warning_when_existing_name_is_assigned_in_all_branches
+f <- function(cond) {
+  x <- 0L
+  if (cond) {
+    x <- 1L
+  } else {
+    x <- 2L
+  }
+  x
+}
+#++++
+Assign(f@b4)
+  Function(cond@b0)
+    Block
+      Assign(x@b1)
+        Integer(0L)
+      If
+        Symbol(cond@b0)
+        Block
+          Assign(x@b2)
+            Integer(1L)
+        Block
+          Assign(x@b3)
+            Integer(2L)
+      Symbol(x@b1)
+
+No diagnostics.

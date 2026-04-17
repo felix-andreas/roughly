@@ -2,8 +2,14 @@
 
 Keep newest decisions at the top.
 
+- maybe-undefined value diagnostics should be emitted by local naming while preserving local binding resolution.
+  - The semantic fact is file-local control-flow availability, not package-global lookup failure. Local naming preserves the local `BindingId` for tooling and typecheck and emits the warning at the local use site.
+
+- typecheck should use naming-owned `BindingId` for local value lookups instead of rebuilding local lexical resolution by raw symbol.
+  - Naming is already the source of truth for file-local binding identity, so typecheck now binds local assignments, parameters, and `for` variables under those ids and resolves local symbol uses through `expression_resolutions`. Package/global lookup remains a separate boundary for now.
+
 - typecheck should consume naming outputs instead of performing a second symbol-based name-resolution pass for package/global references.
-  - Naming is the source of truth for unresolved/global value resolution, and typecheck now treats naming-missing references as `Unknown` instead of emitting duplicate unknown-name diagnostics. The current implementation keeps local lexical binding lookup symbol-based for now, but package/global lookup and top-level winner binding behavior come from naming.
+  - Naming is the source of truth for unresolved/global value resolution, and typecheck now treats naming-missing references as `Unknown` instead of emitting duplicate unknown-name diagnostics. Package/global lookup and top-level winner binding behavior come from naming.
 
 - `lint` should be a separate file-local phase and test suite, rather than being folded into `lower`.
   - Lint rules depend only on parsed tree structure and source text, but they are not part of HIR construction. Keeping `lint` separate preserves a cleaner structural boundary while still letting `analysis` own all diagnostic production.
@@ -14,8 +20,8 @@ Keep newest decisions at the top.
 - project 005 should rebuild `global_bindings` package-wide from local export tables on each naming run, rather than trying to maintain that winner table incrementally now.
   - This keeps the implementation simple while naming is still package-wide, avoids repeated lazy package scans for cross-file lookups, and leaves a clean future upgrade path to a reverse `Symbol -> ordered exporters` index once package naming itself becomes incremental.
 
-- local naming should use `non_locals` for value references outside file-local lexical resolution, and the type-side equivalent should move from `annotated_expressions` toward an explicit `referenced_type_names`-style work-item table.
-  - `unresolved_values` is misleading because many of those names are only unresolved in the file-local pass, not after package-global lookup. `annotated_expressions` is too coarse because it records that an annotation exists, not the actual type-name references naming still needs to resolve.
+- naming should keep local use sites, maybe-undefined use sites, and non-local use sites distinct, and binder-side local ids should live in one shared binder table instead of one table per binder kind.
+  - `unresolved_values` is misleading because many of those names are only unresolved in the file-local pass, not after package-global lookup. `annotated_expressions` is too coarse because it records that an annotation exists, not the actual type-name references naming still needs to resolve. The old split between `function_parameter_bindings` and `for_bindings` also duplicated one binder-ownership fact.
 
 - stable exported declaration identity is out of scope for project 005.
   - Project 005 only needs a cleaner naming data model and better incremental boundaries. Durable declaration identity matters later for tooling features across edits, not for this naming cleanup.
