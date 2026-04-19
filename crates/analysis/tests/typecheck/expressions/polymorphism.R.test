@@ -40,3 +40,36 @@ fn(?1) -> ?1
 fn(fn(?1) -> ?2, ?1) -> ?2
 integer
 character
+
+#---- constant_function_instantiates_across_argument_types
+const_integer <- function(x) 1L
+const_integer(1L)
+const_integer("hello")
+#++++
+fn(?1) -> integer
+integer
+integer
+
+#---- repeated_fresh_instantiation_in_higher_order_calls
+apply <- function(f, value) f(value)
+const_integer <- function(x) 1L
+identity <- function(x) x
+apply(const_integer, "hello")
+apply(identity, 1L)
+apply(identity, "hello")
+#++++
+fn(fn(?1) -> ?2, ?1) -> ?2
+fn(?1) -> integer
+fn(?1) -> ?1
+integer
+integer
+character
+
+#---- solved_returned_function_keeps_outer_argument_type
+apply_left <- function(x) function(f) f(x)
+use_integer <- apply_left(1L)
+use_integer(function(value) 1L)
+#++++
+fn(?1) -> fn(fn(?1) -> ?2) -> ?2
+fn(fn(integer) -> ?1) -> ?1
+integer

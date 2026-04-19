@@ -14,3 +14,28 @@ identity <- function(x) x
 identity <- function(x) 1L
 #++++
 identity: <T> fn(T) -> integer
+
+#---- generic_alias_export
+#: @alias Box<T> {list{value: T}}
+value <- list(value = 1L)
+#++++
+alias Box<T> = list{value: T}
+value: list{value: integer}
+
+#---- generic_nominal_export
+#: @type Person<T> {list{value: T}}
+value <- 1L
+#++++
+type Person<T> = list{value: T}
+value: integer
+
+#---- mixed_nominal_alias_and_value_exports
+#: @alias PersonShape {list{name: character}}
+#: @type Person {PersonShape}
+
+#: @new Person
+person <- list(name = "bob")
+#++++
+alias PersonShape = list{name: character}
+type Person = PersonShape
+person: Person

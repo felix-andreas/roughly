@@ -32,6 +32,11 @@ render <- function(count) "ok"
 #++++
 render: <T> fn(T) -> character
 
+#---- constant_integer_function_binding
+const_integer <- function(x) 1L
+#++++
+const_integer: <T> fn(T) -> integer
+
 #---- alias_of_polymorphic_binding
 identity <- function(x) x
 alias <- identity
@@ -44,3 +49,14 @@ alias: <T> fn(T) -> T
 increment <- function(value) value
 #++++
 increment: fn(integer) -> integer
+
+#---- annotated_named_parameter_binding
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+#++++
+double_count: fn(count: integer) -> integer
+
+#---- higher_order_apply_binding
+apply <- function(f, value) f(value)
+#++++
+apply: <T, U> fn(fn(T) -> U, T) -> U

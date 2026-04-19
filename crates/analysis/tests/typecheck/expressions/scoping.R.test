@@ -49,3 +49,39 @@ f <- function() {
 }
 #++++
 fn() -> character
+
+#==== scope_visibility
+#---- local_binding_does_not_escape
+x <- 1L
+f <- function() {
+  x <- "ok"
+  x
+}
+x
+#++++
+integer
+fn() -> character
+integer
+
+#---- parameter_shadowing_preserves_outer_binding
+x <- 1L
+f <- function(x) x
+x
+f("ok")
+#++++
+integer
+fn(?1) -> ?1
+integer
+character
+
+#---- nested_function_uses_enclosing_binding
+x <- 1L
+f <- function() {
+  g <- function() x
+  g()
+}
+f()
+#++++
+integer
+fn() -> integer
+integer

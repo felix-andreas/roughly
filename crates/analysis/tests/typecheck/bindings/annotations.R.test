@@ -4,3 +4,41 @@
 log_count <- function(count) { }
 #++++
 log_count: fn(count: integer) -> NULL
+
+#---- scalar_checked_annotation
+#: integer
+value <- 1L
+#++++
+value: integer
+
+#---- vector_checked_annotation
+#: integer[]
+value <- 1L
+#++++
+value: integer[]
+
+#---- unknown_only_annotation_on_unknown_binding
+#: @if-unknown integer
+value <- 2L ^ 3L
+#++++
+value: integer
+
+#---- trusted_annotation_on_incompatible_binding
+#: @trust integer
+value <- "hello"
+#++++
+value: integer
+
+#---- nullable_union_checked_annotation
+#: integer | NULL
+value <- NULL
+#++++
+value: integer | NULL
+
+#---- expanded_forall_identity_binding
+#: @forall T
+#: @param {T} value
+#: @return {T}
+identity <- function(value) value
+#++++
+identity: <T> fn(value: T) -> T

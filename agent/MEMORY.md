@@ -19,3 +19,8 @@ Use this document to record:
 If code changes make this document inaccurate, update it in the same session.
 
 ## Active continuity
+
+- Typecheck fixture migration active. Deprecated suites unwired; files remain under `tests/typecheck/deprecated/` as migration storage only.
+- New semantics-first fixtures now intentionally fail in `typecheck_bindings` and `typecheck_interfaces`.
+- Next step: preserve named types and explicit `@forall` binders in typecheck.
+- Then: make `@new`, alias annotations, nominal/interface value rendering, and expanded `@forall` binding fixtures pass.

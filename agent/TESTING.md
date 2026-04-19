@@ -6,6 +6,11 @@ This crate prefers fixture tests for source-driven behavior because they are:
 - easy to extend into many cases quickly
 - a good fit for verifying AI-generated changes against an explicit text contract
 
+Fixture suites should describe the desired semantics as exhaustively as practical. Do not shape the
+matrix around what the current implementation already happens to pass. If the suite is still
+migrating toward the desired contract, record the missing coverage explicitly in the relevant
+README instead of treating current gaps as intentional.
+
 Use ordinary Rust tests only when the behavior is awkward to express as a rendered fixture.
 
 ## Fixture format
@@ -18,6 +23,10 @@ Some suites may include a local `README.md` with more detailed strategy, coverag
 The shared naming suite README at `tests/naming/README.md` is authoritative for the naming fixture
 matrix and the local-versus-global suite split. Keep it in sync with naming fixture changes in the
 same session.
+
+Top-level fixture suites should generally also include a local `README.md` with a coverage matrix.
+Use those README files to describe the suite's rendered output contract, semantic matrix, what does
+not belong in the suite, and naming guidance for fixture groups and cases.
 
 The `fixtures` crate currently parses two fixture shapes:
 
@@ -137,6 +146,11 @@ The parser now understands both fixture shapes.
 
 `naming/local` uses `Simple` cases and runs only the file-local naming pass.
 `naming/global` uses `MultiFile` cases and runs package-global naming on the initial generation.
+Typecheck fixtures are still mid-migration: older engine-centric fixture files now live under
+`tests/typecheck/deprecated/`, namely `generalization`, `instantiation`, `substitution`, and
+`environment`, but they are no longer wired as active suites. The active target split is
+`bindings`, `expressions`, `interfaces`, later `project`, and at most one clearly-internal
+raw-inference suite.
 The other analysis fixture runners still execute only `Simple` cases.
 Later-generation `MultiFile` support is still waiting on broader renderer-side adoption in
 `analysis`.
@@ -164,20 +178,17 @@ cargo test -p analysis
 The intended fixture suites are:
 
 - `type_syntax` - typing-comment syntax and normalized type rendering
-- `bindings` - top-level binding result types
+- `bindings` - binding-boundary stored type schemes
 - `diagnostics` - final user-facing errors
-- `environment` - rebinding, shadowing, and scheme reuse across scopes
 - `expressions` - checked expression result types
-- `generalization` - quantified schemes produced at binding boundaries
-- `instantiation` - fresh reuse of generalized bindings at use sites
 - `interfaces` - exported per-file interface shapes
 - `ide/hover` - hover rendering over multi-file workspace state
 - `lint` - file-local lint diagnostics
 - `lowering` - syntax-to-HIR lowering output
 - `naming/local` - file-local binding introduction and lexical use-site resolution
 - `naming/global` - package-global resolution across multiple files
-- `substitution` - propagation of solved types through larger shapes
-- `unification` - solved monotypes during local inference
+- `project` - future multi-file typed package behavior
+- `unification` - optional internal raw-inference coverage for metavariable-facing engine behavior
 
 Keep focused test-running guidance minimal in this document. Exact suite adoption may lag behind the intended split while implementation and fixture migration are still in progress.
 
@@ -261,8 +272,8 @@ Rules:
 
 Purpose:
 
-- smaller checked-expression cases
-- normalized expression result types
+- use-site and evaluation-site typing behavior
+- resolved expression result types
 - focused checking behavior for small snippets
 
 Expected output should show:
@@ -270,95 +281,73 @@ Expected output should show:
 - rendered checked expression types
 - or a normalized checking error kind when the suite intentionally targets failure shape
 
-### `unification`
+Rules:
+
+- `expressions` is the home for ordinary language semantics such as calls, control flow, indexing,
+  arithmetic, special types, polymorphic use, and scoping effects
+- cases from older `tests/typecheck/deprecated/environment/`,
+  `tests/typecheck/deprecated/instantiation/`, and
+  `tests/typecheck/deprecated/substitution/` directories should migrate here when their rendered
+  output is ordinary expression results rather than binding schemes
+
+### `bindings`
 
 Purpose:
 
-- monotypes produced while inference solves local constraints
-- how expression shapes and operators constrain inference variables
-- higher-order function shapes before binding-level generalization
-
-Expected output should show:
-
-- rendered monotypes using inference metavariables such as `?1`
-
-### `generalization`
-
-Purpose:
-
-- generalized schemes assigned at top-level binding boundaries
-- which variables remain polymorphic after local constraints are solved
-- how annotations or concrete operations prevent quantification
+- binding-boundary typing facts
+- generalized type schemes stored for names
+- rebinding history at the assignment boundary
+- binding-level annotation behavior
 
 Expected output should show:
 
 - `name: TYPE_SCHEME` lines
 - explicit quantifiers such as `<T>` when a binding is polymorphic
 
-### `instantiation`
+Rules:
 
-Purpose:
-
-- how generalized bindings are reused at later use sites
-- whether each use site receives a fresh instantiation
-- interaction between polymorphic bindings and higher-order calls
-
-Expected output should show:
-
-- generalized binding schemes for top-level assignments
-- instantiated expression result types for later expressions
-
-### `bindings`
-
-Purpose:
-
-- top-level binding results
-- generalized binding types
-- checked binding-level behavior
-
-Expected output should show:
-
-- normalized rendered binding types
-- binding-level checked facts rather than raw engine state
-
-### `substitution`
-
-Purpose:
-
-- propagation of solved types through nested type structure
-- how local constraints update higher-order and returned-function shapes
-- solved binding and call results after inference variables are replaced consistently
-
-Expected output should show:
-
-- generalized binding schemes for top-level assignments when applicable
-- rendered expression result types after solved substitutions have propagated
-
-### `environment`
-
-Purpose:
-
-- binding storage and rebinding across the top-level environment
-- aliasing and reuse of generalized schemes
-- shadowing across function parameters and nested scopes
-
-Expected output should show:
-
-- generalized binding schemes for top-level assignments when applicable
-- rendered expression result types for later uses under the resulting environment
+- `bindings` asks what type scheme gets stored at a binding boundary, not what later use sites
+  evaluate to
+- `bindings` may show repeated top-level rebinding history instead of collapsing to the final
+  export only
+- cases from older `tests/typecheck/deprecated/generalization/` fixtures belong here
 
 ### `interfaces`
 
 Purpose:
 
 - per-file exported interface rendering
-- generalized exported types
+- final exported bindings after top-level rebinding settles
 - exported type definitions
 
 Expected output should show:
 
 - normalized exported bindings
 - exported aliases or nominal declarations
+
+Rules:
+
+- `interfaces` answers what a file exposes, not what happened at each binding boundary
+- `interfaces` may collapse repeated top-level rebindings to the final visible export
+- `interfaces` is separate from `bindings` because its rendered output contract is different
+
+### `unification`
+
+Purpose:
+
+- raw internal inference behavior
+- monotypes produced while inference solves local constraints
+- how expression shapes constrain inference variables before generalization
+
+Expected output should show:
+
+- rendered monotypes using inference metavariables such as `?1`
+
+Rules:
+
+- this suite is internal-facing and optional
+- keep it only when raw metavariable snapshots remain useful as fixtures
+- direct Rust tests are still preferred for tiny `InferenceState` invariants
 
 ### `diagnostics`
 
@@ -371,9 +360,19 @@ Expected output should show:
 
 - final rendered diagnostic text as the user should see it
 
+Rules:
+
+- keep the dedicated diagnostics suite for now
+- do not use diagnostics fixtures as a substitute for missing semantic type-output coverage in
+  `bindings`, `expressions`, or `interfaces`
+- if a future incremental-analysis suite later becomes the owner of full rendered diagnostics,
+  revisit this split then rather than preemptively collapsing it now
+
 ## Testing guidance
 
 - Prefer adding or tightening fixtures before writing parser-local or engine-local unit tests unless the behavior is genuinely awkward to express as a fixture.
 - When adding a new phase or module, add or extend a fixture suite for that phase before relying on ad hoc unit tests.
 - Use the lightest fixture change that captures the failing shape.
 - Keep fixture expectation changes deliberate when output changes.
+- Prefer keeping typecheck coverage in fixtures unless the behavior is too low-level or too
+  mechanical to express clearly in rendered fixture output.

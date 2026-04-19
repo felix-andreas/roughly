@@ -2,15 +2,17 @@
 
 what we are working on:
 
+* typecheck:
+  * I want to improve the testing setup for typecheck phase. currently we have: bindings, expressions, generalization, instantiation, interfaces, subsitutation, unification. is there a more reasonable split. according to the semantics. according to the TYPING_SEMANTICS.md, how can we improve the testing surface. the current approach is relatively poor
+  * do we need: environment: BTreeMap<EnvironmentKey, Binding>,
+  * check if we have good coverage for generalization, instantiation, subsitutation, unification
 
 * naming:
   * in conditionals (should the binding still be resolved correctly?). in current fixture tests they are kept unresolved
   * make conditional test fixture exhaustive
   - (update semantics) maybe later support local types. @new would work only in the same file. also can only be edited in local file (opaque like type)
-* typing
-  * do we need: environment: BTreeMap<EnvironmentKey, Binding>,
-* type syntax errors should be more local
-  * list {age: intgr} <- this should only underline intgr
+* type syntax errors
+  * should be more local: list {age: intgr} <- this should only underline intgr
 * we should only have run_full and run_fast (not check)
 * can we get rid of tree.rs in roughly?
 * saved_document_diagnostics is called twice (not needed)
@@ -22,14 +24,9 @@ what we are working on:
 * we must have a format for builtins (like a .rtypes file or something)
 * simplify check function (is it used by server.rs? shouldn't return diags)
 
-* we should somehow pass config into analysis (e.g. if typecheck or not and if strict or not or if debug (show lowering and parsing on hover))
-
-* question: how do we know if we need to re-run package phases based of document ids?? (if the idea is to do this incrementallys)
-
 * incremental analysis
   * we need a test-suite (we can use multi-file and a dedicated save action)
 
-* we should keep track of what needs to be run
 * should global naming test render global ids or tuple (document_id, binding_id)
 * add wording inherent complexity and irreducible form to agents.md design bar
 

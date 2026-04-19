@@ -60,6 +60,14 @@ identity(count = 1L)
 fn(count: integer) -> integer
 integer
 
+#---- annotated_identity_call
+#: fn(count: integer) -> integer
+identity <- function(count) count
+identity(1L)
+#++++
+fn(count: integer) -> integer
+integer
+
 #---- positional_only_function_rejects_named_argument
 #: fn(integer) -> integer
 identity <- function(value) value
