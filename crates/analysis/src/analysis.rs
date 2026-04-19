@@ -498,6 +498,12 @@ pub fn typecheck(analysis_state: &mut Analysis) {
         .package_naming_output
         .as_ref()
         .unwrap_or_else(|| panic!("missing package naming output for typecheck"));
+    for document_id in &document_ids {
+        let module = analysis_state
+            .module(*document_id)
+            .unwrap_or_else(|| panic!("missing lowered module for typecheck {document_id:?}"));
+        inference_state.register_module_definitions(module);
+    }
     for (symbol, document_id) in &package_naming.output.global_bindings {
         let local_naming = analysis_state
             .document_naming_outputs

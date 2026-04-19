@@ -94,6 +94,7 @@ fn run_bindings_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, S
     let mut lowering_context = LoweringContext::new();
     let module = lower::lower(&document, &mut lowering_context);
     let mut inference_state = inference_state_with_builtins(&mut lowering_context);
+    inference_state.register_module_definitions(&module);
     let mut lines = Vec::new();
 
     for expression_id in &module.expressions {

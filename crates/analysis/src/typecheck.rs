@@ -1,7 +1,7 @@
 use {
     crate::{
         document::DocumentId,
-        hir::{Argument, Expression, ExpressionId, ExpressionKind, HirArena, Module},
+        hir::{Argument, DefinitionKind, Expression, ExpressionId, ExpressionKind, HirArena, Module},
         interner::{Interner, Symbol},
         lower::LoweringContext,
         naming::{
@@ -30,6 +30,7 @@ pub struct InferenceState {
     entries: BTreeMap<InferenceVariableId, InferenceEntry>,
     environment: BTreeMap<EnvironmentKey, Binding>,
     builtins: BTreeMap<Symbol, BuiltinKind>,
+    type_definitions: BTreeMap<Symbol, TypeDefinition>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -44,6 +45,13 @@ struct ResolutionContext<'a> {
     top_level_expression_ids: &'a [ExpressionId],
     local_naming: &'a NamesLocal,
     package_naming: &'a NamesGlobal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TypeDefinition {
+    kind: DefinitionKind,
+    type_parameters: Vec<Symbol>,
+    surface_type: SurfaceType,
 }
 
 pub fn inference_state_with_builtins(lowering_context: &mut LoweringContext) -> InferenceState {
@@ -138,6 +146,19 @@ impl InferenceState {
         self.lookup_global_name(symbol)
     }
 
+    pub fn register_module_definitions(&mut self, module: &Module) {
+        for definition in &module.definitions {
+            self.type_definitions.insert(
+                definition.definition.name,
+                TypeDefinition {
+                    kind: definition.definition.kind,
+                    type_parameters: definition.definition.type_parameters.clone(),
+                    surface_type: definition.definition.surface_type.clone(),
+                },
+            );
+        }
+    }
+
     pub fn infer_module(&mut self, module: &Module) -> Result<Vec<CoreType>, InferenceError> {
         self.infer_module_with_context(module, None)
     }
@@ -166,6 +187,7 @@ impl InferenceState {
         module: &Module,
         resolution_context: Option<&ResolutionContext<'_>>,
     ) -> Result<Vec<CoreType>, InferenceError> {
+        self.register_module_definitions(module);
         let mut inferred_types = Vec::with_capacity(module.expressions.len());
 
         for expression_id in &module.expressions {
@@ -300,8 +322,8 @@ impl InferenceState {
             ExpressionKind::Assign { target, value } => {
                 let annotation = expression.annotation.as_ref();
                 let value_expression = arena.get(*value);
-                let inferred_value = if let Some(expected_function_type) =
-                    checked_function_annotation(annotation)
+                let inferred_value =
+                    if let Some(expected_function_type) = self.checked_function_annotation(annotation)
                 {
                     if let ExpressionKind::Function { parameters, body } = &value_expression.kind {
                         self.infer_function_expression(
@@ -764,6 +786,11 @@ impl InferenceState {
                         self.check_compatibility(actual_argument, expected_argument)
                     })
             }
+            (CoreType::Nominal(actual_name, actual_arguments), other_type) => self
+                .nominal_representation_type(actual_name, &actual_arguments)
+                .is_some_and(|representation_type| {
+                    self.check_compatibility(representation_type, other_type)
+                }),
             (CoreType::Scalar(actual_atomic), CoreType::Vector(expected_atomic)) => {
                 actual_atomic == expected_atomic
             }
@@ -859,7 +886,7 @@ impl InferenceState {
         match annotation.annotation() {
             Annotation::Type { kind, surface_type } => {
                 let actual_type = self.resolve(inferred_type)?;
-                let expected_type = core_type_from_surface_type(surface_type);
+                let expected_type = self.lower_annotation_surface_type(surface_type);
 
                 match kind {
                     TypeAnnotationKind::Checked => {
@@ -898,6 +925,235 @@ impl InferenceState {
             }
             Annotation::New { nominal_type } => Ok(nominal_core_type_from_named_type_ref(nominal_type)),
         }
+    }
+
+    fn checked_function_annotation(
+        &mut self,
+        annotation: Option<&AttachedAnnotation>,
+    ) -> Option<FunctionType<CoreType>> {
+        let annotation = annotation?;
+        match annotation.annotation() {
+            Annotation::Type {
+                kind: TypeAnnotationKind::Checked,
+                surface_type,
+            } => match self.lower_annotation_surface_type(surface_type) {
+                CoreType::Function(function_type) => Some(function_type),
+                _ => None,
+            },
+            Annotation::Type { .. } | Annotation::New { .. } => None,
+        }
+    }
+
+    fn lower_annotation_surface_type(&mut self, surface_type: &SurfaceType) -> CoreType {
+        self.lower_surface_type_with_substitutions(
+            surface_type,
+            &BTreeMap::new(),
+            &mut BTreeSet::new(),
+        )
+    }
+
+    fn lower_surface_type_with_substitutions(
+        &mut self,
+        surface_type: &SurfaceType,
+        substitutions: &BTreeMap<Symbol, CoreType>,
+        expanding_aliases: &mut BTreeSet<Symbol>,
+    ) -> CoreType {
+        match surface_type {
+            SurfaceType::Any => CoreType::Any,
+            SurfaceType::Unknown => CoreType::Unknown,
+            SurfaceType::Null => CoreType::Null,
+            SurfaceType::Nullable(inner_type) => nullable_type(
+                self.lower_surface_type_with_substitutions(inner_type, substitutions, expanding_aliases),
+            ),
+            SurfaceType::Scalar(atomic) => CoreType::Scalar(*atomic),
+            SurfaceType::Named(name, arguments) => {
+                if arguments.is_empty() {
+                    if let Some(core_type) = substitutions.get(name) {
+                        return core_type.clone();
+                    }
+                }
+
+                let lowered_arguments = arguments
+                    .iter()
+                    .map(|argument| {
+                        self.lower_surface_type_with_substitutions(
+                            argument,
+                            substitutions,
+                            expanding_aliases,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let Some(type_definition) = self.type_definitions.get(name).cloned() else {
+                    return CoreType::Unknown;
+                };
+
+                match type_definition.kind {
+                    DefinitionKind::Type => CoreType::Nominal(*name, lowered_arguments),
+                    DefinitionKind::Alias => {
+                        if !expanding_aliases.insert(*name) {
+                            return CoreType::Unknown;
+                        }
+
+                        let lowered_alias = if type_definition.type_parameters.len()
+                            != lowered_arguments.len()
+                        {
+                            CoreType::Unknown
+                        } else {
+                            let mut nested_substitutions = substitutions.clone();
+                            for (type_parameter, lowered_argument) in type_definition
+                                .type_parameters
+                                .iter()
+                                .zip(lowered_arguments)
+                            {
+                                nested_substitutions.insert(*type_parameter, lowered_argument);
+                            }
+
+                            self.lower_surface_type_with_substitutions(
+                                &type_definition.surface_type,
+                                &nested_substitutions,
+                                expanding_aliases,
+                            )
+                        };
+
+                        expanding_aliases.remove(name);
+                        lowered_alias
+                    }
+                }
+            }
+            SurfaceType::Vector(inner_type) => {
+                match self
+                    .lower_surface_type_with_substitutions(inner_type, substitutions, expanding_aliases)
+                {
+                    CoreType::Scalar(atomic) => CoreType::Vector(atomic),
+                    other_type => CoreType::List(Box::new(other_type)),
+                }
+            }
+            SurfaceType::NamedVector(inner_type) => {
+                match self
+                    .lower_surface_type_with_substitutions(inner_type, substitutions, expanding_aliases)
+                {
+                    CoreType::Scalar(atomic) => CoreType::NamedVector(atomic),
+                    other_type => CoreType::NamedList(Box::new(other_type)),
+                }
+            }
+            SurfaceType::List(item_type) => CoreType::List(Box::new(
+                self.lower_surface_type_with_substitutions(item_type, substitutions, expanding_aliases),
+            )),
+            SurfaceType::NamedList(item_type) => CoreType::NamedList(Box::new(
+                self.lower_surface_type_with_substitutions(item_type, substitutions, expanding_aliases),
+            )),
+            SurfaceType::Record(fields) => CoreType::Record(
+                fields
+                    .iter()
+                    .map(|field| {
+                        RecordField::new(
+                            field.name,
+                            self.lower_surface_type_with_substitutions(
+                                &field.value,
+                                substitutions,
+                                expanding_aliases,
+                            ),
+                        )
+                    })
+                    .collect(),
+            ),
+            SurfaceType::Tuple(items) => CoreType::Tuple(
+                items
+                    .iter()
+                    .map(|item| {
+                        self.lower_surface_type_with_substitutions(
+                            item,
+                            substitutions,
+                            expanding_aliases,
+                        )
+                    })
+                    .collect(),
+            ),
+            SurfaceType::Function(function_type) => CoreType::Function(FunctionType::new(
+                function_type
+                    .parameters
+                    .iter()
+                    .map(|parameter| {
+                        self.lower_surface_type_with_substitutions(
+                            parameter,
+                            substitutions,
+                            expanding_aliases,
+                        )
+                    })
+                    .collect(),
+                function_type
+                    .named_parameters
+                    .iter()
+                    .map(|parameter| {
+                        RecordField::with_optional(
+                            parameter.name,
+                            self.lower_surface_type_with_substitutions(
+                                &parameter.value,
+                                substitutions,
+                                expanding_aliases,
+                            ),
+                            parameter.optional,
+                        )
+                    })
+                    .collect(),
+                self.lower_surface_type_with_substitutions(
+                    &function_type.return_type,
+                    substitutions,
+                    expanding_aliases,
+                ),
+            )),
+            SurfaceType::Binders(bound_type_parameters, inner_type) => {
+                if bound_type_parameters.is_empty() {
+                    return self.lower_surface_type_with_substitutions(
+                        inner_type,
+                        substitutions,
+                        expanding_aliases,
+                    );
+                }
+
+                let mut nested_type_parameters = substitutions.clone();
+                for type_parameter in bound_type_parameters {
+                    nested_type_parameters
+                        .insert(*type_parameter, CoreType::Variable(self.fresh_variable()));
+                }
+
+                self.lower_surface_type_with_substitutions(
+                    inner_type,
+                    &nested_type_parameters,
+                    expanding_aliases,
+                )
+            }
+        }
+    }
+
+    fn nominal_representation_type(
+        &mut self,
+        symbol: Symbol,
+        type_arguments: &[CoreType],
+    ) -> Option<CoreType> {
+        let type_definition = self.type_definitions.get(&symbol)?.clone();
+        if type_definition.kind != DefinitionKind::Type {
+            return None;
+        }
+
+        if type_definition.type_parameters.len() != type_arguments.len() {
+            return None;
+        }
+
+        let mut substitutions = BTreeMap::new();
+        for (type_parameter, type_argument) in type_definition
+            .type_parameters
+            .iter()
+            .zip(type_arguments.iter())
+        {
+            substitutions.insert(*type_parameter, type_argument.clone());
+        }
+
+        Some(self.lower_surface_type_with_substitutions(
+            &type_definition.surface_type,
+            &substitutions,
+            &mut BTreeSet::new(),
+        ))
     }
 
     pub fn resolve(&mut self, core_type: CoreType) -> Result<CoreType, InferenceError> {
@@ -2487,22 +2743,6 @@ fn nominal_core_type_from_named_type_ref(named_type_ref: &NamedTypeRef) -> CoreT
             .map(core_type_from_surface_type)
             .collect(),
     )
-}
-
-fn checked_function_annotation(
-    annotation: Option<&AttachedAnnotation>,
-) -> Option<FunctionType<CoreType>> {
-    let annotation = annotation?;
-    match annotation.annotation() {
-        Annotation::Type {
-            kind: TypeAnnotationKind::Checked,
-            surface_type,
-        } => match core_type_from_surface_type(surface_type) {
-            CoreType::Function(function_type) => Some(function_type),
-            _ => None,
-        },
-        Annotation::Type { .. } | Annotation::New { .. } => None,
-    }
 }
 
 fn flatten_expected_parameter_types(function_type: &FunctionType<CoreType>) -> Vec<CoreType> {
