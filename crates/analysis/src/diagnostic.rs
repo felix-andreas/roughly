@@ -421,6 +421,19 @@ impl<'a> TypeRenderer<'a> {
                 format!("{} | NULL", self.render_core_type(inner_type))
             }
             CoreType::Scalar(atomic) => render_atomic(*atomic).to_owned(),
+            CoreType::Nominal(symbol, type_arguments) => {
+                let name = self.interner.resolve(*symbol).unwrap_or("<unknown>");
+                if type_arguments.is_empty() {
+                    name.to_owned()
+                } else {
+                    let rendered_type_arguments = type_arguments
+                        .iter()
+                        .map(|type_argument| self.render_core_type(type_argument))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{name}<{rendered_type_arguments}>")
+                }
+            }
             CoreType::Vector(atomic) => format!("{}[]", render_atomic(*atomic)),
             CoreType::NamedVector(atomic) => format!("{}[named]", render_atomic(*atomic)),
             CoreType::List(item_type) => format!("list[{}]", self.render_core_type(item_type)),

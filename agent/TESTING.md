@@ -319,17 +319,25 @@ Purpose:
 - per-file exported interface rendering
 - final exported bindings after top-level rebinding settles
 - exported type definitions
+- mixed exported value-plus-type surface
 
 Expected output should show:
 
 - normalized exported bindings
 - exported aliases or nominal declarations
+- final surviving export order
+- function interface shapes, including named or optional parameters when present
 
 Rules:
 
 - `interfaces` answers what a file exposes, not what happened at each binding boundary
 - `interfaces` may collapse repeated top-level rebindings to the final visible export
 - `interfaces` is separate from `bindings` because its rendered output contract is different
+- default to `Simple` fixtures here; most interface rules are file-local exported-surface checks
+- if multi-file support lands, use it here only for several independent file-local interface
+  snapshots in one workspace state
+- cross-file value/type visibility, package winner behavior, and later-generation workspace edits
+  belong in `project`, not `interfaces`
 
 ### `unification`
 

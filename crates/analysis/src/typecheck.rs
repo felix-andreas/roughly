@@ -10,7 +10,7 @@ use {
         },
         types::{
             Annotation, Atomic, AttachedAnnotation, CoreType, FunctionType, InferenceVariableId,
-            RecordField, SurfaceType, TypeAnnotationKind, TypeScheme,
+            NamedTypeRef, RecordField, SurfaceType, TypeAnnotationKind, TypeScheme,
         },
     },
     std::collections::{BTreeMap, BTreeSet},
@@ -753,6 +753,17 @@ impl InferenceState {
             (other_type, CoreType::Nullable(inner_type)) => {
                 self.check_compatibility(other_type, *inner_type)
             }
+            (
+                CoreType::Nominal(actual_name, actual_arguments),
+                CoreType::Nominal(expected_name, expected_arguments),
+            ) if actual_name == expected_name && actual_arguments.len() == expected_arguments.len() => {
+                actual_arguments
+                    .into_iter()
+                    .zip(expected_arguments)
+                    .all(|(actual_argument, expected_argument)| {
+                        self.check_compatibility(actual_argument, expected_argument)
+                    })
+            }
             (CoreType::Scalar(actual_atomic), CoreType::Vector(expected_atomic)) => {
                 actual_atomic == expected_atomic
             }
@@ -845,10 +856,9 @@ impl InferenceState {
         inferred_type: CoreType,
         expression: &Expression,
     ) -> Result<CoreType, InferenceError> {
-        let actual_type = self.resolve(inferred_type)?;
-
         match annotation.annotation() {
             Annotation::Type { kind, surface_type } => {
+                let actual_type = self.resolve(inferred_type)?;
                 let expected_type = core_type_from_surface_type(surface_type);
 
                 match kind {
@@ -886,7 +896,7 @@ impl InferenceState {
                     TypeAnnotationKind::Trusted => Ok(expected_type),
                 }
             }
-            Annotation::New { .. } => Ok(actual_type),
+            Annotation::New { nominal_type } => Ok(nominal_core_type_from_named_type_ref(nominal_type)),
         }
     }
 
@@ -896,6 +906,13 @@ impl InferenceState {
             CoreType::Nullable(inner_type) => {
                 let resolved_inner_type = self.resolve(*inner_type)?;
                 Ok(nullable_type(resolved_inner_type))
+            }
+            CoreType::Nominal(symbol, type_arguments) => {
+                let mut resolved_type_arguments = Vec::with_capacity(type_arguments.len());
+                for type_argument in type_arguments {
+                    resolved_type_arguments.push(self.resolve(type_argument)?);
+                }
+                Ok(CoreType::Nominal(symbol, resolved_type_arguments))
             }
             CoreType::List(item_type) => {
                 let resolved_item_type = self.resolve(*item_type)?;
@@ -972,6 +989,18 @@ impl InferenceState {
                 let unified_type = self.unify_internal(*left_type, *right_type, expression)?;
                 Ok(nullable_type(unified_type))
             }
+            (
+                CoreType::Nominal(left_name, left_arguments),
+                CoreType::Nominal(right_name, right_arguments),
+            ) if left_name == right_name && left_arguments.len() == right_arguments.len() => {
+                let mut unified_arguments = Vec::with_capacity(left_arguments.len());
+                for (left_argument, right_argument) in left_arguments.into_iter().zip(right_arguments)
+                {
+                    unified_arguments
+                        .push(self.unify_internal(left_argument, right_argument, expression)?);
+                }
+                Ok(CoreType::Nominal(left_name, unified_arguments))
+            }
             (CoreType::Nullable(inner_type), CoreType::Null)
             | (CoreType::Null, CoreType::Nullable(inner_type)) => {
                 Ok(CoreType::Nullable(inner_type))
@@ -1029,6 +1058,14 @@ impl InferenceState {
         match self.resolve(core_type.clone())? {
             CoreType::Variable(other_variable) => Ok(variable == other_variable),
             CoreType::Nullable(inner_type) => self.occurs_in(variable, &inner_type),
+            CoreType::Nominal(_, type_arguments) => {
+                for type_argument in type_arguments {
+                    if self.occurs_in(variable, &type_argument)? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
             CoreType::List(item_type) => self.occurs_in(variable, &item_type),
             CoreType::NamedList(item_type) => self.occurs_in(variable, &item_type),
             CoreType::Record(fields) => {
@@ -1895,6 +1932,14 @@ impl InferenceState {
                 self.instantiate_core_type(inner_type, substitutions)?,
             )),
             CoreType::Scalar(atomic) => Ok(CoreType::Scalar(*atomic)),
+            CoreType::Nominal(symbol, type_arguments) => {
+                let mut instantiated_type_arguments = Vec::with_capacity(type_arguments.len());
+                for type_argument in type_arguments {
+                    instantiated_type_arguments
+                        .push(self.instantiate_core_type(type_argument, substitutions)?);
+                }
+                Ok(CoreType::Nominal(*symbol, instantiated_type_arguments))
+            }
             CoreType::Vector(atomic) => Ok(CoreType::Vector(*atomic)),
             CoreType::NamedVector(atomic) => Ok(CoreType::NamedVector(*atomic)),
             CoreType::List(item_type) => Ok(CoreType::List(Box::new(
@@ -2015,6 +2060,13 @@ impl InferenceState {
             | CoreType::NamedVector(_) => Ok(BTreeSet::new()),
             CoreType::Nullable(inner_type) => self.free_type_variables_in_core_type(&inner_type),
             CoreType::Variable(variable) => Ok(BTreeSet::from([variable])),
+            CoreType::Nominal(_, type_arguments) => {
+                let mut free_variables = BTreeSet::new();
+                for type_argument in type_arguments {
+                    free_variables.extend(self.free_type_variables_in_core_type(&type_argument)?);
+                }
+                Ok(free_variables)
+            }
             CoreType::List(item_type) => self.free_type_variables_in_core_type(&item_type),
             CoreType::NamedList(item_type) => self.free_type_variables_in_core_type(&item_type),
             CoreType::Record(fields) => {
@@ -2424,6 +2476,17 @@ fn core_type_from_surface_type(surface_type: &SurfaceType) -> CoreType {
         )),
         SurfaceType::Binders(_, inner_type) => core_type_from_surface_type(inner_type),
     }
+}
+
+fn nominal_core_type_from_named_type_ref(named_type_ref: &NamedTypeRef) -> CoreType {
+    CoreType::Nominal(
+        named_type_ref.name,
+        named_type_ref
+            .type_arguments
+            .iter()
+            .map(core_type_from_surface_type)
+            .collect(),
+    )
 }
 
 fn checked_function_annotation(

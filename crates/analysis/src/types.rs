@@ -28,6 +28,7 @@ pub enum CoreType {
     Null,
     Nullable(Box<CoreType>),
     Scalar(Atomic),
+    Nominal(Symbol, Vec<CoreType>),
     Vector(Atomic),
     NamedVector(Atomic),
     List(Box<CoreType>),
