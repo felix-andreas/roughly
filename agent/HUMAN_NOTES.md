@@ -1,9 +1,9 @@
 # Human Notes (!AIs are not allowed to edit!)
 
-what we are working on:
+* next step: migrate ide features to analysis
+* rename tree.rs to ast.rs
 
 * typecheck:
-  * I want to improve the testing setup for typecheck phase. currently we have: bindings, expressions, generalization, instantiation, interfaces, subsitutation, unification. is there a more reasonable split. according to the semantics. according to the TYPING_SEMANTICS.md, how can we improve the testing surface. the current approach is relatively poor
   * do we need: environment: BTreeMap<EnvironmentKey, Binding>,
   * check if we have good coverage for generalization, instantiation, subsitutation, unification
 

@@ -153,6 +153,14 @@ impl Diagnostic {
                 let name = interner.resolve(*symbol).unwrap_or("<unknown>");
                 (*range, format!("I could not find `{name}` in scope."))
             }
+            InferenceError::AliasCycle {
+                symbol,
+                range,
+                expression_id: _,
+            } => {
+                let name = interner.resolve(*symbol).unwrap_or("<unknown>");
+                (*range, format!("Type alias `{name}` expands in a cycle."))
+            }
             InferenceError::ExpectedFunction {
                 actual_type,
                 range,

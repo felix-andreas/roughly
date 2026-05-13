@@ -17,7 +17,7 @@ use {
         resolve_package,
         tree::new_parser,
         type_syntax::{parse_type_syntax, render_type_syntax},
-        typecheck::inference_state_with_builtins,
+        typecheck::{TypeDefinitionEnvironment, inference_state_with_builtins},
     },
     fixture_renderers::{
         render_expression_error_kind, render_expression_types, render_interface_snapshot,
@@ -94,13 +94,13 @@ fn run_bindings_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, S
     let mut lowering_context = LoweringContext::new();
     let module = lower::lower(&document, &mut lowering_context);
     let mut inference_state = inference_state_with_builtins(&mut lowering_context);
-    inference_state.register_module_definitions(&module);
+    let type_definitions = TypeDefinitionEnvironment::from_module(&module);
     let mut lines = Vec::new();
 
     for expression_id in &module.expressions {
         let expression = module.arena.get(*expression_id);
         inference_state
-            .infer_expression(expression, &module.arena)
+            .infer_expression(expression, &module.arena, &type_definitions)
             .map_err(|error| render_expression_error_kind(&error).to_owned())?;
 
         if let ExpressionKind::Assign { target, .. } = &expression.kind {
@@ -184,7 +184,8 @@ fn run_expression_type_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFi
     let mut lowering_context = LoweringContext::new();
     let module = lower::lower(&document, &mut lowering_context);
     let mut inference_state = inference_state_with_builtins(&mut lowering_context);
-    let inferred_types = match inference_state.infer_module(&module) {
+    let type_definitions = TypeDefinitionEnvironment::from_module(&module);
+    let inferred_types = match inference_state.infer_module(&module, &type_definitions) {
         Ok(inferred_types) => inferred_types,
         Err(error) => {
             return Ok(vec![vec![FixtureRunFile {
@@ -209,8 +210,9 @@ fn run_interfaces_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>,
     let mut lowering_context = LoweringContext::new();
     let module = lower::lower(&document, &mut lowering_context);
     let mut inference_state = inference_state_with_builtins(&mut lowering_context);
+    let type_definitions = TypeDefinitionEnvironment::from_module(&module);
 
-    if inference_state.infer_module(&module).is_err() {
+    if inference_state.infer_module(&module, &type_definitions).is_err() {
         return Ok(vec![vec![FixtureRunFile {
             path: PathBuf::new(),
             output: "error: inference".to_owned(),

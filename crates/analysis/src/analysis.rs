@@ -11,7 +11,7 @@ use {
             resolve_document_locally,
         },
         tree,
-        typecheck::inference_state_with_builtins_in_interner,
+        typecheck::{TypeDefinitionEnvironment, inference_state_with_builtins_in_interner},
     },
     ropey::Rope,
     std::{
@@ -492,18 +492,19 @@ pub fn typecheck(analysis_state: &mut Analysis) {
     }
 
     let document_ids = analysis_state.package_document_ids();
+    let type_definitions = TypeDefinitionEnvironment::from_modules(document_ids.iter().map(
+        |document_id| {
+            analysis_state
+                .module(*document_id)
+                .unwrap_or_else(|| panic!("missing lowered module for typecheck {document_id:?}"))
+        },
+    ));
     let mut inference_state =
         inference_state_with_builtins_in_interner(analysis_state.interner_mut());
     let package_naming = analysis_state
         .package_naming_output
         .as_ref()
         .unwrap_or_else(|| panic!("missing package naming output for typecheck"));
-    for document_id in &document_ids {
-        let module = analysis_state
-            .module(*document_id)
-            .unwrap_or_else(|| panic!("missing lowered module for typecheck {document_id:?}"));
-        inference_state.register_module_definitions(module);
-    }
     for (symbol, document_id) in &package_naming.output.global_bindings {
         let local_naming = analysis_state
             .document_naming_outputs
@@ -547,6 +548,7 @@ pub fn typecheck(analysis_state: &mut Analysis) {
             module,
             &local_naming.output,
             &package_naming.output,
+            &type_definitions,
         ) {
             diagnostics.insert(
                 document_id,

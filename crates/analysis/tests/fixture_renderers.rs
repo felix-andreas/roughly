@@ -15,6 +15,7 @@ pub fn render_expression_error_kind(error: &InferenceError) -> &'static str {
     match error {
         InferenceError::UnknownInferenceVariable(_) => "error: unknown inference variable",
         InferenceError::UnknownName { .. } => "error: unknown name",
+        InferenceError::AliasCycle { .. } => "error: alias cycle",
         InferenceError::ExpectedFunction { .. } => "error: expected function",
         InferenceError::OccursCheckFailed { .. } => "error: occurs check failed",
         InferenceError::TypeMismatch { .. } => "error: type mismatch",
