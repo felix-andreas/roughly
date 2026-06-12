@@ -242,14 +242,21 @@ impl InferenceState {
                     errors.push(error);
                     expression_types.push(CoreType::Unknown);
                     if let ExpressionKind::Assign { target, .. } = &expression.kind {
+                        // Later references reach a failed top-level binding through both the
+                        // local and the package-global lookup path, so recovery binds both.
                         let recovery_scheme = TypeScheme::monomorphic(CoreType::Unknown);
                         if let Some(binding_id) = local_naming
                             .expression_resolutions
                             .get(expression_id)
                             .copied()
                         {
-                            self.bind_local_scheme(binding_id, recovery_scheme, expression.range);
-                        } else {
+                            self.bind_local_scheme(
+                                binding_id,
+                                recovery_scheme.clone(),
+                                expression.range,
+                            );
+                        }
+                        if package_naming.global_bindings.contains_key(target) {
                             self.bind_global_scheme(*target, recovery_scheme, expression.range);
                         }
                     }
@@ -2884,6 +2891,21 @@ impl InferenceState {
         Ok(CoreType::Variable(right))
     }
 
+    // Interface schemes computed by another `InferenceState` carry variable ids that mean
+    // nothing here, so importing re-binds quantified variables to fresh local ids and erases
+    // any stray free variable to `Unknown`.
+    pub fn import_scheme(&mut self, type_scheme: &TypeScheme) -> TypeScheme {
+        let mut substitutions = BTreeMap::new();
+        for variable in &type_scheme.quantified_variables {
+            substitutions.insert(*variable, self.fresh_variable());
+        }
+
+        TypeScheme {
+            quantified_variables: substitutions.values().copied().collect(),
+            body: import_core_type(&type_scheme.body, &substitutions),
+        }
+    }
+
     fn instantiate_type_scheme(
         &mut self,
         type_scheme: &TypeScheme,
@@ -3384,6 +3406,76 @@ fn homogeneous_structural_item_type(items: &[CoreType]) -> Option<CoreType> {
         Some(first_item)
     } else {
         None
+    }
+}
+
+fn import_core_type(
+    core_type: &CoreType,
+    substitutions: &BTreeMap<InferenceVariableId, InferenceVariableId>,
+) -> CoreType {
+    match core_type {
+        CoreType::Any => CoreType::Any,
+        CoreType::Unknown => CoreType::Unknown,
+        CoreType::Null => CoreType::Null,
+        CoreType::Nullable(inner_type) => nullable_type(import_core_type(inner_type, substitutions)),
+        CoreType::Scalar(atomic) => CoreType::Scalar(*atomic),
+        CoreType::Nominal(symbol, type_arguments) => CoreType::Nominal(
+            *symbol,
+            type_arguments
+                .iter()
+                .map(|type_argument| import_core_type(type_argument, substitutions))
+                .collect(),
+        ),
+        CoreType::Vector(atomic) => CoreType::Vector(*atomic),
+        CoreType::NamedVector(atomic) => CoreType::NamedVector(*atomic),
+        CoreType::List(item_type) => {
+            CoreType::List(Box::new(import_core_type(item_type, substitutions)))
+        }
+        CoreType::NamedList(item_type) => {
+            CoreType::NamedList(Box::new(import_core_type(item_type, substitutions)))
+        }
+        CoreType::Record(fields) => CoreType::Record(
+            fields
+                .iter()
+                .map(|field| {
+                    RecordField::with_optional(
+                        field.name,
+                        import_core_type(&field.value, substitutions),
+                        field.optional,
+                    )
+                })
+                .collect(),
+        ),
+        CoreType::Tuple(items) => CoreType::Tuple(
+            items
+                .iter()
+                .map(|item| import_core_type(item, substitutions))
+                .collect(),
+        ),
+        CoreType::Function(function_type) => CoreType::Function(FunctionType::new(
+            function_type
+                .parameters
+                .iter()
+                .map(|parameter| import_core_type(parameter, substitutions))
+                .collect(),
+            function_type
+                .named_parameters
+                .iter()
+                .map(|parameter| {
+                    RecordField::with_optional(
+                        parameter.name,
+                        import_core_type(&parameter.value, substitutions),
+                        parameter.optional,
+                    )
+                })
+                .collect(),
+            import_core_type(&function_type.return_type, substitutions),
+        )),
+        CoreType::Variable(variable) => substitutions
+            .get(variable)
+            .copied()
+            .map(CoreType::Variable)
+            .unwrap_or(CoreType::Unknown),
     }
 }
 

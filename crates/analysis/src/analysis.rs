@@ -15,6 +15,7 @@ use {
         typecheck::{
             ExportedValue, TypeDefinitionEnvironment, inference_state_with_builtins_in_interner,
         },
+        types::{CoreType, TypeScheme},
     },
     ropey::Rope,
     std::{
@@ -580,13 +581,58 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         let local_naming = analysis_state
             .document_naming(*document_id)
             .unwrap_or_else(|| panic!("missing local naming for typecheck {document_id:?}"));
+
+        // The interface is computed in isolation from other documents, but same-document
+        // top-level references must still resolve, so the document's own names form the
+        // global table here. A second pass rebinding the first pass's schemes settles
+        // acyclic define-then-alias and forward-reference shapes; cyclic references keep
+        // `Unknown` in the exported interface.
+        let mut own_naming = NamesGlobal::default();
+        let mut own_symbols = Vec::new();
+        for expression_id in &module.expressions {
+            let expression = module.arena.get(*expression_id);
+            if let crate::hir::ExpressionKind::Assign { target, .. } = &expression.kind
+                && !own_naming.global_bindings.contains_key(target)
+            {
+                own_naming.global_bindings.insert(*target, *document_id);
+                own_symbols.push((*target, expression.range));
+            }
+        }
+
+        let mut draft_state = template_state.clone();
+        for (symbol, range) in &own_symbols {
+            draft_state.bind_global_scheme(
+                *symbol,
+                TypeScheme::monomorphic(CoreType::Unknown),
+                *range,
+            );
+        }
+        let _ = draft_state.check_module_with_naming(
+            *document_id,
+            module,
+            local_naming,
+            &own_naming,
+            &type_definitions,
+        );
+        let draft_exports = draft_state.exported_value_schemes(module, local_naming);
+
         let mut inference_state = template_state.clone();
-        let isolated_naming = NamesGlobal::default();
+        for (symbol, range) in &own_symbols {
+            inference_state.bind_global_scheme(
+                *symbol,
+                TypeScheme::monomorphic(CoreType::Unknown),
+                *range,
+            );
+        }
+        for export in &draft_exports {
+            let imported_scheme = inference_state.import_scheme(&export.type_scheme);
+            inference_state.bind_global_scheme(export.symbol, imported_scheme, export.range);
+        }
         let _ = inference_state.check_module_with_naming(
             *document_id,
             module,
             local_naming,
-            &isolated_naming,
+            &own_naming,
             &type_definitions,
         );
         let exports = inference_state.exported_value_schemes(module, local_naming);
@@ -701,11 +747,8 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
             };
         let mut inference_state = template_state.clone();
         for export in &global_schemes {
-            inference_state.bind_global_scheme(
-                export.symbol,
-                export.type_scheme.clone(),
-                export.range,
-            );
+            let imported_scheme = inference_state.import_scheme(&export.type_scheme);
+            inference_state.bind_global_scheme(export.symbol, imported_scheme, export.range);
         }
         let module_check = inference_state.check_module_with_naming(
             *document_id,
@@ -745,7 +788,7 @@ impl Analysis {
         path.starts_with(self.base_path.join("R"))
     }
 
-    pub(crate) fn all_document_ids(&self) -> Vec<DocumentId> {
+    pub fn all_document_ids(&self) -> Vec<DocumentId> {
         let mut document_ids = self.documents.keys().copied().collect::<Vec<_>>();
         document_ids.sort_by_key(|document_id| document_id.0);
         document_ids

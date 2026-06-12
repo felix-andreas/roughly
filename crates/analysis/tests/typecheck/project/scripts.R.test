@@ -44,3 +44,57 @@ No diagnostics.
 #: @type Person {list{age: double}}
 #++++
 No diagnostics.
+
+#==== script_typing
+#---- script_self_reference_typechecks_sequentially
+#---- R/pkg.R
+pkg_value <- 1L
+#++++
+No diagnostics.
+#---- scripts/local.R
+count <- 1L
+
+#: integer
+doubled <- count + count
+#++++
+No diagnostics.
+
+#---- script_rebinding_uses_latest_type
+#---- R/pkg.R
+pkg_value <- 1L
+#++++
+No diagnostics.
+#---- scripts/local.R
+value <- 1L
+value <- "text"
+
+#: character
+label <- value
+#++++
+No diagnostics.
+
+#---- script_annotation_error_reports
+#---- R/pkg.R
+pkg_value <- 1L
+#++++
+No diagnostics.
+#---- scripts/local.R
+#: integer
+x <- "wrong"
+#++++
+error[type-error] expected `integer`, found `character`
+--> 2:1-2:13
+| x <- "wrong"
+
+#---- script_local_type_shadows_package_type
+#---- R/pkg.R
+#: @type Person {list{name: character}}
+#++++
+No diagnostics.
+#---- scripts/local.R
+#: @type Person {list{age: double}}
+
+#: @new Person
+person <- list(age = 20)
+#++++
+No diagnostics.

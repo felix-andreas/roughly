@@ -94,7 +94,6 @@ fn run_project_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, St
     let FixtureKind::MultiFile(case) = &fixture.kind else {
         return Err("unsupported fixture".to_owned());
     };
-    let mut parser = new_parser().unwrap();
     let mut analysis_state = Analysis::new(
         PathBuf::new(),
         LintConfig::default(),
@@ -103,35 +102,113 @@ fn run_project_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, St
             typing: true,
         },
     );
-    let mut contents_by_path = BTreeMap::new();
+
     for entry in &case.initial_generation.entries {
-        let FixtureOperation::CreateDocument { path, contents } = &entry.operation else {
-            continue;
-        };
-        let document = Document::parse(&mut parser, contents).expect("parse fixture document");
-        analysis_state.add_document(path.clone(), document);
-        contents_by_path.insert(path.clone(), contents.clone());
+        apply_project_operation(&mut analysis_state, &entry.operation)?;
+    }
+    let mut snapshots = vec![render_project_snapshot(&mut analysis_state)?];
+    for generation in &case.generations {
+        for entry in &generation.entries {
+            apply_project_operation(&mut analysis_state, &entry.operation)?;
+        }
+        snapshots.push(render_project_snapshot(&mut analysis_state)?);
     }
 
-    analysis::run_full(&mut analysis_state);
+    return Ok(snapshots);
 
-    let files = contents_by_path
-        .into_iter()
-        .map(|(path, contents)| {
-            let document_id = analysis_state
-                .document_id_for_path(&path)
-                .ok_or_else(|| "missing document id".to_owned())?;
-            Ok(FixtureRunFile {
-                output: render_diagnostics(
-                    &contents,
-                    &analysis_state.document_diagnostics(document_id),
-                ),
+    fn apply_project_operation(
+        analysis_state: &mut Analysis,
+        operation: &FixtureOperation,
+    ) -> Result<(), String> {
+        match operation {
+            FixtureOperation::CreateDocument { path, contents } => analysis_state
+                .add_document_from_source(path.clone(), contents)
+                .map(|_| ())
+                .map_err(|error| format!("failed to add `{}`: {error:?}", path.display())),
+            FixtureOperation::EditDocument {
                 path,
-            })
-        })
-        .collect::<Result<Vec<_>, String>>()?;
+                range,
+                replacement_text,
+            } => analysis_state
+                .edit_document(
+                    path,
+                    &[DocumentChange {
+                        range: fixture_text_range(*range),
+                        text: replacement_text.clone(),
+                    }],
+                )
+                .map_err(|error| format!("failed to edit `{}`: {error:?}", path.display())),
+            FixtureOperation::MoveDocument {
+                source_path,
+                destination_path,
+            } => {
+                let source = analysis_state
+                    .document(source_path)
+                    .ok_or_else(|| format!("missing source document `{}`", source_path.display()))?
+                    .rope()
+                    .to_string();
+                analysis_state
+                    .add_document_from_source(destination_path.clone(), &source)
+                    .map_err(|error| {
+                        format!("failed to move `{}`: {error:?}", destination_path.display())
+                    })?;
+                analysis_state
+                    .delete_document(source_path)
+                    .map_err(|error| {
+                        format!("failed to delete `{}`: {error:?}", source_path.display())
+                    })
+            }
+            FixtureOperation::DeleteDocument { path } => analysis_state
+                .delete_document(path)
+                .map_err(|error| format!("failed to delete `{}`: {error:?}", path.display())),
+            FixtureOperation::Action { action, .. } => {
+                Err(format!("project fixtures do not support `{action}` actions"))
+            }
+        }
+    }
 
-    Ok(vec![files])
+    fn render_project_snapshot(
+        analysis_state: &mut Analysis,
+    ) -> Result<Vec<FixtureRunFile>, String> {
+        analysis::run_full(analysis_state);
+        let mut files = analysis_state
+            .all_document_ids()
+            .into_iter()
+            .map(|document_id| {
+                let path = analysis_state
+                    .path_for_document_id(document_id)
+                    .ok_or_else(|| "missing path for document".to_owned())?
+                    .to_path_buf();
+                let contents = analysis_state
+                    .document_by_id(document_id)
+                    .ok_or_else(|| "missing document".to_owned())?
+                    .rope()
+                    .to_string();
+                Ok(FixtureRunFile {
+                    output: render_diagnostics(
+                        &contents,
+                        &analysis_state.document_diagnostics(document_id),
+                    ),
+                    path,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        files.sort_by(|left, right| left.path.cmp(&right.path));
+        Ok(files)
+    }
+
+    fn fixture_text_range(range: fixtures::FixtureRange) -> TextRange {
+        TextRange {
+            start: TextPosition {
+                line_index: range.start.line_number - 1,
+                character_index: range.start.column_number - 1,
+            },
+            end: TextPosition {
+                line_index: range.end.line_number - 1,
+                character_index: range.end.column_number - 1,
+            },
+        }
+    }
 }
 
 fn run_bindings_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String> {

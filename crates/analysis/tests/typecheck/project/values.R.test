@@ -46,3 +46,35 @@ No diagnostics.
 render <- function(count) "ok"
 #++++
 No diagnostics.
+
+#==== multiple_errors
+#---- several_errors_in_one_file_all_report
+#---- R/a.R
+#: integer
+first <- "one"
+#: integer
+second <- "two"
+#++++
+error[type-error] expected `integer`, found `character`
+--> 2:1-2:15
+| first <- "one"
+
+error[type-error] expected `integer`, found `character`
+--> 4:1-4:16
+| second <- "two"
+
+#---- errors_in_several_files_all_report
+#---- R/a.R
+#: integer
+first <- "one"
+#++++
+error[type-error] expected `integer`, found `character`
+--> 2:1-2:15
+| first <- "one"
+#---- R/b.R
+#: integer
+second <- "two"
+#++++
+error[type-error] expected `integer`, found `character`
+--> 2:1-2:16
+| second <- "two"
