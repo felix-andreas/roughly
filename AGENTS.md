@@ -1,6 +1,8 @@
 # Roughly
 
-Roughly is a language tool for R, built as a language server plus CLI. It aims to be world class at three things: code analysis on the level of rust-analyzer, code formatting, and linting.
+Roughly is a language tool for R, built as a language server plus CLI. It aims to be world class at three things: code analysis on the level of rust-analyzer — with a static type checker at its core — plus code formatting and linting.
+
+The type checker is central: no static type checker exists for R, so Roughly defines its own typing semantics (the contract lives in `agent/TYPING_SEMANTICS.md`). Because R itself has no type-annotation syntax, annotations are written in `#:` comments using a JSDoc-like notation, which keeps annotated code fully compatible with ordinary R tooling.
 
 Crates:
 

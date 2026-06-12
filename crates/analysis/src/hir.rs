@@ -146,6 +146,9 @@ pub enum ExpressionKind {
     Repeat {
         body: ExpressionId,
     },
+    UnaryNot {
+        value: ExpressionId,
+    },
     UnaryMinus {
         value: ExpressionId,
     },
@@ -195,6 +198,7 @@ impl DefinitionKind {
 pub struct Parameter {
     pub symbol: Symbol,
     pub range: Range,
+    pub has_default: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -314,7 +318,14 @@ impl Module {
             ExpressionKind::Function { parameters, body } => {
                 let params = parameters
                     .iter()
-                    .map(|p| interner.resolve(p.symbol).unwrap_or("<unknown>"))
+                    .map(|p| {
+                        let name = interner.resolve(p.symbol).unwrap_or("<unknown>");
+                        if p.has_default {
+                            format!("{name} = <default>")
+                        } else {
+                            name.to_owned()
+                        }
+                    })
                     .collect::<Vec<_>>()
                     .join(", ");
                 out.push_str(&format!("{prefix}Function ({params})\n"));
@@ -353,6 +364,10 @@ impl Module {
             }
             ExpressionKind::UnaryMinus { value } => {
                 out.push_str(&format!("{prefix}UnaryMinus\n"));
+                self.render_expression(*value, indent + 1, out, interner);
+            }
+            ExpressionKind::UnaryNot { value } => {
+                out.push_str(&format!("{prefix}UnaryNot\n"));
                 self.render_expression(*value, indent + 1, out, interner);
             }
             ExpressionKind::Call { callee, arguments } => {

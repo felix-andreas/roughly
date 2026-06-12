@@ -25,7 +25,7 @@ f <- function(x) {
 }
 #++++
 integer
-fn(?1) -> ?1
+fn(x: ?1) -> ?1
 
 #---- nested_function_access
 f <- function() {
@@ -70,7 +70,7 @@ x
 f("ok")
 #++++
 integer
-fn(?1) -> ?1
+fn(x: ?1) -> ?1
 integer
 character
 

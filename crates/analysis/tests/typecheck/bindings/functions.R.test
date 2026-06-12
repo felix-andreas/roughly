@@ -12,12 +12,12 @@ label: character
 #---- identity_binding
 identity <- function(x) x
 #++++
-identity: <T> fn(T) -> T
+identity: <T> fn(x: T) -> T
 
 #---- first_binding
 first <- function(x, y) x
 #++++
-first: <T, U> fn(T, U) -> T
+first: <T, U> fn(x: T, y: U) -> T
 
 #---- annotated_optional_parameter_binding
 #: @param {integer} count
@@ -30,19 +30,19 @@ double_count: fn(count: integer, [label]: character) -> integer
 #---- constant_function_binding
 render <- function(count) "ok"
 #++++
-render: <T> fn(T) -> character
+render: <T> fn(count: T) -> character
 
 #---- constant_integer_function_binding
 const_integer <- function(x) 1L
 #++++
-const_integer: <T> fn(T) -> integer
+const_integer: <T> fn(x: T) -> integer
 
 #---- alias_of_polymorphic_binding
 identity <- function(x) x
 alias <- identity
 #++++
-identity: <T> fn(T) -> T
-alias: <T> fn(T) -> T
+identity: <T> fn(x: T) -> T
+alias: <T> fn(x: T) -> T
 
 #---- annotated_monomorphic_binding
 #: fn(integer) -> integer
@@ -59,4 +59,4 @@ double_count: fn(count: integer) -> integer
 #---- higher_order_apply_binding
 apply <- function(f, value) f(value)
 #++++
-apply: <T, U> fn(fn(T) -> U, T) -> U
+apply: <T, U> fn(f: fn(T) -> U, value: T) -> U

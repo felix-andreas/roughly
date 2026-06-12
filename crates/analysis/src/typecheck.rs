@@ -12,7 +12,7 @@ use {
         },
         types::{
             Annotation, Atomic, AttachedAnnotation, CoreType, FunctionType, InferenceVariableId,
-            NamedTypeRef, RecordField, SurfaceType, TypeAnnotationKind, TypeScheme,
+            RecordField, SurfaceType, TypeAnnotationKind, TypeScheme,
         },
     },
     std::collections::{BTreeMap, BTreeSet},
@@ -96,25 +96,32 @@ pub fn inference_state_with_builtins(lowering_context: &mut LoweringContext) -> 
 pub fn inference_state_with_builtins_in_interner(interner: &mut Interner) -> InferenceState {
     let mut inference_state = InferenceState::new();
 
-    let plus_symbol = interner.intern("+");
-    let minus_symbol = interner.intern("-");
-    let multiply_symbol = interner.intern("*");
-    let divide_symbol = interner.intern("/");
-    let power_symbol = interner.intern("**");
-    let and_symbol = interner.intern("&&");
-    let or_symbol = interner.intern("||");
-    let combine_symbol = interner.intern("c");
-    let list_symbol = interner.intern("list");
+    let builtin_kinds = [
+        ("+", BuiltinKind::Plus),
+        ("-", BuiltinKind::Minus),
+        ("*", BuiltinKind::Multiply),
+        ("/", BuiltinKind::Divide),
+        ("**", BuiltinKind::Power),
+        ("^", BuiltinKind::Power),
+        ("%%", BuiltinKind::Modulo),
+        ("%/%", BuiltinKind::IntegerDivide),
+        (":", BuiltinKind::Colon),
+        ("<", BuiltinKind::Compare),
+        ("<=", BuiltinKind::Compare),
+        (">", BuiltinKind::Compare),
+        (">=", BuiltinKind::Compare),
+        ("==", BuiltinKind::Compare),
+        ("!=", BuiltinKind::Compare),
+        ("&&", BuiltinKind::And),
+        ("||", BuiltinKind::Or),
+        ("c", BuiltinKind::Combine),
+        ("list", BuiltinKind::List),
+    ];
 
-    inference_state.bind_builtin(plus_symbol, BuiltinKind::Plus);
-    inference_state.bind_builtin(minus_symbol, BuiltinKind::Minus);
-    inference_state.bind_builtin(multiply_symbol, BuiltinKind::Multiply);
-    inference_state.bind_builtin(divide_symbol, BuiltinKind::Divide);
-    inference_state.bind_builtin(power_symbol, BuiltinKind::Power);
-    inference_state.bind_builtin(and_symbol, BuiltinKind::And);
-    inference_state.bind_builtin(or_symbol, BuiltinKind::Or);
-    inference_state.bind_builtin(combine_symbol, BuiltinKind::Combine);
-    inference_state.bind_builtin(list_symbol, BuiltinKind::List);
+    for (name, builtin_kind) in builtin_kinds {
+        let symbol = interner.intern(name);
+        inference_state.bind_builtin(symbol, builtin_kind);
+    }
 
     inference_state
 }
@@ -529,6 +536,12 @@ impl InferenceState {
                 resolution_context,
                 type_definitions,
             ),
+            ExpressionKind::UnaryNot { value } => self.infer_unary_not(
+                arena.get(*value),
+                arena,
+                resolution_context,
+                type_definitions,
+            ),
             ExpressionKind::Call { callee, arguments } => {
                 let callee_expr = arena.get(*callee);
                 if let ExpressionKind::Symbol(symbol) = &callee_expr.kind
@@ -691,8 +704,21 @@ impl InferenceState {
             inferred_return_type
         };
 
-        let function_type =
-            CoreType::Function(FunctionType::new(parameter_types, Vec::new(), return_type));
+        // R parameters are always matchable by name and by position, so inferred function
+        // types carry every parameter as a named parameter; parameters with a default value
+        // are optional at call sites.
+        let named_parameter_types = parameters
+            .iter()
+            .zip(parameter_types)
+            .map(|(parameter, parameter_type)| {
+                RecordField::with_optional(parameter.symbol, parameter_type, parameter.has_default)
+            })
+            .collect();
+        let function_type = CoreType::Function(FunctionType::new(
+            Vec::new(),
+            named_parameter_types,
+            return_type,
+        ));
 
         self.environment = parent_environment;
         Ok(function_type)
@@ -863,6 +889,12 @@ impl InferenceState {
                 .is_ok());
         }
 
+        if let CoreType::Variable(expected_var) = expected_type {
+            return Ok(self
+                .unify_internal(actual_type, CoreType::Variable(expected_var), None)
+                .is_ok());
+        }
+
         match (actual_type, expected_type) {
             (CoreType::Unknown, CoreType::Any) => Ok(true),
             (CoreType::Null, CoreType::Nullable(_)) => Ok(true),
@@ -953,66 +985,48 @@ impl InferenceState {
                     expression,
                 ),
             (CoreType::Function(actual_function), CoreType::Function(expected_function)) => {
-                let actual_positional_parameters = actual_function.parameters;
-                let actual_named_parameters = actual_function.named_parameters;
-                let expected_positional_parameters = expected_function.parameters;
-                let expected_named_parameters = expected_function.named_parameters;
-
-                if actual_named_parameters.is_empty() && expected_named_parameters.is_empty() {
-                    if actual_positional_parameters.len() != expected_positional_parameters.len() {
-                        return Ok(false);
-                    }
-
-                    for (actual_param, expected_param) in actual_positional_parameters
-                        .into_iter()
-                        .zip(expected_positional_parameters)
-                    {
-                        if !self.check_compatibility(
-                            actual_param,
-                            expected_param,
-                            type_definitions,
-                            expression,
-                        )? {
-                            return Ok(false);
-                        }
-                    }
-
-                    return self.check_compatibility(
-                        *actual_function.return_type,
-                        *expected_function.return_type,
-                        type_definitions,
-                        expression,
-                    );
-                }
-
                 let actual_parameter_count =
-                    actual_positional_parameters.len() + actual_named_parameters.len();
+                    actual_function.parameters.len() + actual_function.named_parameters.len();
                 let expected_parameter_count =
-                    expected_positional_parameters.len() + expected_named_parameters.len();
+                    expected_function.parameters.len() + expected_function.named_parameters.len();
 
                 if actual_parameter_count != expected_parameter_count {
                     return Ok(false);
                 }
 
-                let mut actual_parameters = Vec::with_capacity(actual_parameter_count);
-                for actual_parameter in actual_positional_parameters {
-                    actual_parameters.push(actual_parameter);
-                }
-                for actual_parameter in actual_named_parameters {
-                    actual_parameters.push(actual_parameter.value);
-                }
+                let mut actual_parameters = actual_function
+                    .parameters
+                    .into_iter()
+                    .map(|parameter| (parameter, false))
+                    .collect::<Vec<_>>();
+                actual_parameters.extend(
+                    actual_function
+                        .named_parameters
+                        .into_iter()
+                        .map(|parameter| (parameter.value, parameter.optional)),
+                );
 
-                let mut expected_parameters = Vec::with_capacity(expected_parameter_count);
-                for expected_parameter in expected_positional_parameters {
-                    expected_parameters.push(expected_parameter);
-                }
-                for expected_parameter in expected_named_parameters {
-                    expected_parameters.push(expected_parameter.value);
-                }
+                let mut expected_parameters = expected_function
+                    .parameters
+                    .into_iter()
+                    .map(|parameter| (parameter, false))
+                    .collect::<Vec<_>>();
+                expected_parameters.extend(
+                    expected_function
+                        .named_parameters
+                        .into_iter()
+                        .map(|parameter| (parameter.value, parameter.optional)),
+                );
 
-                for (actual_param, expected_param) in
+                for ((actual_param, actual_optional), (expected_param, expected_optional)) in
                     actual_parameters.into_iter().zip(expected_parameters)
                 {
+                    // An expected-optional parameter promises callers they may omit it, so
+                    // the actual function must have a default for that parameter.
+                    if expected_optional && !actual_optional {
+                        return Ok(false);
+                    }
+
                     if !self.check_compatibility(
                         actual_param,
                         expected_param,
@@ -1091,7 +1105,53 @@ impl InferenceState {
                 }
             }
             Annotation::New { nominal_type } => {
-                Ok(nominal_core_type_from_named_type_ref(nominal_type))
+                let lowered_arguments = nominal_type
+                    .type_arguments
+                    .iter()
+                    .map(|argument| {
+                        self.lower_annotation_surface_type(
+                            argument,
+                            type_definitions,
+                            Some(expression),
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                // Naming already diagnoses `@new` on unknown names, aliases, and wrong type
+                // argument arity; typecheck recovers without piling on a second diagnostic.
+                let is_nominal_definition = type_definitions
+                    .get(nominal_type.name)
+                    .is_some_and(|definition| definition.kind == DefinitionKind::Type);
+                if !is_nominal_definition {
+                    return self.resolve(inferred_type);
+                }
+
+                let Some(representation_type) = self.nominal_representation_type(
+                    nominal_type.name,
+                    &lowered_arguments,
+                    type_definitions,
+                    Some(expression),
+                )?
+                else {
+                    return self.resolve(inferred_type);
+                };
+
+                let actual_type = self.resolve(inferred_type)?;
+                if self.check_compatibility(
+                    actual_type.clone(),
+                    representation_type.clone(),
+                    type_definitions,
+                    Some(expression),
+                )? {
+                    Ok(CoreType::Nominal(nominal_type.name, lowered_arguments))
+                } else {
+                    Err(InferenceError::TypeMismatch {
+                        expected: Box::new(representation_type),
+                        actual: Box::new(actual_type),
+                        range: Some(expression.range),
+                        expression_id: Some(expression.id),
+                    })
+                }
             }
         }
     }
@@ -1612,6 +1672,34 @@ impl InferenceState {
         };
 
         match builtin_kind {
+            BuiltinKind::Modulo | BuiltinKind::IntegerDivide => self
+                .infer_binary_numeric(
+                    arguments,
+                    expression,
+                    NumericResultAtomic::Promote,
+                    arena,
+                    resolution_context,
+                    type_definitions,
+                )
+                .map(Some),
+            BuiltinKind::Colon => self
+                .infer_builtin_colon(
+                    arguments,
+                    expression,
+                    arena,
+                    resolution_context,
+                    type_definitions,
+                )
+                .map(Some),
+            BuiltinKind::Compare => self
+                .infer_builtin_compare(
+                    arguments,
+                    expression,
+                    arena,
+                    resolution_context,
+                    type_definitions,
+                )
+                .map(Some),
             BuiltinKind::Plus => self
                 .infer_builtin_plus(
                     arguments,
@@ -1820,18 +1908,12 @@ impl InferenceState {
 
         let (left_shape, left_atomic) = match left_shape_atomic {
             Some(parts) => parts,
-            None if matches!(resolved_left, CoreType::Variable(_)) => {
-                return Err(InferenceError::InvalidPlusOperand {
-                    actual: resolved_left.clone(),
-                    range: arg0.range,
-                    expression_id: arg0.id,
-                });
-            }
             None if matches!(resolved_left, CoreType::Any | CoreType::Unknown) => {
                 return Ok(CoreType::Unknown);
             }
             None => {
-                return Err(InferenceError::InvalidPlusOperand {
+                return Err(InferenceError::InvalidOperand {
+                    expected: OperandExpectation::Numeric,
                     actual: resolved_left.clone(),
                     range: arg0.range,
                     expression_id: arg0.id,
@@ -1841,18 +1923,12 @@ impl InferenceState {
 
         let (right_shape, right_atomic) = match right_shape_atomic {
             Some(parts) => parts,
-            None if matches!(resolved_right, CoreType::Variable(_)) => {
-                return Err(InferenceError::InvalidPlusOperand {
-                    actual: resolved_right.clone(),
-                    range: arg1.range,
-                    expression_id: arg1.id,
-                });
-            }
             None if matches!(resolved_right, CoreType::Any | CoreType::Unknown) => {
                 return Ok(CoreType::Unknown);
             }
             None => {
-                return Err(InferenceError::InvalidPlusOperand {
+                return Err(InferenceError::InvalidOperand {
+                    expected: OperandExpectation::Numeric,
                     actual: resolved_right.clone(),
                     range: arg1.range,
                     expression_id: arg1.id,
@@ -1888,22 +1964,163 @@ impl InferenceState {
 
         match numeric_operand_parts(&resolved_type) {
             Some((shape, atomic)) => Ok(core_type_for_shape(shape, atomic)),
-            None if matches!(resolved_type, CoreType::Variable(_)) => {
-                Err(InferenceError::InvalidPlusOperand {
-                    actual: resolved_type,
-                    range: value.range,
-                    expression_id: value.id,
-                })
-            }
             None if matches!(resolved_type, CoreType::Any | CoreType::Unknown) => {
                 Ok(CoreType::Unknown)
             }
-            None => Err(InferenceError::InvalidPlusOperand {
-                actual: resolved_type.clone(),
+            None => Err(InferenceError::InvalidOperand {
+                expected: OperandExpectation::Numeric,
+                actual: resolved_type,
                 range: value.range,
                 expression_id: value.id,
             }),
         }
+    }
+
+    fn infer_unary_not(
+        &mut self,
+        value: &Expression,
+        arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<CoreType, InferenceError> {
+        let inferred_type =
+            self.infer_expression_with_context(value, arena, resolution_context, type_definitions)?;
+        let resolved_type = self.resolve(inferred_type)?;
+
+        match resolved_type {
+            CoreType::Scalar(Atomic::Logical) => Ok(CoreType::Scalar(Atomic::Logical)),
+            CoreType::Vector(Atomic::Logical) | CoreType::NamedVector(Atomic::Logical) => {
+                Ok(CoreType::Vector(Atomic::Logical))
+            }
+            CoreType::Any | CoreType::Unknown => Ok(CoreType::Unknown),
+            CoreType::Variable(_) => {
+                self.unify_with_context(
+                    CoreType::Scalar(Atomic::Logical),
+                    resolved_type,
+                    value,
+                )?;
+                Ok(CoreType::Scalar(Atomic::Logical))
+            }
+            other_type => Err(InferenceError::InvalidOperand {
+                expected: OperandExpectation::Logical,
+                actual: other_type,
+                range: value.range,
+                expression_id: value.id,
+            }),
+        }
+    }
+
+    fn infer_builtin_compare(
+        &mut self,
+        arguments: &[Argument],
+        expression: &Expression,
+        arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<CoreType, InferenceError> {
+        if arguments.len() != 2 {
+            return Err(InferenceError::FunctionArityMismatch {
+                expected: 2,
+                actual: arguments.len(),
+                range: Some(expression.range),
+                expression_id: Some(expression.id),
+            });
+        }
+
+        let arg0 = arena.get(arguments[0].expression);
+        let arg1 = arena.get(arguments[1].expression);
+        let left_type =
+            self.infer_expression_with_context(arg0, arena, resolution_context, type_definitions)?;
+        let right_type =
+            self.infer_expression_with_context(arg1, arena, resolution_context, type_definitions)?;
+        let resolved_left = self.resolve(left_type)?;
+        let resolved_right = self.resolve(right_type)?;
+
+        if matches!(resolved_left, CoreType::Any | CoreType::Unknown)
+            || matches!(resolved_right, CoreType::Any | CoreType::Unknown)
+        {
+            return Ok(CoreType::Unknown);
+        }
+
+        let Some((left_shape, left_family)) = comparison_operand_parts(&resolved_left) else {
+            return Err(InferenceError::InvalidOperand {
+                expected: OperandExpectation::Comparable,
+                actual: resolved_left,
+                range: arg0.range,
+                expression_id: arg0.id,
+            });
+        };
+        let Some((right_shape, right_family)) = comparison_operand_parts(&resolved_right) else {
+            return Err(InferenceError::InvalidOperand {
+                expected: OperandExpectation::Comparable,
+                actual: resolved_right,
+                range: arg1.range,
+                expression_id: arg1.id,
+            });
+        };
+
+        if left_family != right_family {
+            return Err(InferenceError::TypeMismatch {
+                expected: Box::new(resolved_left),
+                actual: Box::new(resolved_right),
+                range: Some(expression.range),
+                expression_id: Some(expression.id),
+            });
+        }
+
+        let result_shape = if matches!(left_shape, OperandShape::Vector)
+            || matches!(right_shape, OperandShape::Vector)
+        {
+            OperandShape::Vector
+        } else {
+            OperandShape::Scalar
+        };
+        Ok(core_type_for_shape(result_shape, Atomic::Logical))
+    }
+
+    fn infer_builtin_colon(
+        &mut self,
+        arguments: &[Argument],
+        expression: &Expression,
+        arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<CoreType, InferenceError> {
+        if arguments.len() != 2 {
+            return Err(InferenceError::FunctionArityMismatch {
+                expected: 2,
+                actual: arguments.len(),
+                range: Some(expression.range),
+                expression_id: Some(expression.id),
+            });
+        }
+
+        let mut result_atomic = Atomic::Integer;
+        for argument in arguments {
+            let argument_expression = arena.get(argument.expression);
+            let inferred_argument = self.infer_expression_with_context(
+                argument_expression,
+                arena,
+                resolution_context,
+                type_definitions,
+            )?;
+            let resolved_argument = self.resolve(inferred_argument)?;
+            match resolved_argument {
+                CoreType::Scalar(Atomic::Integer) => {}
+                CoreType::Scalar(Atomic::Double) => result_atomic = Atomic::Double,
+                CoreType::Any | CoreType::Unknown => return Ok(CoreType::Unknown),
+                other_type => {
+                    return Err(InferenceError::InvalidOperand {
+                        expected: OperandExpectation::ScalarNumeric,
+                        actual: other_type,
+                        range: argument_expression.range,
+                        expression_id: argument_expression.id,
+                    });
+                }
+            }
+        }
+
+        Ok(CoreType::Vector(result_atomic))
     }
 
     fn infer_function_call_expression(
@@ -2028,19 +2245,24 @@ impl InferenceState {
                 };
 
                 let parameter = remaining_named_parameters.remove(parameter_index);
-                self.unify_with_context(parameter.value, inferred_argument, arg_expr)?;
+                self.check_argument(parameter.value, inferred_argument, arg_expr, type_definitions)?;
                 continue;
             }
 
             if let Some(parameter) = positional_parameters.get(next_positional_index) {
                 next_positional_index += 1;
-                self.unify_with_context(parameter.clone(), inferred_argument, arg_expr)?;
+                self.check_argument(
+                    parameter.clone(),
+                    inferred_argument,
+                    arg_expr,
+                    type_definitions,
+                )?;
                 continue;
             }
 
             if !remaining_named_parameters.is_empty() {
                 let parameter = remaining_named_parameters.remove(0);
-                self.unify_with_context(parameter.value, inferred_argument, arg_expr)?;
+                self.check_argument(parameter.value, inferred_argument, arg_expr, type_definitions)?;
                 continue;
             }
 
@@ -2066,6 +2288,39 @@ impl InferenceState {
         }
 
         self.resolve(return_type)
+    }
+
+    // Arguments are checked with compatibility, not unification, so coercions like
+    // scalar-to-vector and `T` into `T | NULL` work at parameter positions. An `Unknown`
+    // argument is accepted to avoid cascading a second error after the cause was already
+    // diagnosed where the value became `Unknown`.
+    fn check_argument(
+        &mut self,
+        parameter_type: CoreType,
+        argument_type: CoreType,
+        argument_expression: &Expression,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<(), InferenceError> {
+        let resolved_argument = self.resolve(argument_type)?;
+        if resolved_argument == CoreType::Unknown {
+            return Ok(());
+        }
+
+        if self.check_compatibility(
+            resolved_argument.clone(),
+            parameter_type.clone(),
+            type_definitions,
+            Some(argument_expression),
+        )? {
+            return Ok(());
+        }
+
+        Err(InferenceError::TypeMismatch {
+            expected: Box::new(self.resolve(parameter_type)?),
+            actual: Box::new(resolved_argument),
+            range: Some(argument_expression.range),
+            expression_id: Some(argument_expression.id),
+        })
     }
 
     fn infer_subset_expression(
@@ -2303,7 +2558,7 @@ impl InferenceState {
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<CoreType, InferenceError> {
         if arguments.is_empty() {
-            return Ok(CoreType::Unknown);
+            return Ok(CoreType::Null);
         }
 
         let mut item_atomic = None;
@@ -2794,47 +3049,41 @@ impl InferenceState {
         Ok(CoreType::Record(unified_fields))
     }
 
+    // Parameters unify positionally across the flattened positional-then-named parameter
+    // list: parameter names describe the call interface, not the identity of the function
+    // type, so `fn(integer) -> NULL` and `fn(count: integer) -> NULL` unify. The left
+    // function's interface (names and positional split) is kept for the result.
     fn unify_functions(
         &mut self,
         left_function: FunctionType<CoreType>,
         right_function: FunctionType<CoreType>,
         expression: Option<&Expression>,
     ) -> Result<FunctionType<CoreType>, InferenceError> {
-        if left_function.parameters.len() != right_function.parameters.len() {
+        let left_total = left_function.parameters.len() + left_function.named_parameters.len();
+        let right_total = right_function.parameters.len() + right_function.named_parameters.len();
+        if left_total != right_total {
             return Err(InferenceError::FunctionArityMismatch {
-                expected: left_function.parameters.len(),
-                actual: right_function.parameters.len(),
+                expected: left_total,
+                actual: right_total,
                 range: expression.map(|current_expression| current_expression.range),
                 expression_id: expression.map(|current_expression| current_expression.id),
             });
         }
 
-        let left_named_names: BTreeSet<_> = left_function
-            .named_parameters
-            .iter()
-            .map(|parameter| parameter.name)
-            .collect();
-        let right_named_names: BTreeSet<_> = right_function
-            .named_parameters
-            .iter()
-            .map(|parameter| parameter.name)
-            .collect();
-
-        if left_named_names != right_named_names {
-            return Err(InferenceError::NamedParameterMismatch {
-                expected_parameters: left_named_names.into_iter().collect(),
-                actual_parameters: right_named_names.into_iter().collect(),
-                range: expression.map(|current_expression| current_expression.range),
-                expression_id: expression.map(|current_expression| current_expression.id),
-            });
-        }
+        let mut right_parameter_types = right_function.parameters;
+        right_parameter_types.extend(
+            right_function
+                .named_parameters
+                .into_iter()
+                .map(|parameter| parameter.value),
+        );
+        let mut right_parameter_iter = right_parameter_types.into_iter();
 
         let mut unified_parameters = Vec::with_capacity(left_function.parameters.len());
-        for (left_parameter, right_parameter) in left_function
-            .parameters
-            .into_iter()
-            .zip(right_function.parameters)
-        {
+        for left_parameter in left_function.parameters {
+            let right_parameter = right_parameter_iter
+                .next()
+                .expect("parameter totals were checked to match");
             unified_parameters.push(self.unify_internal(
                 left_parameter,
                 right_parameter,
@@ -2842,31 +3091,17 @@ impl InferenceState {
             )?);
         }
 
-        let right_named_by_name: BTreeMap<_, _> = right_function
-            .named_parameters
-            .into_iter()
-            .map(|parameter| (parameter.name, (parameter.value, parameter.optional)))
-            .collect();
-
         let mut unified_named_parameters = Vec::with_capacity(left_function.named_parameters.len());
         for left_named_parameter in left_function.named_parameters {
-            let Some((right_value, right_optional)) =
-                right_named_by_name.get(&left_named_parameter.name).cloned()
-            else {
-                return Err(InferenceError::NamedParameterMismatch {
-                    expected_parameters: vec![left_named_parameter.name],
-                    actual_parameters: Vec::new(),
-                    range: expression.map(|current_expression| current_expression.range),
-                    expression_id: expression.map(|current_expression| current_expression.id),
-                });
-            };
-
+            let right_parameter = right_parameter_iter
+                .next()
+                .expect("parameter totals were checked to match");
             let unified_value =
-                self.unify_internal(left_named_parameter.value, right_value, expression)?;
+                self.unify_internal(left_named_parameter.value, right_parameter, expression)?;
             unified_named_parameters.push(RecordField::with_optional(
                 left_named_parameter.name,
                 unified_value,
-                left_named_parameter.optional || right_optional,
+                left_named_parameter.optional,
             ));
         }
 
@@ -2903,10 +3138,46 @@ pub enum BuiltinKind {
     Multiply,
     Divide,
     Power,
+    Modulo,
+    IntegerDivide,
+    Colon,
+    Compare,
     And,
     Or,
     Combine,
     List,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperandExpectation {
+    Numeric,
+    ScalarNumeric,
+    Logical,
+    Comparable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ComparisonFamily {
+    Numeric,
+    Character,
+    Logical,
+}
+
+fn comparison_operand_parts(core_type: &CoreType) -> Option<(OperandShape, ComparisonFamily)> {
+    let (shape, atomic) = match core_type {
+        CoreType::Scalar(atomic) => (OperandShape::Scalar, *atomic),
+        CoreType::Vector(atomic) | CoreType::NamedVector(atomic) => (OperandShape::Vector, *atomic),
+        _ => return None,
+    };
+
+    let family = match atomic {
+        Atomic::Integer | Atomic::Double => ComparisonFamily::Numeric,
+        Atomic::Character => ComparisonFamily::Character,
+        Atomic::Logical => ComparisonFamily::Logical,
+        Atomic::Complex | Atomic::Raw => return None,
+    };
+
+    Some((shape, family))
 }
 
 fn numeric_operand_parts(core_type: &CoreType) -> Option<(OperandShape, Atomic)> {
@@ -3037,73 +3308,6 @@ fn alias_cycle_error(symbol: Symbol, expression: Option<&Expression>) -> Inferen
     }
 }
 
-fn core_type_from_surface_type(surface_type: &SurfaceType) -> CoreType {
-    match surface_type {
-        SurfaceType::Any => CoreType::Any,
-        SurfaceType::Unknown => CoreType::Unknown,
-        SurfaceType::Null => CoreType::Null,
-        SurfaceType::Nullable(inner_type) => nullable_type(core_type_from_surface_type(inner_type)),
-        SurfaceType::Scalar(atomic) => CoreType::Scalar(*atomic),
-        SurfaceType::Named(_, _) => CoreType::Unknown,
-        SurfaceType::Vector(inner_type) => match core_type_from_surface_type(inner_type) {
-            CoreType::Scalar(atomic) => CoreType::Vector(atomic),
-            other_type => CoreType::List(Box::new(other_type)),
-        },
-        SurfaceType::NamedVector(inner_type) => match core_type_from_surface_type(inner_type) {
-            CoreType::Scalar(atomic) => CoreType::NamedVector(atomic),
-            other_type => CoreType::NamedList(Box::new(other_type)),
-        },
-        SurfaceType::List(item_type) => {
-            CoreType::List(Box::new(core_type_from_surface_type(item_type)))
-        }
-        SurfaceType::NamedList(item_type) => {
-            CoreType::NamedList(Box::new(core_type_from_surface_type(item_type)))
-        }
-        SurfaceType::Record(fields) => CoreType::Record(
-            fields
-                .iter()
-                .map(|field| {
-                    RecordField::new(field.name, core_type_from_surface_type(&field.value))
-                })
-                .collect(),
-        ),
-        SurfaceType::Tuple(items) => {
-            CoreType::Tuple(items.iter().map(core_type_from_surface_type).collect())
-        }
-        SurfaceType::Function(function_type) => CoreType::Function(FunctionType::new(
-            function_type
-                .parameters
-                .iter()
-                .map(core_type_from_surface_type)
-                .collect(),
-            function_type
-                .named_parameters
-                .iter()
-                .map(|parameter| {
-                    RecordField::with_optional(
-                        parameter.name,
-                        core_type_from_surface_type(&parameter.value),
-                        parameter.optional,
-                    )
-                })
-                .collect(),
-            core_type_from_surface_type(&function_type.return_type),
-        )),
-        SurfaceType::Binders(_, inner_type) => core_type_from_surface_type(inner_type),
-    }
-}
-
-fn nominal_core_type_from_named_type_ref(named_type_ref: &NamedTypeRef) -> CoreType {
-    CoreType::Nominal(
-        named_type_ref.name,
-        named_type_ref
-            .type_arguments
-            .iter()
-            .map(core_type_from_surface_type)
-            .collect(),
-    )
-}
-
 fn flatten_expected_parameter_types(function_type: &FunctionType<CoreType>) -> Vec<CoreType> {
     let mut parameter_types =
         Vec::with_capacity(function_type.parameters.len() + function_type.named_parameters.len());
@@ -3147,7 +3351,8 @@ pub enum InferenceError {
         range: Option<Range>,
         expression_id: Option<ExpressionId>,
     },
-    InvalidPlusOperand {
+    InvalidOperand {
+        expected: OperandExpectation,
         actual: CoreType,
         range: Range,
         expression_id: ExpressionId,

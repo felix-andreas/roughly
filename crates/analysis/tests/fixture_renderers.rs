@@ -19,7 +19,7 @@ pub fn render_expression_error_kind(error: &InferenceError) -> &'static str {
         InferenceError::ExpectedFunction { .. } => "error: expected function",
         InferenceError::OccursCheckFailed { .. } => "error: occurs check failed",
         InferenceError::TypeMismatch { .. } => "error: type mismatch",
-        InferenceError::InvalidPlusOperand { .. } => "error: invalid plus operand",
+        InferenceError::InvalidOperand { .. } => "error: invalid operand",
         InferenceError::TupleLengthMismatch { .. } => "error: tuple length mismatch",
         InferenceError::MixedListElements { .. } => "error: mixed list elements",
         InferenceError::RecordFieldMismatch { .. } => "error: record field mismatch",
@@ -394,6 +394,10 @@ fn render_named_expression(
             lines.push(format!("{prefix}UnaryMinus"));
             render_nested(*value, indent + 1, lines);
         }
+        ExpressionKind::UnaryNot { value } => {
+            lines.push(format!("{prefix}UnaryNot"));
+            render_nested(*value, indent + 1, lines);
+        }
         ExpressionKind::Call { callee, arguments } => {
             lines.push(format!("{prefix}Call"));
             render_nested(*callee, indent + 1, lines);
@@ -550,6 +554,10 @@ fn render_locally_named_expression(
         }
         ExpressionKind::UnaryMinus { value } => {
             lines.push(format!("{prefix}UnaryMinus"));
+            render_nested(*value, indent + 1, lines);
+        }
+        ExpressionKind::UnaryNot { value } => {
+            lines.push(format!("{prefix}UnaryNot"));
             render_nested(*value, indent + 1, lines);
         }
         ExpressionKind::Call { callee, arguments } => {

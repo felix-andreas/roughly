@@ -54,6 +54,6 @@ identity <- function(x) x
 mixed_apply <- apply(identity)
 mixed_apply("ok")
 #++++
-error[type-error] expected `numeric`, found `type1`
+error[type-error] expected a numeric value (`integer` or `double`), found `type1`
 --> 1:36-1:37
 | apply <- function(f) function(x) f(x + 1L)

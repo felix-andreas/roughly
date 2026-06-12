@@ -13,7 +13,7 @@ value: integer
 identity <- function(x) x
 identity <- function(x) 1L
 #++++
-identity: <T> fn(T) -> integer
+identity: <T> fn(x: T) -> integer
 
 #---- generic_alias_export
 #: @alias Box<T> {list{value: T}}

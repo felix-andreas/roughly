@@ -778,7 +778,7 @@ impl<'a> DocumentNamingContext<'a> {
             ExpressionKind::Repeat { body } => {
                 self.resolve_expression(*body);
             }
-            ExpressionKind::UnaryMinus { value } => {
+            ExpressionKind::UnaryMinus { value } | ExpressionKind::UnaryNot { value } => {
                 self.resolve_expression(*value);
             }
             ExpressionKind::Call { callee, arguments } => {

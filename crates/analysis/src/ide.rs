@@ -207,6 +207,7 @@ fn render_expression_hover(analysis: &Analysis, expression: &Expression) -> Stri
         ExpressionKind::While { .. } => "While".to_owned(),
         ExpressionKind::Repeat { .. } => "Repeat".to_owned(),
         ExpressionKind::UnaryMinus { .. } => "UnaryMinus".to_owned(),
+        ExpressionKind::UnaryNot { .. } => "UnaryNot".to_owned(),
         ExpressionKind::Call { arguments, .. } => {
             format!("Call(arguments: {})", arguments.len())
         }

@@ -1,7 +1,7 @@
 use {
     crate::{
         interner::{Interner, Symbol},
-        typecheck::InferenceError,
+        typecheck::{InferenceError, OperandExpectation},
         types::{Atomic, CoreType, InferenceVariableId, TypeScheme},
     },
     std::{collections::BTreeMap, fmt},
@@ -207,16 +207,27 @@ impl Diagnostic {
                     ),
                 )
             }
-            InferenceError::InvalidPlusOperand {
+            InferenceError::InvalidOperand {
+                expected,
                 actual,
                 range,
                 expression_id: _,
             } => {
                 let mut type_renderer = TypeRenderer::diagnostic(interner);
+                let expected_description = match expected {
+                    OperandExpectation::Numeric => "a numeric value (`integer` or `double`)",
+                    OperandExpectation::ScalarNumeric => {
+                        "a scalar numeric value (`integer` or `double`)"
+                    }
+                    OperandExpectation::Logical => "a `logical` value",
+                    OperandExpectation::Comparable => {
+                        "a comparable value (numeric, `character`, or `logical`)"
+                    }
+                };
                 (
                     *range,
                     format!(
-                        "expected `numeric`, found `{}`",
+                        "expected {expected_description}, found `{}`",
                         type_renderer.render(actual)
                     ),
                 )

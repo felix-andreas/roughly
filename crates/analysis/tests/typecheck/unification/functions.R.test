@@ -2,27 +2,27 @@
 #---- identity_function_literal
 function(x) x
 #++++
-fn(?1) -> ?1
+fn(x: ?1) -> ?1
 
 #---- constant_function_literal
 function(x) 1L
 #++++
-fn(?1) -> integer
+fn(x: ?1) -> integer
 
 #---- higher_order_apply_literal
 function(f, value) f(value)
 #++++
-fn(fn(?1) -> ?2, ?1) -> ?2
+fn(f: fn(?1) -> ?2, value: ?1) -> ?2
 
 #---- two_parameter_function_literal
 function(x, y) x
 #++++
-fn(?1, ?2) -> ?1
+fn(x: ?1, y: ?2) -> ?1
 
 #---- function_returning_identity_literal
 function(f) function(x) f(x)
 #++++
-fn(fn(?1) -> ?2) -> fn(?1) -> ?2
+fn(f: fn(?1) -> ?2) -> fn(x: ?1) -> ?2
 
 #---- self_application_occurs_check
 function(x) x(x)

@@ -8,7 +8,7 @@ integer
 identity <- function(x) x
 identity(1L)
 #++++
-fn(?1) -> ?1
+fn(x: ?1) -> ?1
 integer
 
 #==== mismatch_errors

@@ -62,4 +62,4 @@ integer[]
 #---- string_plus_integer
 "foo" + 4L
 #++++
-error: invalid plus operand
+error: invalid operand

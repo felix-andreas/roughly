@@ -197,11 +197,41 @@ fn lower_binary_operator(
 
             ExpressionKind::Assign { target, value }
         }
+        kind::SPECIAL => {
+            let operator_text = node_text(operator, rope);
+            if operator_text != "%%" && operator_text != "%/%" {
+                return ExpressionKind::Unsupported;
+            }
+
+            let operator_symbol = intern_node_text(operator, rope, lowering_context);
+            let callee = lowering_context
+                .expression(operator.range(), ExpressionKind::Symbol(operator_symbol));
+            let arguments = vec![
+                Argument {
+                    expression: lower_node_with_rope(lhs, rope, lowering_context),
+                    name: None,
+                },
+                Argument {
+                    expression: lower_node_with_rope(rhs, rope, lowering_context),
+                    name: None,
+                },
+            ];
+
+            ExpressionKind::Call { callee, arguments }
+        }
         kind::PLUS
         | kind::MINUS
         | kind::STAR
         | kind::SLASH
         | kind::DOUBLE_STAR
+        | kind::CARET
+        | kind::COLON
+        | kind::LT
+        | kind::LTE
+        | kind::GT
+        | kind::GTE
+        | kind::EQEQ
+        | kind::NEQ
         | kind::DOUBLE_AMPERSAND
         | kind::DOUBLE_PIPE => {
             let operator_symbol = intern_node_text(operator, rope, lowering_context);
@@ -256,6 +286,9 @@ fn lower_unary_operator(
 
     match operator.kind_id() {
         kind::MINUS => ExpressionKind::UnaryMinus {
+            value: lower_node_with_rope(value, rope, lowering_context),
+        },
+        kind::EXCLAMATION => ExpressionKind::UnaryNot {
             value: lower_node_with_rope(value, rope, lowering_context),
         },
         _ => ExpressionKind::Unsupported,
@@ -376,6 +409,7 @@ fn lower_parameters(
                 lowered_parameters.push(Parameter {
                     symbol: intern_node_text(child, rope, lowering_context),
                     range: child.range(),
+                    has_default: false,
                 });
             }
             kind::PARAMETER => {
@@ -385,6 +419,7 @@ fn lower_parameters(
                     lowered_parameters.push(Parameter {
                         symbol: intern_node_text(name, rope, lowering_context),
                         range: name.range(),
+                        has_default: child.child_by_field_id(field::DEFAULT).is_some(),
                     });
                 }
             }

@@ -97,7 +97,7 @@ f <- function(count, label = NULL) count
 #++++
 #: fn(count: integer, [label]: character) -> integer
 Assign f
-  Function (count, label)
+  Function (count, label = <default>)
     Symbol(count)
 
 #---- generic_expanded_annotation

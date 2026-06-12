@@ -20,7 +20,7 @@ Function (a, b, c)
 #---- parameter_with_default
 function(count, label = NULL) count
 #++++
-Function (count, label)
+Function (count, label = <default>)
   Symbol(count)
 
 #---- simple_call

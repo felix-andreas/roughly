@@ -36,7 +36,12 @@ If
 for (i in 1:10) print(i)
 #++++
 For i
-  Unsupported
+  Call
+    Symbol(:)
+    Argument:
+      Double("1")
+    Argument:
+      Double("10")
   Call
     Symbol(print)
     Argument:

@@ -2,7 +2,7 @@
 #---- string_plus_integer
 "foo" + 4L
 #++++
-error[type-error] expected `numeric`, found `character`
+error[type-error] expected a numeric value (`integer` or `double`), found `character`
 --> 1:1-1:6
 | "foo" + 4L
 
