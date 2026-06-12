@@ -149,10 +149,9 @@ The parser now understands both fixture shapes.
 `naming/local` uses `Simple` cases and runs only the file-local naming pass.
 `naming/global` uses `MultiFile` cases and runs package-global naming on the initial generation.
 `typecheck/project` uses `MultiFile` cases and runs the full pipeline with typing enabled.
-Older engine-centric typecheck fixture files still live under `tests/typecheck/deprecated/`
-(`generalization`, `instantiation`, `substitution`, `environment`) as migration storage; they are
-not wired as active suites. The active split is `bindings`, `expressions`, `interfaces`,
-`project`, and the internal `unification` suite.
+The old engine-centric `tests/typecheck/deprecated/` migration storage is deleted. The active
+split is `bindings`, `expressions`, `interfaces`, `project`, and the internal `unification`
+suite.
 The other analysis fixture runners still execute only `Simple` cases.
 Later-generation `MultiFile` support is still waiting on broader renderer-side adoption in
 `analysis`.

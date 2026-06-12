@@ -1,6 +1,0 @@
-#==== annotations
-#---- compact_annotation_without_return
-#: fn(count: integer)
-log_count <- function(count) { }
-#++++
-log_count: fn(count: integer) -> NULL

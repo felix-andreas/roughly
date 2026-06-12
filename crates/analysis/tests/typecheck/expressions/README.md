@@ -14,12 +14,6 @@ If the coverage split or intended semantics coverage changes, update this file a
 
 This suite is the primary home for ordinary language semantics.
 
-It is also the intended home for most cases currently living under:
-
-- `tests/typecheck/deprecated/environment/`
-- `tests/typecheck/deprecated/instantiation/`
-- `tests/typecheck/deprecated/substitution/`
-
 ## Current files
 
 - `arithmetic.R.test`

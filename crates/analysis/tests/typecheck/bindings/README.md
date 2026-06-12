@@ -24,9 +24,6 @@ It does not render later use-site expression results as its primary contract.
 - `functions.R.test`
 - `nominals.R.test`
 
-This suite is also the intended home for cases currently living under
-`tests/typecheck/deprecated/generalization/`.
-
 ## Matrix
 
 The bindings suite should explicitly cover:

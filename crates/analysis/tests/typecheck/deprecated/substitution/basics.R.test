@@ -1,7 +1,0 @@
-#==== basics
-#---- identity_call_propagates_argument_type
-identity <- function(x) x
-identity("ok")
-#++++
-identity: <T> fn(T) -> T
-character

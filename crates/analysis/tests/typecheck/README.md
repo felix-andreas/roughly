@@ -34,9 +34,7 @@ There is no intended long-term top-level split by `generalization`, `instantiati
 
 ## Current status
 
-The suite is mid-migration.
-
-The target suites already exist:
+All active suites exist:
 
 - `bindings`
 - `expressions`
@@ -44,21 +42,9 @@ The target suites already exist:
 - `project`
 - `unification`
 
-Temporary transitional fixture directories still exist as migration storage:
-
-- `deprecated/generalization` -> `bindings`
-- `deprecated/environment` -> `expressions`
-- `deprecated/instantiation` -> `expressions`
-- `deprecated/substitution` -> `expressions`
-
-These directories are not wired as active fixture suites anymore.
-
-Prefer moving, deduplicating, or rewriting cases into the target suites instead of adding new
-coverage to those transitional directories.
-
-The first migration slice is already in place: several unique binding and expression cases from the
-deprecated directories are now duplicated in the target suites so the target taxonomy has real
-coverage before the deprecated files are removed.
+The old engine-centric `deprecated/` migration storage (`generalization`, `environment`,
+`instantiation`, `substitution`) is deleted; its unique coverage was re-homed into the
+target suites.
 
 ## Matrix
 
@@ -106,7 +92,6 @@ The largest known gaps are:
 - `project` currently renders per-file diagnostics only, because the check pipeline retains no
   typed artifact; typed cross-file snapshots need pipeline support first
 - `Collate`-driven file order is not covered; the harness cannot model `DESCRIPTION` yet
-- transitional engine-named directories still need to be fully re-homed or deleted
 
 ## Naming guidance
 
