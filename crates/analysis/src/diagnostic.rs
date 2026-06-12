@@ -207,6 +207,13 @@ impl Diagnostic {
                     ),
                 )
             }
+            InferenceError::UnresolvedAnnotationType { symbol } => {
+                let name = interner.resolve(*symbol).unwrap_or("<unknown>");
+                (
+                    fallback_range,
+                    format!("I could not resolve type `{name}`."),
+                )
+            }
             InferenceError::InvalidOperand {
                 expected,
                 actual,

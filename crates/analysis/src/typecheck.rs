@@ -1059,11 +1059,19 @@ impl InferenceState {
         match annotation.annotation() {
             Annotation::Type { kind, surface_type } => {
                 let actual_type = self.resolve(inferred_type)?;
-                let expected_type = self.lower_annotation_surface_type(
+                // Naming already diagnosed an unresolved or misapplied type name in the
+                // annotation; checking the value against it would only cascade noise.
+                let expected_type = match self.lower_annotation_surface_type(
                     surface_type,
                     type_definitions,
                     Some(expression),
-                )?;
+                ) {
+                    Ok(expected_type) => expected_type,
+                    Err(InferenceError::UnresolvedAnnotationType { .. }) => {
+                        return Ok(actual_type);
+                    }
+                    Err(error) => return Err(error),
+                };
 
                 match kind {
                     TypeAnnotationKind::Checked => {
@@ -1106,7 +1114,7 @@ impl InferenceState {
                 }
             }
             Annotation::New { nominal_type } => {
-                let lowered_arguments = nominal_type
+                let lowered_arguments = match nominal_type
                     .type_arguments
                     .iter()
                     .map(|argument| {
@@ -1116,7 +1124,14 @@ impl InferenceState {
                             Some(expression),
                         )
                     })
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<Result<Vec<_>, _>>()
+                {
+                    Ok(lowered_arguments) => lowered_arguments,
+                    Err(InferenceError::UnresolvedAnnotationType { .. }) => {
+                        return self.resolve(inferred_type);
+                    }
+                    Err(error) => return Err(error),
+                };
 
                 // Naming already diagnoses `@new` on unknown names, aliases, and wrong type
                 // argument arity; typecheck recovers without piling on a second diagnostic.
@@ -1174,9 +1189,10 @@ impl InferenceState {
                 surface_type,
                 type_definitions,
                 Some(expression),
-            )? {
-                CoreType::Function(function_type) => Some(function_type),
-                _ => None,
+            ) {
+                Ok(CoreType::Function(function_type)) => Some(function_type),
+                Ok(_) | Err(InferenceError::UnresolvedAnnotationType { .. }) => None,
+                Err(error) => return Err(error),
             },
             Annotation::Type { .. } | Annotation::New { .. } => None,
         })
@@ -1239,7 +1255,7 @@ impl InferenceState {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 let Some(type_definition) = type_definitions.get(*name).cloned() else {
-                    return Ok(CoreType::Unknown);
+                    return Err(InferenceError::UnresolvedAnnotationType { symbol: *name });
                 };
 
                 match type_definition.kind {
@@ -1251,7 +1267,7 @@ impl InferenceState {
 
                         let lowered_alias =
                             if type_definition.type_parameters.len() != lowered_arguments.len() {
-                                Ok(CoreType::Unknown)
+                                Err(InferenceError::UnresolvedAnnotationType { symbol: *name })
                             } else {
                                 let mut nested_substitutions = substitutions.clone();
                                 for (type_parameter, lowered_argument) in type_definition
@@ -1443,13 +1459,17 @@ impl InferenceState {
             substitutions.insert(*type_parameter, type_argument.clone());
         }
 
-        Ok(Some(self.lower_surface_type_with_substitutions(
+        match self.lower_surface_type_with_substitutions(
             &type_definition.surface_type,
             &substitutions,
             &mut BTreeSet::new(),
             type_definitions,
             expression,
-        )?))
+        ) {
+            Ok(representation_type) => Ok(Some(representation_type)),
+            Err(InferenceError::UnresolvedAnnotationType { .. }) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     // Operators and indexing need a structural shape, and nominal values are compatible
@@ -3399,6 +3419,9 @@ pub enum InferenceError {
         actual: Box<CoreType>,
         range: Option<Range>,
         expression_id: Option<ExpressionId>,
+    },
+    UnresolvedAnnotationType {
+        symbol: Symbol,
     },
     InvalidOperand {
         expected: OperandExpectation,

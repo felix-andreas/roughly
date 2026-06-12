@@ -22,10 +22,10 @@
 - Lower and typecheck parameter default expressions
   - `has_default` exists on HIR parameters, but default expressions are dropped, so their types
     do not constrain parameter types
-- Improve unknown-type-name diagnostics
-  - an unresolved type name renders as `Syntax Error: type syntax error: unknown type ...` plus a
-    cascading `expected Unknown, found ...` type error; should be one naming-owned diagnostic with
-    the cascade suppressed
+- Reclassify unknown-type-name diagnostics
+  - the cascade is now suppressed (typecheck skips annotations with unresolved type names), but
+    the remaining diagnostic is still labeled `Syntax Error: type syntax error: unknown type ...`;
+    it should be a naming-owned diagnostic with friendlier wording
 - `typecheck/project` follow-ups
   - package winner behavior with conflicting types
   - `Collate` coverage once the fixture harness models `DESCRIPTION`

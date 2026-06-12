@@ -33,9 +33,9 @@ This makes the file hard to reason about, harder to test by phase, and harder to
 
 HIR `Parameter` records `has_default` only. The default expression itself is not lowered, named, or typechecked, so defaults neither constrain the parameter type nor get checked themselves.
 
-### Unknown type names produce a syntax-error plus a cascade
+### Unknown type names are classified as syntax errors
 
-An unresolved type name in an annotation renders as `Syntax Error: type syntax error: unknown type ...` and then the checked annotation fails again with `expected Unknown, found ...`. The first diagnostic should be naming-owned (per `ARCHITECTURE.md`) and the second suppressed.
+An unresolved type name in an annotation renders as `Syntax Error: type syntax error: unknown type ...` even though resolution is a naming fact, not a syntax fact. Typecheck now suppresses the follow-up cascade (`InferenceError::UnresolvedAnnotationType` is swallowed at annotation application), but the remaining diagnostic should move to naming-owned classification and wording.
 
 ### Function-type variance is unspecified and covariant in practice
 

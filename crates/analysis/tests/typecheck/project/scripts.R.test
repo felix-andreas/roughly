@@ -35,10 +35,6 @@ error[syntax-error] Syntax Error: type syntax error: unknown type `Person`
 --> 1:1-1:10
 | #: Person
 
-error[type-error] expected `Unknown`, found `list{name: character}`
---> 2:1-2:28
-| value <- list(name = "bob")
-
 #---- package_and_script_can_reuse_type_name
 #---- R/a.R
 #: @type Person {list{name: character}}
