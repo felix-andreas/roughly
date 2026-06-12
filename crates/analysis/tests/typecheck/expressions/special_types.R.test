@@ -52,7 +52,7 @@ integer
 
 #---- checked_annotation_rejects_unknown
 #: integer
-value <- 2L ^ 3L
+value <- 1L ~ 2L
 #++++
 error: type mismatch
 
@@ -78,3 +78,49 @@ integer | NULL
 value <- if (TRUE) 1L
 #++++
 error: type mismatch
+
+#==== unknown_propagation
+#---- unknown_argument_is_accepted_without_cascading
+unsupported <- 1L ~ 2L
+
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+double_count(unsupported)
+#++++
+Unknown
+fn(count: integer) -> integer
+integer
+
+#---- unknown_callee_call_evaluates_to_unknown
+unsupported <- 1L ~ 2L
+unsupported(1L)
+#++++
+Unknown
+Unknown
+
+#---- any_callee_call_evaluates_to_any
+#: @trust Any
+callee <- 1L
+callee(1L)
+#++++
+Any
+Any
+
+#---- any_argument_is_accepted
+#: @trust Any
+anything <- 1L
+
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+double_count(anything)
+#++++
+Any
+fn(count: integer) -> integer
+integer
+
+#---- unknown_in_arithmetic_stays_unknown
+unsupported <- 1L ~ 2L
+unsupported + 1L
+#++++
+Unknown
+Unknown

@@ -73,3 +73,60 @@ use_integer(function(value) 1L)
 fn(x: ?1) -> fn(f: fn(?1) -> ?2) -> ?2
 fn(f: fn(integer) -> ?1) -> ?1
 integer
+
+#==== explicit_foralls
+#---- compact_forall_identity_instantiates
+#: <T> fn(value: T) -> T
+identity <- function(value) value
+identity(1L)
+identity("hello")
+#++++
+fn(value: ?1) -> ?1
+integer
+character
+
+#---- expanded_forall_identity_instantiates
+#: @forall T
+#: @param {T} value
+#: @return {T}
+identity <- function(value) value
+identity(1L)
+identity("hello")
+#++++
+fn(value: ?1) -> ?1
+integer
+character
+
+#---- forall_two_parameters_keep_left
+#: <T, U> fn(left: T, right: U) -> T
+keep_left <- function(left, right) left
+keep_left(1L, "x")
+keep_left("x", 1L)
+#++++
+fn(left: ?1, right: ?2) -> ?1
+integer
+character
+
+#---- forall_nullable_return
+#: <T> fn(condition: logical, value: T) -> T | NULL
+then_some <- function(condition, value) {
+  if (condition) value
+}
+then_some(TRUE, 1L)
+then_some(FALSE, "x")
+#++++
+fn(condition: logical, value: ?1) -> ?1 | NULL
+integer | NULL
+character | NULL
+
+#---- forall_higher_order_application
+#: <T, U> fn(transform: fn(T) -> U, value: T) -> U
+apply_once <- function(transform, value) transform(value)
+
+#: fn(count: integer) -> character
+render <- function(count) "ok"
+apply_once(render, 1L)
+#++++
+fn(transform: fn(?1) -> ?2, value: ?1) -> ?2
+fn(count: integer) -> character
+character

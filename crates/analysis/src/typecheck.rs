@@ -96,35 +96,35 @@ pub fn inference_state_with_builtins(lowering_context: &mut LoweringContext) -> 
 pub fn inference_state_with_builtins_in_interner(interner: &mut Interner) -> InferenceState {
     let mut inference_state = InferenceState::new();
 
-    let builtin_kinds = [
-        ("+", BuiltinKind::Plus),
-        ("-", BuiltinKind::Minus),
-        ("*", BuiltinKind::Multiply),
-        ("/", BuiltinKind::Divide),
-        ("**", BuiltinKind::Power),
-        ("^", BuiltinKind::Power),
-        ("%%", BuiltinKind::Modulo),
-        ("%/%", BuiltinKind::IntegerDivide),
-        (":", BuiltinKind::Colon),
-        ("<", BuiltinKind::Compare),
-        ("<=", BuiltinKind::Compare),
-        (">", BuiltinKind::Compare),
-        (">=", BuiltinKind::Compare),
-        ("==", BuiltinKind::Compare),
-        ("!=", BuiltinKind::Compare),
-        ("&&", BuiltinKind::And),
-        ("||", BuiltinKind::Or),
-        ("c", BuiltinKind::Combine),
-        ("list", BuiltinKind::List),
-    ];
-
-    for (name, builtin_kind) in builtin_kinds {
+    for (name, builtin_kind) in BUILTINS {
         let symbol = interner.intern(name);
-        inference_state.bind_builtin(symbol, builtin_kind);
+        inference_state.bind_builtin(symbol, *builtin_kind);
     }
 
     inference_state
 }
+
+pub const BUILTINS: &[(&str, BuiltinKind)] = &[
+    ("+", BuiltinKind::Plus),
+    ("-", BuiltinKind::Minus),
+    ("*", BuiltinKind::Multiply),
+    ("/", BuiltinKind::Divide),
+    ("**", BuiltinKind::Power),
+    ("^", BuiltinKind::Power),
+    ("%%", BuiltinKind::Modulo),
+    ("%/%", BuiltinKind::IntegerDivide),
+    (":", BuiltinKind::Colon),
+    ("<", BuiltinKind::Compare),
+    ("<=", BuiltinKind::Compare),
+    (">", BuiltinKind::Compare),
+    (">=", BuiltinKind::Compare),
+    ("==", BuiltinKind::Compare),
+    ("!=", BuiltinKind::Compare),
+    ("&&", BuiltinKind::And),
+    ("||", BuiltinKind::Or),
+    ("c", BuiltinKind::Combine),
+    ("list", BuiltinKind::List),
+];
 
 impl InferenceState {
     pub fn new() -> Self {
@@ -788,7 +788,8 @@ impl InferenceState {
             resolution_context,
             type_definitions,
         )?;
-        let sequence_type = self.resolve(inferred_sequence)?;
+        let sequence_type =
+            self.resolve_structural(inferred_sequence, type_definitions, Some(sequence))?;
         let Some(item_type) = iterable_item_type(&sequence_type) else {
             return Err(InferenceError::TypeMismatch {
                 expected: Box::new(CoreType::Vector(Atomic::Integer)),
@@ -1451,6 +1452,37 @@ impl InferenceState {
         )?))
     }
 
+    // Operators and indexing need a structural shape, and nominal values are compatible
+    // with their representation type, so they project through nominal identity here. The
+    // seen-set guards against recursive nominal representations.
+    fn resolve_structural(
+        &mut self,
+        core_type: CoreType,
+        type_definitions: &TypeDefinitionEnvironment,
+        expression: Option<&Expression>,
+    ) -> Result<CoreType, InferenceError> {
+        let mut resolved_type = self.resolve(core_type)?;
+        let mut seen_nominals = BTreeSet::new();
+
+        while let CoreType::Nominal(name, type_arguments) = &resolved_type {
+            if !seen_nominals.insert(*name) {
+                break;
+            }
+            let Some(representation_type) = self.nominal_representation_type(
+                *name,
+                type_arguments,
+                type_definitions,
+                expression,
+            )?
+            else {
+                break;
+            };
+            resolved_type = self.resolve(representation_type)?;
+        }
+
+        Ok(resolved_type)
+    }
+
     pub fn resolve(&mut self, core_type: CoreType) -> Result<CoreType, InferenceError> {
         match core_type {
             CoreType::Variable(variable) => self.resolve_variable(variable),
@@ -1900,8 +1932,8 @@ impl InferenceState {
         let right_type =
             self.infer_expression_with_context(arg1, arena, resolution_context, type_definitions)?;
 
-        let resolved_left = self.resolve(left_type)?;
-        let resolved_right = self.resolve(right_type)?;
+        let resolved_left = self.resolve_structural(left_type, type_definitions, Some(arg0))?;
+        let resolved_right = self.resolve_structural(right_type, type_definitions, Some(arg1))?;
 
         let left_shape_atomic = numeric_operand_parts(&resolved_left);
         let right_shape_atomic = numeric_operand_parts(&resolved_right);
@@ -1960,7 +1992,7 @@ impl InferenceState {
     ) -> Result<CoreType, InferenceError> {
         let inferred_type =
             self.infer_expression_with_context(value, arena, resolution_context, type_definitions)?;
-        let resolved_type = self.resolve(inferred_type)?;
+        let resolved_type = self.resolve_structural(inferred_type, type_definitions, Some(value))?;
 
         match numeric_operand_parts(&resolved_type) {
             Some((shape, atomic)) => Ok(core_type_for_shape(shape, atomic)),
@@ -1985,7 +2017,7 @@ impl InferenceState {
     ) -> Result<CoreType, InferenceError> {
         let inferred_type =
             self.infer_expression_with_context(value, arena, resolution_context, type_definitions)?;
-        let resolved_type = self.resolve(inferred_type)?;
+        let resolved_type = self.resolve_structural(inferred_type, type_definitions, Some(value))?;
 
         match resolved_type {
             CoreType::Scalar(Atomic::Logical) => Ok(CoreType::Scalar(Atomic::Logical)),
@@ -2033,8 +2065,8 @@ impl InferenceState {
             self.infer_expression_with_context(arg0, arena, resolution_context, type_definitions)?;
         let right_type =
             self.infer_expression_with_context(arg1, arena, resolution_context, type_definitions)?;
-        let resolved_left = self.resolve(left_type)?;
-        let resolved_right = self.resolve(right_type)?;
+        let resolved_left = self.resolve_structural(left_type, type_definitions, Some(arg0))?;
+        let resolved_right = self.resolve_structural(right_type, type_definitions, Some(arg1))?;
 
         if matches!(resolved_left, CoreType::Any | CoreType::Unknown)
             || matches!(resolved_right, CoreType::Any | CoreType::Unknown)
@@ -2104,9 +2136,17 @@ impl InferenceState {
                 resolution_context,
                 type_definitions,
             )?;
-            let resolved_argument = self.resolve(inferred_argument)?;
+            let resolved_argument = self.resolve_structural(
+                inferred_argument,
+                type_definitions,
+                Some(argument_expression),
+            )?;
             match resolved_argument {
                 CoreType::Scalar(Atomic::Integer) => {}
+                // R's `:` yields an integer sequence for whole-number endpoints, so
+                // whole-number double literals like `1` in `1:10` count as integer here.
+                CoreType::Scalar(Atomic::Double)
+                    if is_whole_number_double_literal(argument_expression) => {}
                 CoreType::Scalar(Atomic::Double) => result_atomic = Atomic::Double,
                 CoreType::Any | CoreType::Unknown => return Ok(CoreType::Unknown),
                 other_type => {
@@ -2343,7 +2383,7 @@ impl InferenceState {
 
         let inferred_value =
             self.infer_expression_with_context(value, arena, resolution_context, type_definitions)?;
-        let value_type = self.resolve(inferred_value)?;
+        let value_type = self.resolve_structural(inferred_value, type_definitions, Some(value))?;
         let arg0_expr = arena.get(arguments[0].expression);
         let inferred_index = self.infer_expression_with_context(
             arg0_expr,
@@ -2406,7 +2446,7 @@ impl InferenceState {
 
         let inferred_value =
             self.infer_expression_with_context(value, arena, resolution_context, type_definitions)?;
-        let value_type = self.resolve(inferred_value)?;
+        let value_type = self.resolve_structural(inferred_value, type_definitions, Some(value))?;
         let index_expression = arena.get(arguments[0].expression);
         let inferred_index = self.infer_expression_with_context(
             index_expression,
@@ -2492,7 +2532,7 @@ impl InferenceState {
     ) -> Result<CoreType, InferenceError> {
         let inferred_value =
             self.infer_expression_with_context(value, arena, resolution_context, type_definitions)?;
-        let value_type = self.resolve(inferred_value)?;
+        let value_type = self.resolve_structural(inferred_value, type_definitions, Some(value))?;
 
         match value_type {
             CoreType::Unknown => Ok(CoreType::Unknown),
@@ -2574,7 +2614,8 @@ impl InferenceState {
                 resolution_context,
                 type_definitions,
             )?;
-            let resolved_argument = self.resolve(inferred_argument)?;
+            let resolved_argument =
+                self.resolve_structural(inferred_argument, type_definitions, Some(arg_expr))?;
 
             let Some(current_atomic) = combine_operand_atomic(&resolved_argument) else {
                 return Err(InferenceError::TypeMismatch {
@@ -3261,6 +3302,14 @@ fn homogeneous_structural_item_type(items: &[CoreType]) -> Option<CoreType> {
     } else {
         None
     }
+}
+
+fn is_whole_number_double_literal(expression: &Expression) -> bool {
+    let ExpressionKind::Double(text) = &expression.kind else {
+        return false;
+    };
+    text.parse::<f64>()
+        .is_ok_and(|value| value.fract() == 0.0 && value.is_finite())
 }
 
 fn integer_literal_position(expression: &Expression) -> Option<usize> {

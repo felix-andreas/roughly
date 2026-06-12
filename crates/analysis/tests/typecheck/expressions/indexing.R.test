@@ -84,3 +84,65 @@ list[named: integer]
 list(foo = 1L, bar = 2L)$foo
 #++++
 integer
+
+#==== unsupported_indexing
+#---- bracket_on_scalar_vector_is_rejected
+value <- 1L
+value[1L]
+#++++
+error: type mismatch
+
+#---- bracket_on_array_vector_is_rejected
+c(1L, 2L)[1L]
+#++++
+error: type mismatch
+
+#---- bracket_on_named_vector_is_rejected
+c(foo = 1L)[["foo"]]
+c(foo = 1L)["foo"]
+#++++
+error: type mismatch
+
+#---- double_bracket_on_function_is_rejected
+f <- function(x) x
+f[[1L]]
+#++++
+error: type mismatch
+
+#==== boundary_cases
+#---- tuple_out_of_bounds_literal_position_is_rejected
+list(1L, "foo")[[3L]]
+#++++
+error: type mismatch
+
+#---- named_vector_positional_index_returns_element
+c(foo = 1L, bar = 2L)[[1L]]
+#++++
+integer
+
+#---- dollar_on_map_like_list_is_nullable
+#: list[named: integer]
+values <- list(foo = 1L, bar = 2L)
+values$foo
+#++++
+list[named: integer]
+integer | NULL
+
+#---- dollar_on_named_vector_is_nullable
+counts <- c(foo = 1L, bar = 2L)
+counts$foo
+#++++
+integer[named]
+integer | NULL
+
+#---- dollar_missing_record_field_is_rejected
+list(foo = 1L)$bar
+#++++
+error: type mismatch
+
+#---- chained_record_access
+config <- list(server = list(port = 8080L))
+config$server$port
+#++++
+list{server: list{port: integer}}
+integer

@@ -84,3 +84,84 @@ error: type mismatch
 repeat { }
 #++++
 NULL
+
+#==== if_normalization
+#---- if_without_else_null_branch_stays_null
+if (TRUE) NULL
+#++++
+NULL
+
+#---- if_without_else_nullable_branch_stays_single_nullable
+flag <- TRUE
+value <- if (flag) 1L
+if (flag) value
+#++++
+logical
+integer | NULL
+integer | NULL
+
+#---- if_else_same_nullable_branches
+flag <- TRUE
+left <- if (flag) 1L
+right <- if (flag) 2L
+if (flag) left else right
+#++++
+logical
+integer | NULL
+integer | NULL
+integer | NULL
+
+#---- negated_condition
+flag <- TRUE
+if (!flag) 1L else 2L
+#++++
+logical
+integer
+
+#---- comparison_condition
+count <- 3L
+if (count > 2L) "big" else "small"
+#++++
+integer
+character
+
+#==== loop_iteration_types
+#---- for_over_range_binds_element_type
+total <- 0L
+for (index in 1L:3L) {
+  total <- total + index
+}
+#++++
+integer
+NULL
+
+#---- for_over_record_like_list
+for (field in list(foo = 1L, bar = 2L)) field
+#++++
+NULL
+
+#---- for_over_map_like_list_annotation
+#: list[named: integer]
+values <- list(foo = 1L, bar = 2L)
+for (value in values) value
+#++++
+list[named: integer]
+NULL
+
+#---- for_body_uses_element_type_in_typed_call
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+for (count in c(1L, 2L)) double_count(count)
+#++++
+fn(count: integer) -> integer
+NULL
+
+#---- for_over_heterogeneous_tuple_is_rejected
+for (item in list(1L, "foo")) item
+#++++
+error: type mismatch
+
+#---- for_over_function_is_rejected
+for (item in function(x) x) item
+#++++
+error: type mismatch

@@ -2,6 +2,18 @@
 
 Keep newest decisions at the top.
 
+- inferred function types carry every parameter as a named, position-matchable parameter; defaults make parameters optional; parameter names are call interface, not type identity.
+  - R parameters are always matchable by name and position, so dropping names made named-argument calls on unannotated functions impossible and hover output worse. Function types unify and check compatibility positionally across the flattened parameter list, so `fn(integer)` and `fn(count: integer)` stay interchangeable. An expected-optional parameter requires an actual default.
+
+- call arguments are checked with compatibility instead of unification, and `Unknown` arguments are accepted at any parameter.
+  - Unification rejected the documented coercions (`T` into `T[]`, `T` into `T | NULL`) at parameter positions. Accepting `Unknown` arguments suppresses cascade errors after the original cause was already diagnosed.
+
+- comparison operators, unary `!`, `%%`, `%/%`, `^`, `:`, and `c()` emptiness are now defined semantics, recorded in `TYPING_SEMANTICS.md`.
+  - These are everyday R constructs; leaving them `Unknown`/unsupported made the checker useless on real code. `:` counts whole-number double literals as integer endpoints to match R's runtime behavior for `1:10`. Comparisons require one comparison family (numeric, character, logical) and produce `logical` with the arithmetic shape rule. `c()` with no arguments is `NULL`, matching R.
+
+- `@new` typechecks the annotated value against the nominal representation type, and `@new` type arguments lower through the ordinary annotation-lowering path.
+  - The previous implementation trusted `@new` unconditionally and erased named type arguments to `Unknown`, so nominal introduction silently accepted wrong values.
+
 - typing-time analysis should eagerly refresh `lint`, `lower`, and `resolve_document`, while package resolution and typecheck stay lazy until save or an IDE action needs them.
   - This keeps local diagnostics and local tooling current in the unsaved buffer without paying package-scoped semantic cost on every keystroke. One versioned phase cache remains the only source of truth, so save and IDE actions request broader freshness over the same retained artifacts instead of building separate caches.
 

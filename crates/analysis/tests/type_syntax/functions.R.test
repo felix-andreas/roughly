@@ -136,3 +136,18 @@ fn(count: integer, payload: list{label: character, values: list[double]}) -> lis
 @return {list[named: character]}
 #++++
 fn(formatter: fn(integer, options: list{verbose: logical}) -> character) -> list[named: character]
+
+#---- compact_optional_named_parameter
+fn(count: integer, [label]: character) -> integer
+#++++
+fn(count: integer, [label]: character) -> integer
+
+#---- compact_optional_parameter_without_name_is_rejected
+fn(integer, [character]) -> integer
+#++++
+InvalidSyntax { message: "expected `:` after `[name]` in an optional parameter." }
+
+#---- compact_optional_parameter_missing_colon_is_rejected
+fn([label] character) -> integer
+#++++
+InvalidSyntax { message: "expected `:` after `[name]` in an optional parameter." }

@@ -43,3 +43,45 @@ shape <- person
 #++++
 person: Person
 shape: list{name: character}
+
+#---- nominal_checked_annotation_after_new
+#: @type Person {list{name: character}}
+
+#: @new Person
+person <- list(name = "bob")
+
+#: Person
+same <- person
+#++++
+person: Person
+same: Person
+
+#---- alias_of_nominal_value
+#: @type Person {list{name: character}}
+
+#: @new Person
+person <- list(name = "bob")
+copy <- person
+#++++
+person: Person
+copy: Person
+
+#---- nominal_in_function_return_binding
+#: @type Person {list{name: character}}
+
+#: fn(name: character) -> Person
+make_person <- function(name) {
+  #: @new Person
+  person <- list(name = name)
+  person
+}
+#++++
+make_person: fn(name: character) -> Person
+
+#---- generic_nominal_nested_argument
+#: @type Box<T> {list{value: T}}
+
+#: @new Box<list{name: character}>
+box <- list(value = list(name = "bob"))
+#++++
+box: Box<list{name: character}>

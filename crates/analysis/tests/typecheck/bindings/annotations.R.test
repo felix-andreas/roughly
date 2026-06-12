@@ -42,3 +42,62 @@ value: integer | NULL
 identity <- function(value) value
 #++++
 identity: <T> fn(value: T) -> T
+
+#---- list_array_checked_annotation
+#: list[integer]
+value <- list(1L, 2L, 3L)
+#++++
+value: list[integer]
+
+#---- list_map_checked_annotation
+#: list[named: integer]
+value <- list(foo = 1L, bar = 2L)
+#++++
+value: list[named: integer]
+
+#---- record_checked_annotation
+#: list{name: character, age: double}
+value <- list(name = "bob", age = 20)
+#++++
+value: list{name: character, age: double}
+
+#---- compact_forall_binding
+#: <T> fn(value: T) -> T
+identity <- function(value) value
+#++++
+identity: <T> fn(value: T) -> T
+
+#---- compact_forall_two_parameters_binding
+#: <T, U> fn(left: T, right: U) -> T
+keep_left <- function(left, right) left
+#++++
+keep_left: <T, U> fn(left: T, right: U) -> T
+
+#---- expanded_forall_two_lines_binding
+#: @forall T
+#: @forall U
+#: @param {T} left
+#: @param {U} right
+#: @return {T}
+keep_left <- function(left, right) left
+#++++
+keep_left: <T, U> fn(left: T, right: U) -> T
+
+#---- nullable_return_function_binding
+#: fn(count: integer) -> integer | NULL
+maybe_count <- function(count) {
+  if (count > 0L) count
+}
+#++++
+maybe_count: fn(count: integer) -> integer | NULL
+
+#---- higher_order_named_parameter_binding
+#: fn(transform: fn(integer) -> character, count: integer) -> character
+apply_transform <- function(transform, count) transform(count)
+#++++
+apply_transform: fn(transform: fn(integer) -> character, count: integer) -> character
+
+#---- optional_parameter_default_inferred_binding
+pad <- function(value, width = NULL) value
+#++++
+pad: <T, U> fn(value: T, [width]: U) -> T

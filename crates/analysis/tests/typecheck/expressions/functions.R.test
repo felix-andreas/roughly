@@ -99,3 +99,147 @@ value <- 1L
 value(2L)
 #++++
 error: expected function
+
+#==== named_argument_calls
+#---- inferred_function_accepts_named_argument
+identity <- function(x) x
+identity(x = 1L)
+#++++
+fn(x: ?1) -> ?1
+integer
+
+#---- inferred_function_accepts_named_arguments_out_of_order
+#: fn(count: integer, label: character) -> character
+describe <- function(count, label) label
+describe(label = "items", count = 2L)
+#++++
+fn(count: integer, label: character) -> character
+character
+
+#---- unknown_named_argument_is_rejected
+identity <- function(x) x
+identity(y = 1L)
+#++++
+error: named parameter mismatch
+
+#==== optional_parameters
+#---- inferred_default_makes_parameter_optional
+pad <- function(value, width = NULL) value
+pad(1L)
+#++++
+fn(value: ?1, [width]: ?2) -> ?1
+integer
+
+#---- inferred_default_parameter_can_still_be_supplied
+pad <- function(value, width = NULL) value
+pad(1L, 2L)
+#++++
+fn(value: ?1, [width]: ?2) -> ?1
+integer
+
+#---- optional_parameter_supplied_by_name
+#: fn(count: integer, [label]: character) -> integer
+double_count <- function(count, label = NULL) count + count
+double_count(1L, label = "units")
+#++++
+fn(count: integer, [label]: character) -> integer
+integer
+
+#---- omitting_required_parameter_is_rejected
+#: fn(count: integer, label: character) -> integer
+double_count <- function(count, label = NULL) count + count
+double_count(1L)
+#++++
+error: function arity mismatch
+
+#---- expected_optional_requires_actual_default
+#: fn(count: integer, [label]: character) -> integer
+double_count <- function(count, label) count + count
+#++++
+error: type mismatch
+
+#==== argument_coercions
+#---- scalar_argument_coerces_to_array_parameter
+#: fn(values: integer[]) -> integer[]
+keep <- function(values) values
+keep(1L)
+#++++
+fn(values: integer[]) -> integer[]
+integer[]
+
+#---- named_map_argument_coerces_to_array_parameter
+#: fn(values: integer[]) -> integer[]
+keep <- function(values) values
+keep(c(foo = 1L, bar = 2L))
+#++++
+fn(values: integer[]) -> integer[]
+integer[]
+
+#---- null_argument_accepted_for_nullable_parameter
+#: fn(label: character | NULL) -> NULL
+log_label <- function(label) NULL
+log_label(NULL)
+#++++
+fn(label: character | NULL) -> NULL
+NULL
+
+#---- value_argument_accepted_for_nullable_parameter
+#: fn(label: character | NULL) -> NULL
+log_label <- function(label) NULL
+log_label("items")
+#++++
+fn(label: character | NULL) -> NULL
+NULL
+
+#---- tuple_argument_coerces_to_array_like_list_parameter
+#: fn(items: list[integer]) -> NULL
+consume <- function(items) NULL
+consume(list(1L, 2L))
+#++++
+fn(items: list[integer]) -> NULL
+NULL
+
+#---- record_argument_coerces_to_map_like_list_parameter
+#: fn(items: list[named: integer]) -> NULL
+consume <- function(items) NULL
+consume(list(foo = 1L, bar = 2L))
+#++++
+fn(items: list[named: integer]) -> NULL
+NULL
+
+#---- nullable_parameter_rejects_wrong_base_type
+#: fn(label: character | NULL) -> NULL
+log_label <- function(label) NULL
+log_label(1L)
+#++++
+error: type mismatch
+
+#---- array_argument_rejected_for_scalar_parameter
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+double_count(c(1L, 2L))
+#++++
+error: type mismatch
+
+#==== function_arguments
+#---- annotated_function_accepted_where_positional_interface_expected
+#: fn(transform: fn(integer) -> character, count: integer) -> character
+apply_transform <- function(transform, count) transform(count)
+
+#: fn(value: integer) -> character
+render <- function(value) "ok"
+apply_transform(render, 1L)
+#++++
+fn(transform: fn(integer) -> character, count: integer) -> character
+fn(value: integer) -> character
+character
+
+#---- function_argument_with_wrong_return_is_rejected
+#: fn(transform: fn(integer) -> character) -> character
+apply_transform <- function(transform) transform(1L)
+
+#: fn(value: integer) -> integer
+render <- function(value) value
+apply_transform(render)
+#++++
+error: type mismatch

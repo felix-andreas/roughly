@@ -634,6 +634,31 @@ A nominal type creates a fresh type identity, even when another nominal type has
 - two different nominal types are not compatible with each other, even if their representation types are identical
 - an ordinary structural value is not compatible with a nominal type unless it is introduced with `@new`
 - a value of a nominal type is compatible with its underlying representation type
+- when an operator, indexing form, or loop iteration requires a structural shape, a nominal value is projected to its underlying representation type; the projected result is structural, not nominal
+
+Projection examples:
+
+```r
+#: @type Person {list{name: character}}
+
+#: @new Person
+person <- list(name = "bob")
+
+person$name
+```
+
+`person$name` has type `character` because `$` sees the representation type of `Person`.
+
+```r
+#: @type Meters {double}
+
+#: @new Meters
+height <- 1.8
+
+height + height
+```
+
+`height + height` has type `double`; arithmetic projects `Meters` to `double` and the result does not keep the nominal identity.
 
 Examples:
 
@@ -791,6 +816,11 @@ A function call is a type error when:
 - too many arguments are provided
 - an argument value is incompatible with the corresponding parameter type
 
+Argument checking is compatibility-based, not exact-equality-based:
+
+- the ordinary coercions defined in this document apply at parameter positions, for example scalar-like `T` into array-like `T[]` and `T` or `NULL` into `T | NULL`
+- an argument whose type is `Unknown` is accepted at any parameter; the reason the value became `Unknown` was already diagnosed where it happened, and repeating it at every later use would only cascade noise
+
 ### Indexing
 
 `[[` is single-element extraction.
@@ -881,10 +911,11 @@ Examples:
 - `double * integer[]` returns `double[]`
 - `integer[named] + integer` returns `integer[]`
 
-#### Binary `/` and `**`
+#### Binary `/`, `**`, and `^`
 
-Binary `/` and `**` use these rules:
+Binary `/`, `**`, and `^` use these rules:
 
+- `^` and `**` are the same operator; `**` is R's parser alias for `^`
 - atomic result:
   - always `double`
 - shape result:
@@ -895,7 +926,21 @@ Examples:
 
 - `integer / integer` returns `double`
 - `double ** integer` returns `double`
+- `2L ^ 3L` returns `double`
 - `integer[] / integer` returns `double[]`
+
+#### Binary `%%` and `%/%`
+
+Modulo `%%` and integer division `%/%` follow the same rules as binary `+`, `-`, and `*`:
+
+- atomic result:
+  - `integer op integer` returns `integer`
+  - if either operand is `double`, the result is `double`
+- shape result:
+  - if both operands are scalar-like, the result is scalar-like
+  - otherwise, the result is array-like
+
+Other `%op%` special operators are unsupported constructs.
 
 #### Unary `-`
 
@@ -915,6 +960,73 @@ Examples:
 - `-1L` returns `integer`
 - `-c(1L, 2L)` returns `integer[]`
 - `-c(foo = 1L, bar = 2L)` returns `integer[]`
+
+### Comparison operators
+
+`<`, `<=`, `>`, `>=`, `==`, and `!=` compare two operands of the same comparison family:
+
+- the comparison families are:
+  - numeric: `integer` and `double`, freely mixed
+  - `character`
+  - `logical`
+- both operands must belong to the same family; comparing across families is a type error
+- `complex` and `raw` operands are not supported
+- map-like vectors participate via compatibility with array-like vectors
+- result:
+  - atomic result is always `logical`
+  - if both operands are scalar-like, the result is scalar-like
+  - otherwise, the result is array-like
+
+Examples:
+
+- `1L < 2L` returns `logical`
+- `1L == 1.5` returns `logical`
+- `"a" < "b"` returns `logical`
+- `c(1L, 2L) > 1L` returns `logical[]`
+- `1L < "a"` is a type error
+
+### Unary `!`
+
+Logical negation `!` accepts only `logical` operands:
+
+- `!logical` returns `logical`
+- `!logical[]` returns `logical[]`
+- `!logical[named]` returns `logical[]`; negation does not preserve map-likeness
+- any other operand is a type error
+
+### Range operator `:`
+
+`from:to` builds a numeric sequence:
+
+- both operands must be scalar-like `integer` or `double`
+- if both operands are `integer`, the result is `integer[]`
+- a whole-number `double` literal operand such as `1` or `10` counts as `integer` here, matching R's runtime behavior for `:`
+- otherwise, if either operand is `double`, the result is `double[]`
+- array-like or non-numeric operands are type errors
+
+Examples:
+
+- `1L:10L` returns `integer[]`
+- `1:10` returns `integer[]` even though the literals are `double`, because both are whole-number literals
+- `1.5:3L` returns `double[]`
+- `x:10L` returns `double[]` when `x` has type `double`
+
+### Combine `c(...)`
+
+`c(...)` builds an atomic vector from scalar-like, array-like, and map-like atomic arguments:
+
+- with no arguments, `c()` returns `NULL`, matching R
+- every argument must be an atomic vector type; lists are not supported
+- all arguments must share one atomic type, except that `integer` and `double` may mix and promote to `double`
+- if every argument is named, the result is map-like `T[named]`
+- otherwise the result is array-like `T[]`
+
+Examples:
+
+- `c(1L, 2L)` returns `integer[]`
+- `c(1L, 2.5)` returns `double[]`
+- `c(foo = 1L, bar = 2L)` returns `integer[named]`
+- `c(1L, "a")` is a type error
 
 ### Assignment operator `<-`
 
@@ -1051,9 +1163,10 @@ Compact function annotations use a single function type:
 - `fn(name: TYPE) -> RETURN_TYPE`
 - `fn(TYPE) -> RETURN_TYPE`
 - `fn(name: TYPE, [optional_name]: TYPE) -> RETURN_TYPE`
-- `fn(TYPE, [TYPE]) -> RETURN_TYPE`
 - `<T> fn(name: TYPE) -> RETURN_TYPE`
 - `<T, U, ...> fn(TYPE) -> RETURN_TYPE`
+
+Optional parameters must be named: `[name]: TYPE`. A bare optional positional form like `fn(integer, [character])` is not supported.
 
 Additional rules:
 
@@ -1090,6 +1203,20 @@ then_some <- function(condition, value) {
 }
 ```
 
+### Inferred function types
+
+An unannotated `function(...)` expression infers a function type directly from its definition:
+
+- every parameter appears as a named parameter using its definition name, because R parameters are always matchable both by name and by position
+- a parameter with a default value is optional at call sites
+- parameter and return types are inferred; unconstrained parameters generalize at binding boundaries like any other inferred type
+- default value expressions are not themselves typechecked yet; a parameter's type comes from its uses, not from its default
+
+Examples:
+
+- `function(x) x` infers as `<T> fn(x: T) -> T` at a binding boundary
+- `function(count, label = NULL) count` may be called as `f(1L)`, `f(count = 1L)`, or `f(1L, "x")`
+
 ### Named and positional parameters
 
 Parameter names in function types are part of the call interface.
@@ -1102,10 +1229,20 @@ Example:
 - `fn(count: integer) -> integer` allows calling with `count = 1L`
 - `fn(integer) -> integer` makes it a type error to call with named arguments
 
-Optional parameters follow the same rule:
+Optional parameters follow the same rule and must be named:
 
 - `fn(count: integer, [label]: character) -> integer`
-- `fn(integer, [character]) -> integer`
+
+### Function type compatibility
+
+Parameter names describe the call interface, not the identity of a function type. Two function types match by position across the flattened parameter list:
+
+- `fn(count: integer) -> NULL` and `fn(integer) -> NULL` are mutually compatible
+- an annotation `fn(count: integer) -> integer` accepts a function defined as `function(n) n`, and calls through the annotated binding use the annotation's interface
+- parameter counts must match
+- an expected-optional parameter promises callers they may omit it, so the actual function must have a default for that parameter:
+  - `fn(count: integer, [label]: character) -> integer` does not accept `function(count, label) count`
+  - `fn(count: integer, label: character) -> integer` accepts `function(count, label = NULL) count`
 
 ### Higher-order function types
 

@@ -63,3 +63,61 @@ integer[]
 "foo" + 4L
 #++++
 error: invalid operand
+
+#==== modulo_and_integer_division
+#---- integer_modulo_integer
+5L %% 2L
+#++++
+integer
+
+#---- double_modulo_integer
+5.5 %% 2L
+#++++
+double
+
+#---- integer_division_integer
+5L %/% 2L
+#++++
+integer
+
+#---- integer_division_with_double
+5L %/% 2.5
+#++++
+double
+
+#---- vector_modulo_scalar
+c(5L, 6L) %% 2L
+#++++
+integer[]
+
+#---- character_modulo_is_rejected
+"a" %% 2L
+#++++
+error: invalid operand
+
+#==== power
+#---- caret_is_power_operator
+2L ^ 3L
+#++++
+double
+
+#---- double_star_power
+2L ** 3L
+#++++
+double
+
+#---- vector_power
+c(1L, 2L) ^ 2L
+#++++
+double[]
+
+#==== unsupported_operators
+#---- other_special_operator_is_unsupported
+1L %o% 2L
+#++++
+Unknown
+
+#---- tilde_formula_is_unsupported
+1L ~ 2L
+#++++
+Unknown

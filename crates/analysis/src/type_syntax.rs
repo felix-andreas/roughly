@@ -1315,6 +1315,33 @@ impl<'a> TypeParser<'a> {
         if !self.consume_byte(b')') {
             loop {
                 self.skip_ascii_whitespace();
+
+                if self.consume_byte(b'[') {
+                    let parsed_name = self.parse_identifier_span();
+                    self.skip_ascii_whitespace();
+                    let Some((start, end)) = parsed_name.filter(|_| self.consume_byte(b']')) else {
+                        return Err(invalid_syntax(
+                            "expected `[name]: TYPE` for an optional parameter.",
+                        ));
+                    };
+                    self.skip_ascii_whitespace();
+                    self.expect_byte(b':', "expected `:` after `[name]` in an optional parameter.")?;
+                    let name = self.interner.intern(&self.source[start..end]);
+                    let value = self
+                        .parse_type_until(StopContext::FUNCTION_PARAMETER)
+                        .map_err(|error| {
+                            error.with_context("while parsing optional parameter type")
+                        })?;
+                    named_parameters.push(RecordField::optional(name, value));
+
+                    self.skip_ascii_whitespace();
+                    if self.consume_byte(b',') {
+                        continue;
+                    }
+                    self.expect_byte(b')', "expected `)` to close `fn(...)`.")?;
+                    break;
+                }
+
                 let parameter_start = self.position;
 
                 let parsed_name = self.parse_identifier_span();

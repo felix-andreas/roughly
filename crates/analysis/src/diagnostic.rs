@@ -283,7 +283,7 @@ impl Diagnostic {
             } => (
                 range.unwrap_or(fallback_range),
                 format!(
-                    "This call uses named argument(s) `{}`, but the function accepts named parameter(s) `{}`.",
+                    "This call uses named argument(s) {}, but the function accepts named parameter(s) {}.",
                     render_symbols(actual_parameters, interner),
                     render_symbols(expected_parameters, interner)
                 ),

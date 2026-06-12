@@ -67,3 +67,29 @@ error: type mismatch
 value <- c(1L, 2L)
 #++++
 error: type mismatch
+
+#==== combine_edge_cases
+#---- empty_combine_is_null
+c()
+#++++
+NULL
+
+#---- nested_combine_flattens
+c(c(1L, 2L), 3L)
+#++++
+integer[]
+
+#---- combine_promotes_named_map_argument
+c(c(foo = 1L), 2.5)
+#++++
+double[]
+
+#---- combine_of_logical_and_integer_is_rejected
+c(TRUE, 1L)
+#++++
+error: type mismatch
+
+#---- combine_of_list_is_rejected
+c(list(1L), 2L)
+#++++
+error: type mismatch

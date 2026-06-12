@@ -13,3 +13,41 @@ value <- 1L
 value <- "ok"
 #++++
 value: character
+
+#---- annotated_monomorphic_export
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+#++++
+double_count: fn(count: integer) -> integer
+
+#---- higher_order_export
+#: fn(transform: fn(integer) -> character, count: integer) -> character
+apply_transform <- function(transform, count) transform(count)
+#++++
+apply_transform: fn(transform: fn(integer) -> character, count: integer) -> character
+
+#---- optional_parameter_export
+#: fn(count: integer, [label]: character) -> integer
+double_count <- function(count, label = NULL) count + count
+#++++
+double_count: fn(count: integer, [label]: character) -> integer
+
+#---- latest_function_binding_wins_with_changed_shape
+render <- function(count) "ok"
+
+#: fn(count: integer, label: character) -> character
+render <- function(count, label) label
+#++++
+render: fn(count: integer, label: character) -> character
+
+#---- exports_interleaved_with_type_definitions
+#: @alias Count {integer}
+first <- 1L
+
+#: @type Person {list{name: character}}
+second <- "two"
+#++++
+alias Count = integer
+type Person = list{name: character}
+first: integer
+second: character

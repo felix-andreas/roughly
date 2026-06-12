@@ -30,3 +30,29 @@ missing(identity("ok"))
 warning[naming] I could not resolve `missing` in this package, its imports, or builtins.
 --> 3:1-3:8
 | missing(identity("ok"))
+
+#---- named_argument_not_in_interface
+identity <- function(x) x
+identity(y = 1L)
+#++++
+error[type-error] This call uses named argument(s) `y`, but the function accepts named parameter(s) `x`.
+--> 2:1-2:17
+| identity(y = 1L)
+
+#---- missing_required_argument
+#: fn(count: integer, label: character) -> character
+describe <- function(count, label) label
+describe(1L)
+#++++
+error[type-error] This call passes 1 positional argument(s), but the function accepts 2.
+--> 3:1-3:9
+| describe(1L)
+
+#---- argument_type_mismatch_points_at_argument
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+double_count("two")
+#++++
+error[type-error] expected `integer`, found `character`
+--> 3:14-3:19
+| double_count("two")

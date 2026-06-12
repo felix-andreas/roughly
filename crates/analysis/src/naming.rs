@@ -380,10 +380,11 @@ fn is_namespace_symbol(_symbol: Symbol, _document_id: DocumentId) -> bool {
 }
 
 fn is_builtin_symbol(interner: &Interner, symbol: Symbol) -> bool {
-    matches!(
-        interner.resolve(symbol),
-        Some("+" | "-" | "*" | "/" | "**" | "&&" | "||" | "c" | "list")
-    )
+    interner.resolve(symbol).is_some_and(|name| {
+        crate::typecheck::BUILTINS
+            .iter()
+            .any(|(builtin_name, _)| *builtin_name == name)
+    })
 }
 
 struct TypeResolver<'a> {
