@@ -329,3 +329,127 @@ wrapper <- function() {
 R/main.R:2:4 -> renamed
 #++++
 no rename
+
+#---- literal_position
+#---- R/main.R
+value <- 1L
+#++++ any
+#!!!! rename literal.rename
+R/main.R:1:10 -> renamed
+#++++
+no rename
+
+#==== rename_bindings
+#---- equals_assignment
+#---- R/main.R
+wrapper <- function() {
+  value = 1L
+  value
+}
+#++++ any
+#!!!! rename equals.rename
+R/main.R:3:3 -> renamed
+#++++
+before:
+R/main.R:
+wrapper <- function() {
+  value = 1L
+  value
+}
+
+after:
+R/main.R:
+wrapper <- function() {
+  renamed = 1L
+  renamed
+}
+
+#---- conditional_maybe_defined
+#---- R/main.R
+wrapper <- function(flag) {
+  if (flag) value <- 1L
+  value
+}
+#++++ any
+#!!!! rename conditional.rename
+R/main.R:3:3 -> renamed
+#++++
+before:
+R/main.R:
+wrapper <- function(flag) {
+  if (flag) value <- 1L
+  value
+}
+
+after:
+R/main.R:
+wrapper <- function(flag) {
+  if (flag) renamed <- 1L
+  renamed
+}
+
+#---- for_variable_declaration_position
+#---- R/main.R
+wrapper <- function(values) {
+  for (item in values) item
+}
+#++++ any
+#!!!! rename for_declaration.rename
+R/main.R:2:8 -> renamed
+#++++
+before:
+R/main.R:
+wrapper <- function(values) {
+  for (item in values) item
+}
+
+after:
+R/main.R:
+wrapper <- function(values) {
+  for (renamed in values) renamed
+}
+
+#==== rename_global_use_site
+#---- variable_from_other_file
+#---- R/a.R
+value <- 1L
+#++++ any
+#---- R/b.R
+result <- value
+#++++ any
+#!!!! rename from_use_site.rename
+R/b.R:1:11 -> renamed
+#++++
+before:
+R/a.R:
+value <- 1L
+R/b.R:
+result <- value
+
+after:
+R/a.R:
+renamed <- 1L
+R/b.R:
+result <- renamed
+
+#---- function_from_callee
+#---- R/def.R
+helper <- function(value) value
+#++++ any
+#---- R/use.R
+result <- helper(1L)
+#++++ any
+#!!!! rename from_callee.rename
+R/use.R:1:11 -> renamed
+#++++
+before:
+R/def.R:
+helper <- function(value) value
+R/use.R:
+result <- helper(1L)
+
+after:
+R/def.R:
+renamed <- function(value) value
+R/use.R:
+result <- renamed(1L)

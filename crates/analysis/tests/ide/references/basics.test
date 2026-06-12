@@ -146,3 +146,68 @@ object$field
 R/main.R:2:8
 #++++
 no references
+
+#---- namespace_rhs
+#---- R/main.R
+pkg::func
+#++++ any
+#!!!! references namespace_use.references
+R/main.R:1:6
+#++++
+no references
+
+#==== references_conditional
+#---- maybe_defined_use
+#---- R/main.R
+wrapper <- function(flag) {
+  if (flag) value <- 1L
+  value
+}
+#++++ any
+#!!!! references from_maybe_defined_use.references
+R/main.R:3:3
+#++++
+R/main.R:2:13..2:18 [declaration]
+R/main.R:3:3..3:8
+
+#==== references_redefinition
+#---- multi_file_redefinition
+#---- R/a.R
+value <- 1L
+#++++ any
+#---- R/b.R
+value <- 2L
+#++++ any
+#---- R/c.R
+result <- value
+#++++ any
+#!!!! references from_use.references
+R/c.R:1:11
+#++++
+R/b.R:1:1..1:6 [declaration]
+R/c.R:1:11..1:16
+#!!!! references from_shadowed_declaration.references
+R/a.R:1:1
+#++++
+R/a.R:1:1..1:6 [declaration]
+
+#==== references_workspace
+#---- updates_after_move
+#---- R/a.R
+value <- 1L
+#++++ any
+#---- R/b.R
+result <- value
+#++++ any
+#!!!! references before_move.references
+R/b.R:1:11
+#++++
+R/a.R:1:1..1:6 [declaration]
+R/b.R:1:11..1:16
+#.... after_move
+#---- move R/a.R -> R/c.R
+#!!!! references after_move.references
+R/b.R:1:11
+#++++
+R/b.R:1:11..1:16
+R/c.R:1:1..1:6 [declaration]

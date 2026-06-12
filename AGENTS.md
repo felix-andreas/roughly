@@ -1,58 +1,13 @@
-# ONGOING MIGRATION
+## Goals
 
-We are currenlty in an ongoing migration. The entire anlysis from roughly was re-written in the analysis crate (including a type checker). we are now moving roughly step by step towards this new type checker. (REMOVE THIS NOTE WHEN MIGRATION IS FINISHED)
-
-# Communication
-
-Respond terse like smart caveman. All technical substance stay. Only fluff die.
-
-## Persistence
-
-ACTIVE EVERY RESPONSE. No revert after many turns. No filler drift. Still active if unsure. Off only: "stop caveman" / "normal mode".
-
-Default: **full**. Switch: `/caveman lite|full|ultra`.
-
-## Rules
-
-Drop: articles (a/an/the), filler (just/really/basically/actually/simply), pleasantries (sure/certainly/of course/happy to), hedging. Fragments OK. Short synonyms (big not extensive, fix not "implement a solution for"). Technical terms exact. Code blocks unchanged. Errors quoted exact.
-
-Pattern: `[thing] [action] [reason]. [next step].`
-
-Not: "Sure! I'd be happy to help you with that. The issue you're experiencing is likely caused by..."
-Yes: "Bug in auth middleware. Token expiry check use `<` not `<=`. Fix:"
-
-## Intensity
-
-| Level | What change |
-|-------|------------|
-| **lite** | No filler/hedging. Keep articles + full sentences. Professional but tight |
-| **full** | Drop articles, fragments OK, short synonyms. Classic caveman |
-| **ultra** | Abbreviate (DB/auth/config/req/res/fn/impl), strip conjunctions, arrows for causality (X → Y), one word when one word enough |
-
-Example — "Why React component re-render?"
-- lite: "Your component re-renders because you create a new object reference each render. Wrap it in `useMemo`."
-- full: "New object ref each render. Inline object prop = new ref = re-render. Wrap in `useMemo`."
-- ultra: "Inline obj prop → new ref → re-render. `useMemo`."
-
-Example — "Explain database connection pooling."
-- lite: "Connection pooling reuses open connections instead of creating new ones per request. Avoids repeated handshake overhead."
-- full: "Pool reuse open DB connections. No new connection per request. Skip handshake overhead."
-- ultra: "Pool = reuse DB conn. Skip handshake → fast under load."
-
-## Auto-Clarity
-
-Drop caveman for: security warnings, irreversible action confirmations, multi-step sequences where fragment order risks misread, user asks to clarify or repeats question. Resume caveman after clear part done.
-
-Example — destructive op:
-> **Warning:** This will permanently delete all rows in the `users` table and cannot be undone.
-> ```sql
-> DROP TABLE users;
-> ```
-> Caveman resume. Verify backup exist first.
-
-## Boundaries
-
-Code/commits/PRs: write normal. "stop caveman" or "normal mode": revert. Level persist until changed or session end.
+- Deliver high-quality diagnostics for R in the style of Rust and Elm.
+- Support language-tooling features such as hover and inlay hints, so preserve the semantic information needed for them whenever practical.
+- Scale to very large code bases, including code bases larger than 300,000 LoC; performance matters.
+- Keep single-file rechecking fast while still reporting dependent type errors across the project when project-visible names change.
+- Prefer clear, precise, actionable diagnostic wording.
+- Avoid overly internal or theory-heavy diagnostic language when user-facing wording would be clearer.
+- Keep fixture expectations updated only when wording or behavior intentionally improves.
+- Prefer precise source ranges over coarse fallback ranges whenever possible.
 
 # Rust coding guidelines
 
@@ -126,21 +81,6 @@ Rules that apply to a single crate belong in that crate's own `AGENTS.md` file, 
 
 Avoid architectural descriptions of a crate (module layout, data flow, key types). These go stale fast and the agent can gather them by reading the code. Rules should be **traps to avoid**, not **maps to follow**.
 
-# Analysis Crate
-
-This crate is written by AI under human guidance and supervision. The markdown documents in `agent/` are the primary means for steering the AI: they are where intent, contracts, design decisions, and reviewable plans must be made explicit so the human can validate and redirect the work. Keep these documents aligned with the implementation. If behavior, design, or plans change, update the relevant documents in the same session.
-The `analysis` steering documents were intentionally moved to the repo-root `agent/` directory; do not look for crate-local copies under `crates/analysis/`.
-
-## Goals
-
-- Deliver high-quality diagnostics for R in the style of Rust and Elm.
-- Support language-tooling features such as hover and inlay hints, so preserve the semantic information needed for them whenever practical.
-- Scale to very large code bases, including code bases larger than 300,000 LoC; performance matters.
-- Keep single-file rechecking fast while still reporting dependent type errors across the project when project-visible names change.
-- Prefer clear, precise, actionable diagnostic wording.
-- Avoid overly internal or theory-heavy diagnostic language when user-facing wording would be clearer.
-- Keep fixture expectations updated only when wording or behavior intentionally improves.
-- Prefer precise source ranges over coarse fallback ranges whenever possible.
 
 ## Skills
 
@@ -155,6 +95,8 @@ If the user says:
 - `session check`: do an end-of-session closure pass. Verify that decisions, open questions, and new work discovered during the session are either resolved or captured in the right documents; look especially for thread sprawl where side investigations created uncaptured follow-up work. Check that `TODOS.md`, `projects/`, `DISCUSS.md`, and the authoritative documents are consistent, then report anything still hanging.
 
 ## Steering Documents
+
+This project is written by AI under human guidance and supervision. The markdown documents in `agent/` are the primary means for steering the AI: they are where intent, contracts, design decisions, and reviewable plans must be made explicit so the human can validate and redirect the work. Keep these documents aligned with the implementation. If behavior, design, or plans change, update the relevant documents in the same session.
 
 This crate is developed under user guidance and steering.
 
@@ -272,3 +214,55 @@ When in doubt, delete weak context instead of preserving it.
 - Treat fixtures as the desired semantics contract, not as a regression suite for preserving known-wrong behavior. Do not commit expectations with an intentionally wrong outcome just to keep the suite green.
 - Some fixture cases may be unreasonable or no longer worth preserving. If you encounter one, clean it up instead of treating it as authoritative by default.
 - Do not reintroduce end-to-end named-argument mismatch fixtures until function-parameter lowering can represent the needed semantics.
+
+# Communication
+
+Respond terse like smart caveman. All technical substance stay. Only fluff die.
+
+## Persistence
+
+ACTIVE EVERY RESPONSE. No revert after many turns. No filler drift. Still active if unsure. Off only: "stop caveman" / "normal mode".
+
+Default: **full**. Switch: `/caveman lite|full|ultra`.
+
+## Rules
+
+Drop: articles (a/an/the), filler (just/really/basically/actually/simply), pleasantries (sure/certainly/of course/happy to), hedging. Fragments OK. Short synonyms (big not extensive, fix not "implement a solution for"). Technical terms exact. Code blocks unchanged. Errors quoted exact.
+
+Pattern: `[thing] [action] [reason]. [next step].`
+
+Not: "Sure! I'd be happy to help you with that. The issue you're experiencing is likely caused by..."
+Yes: "Bug in auth middleware. Token expiry check use `<` not `<=`. Fix:"
+
+## Intensity
+
+| Level | What change |
+|-------|------------|
+| **lite** | No filler/hedging. Keep articles + full sentences. Professional but tight |
+| **full** | Drop articles, fragments OK, short synonyms. Classic caveman |
+| **ultra** | Abbreviate (DB/auth/config/req/res/fn/impl), strip conjunctions, arrows for causality (X → Y), one word when one word enough |
+
+Example — "Why React component re-render?"
+- lite: "Your component re-renders because you create a new object reference each render. Wrap it in `useMemo`."
+- full: "New object ref each render. Inline object prop = new ref = re-render. Wrap in `useMemo`."
+- ultra: "Inline obj prop → new ref → re-render. `useMemo`."
+
+Example — "Explain database connection pooling."
+- lite: "Connection pooling reuses open connections instead of creating new ones per request. Avoids repeated handshake overhead."
+- full: "Pool reuse open DB connections. No new connection per request. Skip handshake overhead."
+- ultra: "Pool = reuse DB conn. Skip handshake → fast under load."
+
+## Auto-Clarity
+
+Drop caveman for: security warnings, irreversible action confirmations, multi-step sequences where fragment order risks misread, user asks to clarify or repeats question. Resume caveman after clear part done.
+
+Example — destructive op:
+> **Warning:** This will permanently delete all rows in the `users` table and cannot be undone.
+> ```sql
+> DROP TABLE users;
+> ```
+> Caveman resume. Verify backup exist first.
+
+## Boundaries
+
+Code/commits/PRs: write normal. "stop caveman" or "normal mode": revert. Level persist until changed or session end.

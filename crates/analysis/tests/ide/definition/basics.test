@@ -170,3 +170,85 @@ if (TRUE) 1L
 R/main.R:1:1
 #++++
 no definition
+
+#==== definition_bindings
+#---- equals_assignment
+#---- R/main.R
+wrapper <- function() {
+  value = 1L
+  value
+}
+#++++ any
+#!!!! goto_definition equals_use.goto_definition
+R/main.R:3:3
+#++++
+R/main.R:2:3..2:8
+
+#---- conditional_maybe_defined
+#---- R/main.R
+wrapper <- function(flag) {
+  if (flag) value <- 1L
+  value
+}
+#++++ any
+#!!!! goto_definition maybe_defined_use.goto_definition
+R/main.R:3:3
+#++++
+R/main.R:2:13..2:18
+
+#==== definition_redefinition
+#---- multi_file_redefinition
+#---- R/a.R
+value <- 1L
+#++++ any
+#---- R/b.R
+value <- 2L
+#++++ any
+#---- R/c.R
+result <- value
+#++++ any
+#!!!! goto_definition use_resolves_to_winner.goto_definition
+R/c.R:1:11
+#++++
+R/b.R:1:1..1:6
+#!!!! goto_definition shadowed_declaration_is_local.goto_definition
+R/a.R:1:1
+#++++
+R/a.R:1:1..1:6
+
+#==== definition_workspace
+#---- updates_after_edit
+#---- R/def.R
+value <- 1L
+#++++ any
+#---- R/use.R
+result <- value
+#++++ any
+#!!!! goto_definition before_edit.goto_definition
+R/use.R:1:11
+#++++
+R/def.R:1:1..1:6
+#.... after_edit
+#---- edit R/def.R 1:1-1:1 -> "other <- 2L\n"
+#!!!! goto_definition after_edit.goto_definition
+R/use.R:1:11
+#++++
+R/def.R:2:1..2:6
+
+#---- gone_after_delete
+#---- R/def.R
+value <- 1L
+#++++ any
+#---- R/use.R
+result <- value
+#++++ any
+#!!!! goto_definition before_delete.goto_definition
+R/use.R:1:11
+#++++
+R/def.R:1:1..1:6
+#.... after_delete
+#---- delete R/def.R
+#!!!! goto_definition after_delete.goto_definition
+R/use.R:1:11
+#++++
+no definition
