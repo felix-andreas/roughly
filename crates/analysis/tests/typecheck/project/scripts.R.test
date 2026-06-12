@@ -1,0 +1,50 @@
+#==== scripts
+#---- script_uses_package_globals
+#---- R/a.R
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+#++++
+No diagnostics.
+#---- scripts/use.R
+result <- double_count(2L)
+#++++
+No diagnostics.
+
+#---- script_binding_is_not_package_global
+#---- scripts/local.R
+helper <- function(x) x
+#++++
+No diagnostics.
+#---- R/a.R
+result <- helper(1L)
+#++++
+warning[naming] I could not resolve `helper` in this package, its imports, or builtins.
+--> 1:11-1:17
+| result <- helper(1L)
+
+#---- script_type_declaration_is_not_project_global
+#---- scripts/local.R
+#: @type Person {list{name: character}}
+#++++
+No diagnostics.
+#---- R/a.R
+#: Person
+value <- list(name = "bob")
+#++++
+error[syntax-error] Syntax Error: type syntax error: unknown type `Person`
+--> 1:1-1:10
+| #: Person
+
+error[type-error] expected `Unknown`, found `list{name: character}`
+--> 2:1-2:28
+| value <- list(name = "bob")
+
+#---- package_and_script_can_reuse_type_name
+#---- R/a.R
+#: @type Person {list{name: character}}
+#++++
+No diagnostics.
+#---- scripts/local.R
+#: @type Person {list{age: double}}
+#++++
+No diagnostics.

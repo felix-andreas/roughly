@@ -22,6 +22,7 @@ It does not render later use-site expression results as its primary contract.
 - `annotations.R.test`
 - `basics.R.test`
 - `functions.R.test`
+- `nominals.R.test`
 
 This suite is also the intended home for cases currently living under
 `tests/typecheck/deprecated/generalization/`.
@@ -62,12 +63,7 @@ The bindings suite should explicitly cover:
 
 Known missing or thin areas:
 
-- `@trust` at binding boundary
-- `@if-unknown` at binding boundary
-- `@new` success cases
-- generic named type success cases
-- explicit `@forall` binding coverage
-- more nominal and alias success cases
+- rebinding-history coverage is thin; most cases assert one final scheme per name
 
 ## What does not belong here
 

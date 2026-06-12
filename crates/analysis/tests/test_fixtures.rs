@@ -81,8 +81,57 @@ fn typecheck_interfaces() {
 }
 
 #[test]
+fn typecheck_project() {
+    run_fixture_suite("tests/typecheck/project", run_project_fixture);
+}
+
+#[test]
 fn typecheck_unification() {
     run_fixture_suite("tests/typecheck/unification", run_unification_fixture);
+}
+
+fn run_project_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String> {
+    let FixtureKind::MultiFile(case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+    let mut parser = new_parser().unwrap();
+    let mut analysis_state = Analysis::new(
+        PathBuf::new(),
+        LintConfig::default(),
+        CheckConfig {
+            unused: false,
+            typing: true,
+        },
+    );
+    let mut contents_by_path = BTreeMap::new();
+    for entry in &case.initial_generation.entries {
+        let FixtureOperation::CreateDocument { path, contents } = &entry.operation else {
+            continue;
+        };
+        let document = Document::parse(&mut parser, contents).expect("parse fixture document");
+        analysis_state.add_document(path.clone(), document);
+        contents_by_path.insert(path.clone(), contents.clone());
+    }
+
+    analysis::run_full(&mut analysis_state);
+
+    let files = contents_by_path
+        .into_iter()
+        .map(|(path, contents)| {
+            let document_id = analysis_state
+                .document_id_for_path(&path)
+                .ok_or_else(|| "missing document id".to_owned())?;
+            Ok(FixtureRunFile {
+                output: render_diagnostics(
+                    &contents,
+                    &analysis_state.document_diagnostics(document_id),
+                ),
+                path,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    Ok(vec![files])
 }
 
 fn run_bindings_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String> {

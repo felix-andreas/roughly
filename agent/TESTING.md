@@ -148,11 +148,11 @@ The parser now understands both fixture shapes.
 
 `naming/local` uses `Simple` cases and runs only the file-local naming pass.
 `naming/global` uses `MultiFile` cases and runs package-global naming on the initial generation.
-Typecheck fixtures are still mid-migration: older engine-centric fixture files now live under
-`tests/typecheck/deprecated/`, namely `generalization`, `instantiation`, `substitution`, and
-`environment`, but they are no longer wired as active suites. The active target split is
-`bindings`, `expressions`, `interfaces`, later `project`, and at most one clearly-internal
-raw-inference suite.
+`typecheck/project` uses `MultiFile` cases and runs the full pipeline with typing enabled.
+Older engine-centric typecheck fixture files still live under `tests/typecheck/deprecated/`
+(`generalization`, `instantiation`, `substitution`, `environment`) as migration storage; they are
+not wired as active suites. The active split is `bindings`, `expressions`, `interfaces`,
+`project`, and the internal `unification` suite.
 The other analysis fixture runners still execute only `Simple` cases.
 Later-generation `MultiFile` support is still waiting on broader renderer-side adoption in
 `analysis`.
@@ -190,7 +190,7 @@ The intended fixture suites are:
 - `lowering` - syntax-to-HIR lowering output
 - `naming/local` - file-local binding introduction and lexical use-site resolution
 - `naming/global` - package-global resolution across multiple files
-- `project` - future multi-file typed package behavior
+- `project` - multi-file typed package behavior, currently rendered as per-file diagnostics
 - `unification` - optional internal raw-inference coverage for metavariable-facing engine behavior
 
 Keep focused test-running guidance minimal in this document. Exact suite adoption may lag behind the intended split while implementation and fixture migration are still in progress.
@@ -359,6 +359,24 @@ Rules:
 - this suite is internal-facing and optional
 - keep it only when raw metavariable snapshots remain useful as fixtures
 - direct Rust tests are still preferred for tiny `InferenceState` invariants
+
+### `project`
+
+Purpose:
+
+- cross-file value and type use through package-global naming
+- later-file winner behavior
+- script versus package document behavior
+
+Expected output should show:
+
+- per-file rendered diagnostics, with `No diagnostics.` for clean files
+
+Rules:
+
+- the suite runs the full pipeline on `MultiFile` fixtures with typing enabled
+- typed cross-file snapshots wait on the pipeline retaining checked-file results; the detailed
+  matrix lives in `tests/typecheck/project/README.md`
 
 ### `diagnostics`
 

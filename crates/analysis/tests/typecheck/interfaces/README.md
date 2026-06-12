@@ -39,6 +39,7 @@ belong in later `tests/typecheck/project/`.
 ## Current files
 
 - `functions.R.test`
+- `nominals.R.test`
 - `types.R.test`
 
 ## Matrix
@@ -82,10 +83,7 @@ The interfaces suite should explicitly cover:
 
 Known missing or thin areas:
 
-- exported nominal type coverage is thin
-- generic export coverage is thin
 - expanded annotation export coverage is thin
-- named-parameter and optional-parameter export coverage is thin
 - explicit `@forall` export coverage is thin
 - rebinding coverage mostly covers one-name collapse, not richer mixed surfaces
 - more mixed value/type export snapshots are needed

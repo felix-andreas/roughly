@@ -24,10 +24,12 @@ It is also the intended home for most cases currently living under:
 
 - `arithmetic.R.test`
 - `basics.R.test`
+- `comparison.R.test`
 - `control_flow.R.test`
 - `functions.R.test`
 - `indexing.R.test`
 - `lists.R.test`
+- `nominals.R.test`
 - `polymorphism.R.test`
 - `scoping.R.test`
 - `special_types.R.test`
@@ -48,7 +50,14 @@ The expressions suite should explicitly cover:
   - mixed integer/double cases
   - scalar/vector shape lifting
   - named-vector arithmetic losing map-likeness
+  - `%%`, `%/%`, `^`, and `**`
+  - unsupported `%op%` specials staying `Unknown`
   - invalid operand diagnostics as normalized error kinds
+- comparison, negation, and ranges
+  - comparison families (numeric, character, logical) and cross-family rejection
+  - shape lifting to `logical[]`
+  - unary `!` on logical shapes and rejection elsewhere
+  - `:` endpoint typing including whole-number double literals
 - vectors
   - scalar-like, array-like, and map-like vector shapes
   - coercions allowed by checked annotations
@@ -71,13 +80,19 @@ The expressions suite should explicitly cover:
   - boolean operators
   - `for`, `while`, and `repeat`
 - functions and calls
-  - inferred functions
-  - compact function annotations
+  - inferred functions with parameter names and optional defaults
+  - compact function annotations, including `[name]: TYPE` optional parameters
   - expanded function annotations
-  - named and positional parameters
+  - named and positional parameters, named arguments out of order
+  - argument compatibility coercions and `Unknown`-argument acceptance
   - arity mismatch
   - calling non-functions
-  - higher-order calls
+  - higher-order calls and function-typed arguments
+- nominals and aliases
+  - `@new` introduction success and failure
+  - nominal projection through operators, indexing, and iteration
+  - nominal function parameters and returns
+  - alias and generic alias use
 - indexing
   - vector `[[`
   - list `[[`
@@ -98,11 +113,9 @@ The expressions suite should explicitly cover:
 
 Known missing or thin areas:
 
-- `@new` use-site success cases
-- generic named type use-site success cases
-- explicit `@forall` function annotation success cases
-- more alias and nominal use-site success cases
-- multi-file package-visible expression behavior belongs in later `project`
+- backtick-quoted `$` name sugar is not covered (lowering does not model it yet)
+- multi-file package-visible expression behavior lives in `project`, which currently renders
+  diagnostics only
 
 ## What does not belong here
 

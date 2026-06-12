@@ -1,0 +1,48 @@
+#==== cross_file_values
+#---- cross_file_function_use_typechecks
+#---- R/a.R
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+#++++
+No diagnostics.
+#---- R/b.R
+result <- double_count(2L)
+#++++
+No diagnostics.
+
+#---- cross_file_function_argument_mismatch
+#---- R/a.R
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+#++++
+No diagnostics.
+#---- R/b.R
+result <- double_count("two")
+#++++
+error[type-error] expected `integer`, found `character`
+--> 1:24-1:29
+| result <- double_count("two")
+
+#---- cross_file_value_annotation_mismatch
+#---- R/a.R
+count <- 1L
+#++++
+No diagnostics.
+#---- R/b.R
+#: character
+label <- count
+#++++
+error[type-error] expected `character`, found `integer`
+--> 2:1-2:15
+| label <- count
+
+#---- later_file_definition_is_visible_earlier
+#---- R/a.R
+result <- render(1L)
+#++++
+No diagnostics.
+#---- R/b.R
+#: fn(count: integer) -> character
+render <- function(count) "ok"
+#++++
+No diagnostics.

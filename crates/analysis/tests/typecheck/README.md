@@ -41,6 +41,7 @@ The target suites already exist:
 - `bindings`
 - `expressions`
 - `interfaces`
+- `project`
 - `unification`
 
 Temporary transitional fixture directories still exist as migration storage:
@@ -102,10 +103,9 @@ refine the split instead of adding `misc`.
 
 The largest known gaps are:
 
-- no `project` suite yet, so multi-file typecheck semantics are not directly covered
-- nominal happy-path coverage is thin compared with diagnostics coverage
-- generic named type coverage is thin
-- `@forall` coverage is thin
+- `project` currently renders per-file diagnostics only, because the check pipeline retains no
+  typed artifact; typed cross-file snapshots need pipeline support first
+- `Collate`-driven file order is not covered; the harness cannot model `DESCRIPTION` yet
 - transitional engine-named directories still need to be fully re-homed or deleted
 
 ## Naming guidance
