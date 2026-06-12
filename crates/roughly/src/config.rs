@@ -30,6 +30,31 @@ impl Config {
     pub fn from_str(text: &str, experimental: ExperimentalFeatures) -> Result<Config, ConfigError> {
         Ok(toml::from_str::<ConfigToml>(text)?.to_config(experimental))
     }
+
+    /// Loads the `roughly.toml` governing `target` by searching the target's directory and
+    /// its ancestors, falling back to the default configuration when none exists.
+    pub fn for_target(
+        target: impl AsRef<Path>,
+        experimental: ExperimentalFeatures,
+    ) -> Result<Config, ConfigError> {
+        let target = target.as_ref();
+        let start = if target.is_dir() {
+            Some(target)
+        } else {
+            target.parent()
+        };
+
+        let mut directory = start;
+        while let Some(current) = directory {
+            let candidate = current.join("roughly.toml");
+            if candidate.is_file() {
+                return Config::from_path(candidate, experimental);
+            }
+            directory = current.parent();
+        }
+
+        Ok(Config::default())
+    }
 }
 
 #[derive(Error, Debug)]

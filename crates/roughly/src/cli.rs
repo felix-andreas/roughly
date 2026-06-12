@@ -64,10 +64,10 @@ pub fn check(
     let root: Vec<PathBuf> = vec![".".into()];
     let files = maybe_files.unwrap_or(&root);
 
-    let paths_with_config = files
+    let targets_with_config = files
         .iter()
         .map(|file| {
-            let config = match config::Config::from_path(file, experimental_features) {
+            let config = match config::Config::for_target(file, experimental_features) {
                 Ok(config) => config,
                 Err(err) => {
                     error(&err.to_string());
@@ -75,7 +75,13 @@ pub fn check(
                 }
             };
 
-            let paths = Walk::new(file)
+            let target = std::fs::canonicalize(file).map_err(|err| {
+                error(&format!("failed to resolve: {}", file.display()));
+                eprintln!("{err}");
+                CheckError
+            })?;
+
+            let paths = Walk::new(&target)
                 .filter_map(|entry| match entry {
                     Ok(entry) => {
                         let path = entry.into_path();
@@ -90,17 +96,22 @@ pub fn check(
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
-            Ok((paths, config))
+            Ok((target, paths, config))
         })
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut n_files = 0;
     let mut n_errors = 0;
-    for (paths, config) in paths_with_config {
+    for (target, paths, config) in targets_with_config {
+        // One analysis per target keeps package-global naming and the project-global type
+        // namespace intact across all files under that target.
+        let root = analysis_root_for_target(&target);
+        let mut analysis_state = Analysis::new(root, config.lint, config.check);
+        let mut checked_paths = Vec::with_capacity(paths.len());
         for path in paths {
             n_files += 1;
-            let old = match std::fs::read_to_string(&path) {
-                Ok(old) => old,
+            let source = match std::fs::read_to_string(&path) {
+                Ok(source) => source,
                 Err(err) => {
                     n_errors += 1;
                     error(&format!("failed to read: {}", path.display()));
@@ -108,10 +119,8 @@ pub fn check(
                     continue;
                 }
             };
-            let mut analysis_state =
-                Analysis::new(std::env::current_dir().unwrap(), config.lint, config.check);
             if analysis_state
-                .add_document_from_source(path.clone(), &old)
+                .add_document_from_source(path.clone(), &source)
                 .is_err()
             {
                 n_errors += 1;
@@ -121,7 +130,12 @@ pub fn check(
                 ));
                 continue;
             }
+            checked_paths.push(path);
+        }
 
+        analysis::run_full(&mut analysis_state);
+
+        for path in checked_paths {
             let Some(document_id) = analysis_state.document_id_for_path(&path) else {
                 n_errors += 1;
                 error(&format!(
@@ -130,7 +144,6 @@ pub fn check(
                 ));
                 continue;
             };
-            analysis::run_full(&mut analysis_state);
             let diagnostics =
                 diagnostics::convert_diagnostics(analysis_state.document_diagnostics(document_id));
 
@@ -231,6 +244,23 @@ pub fn check(
     }
 }
 
+fn analysis_root_for_target(target: &std::path::Path) -> PathBuf {
+    if target.is_dir() {
+        return target.to_path_buf();
+    }
+
+    // A file directly under an `R/` directory is a package source file; its package root is
+    // the directory containing `R/`.
+    match target.parent() {
+        Some(parent) if parent.file_name().is_some_and(|name| name == "R") => parent
+            .parent()
+            .map(|root| root.to_path_buf())
+            .unwrap_or_else(|| parent.to_path_buf()),
+        Some(parent) => parent.to_path_buf(),
+        None => PathBuf::from("."),
+    }
+}
+
 //
 // FMT
 //
@@ -253,7 +283,7 @@ pub fn fmt(
     let paths_with_config = files
         .iter()
         .map(|file| {
-            let config = config::Config::from_path(file, experimental_features).map_err(|err| {
+            let config = config::Config::for_target(file, experimental_features).map_err(|err| {
                 error(&err.to_string());
                 FmtError
             })?;
