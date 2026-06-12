@@ -21,7 +21,7 @@ pub fn node_range(node: Node) -> Range {
 }
 
 #[inline(always)]
-pub fn point_to_position(point: Point) -> Position {
+fn point_to_position(point: Point) -> Position {
     Position::new(point.row as u32, point.column as u32)
 }
 

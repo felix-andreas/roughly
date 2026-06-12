@@ -1,11 +1,12 @@
 use {
     crate::{
-        cli, completion,
+        cli,
         config::{Config, ExperimentalFeatures},
         diagnostics, format,
         index::{self, IndexError, Item},
         lsp_types::{
-            CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+            CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionOptions,
+            CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
             DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
             DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
             DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol,
@@ -571,20 +572,53 @@ impl LanguageServer for ServerState {
         &mut self,
         params: CompletionParams,
     ) -> BoxFuture<'static, Result<Option<CompletionResponse>, ResponseError>> {
-        let uri = params.text_document_position.text_document.uri;
-        let path = uri.to_file_path().unwrap();
+        let path = params
+            .text_document_position
+            .text_document
+            .uri
+            .to_file_path()
+            .unwrap();
         let position = params.text_document_position.position;
 
         tracing::debug!(?path, "completion");
 
-        let Some(document) = self.opened_document(&path).cloned() else {
+        if self.opened_document(&path).is_none() {
             tracing::error!(?path, "document not found");
             return box_future(Err(path_not_found_error(&path)));
-        };
-        let workspace_items = self.package_items_map();
+        }
 
-        let completions =
-            completion::get(position, document.rope(), document.tree(), &workspace_items);
+        let completions = ide::completion(
+            &mut self.analysis_state,
+            &path,
+            TextPosition {
+                line_index: position.line as usize,
+                character_index: position.character as usize,
+            },
+        )
+        .map(|items| {
+            CompletionResponse::Array(
+                items
+                    .into_iter()
+                    .map(|item| CompletionItem {
+                        label: item.label,
+                        label_details: Some(CompletionItemLabelDetails {
+                            detail: None,
+                            description: Some(match item.source {
+                                analysis::CompletionItemSource::Keyword => "Keyword".into(),
+                                analysis::CompletionItemSource::Local => "Local".into(),
+                                analysis::CompletionItemSource::Global => "Global".into(),
+                            }),
+                        }),
+                        kind: Some(match item.kind {
+                            analysis::CompletionItemKind::Keyword => CompletionItemKind::KEYWORD,
+                            analysis::CompletionItemKind::Variable => CompletionItemKind::VARIABLE,
+                            analysis::CompletionItemKind::Function => CompletionItemKind::FUNCTION,
+                        }),
+                        ..Default::default()
+                    })
+                    .collect(),
+            )
+        });
 
         box_future(Ok(completions))
     }
@@ -597,33 +631,39 @@ impl LanguageServer for ServerState {
         &mut self,
         params: GotoDefinitionParams,
     ) -> BoxFuture<'static, Result<Option<GotoDefinitionResponse>, ResponseError>> {
-        /*
-        let _ = params;
         let uri = params.text_document_position_params.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let position = params.text_document_position_params.position;
 
-        tracing::debug!(?path, "goto definition");
+        tracing::debug!(?path, ?position, "goto definition");
 
         if self.opened_document(&path).is_none() {
             tracing::info!(?path, "document not found");
             return box_future(Err(path_not_found_error(&path)));
         }
-        let workspace_items = self.package_items_map();
 
-        let definitions = definition::goto(
-            &uri,
-            position.line as usize,
-            position.character as usize,
-            document.rope(),
-            document.tree(),
-            &workspace_items,
-        );
+        let response = ide::definition(
+            &mut self.analysis_state,
+            &path,
+            TextPosition {
+                line_index: position.line as usize,
+                character_index: position.character as usize,
+            },
+        )
+        .map(|locations| {
+            let mut locations = locations
+                .into_iter()
+                .map(convert_location)
+                .collect::<Vec<_>>();
+            match locations.len() {
+                1 => GotoDefinitionResponse::Scalar(
+                    locations.pop().expect("single definition location"),
+                ),
+                _ => GotoDefinitionResponse::Array(locations),
+            }
+        });
 
-        return box_future(Ok(definitions));
-        */
-        let _ = params;
-        box_future(Err(unsupported_feature_error("goto definition")))
+        box_future(Ok(response))
     }
 
     //
@@ -774,8 +814,6 @@ impl LanguageServer for ServerState {
         &mut self,
         params: ReferenceParams,
     ) -> BoxFuture<'static, Result<Option<Vec<Location>>, ResponseError>> {
-        /*
-        let _ = params;
         let uri = params.text_document_position.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let position = params.text_document_position.position;
@@ -783,26 +821,23 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(?path, ?position, ?include_declaration, "find references");
 
-        let Some(document) = self.opened_document(&path) else {
+        if self.opened_document(&path).is_none() {
             tracing::info!(?path, "document not found");
             return box_future(Err(path_not_found_error(&path)));
-        };
-        let workspace_items = self.package_items_map();
+        }
 
-        let references = references::find_references(
-            &uri,
-            position.line as usize,
-            position.character as usize,
+        let references = ide::references(
+            &mut self.analysis_state,
+            &path,
+            TextPosition {
+                line_index: position.line as usize,
+                character_index: position.character as usize,
+            },
             include_declaration,
-            document.rope(),
-            document.tree(),
-            &workspace_items,
-        );
+        )
+        .map(|locations| locations.into_iter().map(convert_location).collect());
 
-        return box_future(Ok(references));
-        */
-        let _ = params;
-        box_future(Err(unsupported_feature_error("references")))
+        box_future(Ok(references))
     }
 
     //
@@ -813,8 +848,6 @@ impl LanguageServer for ServerState {
         &mut self,
         params: RenameParams,
     ) -> BoxFuture<'static, Result<Option<WorkspaceEdit>, ResponseError>> {
-        /*
-        let _ = params;
         let uri = params.text_document_position.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let position = params.text_document_position.position;
@@ -822,24 +855,54 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(?path, ?position, ?new_name, "rename");
 
-        let Some(document) = self.opened_document(&path) else {
+        if self.opened_document(&path).is_none() {
             tracing::info!(?path, "document not found");
             return box_future(Err(path_not_found_error(&path)));
-        };
+        }
 
-        let workspace_edit = rename::rename(
-            &uri,
-            position.line as usize,
-            position.character as usize,
+        let workspace_edit = ide::rename(
+            &mut self.analysis_state,
+            &path,
+            TextPosition {
+                line_index: position.line as usize,
+                character_index: position.character as usize,
+            },
             &new_name,
-            document.rope(),
-            document.tree(),
-        );
+        )
+        .map(|rename_result| {
+            let changes = rename_result
+                .edits
+                .into_iter()
+                .map(|(path, edits)| {
+                    let uri =
+                        Url::from_file_path(path).expect("rename edit path should convert to URI");
+                    let edits = edits
+                        .into_iter()
+                        .map(|edit| TextEdit {
+                            range: Range::new(
+                                Position::new(
+                                    edit.range.start.line_index as u32,
+                                    edit.range.start.character_index as u32,
+                                ),
+                                Position::new(
+                                    edit.range.end.line_index as u32,
+                                    edit.range.end.character_index as u32,
+                                ),
+                            ),
+                            new_text: edit.replacement_text,
+                        })
+                        .collect();
+                    (uri, edits)
+                })
+                .collect();
 
-        return box_future(Ok(workspace_edit));
-        */
-        let _ = params;
-        box_future(Err(unsupported_feature_error("rename")))
+            WorkspaceEdit {
+                changes: Some(changes),
+                ..Default::default()
+            }
+        });
+
+        box_future(Ok(workspace_edit))
     }
 
     //
@@ -857,6 +920,9 @@ impl LanguageServer for ServerState {
             tracing::error!(?path, "symbols not found");
             return box_future(Err(path_not_found_error(&path)));
         };
+        // Document symbols are requested on every keystroke and only need top-level symbols, so
+        // they intentionally read the parsed tree directly instead of running the analysis
+        // pipeline.
         let items = index::index(document.tree().root_node(), document.rope(), false, false);
         let symbols: Vec<DocumentSymbol> = symbols::document(&items);
 
@@ -890,9 +956,18 @@ fn path_not_found_error(path: &Path) -> ResponseError {
     )
 }
 
-fn unsupported_feature_error(feature_name: &str) -> ResponseError {
-    ResponseError::new(
-        ErrorCode::REQUEST_FAILED,
-        format!("{feature_name} is temporarily disabled during analysis integration"),
-    )
+fn convert_location(location: analysis::ide::Location) -> Location {
+    Location {
+        uri: Url::from_file_path(&location.path).expect("location path should convert to URI"),
+        range: Range::new(
+            Position::new(
+                location.range.start.line_index as u32,
+                location.range.start.character_index as u32,
+            ),
+            Position::new(
+                location.range.end.line_index as u32,
+                location.range.end.character_index as u32,
+            ),
+        ),
+    }
 }

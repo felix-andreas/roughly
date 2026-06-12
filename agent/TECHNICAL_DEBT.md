@@ -29,11 +29,9 @@ This creates drift risk and makes tests depend on setup that is not owned by a s
 
 ### Rope and tree-sitter helper logic overlaps with `roughly`
 
-The `analysis` crate currently carries rope and tree-sitter helper code that overlaps with helper logic in the `roughly` crate.
+`roughly/src/tree.rs` now re-exports the parser constructors and the `kind`/`field` id tables from `analysis` and keeps only CLI- and formatter-specific helpers, so the former wholesale duplication is gone.
 
-This includes text extraction and source-position helper functionality that is conceptually shared infrastructure rather than checker-specific behavior.
-
-That overlap increases maintenance cost and creates drift risk between the syntax pipeline in `roughly` and the checker front end.
+Remaining overlap: `roughly/src/index.rs` still walks the AST with its own symbol-indexing logic for the per-keystroke document-symbol path, and small rope/text helpers exist on both sides.
 
 ### Tree-sitter node matching is string-based in hot front-end code
 

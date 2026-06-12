@@ -492,13 +492,12 @@ pub fn typecheck(analysis_state: &mut Analysis) {
     }
 
     let document_ids = analysis_state.package_document_ids();
-    let type_definitions = TypeDefinitionEnvironment::from_modules(document_ids.iter().map(
-        |document_id| {
+    let type_definitions =
+        TypeDefinitionEnvironment::from_modules(document_ids.iter().map(|document_id| {
             analysis_state
                 .module(*document_id)
                 .unwrap_or_else(|| panic!("missing lowered module for typecheck {document_id:?}"))
-        },
-    ));
+        }));
     let mut inference_state =
         inference_state_with_builtins_in_interner(analysis_state.interner_mut());
     let package_naming = analysis_state
@@ -573,7 +572,7 @@ impl Analysis {
         path.starts_with(self.base_path.join("R"))
     }
 
-    fn all_document_ids(&self) -> Vec<DocumentId> {
+    pub(crate) fn all_document_ids(&self) -> Vec<DocumentId> {
         let mut document_ids = self.documents.keys().copied().collect::<Vec<_>>();
         document_ids.sort_by_key(|document_id| document_id.0);
         document_ids

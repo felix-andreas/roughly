@@ -19,3 +19,13 @@ Use this document to record:
 If code changes make this document inaccurate, update it in the same session.
 
 ## Active continuity
+
+- All editor features (hover, completion, rename, goto-definition, references) now live in
+  `analysis::ide`. Definition, references, and rename share one `SymbolTarget` resolution plus a
+  common occurrence scan; the `ide` fixture suite covers each feature per-directory under
+  `tests/ide/`.
+- The old `roughly` modules `completion.rs`, `rename.rs`, `definition.rs`, and `references.rs`
+  are deleted; `roughly/src/tree.rs` re-exports `analysis` parsing helpers and `kind`/`field`
+  tables and keeps only CLI/formatter helpers.
+- Document symbols intentionally stay AST-based (per-keystroke path, top-level symbols only);
+  see the comment in `roughly/src/server.rs::document_symbol`.

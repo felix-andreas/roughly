@@ -1,0 +1,172 @@
+#==== definition_locals
+#---- local_assignment_use
+#---- R/main.R
+wrapper <- function() {
+  value <- 1L
+  value
+}
+#++++ any
+#!!!! goto_definition value_use.goto_definition
+R/main.R:3:3
+#++++
+R/main.R:2:3..2:8
+#!!!! goto_definition value_declaration.goto_definition
+R/main.R:2:3
+#++++
+R/main.R:2:3..2:8
+
+#---- parameter_use
+#---- R/main.R
+f <- function(parameter) parameter
+#++++ any
+#!!!! goto_definition parameter_use.goto_definition
+R/main.R:1:26
+#++++
+R/main.R:1:15..1:24
+#!!!! goto_definition parameter_declaration.goto_definition
+R/main.R:1:15
+#++++
+R/main.R:1:15..1:24
+
+#---- for_variable_use
+#---- R/main.R
+wrapper <- function(items) {
+  for (item in items) {
+    item
+  }
+}
+#++++ any
+#!!!! goto_definition item_use.goto_definition
+R/main.R:3:5
+#++++
+R/main.R:2:8..2:12
+#!!!! goto_definition sequence_use.goto_definition
+R/main.R:2:16
+#++++
+R/main.R:1:21..1:26
+
+#---- shadowed_local
+#---- R/main.R
+wrapper <- function() {
+  value <- 1L
+  inner <- function() {
+    value <- 2L
+    value
+  }
+  value
+}
+#++++ any
+#!!!! goto_definition inner_use.goto_definition
+R/main.R:5:5
+#++++
+R/main.R:4:5..4:10
+#!!!! goto_definition outer_use.goto_definition
+R/main.R:7:3
+#++++
+R/main.R:2:3..2:8
+
+#---- sequential_rebinding
+#---- R/main.R
+wrapper <- function() {
+  value <- 1L
+  value
+  value <- 2L
+  value
+}
+#++++ any
+#!!!! goto_definition first_use.goto_definition
+R/main.R:3:3
+#++++
+R/main.R:2:3..2:8
+#!!!! goto_definition second_use.goto_definition
+R/main.R:5:3
+#++++
+R/main.R:4:3..4:8
+
+#==== definition_globals
+#---- cross_file_use
+#---- R/def.R
+helper <- function(value) value
+#++++ any
+#---- R/use.R
+result <- helper(1L)
+#++++ any
+#!!!! goto_definition helper_use.goto_definition
+R/use.R:1:11
+#++++
+R/def.R:1:1..1:7
+
+#---- same_file_top_level_use
+#---- R/main.R
+value <- 1L
+result <- value
+#++++ any
+#!!!! goto_definition value_use.goto_definition
+R/main.R:2:11
+#++++
+R/main.R:1:1..1:6
+
+#---- global_use_inside_function
+#---- R/def.R
+helper <- function(value) value
+#++++ any
+#---- R/use.R
+wrapper <- function() {
+  helper(1L)
+}
+#++++ any
+#!!!! goto_definition helper_use.goto_definition
+R/use.R:2:3
+#++++
+R/def.R:1:1..1:7
+
+#---- top_level_redefinition_resolves_to_exported_binding
+#---- R/main.R
+value <- 1L
+value
+value <- 2L
+#++++ any
+#!!!! goto_definition between_use.goto_definition
+R/main.R:2:1
+#++++
+R/main.R:3:1..3:6
+
+#==== definition_none
+#---- undefined_name
+#---- R/main.R
+wrapper <- function() {
+  unknown_value
+}
+#++++ any
+#!!!! goto_definition unknown_use.goto_definition
+R/main.R:2:3
+#++++
+no definition
+
+#---- builtin_use
+#---- R/main.R
+values <- c(1L, 2L)
+#++++ any
+#!!!! goto_definition builtin_use.goto_definition
+R/main.R:1:11
+#++++
+no definition
+
+#---- extract_rhs
+#---- R/main.R
+object <- 1L
+object$field
+#++++ any
+#!!!! goto_definition field_use.goto_definition
+R/main.R:2:8
+#++++
+no definition
+
+#---- keyword_position
+#---- R/main.R
+if (TRUE) 1L
+#++++ any
+#!!!! goto_definition keyword.goto_definition
+R/main.R:1:1
+#++++
+no definition

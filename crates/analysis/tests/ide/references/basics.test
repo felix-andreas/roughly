@@ -1,0 +1,148 @@
+#==== references_locals
+#---- local_assignment_use
+#---- R/main.R
+wrapper <- function() {
+  value <- 1L
+  value
+  identity(value)
+}
+#++++ any
+#!!!! references from_declaration.references
+R/main.R:2:3
+#++++
+R/main.R:2:3..2:8 [declaration]
+R/main.R:3:3..3:8
+R/main.R:4:12..4:17
+#!!!! references from_use.references
+R/main.R:3:3
+#++++
+R/main.R:2:3..2:8 [declaration]
+R/main.R:3:3..3:8
+R/main.R:4:12..4:17
+
+#---- parameter_references
+#---- R/main.R
+f <- function(parameter) parameter
+#++++ any
+#!!!! references from_parameter.references
+R/main.R:1:15
+#++++
+R/main.R:1:15..1:24 [declaration]
+R/main.R:1:26..1:35
+
+#---- for_variable_references
+#---- R/main.R
+wrapper <- function(items) {
+  for (item in items) {
+    item
+  }
+}
+#++++ any
+#!!!! references from_for_variable.references
+R/main.R:2:8
+#++++
+R/main.R:2:8..2:12 [declaration]
+R/main.R:3:5..3:9
+
+#---- shadowed_local
+#---- R/main.R
+wrapper <- function() {
+  value <- 1L
+  inner <- function() {
+    value <- 2L
+    value
+  }
+  value
+}
+#++++ any
+#!!!! references outer_value.references
+R/main.R:2:3
+#++++
+R/main.R:2:3..2:8 [declaration]
+R/main.R:7:3..7:8
+#!!!! references inner_value.references
+R/main.R:4:5
+#++++
+R/main.R:4:5..4:10 [declaration]
+R/main.R:5:5..5:10
+
+#---- sequential_rebinding
+#---- R/main.R
+wrapper <- function() {
+  value <- 1L
+  value
+  value <- 2L
+  value
+}
+#++++ any
+#!!!! references first_binding.references
+R/main.R:2:3
+#++++
+R/main.R:2:3..2:8 [declaration]
+R/main.R:3:3..3:8
+#!!!! references second_binding.references
+R/main.R:4:3
+#++++
+R/main.R:4:3..4:8 [declaration]
+R/main.R:5:3..5:8
+
+#==== references_globals
+#---- cross_file_references
+#---- R/def.R
+value <- 1L
+#++++ any
+#---- R/use.R
+result <- value
+other <- value
+#++++ any
+#!!!! references from_declaration.references
+R/def.R:1:1
+#++++
+R/def.R:1:1..1:6 [declaration]
+R/use.R:1:11..1:16
+R/use.R:2:10..2:15
+#!!!! references from_cross_file_use.references
+R/use.R:1:11
+#++++
+R/def.R:1:1..1:6 [declaration]
+R/use.R:1:11..1:16
+R/use.R:2:10..2:15
+
+#---- global_function_references
+#---- R/def.R
+helper <- function(value) value
+#++++ any
+#---- R/use.R
+wrapper <- function() {
+  helper(1L)
+}
+result <- helper(2L)
+#++++ any
+#!!!! references from_use.references
+R/use.R:2:3
+#++++
+R/def.R:1:1..1:7 [declaration]
+R/use.R:2:3..2:9
+R/use.R:4:11..4:17
+
+#==== references_none
+#---- undefined_name
+#---- R/main.R
+wrapper <- function() {
+  unknown_value
+}
+#++++ any
+#!!!! references unknown_use.references
+R/main.R:2:3
+#++++
+no references
+
+#---- extract_rhs
+#---- R/main.R
+object <- 1L
+object$field
+#++++ any
+#!!!! references field_use.references
+R/main.R:2:8
+#++++
+no references

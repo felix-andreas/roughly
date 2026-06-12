@@ -1,4 +1,5 @@
-// Keep one `// Section` block per IDE action, followed by one `// Utils` block for shared helpers.
+// Keep one `// Section` block per IDE action, a `// Symbol targets` block for the shared
+// identifier-resolution machinery, and one `// Utils` block for remaining shared helpers.
 use {
     crate::{
         analysis::{Analysis, lower, resolve_package},
@@ -7,12 +8,18 @@ use {
             DefinitionId, DefinitionItem, DefinitionKind, Expression, ExpressionId, ExpressionKind,
             Module,
         },
-        naming::{BindingInfo, find_exported_binding, is_maybe_undefined_expression},
+        interner::Symbol,
+        naming::{BindingId, BindingInfo, find_exported_binding, is_maybe_undefined_expression},
         text::{TextPosition, TextRange},
         type_syntax::{render_named_type_ref, render_surface_type},
         types::{Annotation, TypeAnnotationKind},
     },
-    std::path::Path,
+    ropey::{Rope, iter::Chunks},
+    std::{
+        collections::{BTreeMap, BTreeSet},
+        path::{Path, PathBuf},
+    },
+    tree_sitter::{Node, Point, Query, QueryCursor, Range, StreamingIterator, Tree},
 };
 
 //
@@ -45,7 +52,7 @@ pub fn hover(analysis: &mut Analysis, path: &Path, position: TextPosition) -> Op
     resolve_package(analysis);
 
     let module = analysis.module(document_id)?;
-    let point = tree_sitter::Point::new(position.line_index, position.character_index);
+    let point = Point::new(position.line_index, position.character_index);
     let target = smallest_expression_hover_target(module, point)
         .or_else(|| smallest_definition_hover_target(module, point))?;
     let mut sections = Vec::new();
@@ -119,8 +126,8 @@ pub fn render_hover_markdown(hover_info: &HoverInfo, include_parsing: bool) -> S
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HoverTarget {
-    Expression(ExpressionId, tree_sitter::Range),
-    Definition(DefinitionId, tree_sitter::Range),
+    Expression(ExpressionId, Range),
+    Definition(DefinitionId, Range),
 }
 
 fn render_expression_hover(analysis: &Analysis, expression: &Expression) -> String {
@@ -310,11 +317,7 @@ fn render_binding_site(analysis: &Analysis, binding: &BindingInfo) -> String {
     )
 }
 
-fn render_source_location(
-    analysis: &Analysis,
-    document_id: DocumentId,
-    range: tree_sitter::Range,
-) -> String {
+fn render_source_location(analysis: &Analysis, document_id: DocumentId, range: Range) -> String {
     let path = analysis
         .path_for_document_id(document_id)
         .map(|path| {
@@ -333,13 +336,650 @@ fn render_source_location(
 }
 
 //
+// Definition
+//
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Location {
+    pub path: PathBuf,
+    pub range: TextRange,
+}
+
+pub fn definition(
+    analysis: &mut Analysis,
+    path: &Path,
+    position: TextPosition,
+) -> Option<Vec<Location>> {
+    let occurrences = symbol_occurrences_at(analysis, path, position)?;
+    let definitions = occurrences
+        .into_iter()
+        .filter(|occurrence| occurrence.is_declaration)
+        .map(|occurrence| occurrence.location)
+        .collect::<Vec<_>>();
+    (!definitions.is_empty()).then_some(definitions)
+}
+
+//
+// References
+//
+
+pub fn references(
+    analysis: &mut Analysis,
+    path: &Path,
+    position: TextPosition,
+    include_declaration: bool,
+) -> Option<Vec<Location>> {
+    let occurrences = symbol_occurrences_at(analysis, path, position)?;
+    let references = occurrences
+        .into_iter()
+        .filter(|occurrence| include_declaration || !occurrence.is_declaration)
+        .map(|occurrence| occurrence.location)
+        .collect::<Vec<_>>();
+    (!references.is_empty()).then_some(references)
+}
+
+//
+// Rename
+//
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameResult {
+    pub edits: BTreeMap<PathBuf, Vec<RenameEdit>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameEdit {
+    pub range: TextRange,
+    pub replacement_text: String,
+}
+
+pub fn rename(
+    analysis: &mut Analysis,
+    path: &Path,
+    position: TextPosition,
+    new_name: &str,
+) -> Option<RenameResult> {
+    let occurrences = symbol_occurrences_at(analysis, path, position)?;
+    let mut edits = BTreeMap::<PathBuf, Vec<RenameEdit>>::new();
+
+    for occurrence in occurrences {
+        edits
+            .entry(occurrence.location.path)
+            .or_default()
+            .push(RenameEdit {
+                range: occurrence.location.range,
+                replacement_text: new_name.to_owned(),
+            });
+    }
+
+    (!edits.is_empty()).then_some(RenameResult { edits })
+}
+
+//
+// Symbol targets
+//
+// Definition, references, and rename all resolve the identifier under the cursor to one
+// `SymbolTarget` and then scan the target's scope for identifiers resolving to the same target.
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SymbolOccurrence {
+    location: Location,
+    is_declaration: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SymbolTarget {
+    Local {
+        document_id: DocumentId,
+        binding_id: BindingId,
+    },
+    Global {
+        symbol: Symbol,
+        export_document_id: DocumentId,
+    },
+}
+
+fn symbol_occurrences_at(
+    analysis: &mut Analysis,
+    path: &Path,
+    position: TextPosition,
+) -> Option<Vec<SymbolOccurrence>> {
+    let document_id = analysis.document_id_for_path(path)?;
+
+    lower(analysis);
+    resolve_package(analysis);
+
+    let document = analysis.document(path)?;
+    let identifier = identifier_at_position(document.tree(), position)?;
+    let target = symbol_target_for_identifier(analysis, document_id, identifier)?;
+    let document_ids = match target {
+        SymbolTarget::Local { document_id, .. } => vec![document_id],
+        SymbolTarget::Global { .. } => analysis.all_document_ids(),
+    };
+    let mut occurrences = Vec::new();
+
+    for scoped_document_id in document_ids {
+        let scoped_path = analysis
+            .path_for_document_id(scoped_document_id)
+            .unwrap_or_else(|| panic!("missing path for document {scoped_document_id:?}"))
+            .to_path_buf();
+        let scoped_document = analysis
+            .document_by_id(scoped_document_id)
+            .unwrap_or_else(|| panic!("missing document {scoped_document_id:?}"));
+
+        for identifier in identifier_nodes(scoped_document.tree()) {
+            if symbol_target_for_identifier(analysis, scoped_document_id, identifier)
+                != Some(target)
+            {
+                continue;
+            }
+
+            occurrences.push(SymbolOccurrence {
+                location: Location {
+                    path: scoped_path.clone(),
+                    range: text_range(identifier.range()),
+                },
+                is_declaration: identifier.parent().is_some_and(|parent| {
+                    is_parameter_name(identifier, parent)
+                        || is_assignment_target(identifier, parent)
+                        || is_for_variable(identifier, parent)
+                }),
+            });
+        }
+    }
+
+    Some(occurrences)
+}
+
+fn symbol_target_for_identifier(
+    analysis: &Analysis,
+    document_id: DocumentId,
+    identifier: Node<'_>,
+) -> Option<SymbolTarget> {
+    if identifier.kind_id() != crate::tree::kind::IDENTIFIER
+        || is_rhs_of_extract_or_namespace(identifier)
+    {
+        return None;
+    }
+
+    let module = analysis.module(document_id)?;
+    let local_naming = analysis.document_naming(document_id)?;
+
+    if let Some(parent) = identifier.parent() {
+        if is_parameter_name(identifier, parent) {
+            return local_naming.bindings.values().find_map(|binding| {
+                (binding.range == identifier.range()).then_some(SymbolTarget::Local {
+                    document_id,
+                    binding_id: binding.id,
+                })
+            });
+        }
+
+        if is_assignment_target(identifier, parent)
+            && let Some(expression_id) = expression_id_by_range(module, parent.range())
+        {
+            let binding_id = local_naming
+                .expression_resolutions
+                .get(&expression_id)
+                .copied()?;
+            return Some(symbol_target_for_binding(
+                analysis,
+                document_id,
+                module,
+                local_naming,
+                binding_id,
+            ));
+        }
+
+        if is_for_variable(identifier, parent)
+            && let Some(binding_id) = local_naming
+                .bindings
+                .values()
+                .find_map(|binding| (binding.range == parent.range()).then_some(binding.id))
+        {
+            return Some(symbol_target_for_binding(
+                analysis,
+                document_id,
+                module,
+                local_naming,
+                binding_id,
+            ));
+        }
+    }
+
+    let expression_id = expression_id_by_range(module, identifier.range())?;
+    if let Some(binding_id) = local_naming
+        .expression_resolutions
+        .get(&expression_id)
+        .copied()
+    {
+        return Some(symbol_target_for_binding(
+            analysis,
+            document_id,
+            module,
+            local_naming,
+            binding_id,
+        ));
+    }
+
+    let symbol = local_naming.non_locals.get(&expression_id).copied()?;
+    let package_naming = analysis.package_naming()?;
+    let export_document_id = package_naming.global_bindings.get(&symbol).copied()?;
+    Some(SymbolTarget::Global {
+        symbol,
+        export_document_id,
+    })
+}
+
+fn symbol_target_for_binding(
+    analysis: &Analysis,
+    document_id: DocumentId,
+    module: &Module,
+    local_naming: &crate::naming::NamesLocal,
+    binding_id: BindingId,
+) -> SymbolTarget {
+    let binding = local_naming
+        .bindings
+        .get(&binding_id)
+        .unwrap_or_else(|| panic!("missing local binding {document_id:?}:{binding_id:?}"));
+
+    if let Some(package_naming) = analysis.package_naming()
+        && package_naming.global_bindings.get(&binding.symbol) == Some(&document_id)
+        && let Some(exported_binding_id) =
+            find_exported_binding(module, local_naming, binding.symbol)
+        && exported_binding_id == binding_id
+    {
+        return SymbolTarget::Global {
+            symbol: binding.symbol,
+            export_document_id: document_id,
+        };
+    }
+
+    SymbolTarget::Local {
+        document_id,
+        binding_id,
+    }
+}
+
+//
+// Completion
+//
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionItem {
+    pub label: String,
+    pub kind: CompletionItemKind,
+    pub source: CompletionItemSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CompletionItemKind {
+    Keyword,
+    Variable,
+    Function,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CompletionItemSource {
+    Keyword,
+    Local,
+    Global,
+}
+
+pub fn completion(
+    analysis: &mut Analysis,
+    path: &Path,
+    position: TextPosition,
+) -> Option<Vec<CompletionItem>> {
+    let document_id = analysis.document_id_for_path(path)?;
+
+    lower(analysis);
+    resolve_package(analysis);
+
+    let document = analysis.document(path)?;
+    let rope = document.rope();
+    let tree = document.tree();
+    let (context, query) = extract_completion_context(position, rope)?;
+
+    match context {
+        CompletionContext::Default => {}
+        CompletionContext::Field => {
+            return Some(rendered_query_matches(tree, rope, FIELD_QUERY, &query));
+        }
+        CompletionContext::Item => {
+            return Some(rendered_query_matches(tree, rope, ITEM_QUERY, &query));
+        }
+        CompletionContext::Namespace => {
+            return Some(rendered_query_matches(tree, rope, NAMESPACE_QUERY, &query));
+        }
+        CompletionContext::MaybeNamespace => return None,
+    }
+
+    let mut items = Vec::new();
+
+    for keyword in RESERVED_WORDS {
+        if starts_with_query(keyword, &query) {
+            items.push(CompletionItem {
+                label: (*keyword).to_owned(),
+                kind: CompletionItemKind::Keyword,
+                source: CompletionItemSource::Keyword,
+            });
+        }
+    }
+
+    for local_item in local_completion_items(analysis, document_id, position, &query) {
+        items.push(local_item);
+    }
+
+    if let Some(package_naming) = analysis.package_naming() {
+        for (symbol, export_document_id) in &package_naming.global_bindings {
+            let Some(label) = analysis.interner().resolve(*symbol) else {
+                continue;
+            };
+            if !starts_with_query(label, &query) {
+                continue;
+            }
+
+            let kind = global_completion_kind(analysis, *export_document_id, *symbol);
+            items.push(CompletionItem {
+                label: label.to_owned(),
+                kind,
+                source: CompletionItemSource::Global,
+            });
+        }
+    }
+
+    deduplicate_completion_items(items)
+}
+
+const RESERVED_WORDS: &[&str] = &[
+    "if",
+    "else",
+    "repeat",
+    "while",
+    "function",
+    "for",
+    "in",
+    "next",
+    "break",
+    "TRUE",
+    "FALSE",
+    "NULL",
+    "Inf",
+    "NaN",
+    "NA",
+    "NA_integer_",
+    "NA_real_",
+    "NA_complex_",
+    "NA_character_",
+];
+
+const FIELD_QUERY: &str = r#"(extract_operator operator: "@" rhs: (identifier) @ident)"#;
+const ITEM_QUERY: &str = r#"(extract_operator operator: "$" rhs: (identifier) @ident)"#;
+const NAMESPACE_QUERY: &str = r#"(namespace_operator rhs: (identifier) @ident)"#;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompletionContext {
+    Default,
+    Field,
+    Item,
+    Namespace,
+    MaybeNamespace,
+}
+
+fn extract_completion_context(
+    position: TextPosition,
+    rope: &Rope,
+) -> Option<(CompletionContext, String)> {
+    let line = rope.get_line(position.line_index)?;
+    let mut previous = None;
+    Some(line.chars().take(position.character_index).fold(
+        (CompletionContext::Default, String::new()),
+        |(mut context, mut query), character| {
+            if character.is_alphabetic()
+                || character == '.'
+                || character == '_'
+                || (!query.is_empty() && character.is_numeric())
+            {
+                query.push(character);
+            } else {
+                context = match character {
+                    '@' => CompletionContext::Field,
+                    '$' => CompletionContext::Item,
+                    ':' => {
+                        if previous.is_some_and(|previous_character| previous_character == ':') {
+                            CompletionContext::Namespace
+                        } else {
+                            CompletionContext::MaybeNamespace
+                        }
+                    }
+                    _ => CompletionContext::Default,
+                };
+                query.clear();
+            }
+            previous = Some(character);
+            (context, query)
+        },
+    ))
+}
+
+fn rendered_query_matches(
+    tree: &Tree,
+    rope: &Rope,
+    query_text: &str,
+    query: &str,
+) -> Vec<CompletionItem> {
+    let compiled_query =
+        Query::new(&tree_sitter_r::LANGUAGE.into(), query_text).unwrap_or_else(|error| {
+            panic!("failed to compile completion query `{query_text}`: {error}")
+        });
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(&compiled_query, tree.root_node(), RopeTextProvider(rope));
+    let mut labels = Vec::new();
+
+    while let Some(query_match) = matches.next() {
+        let identifier = query_match.captures[0].node;
+        let label = rope.byte_slice(identifier.byte_range()).to_string();
+        if starts_with_query(&label, query) && label.len() != query.len() {
+            labels.push(label);
+        }
+    }
+
+    labels.sort();
+    labels.dedup();
+
+    labels
+        .into_iter()
+        .map(|label| CompletionItem {
+            label,
+            kind: CompletionItemKind::Variable,
+            source: CompletionItemSource::Local,
+        })
+        .collect()
+}
+
+fn local_completion_items(
+    analysis: &Analysis,
+    document_id: DocumentId,
+    position: TextPosition,
+    query: &str,
+) -> Vec<CompletionItem> {
+    let Some(document) = analysis.document_by_id(document_id) else {
+        return Vec::new();
+    };
+    let point = Point::new(position.line_index, position.character_index);
+    let Some(node) = node_at_position(document.tree(), point) else {
+        return Vec::new();
+    };
+
+    let mut items = Vec::new();
+    for function_node in std::iter::successors(Some(node), |current| current.parent())
+        .filter(|current| current.kind_id() == crate::tree::kind::FUNCTION_DEFINITION)
+    {
+        if let Some(parameters) = function_node.child_by_field_id(crate::tree::field::PARAMETERS) {
+            for parameter in parameters.children_by_field_name("parameter", &mut parameters.walk())
+            {
+                let Some(name) = parameter.child_by_field_id(crate::tree::field::NAME) else {
+                    continue;
+                };
+                if name.kind_id() != crate::tree::kind::IDENTIFIER {
+                    continue;
+                }
+
+                let label = document.rope().byte_slice(name.byte_range()).to_string();
+                if starts_with_query(&label, query) {
+                    items.push(CompletionItem {
+                        label,
+                        kind: CompletionItemKind::Variable,
+                        source: CompletionItemSource::Local,
+                    });
+                }
+            }
+        }
+
+        if let Some(body) = function_node.child_by_field_id(crate::tree::field::BODY) {
+            collect_local_bindings_in_body(document.rope(), body, query, &mut items);
+        }
+    }
+
+    items
+}
+
+fn collect_local_bindings_in_body(
+    rope: &Rope,
+    node: Node<'_>,
+    query: &str,
+    items: &mut Vec<CompletionItem>,
+) {
+    for child in node.named_children(&mut node.walk()) {
+        match child.kind_id() {
+            crate::tree::kind::BINARY_OPERATOR => {
+                let Some(lhs) = child.child_by_field_id(crate::tree::field::LHS) else {
+                    continue;
+                };
+                let Some(operator) = child.child_by_field_id(crate::tree::field::OPERATOR) else {
+                    continue;
+                };
+                if lhs.kind_id() != crate::tree::kind::IDENTIFIER
+                    || ![crate::tree::kind::EQUAL, crate::tree::kind::LEFT_ASSIGN]
+                        .contains(&operator.kind_id())
+                {
+                    continue;
+                }
+
+                let label = rope.byte_slice(lhs.byte_range()).to_string();
+                if starts_with_query(&label, query) {
+                    items.push(CompletionItem {
+                        label,
+                        kind: CompletionItemKind::Variable,
+                        source: CompletionItemSource::Local,
+                    });
+                }
+            }
+            crate::tree::kind::FOR_STATEMENT => {
+                let Some(variable) = child.child_by_field_id(crate::tree::field::VARIABLE) else {
+                    continue;
+                };
+                if variable.kind_id() != crate::tree::kind::IDENTIFIER {
+                    continue;
+                }
+
+                let label = rope.byte_slice(variable.byte_range()).to_string();
+                if starts_with_query(&label, query) {
+                    items.push(CompletionItem {
+                        label,
+                        kind: CompletionItemKind::Variable,
+                        source: CompletionItemSource::Local,
+                    });
+                }
+            }
+            crate::tree::kind::FUNCTION_DEFINITION => continue,
+            _ => {}
+        }
+
+        if child.child_count() > 0 {
+            collect_local_bindings_in_body(rope, child, query, items);
+        }
+    }
+}
+
+fn global_completion_kind(
+    analysis: &Analysis,
+    document_id: DocumentId,
+    symbol: Symbol,
+) -> CompletionItemKind {
+    let Some(module) = analysis.module(document_id) else {
+        return CompletionItemKind::Variable;
+    };
+    let Some(local_naming) = analysis.document_naming(document_id) else {
+        return CompletionItemKind::Variable;
+    };
+    let Some(binding_id) = find_exported_binding(module, local_naming, symbol) else {
+        return CompletionItemKind::Variable;
+    };
+
+    binding_completion_kind(module, local_naming, binding_id)
+}
+
+fn binding_completion_kind(
+    module: &Module,
+    local_naming: &crate::naming::NamesLocal,
+    binding_id: BindingId,
+) -> CompletionItemKind {
+    let Some(expression_id) = local_naming.expression_resolutions.iter().find_map(
+        |(expression_id, resolved_binding_id)| {
+            (*resolved_binding_id == binding_id).then_some(*expression_id)
+        },
+    ) else {
+        return CompletionItemKind::Variable;
+    };
+
+    let expression = module.arena.get(expression_id);
+    match expression.kind {
+        ExpressionKind::Assign { value, .. } => {
+            let value_expression = module.arena.get(value);
+            match value_expression.kind {
+                ExpressionKind::Function { .. } => CompletionItemKind::Function,
+                _ => CompletionItemKind::Variable,
+            }
+        }
+        _ => CompletionItemKind::Variable,
+    }
+}
+
+fn deduplicate_completion_items(items: Vec<CompletionItem>) -> Option<Vec<CompletionItem>> {
+    let mut seen = BTreeSet::new();
+    let mut deduplicated = Vec::new();
+
+    for item in items {
+        if seen.insert(item.label.clone()) {
+            deduplicated.push(item);
+        }
+    }
+
+    deduplicated.sort_by(|left, right| {
+        (
+            left.source,
+            left.label.to_lowercase(),
+            left.label.clone(),
+            left.kind,
+        )
+            .cmp(&(
+                right.source,
+                right.label.to_lowercase(),
+                right.label.clone(),
+                right.kind,
+            ))
+    });
+
+    (!deduplicated.is_empty()).then_some(deduplicated)
+}
+
+//
 // Utils
 //
 
-fn smallest_expression_hover_target(
-    module: &Module,
-    position: tree_sitter::Point,
-) -> Option<HoverTarget> {
+fn smallest_expression_hover_target(module: &Module, position: Point) -> Option<HoverTarget> {
     module
         .arena
         .expressions()
@@ -355,10 +995,7 @@ fn smallest_expression_hover_target(
         .map(|expression| HoverTarget::Expression(expression.id, expression.range))
 }
 
-fn smallest_definition_hover_target(
-    module: &Module,
-    position: tree_sitter::Point,
-) -> Option<HoverTarget> {
+fn smallest_definition_hover_target(module: &Module, position: Point) -> Option<HoverTarget> {
     module
         .definitions
         .iter()
@@ -373,19 +1010,125 @@ fn smallest_definition_hover_target(
         .map(|definition| HoverTarget::Definition(definition.id, definition.range))
 }
 
-fn hover_target_width(range: tree_sitter::Range) -> usize {
+fn identifier_at_position<'tree>(tree: &'tree Tree, position: TextPosition) -> Option<Node<'tree>> {
+    let point = Point::new(position.line_index, position.character_index);
+    let node = node_at_position(tree, point)?;
+    (node.kind_id() == crate::tree::kind::IDENTIFIER).then_some(node)
+}
+
+fn node_at_position<'tree>(tree: &'tree Tree, point: Point) -> Option<Node<'tree>> {
+    let node = tree.root_node().descendant_for_point_range(point, point)?;
+    match node.kind_id() {
+        crate::tree::kind::PROGRAM => match node.child(0) {
+            Some(child) if point_in_range(point, child.range()) => {
+                child.descendant_for_point_range(point, point)
+            }
+            _ => None,
+        },
+        _ => Some(node),
+    }
+}
+
+fn point_in_range(point: Point, range: Range) -> bool {
+    range.start_point <= point && point <= range.end_point
+}
+
+fn is_rhs_of_extract_or_namespace(node: Node<'_>) -> bool {
+    node.parent().is_some_and(|parent| {
+        [
+            crate::tree::kind::EXTRACT_OPERATOR,
+            crate::tree::kind::NAMESPACE_OPERATOR,
+        ]
+        .contains(&parent.kind_id())
+            && parent
+                .child_by_field_id(crate::tree::field::RHS)
+                .is_some_and(|rhs| rhs.id() == node.id())
+    })
+}
+
+fn is_assignment_target(identifier: Node<'_>, parent: Node<'_>) -> bool {
+    if parent.kind_id() != crate::tree::kind::BINARY_OPERATOR {
+        return false;
+    }
+
+    parent
+        .child_by_field_id(crate::tree::field::LHS)
+        .is_some_and(|lhs| lhs.id() == identifier.id())
+        && parent
+            .child_by_field_id(crate::tree::field::OPERATOR)
+            .is_some_and(|operator| {
+                [crate::tree::kind::EQUAL, crate::tree::kind::LEFT_ASSIGN]
+                    .contains(&operator.kind_id())
+            })
+}
+
+fn is_parameter_name(identifier: Node<'_>, parent: Node<'_>) -> bool {
+    parent.kind_id() == crate::tree::kind::PARAMETER
+        && parent
+            .child_by_field_id(crate::tree::field::NAME)
+            .is_some_and(|name| name.id() == identifier.id())
+}
+
+fn is_for_variable(identifier: Node<'_>, parent: Node<'_>) -> bool {
+    parent.kind_id() == crate::tree::kind::FOR_STATEMENT
+        && parent
+            .child_by_field_id(crate::tree::field::VARIABLE)
+            .is_some_and(|variable| variable.id() == identifier.id())
+}
+
+fn expression_id_by_range(module: &Module, range: Range) -> Option<ExpressionId> {
+    module
+        .arena
+        .expressions()
+        .iter()
+        .find(|expression| expression.range == range)
+        .map(|expression| expression.id)
+}
+
+fn identifier_nodes(tree: &Tree) -> Vec<Node<'_>> {
+    let mut cursor = tree.root_node().walk();
+    let mut nodes = Vec::new();
+    collect_identifier_nodes(&mut cursor, &mut nodes);
+    nodes
+}
+
+fn collect_identifier_nodes<'tree>(
+    cursor: &mut tree_sitter::TreeCursor<'tree>,
+    nodes: &mut Vec<Node<'tree>>,
+) {
+    let node = cursor.node();
+    if node.kind_id() == crate::tree::kind::IDENTIFIER {
+        nodes.push(node);
+    }
+
+    if cursor.goto_first_child() {
+        loop {
+            collect_identifier_nodes(cursor, nodes);
+            if !cursor.goto_next_sibling() {
+                cursor.goto_parent();
+                break;
+            }
+        }
+    }
+}
+
+fn hover_target_width(range: Range) -> usize {
     range.end_byte - range.start_byte
 }
 
-fn range_contains_position(range: tree_sitter::Range, position: tree_sitter::Point) -> bool {
+fn range_contains_position(range: Range, position: Point) -> bool {
     !point_before(position, range.start_point) && point_before(position, range.end_point)
 }
 
-fn point_before(left: tree_sitter::Point, right: tree_sitter::Point) -> bool {
+fn point_before(left: Point, right: Point) -> bool {
     left.row < right.row || (left.row == right.row && left.column < right.column)
 }
 
-fn text_range(range: tree_sitter::Range) -> TextRange {
+fn starts_with_query(label: &str, query: &str) -> bool {
+    query.is_empty() || label.to_lowercase().starts_with(&query.to_lowercase())
+}
+
+fn text_range(range: Range) -> TextRange {
     TextRange {
         start: TextPosition {
             line_index: range.start_point.row,
@@ -395,5 +1138,25 @@ fn text_range(range: tree_sitter::Range) -> TextRange {
             line_index: range.end_point.row,
             character_index: range.end_point.column,
         },
+    }
+}
+
+struct RopeTextProvider<'a>(&'a Rope);
+
+struct RopeByteChunks<'a>(Chunks<'a>);
+
+impl<'a> tree_sitter::TextProvider<&'a [u8]> for RopeTextProvider<'a> {
+    type I = RopeByteChunks<'a>;
+
+    fn text(&mut self, node: Node) -> Self::I {
+        RopeByteChunks(self.0.byte_slice(node.byte_range()).chunks())
+    }
+}
+
+impl<'a> Iterator for RopeByteChunks<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(str::as_bytes)
     }
 }

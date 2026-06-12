@@ -13,8 +13,8 @@ use {
         lint::{self, NameStyle},
         lower::{self, LoweringContext},
         naming::resolve_document_locally,
-        render_diagnostics, render_hover_markdown, render_type_scheme,
-        resolve_package,
+        render_diagnostics, render_hover_markdown, render_type_scheme, resolve_package,
+        text::line_character_to_character_index,
         tree::new_parser,
         type_syntax::{parse_type_syntax, render_type_syntax},
         typecheck::{TypeDefinitionEnvironment, inference_state_with_builtins},
@@ -212,7 +212,10 @@ fn run_interfaces_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>,
     let mut inference_state = inference_state_with_builtins(&mut lowering_context);
     let type_definitions = TypeDefinitionEnvironment::from_module(&module);
 
-    if inference_state.infer_module(&module, &type_definitions).is_err() {
+    if inference_state
+        .infer_module(&module, &type_definitions)
+        .is_err()
+    {
         return Ok(vec![vec![FixtureRunFile {
             path: PathBuf::new(),
             output: "error: inference".to_owned(),
@@ -334,7 +337,7 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
 
             let output = match action.as_str() {
                 "hover" => {
-                    let request = parse_hover_request(contents)?;
+                    let request = parse_position_request(contents, "hover")?;
                     let hover = ide::hover(analysis_state, &request.path, request.position);
                     match hover.as_ref() {
                         Some(hover) => render_hover_markdown(hover, false),
@@ -342,13 +345,44 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
                     }
                 }
                 "rename" => {
-                    panic!("IDE action `rename` is not implemented yet")
+                    let request = parse_rename_request(contents)?;
+                    match ide::rename(
+                        analysis_state,
+                        &request.path,
+                        request.position,
+                        &request.new_name,
+                    ) {
+                        Some(rename_result) => {
+                            render_rename_result(analysis_state, &rename_result)?
+                        }
+                        None => "no rename".to_owned(),
+                    }
+                }
+                "completion" => {
+                    let request = parse_position_request(contents, "completion")?;
+                    match ide::completion(analysis_state, &request.path, request.position) {
+                        Some(items) => render_completion_items(&items),
+                        None => "no completions".to_owned(),
+                    }
                 }
                 "goto_definition" => {
-                    panic!("IDE action `goto_definition` is not implemented yet")
+                    let request = parse_position_request(contents, "goto_definition")?;
+                    match ide::definition(analysis_state, &request.path, request.position) {
+                        Some(locations) => render_locations(&locations, &[]),
+                        None => "no definition".to_owned(),
+                    }
                 }
-                "assert_content" => {
-                    panic!("IDE action `assert_content` is not implemented yet")
+                "references" => {
+                    let request = parse_position_request(contents, "references")?;
+                    match ide::references(analysis_state, &request.path, request.position, true) {
+                        Some(locations) => {
+                            let declarations =
+                                ide::definition(analysis_state, &request.path, request.position)
+                                    .unwrap_or_default();
+                            render_locations(&locations, &declarations)
+                        }
+                        None => "no references".to_owned(),
+                    }
                 }
                 _ => {
                     panic!("IDE action `{action}` is not implemented yet")
@@ -364,9 +398,15 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
             .collect())
     }
 
-    struct HoverRequest {
+    struct PositionRequest {
         path: PathBuf,
         position: TextPosition,
+    }
+
+    struct RenameRequest {
+        path: PathBuf,
+        position: TextPosition,
+        new_name: String,
     }
 
     fn hover_text_range(range: fixtures::FixtureRange) -> TextRange {
@@ -382,13 +422,19 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
         }
     }
 
-    fn parse_hover_request(contents: &str) -> Result<HoverRequest, String> {
-        fn parse_hover_request_number(text: &str, label: &str) -> Result<usize, String> {
-            let value = text
-                .parse::<usize>()
-                .map_err(|error| format!("invalid hover request {label} `{text}`: {error}"))?;
+    fn parse_position_request(contents: &str, label: &str) -> Result<PositionRequest, String> {
+        fn parse_request_number(
+            text: &str,
+            request_label: &str,
+            part_label: &str,
+        ) -> Result<usize, String> {
+            let value = text.parse::<usize>().map_err(|error| {
+                format!("invalid {request_label} request {part_label} `{text}`: {error}")
+            })?;
             if value == 0 {
-                return Err(format!("hover request {label} values are 1-based"));
+                return Err(format!(
+                    "{request_label} request {part_label} values are 1-based"
+                ));
             }
             Ok(value)
         }
@@ -396,20 +442,133 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
         let request = contents.trim();
         let (path_and_line, column_number) = request
             .rsplit_once(':')
-            .ok_or_else(|| "hover request must use `path:line:column`".to_owned())?;
+            .ok_or_else(|| format!("{label} request must use `path:line:column`"))?;
         let (path, line_number) = path_and_line
             .rsplit_once(':')
-            .ok_or_else(|| "hover request must use `path:line:column`".to_owned())?;
-        let line_number = parse_hover_request_number(line_number, "line")?;
-        let column_number = parse_hover_request_number(column_number, "column")?;
+            .ok_or_else(|| format!("{label} request must use `path:line:column`"))?;
+        let line_number = parse_request_number(line_number, label, "line")?;
+        let column_number = parse_request_number(column_number, label, "column")?;
 
-        Ok(HoverRequest {
+        Ok(PositionRequest {
             path: PathBuf::from(path),
             position: TextPosition {
                 line_index: line_number - 1,
                 character_index: column_number - 1,
             },
         })
+    }
+
+    fn parse_rename_request(contents: &str) -> Result<RenameRequest, String> {
+        let (location, new_name) = contents
+            .trim()
+            .split_once("->")
+            .ok_or_else(|| "rename request must use `path:line:column -> new_name`".to_owned())?;
+        let request = parse_position_request(location.trim(), "rename")?;
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return Err("rename request new_name cannot be empty".to_owned());
+        }
+
+        Ok(RenameRequest {
+            path: request.path,
+            position: request.position,
+            new_name: new_name.to_owned(),
+        })
+    }
+
+    fn render_locations(
+        locations: &[analysis::Location],
+        declarations: &[analysis::Location],
+    ) -> String {
+        locations
+            .iter()
+            .map(|location| {
+                let marker = if declarations.contains(location) {
+                    " [declaration]"
+                } else {
+                    ""
+                };
+                format!(
+                    "{}:{}:{}..{}:{}{marker}",
+                    location.path.display(),
+                    location.range.start.line_index + 1,
+                    location.range.start.character_index + 1,
+                    location.range.end.line_index + 1,
+                    location.range.end.character_index + 1,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn render_completion_items(items: &[analysis::CompletionItem]) -> String {
+        items
+            .iter()
+            .map(|item| {
+                let source = match item.source {
+                    analysis::CompletionItemSource::Keyword => "keyword",
+                    analysis::CompletionItemSource::Local => "local",
+                    analysis::CompletionItemSource::Global => "global",
+                };
+                let kind = match item.kind {
+                    analysis::CompletionItemKind::Keyword => "keyword",
+                    analysis::CompletionItemKind::Variable => "variable",
+                    analysis::CompletionItemKind::Function => "function",
+                };
+                format!("{} [{source} {kind}]", item.label)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn render_rename_result(
+        analysis_state: &Analysis,
+        rename_result: &analysis::RenameResult,
+    ) -> Result<String, String> {
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+
+        for (path, edits) in &rename_result.edits {
+            let source = analysis_state
+                .document(path)
+                .ok_or_else(|| format!("missing rename document `{}`", path.display()))?
+                .rope()
+                .to_string();
+            let renamed = apply_text_edits(&source, edits)?;
+            before.push(render_named_file(path, &source));
+            after.push(render_named_file(path, &renamed));
+        }
+
+        Ok(format!(
+            "before:\n{}\n\nafter:\n{}",
+            before.join("\n"),
+            after.join("\n")
+        ))
+    }
+
+    fn render_named_file(path: &Path, contents: &str) -> String {
+        format!("{}:\n{}", path.display(), contents.trim_end())
+    }
+
+    fn apply_text_edits(source: &str, edits: &[analysis::RenameEdit]) -> Result<String, String> {
+        let rope = ropey::Rope::from_str(source);
+        let mut replacements = edits
+            .iter()
+            .map(|edit| {
+                let start = line_character_to_character_index(&rope, edit.range.start)
+                    .ok_or_else(|| "rename edit start is out of bounds".to_owned())?;
+                let end = line_character_to_character_index(&rope, edit.range.end)
+                    .ok_or_else(|| "rename edit end is out of bounds".to_owned())?;
+                Ok((start, end, edit.replacement_text.clone()))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        replacements.sort_by(|left, right| right.0.cmp(&left.0));
+
+        let mut rendered = source.to_owned();
+        for (start, end, replacement_text) in replacements {
+            rendered.replace_range(start..end, &replacement_text);
+        }
+        Ok(rendered)
     }
 }
 

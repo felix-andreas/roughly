@@ -8,7 +8,7 @@ use {
         fs,
         panic::{AssertUnwindSafe, catch_unwind},
         path::PathBuf,
-        time::{SystemTime, UNIX_EPOCH},
+        sync::atomic::{AtomicU64, Ordering},
     },
 };
 
@@ -491,10 +491,10 @@ fn rejects_empty_paths_in_generational_initial_generation() {
 }
 
 fn write_fixture_suite(contents: &str) -> PathBuf {
-    let unique_suffix = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("time should be after unix epoch")
-        .as_nanos();
+    // Tests run in parallel, so a timestamp is not unique enough to keep their suite
+    // directories apart; a process-wide counter is.
+    static FIXTURE_DIRECTORY_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let unique_suffix = FIXTURE_DIRECTORY_COUNTER.fetch_add(1, Ordering::Relaxed);
     let directory_path = std::env::temp_dir().join(format!(
         "roughly-fixtures-{}-{}",
         std::process::id(),

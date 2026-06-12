@@ -8,9 +8,9 @@ use {
             DocumentSymbolResponse, FileChangeType, FileEvent, FormattingOptions,
             GotoDefinitionParams, GotoDefinitionResponse, HoverContents, HoverParams,
             HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
-            PartialResultParams, Position, PublishDiagnosticsParams, TextDocumentIdentifier,
-            TextDocumentItem, TextDocumentPositionParams, Url, WorkDoneProgressParams,
-            WorkspaceFolder,
+            PartialResultParams, Position, PublishDiagnosticsParams, ReferenceContext,
+            ReferenceParams, RenameParams, TextDocumentIdentifier, TextDocumentItem,
+            TextDocumentPositionParams, Url, WorkDoneProgressParams, WorkspaceFolder,
             notification::{PublishDiagnostics, ShowMessage},
             request::RegisterCapability,
         },
@@ -368,8 +368,12 @@ async fn hover_returns_identifier_name_without_debug_by_default() {
     };
     let value = markup.value;
     assert!(
-        value.contains("```text\nvariable_name\n```"),
-        "expected hover to include the identifier name in a fenced block, got: {value}"
+        value.contains("Assign(variable_name)"),
+        "expected hover to include the lowered assignment, got: {value}"
+    );
+    assert!(
+        value.contains("local resolution: binding `variable_name`"),
+        "expected hover to include the naming resolution, got: {value}"
     );
     assert!(
         !value.contains("### Parsing"),
@@ -406,31 +410,27 @@ async fn hover_returns_identifier_debug_info_when_debug_enabled() {
     };
     let value = markup.value;
     assert!(
-        value.contains("```text\nvariable_name\n```"),
-        "expected hover to include the identifier name in a fenced block, got: {value}"
+        value.contains("Assign(variable_name)"),
+        "expected hover to include the lowered assignment, got: {value}"
     );
     assert!(
         value.contains("### Parsing"),
         "expected hover to include a parsing section when enabled, got: {value}"
     );
     assert!(
-        value.contains("- kind: `identifier`"),
-        "expected hover to include node kind, got: {value}"
-    );
-    assert!(
-        value.contains("- id: `"),
-        "expected hover to include node id, got: {value}"
+        value.contains("- range:"),
+        "expected hover to include the target range, got: {value}"
     );
 
     context.shutdown().await;
 }
 
 #[tokio::test]
-async fn hover_truncates_literal_value_at_newline() {
+async fn hover_returns_literal_value() {
     let mut context = setup_test_with_features(&[], &["hovering"]).await;
 
     let file_uri = context.file_uri("R/test_literal.R");
-    context.open_file(&file_uri, "x <- r\"foo\nbar\"\n").await;
+    context.open_file(&file_uri, "x <- \"foo\"\n").await;
 
     let hover = context
         .server
@@ -452,12 +452,8 @@ async fn hover_truncates_literal_value_at_newline() {
     };
     let value = markup.value;
     assert!(
-        value.contains("```r\n\"foo\n```"),
-        "expected hover to include an RA-style fenced literal section, got: {value}"
-    );
-    assert!(
-        value.contains("value of literal (truncated up to newline): ` foo `"),
-        "expected truncated literal value in hover, got: {value}"
+        value.contains(r#"Character("\"foo\"")"#),
+        "expected hover to include the lowered literal, got: {value}"
     );
     assert!(
         !value.contains("### Parsing"),
@@ -468,49 +464,7 @@ async fn hover_truncates_literal_value_at_newline() {
 }
 
 #[tokio::test]
-async fn hover_literal_includes_debug_when_debug_enabled() {
-    let mut context = setup_test_with_features(&[], &["hovering", "debug"]).await;
-
-    let file_uri = context.file_uri("R/test_literal_debug.R");
-    context.open_file(&file_uri, "x <- r\"foo\nbar\"\n").await;
-
-    let hover = context
-        .server
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: file_uri.clone(),
-                },
-                position: Position::new(0, 6),
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .expect("hover request failed")
-        .expect("hover response missing");
-
-    let HoverContents::Markup(markup) = hover.contents else {
-        panic!("expected markup hover contents");
-    };
-    let value = markup.value;
-    assert!(
-        value.contains("### Parsing"),
-        "expected hover to include a parsing section when enabled, got: {value}"
-    );
-    assert!(
-        value.contains("- kind: `string`"),
-        "expected hover to include literal node kind, got: {value}"
-    );
-    assert!(
-        value.contains("- id: `"),
-        "expected hover to include literal node id, got: {value}"
-    );
-
-    context.shutdown().await;
-}
-
-#[tokio::test]
-async fn hover_returns_keyword_information_for_if() {
+async fn hover_returns_lowered_expression_for_if() {
     let mut context = setup_test_with_features(&[], &["hovering"]).await;
 
     let file_uri = context.file_uri("R/test_if.R");
@@ -538,12 +492,8 @@ async fn hover_returns_keyword_information_for_if() {
     };
     let value = markup.value;
     assert!(
-        value.contains("```r\nif\n```"),
-        "expected keyword hover summary block, got: {value}"
-    );
-    assert!(
-        value.contains("Conditional branch."),
-        "expected keyword description, got: {value}"
+        value.contains("If(alternative: false)"),
+        "expected lowered if-expression hover, got: {value}"
     );
     assert!(
         !value.contains("### Parsing"),
@@ -554,55 +504,11 @@ async fn hover_returns_keyword_information_for_if() {
 }
 
 #[tokio::test]
-async fn hover_keyword_includes_debug_when_debug_enabled() {
-    let mut context = setup_test_with_features(&[], &["hovering", "debug"]).await;
-
-    let file_uri = context.file_uri("R/test_if_debug.R");
-    context
-        .open_file(&file_uri, "if (TRUE) {\n  x <- 1\n}\n")
-        .await;
-
-    let hover = context
-        .server
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: file_uri.clone(),
-                },
-                position: Position::new(0, 0),
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .expect("hover request failed")
-        .expect("hover response missing");
-
-    let HoverContents::Markup(markup) = hover.contents else {
-        panic!("expected markup hover contents");
-    };
-    let value = markup.value;
-    assert!(
-        value.contains("### Parsing"),
-        "expected hover to include a parsing section when enabled, got: {value}"
-    );
-    assert!(
-        value.contains("- kind: `if`"),
-        "expected hover to include keyword node kind, got: {value}"
-    );
-    assert!(
-        value.contains("- id: `"),
-        "expected hover to include keyword node id, got: {value}"
-    );
-
-    context.shutdown().await;
-}
-
-#[tokio::test]
-async fn hover_returns_none_for_unsupported_nodes() {
+async fn hover_returns_none_outside_expressions() {
     let mut context = setup_test_with_features(&[], &["hovering"]).await;
 
-    let file_uri = context.file_uri("R/test_unsupported.R");
-    context.open_file(&file_uri, "x <- 1 + 2\n").await;
+    let file_uri = context.file_uri("R/test_outside.R");
+    context.open_file(&file_uri, "x <- 1\n").await;
 
     let hover = context
         .server
@@ -620,7 +526,7 @@ async fn hover_returns_none_for_unsupported_nodes() {
 
     assert!(
         hover.is_none(),
-        "expected no hover response for unsupported nodes, got: {hover:?}"
+        "expected no hover response outside expressions, got: {hover:?}"
     );
 
     context.shutdown().await;
@@ -823,6 +729,131 @@ async fn completion() {
     assert!(
         labels.iter().any(|label| *label == "my_function"),
         "expected 'my_function' in completions, got: {labels:?}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn rename_uses_analysis_across_files() {
+    let mut context = setup_test_with_features(
+        &[("R/a.R", "value <- 1L\n"), ("R/b.R", "result <- value\n")],
+        &["rename"],
+    )
+    .await;
+
+    let file_uri = context.file_uri("R/a.R");
+    context.open_file(&file_uri, "value <- 1L\n").await;
+
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    let result = context
+        .server
+        .rename(RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(0, 1),
+            },
+            new_name: "renamed".into(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("rename request failed");
+
+    let result = result.expect("expected rename edit");
+    let changes = result.changes.expect("expected rename changes");
+
+    let file_a_uri = context.file_uri("R/a.R");
+    let file_b_uri = context.file_uri("R/b.R");
+
+    let file_a_edits = changes.get(&file_a_uri).expect("missing file A edits");
+    assert_eq!(file_a_edits.len(), 1);
+    assert_eq!(file_a_edits[0].new_text, "renamed");
+    assert_eq!(file_a_edits[0].range.start.line, 0);
+    assert_eq!(file_a_edits[0].range.start.character, 0);
+
+    let file_b_edits = changes.get(&file_b_uri).expect("missing file B edits");
+    assert_eq!(file_b_edits.len(), 1);
+    assert_eq!(file_b_edits[0].new_text, "renamed");
+    assert_eq!(file_b_edits[0].range.start.line, 0);
+    assert_eq!(file_b_edits[0].range.start.character, 10);
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn references_use_analysis_across_files() {
+    let mut context = setup_test_with_features(
+        &[("R/a.R", "value <- 1L\n"), ("R/b.R", "result <- value\n")],
+        &["goto_references"],
+    )
+    .await;
+
+    let file_uri = context.file_uri("R/a.R");
+    context.open_file(&file_uri, "value <- 1L\n").await;
+
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    let result = context
+        .server
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(0, 1),
+            },
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("references request failed");
+
+    let locations = result.expect("expected reference locations");
+    let file_b_uri = context.file_uri("R/b.R");
+
+    assert!(
+        locations
+            .iter()
+            .any(|location| location.uri == file_uri && location.range.start.line == 0),
+        "expected the declaration in file A, got: {locations:?}"
+    );
+    assert!(
+        locations
+            .iter()
+            .any(|location| location.uri == file_b_uri && location.range.start.character == 10),
+        "expected the cross-file use in file B, got: {locations:?}"
+    );
+
+    let without_declaration = context
+        .server
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(0, 1),
+            },
+            context: ReferenceContext {
+                include_declaration: false,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("references request failed")
+        .expect("expected reference locations");
+
+    assert!(
+        without_declaration
+            .iter()
+            .all(|location| location.uri != file_uri),
+        "expected the declaration to be excluded, got: {without_declaration:?}"
     );
 
     context.shutdown().await;

@@ -27,7 +27,10 @@ pub use crate::{
         Argument, Definition, DefinitionId, DefinitionItem, DefinitionKind, Expression,
         ExpressionId, ExpressionKind, Module, ModuleId, Parameter,
     },
-    ide::{HoverInfo, HoverPhase, HoverSection, render_hover_markdown},
+    ide::{
+        CompletionItem, CompletionItemKind, CompletionItemSource, HoverInfo, HoverPhase,
+        HoverSection, Location, RenameEdit, RenameResult, render_hover_markdown,
+    },
     interner::{Interner, Symbol},
     lint::NameStyle,
     lower::LoweringContext,

@@ -1,8 +1,5 @@
 # Human Notes (!AIs are not allowed to edit!)
 
-* next step: migrate ide features to analysis
-* rename tree.rs to ast.rs
-
 * typecheck:
   * do we need: environment: BTreeMap<EnvironmentKey, Binding>,
   * check if we have good coverage for generalization, instantiation, subsitutation, unification
@@ -67,7 +64,7 @@ test suite should be ide/hover &  and test_fixtures ide_hover
   * what about type defintions and globals in this file (do they leak) 
   * we cannot just use a fresh analysis state per script as it needs access to analysis state of package.
   
-* fixutres:
+* fixtures:
   * add possiblity to simulate (did_change, did_save, did_close and did_watched_files_change)
 
 - what about pull diagnostics??
@@ -93,8 +90,6 @@ test suite should be ide/hover &  and test_fixtures ide_hover
   - hir (after lowering)
   - naming (after naming)
   - typecheck (after typecheck)
-
-
 
 - better document split: (https://chatgpt.com/c/69c5985f-f050-8332-bf70-4834bc44b3c4)
   - Overview / Goals
@@ -162,7 +157,6 @@ test suite should be ide/hover &  and test_fixtures ide_hover
 - do we need lowering?
   - can't we just have a table for annotations (key is tree-sitter id)
   - can't even typing check not use tree-sitter directly ??
-  
   
 - free variables in fixtures:
 

@@ -137,8 +137,10 @@ Rules:
 - the shared fixture parser only records the action name and path; the suite runner defines what
   each action means
 - use this shape for focused IDE suites such as `hover`
-- if IDE coverage expands to `rename`, `goto_definition`, and `assert_content`, keep one shared
-  `ide` fixture runner rather than per-action suite-specific conventions
+- the shared `ide` runner currently implements `hover`, `completion`, `rename`,
+  `goto_definition`, and `references`; keep new IDE actions in that one runner rather than
+  per-action suite-specific conventions
+- the per-action request and output formats are documented in `tests/ide/README.md`
 
 ### Current migration status
 
@@ -182,7 +184,8 @@ The intended fixture suites are:
 - `diagnostics` - final user-facing errors
 - `expressions` - checked expression result types
 - `interfaces` - exported per-file interface shapes
-- `ide/hover` - hover rendering over multi-file workspace state
+- `ide` - editor-facing queries (hover, completion, rename, goto_definition, references) over
+  multi-file workspace state, split into per-feature subdirectories under `tests/ide/`
 - `lint` - file-local lint diagnostics
 - `lowering` - syntax-to-HIR lowering output
 - `naming/local` - file-local binding introduction and lexical use-site resolution

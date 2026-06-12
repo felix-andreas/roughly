@@ -1,0 +1,331 @@
+#==== global
+#---- top_level_across_files
+#---- R/a.R
+value <- 1L
+#++++ any
+#---- R/b.R
+result <- value
+#++++ any
+#!!!! rename global.rename
+R/a.R:1:1 -> renamed
+#++++
+before:
+R/a.R:
+value <- 1L
+R/b.R:
+result <- value
+
+after:
+R/a.R:
+renamed <- 1L
+R/b.R:
+result <- renamed
+
+#==== params
+#---- simple_parameter
+#---- R/main.R
+wrapper <- function(parameter) parameter
+#++++ any
+#!!!! rename parameter.rename
+R/main.R:1:33 -> renamed
+#++++
+before:
+R/main.R:
+wrapper <- function(parameter) parameter
+
+after:
+R/main.R:
+wrapper <- function(renamed) renamed
+
+#---- outer_parameter_used_in_nested_function
+#---- R/main.R
+wrapper <- function(value) {
+  inner <- function() value
+  value
+}
+#++++ any
+#!!!! rename nested_parameter.rename
+R/main.R:2:23 -> renamed
+#++++
+before:
+R/main.R:
+wrapper <- function(value) {
+  inner <- function() value
+  value
+}
+
+after:
+R/main.R:
+wrapper <- function(renamed) {
+  inner <- function() renamed
+  renamed
+}
+
+#---- outer_parameter_shadowed_by_inner_parameter
+#---- R/main.R
+wrapper <- function(value) {
+  inner <- function(value) value
+  value
+}
+#++++ any
+#!!!! rename shadowed_parameter.rename
+R/main.R:1:21 -> renamed
+#++++
+before:
+R/main.R:
+wrapper <- function(value) {
+  inner <- function(value) value
+  value
+}
+
+after:
+R/main.R:
+wrapper <- function(renamed) {
+  inner <- function(value) value
+  renamed
+}
+
+#==== locals
+#---- simple_local
+#---- R/main.R
+wrapper <- function() {
+  value <- 1L
+  value
+}
+#++++ any
+#!!!! rename local.rename
+R/main.R:3:3 -> renamed
+#++++
+before:
+R/main.R:
+wrapper <- function() {
+  value <- 1L
+  value
+}
+
+after:
+R/main.R:
+wrapper <- function() {
+  renamed <- 1L
+  renamed
+}
+
+#---- outer_local_used_in_nested_function
+#---- R/main.R
+wrapper <- function() {
+  value <- 1L
+  inner <- function() value
+  value
+}
+#++++ any
+#!!!! rename nested_local.rename
+R/main.R:2:3 -> renamed
+#++++
+before:
+R/main.R:
+wrapper <- function() {
+  value <- 1L
+  inner <- function() value
+  value
+}
+
+after:
+R/main.R:
+wrapper <- function() {
+  renamed <- 1L
+  inner <- function() renamed
+  renamed
+}
+
+#---- inner_local_shadowing_outer_local
+#---- R/main.R
+wrapper <- function() {
+  value <- 1L
+  inner <- function() {
+    value <- 2L
+    value
+  }
+  value
+}
+#++++ any
+#!!!! rename inner_shadowed_local.rename
+R/main.R:4:5 -> renamed
+#++++
+before:
+R/main.R:
+wrapper <- function() {
+  value <- 1L
+  inner <- function() {
+    value <- 2L
+    value
+  }
+  value
+}
+
+after:
+R/main.R:
+wrapper <- function() {
+  value <- 1L
+  inner <- function() {
+    renamed <- 2L
+    renamed
+  }
+  value
+}
+
+#---- outer_local_shadowed_by_inner_local
+#---- R/main.R
+wrapper <- function() {
+  value <- 1L
+  inner <- function() {
+    value <- 2L
+    value
+  }
+  value
+}
+#++++ any
+#!!!! rename outer_shadowed_local.rename
+R/main.R:2:3 -> renamed
+#++++
+before:
+R/main.R:
+wrapper <- function() {
+  value <- 1L
+  inner <- function() {
+    value <- 2L
+    value
+  }
+  value
+}
+
+after:
+R/main.R:
+wrapper <- function() {
+  renamed <- 1L
+  inner <- function() {
+    value <- 2L
+    value
+  }
+  renamed
+}
+
+#---- top_level_and_inner_local_same_name
+#---- R/main.R
+value <- 1L
+wrapper <- function() {
+  value <- 2L
+  value
+}
+value
+#++++ any
+#!!!! rename inner_scope_only.rename
+R/main.R:3:3 -> renamed
+#++++
+before:
+R/main.R:
+value <- 1L
+wrapper <- function() {
+  value <- 2L
+  value
+}
+value
+
+after:
+R/main.R:
+value <- 1L
+wrapper <- function() {
+  renamed <- 2L
+  renamed
+}
+value
+
+#==== loops
+#---- simple_for_loop_variable
+#---- R/main.R
+wrapper <- function(values) {
+  for (item in values) item
+}
+#++++ any
+#!!!! rename for.rename
+R/main.R:2:24 -> renamed
+#++++
+before:
+R/main.R:
+wrapper <- function(values) {
+  for (item in values) item
+}
+
+after:
+R/main.R:
+wrapper <- function(values) {
+  for (renamed in values) renamed
+}
+
+#---- for_loop_variable_shadowed_by_nested_parameter
+#---- R/main.R
+wrapper <- function(values) {
+  for (item in values) {
+    inner <- function(item) item
+    item
+  }
+}
+#++++ any
+#!!!! rename shadowed_for.rename
+R/main.R:4:5 -> renamed
+#++++
+before:
+R/main.R:
+wrapper <- function(values) {
+  for (item in values) {
+    inner <- function(item) item
+    item
+  }
+}
+
+after:
+R/main.R:
+wrapper <- function(values) {
+  for (renamed in values) {
+    inner <- function(item) item
+    renamed
+  }
+}
+
+#==== invalid
+#---- rhs_of_extract
+#---- R/main.R
+obj@field
+#++++ any
+#!!!! rename extract.rename
+R/main.R:1:5 -> renamed
+#++++
+no rename
+
+#---- rhs_of_subset
+#---- R/main.R
+obj$field
+#++++ any
+#!!!! rename subset.rename
+R/main.R:1:5 -> renamed
+#++++
+no rename
+
+#---- rhs_of_namespace
+#---- R/main.R
+pkg::func
+#++++ any
+#!!!! rename namespace.rename
+R/main.R:1:6 -> renamed
+#++++
+no rename
+
+#---- undefined_variable
+#---- R/main.R
+wrapper <- function() {
+  missing_name
+}
+#++++ any
+#!!!! rename missing.rename
+R/main.R:2:4 -> renamed
+#++++
+no rename
