@@ -29,3 +29,13 @@ If code changes make this document inaccurate, update it in the same session.
   tables and keeps only CLI/formatter helpers.
 - Document symbols intentionally stay AST-based (per-keystroke path, top-level symbols only);
   see the comment in `roughly/src/server.rs::document_symbol`.
+- The type checker now covers comparison operators, `!`, `%%`, `%/%`, `^`, `:`, `c()` emptiness,
+  call-site compatibility (with `Unknown`-argument cascade suppression), inferred parameter names
+  with optional defaults, `@new` validation, and nominal-to-representation projection at
+  operators/indexing/iteration. `TYPING_SEMANTICS.md` and `DECISION_LOG.md` record the semantics.
+- Biggest known checker gap: arithmetic/comparison on unannotated parameters errors because there
+  is no numeric-class constraint on inference variables (`function(x) x + 1L` fails). Needs a
+  design discussion before fixing; see TODOS.
+- Project 007 (typecheck fixture rework) is done; the active fixture split is `bindings`,
+  `expressions`, `interfaces`, `project` (per-file diagnostics), `unification`. The `deprecated/`
+  fixture storage is deleted.

@@ -19,36 +19,32 @@ The current `typecheck.rs` file contains multiple responsibilities at once:
 - builtin typing rules
 - expression-level typechecking
 
-This makes the file hard to reason about, harder to test by phase, and harder to evolve toward the architecture described in `ARCHITECTURE.md`.
+This makes the file hard to reason about, harder to test by phase, and harder to evolve toward the architecture described in `ARCHITECTURE.md`. The file has grown past 3,500 lines and should be split along those seams.
 
-### Builtin registration is duplicated
+### `generalize` re-walks the whole environment per binding
 
-Builtin registration logic is duplicated between the main checker flow and the fixture helpers.
+`generalize` collects free type variables by cloning and walking every scheme in the environment on every binding boundary. That is quadratic in bindings per file and conflicts with the incremental-analysis performance goals. Level-based generalization (as in typical efficient HM implementations) would remove the environment walk.
 
-This creates drift risk and makes tests depend on setup that is not owned by a shared boundary.
+### The package typecheck loop stops at the first error
+
+`analysis::typecheck` `break`s out of the per-document loop on the first inference error and stores diagnostics-only output (`output: ()`). One run reports at most one type error per package, later documents silently get no checking, and no typed artifact survives for tooling, `typecheck/project` snapshots, or incremental analysis.
+
+### Parameter default expressions are dropped during lowering
+
+HIR `Parameter` records `has_default` only. The default expression itself is not lowered, named, or typechecked, so defaults neither constrain the parameter type nor get checked themselves.
+
+### Unknown type names produce a syntax-error plus a cascade
+
+An unresolved type name in an annotation renders as `Syntax Error: type syntax error: unknown type ...` and then the checked annotation fails again with `expected Unknown, found ...`. The first diagnostic should be naming-owned (per `ARCHITECTURE.md`) and the second suppressed.
+
+### Function-type variance is unspecified and covariant in practice
+
+`check_compatibility` checks function parameters covariantly (argument-to-parameter direction per position). Sound variance would be contravariant parameters. `TYPING_SEMANTICS.md` does not yet define variance; decide and align.
 
 ### Rope and tree-sitter helper logic overlaps with `roughly`
 
-`roughly/src/tree.rs` now re-exports the parser constructors and the `kind`/`field` id tables from `analysis` and keeps only CLI- and formatter-specific helpers, so the former wholesale duplication is gone.
-
-Remaining overlap: `roughly/src/index.rs` still walks the AST with its own symbol-indexing logic for the per-keystroke document-symbol path, and small rope/text helpers exist on both sides.
+`roughly/src/index.rs` still walks the AST with its own symbol-indexing logic for the per-keystroke document-symbol path, and small rope/text helpers exist on both sides.
 
 ### Tree-sitter node matching is string-based in hot front-end code
 
-The `analysis` front end currently matches tree-sitter node kinds and fields through string-based APIs such as `kind()` and `child_by_field_name()`.
-
-`roughly` already uses `kind_id()` and `field_id()` style access in several places. That difference suggests an opportunity to consolidate syntax constants and traversal helpers into reusable shared infrastructure.
-
-The current string-based matching is not only repetitive. It also leaves performance and consistency improvements on the table, especially in front-end code that will run frequently across large code bases.
-
-### The main check pipeline does not retain successful semantic results
-
-The current public checking result is diagnostics-only.
-
-That is enough for some tests, but it leaves later tooling work without a stable checked artifact to consume and encourages recomputation in places that will eventually need typed results.
-
-### `workspace` still overlaps too much with `package`
-
-The current `workspace` API still exposes package-shaped mutation helpers.
-
-That overlap makes the intended boundary harder to read: `Package` is the analysis unit, while `Workspace` should stay the editor-facing registry and mutation helper around packages and detached scripts.
+The `analysis` front end currently matches tree-sitter node kinds and fields through string-based APIs such as `kind()` and `child_by_field_name()` in several places, while `roughly` uses `kind_id()`/`field_id()` style access. Consolidate on id-based matching for performance and consistency.
