@@ -12,7 +12,7 @@ use {
         ide,
         lint::{self, NameStyle},
         lower::{self, LoweringContext},
-        naming::resolve_document_locally,
+        naming::{DocumentKind, resolve_document_locally},
         render_diagnostics, render_hover_markdown, render_type_scheme, resolve_package,
         text::line_character_to_character_index,
         tree::new_parser,
@@ -666,7 +666,12 @@ fn run_naming_local_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>
     let module = lower::lower(&document, &mut lowering_context);
     let lowering_diagnostics = lowering_context.take_diagnostics();
     let document_id = DocumentId(0);
-    let local_naming = resolve_document_locally(document_id, &module, lowering_context.interner());
+    let local_naming = resolve_document_locally(
+        document_id,
+        &module,
+        lowering_context.interner(),
+        DocumentKind::Package,
+    );
     let rendered_hir = render_locally_named_hir(
         document_id,
         &module,

@@ -40,6 +40,19 @@ enum EnvironmentKey {
     Global(Symbol),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleCheck {
+    pub expression_types: Vec<CoreType>,
+    pub errors: Vec<InferenceError>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportedValue {
+    pub symbol: Symbol,
+    pub type_scheme: TypeScheme,
+    pub range: Range,
+}
+
 struct ResolutionContext<'a> {
     document_id: DocumentId,
     module: &'a Module,
@@ -196,25 +209,88 @@ impl InferenceState {
         self.infer_module_with_context(module, None, type_definitions)
     }
 
-    pub fn infer_module_with_naming(
+    // Checking recovers per top-level expression: one inference error poisons only its own
+    // expression, which continues as `Unknown`, so every error in a document is reported.
+    pub fn check_module_with_naming(
         &mut self,
         document_id: DocumentId,
         module: &Module,
         local_naming: &NamesLocal,
         package_naming: &NamesGlobal,
         type_definitions: &TypeDefinitionEnvironment,
-    ) -> Result<Vec<CoreType>, InferenceError> {
-        self.infer_module_with_context(
+    ) -> ModuleCheck {
+        let resolution_context = ResolutionContext {
+            document_id,
             module,
-            Some(&ResolutionContext {
-                document_id,
-                module,
-                top_level_expression_ids: &module.expressions,
-                local_naming,
-                package_naming,
-            }),
-            type_definitions,
-        )
+            top_level_expression_ids: &module.expressions,
+            local_naming,
+            package_naming,
+        };
+        let mut expression_types = Vec::with_capacity(module.expressions.len());
+        let mut errors = Vec::new();
+
+        for expression_id in &module.expressions {
+            let expression = module.arena.get(*expression_id);
+            match self.infer_expression_with_context(
+                expression,
+                &module.arena,
+                Some(&resolution_context),
+                type_definitions,
+            ) {
+                Ok(expression_type) => expression_types.push(expression_type),
+                Err(error) => {
+                    errors.push(error);
+                    expression_types.push(CoreType::Unknown);
+                    if let ExpressionKind::Assign { target, .. } = &expression.kind {
+                        let recovery_scheme = TypeScheme::monomorphic(CoreType::Unknown);
+                        if let Some(binding_id) = local_naming
+                            .expression_resolutions
+                            .get(expression_id)
+                            .copied()
+                        {
+                            self.bind_local_scheme(binding_id, recovery_scheme, expression.range);
+                        } else {
+                            self.bind_global_scheme(*target, recovery_scheme, expression.range);
+                        }
+                    }
+                }
+            }
+        }
+
+        ModuleCheck {
+            expression_types,
+            errors,
+        }
+    }
+
+    pub fn exported_value_schemes(
+        &self,
+        module: &Module,
+        local_naming: &NamesLocal,
+    ) -> Vec<ExportedValue> {
+        let mut symbols_in_order = Vec::new();
+        for expression_id in &module.expressions {
+            if let ExpressionKind::Assign { target, .. } = &module.arena.get(*expression_id).kind
+                && !symbols_in_order.contains(target)
+            {
+                symbols_in_order.push(*target);
+            }
+        }
+
+        symbols_in_order
+            .into_iter()
+            .filter_map(|symbol| {
+                let binding_id = find_exported_binding(module, local_naming, symbol)?;
+                let binding = self
+                    .lookup_local_name(binding_id)
+                    .or_else(|| self.lookup_global_name(symbol))?;
+                Some(ExportedValue {
+                    symbol,
+                    type_scheme: binding.type_scheme.clone(),
+                    range: binding.range,
+                })
+            })
+            .collect()
     }
 
     fn infer_module_with_context(
@@ -447,19 +523,6 @@ impl InferenceState {
                         return Ok(binding_type);
                     }
 
-                    let type_scheme = self
-                        .lookup_global_name(*target)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "package winner symbol {:?} should be prebound for typecheck",
-                                target
-                            )
-                        })
-                        .type_scheme
-                        .clone();
-                    let existing_type = self.instantiate_type_scheme(&type_scheme)?;
-                    let binding_type =
-                        self.unify_with_context(existing_type, binding_type, expression)?;
                     self.environment.remove(&EnvironmentKey::Global(*target));
                     let generalized_scheme = self.generalize(binding_type.clone())?;
                     self.bind_global_scheme(*target, generalized_scheme, expression.range);

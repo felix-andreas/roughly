@@ -7,11 +7,14 @@ use {
         lint::{self as lint_phase, NameStyle},
         lower::lower_with_shared_interner,
         naming::{
-            NamesGlobal, NamesLocal, find_exported_binding, rebuild_package_naming,
+            DocumentKind, NamesGlobal, NamesLocal, rebuild_package_naming,
             resolve_document_locally,
         },
         tree,
-        typecheck::{TypeDefinitionEnvironment, inference_state_with_builtins_in_interner},
+        type_syntax::render_surface_type,
+        typecheck::{
+            ExportedValue, TypeDefinitionEnvironment, inference_state_with_builtins_in_interner,
+        },
     },
     ropey::Rope,
     std::{
@@ -41,7 +44,8 @@ pub struct Analysis {
     lowering_outputs: HashMap<DocumentId, DocumentOutput<Module>>,
     document_naming_outputs: HashMap<DocumentId, DocumentOutput<NamesLocal>>,
     package_naming_output: Option<PackageOutput<NamesGlobal>>,
-    typecheck_output: Option<PackageOutput<()>>,
+    document_interface_outputs: HashMap<DocumentId, InterfaceOutput>,
+    document_typecheck_outputs: HashMap<DocumentId, TypecheckDocumentOutput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +85,21 @@ struct LintOutput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct InterfaceOutput {
+    version: Version,
+    type_definitions_fingerprint: String,
+    exports: Vec<ExportedValue>,
+    fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TypecheckDocumentOutput {
+    version: Version,
+    environment_fingerprint: String,
+    diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct PackageOutput<T> {
     version: Version,
     output: T,
@@ -107,7 +126,8 @@ impl Analysis {
             lowering_outputs: HashMap::new(),
             document_naming_outputs: HashMap::new(),
             package_naming_output: None,
-            typecheck_output: None,
+            document_interface_outputs: HashMap::new(),
+            document_typecheck_outputs: HashMap::new(),
         }
     }
 
@@ -318,12 +338,10 @@ impl Analysis {
         {
             diagnostics.extend(package_diagnostics.iter().cloned());
         }
-        if self.check_config.typing {
-            if let Some(output) = &self.typecheck_output
-                && let Some(typecheck_diagnostics) = output.diagnostics.get(&document_id)
-            {
-                diagnostics.extend(typecheck_diagnostics.iter().cloned());
-            }
+        if self.check_config.typing
+            && let Some(output) = self.document_typecheck_outputs.get(&document_id)
+        {
+            diagnostics.extend(output.diagnostics.iter().cloned());
         }
         diagnostics
     }
@@ -423,8 +441,13 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
         let module = analysis_state.module(*document_id).unwrap_or_else(|| {
             panic!("missing lowered module for document naming {document_id:?}")
         });
+        let document_kind = if analysis_state.non_package_documents.contains(document_id) {
+            DocumentKind::Script
+        } else {
+            DocumentKind::Package
+        };
         let local_naming =
-            resolve_document_locally(*document_id, module, analysis_state.interner());
+            resolve_document_locally(*document_id, module, analysis_state.interner(), document_kind);
         analysis_state.document_naming_outputs.insert(
             *document_id,
             DocumentOutput {
@@ -480,91 +503,241 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
     });
 }
 
-pub fn typecheck(analysis_state: &mut Analysis) {
+// Typechecking is incremental at document grain. Round 1 computes each package document's
+// exported value schemes in isolation (cross-file references check as `Unknown`), cached by
+// document version plus the package type-definition fingerprint. Round 2 checks every
+// document against the package interface table built from round 1, cached by document
+// version plus the rendered environment fingerprint, so an edit that does not change the
+// edited document's exported interface rechecks only that document. Returns the documents
+// whose typecheck output was recomputed, so callers can republish exactly those diagnostics.
+pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     resolve_package(analysis_state);
 
-    if analysis_state
-        .typecheck_output
-        .as_ref()
-        .is_some_and(|output| output.version == analysis_state.package_version)
-    {
-        return;
+    let package_document_ids = analysis_state.package_document_ids();
+    let all_document_ids = analysis_state.all_document_ids();
+    let template_state = inference_state_with_builtins_in_interner(analysis_state.interner_mut());
+    let fallback_range = analysis_state.fallback_range();
+
+    let (type_definitions, type_definitions_fingerprint) = {
+        let package_modules = package_document_ids
+            .iter()
+            .map(|document_id| {
+                analysis_state.module(*document_id).unwrap_or_else(|| {
+                    panic!("missing lowered module for typecheck {document_id:?}")
+                })
+            })
+            .collect::<Vec<_>>();
+        let type_definitions =
+            TypeDefinitionEnvironment::from_modules(package_modules.iter().copied());
+        let mut rendered_definitions = Vec::new();
+        for module in &package_modules {
+            for definition_item in &module.definitions {
+                let definition = &definition_item.definition;
+                let name = analysis_state
+                    .interner()
+                    .resolve(definition.name)
+                    .unwrap_or("<unknown>");
+                let parameters = definition
+                    .type_parameters
+                    .iter()
+                    .map(|parameter| {
+                        analysis_state
+                            .interner()
+                            .resolve(*parameter)
+                            .unwrap_or("<unknown>")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                rendered_definitions.push(format!(
+                    "{:?} {name}<{parameters}> = {}",
+                    definition.kind,
+                    render_surface_type(&definition.surface_type, analysis_state.interner())
+                ));
+            }
+        }
+        (type_definitions, rendered_definitions.join(";"))
+    };
+
+    let mut fresh_interfaces = Vec::new();
+    for document_id in &package_document_ids {
+        let Some(document_version) = analysis_state.document_version(*document_id) else {
+            continue;
+        };
+        if analysis_state
+            .document_interface_outputs
+            .get(document_id)
+            .is_some_and(|output| {
+                output.version == document_version
+                    && output.type_definitions_fingerprint == type_definitions_fingerprint
+            })
+        {
+            continue;
+        }
+
+        let module = analysis_state
+            .module(*document_id)
+            .unwrap_or_else(|| panic!("missing lowered module for typecheck {document_id:?}"));
+        let local_naming = analysis_state
+            .document_naming(*document_id)
+            .unwrap_or_else(|| panic!("missing local naming for typecheck {document_id:?}"));
+        let mut inference_state = template_state.clone();
+        let isolated_naming = NamesGlobal::default();
+        let _ = inference_state.check_module_with_naming(
+            *document_id,
+            module,
+            local_naming,
+            &isolated_naming,
+            &type_definitions,
+        );
+        let exports = inference_state.exported_value_schemes(module, local_naming);
+        let fingerprint = exports
+            .iter()
+            .map(|export| {
+                format!(
+                    "{}: {}",
+                    analysis_state
+                        .interner()
+                        .resolve(export.symbol)
+                        .unwrap_or("<unknown>"),
+                    crate::diagnostic::render_type_scheme(
+                        analysis_state.interner(),
+                        &export.type_scheme
+                    )
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(";");
+        fresh_interfaces.push((
+            *document_id,
+            InterfaceOutput {
+                version: document_version,
+                type_definitions_fingerprint: type_definitions_fingerprint.clone(),
+                exports,
+                fingerprint,
+            },
+        ));
+    }
+    for (document_id, output) in fresh_interfaces {
+        analysis_state
+            .document_interface_outputs
+            .insert(document_id, output);
     }
 
-    let document_ids = analysis_state.package_document_ids();
-    let type_definitions =
-        TypeDefinitionEnvironment::from_modules(document_ids.iter().map(|document_id| {
-            analysis_state
-                .module(*document_id)
-                .unwrap_or_else(|| panic!("missing lowered module for typecheck {document_id:?}"))
-        }));
-    let mut inference_state =
-        inference_state_with_builtins_in_interner(analysis_state.interner_mut());
     let package_naming = analysis_state
         .package_naming_output
         .as_ref()
-        .unwrap_or_else(|| panic!("missing package naming output for typecheck"));
-    for (symbol, document_id) in &package_naming.output.global_bindings {
-        let local_naming = analysis_state
-            .document_naming_outputs
-            .get(document_id)
+        .unwrap_or_else(|| panic!("missing package naming output for typecheck"))
+        .output
+        .clone();
+    let mut global_schemes = Vec::with_capacity(package_naming.global_bindings.len());
+    for (symbol, winner_document_id) in &package_naming.global_bindings {
+        let interface = analysis_state
+            .document_interface_outputs
+            .get(winner_document_id)
             .unwrap_or_else(|| {
-                panic!("missing local naming output for package winner {document_id:?}")
+                panic!("missing document interface for package winner {winner_document_id:?}")
             });
+        let export = interface
+            .exports
+            .iter()
+            .find(|export| export.symbol == *symbol)
+            .unwrap_or_else(|| {
+                panic!("missing exported scheme for package winner {winner_document_id:?}")
+            });
+        global_schemes.push(export.clone());
+    }
+    let environment_fingerprint = {
+        let mut parts = Vec::with_capacity(global_schemes.len() + 1);
+        parts.push(type_definitions_fingerprint.clone());
+        for export in &global_schemes {
+            parts.push(format!(
+                "{}: {}",
+                analysis_state
+                    .interner()
+                    .resolve(export.symbol)
+                    .unwrap_or("<unknown>"),
+                crate::diagnostic::render_type_scheme(
+                    analysis_state.interner(),
+                    &export.type_scheme
+                )
+            ));
+        }
+        parts.join(";")
+    };
+
+    let mut recomputed_document_ids = Vec::new();
+    let mut fresh_outputs = Vec::new();
+    for document_id in &all_document_ids {
+        let Some(document_version) = analysis_state.document_version(*document_id) else {
+            continue;
+        };
+        if analysis_state
+            .document_typecheck_outputs
+            .get(document_id)
+            .is_some_and(|output| {
+                output.version == document_version
+                    && output.environment_fingerprint == environment_fingerprint
+            })
+        {
+            continue;
+        }
+
         let module = analysis_state
             .module(*document_id)
-            .unwrap_or_else(|| panic!("missing lowered module for package winner {document_id:?}"));
-        let binding_id = find_exported_binding(module, &local_naming.output, *symbol)
-            .unwrap_or_else(|| {
-                panic!("missing exported binding for package winner {document_id:?}:{symbol:?}")
-            });
-        let binding = local_naming
-            .output
-            .bindings
-            .get(&binding_id)
-            .unwrap_or_else(|| {
-                panic!("missing binding info for package winner {document_id:?}:{binding_id:?}")
-            });
-        let variable = inference_state.fresh_variable();
-        inference_state.bind_global_name(
-            *symbol,
-            crate::types::CoreType::Variable(variable),
-            binding.range,
-        );
-    }
-
-    let mut diagnostics = HashMap::new();
-    for document_id in document_ids {
-        let module = analysis_state
-            .module(document_id)
             .unwrap_or_else(|| panic!("missing lowered module for typecheck {document_id:?}"));
         let local_naming = analysis_state
-            .document_naming_outputs
-            .get(&document_id)
-            .unwrap_or_else(|| panic!("missing local naming output for typecheck {document_id:?}"));
-        if let Err(error) = inference_state.infer_module_with_naming(
-            document_id,
-            module,
-            &local_naming.output,
-            &package_naming.output,
-            &type_definitions,
-        ) {
-            diagnostics.insert(
-                document_id,
-                vec![Diagnostic::from_inference_error(
-                    &error,
-                    analysis_state.fallback_range(),
-                    analysis_state.interner(),
-                )],
+            .document_naming(*document_id)
+            .unwrap_or_else(|| panic!("missing local naming for typecheck {document_id:?}"));
+        // Script-local type declarations are visible only inside the script itself and
+        // shadow package definitions of the same name.
+        let document_type_definitions =
+            if analysis_state.non_package_documents.contains(document_id) {
+                let package_modules = package_document_ids.iter().filter_map(|package_document_id| {
+                    analysis_state.module(*package_document_id)
+                });
+                TypeDefinitionEnvironment::from_modules(package_modules.chain([module]))
+            } else {
+                type_definitions.clone()
+            };
+        let mut inference_state = template_state.clone();
+        for export in &global_schemes {
+            inference_state.bind_global_scheme(
+                export.symbol,
+                export.type_scheme.clone(),
+                export.range,
             );
-            break;
         }
+        let module_check = inference_state.check_module_with_naming(
+            *document_id,
+            module,
+            local_naming,
+            &package_naming,
+            &document_type_definitions,
+        );
+        let diagnostics = module_check
+            .errors
+            .iter()
+            .map(|error| {
+                Diagnostic::from_inference_error(error, fallback_range, analysis_state.interner())
+            })
+            .collect();
+        fresh_outputs.push((
+            *document_id,
+            TypecheckDocumentOutput {
+                version: document_version,
+                environment_fingerprint: environment_fingerprint.clone(),
+                diagnostics,
+            },
+        ));
+        recomputed_document_ids.push(*document_id);
     }
-    analysis_state.typecheck_output = Some(PackageOutput {
-        version: analysis_state.package_version,
-        output: (),
-        diagnostics,
-    });
+    for (document_id, output) in fresh_outputs {
+        analysis_state
+            .document_typecheck_outputs
+            .insert(document_id, output);
+    }
+
+    recomputed_document_ids
 }
 
 impl Analysis {
@@ -586,6 +759,8 @@ impl Analysis {
         self.lint_outputs.remove(&document_id);
         self.lowering_outputs.remove(&document_id);
         self.document_naming_outputs.remove(&document_id);
+        self.document_interface_outputs.remove(&document_id);
+        self.document_typecheck_outputs.remove(&document_id);
     }
 
     fn bump_version(&mut self) -> Version {
@@ -877,7 +1052,7 @@ mod tests {
     }
 
     #[test]
-    fn typecheck_uses_cached_output_when_package_version_is_unchanged() {
+    fn typecheck_reuses_cached_document_output_when_nothing_changed() {
         let mut analysis = Analysis::new(
             PathBuf::from("/workspace"),
             LintConfig::default(),
@@ -887,29 +1062,29 @@ mod tests {
             .add_document_from_source(PathBuf::from("/workspace/R/main.R"), "1L + \"text\"")
             .expect("document should parse");
 
-        super::typecheck(&mut analysis);
+        let first_run = super::typecheck(&mut analysis);
+        assert_eq!(first_run, vec![document_id]);
         let initial_diagnostics = analysis
-            .typecheck_output
-            .as_ref()
-            .and_then(|output| output.diagnostics.get(&document_id))
-            .cloned()
+            .document_typecheck_outputs
+            .get(&document_id)
+            .map(|output| output.diagnostics.clone())
             .unwrap_or_default();
         assert!(!initial_diagnostics.is_empty());
 
         let sentinel =
             Diagnostic::type_error(initial_diagnostics[0].range, "cached typecheck sentinel");
         analysis
-            .typecheck_output
-            .as_mut()
+            .document_typecheck_outputs
+            .get_mut(&document_id)
             .expect("typecheck output should exist")
-            .diagnostics = HashMap::from([(document_id, vec![sentinel.clone()])]);
+            .diagnostics = vec![sentinel.clone()];
 
-        super::typecheck(&mut analysis);
+        let second_run = super::typecheck(&mut analysis);
+        assert!(second_run.is_empty());
         let cached_diagnostics = analysis
-            .typecheck_output
-            .as_ref()
-            .and_then(|output| output.diagnostics.get(&document_id))
-            .cloned()
+            .document_typecheck_outputs
+            .get(&document_id)
+            .map(|output| output.diagnostics.clone())
             .unwrap_or_default();
 
         assert_eq!(cached_diagnostics, vec![sentinel]);

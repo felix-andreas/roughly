@@ -129,12 +129,25 @@ pub(crate) fn rebuild_package_naming(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentKind {
+    Package,
+    Script,
+}
+
 pub fn resolve_document_locally(
     document_id: DocumentId,
     module: &Module,
     interner: &Interner,
+    document_kind: DocumentKind,
 ) -> DocumentNamingComputation {
-    DocumentNamingContext::new(document_id, &module.arena, interner).resolve_module(module)
+    let mut context = DocumentNamingContext::new(document_id, &module.arena, interner);
+    // A script executes top-down like one big function body, so its top level is an
+    // ordinary sequential lexical scope instead of the package-global namespace.
+    if document_kind == DocumentKind::Script {
+        context.local_scopes.push(BTreeMap::new());
+    }
+    context.resolve_module(module)
 }
 
 pub fn is_maybe_undefined_expression(

@@ -22,7 +22,9 @@ impl Config {
 
         Ok(match std::fs::read_to_string(path) {
             Ok(text) => Config::from_str(&text, experimental)?,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Config::default(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                ConfigToml::default().to_config(experimental)
+            }
             Err(error) => return Err(error.into()),
         })
     }
@@ -53,7 +55,7 @@ impl Config {
             directory = current.parent();
         }
 
-        Ok(Config::default())
+        Ok(ConfigToml::default().to_config(experimental))
     }
 }
 
