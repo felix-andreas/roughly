@@ -18,13 +18,19 @@ boundaries.
 
 ## Unresolved questions
 
-- Should save republish diagnostics for every package file, or only for files whose retained
-  diagnostics changed?
 - Should hover remain naming-only for now, or start requesting `typecheck` once typed hover data is
   retained?
-- What is the minimum package-scoped freshness rename should require for a future global rename?
-- When package-scoped work reruns, what query should expose the set of affected documents whose LSP
-  diagnostics must be republished?
+- Should `did_save` in non-typing mode also republish naming diagnostics for dependent files?
+
+## Resolved
+
+- Save republishes diagnostics for every document whose typecheck output changed:
+  `analysis::typecheck` (and `run_full` in typing mode) returns the recomputed document ids, and
+  `did_save` republishes exactly those plus the saved file.
+- Typecheck itself is now incremental at document grain (two-round interface model recorded in
+  `ARCHITECTURE.md`), so save-time package refresh only pays for stale documents.
+- Rename is implemented in `analysis::ide` on naming data, sharing resolution with
+  goto-definition and references.
 
 ## Current idea
 
@@ -100,31 +106,12 @@ Why this mismatches the plan:
 - because `resolve_package` also backfills local naming for every stale document, hover currently
   depends on a broader orchestration path than the new design intends
 
-### 4. Save only republishes diagnostics for saved file
+### 4. (resolved) Save republishes all affected typecheck diagnostics
 
-Current code:
+`did_save` republishes diagnostics for every document `run_full` reports as recomputed. The
+non-typing path still republishes only the saved file; naming-only dependent refresh remains open.
 
-- `did_save` in `crates/roughly/src/server.rs` runs `analysis::run_full`
-- it then publishes diagnostics only for the saved document
-
-Why this mismatches the plan:
-
-- save is supposed to surface full semantic diagnostics for the saved package snapshot
-- package-global naming or typecheck can change diagnostics in dependent files
-- those files currently keep stale diagnostics on the client
-
-### 5. Rename is not integrated with analysis freshness model
-
-Current code:
-
-- LSP rename in `crates/roughly/src/server.rs` is still unsupported
-- dormant rename logic in `crates/roughly/src/rename.rs` uses tree-walk scope heuristics instead of
-  analysis naming data
-
-Why this mismatches the plan:
-
-- future rename should be an IDE action over the same retained semantic caches
-- current rename path is either disabled or bypasses the analysis phase model entirely
+### 5. (resolved) Rename runs on analysis naming data in `analysis::ide`
 
 ## Desired target shape
 
@@ -164,17 +151,13 @@ Why this mismatches the plan:
 - replace `run_fast` call sites or redefine `run_fast` to include `resolve_document`
 - verify diagnostics publication still merges retained phase outputs correctly
 
-### 3. Align save-time package diagnostics [pending]
+### 3. Align save-time package diagnostics [done]
 
-- define affected-document diagnostics publication
-- republish package-wide semantic diagnostics after save-time package refresh
-- add LSP coverage for dependent-file diagnostic refresh
+- `typecheck` returns recomputed document ids; `did_save` republishes them all
 
-### 4. Rebuild rename on analysis state [blocked]
+### 4. Rebuild rename on analysis state [done]
 
-- depends on deciding the first supported rename scope
-- local rename should use naming identities
-- global rename should wait until package freshness requirements are explicit
+- rename lives in `analysis::ide` on naming identities
 
 ## Success criteria
 

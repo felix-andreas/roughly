@@ -118,6 +118,15 @@ Top-level value names are package-global across files.
 - if several package files define the same top-level value name, both the overwritten earlier
   definition and the overwriting later definition should warn
 
+Cross-file references are scheme-based:
+
+- a reference to another file's top-level binding sees that binding's generalized exported type
+  scheme
+- type information does not flow back into the exporting file through inference; a call in one
+  file never changes the inferred type of a function defined in another file
+- within one file, top-level names also resolve to the final exported scheme of that name, so a
+  use placed before the definition still sees the definition's type
+
 Inside executable code, value naming remains lexical.
 
 - function parameters introduce local bindings
@@ -143,6 +152,16 @@ All current `@type` and `@alias` declarations are top-level and project-global.
 
 Files that are not package source files, such as script-like documents under `scripts/`, do
 not contribute to the package-global value or type namespaces.
+
+A script executes top-down, so its top level is one sequential lexical scope, like a function
+body:
+
+- a top-level binding is visible only after its assignment
+- rebinding a name changes later uses, exactly like local rebinding
+- a use before any script-local or package-global definition is an unresolved name
+
+Scripts are typechecked like package files: they check against package-global value schemes and
+project-global types, plus their own script-local bindings and type declarations.
 
 - a non-package document may still resolve package-global value names from package files
 - a non-package document may still resolve project-global `@type` and `@alias` names from package

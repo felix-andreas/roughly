@@ -20,22 +20,15 @@ If code changes make this document inaccurate, update it in the same session.
 
 ## Active continuity
 
-- All editor features (hover, completion, rename, goto-definition, references) now live in
-  `analysis::ide`. Definition, references, and rename share one `SymbolTarget` resolution plus a
-  common occurrence scan; the `ide` fixture suite covers each feature per-directory under
-  `tests/ide/`.
-- The old `roughly` modules `completion.rs`, `rename.rs`, `definition.rs`, and `references.rs`
-  are deleted; `roughly/src/tree.rs` re-exports `analysis` parsing helpers and `kind`/`field`
-  tables and keeps only CLI/formatter helpers.
-- Document symbols intentionally stay AST-based (per-keystroke path, top-level symbols only);
-  see the comment in `roughly/src/server.rs::document_symbol`.
-- The type checker now covers comparison operators, `!`, `%%`, `%/%`, `^`, `:`, `c()` emptiness,
-  call-site compatibility (with `Unknown`-argument cascade suppression), inferred parameter names
-  with optional defaults, `@new` validation, and nominal-to-representation projection at
-  operators/indexing/iteration. `TYPING_SEMANTICS.md` and `DECISION_LOG.md` record the semantics.
-- Biggest known checker gap: arithmetic/comparison on unannotated parameters errors because there
-  is no numeric-class constraint on inference variables (`function(x) x + 1L` fails). Needs a
-  design discussion before fixing; see TODOS.
-- Project 007 (typecheck fixture rework) is done; the active fixture split is `bindings`,
-  `expressions`, `interfaces`, `project` (per-file diagnostics), `unification`. The `deprecated/`
-  fixture storage is deleted.
+- Typecheck is incremental at document grain (two-round interface model; see `ARCHITECTURE.md`
+  "Incremental model"). Generalization is level-based. Measured: 300k-line synthetic package cold
+  check ~8.6s via CLI; 500-file in-process package: full ~0.7s, single-file recheck ~56ms
+  (ignored benchmark test in `tests/test_incremental.rs`).
+- Cross-file references are scheme-based; no inference flow across files. Scripts have a
+  sequential top level and are typechecked. `analysis::typecheck` returns recomputed document
+  ids; `did_save` republishes those diagnostics.
+- All editor features (hover, completion, rename, goto-definition, references) live in
+  `analysis::ide`; document symbols intentionally stay AST-based in `roughly/src/server.rs`.
+- Biggest known checker gap: arithmetic/comparison on unannotated parameters errors (no numeric
+  constraint kind). Needs a design discussion before fixing; see TODOS.
+- Typed expression results are computed but not retained; hover cannot show checked types yet.

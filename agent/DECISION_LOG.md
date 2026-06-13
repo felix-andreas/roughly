@@ -2,6 +2,18 @@
 
 Keep newest decisions at the top.
 
+- typecheck is incremental at document grain via a two-round interface model; cross-file references are scheme-based with no inference flow across files.
+  - Round 1 computes each package file's exported schemes in isolation (run twice so define-then-alias settles), round 2 checks every document against the package interface table. Caches key on document version plus rendered interface fingerprints, so body edits recheck one file and interface changes recheck dependents. The old whole-package single-inference-state model let a call in one file silently solve a function's parameter types in another file, which was order-dependent and impossible to invalidate at document grain.
+
+- generalization is level-based instead of walking the environment.
+  - The environment walk was quadratic and made a 300k-line package take ~29s; levels plus binding only referenced interface schemes brought a cold full check to ~8.6s and a single-file recheck in a 500-file package to ~56ms.
+
+- scripts resolve their top level sequentially like a function body and are typechecked.
+  - Script self-references previously warned `could not resolve` because the local pass deferred all top-level names to package-global resolution, which scripts never join. Sequential scoping matches script execution order and makes script-local rebinding behave as documented.
+
+- a failed top-level binding recovers as `Unknown` on both its local and package-global lookup paths, and checking continues with the next top-level expression.
+  - One error no longer hides every later error in the package; this also keeps per-document checking coherent when a winner binding fails.
+
 - inferred function types carry every parameter as a named, position-matchable parameter; defaults make parameters optional; parameter names are call interface, not type identity.
   - R parameters are always matchable by name and position, so dropping names made named-argument calls on unannotated functions impossible and hover output worse. Function types unify and check compatibility positionally across the flattened parameter list, so `fn(integer)` and `fn(count: integer)` stay interchangeable. An expected-optional parameter requires an actual default.
 

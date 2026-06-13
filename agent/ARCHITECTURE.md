@@ -182,6 +182,37 @@ Non-responsibilities:
 
 Inference is an internal mechanism of `typecheck`, not the architectural name of the phase.
 
+#### Incremental model
+
+Typechecking is incremental at document grain through a two-round interface model:
+
+- Round 1 computes each package document's exported value schemes in isolation. The document's
+  own top-level names are resolvable, other documents' names check as `Unknown`, and the round
+  runs twice inside the document so define-then-alias and forward references settle. The result
+  is cached by document version plus the package type-definition fingerprint.
+- The package interface table maps each package-global name to the winning document's exported
+  scheme. Its rendered form, together with the type-definition fingerprint, is the environment
+  fingerprint.
+- Round 2 checks every document (package files and scripts) against the interface table, binding
+  only the schemes the document references. The result is cached by document version plus the
+  environment fingerprint, so a body-only edit rechecks one document while an interface change
+  rechecks dependents.
+
+Consequences that are part of the contract:
+
+- cross-file references see the exporting document's generalized scheme; type information does
+  not flow back across file boundaries through inference
+- interface schemes move between per-document inference states by importing: quantified
+  variables are re-bound to fresh local ids, and stray free variables erase to `Unknown`
+- `typecheck` returns the set of documents whose output was recomputed so callers can republish
+  exactly those diagnostics
+- checking recovers per top-level expression, so every error in every document is reported
+
+Generalization is level-based: variables created while inferring a binding's value live one
+level deeper than the binding boundary, unification propagates the lower level outward, and
+generalization quantifies exactly the variables deeper than the current level without walking
+the environment.
+
 ## Representation boundaries
 
 ### Syntax tree

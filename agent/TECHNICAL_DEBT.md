@@ -21,13 +21,17 @@ The current `typecheck.rs` file contains multiple responsibilities at once:
 
 This makes the file hard to reason about, harder to test by phase, and harder to evolve toward the architecture described in `ARCHITECTURE.md`. The file has grown past 3,500 lines and should be split along those seams.
 
-### `generalize` re-walks the whole environment per binding
+### Interface fingerprints render strings linear in package size
 
-`generalize` collects free type variables by cloning and walking every scheme in the environment on every binding boundary. That is quadratic in bindings per file and conflicts with the incremental-analysis performance goals. Level-based generalization (as in typical efficient HM implementations) would remove the environment walk.
+The round-2 cache key renders every package-global scheme into one environment-fingerprint string on every `typecheck` call, and round-1 renders the full type-definition table. Both are linear in package size per call even when nothing changed. Hashing per-document interface versions (or comparing structured fingerprints) would make the no-op path closer to constant.
 
-### The package typecheck loop stops at the first error
+### Round-1 interfaces degrade cyclic and deeply chained top-level references
 
-`analysis::typecheck` `break`s out of the per-document loop on the first inference error and stores diagnostics-only output (`output: ()`). One run reports at most one type error per package, later documents silently get no checking, and no typed artifact survives for tooling, `typecheck/project` snapshots, or incremental analysis.
+The document interface settles in two passes, so acyclic define-then-alias and forward references resolve, but reference chains needing more than two passes and genuinely cyclic top-level definitions export `Unknown`. A worklist to a fixed point (bounded) would remove the depth limit.
+
+### Typed expression results still are not retained
+
+Per-document checking computes `ModuleCheck.expression_types` and exported schemes, but only diagnostics and interfaces are stored. Hover and inlay hints cannot show checked expression types yet.
 
 ### Parameter default expressions are dropped during lowering
 
