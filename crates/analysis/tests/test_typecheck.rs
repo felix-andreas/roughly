@@ -11,7 +11,7 @@ fn fresh_variables_start_unbound() {
 
     assert_eq!(
         inference_state.entry(variable),
-        Some(&InferenceEntry::Unbound)
+        Some(&InferenceEntry::Unbound { level: 0 })
     );
 }
 

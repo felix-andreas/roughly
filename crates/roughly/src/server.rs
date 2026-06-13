@@ -478,19 +478,39 @@ impl LanguageServer for ServerState {
                     path.display()
                 )
             });
-        analysis::run_full(&mut self.analysis_state);
-        let diagnostics =
-            diagnostics::convert_diagnostics(self.analysis_state.document_diagnostics(document_id));
+        // Package-visible changes can move diagnostics in dependent files, so every
+        // document whose typecheck output changed gets republished, not only the saved one.
+        let mut affected_document_ids = analysis::run_full(&mut self.analysis_state);
+        if !affected_document_ids.contains(&document_id) {
+            affected_document_ids.push(document_id);
+        }
 
-        if let Err(error) = self
-            .client
-            .publish_diagnostics(PublishDiagnosticsParams::new(
-                uri.clone(),
-                diagnostics,
-                None,
-            ))
-        {
-            tracing::error!(?error, "failed to publish diagnostics");
+        for affected_document_id in affected_document_ids {
+            let Some(affected_path) = self
+                .analysis_state
+                .path_for_document_id(affected_document_id)
+                .map(Path::to_path_buf)
+            else {
+                continue;
+            };
+            let affected_uri = if affected_path == path {
+                uri.clone()
+            } else {
+                match Url::from_file_path(&affected_path) {
+                    Ok(affected_uri) => affected_uri,
+                    Err(()) => continue,
+                }
+            };
+            let diagnostics = diagnostics::convert_diagnostics(
+                self.analysis_state
+                    .document_diagnostics(affected_document_id),
+            );
+            if let Err(error) = self
+                .client
+                .publish_diagnostics(PublishDiagnosticsParams::new(affected_uri, diagnostics, None))
+            {
+                tracing::error!(?error, "failed to publish diagnostics");
+            }
         }
 
         ControlFlow::Continue(())

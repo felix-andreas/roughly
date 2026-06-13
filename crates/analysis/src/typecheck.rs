@@ -19,9 +19,11 @@ use {
     tree_sitter::Range,
 };
 
+pub type Level = u32;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InferenceEntry {
-    Unbound,
+    Unbound { level: Level },
     Redirect(InferenceVariableId),
     Bound(CoreType),
 }
@@ -29,6 +31,7 @@ pub enum InferenceEntry {
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct InferenceState {
     next_variable_id: u32,
+    current_level: Level,
     entries: BTreeMap<InferenceVariableId, InferenceEntry>,
     environment: BTreeMap<EnvironmentKey, Binding>,
     builtins: BTreeMap<Symbol, BuiltinKind>,
@@ -147,8 +150,21 @@ impl InferenceState {
     pub fn fresh_variable(&mut self) -> InferenceVariableId {
         let variable = InferenceVariableId(self.next_variable_id);
         self.next_variable_id += 1;
-        self.entries.insert(variable, InferenceEntry::Unbound);
+        self.entries.insert(
+            variable,
+            InferenceEntry::Unbound {
+                level: self.current_level,
+            },
+        );
         variable
+    }
+
+    fn enter_level(&mut self) {
+        self.current_level += 1;
+    }
+
+    fn exit_level(&mut self) {
+        self.current_level -= 1;
     }
 
     pub fn entry(&self, variable: InferenceVariableId) -> Option<&InferenceEntry> {
@@ -442,52 +458,19 @@ impl InferenceState {
                 type_definitions,
             ),
             ExpressionKind::Assign { target, value } => {
-                let annotation = expression.annotation.as_ref();
-                let value_expression = arena.get(*value);
-                let inferred_value = if let Some(expected_function_type) =
-                    self.checked_function_annotation(annotation, type_definitions, expression)?
-                {
-                    if let ExpressionKind::Function { parameters, body } = &value_expression.kind {
-                        self.infer_function_expression(
-                            value_expression.id,
-                            parameters,
-                            *body,
-                            Some(expected_function_type),
-                            expression,
-                            arena,
-                            resolution_context,
-                            type_definitions,
-                        )?
-                    } else {
-                        self.infer_expression_with_context(
-                            value_expression,
-                            arena,
-                            resolution_context,
-                            type_definitions,
-                        )?
-                    }
-                } else {
-                    self.infer_expression_with_context(
-                        value_expression,
-                        arena,
-                        resolution_context,
-                        type_definitions,
-                    )?
-                };
-                let binding_type = if let Some(annotation) = annotation {
-                    if annotation.applies_to_binding() {
-                        self.apply_annotation(
-                            annotation,
-                            inferred_value,
-                            expression,
-                            type_definitions,
-                        )?
-                    } else {
-                        inferred_value
-                    }
-                } else {
-                    inferred_value
-                };
+                // Variables created while inferring the assigned value live one level above
+                // the binding boundary, so generalization quantifies exactly the variables
+                // that do not escape into the enclosing scope, with no environment walk.
+                self.enter_level();
+                let binding_type_result = self.infer_assign_binding_type(
+                    *value,
+                    expression,
+                    arena,
+                    resolution_context,
+                    type_definitions,
+                );
+                self.exit_level();
+                let binding_type = binding_type_result?;
                 if let Some(resolution_context) = resolution_context
                     && resolution_context
                         .top_level_expression_ids
@@ -661,6 +644,56 @@ impl InferenceState {
                 type_definitions,
             ),
             ExpressionKind::Unsupported => Ok(CoreType::Unknown),
+        }
+    }
+
+    fn infer_assign_binding_type(
+        &mut self,
+        value: ExpressionId,
+        expression: &Expression,
+        arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<CoreType, InferenceError> {
+        let annotation = expression.annotation.as_ref();
+        let value_expression = arena.get(value);
+        let inferred_value = if let Some(expected_function_type) =
+            self.checked_function_annotation(annotation, type_definitions, expression)?
+        {
+            if let ExpressionKind::Function { parameters, body } = &value_expression.kind {
+                self.infer_function_expression(
+                    value_expression.id,
+                    parameters,
+                    *body,
+                    Some(expected_function_type),
+                    expression,
+                    arena,
+                    resolution_context,
+                    type_definitions,
+                )?
+            } else {
+                self.infer_expression_with_context(
+                    value_expression,
+                    arena,
+                    resolution_context,
+                    type_definitions,
+                )?
+            }
+        } else {
+            self.infer_expression_with_context(
+                value_expression,
+                arena,
+                resolution_context,
+                type_definitions,
+            )?
+        };
+
+        if let Some(annotation) = annotation
+            && annotation.applies_to_binding()
+        {
+            self.apply_annotation(annotation, inferred_value, expression, type_definitions)
+        } else {
+            Ok(inferred_value)
         }
     }
 
@@ -2800,7 +2833,7 @@ impl InferenceState {
         };
 
         match entry {
-            InferenceEntry::Unbound => Ok(CoreType::Variable(variable)),
+            InferenceEntry::Unbound { .. } => Ok(CoreType::Variable(variable)),
             InferenceEntry::Redirect(other_variable) => {
                 let resolved_type = self.resolve_variable(other_variable)?;
                 self.compress_variable(variable, &resolved_type)?;
@@ -2848,11 +2881,39 @@ impl InferenceState {
             });
         }
 
+        let Some(entry) = self.entries.get(&variable) else {
+            return Err(InferenceError::UnknownInferenceVariable(variable));
+        };
+        if let InferenceEntry::Unbound { level } = entry {
+            // Anything reachable from the bound type escapes to this variable's scope, so
+            // inner variables drop to its level and stay monomorphic there.
+            self.lower_levels_to(&core_type, *level)?;
+        }
+
         let Some(entry) = self.entries.get_mut(&variable) else {
             return Err(InferenceError::UnknownInferenceVariable(variable));
         };
-
         *entry = InferenceEntry::Bound(core_type);
+        Ok(())
+    }
+
+    fn lower_levels_to(
+        &mut self,
+        core_type: &CoreType,
+        level: Level,
+    ) -> Result<(), InferenceError> {
+        for variable in self.free_type_variables_in_core_type(core_type)? {
+            let Some(entry) = self.entries.get_mut(&variable) else {
+                return Err(InferenceError::UnknownInferenceVariable(variable));
+            };
+            if let InferenceEntry::Unbound {
+                level: variable_level,
+            } = entry
+                && *variable_level > level
+            {
+                *variable_level = level;
+            }
+        }
         Ok(())
     }
 
@@ -2868,7 +2929,7 @@ impl InferenceState {
         let Some(left_entry) = self.entries.get(&left) else {
             return Err(InferenceError::UnknownInferenceVariable(left));
         };
-        if !matches!(left_entry, InferenceEntry::Unbound) {
+        if !matches!(left_entry, InferenceEntry::Unbound { .. }) {
             let resolved_left = self.resolve_variable(left)?;
             let resolved_right = self.resolve_variable(right)?;
             return self.unify(resolved_left, resolved_right);
@@ -2877,10 +2938,23 @@ impl InferenceState {
         let Some(right_entry) = self.entries.get(&right) else {
             return Err(InferenceError::UnknownInferenceVariable(right));
         };
-        if !matches!(right_entry, InferenceEntry::Unbound) {
+        if !matches!(right_entry, InferenceEntry::Unbound { .. }) {
             let resolved_left = self.resolve_variable(left)?;
             let resolved_right = self.resolve_variable(right)?;
             return self.unify(resolved_left, resolved_right);
+        }
+
+        let left_level = match self.entries.get(&left) {
+            Some(InferenceEntry::Unbound { level }) => *level,
+            _ => return Err(InferenceError::UnknownInferenceVariable(left)),
+        };
+        let Some(right_entry) = self.entries.get_mut(&right) else {
+            return Err(InferenceError::UnknownInferenceVariable(right));
+        };
+        if let InferenceEntry::Unbound { level } = right_entry
+            && *level > left_level
+        {
+            *level = left_level;
         }
 
         let Some(entry) = self.entries.get_mut(&left) else {
@@ -3000,51 +3074,30 @@ impl InferenceState {
         }
     }
 
+    // Quantifies the variables whose level is deeper than the current one: those were
+    // created while inferring the binding's value and cannot escape it. Variables shared
+    // with the enclosing scope were lowered to its level when they were unified, so no
+    // environment walk is needed.
     fn generalize(&mut self, core_type: CoreType) -> Result<TypeScheme, InferenceError> {
         let resolved_type = self.resolve(core_type)?;
         let type_variables = self.free_type_variables_in_core_type(&resolved_type)?;
-        let environment_variables = self.free_type_variables_in_environment()?;
 
-        let quantified_variables = type_variables
-            .difference(&environment_variables)
-            .copied()
-            .collect();
+        let mut quantified_variables = Vec::new();
+        for variable in type_variables {
+            let Some(entry) = self.entries.get(&variable) else {
+                return Err(InferenceError::UnknownInferenceVariable(variable));
+            };
+            if let InferenceEntry::Unbound { level } = entry
+                && *level > self.current_level
+            {
+                quantified_variables.push(variable);
+            }
+        }
 
         Ok(TypeScheme {
             quantified_variables,
             body: resolved_type,
         })
-    }
-
-    fn free_type_variables_in_environment(
-        &mut self,
-    ) -> Result<BTreeSet<InferenceVariableId>, InferenceError> {
-        let type_schemes = self
-            .environment
-            .values()
-            .map(|binding| binding.type_scheme.clone())
-            .collect::<Vec<_>>();
-        let mut free_variables = BTreeSet::new();
-
-        for type_scheme in type_schemes {
-            let scheme_variables = self.free_type_variables_in_type_scheme(&type_scheme)?;
-            free_variables.extend(scheme_variables);
-        }
-
-        Ok(free_variables)
-    }
-
-    fn free_type_variables_in_type_scheme(
-        &mut self,
-        type_scheme: &TypeScheme,
-    ) -> Result<BTreeSet<InferenceVariableId>, InferenceError> {
-        let mut free_variables = self.free_type_variables_in_core_type(&type_scheme.body)?;
-
-        for quantified_variable in &type_scheme.quantified_variables {
-            free_variables.remove(quantified_variable);
-        }
-
-        Ok(free_variables)
     }
 
     fn free_type_variables_in_core_type(

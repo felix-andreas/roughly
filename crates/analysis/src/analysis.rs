@@ -348,13 +348,16 @@ impl Analysis {
     }
 }
 
-pub fn run_full(analysis_state: &mut Analysis) {
+// Returns the documents whose typecheck output changed, so callers can republish exactly
+// those diagnostics after a package-visible edit.
+pub fn run_full(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     lint(analysis_state);
 
     if analysis_state.check_config.typing {
-        typecheck(analysis_state);
+        typecheck(analysis_state)
     } else {
         resolve_package(analysis_state);
+        Vec::new()
     }
 }
 
@@ -746,7 +749,17 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 type_definitions.clone()
             };
         let mut inference_state = template_state.clone();
+        // Only the names this document actually references need to be in scope; binding the
+        // whole package interface would make every check linear in package size.
+        let referenced_symbols = local_naming
+            .non_locals
+            .values()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
         for export in &global_schemes {
+            if !referenced_symbols.contains(&export.symbol) {
+                continue;
+            }
             let imported_scheme = inference_state.import_scheme(&export.type_scheme);
             inference_state.bind_global_scheme(export.symbol, imported_scheme, export.range);
         }

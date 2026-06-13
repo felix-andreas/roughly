@@ -190,3 +190,61 @@ fn unedited_documents_keep_diagnostics_after_unrelated_edit() {
         "untouched document keeps its diagnostics"
     );
 }
+
+// Run manually with: cargo test -p analysis --release --test test_incremental -- --ignored --nocapture
+#[test]
+#[ignore = "timing benchmark, run manually"]
+fn benchmark_single_file_recheck_in_large_package() {
+    let mut analysis_state = typing_analysis("/pkg");
+    for file_index in 0..500 {
+        let mut source = String::new();
+        for item_index in 0..30 {
+            source.push_str("#: fn(count: integer) -> integer\n");
+            source.push_str(&format!(
+                "fn_{file_index}_{item_index} <- function(count) count + {item_index}L\n"
+            ));
+            if file_index > 0 {
+                source.push_str(&format!(
+                    "value_{file_index}_{item_index} <- fn_{}_{item_index}(2L)\n",
+                    file_index - 1
+                ));
+            }
+        }
+        replace_document(
+            &mut analysis_state,
+            &format!("/pkg/R/file_{file_index:04}.R"),
+            &source,
+        );
+    }
+
+    let full_start = std::time::Instant::now();
+    analysis::run_full(&mut analysis_state);
+    let full_elapsed = full_start.elapsed();
+
+    // Body-only edit in one file.
+    replace_document(
+        &mut analysis_state,
+        "/pkg/R/file_0250.R",
+        &{
+            let mut source = String::new();
+            for item_index in 0..30 {
+                source.push_str("#: fn(count: integer) -> integer\n");
+                source.push_str(&format!(
+                    "fn_250_{item_index} <- function(count) {{ count + {item_index}L }}\n"
+                ));
+                source.push_str(&format!("value_250_{item_index} <- fn_249_{item_index}(2L)\n"));
+            }
+            source
+        },
+    );
+    let incremental_start = std::time::Instant::now();
+    let recomputed = analysis::typecheck(&mut analysis_state);
+    let incremental_elapsed = incremental_start.elapsed();
+
+    println!("full check: {full_elapsed:?}");
+    println!(
+        "single-file recheck: {incremental_elapsed:?} ({} documents recomputed)",
+        recomputed.len()
+    );
+    assert_eq!(recomputed.len(), 1, "body edit should recheck one document");
+}
