@@ -184,24 +184,32 @@ Inference is an internal mechanism of `typecheck`, not the architectural name of
 
 #### Incremental model
 
-Typechecking is incremental at document grain through a two-round interface model:
+Typechecking is incremental at document grain through a two-phase interface model:
 
-- Round 1 computes each package document's exported value schemes in isolation. The document's
-  own top-level names are resolvable, other documents' names check as `Unknown`, and the round
-  runs twice inside the document so define-then-alias and forward references settle. The result
-  is cached by document version plus the package type-definition fingerprint.
+- The interface phase computes each package document's exported value schemes by a package-level
+  fixed-point. Each round builds the package-global table (the winning document's exported scheme
+  per name, `Unknown` where not yet computed), then recomputes every document whose version, the
+  type-definition fingerprint, or a referenced scheme changed, binding the table's schemes for the
+  names it references and re-extracting its exports. Iterating to a fixed point lets re-exports and
+  forward references resolve both within and across files (`second <- first` exports `first`'s
+  scheme even when `first` lives in another file). Each document's interface is cached by document
+  version, the type-definition fingerprint, and a dependency fingerprint of the referenced schemes,
+  so an edit only re-derives the changed document and its dependents; the round cap stops genuine
+  cycles (which keep `Unknown`).
 - The package interface table maps each package-global name to the winning document's exported
   scheme. Its rendered form, together with the type-definition fingerprint, is the environment
   fingerprint.
-- Round 2 checks every document (package files and scripts) against the interface table, binding
-  only the schemes the document references. The result is cached by document version plus the
-  environment fingerprint, so a body-only edit rechecks one document while an interface change
+- The check phase checks every document (package files and scripts) against the interface table,
+  binding only the schemes the document references. The result is cached by document version plus
+  the environment fingerprint, so a body-only edit rechecks one document while an interface change
   rechecks dependents.
 
 Consequences that are part of the contract:
 
-- cross-file references see the exporting document's generalized scheme; type information does
-  not flow back across file boundaries through inference
+- cross-file references see the exporting document's generalized scheme, and a re-export's own
+  exported scheme is derived from what it re-exports; type information still does not flow back
+  across file boundaries through inference (a call in one file never changes the inferred type of a
+  function defined in another file)
 - interface schemes move between per-document inference states by importing: quantified
   variables are re-bound to fresh local ids, and stray free variables erase to `Unknown`
 - `typecheck` returns the set of documents whose output was recomputed so callers can republish

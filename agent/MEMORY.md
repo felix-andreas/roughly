@@ -35,8 +35,11 @@ If code changes make this document inaccurate, update it in the same session.
     signature with the active parameter. All wired into the LSP server, capabilities gated on typing.
   - Expression-level annotations (e.g. `#: @new User` on a block's final expression) are applied in
     the inference wrapper, not only on assignments.
-  - The document interface settles by a bounded fixed-point (deep forward/alias chains resolve);
-    `typecheck` short-circuits when the package version is unchanged (repeated IDE calls are O(1)).
+  - The package interface settles by a dependency-cached package-level fixed-point, so re-exports and
+    forward references resolve within AND across files (`second <- first`, `get_base <- function()
+    base`, deep cross-file chains). `typecheck` short-circuits when the package version is unchanged
+    (repeated IDE calls are O(1)). Recheck-after-edit cost rose modestly; a reverse-dependency index
+    is the next bounded perf step (see TECHNICAL_DEBT).
   - Record types reject duplicate field names and allow a trailing comma.
   - Function compatibility is contravariant in parameters, covariant in returns.
   - Unresolved type names are naming-owned diagnostics (`Diagnostic::naming_error`, "I could not

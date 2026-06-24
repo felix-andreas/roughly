@@ -2,6 +2,40 @@
 
 Keep newest decisions at the top.
 
+- the package interface is computed by a dependency-cached package-level fixed-point, so cross-file
+  re-exports and forward references resolve.
+  - The old round-1 computed each document's interface in isolation (other files' names checked as
+    `Unknown`), so `second <- first` or `get_base <- function() base` exported `Unknown` when the
+    referenced binding lived in another file. The interface phase now iterates: build the package
+    table, recompute documents whose version / type-definitions / referenced schemes changed (binding
+    the table for referenced names), rebuild the table, until stable. Each document's interface is
+    cached on a dependency fingerprint of the schemes it references, so an edit only re-derives the
+    changed document and its dependents. Recheck cost rose modestly (the per-round dependency-
+    fingerprint scan is O(documents) until a reverse-dependency index is added) but cross-file types
+    are now correct. Recorded in `ARCHITECTURE.md`.
+
+- structural compatibility (record-vs-record, tuple-vs-tuple) is covariant per element and unifies
+  variables, so `@new`/checked annotations infer through inference-variable fields.
+  - `check_compatibility` had no record/tuple arms, so `@new Instrument` on `list(id = id, name =
+    name)` inside an unannotated function could not unify the parameter variables against the nominal
+    representation and errored. With covariant field/element checking, `Instrument <- function(id,
+    name) { #: @new Instrument; list(id = id, name = name) }` now infers `fn(id: integer, name:
+    character) -> Instrument` (and the generic `Box<T>` case likewise). It also makes nested list
+    coercions work at field positions.
+
+- reserved R constants lower to typed atomic literals.
+  - `NA` is `logical`; `NA_integer_`/`NA_real_`/`NA_complex_`/`NA_character_` carry their atomic type;
+    `Inf`/`NaN` are `double`; an imaginary literal like `1i` is `complex`. Added one HIR variant
+    `ExpressionKind::AtomicConstant(Atomic)`. (`T`/`F` remain unhandled — they are rebindable base
+    bindings needing a base-environment model.) Recorded in `TYPING_SEMANTICS.md`.
+
+- `c(...)` follows R's atomic coercion hierarchy and drops `NULL`.
+  - Was: only `integer`/`double` could mix; everything else errored. Now mixed atomics coerce to the
+    widest along `logical < integer < double < complex < character` (so `c(1L, NA)` is `integer[]`,
+    `c(1L, "a")` is `character[]`), `raw` only combines with `raw`, and `NULL` arguments are dropped
+    (`c(x, NULL)` is `c(x)`, `c(NULL)` is `NULL`). This matches R and is needed for pervasive NA use.
+    Recorded in `TYPING_SEMANTICS.md`.
+
 - hover output is human-readable by default; phase dumps moved under a debug-only section.
   - Default hover shows unnamed primary blocks — the inferred type and, for a variable use, where it
     is defined and whether it is local or package-global. The old `Lowering`/`Naming`/`Typing`/`Parsing`

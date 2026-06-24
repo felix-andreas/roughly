@@ -445,6 +445,7 @@ fn render_expression_hover(analysis: &Analysis, expression: &Expression) -> Stri
         ExpressionKind::Integer(value) => format!("Integer({value})"),
         ExpressionKind::Double(value) => format!("Double({value})"),
         ExpressionKind::Character(value) => format!("Character({value:?})"),
+        ExpressionKind::AtomicConstant(atomic) => format!("AtomicConstant({atomic:?})"),
         ExpressionKind::StringLiteralName(symbol) => {
             let name = analysis.interner().resolve(*symbol).unwrap_or("<unknown>");
             format!("StringLiteralName({name:?})")

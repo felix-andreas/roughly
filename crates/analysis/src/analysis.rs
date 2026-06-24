@@ -93,6 +93,10 @@ struct LintOutput {
 struct InterfaceOutput {
     version: Version,
     type_definitions_fingerprint: String,
+    // Fingerprint of the package-global schemes this document references. A document's exported
+    // interface is recomputed when its own version, the type definitions, or any scheme it depends
+    // on changes, so an edit only re-derives the affected documents.
+    dependency_fingerprint: String,
     exports: Vec<ExportedValue>,
     fingerprint: String,
 }
@@ -549,6 +553,56 @@ fn render_interface_fingerprint(exports: &[ExportedValue], interner: &Interner) 
         .join(";")
 }
 
+// The package-global interface table: the winning document's exported scheme for each package-global
+// name. Names whose winning document has not produced an export yet resolve to `Unknown`, which is
+// how the fixed-point starts before re-exports and forward references fill in.
+fn build_package_interface_table(
+    package_naming: &NamesGlobal,
+    interface_outputs: &HashMap<DocumentId, InterfaceOutput>,
+    fallback_range: tree_sitter::Range,
+) -> std::collections::BTreeMap<crate::Symbol, ExportedValue> {
+    let mut table = std::collections::BTreeMap::new();
+    for (symbol, winner_document_id) in &package_naming.global_bindings {
+        let export = interface_outputs
+            .get(winner_document_id)
+            .and_then(|interface| {
+                interface
+                    .exports
+                    .iter()
+                    .find(|export| export.symbol == *symbol)
+                    .cloned()
+            })
+            .unwrap_or_else(|| ExportedValue {
+                symbol: *symbol,
+                type_scheme: TypeScheme::monomorphic(CoreType::Unknown),
+                range: fallback_range,
+            });
+        table.insert(*symbol, export);
+    }
+    table
+}
+
+// Fingerprint of exactly the package-global schemes a document references, used as part of its
+// interface cache key so a document recomputes only when a dependency's scheme changes.
+fn render_dependency_fingerprint(
+    referenced: &std::collections::BTreeSet<crate::Symbol>,
+    table: &std::collections::BTreeMap<crate::Symbol, ExportedValue>,
+    interner: &Interner,
+) -> String {
+    referenced
+        .iter()
+        .filter_map(|symbol| table.get(symbol).map(|export| (symbol, export)))
+        .map(|(symbol, export)| {
+            format!(
+                "{}: {}",
+                interner.resolve(*symbol).unwrap_or("<unknown>"),
+                crate::diagnostic::render_type_scheme(interner, &export.type_scheme)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
 // Typechecking is incremental at document grain. Round 1 computes each package document's
 // exported value schemes in isolation (cross-file references check as `Unknown`), cached by
 // document version plus the package type-definition fingerprint. Round 2 checks every
@@ -610,124 +664,103 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         (type_definitions, rendered_definitions.join(";"))
     };
 
-    let mut fresh_interfaces = Vec::new();
-    for document_id in &package_document_ids {
-        let Some(document_version) = analysis_state.document_version(*document_id) else {
-            continue;
-        };
-        if analysis_state
-            .document_interface_outputs
-            .get(document_id)
-            .is_some_and(|output| {
-                output.version == document_version
-                    && output.type_definitions_fingerprint == type_definitions_fingerprint
-            })
-        {
-            continue;
-        }
-
-        let module = analysis_state
-            .module(*document_id)
-            .unwrap_or_else(|| panic!("missing lowered module for typecheck {document_id:?}"));
-        let local_naming = analysis_state
-            .document_naming(*document_id)
-            .unwrap_or_else(|| panic!("missing local naming for typecheck {document_id:?}"));
-
-        // The interface is computed in isolation from other documents, but same-document
-        // top-level references must still resolve, so the document's own names form the
-        // global table here.
-        let mut own_naming = NamesGlobal::default();
-        let mut own_symbols = Vec::new();
-        for expression_id in &module.expressions {
-            let expression = module.arena.get(*expression_id);
-            if let crate::hir::ExpressionKind::Assign { target, .. } = &expression.kind
-                && !own_naming.global_bindings.contains_key(target)
-            {
-                own_naming.global_bindings.insert(*target, *document_id);
-                own_symbols.push((*target, expression.range));
-            }
-        }
-
-        // The interface settles by a bounded fixed-point. Each round binds the previous round's
-        // exported schemes for the document's own names, then re-checks. A binding with no self- or
-        // forward-reference resolves in the first round; forward references and define-then-alias
-        // chains take one round per link. The loop stops as soon as no export is `Unknown` or the
-        // exports stop changing, so genuine cycles settle (keeping `Unknown`) rather than looping.
-        const MAX_INTERFACE_ROUNDS: usize = 8;
-        let mut exports = Vec::new();
-        let mut fingerprint = String::new();
-        let mut previous_exports: Vec<ExportedValue> = Vec::new();
-        for round in 0..MAX_INTERFACE_ROUNDS {
-            let mut inference_state = template_state.clone();
-            for export in &previous_exports {
-                let imported_scheme = inference_state.import_scheme(&export.type_scheme);
-                inference_state.bind_global_scheme(export.symbol, imported_scheme, export.range);
-            }
-            for (symbol, range) in &own_symbols {
-                if inference_state.lookup_global_name(*symbol).is_none() {
-                    inference_state.bind_global_scheme(
-                        *symbol,
-                        TypeScheme::monomorphic(CoreType::Unknown),
-                        *range,
-                    );
-                }
-            }
-            let _ = inference_state.check_module_with_naming(
-                *document_id,
-                module,
-                local_naming,
-                &own_naming,
-                &type_definitions,
-            );
-            exports = inference_state.exported_value_schemes(module, local_naming);
-            let next_fingerprint =
-                render_interface_fingerprint(&exports, analysis_state.interner());
-            let settled = next_fingerprint == fingerprint;
-            fingerprint = next_fingerprint;
-            if (round > 0 && settled) || !fingerprint.contains("Unknown") {
-                break;
-            }
-            previous_exports = exports.clone();
-        }
-        fresh_interfaces.push((
-            *document_id,
-            InterfaceOutput {
-                version: document_version,
-                type_definitions_fingerprint: type_definitions_fingerprint.clone(),
-                exports,
-                fingerprint,
-            },
-        ));
-    }
-    for (document_id, output) in fresh_interfaces {
-        analysis_state
-            .document_interface_outputs
-            .insert(document_id, output);
-    }
-
     let package_naming = analysis_state
         .package_naming_output
         .as_ref()
         .unwrap_or_else(|| panic!("missing package naming output for typecheck"))
         .output
         .clone();
-    let mut global_schemes = Vec::with_capacity(package_naming.global_bindings.len());
-    for (symbol, winner_document_id) in &package_naming.global_bindings {
-        let interface = analysis_state
-            .document_interface_outputs
-            .get(winner_document_id)
-            .unwrap_or_else(|| {
-                panic!("missing document interface for package winner {winner_document_id:?}")
+
+    // Package interface fixed-point. Each round builds the current package-global table, recomputes
+    // every document whose version, the type definitions, or a referenced scheme changed, then
+    // rebuilds the table from the fresh exports. Because a document's interface is checked against
+    // that table, re-exports and forward references resolve within and across files; the
+    // dependency-fingerprint cache keeps an edit from re-deriving documents it cannot affect, and
+    // the round cap stops genuine cycles (which keep `Unknown`).
+    const MAX_PACKAGE_INTERFACE_ROUNDS: usize = 32;
+    for _round in 0..MAX_PACKAGE_INTERFACE_ROUNDS {
+        let table = build_package_interface_table(
+            &package_naming,
+            &analysis_state.document_interface_outputs,
+            fallback_range,
+        );
+
+        let mut fresh_interfaces = Vec::new();
+        for document_id in &package_document_ids {
+            let Some(document_version) = analysis_state.document_version(*document_id) else {
+                continue;
+            };
+            let local_naming = analysis_state
+                .document_naming(*document_id)
+                .unwrap_or_else(|| panic!("missing local naming for typecheck {document_id:?}"));
+            let referenced = local_naming
+                .non_locals
+                .values()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>();
+            let dependency_fingerprint =
+                render_dependency_fingerprint(&referenced, &table, analysis_state.interner());
+
+            if analysis_state
+                .document_interface_outputs
+                .get(document_id)
+                .is_some_and(|output| {
+                    output.version == document_version
+                        && output.type_definitions_fingerprint == type_definitions_fingerprint
+                        && output.dependency_fingerprint == dependency_fingerprint
+                })
+            {
+                continue;
+            }
+
+            let module = analysis_state.module(*document_id).unwrap_or_else(|| {
+                panic!("missing lowered module for typecheck {document_id:?}")
             });
-        let export = interface
-            .exports
-            .iter()
-            .find(|export| export.symbol == *symbol)
-            .unwrap_or_else(|| {
-                panic!("missing exported scheme for package winner {winner_document_id:?}")
-            });
-        global_schemes.push(export.clone());
+            let mut inference_state = template_state.clone();
+            for symbol in &referenced {
+                if let Some(export) = table.get(symbol) {
+                    let imported_scheme = inference_state.import_scheme(&export.type_scheme);
+                    inference_state.bind_global_scheme(*symbol, imported_scheme, export.range);
+                }
+            }
+            let _ = inference_state.check_module_with_naming(
+                *document_id,
+                module,
+                local_naming,
+                &package_naming,
+                &type_definitions,
+            );
+            let exports = inference_state.exported_value_schemes(module, local_naming);
+            let fingerprint = render_interface_fingerprint(&exports, analysis_state.interner());
+            fresh_interfaces.push((
+                *document_id,
+                InterfaceOutput {
+                    version: document_version,
+                    type_definitions_fingerprint: type_definitions_fingerprint.clone(),
+                    dependency_fingerprint,
+                    exports,
+                    fingerprint,
+                },
+            ));
+        }
+
+        if fresh_interfaces.is_empty() {
+            break;
+        }
+        for (document_id, output) in fresh_interfaces {
+            analysis_state
+                .document_interface_outputs
+                .insert(document_id, output);
+        }
     }
+
+    let global_schemes = build_package_interface_table(
+        &package_naming,
+        &analysis_state.document_interface_outputs,
+        fallback_range,
+    )
+    .into_values()
+    .collect::<Vec<_>>();
     let environment_fingerprint = {
         let mut parts = Vec::with_capacity(global_schemes.len() + 1);
         parts.push(type_definitions_fingerprint.clone());

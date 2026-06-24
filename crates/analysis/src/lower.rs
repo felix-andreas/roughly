@@ -10,7 +10,7 @@ use {
         text,
         tree::{field, kind},
         type_syntax::{TypeParseError, TypeSyntax, parse_type_syntax},
-        types::{Annotation, AttachedAnnotation},
+        types::{Annotation, Atomic, AttachedAnnotation},
     },
     ropey::Rope,
     tree_sitter::{Node, Range, TreeCursor},
@@ -142,6 +142,11 @@ fn lower_node_with_rope(
         kind::FALSE => ExpressionKind::Logical(false),
         kind::INTEGER => ExpressionKind::Integer(node_text(node, rope)),
         kind::FLOAT => ExpressionKind::Double(node_text(node, rope)),
+        // `Inf` and `NaN` are reserved `double` constants; `1i` is `complex`.
+        kind::INF | kind::NAN => ExpressionKind::Double(node_text(node, rope)),
+        kind::COMPLEX => ExpressionKind::AtomicConstant(Atomic::Complex),
+        // `NA` is logical; the typed `NA_*` forms carry their atomic type.
+        kind::NA => ExpressionKind::AtomicConstant(na_atomic(node, rope)),
         kind::STRING => ExpressionKind::Character(node_text(node, rope)),
         kind::BRACED_EXPRESSION => lower_block(node, rope, lowering_context),
         kind::BINARY_OPERATOR => lower_binary_operator(node, rope, lowering_context),
@@ -604,6 +609,17 @@ fn first_named_child(node: Node<'_>) -> Option<Node<'_>> {
 
 fn node_text(node: Node<'_>, rope: &Rope) -> String {
     text::node_text(rope, node).unwrap_or_default()
+}
+
+// `NA` is logical; the typed sentinels carry a fixed atomic type.
+fn na_atomic(node: Node<'_>, rope: &Rope) -> Atomic {
+    match node_text(node, rope).as_str() {
+        "NA_integer_" => Atomic::Integer,
+        "NA_real_" => Atomic::Double,
+        "NA_complex_" => Atomic::Complex,
+        "NA_character_" => Atomic::Character,
+        _ => Atomic::Logical,
+    }
 }
 
 fn intern_string_node_content(

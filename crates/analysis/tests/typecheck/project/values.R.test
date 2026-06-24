@@ -92,3 +92,70 @@ No diagnostics.
 ok <- third
 #++++
 No diagnostics.
+
+#==== cross_file_reexport
+#---- value_reexport_resolves_across_files
+#---- R/a.R
+first <- 1L
+#++++
+No diagnostics.
+#---- R/b.R
+second <- first
+#++++
+No diagnostics.
+#---- R/c.R
+#: integer
+check <- second
+#++++
+No diagnostics.
+
+#---- function_wrapper_reexports_return_type
+#---- R/a.R
+base <- 10L
+#++++
+No diagnostics.
+#---- R/b.R
+get_base <- function() base
+#++++
+No diagnostics.
+#---- R/c.R
+#: integer
+value <- get_base()
+#++++
+No diagnostics.
+
+#---- reexport_type_error_is_caught
+#---- R/a.R
+first <- 1L
+#++++
+No diagnostics.
+#---- R/b.R
+second <- first
+#++++
+No diagnostics.
+#---- R/c.R
+#: character
+bad <- second
+#++++
+error[type-error] expected `character`, found `integer`
+--> 2:1-2:14
+| bad <- second
+
+#---- deep_cross_file_chain_resolves
+#---- R/a.R
+first <- 1L
+#++++
+No diagnostics.
+#---- R/b.R
+second <- first
+#++++
+No diagnostics.
+#---- R/c.R
+third <- second
+#++++
+No diagnostics.
+#---- R/d.R
+#: integer
+fourth <- third
+#++++
+No diagnostics.

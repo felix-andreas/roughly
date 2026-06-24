@@ -36,4 +36,7 @@
 
 ### Active Projects
 
+- `projects/008_typing_audit_gaps.md` — exhaustive typing audit (~580 green fixtures landed); gap
+  backlog. Fixed: `@new` inference, reserved constants, `c()` coercion, cross-file re-exports. Top
+  remaining: structural constraints on inferred params, diagnostic wording, `T`/`F` base bindings.
 - `projects/006_incremental_analysis_operation_model.md` — operation scheduling alignment

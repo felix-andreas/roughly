@@ -453,6 +453,7 @@ impl InferenceState {
             ExpressionKind::Integer(_) => Ok(CoreType::Scalar(Atomic::Integer)),
             ExpressionKind::Double(_) => Ok(CoreType::Scalar(Atomic::Double)),
             ExpressionKind::Character(_) => Ok(CoreType::Scalar(Atomic::Character)),
+            ExpressionKind::AtomicConstant(atomic) => Ok(CoreType::Scalar(*atomic)),
             ExpressionKind::StringLiteralName(_) => Ok(CoreType::Scalar(Atomic::Character)),
             ExpressionKind::Symbol(symbol) => {
                 if let Some(resolution_context) = resolution_context {
@@ -1184,6 +1185,46 @@ impl InferenceState {
             }
             (CoreType::NamedVector(actual_atomic), CoreType::Vector(expected_atomic)) => {
                 Ok(actual_atomic == expected_atomic)
+            }
+            // Fixed-shape structural compatibility, checked covariantly per element/field. This is
+            // what lets `@new` and checked annotations on a `list(...)` accept (and unify) a value
+            // whose fields are still inference variables, e.g. `@new Person` on
+            // `list(name = name, age = age)` inside an unannotated function.
+            (CoreType::Tuple(actual_items), CoreType::Tuple(expected_items))
+                if actual_items.len() == expected_items.len() =>
+            {
+                for (actual_item, expected_item) in actual_items.into_iter().zip(expected_items) {
+                    if !self.check_compatibility(
+                        actual_item,
+                        expected_item,
+                        type_definitions,
+                        expression,
+                    )? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            (CoreType::Record(actual_fields), CoreType::Record(expected_fields))
+                if actual_fields.len() == expected_fields.len() =>
+            {
+                for expected_field in expected_fields {
+                    let Some(actual_field) = actual_fields
+                        .iter()
+                        .find(|field| field.name == expected_field.name)
+                    else {
+                        return Ok(false);
+                    };
+                    if !self.check_compatibility(
+                        actual_field.value.clone(),
+                        expected_field.value,
+                        type_definitions,
+                        expression,
+                    )? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
             }
             (CoreType::Tuple(items), CoreType::List(item_type)) => {
                 for item in items {
@@ -2950,10 +2991,9 @@ impl InferenceState {
 
         let mut item_atomic = None;
         let mut all_arguments_are_named = true;
+        let mut saw_non_null_argument = false;
 
         for argument in arguments {
-            all_arguments_are_named &= argument.name.is_some();
-
             let arg_expr = arena.get(argument.expression);
             let inferred_argument = self.infer_expression_with_context(
                 arg_expr,
@@ -2963,6 +3003,13 @@ impl InferenceState {
             )?;
             let resolved_argument =
                 self.resolve_structural(inferred_argument, type_definitions, Some(arg_expr))?;
+
+            // R drops `NULL` inside `c(...)`: `c(x, NULL)` is `c(x)` and `c(NULL)` is `NULL`.
+            if resolved_argument == CoreType::Null {
+                continue;
+            }
+            saw_non_null_argument = true;
+            all_arguments_are_named &= argument.name.is_some();
 
             let Some(current_atomic) = combine_operand_atomic(&resolved_argument) else {
                 return Err(InferenceError::TypeMismatch {
@@ -2985,6 +3032,9 @@ impl InferenceState {
             });
         }
 
+        if !saw_non_null_argument {
+            return Ok(CoreType::Null);
+        }
         let combined_atomic = item_atomic.unwrap_or(Atomic::Integer);
         if all_arguments_are_named {
             Ok(CoreType::NamedVector(combined_atomic))
@@ -3763,16 +3813,32 @@ fn combine_operand_atomic(core_type: &CoreType) -> Option<Atomic> {
     }
 }
 
+// `c(...)` follows R's atomic coercion hierarchy: logical < integer < double < complex < character,
+// so mixed arguments promote to the widest type (this is what lets `c(1L, NA)` be `integer` and
+// `c(1L, "a")` be `character`). `raw` does not participate and only combines with itself.
 fn promote_combine_atomic(left: Atomic, right: Atomic) -> Option<Atomic> {
     if left == right {
         return Some(left);
     }
+    let left_rank = combine_atomic_rank(left)?;
+    let right_rank = combine_atomic_rank(right)?;
+    Some(match left_rank.max(right_rank) {
+        0 => Atomic::Logical,
+        1 => Atomic::Integer,
+        2 => Atomic::Double,
+        3 => Atomic::Complex,
+        _ => Atomic::Character,
+    })
+}
 
-    match (left, right) {
-        (Atomic::Integer, Atomic::Double) | (Atomic::Double, Atomic::Integer) => {
-            Some(Atomic::Double)
-        }
-        _ => None,
+fn combine_atomic_rank(atomic: Atomic) -> Option<u8> {
+    match atomic {
+        Atomic::Logical => Some(0),
+        Atomic::Integer => Some(1),
+        Atomic::Double => Some(2),
+        Atomic::Complex => Some(3),
+        Atomic::Character => Some(4),
+        Atomic::Raw => None,
     }
 }
 

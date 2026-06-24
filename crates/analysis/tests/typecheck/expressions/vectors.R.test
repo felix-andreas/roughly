@@ -84,10 +84,10 @@ c(c(foo = 1L), 2.5)
 #++++
 double[]
 
-#---- combine_of_logical_and_integer_is_rejected
+#---- combine_of_logical_and_integer_coerces
 c(TRUE, 1L)
 #++++
-error: type mismatch
+integer[]
 
 #---- combine_of_list_is_rejected
 c(list(1L), 2L)

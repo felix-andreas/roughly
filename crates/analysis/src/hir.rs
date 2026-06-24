@@ -3,7 +3,7 @@ use {
         document::DocumentId,
         interner::Symbol,
         type_syntax::{render_named_type_ref, render_surface_type},
-        types::{AttachedAnnotation, SurfaceType},
+        types::{Atomic, AttachedAnnotation, SurfaceType},
     },
     tree_sitter::Range,
 };
@@ -115,6 +115,9 @@ pub enum ExpressionKind {
     Integer(String),
     Double(String),
     Character(String),
+    // A reserved constant whose atomic type is fixed, such as `NA` (logical), the typed `NA_*`
+    // forms, or an imaginary literal like `1i` (complex).
+    AtomicConstant(Atomic),
     StringLiteralName(Symbol),
     Symbol(Symbol),
     Block {
@@ -297,6 +300,9 @@ impl Module {
             ExpressionKind::Integer(s) => out.push_str(&format!("{prefix}Integer({s:?})\n")),
             ExpressionKind::Double(s) => out.push_str(&format!("{prefix}Double({s:?})\n")),
             ExpressionKind::Character(s) => out.push_str(&format!("{prefix}Character({s:?})\n")),
+            ExpressionKind::AtomicConstant(atomic) => {
+                out.push_str(&format!("{prefix}AtomicConstant({atomic:?})\n"))
+            }
             ExpressionKind::StringLiteralName(sym) => {
                 let name = interner.resolve(*sym).unwrap_or("<unknown>");
                 out.push_str(&format!("{prefix}StringLiteralName({name:?})\n"))

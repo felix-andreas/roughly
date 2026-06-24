@@ -10,13 +10,16 @@ Keep this file focused on concrete, current debt that affects correctness, testa
 
 ### Single-file recheck still scales with package size
 
-`typecheck` now short-circuits when the package version is unchanged (so repeated IDE requests on an
+`typecheck` short-circuits when the package version is unchanged (so repeated IDE requests on an
 unchanged package are O(1)), but a single-file *edit* still pays package-scoped work: `resolve_package`
-rebuilds package naming and the round-2 path rebuilds the package interface table and renders the
-environment fingerprint, all linear in package size. The `just bench` suite measures this: single-file
-recheck after an edit is ~13ms at 10k LoC and ~1.8s at 200k LoC. Making this near-constant needs the
-incremental-analysis redesign (incremental package naming plus interface-version tracking) that
-`AGENTS.md` says to design with the user before large steps.
+rebuilds package naming, the interface fixed-point scans every document each round to compare its
+dependency fingerprint (only changed documents are re-derived, but the scan itself is O(documents)),
+and the environment fingerprint is rendered over all globals. The `just bench` suite measures this:
+single-file recheck after an edit is ~13ms at 10k LoC and ~0.4s at 100k LoC. Two bounded steps would
+help before the larger redesign: a reverse-dependency index (name -> referencing documents) so the
+interface fixed-point only revisits affected documents instead of scanning all, and incremental
+package naming. The full near-constant model is the incremental-analysis redesign `AGENTS.md` says to
+design with the user first.
 
 ### Type-syntax error ranges are coarse
 

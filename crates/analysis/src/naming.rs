@@ -823,6 +823,7 @@ impl<'a> DocumentNamingContext<'a> {
             | ExpressionKind::Integer(_)
             | ExpressionKind::Double(_)
             | ExpressionKind::Character(_)
+            | ExpressionKind::AtomicConstant(_)
             | ExpressionKind::StringLiteralName(_)
             | ExpressionKind::Unsupported => {}
         }

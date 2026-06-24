@@ -315,6 +315,17 @@ Use original R type names in semantics and fixtures:
 
 Do not rename them to aliases like `bool`, `int`, `float`, or `string`.
 
+### Reserved constants
+
+R's reserved constants infer their fixed scalar atomic type:
+
+- `TRUE` and `FALSE` infer as `logical`
+- `NA` infers as `logical`; `NA_integer_`, `NA_real_`, `NA_complex_`, and `NA_character_` infer as
+  `integer`, `double`, `complex`, and `character`
+- `Inf` and `NaN` infer as `double`
+- an imaginary literal such as `1i` infers as `complex`
+- `NULL` infers as `NULL`
+
 ### Vector shapes
 
 Atomic vector types have three user-facing shapes:
@@ -1064,8 +1075,11 @@ Examples:
 `c(...)` builds an atomic vector from scalar-like, array-like, and map-like atomic arguments:
 
 - with no arguments, `c()` returns `NULL`, matching R
-- every argument must be an atomic vector type; lists are not supported
-- all arguments must share one atomic type, except that `integer` and `double` may mix and promote to `double`
+- `NULL` arguments are dropped, matching R; `c(x, NULL)` is `c(x)` and `c(NULL)` is `NULL`
+- every non-`NULL` argument must be an atomic vector type; lists are not supported
+- mixed atomic arguments coerce to the widest type along R's coercion hierarchy
+  `logical < integer < double < complex < character`; `raw` does not participate and only combines
+  with `raw`
 - if every argument is named, the result is map-like `T[named]`
 - otherwise the result is array-like `T[]`
 
@@ -1073,8 +1087,10 @@ Examples:
 
 - `c(1L, 2L)` returns `integer[]`
 - `c(1L, 2.5)` returns `double[]`
+- `c(TRUE, 1L)` returns `integer[]`
+- `c(1L, NA)` returns `integer[]`
+- `c(1L, "a")` returns `character[]`
 - `c(foo = 1L, bar = 2L)` returns `integer[named]`
-- `c(1L, "a")` is a type error
 
 ### Assignment operator `<-`
 
