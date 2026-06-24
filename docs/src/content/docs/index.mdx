@@ -75,6 +75,22 @@ Diff in R/main.R:
 
 </Card>
 
+<Card title="Type Checker" icon="approve-check-circle">
+
+Catch type errors with a [static type checker](/type-checker) driven by `#:` typing comments.
+
+```r
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+double_count("two")
+```
+
+```
+error[type-error] expected `integer`, found `character`
+```
+
+</Card>
+
 <Card title="Language Server" icon="puzzle">
   Experience [rich IDE features](/language-server) like completions, go-to-definition, and more.
 </Card>

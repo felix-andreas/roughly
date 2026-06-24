@@ -24,8 +24,8 @@ export default defineConfig({
 					items: [
 						{ slug: 'getting-started' },
 						{ slug: 'formatter' },
+						{ slug: 'type-checker' },
 						{ slug: 'linter' },
-						{ slug: 'type-checking' },
 						{ slug: 'language-server' },
 						{ slug: 'configuration' },
 					],
@@ -48,6 +48,10 @@ export default defineConfig({
 						{
 							label: 'Formatter',
 							link: '/formatter',
+						},
+						{
+							label: 'Type Checker',
+							link: '/type-checker',
 						},
 						{
 							label: 'Linter',

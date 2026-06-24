@@ -1,5 +1,5 @@
 ---
-title: Type Checking
+title: Type Checker
 description: Roughly's static type checker for R and its typing-comment syntax
 ---
 
@@ -30,7 +30,6 @@ roughly check --experimental-features typing
 ```
 
 In the VS Code extension, add `"typing"` (or `"all"`) to `roughly.experimentalFeatures`.
-Typed hover information additionally requires the `hovering` feature.
 
 ## What it does
 

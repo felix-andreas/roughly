@@ -33,7 +33,7 @@ Roughly aims to support the following language server features (some are experim
   - Search current document - <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> *in VS Code*
   - Search global workspace - <kbd>Ctrl</kbd> + <kbd>T</kbd> *in VS Code*
   - Go to definition
-  - Find all references *(🧪 experimental)*
+  - Find all references
 
 - **Diagnostics**
   - Syntax errors - *including missing or trailing commas*
@@ -41,12 +41,12 @@ Roughly aims to support the following language server features (some are experim
   - Warning for unused variables *(🧪 experimental)*
   - Error for undefined variable *(⚠️ missing)*
   - Argument validation for function calls *(🧪 experimental — part of type checking)*
-  - Static type checking — HM-style inference with nominal/structural types, function types, nullable unions, and numeric constraints, driven by [`#:` typing comments](https://roughly.felixandreas.me/type-checking) *(🧪 experimental)*
+  - Static type checking — HM-style inference with nominal/structural types, function types, nullable unions, and numeric constraints, driven by [`#:` typing comments](https://roughly.felixandreas.me/type-checker) *(🧪 experimental)*
 
 - **Editing**
   - Autocomplete local and global variables
   - Autocomplete variables from other packages *(⚠️ missing)*
-  - Rename local variables *(🧪 experimental)*
+  - Rename local variables
   - Rename global variables *(⚠️ missing)*
   - Signature help — inferred call signature with active parameter *(🧪 experimental — needs type checking)*
   - Inlay hints — inferred types on unannotated bindings *(🧪 experimental — needs type checking)*
@@ -135,7 +135,7 @@ You can customize the Roughly extension in VS Code through the following setting
   // Pass custom arguments; defaults to ["server"]
   "roughly.args": ["server", "--verbose"],
   // Enable experimental features
-  "roughly.experimentalFeatures": ["rename", "range_formatting"],
+  "roughly.experimentalFeatures": ["typing", "range_formatting"],
 }
 ```
 
@@ -182,9 +182,8 @@ Roughly includes several experimental features that can be enabled in the VS Cod
 | Name               | Description                      |
 | ------------------ | -------------------------------- |
 | `all`              | Enable all experimental features |
-| `goto_references`  | Find all references to a symbol  |
+| `typing`           | Static type checking             |
 | `range_formatting` | Format selected code ranges      |
-| `rename`           | Rename symbols                   |
 | `unused`           | Warn about unused variables      |
 
 ## Development

@@ -2,6 +2,14 @@
 
 Keep newest decisions at the top.
 
+- hover, find-references, and rename graduated from experimental flags to always-on LSP capabilities.
+  - All three are fixture- and LSP-integration-tested, so they no longer hide behind
+    `--experimental-features`. The `goto_references`/`hovering`/`rename` flags now emit the
+    "stabilized, you can remove it" warning (like `goto_definition`); `ExperimentalFeatures` keeps only
+    `debug`, `range_formatting`, `unused`, `typing`. The docs page is named "Type Checker" (consistent
+    with Formatter/Linter), slugged `/type-checker`, ordered before Linter, and linked from the docs
+    header nav and landing page.
+
 - the package interface is computed by a dependency-cached package-level fixed-point, so cross-file
   re-exports and forward references resolve.
   - The old round-1 computed each document's interface in isolation (other files' names checked as

@@ -56,7 +56,7 @@ If code changes make this document inaccurate, update it in the same session.
   top level and are typechecked. `analysis::typecheck` returns recomputed document ids.
 - Editor features (hover w/ typed section, completion, rename, goto-definition, references, inlay
   hints) live in `analysis::ide`; document symbols intentionally stay AST-based in `roughly`.
-- Docs: user guide at `docs/src/content/docs/type-checking.md`; high-level `human-overview.html` at
+- Docs: user guide at `docs/src/content/docs/type-checker.md`; high-level `human-overview.html` at
   repo root; README features updated.
 - Remaining big items: near-constant incremental recheck *after an edit* (needs the incremental
   package-naming + interface-version redesign per `AGENTS.md`, design with user first); precise

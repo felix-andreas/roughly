@@ -290,21 +290,20 @@ async fn initialize_reports_capabilities() {
 
     let hover = &capabilities.hover_provider;
     assert!(
-        hover.is_none(),
-        "expected hover_provider to be absent by default"
+        matches!(hover, Some(HoverProviderCapability::Simple(true))),
+        "expected hover_provider to be enabled by default"
     );
 
-    context.shutdown().await;
-}
-
-#[tokio::test]
-async fn initialize_reports_hover_capability_when_enabled() {
-    let context = setup_test_with_features(&[], &["hovering"]).await;
-
-    let hover = &context.init_result.capabilities.hover_provider;
+    let references = &capabilities.references_provider;
     assert!(
-        matches!(hover, Some(HoverProviderCapability::Simple(true))),
-        "expected hover_provider to be true when hovering is enabled"
+        matches!(references, Some(async_lsp::lsp_types::OneOf::Left(true))),
+        "expected references_provider to be enabled by default"
+    );
+
+    let rename = &capabilities.rename_provider;
+    assert!(
+        matches!(rename, Some(async_lsp::lsp_types::OneOf::Left(true))),
+        "expected rename_provider to be enabled by default"
     );
 
     context.shutdown().await;
@@ -343,7 +342,7 @@ async fn initialize_without_r_directory() {
 
 #[tokio::test]
 async fn hover_returns_identifier_definition_without_debug_by_default() {
-    let mut context = setup_test_with_features(&[], &["hovering", "typing"]).await;
+    let mut context = setup_test_with_features(&[], &["typing"]).await;
 
     let file_uri = context.file_uri("R/test.R");
     context
@@ -383,7 +382,7 @@ async fn hover_returns_identifier_definition_without_debug_by_default() {
 
 #[tokio::test]
 async fn hover_returns_debug_section_when_debug_enabled() {
-    let mut context = setup_test_with_features(&[], &["hovering", "typing", "debug"]).await;
+    let mut context = setup_test_with_features(&[], &["typing", "debug"]).await;
 
     let file_uri = context.file_uri("R/test_debug.R");
     context.open_file(&file_uri, "variable_name <- 1\n").await;
@@ -421,7 +420,7 @@ async fn hover_returns_debug_section_when_debug_enabled() {
 
 #[tokio::test]
 async fn hover_returns_type_by_default() {
-    let mut context = setup_test_with_features(&[], &["hovering", "typing"]).await;
+    let mut context = setup_test_with_features(&[], &["typing"]).await;
 
     let file_uri = context.file_uri("R/test_literal.R");
     context.open_file(&file_uri, "x <- \"foo\"\n").await;
@@ -459,7 +458,7 @@ async fn hover_returns_type_by_default() {
 
 #[tokio::test]
 async fn hover_returns_type_for_if() {
-    let mut context = setup_test_with_features(&[], &["hovering", "typing"]).await;
+    let mut context = setup_test_with_features(&[], &["typing"]).await;
 
     let file_uri = context.file_uri("R/test_if.R");
     context
@@ -499,7 +498,7 @@ async fn hover_returns_type_for_if() {
 
 #[tokio::test]
 async fn hover_returns_none_outside_expressions() {
-    let mut context = setup_test_with_features(&[], &["hovering"]).await;
+    let mut context = setup_test_with_features(&[], &[]).await;
 
     let file_uri = context.file_uri("R/test_outside.R");
     context.open_file(&file_uri, "x <- 1\n").await;
@@ -732,7 +731,7 @@ async fn completion() {
 async fn rename_uses_analysis_across_files() {
     let mut context = setup_test_with_features(
         &[("R/a.R", "value <- 1L\n"), ("R/b.R", "result <- value\n")],
-        &["rename"],
+        &[],
     )
     .await;
 
@@ -781,7 +780,7 @@ async fn rename_uses_analysis_across_files() {
 async fn references_use_analysis_across_files() {
     let mut context = setup_test_with_features(
         &[("R/a.R", "value <- 1L\n"), ("R/b.R", "result <- value\n")],
-        &["goto_references"],
+        &[],
     )
     .await;
 

@@ -70,7 +70,7 @@ For details on configuring the linter, see the [Configuration](/configuration) p
 ## Roadmap
 
 Static type checking and function-call argument validation are already available as an
-experimental, opt-in feature — see [Type Checking](/type-checking).
+experimental, opt-in feature — see [Type Checker](/type-checker).
 
 Roughly's static analysis capabilities will continue to expand in future versions to include:
 

@@ -206,10 +206,7 @@ impl LanguageServer for ServerState {
                     self.experimental_features.range_formatting,
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
-                hover_provider: self
-                    .experimental_features
-                    .hovering
-                    .then_some(HoverProviderCapability::Simple(true)),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 inlay_hint_provider: Some(OneOf::Left(self.analysis_state.typing_enabled())),
                 signature_help_provider: self.analysis_state.typing_enabled().then(|| {
                     SignatureHelpOptions {
@@ -218,8 +215,8 @@ impl LanguageServer for ServerState {
                         work_done_progress_options: Default::default(),
                     }
                 }),
-                references_provider: Some(OneOf::Left(self.experimental_features.goto_references)),
-                rename_provider: Some(OneOf::Left(self.experimental_features.rename)),
+                references_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Left(true)),
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
                     TextDocumentSyncOptions {
                         open_close: Some(true),
