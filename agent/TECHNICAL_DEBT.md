@@ -19,31 +19,25 @@ The current `typecheck.rs` file contains multiple responsibilities at once:
 - builtin typing rules
 - expression-level typechecking
 
-This makes the file hard to reason about, harder to test by phase, and harder to evolve toward the architecture described in `ARCHITECTURE.md`. The file has grown past 3,500 lines and should be split along those seams.
+This makes the file hard to reason about. The file is now past 3,900 lines. `STRUCTURE.md` and
+`DECISION_LOG.md` deliberately defer this split ("keep builtin typing, compatibility logic, and
+interface extraction inside `typecheck.rs` for now") until the internal structure stabilizes. The
+inference engine is now stable and well-organized top-down, so the deferral is ready to revisit:
+pulling the inference state / unification engine, the builtin typing rules, and interface extraction
+into sibling modules would each remove a clear seam. This is a deliberate structural decision to take
+with the user before the move, since it contradicts the current `STRUCTURE.md` deferral.
 
 ### Interface fingerprints render strings linear in package size
 
-The round-2 cache key renders every package-global scheme into one environment-fingerprint string on every `typecheck` call, and round-1 renders the full type-definition table. Both are linear in package size per call even when nothing changed. Hashing per-document interface versions (or comparing structured fingerprints) would make the no-op path closer to constant.
+The round-2 cache key renders every package-global scheme into one environment-fingerprint string on every `typecheck` call, and round-1 renders the full type-definition table. Both are linear in package size per call even when nothing changed. Hashing per-document interface versions (or comparing structured fingerprints) would make the no-op path closer to constant. The `just bench` suite measures this: single-file recheck currently scales roughly linearly with package size (~13ms at 10k LoC, ~1.8s at 200k LoC) instead of staying near-constant.
 
 ### Round-1 interfaces degrade cyclic and deeply chained top-level references
 
 The document interface settles in two passes, so acyclic define-then-alias and forward references resolve, but reference chains needing more than two passes and genuinely cyclic top-level definitions export `Unknown`. A worklist to a fixed point (bounded) would remove the depth limit.
 
-### Typed expression results still are not retained
+### Type-syntax error ranges are coarse
 
-Per-document checking computes `ModuleCheck.expression_types` and exported schemes, but only diagnostics and interfaces are stored. Hover and inlay hints cannot show checked expression types yet.
-
-### Parameter default expressions are dropped during lowering
-
-HIR `Parameter` records `has_default` only. The default expression itself is not lowered, named, or typechecked, so defaults neither constrain the parameter type nor get checked themselves.
-
-### Unknown type names are classified as syntax errors
-
-An unresolved type name in an annotation renders as `Syntax Error: type syntax error: unknown type ...` even though resolution is a naming fact, not a syntax fact. Typecheck now suppresses the follow-up cascade (`InferenceError::UnresolvedAnnotationType` is swallowed at annotation application), but the remaining diagnostic should move to naming-owned classification and wording.
-
-### Function-type variance is unspecified and covariant in practice
-
-`check_compatibility` checks function parameters covariantly (argument-to-parameter direction per position). Sound variance would be contravariant parameters. `TYPING_SEMANTICS.md` does not yet define variance; decide and align.
+Naming reports an unresolved type name (`I could not resolve type ...`, naming-owned) over the whole annotation range rather than the offending token, because `SurfaceType` carries no per-node source ranges. Threading ranges through type-syntax parsing would let `list{age: intgr}` underline only `intgr`.
 
 ### Rope and tree-sitter helper logic overlaps with `roughly`
 

@@ -69,10 +69,11 @@ For details on configuring the linter, see the [Configuration](/configuration) p
 
 ## Roadmap
 
-Roughly's static analysis capabilities will expand in future versions to include:
+Static type checking and function-call argument validation are already available as an
+experimental, opt-in feature — see [Type Checking](/type-checking).
 
-- **Argument validation**: Checking that function calls provide the correct number of arguments
-- **Type checking**: Basic type inference and validation for function arguments and returns
+Roughly's static analysis capabilities will continue to expand in future versions to include:
+
 - **Unused variables**: Detection of unused variable declarations
 - **Unreachable code**: Identification of code that will never be executed
 - **Control flow analysis**: Detecting potential infinite loops or missing return statements

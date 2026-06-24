@@ -29,7 +29,8 @@ pub use crate::{
     },
     ide::{
         CompletionItem, CompletionItemKind, CompletionItemSource, HoverInfo, HoverPhase,
-        HoverSection, Location, RenameEdit, RenameResult, render_hover_markdown,
+        HoverSection, InlayHint, Location, RenameEdit, RenameResult, SignatureHelp, inlay_hints,
+        render_hover_markdown, signature_help,
     },
     interner::{Interner, Symbol},
     lint::NameStyle,

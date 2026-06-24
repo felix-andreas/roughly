@@ -89,11 +89,11 @@ Document kinds:
 
 ## Persistent authoritative documents
 
-Request or discuss changes to persistent authoritative documents before editing them.
+Under the current lower-supervision workflow, the agent may edit persistent authoritative documents directly when implementing agreed-direction work, but must record the decision and rationale in `DECISION_LOG.md`, keep fixtures aligned, and surface the change to the user for review in the same session. Reserve a prior check-in for genuinely contentious or irreversible design forks.
 
 If a persistent authoritative document is outdated, contradictory, or clearly no longer matches the implementation or agreed direction, inform the user even if they did not explicitly ask about that document.
 
-Use these documents to surface uncertainty and record agreed decisions, not to silently lock in unresolved design choices.
+Use these documents to surface uncertainty and record decisions, not to silently lock in unresolved design choices.
 
 - `README.md`
   - Human-facing overview and pointers to the other persistent documents.

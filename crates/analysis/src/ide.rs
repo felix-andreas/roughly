@@ -2,7 +2,8 @@
 // identifier-resolution machinery, and one `// Utils` block for remaining shared helpers.
 use {
     crate::{
-        analysis::{Analysis, lower, resolve_package},
+        analysis::{Analysis, lower, resolve_package, typecheck},
+        diagnostic::render_core_type,
         document::DocumentId,
         hir::{
             DefinitionId, DefinitionItem, DefinitionKind, Expression, ExpressionId, ExpressionKind,
@@ -12,7 +13,7 @@ use {
         naming::{BindingId, BindingInfo, find_exported_binding, is_maybe_undefined_expression},
         text::{TextPosition, TextRange},
         type_syntax::{render_named_type_ref, render_surface_type},
-        types::{Annotation, TypeAnnotationKind},
+        types::{Annotation, CoreType, TypeAnnotationKind},
     },
     ropey::{Rope, iter::Chunks},
     std::{
@@ -50,6 +51,11 @@ pub fn hover(analysis: &mut Analysis, path: &Path, position: TextPosition) -> Op
 
     lower(analysis);
     resolve_package(analysis);
+    // Typed hover needs checked expression types, which only `typecheck` retains. It is
+    // incremental, so this is cheap when the package is already fresh.
+    if analysis.typing_enabled() {
+        typecheck(analysis);
+    }
 
     let module = analysis.module(document_id)?;
     let point = Point::new(position.line_index, position.character_index);
@@ -74,6 +80,13 @@ pub fn hover(analysis: &mut Analysis, path: &Path, position: TextPosition) -> Op
                 });
             }
 
+            if let Some(core_type) = analysis.checked_expression_type(document_id, expression_id) {
+                sections.push(HoverSection {
+                    phase: HoverPhase::Typing,
+                    value: format!("type: {}", render_core_type(analysis.interner(), core_type)),
+                });
+            }
+
             Some(HoverInfo {
                 range: text_range(range),
                 sections,
@@ -95,6 +108,188 @@ pub fn hover(analysis: &mut Analysis, path: &Path, position: TextPosition) -> Op
             })
         }
     }
+}
+
+//
+// Inlay hints
+//
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlayHint {
+    pub position: TextPosition,
+    pub label: String,
+}
+
+// Inferred-type hints for unannotated `name <- value` bindings, shown after the binding name like
+// rust-analyzer's let hints. Annotated bindings are skipped because the type is already written, and
+// `Unknown` is skipped because it carries no information.
+pub fn inlay_hints(analysis: &mut Analysis, path: &Path) -> Vec<InlayHint> {
+    let Some(document_id) = analysis.document_id_for_path(path) else {
+        return Vec::new();
+    };
+    if !analysis.typing_enabled() {
+        return Vec::new();
+    }
+
+    lower(analysis);
+    resolve_package(analysis);
+    typecheck(analysis);
+
+    let Some(module) = analysis.module(document_id) else {
+        return Vec::new();
+    };
+
+    let mut hints = Vec::new();
+    for expression in module.arena.expressions() {
+        let ExpressionKind::Assign { target, .. } = &expression.kind else {
+            continue;
+        };
+        if expression.annotation.is_some() {
+            continue;
+        }
+        let Some(core_type) = analysis.checked_expression_type(document_id, expression.id) else {
+            continue;
+        };
+        // Only concrete types make useful inline hints; a polymorphic or unknown binding would
+        // render an internal type variable, which is noise shown on every line.
+        if !is_concrete_type(core_type) {
+            continue;
+        }
+
+        let name = analysis.interner().resolve(*target).unwrap_or_default();
+        let label = format!(": {}", render_core_type(analysis.interner(), core_type));
+        hints.push(InlayHint {
+            position: TextPosition {
+                line_index: expression.range.start_point.row,
+                character_index: expression.range.start_point.column + name.len(),
+            },
+            label,
+        });
+    }
+
+    hints.sort_by_key(|hint| (hint.position.line_index, hint.position.character_index));
+    hints
+}
+
+fn is_concrete_type(core_type: &CoreType) -> bool {
+    match core_type {
+        CoreType::Variable(_) | CoreType::Unknown => false,
+        CoreType::Nullable(inner_type)
+        | CoreType::List(inner_type)
+        | CoreType::NamedList(inner_type) => is_concrete_type(inner_type),
+        CoreType::Nominal(_, type_arguments) => type_arguments.iter().all(is_concrete_type),
+        CoreType::Record(fields) => fields.iter().all(|field| is_concrete_type(&field.value)),
+        CoreType::Tuple(items) => items.iter().all(is_concrete_type),
+        CoreType::Function(function_type) => {
+            function_type.parameters.iter().all(is_concrete_type)
+                && function_type
+                    .named_parameters
+                    .iter()
+                    .all(|parameter| is_concrete_type(&parameter.value))
+                && is_concrete_type(&function_type.return_type)
+        }
+        CoreType::Any
+        | CoreType::Null
+        | CoreType::Scalar(_)
+        | CoreType::Vector(_)
+        | CoreType::NamedVector(_) => true,
+    }
+}
+
+//
+// Signature help
+//
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignatureHelp {
+    pub label: String,
+    pub parameters: Vec<String>,
+    pub active_parameter: Option<usize>,
+}
+
+// Shows the inferred signature of the function being called at the cursor, with the active
+// parameter derived from how many arguments precede the cursor. Needs checked types, so it is a
+// no-op unless typing is enabled and the callee resolved to a function type.
+pub fn signature_help(
+    analysis: &mut Analysis,
+    path: &Path,
+    position: TextPosition,
+) -> Option<SignatureHelp> {
+    let document_id = analysis.document_id_for_path(path)?;
+    if !analysis.typing_enabled() {
+        return None;
+    }
+
+    lower(analysis);
+    resolve_package(analysis);
+    typecheck(analysis);
+
+    let module = analysis.module(document_id)?;
+    let point = Point::new(position.line_index, position.character_index);
+
+    let call_expression = module
+        .arena
+        .expressions()
+        .iter()
+        .filter(|expression| {
+            matches!(expression.kind, ExpressionKind::Call { .. })
+                && range_contains_position(expression.range, point)
+        })
+        .min_by_key(|expression| {
+            (
+                hover_target_width(expression.range),
+                expression.range.start_byte,
+                expression.id.0,
+            )
+        })?;
+
+    let ExpressionKind::Call { callee, arguments } = &call_expression.kind else {
+        return None;
+    };
+
+    let callee_type = analysis.checked_expression_type(document_id, *callee)?;
+    let CoreType::Function(function_type) = callee_type else {
+        return None;
+    };
+
+    let mut parameters = Vec::new();
+    for parameter in &function_type.parameters {
+        parameters.push(render_core_type(analysis.interner(), parameter));
+    }
+    for parameter in &function_type.named_parameters {
+        let name = analysis.interner().resolve(parameter.name).unwrap_or("");
+        let rendered_name = if parameter.optional {
+            format!("[{name}]")
+        } else {
+            name.to_owned()
+        };
+        parameters.push(format!(
+            "{rendered_name}: {}",
+            render_core_type(analysis.interner(), &parameter.value)
+        ));
+    }
+
+    let label = format!(
+        "fn({}) -> {}",
+        parameters.join(", "),
+        render_core_type(analysis.interner(), &function_type.return_type)
+    );
+
+    let active_parameter = if parameters.is_empty() {
+        None
+    } else {
+        let preceding = arguments
+            .iter()
+            .filter(|argument| module.arena.get(argument.expression).range.end_point < point)
+            .count();
+        Some(preceding.min(parameters.len() - 1))
+    };
+
+    Some(SignatureHelp {
+        label,
+        parameters,
+        active_parameter,
+    })
 }
 
 pub fn render_hover_markdown(hover_info: &HoverInfo, include_parsing: bool) -> String {

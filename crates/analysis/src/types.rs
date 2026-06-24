@@ -3,6 +3,32 @@ use {crate::interner::Symbol, tree_sitter::Range};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct InferenceVariableId(pub u32);
 
+// A type-class-style bound carried by an inference variable. `Numeric` restricts a variable to
+// `integer` or `double` (any vector shape), so an unannotated parameter used arithmetically stays
+// polymorphic over numeric types instead of being rejected. The ordering is the constraint lattice:
+// merging two constraints takes the more restrictive one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum Constraint {
+    #[default]
+    Unconstrained,
+    Numeric,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuantifiedVariable {
+    pub variable: InferenceVariableId,
+    pub constraint: Constraint,
+}
+
+impl QuantifiedVariable {
+    pub fn new(variable: InferenceVariableId, constraint: Constraint) -> Self {
+        Self {
+            variable,
+            constraint,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SurfaceType {
     Any,
@@ -41,7 +67,7 @@ pub enum CoreType {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeScheme {
-    pub quantified_variables: Vec<InferenceVariableId>,
+    pub quantified_variables: Vec<QuantifiedVariable>,
     pub body: CoreType,
 }
 

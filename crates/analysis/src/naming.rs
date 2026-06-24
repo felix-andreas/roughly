@@ -599,7 +599,7 @@ impl<'a> TypeResolver<'a> {
         push_diagnostic(
             self.diagnostics,
             document_id,
-            Diagnostic::syntax_error(range, format!("type syntax error: unknown type `{name}`")),
+            Diagnostic::naming_error(range, format!("I could not resolve type `{name}`.")),
         );
     }
 
@@ -734,6 +734,13 @@ impl<'a> DocumentNamingContext<'a> {
                 }
                 self.local_scopes.push(scope);
                 self.maybe_defined_scopes.push(BTreeMap::new());
+                // Defaults are evaluated in the function frame with every parameter in scope, so
+                // they resolve after all parameters are bound and before the body.
+                for parameter in parameters {
+                    if let Some(default_expression_id) = parameter.default {
+                        self.resolve_expression(default_expression_id);
+                    }
+                }
                 self.resolve_expression(*body);
                 self.local_scopes.pop();
                 self.maybe_defined_scopes.pop();

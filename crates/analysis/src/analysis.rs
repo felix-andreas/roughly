@@ -3,7 +3,7 @@ use {
         Interner,
         diagnostic::Diagnostic,
         document::{Document, DocumentChange, DocumentId},
-        hir::Module,
+        hir::{ExpressionId, Module},
         lint::{self as lint_phase, NameStyle},
         lower::lower_with_shared_interner,
         naming::{
@@ -98,6 +98,7 @@ struct TypecheckDocumentOutput {
     version: Version,
     environment_fingerprint: String,
     diagnostics: Vec<Diagnostic>,
+    expression_types: HashMap<ExpressionId, CoreType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,6 +148,10 @@ impl Analysis {
 
     pub fn base_path(&self) -> &Path {
         &self.base_path
+    }
+
+    pub fn typing_enabled(&self) -> bool {
+        self.check_config.typing
     }
 
     pub fn add_document(&mut self, path: PathBuf, document: Document) -> DocumentId {
@@ -345,6 +350,19 @@ impl Analysis {
             diagnostics.extend(output.diagnostics.iter().cloned());
         }
         diagnostics
+    }
+
+    // The checked type of an expression, available once `typecheck` has run for the document.
+    // Used by hover and inlay hints to show inferred types.
+    pub fn checked_expression_type(
+        &self,
+        document_id: DocumentId,
+        expression_id: ExpressionId,
+    ) -> Option<&CoreType> {
+        self.document_typecheck_outputs
+            .get(&document_id)?
+            .expression_types
+            .get(&expression_id)
     }
 }
 
@@ -763,6 +781,9 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
             let imported_scheme = inference_state.import_scheme(&export.type_scheme);
             inference_state.bind_global_scheme(export.symbol, imported_scheme, export.range);
         }
+        // Round 2 is the authoritative per-document check, so it records expression types for
+        // hover and inlay hints.
+        inference_state.enable_expression_type_recording();
         let module_check = inference_state.check_module_with_naming(
             *document_id,
             module,
@@ -777,12 +798,17 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 Diagnostic::from_inference_error(error, fallback_range, analysis_state.interner())
             })
             .collect();
+        let expression_types = module_check
+            .expression_types_by_id
+            .into_iter()
+            .collect::<HashMap<_, _>>();
         fresh_outputs.push((
             *document_id,
             TypecheckDocumentOutput {
                 version: document_version,
                 environment_fingerprint: environment_fingerprint.clone(),
                 diagnostics,
+                expression_types,
             },
         ));
         recomputed_document_ids.push(*document_id);
@@ -873,7 +899,6 @@ mod tests {
             text::{TextPosition, TextRange},
         },
         std::{
-            collections::HashMap,
             fs,
             path::{Path, PathBuf},
             sync::atomic::{AtomicU64, Ordering},

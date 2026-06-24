@@ -2,6 +2,46 @@
 
 Keep newest decisions at the top.
 
+- parameter default expressions are lowered, named, and typechecked, but do not pin an unannotated
+  parameter's type.
+  - Defaults were previously dropped entirely (`Parameter` only stored `has_default`). The default
+    expression is now lowered to an `ExpressionId`, resolved in the function scope (all parameters in
+    scope, matching R's lazy default evaluation), and typechecked. An error inside a default is
+    reported and a non-`NULL` default for an annotated parameter must be compatible with the declared
+    type. A `NULL` default is always allowed because it is R's optional-parameter sentinel (e.g.
+    `function(count, label = NULL)` with `[label]: character`). An unannotated parameter's type comes
+    from its uses, not its default, so `function(value, width = NULL)` keeps `width` polymorphic.
+
+- inlay hints and signature help are built on retained checked types, in `analysis::ide` and wired
+  into the LSP server.
+  - `ide::inlay_hints` shows inferred types on unannotated bindings (concrete types only, so
+    polymorphic/`Unknown` bindings stay unannotated rather than showing internal variables).
+  - `ide::signature_help` shows the called function's inferred signature with the active parameter
+    derived from how many arguments precede the cursor. Both LSP capabilities are gated on typing.
+
+- typed expression results are retained per document so hover, inlay hints, and signature help can
+  show checked types.
+  - Round-2 typecheck records each expression's resolved type by id (`InferenceState` recording,
+    gated to round 2 to avoid interface-round cost). `Analysis::checked_expression_type` exposes it
+    and hover renders a `Typing` section. The IDE fixture runner now enables typing.
+
+- function-type compatibility is contravariant in parameters and covariant in returns.
+  - `check_compatibility` previously checked parameters covariantly, which was unsound: a function
+    accepting only `integer` was wrongly accepted where a function accepting `integer | NULL` was
+    required. Parameters are now checked contravariantly (expected parameter compatible with actual
+    parameter) and the return covariantly. Recorded in `TYPING_SEMANTICS.md`.
+
+- unannotated values used arithmetically carry a `numeric` constraint instead of erroring, and
+  numeric-constrained inference variables generalize as `<T: numeric>` or default to `double`.
+  - `function(x) x + 1L` previously failed with `expected a numeric value, found type1`, which was
+    the single biggest usability gap for real R code. Inference variables now carry a constraint
+    (`Constraint::Numeric`); arithmetic, unary `-`, `:`, and numeric comparison constrain a flexible
+    operand instead of rejecting it. The constraint generalizes into a rank-1 numeric type parameter
+    (so `f(1L)` and `f(2.5)` both type-check while `f("x")` errors at the call site), and a numeric
+    variable that escapes a binding without being abstracted by a function parameter defaults to
+    `double`. This is a lightweight qualified-type / numeric-type-class model; only the `numeric`
+    constraint exists for now. Recorded in `TYPING_SEMANTICS.md`.
+
 - typecheck is incremental at document grain via a two-round interface model; cross-file references are scheme-based with no inference flow across files.
   - Round 1 computes each package file's exported schemes in isolation (run twice so define-then-alias settles), round 2 checks every document against the package interface table. Caches key on document version plus rendered interface fingerprints, so body edits recheck one file and interface changes recheck dependents. The old whole-package single-inference-state model let a call in one file silently solve a function's parameter types in another file, which was order-dependent and impossible to invalidate at document grain.
 

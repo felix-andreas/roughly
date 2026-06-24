@@ -56,3 +56,48 @@ double_count("two")
 error[type-error] expected `integer`, found `character`
 --> 3:14-3:19
 | double_count("two")
+
+#---- function_argument_contravariant_parameter_accepted
+#: fn(callback: fn(integer) -> integer) -> integer
+run <- function(callback) callback(1L)
+#: fn(value: integer | NULL) -> integer
+wider <- function(value) 1L
+run(wider)
+#++++
+No diagnostics.
+
+#---- function_argument_contravariant_parameter_rejected
+#: fn(callback: fn(integer | NULL) -> integer) -> integer
+run <- function(callback) 1L
+#: fn(value: integer) -> integer
+narrower <- function(value) value
+run(narrower)
+#++++
+error[type-error] expected `fn(integer | NULL) -> integer`, found `fn(value: integer) -> integer`
+--> 5:5-5:13
+| run(narrower)
+
+#==== defaults
+#---- default_expression_internal_error
+make <- function(value = "a" + 1L) value
+#++++
+error[type-error] expected a numeric value (`integer` or `double`), found `character`
+--> 1:26-1:29
+| make <- function(value = "a" + 1L) value
+
+#---- annotated_non_null_default_incompatible
+#: @param {integer} count
+#: @return {integer}
+describe <- function(count = "x") count
+#++++
+error[type-error] expected `integer`, found `character`
+--> 3:30-3:33
+| describe <- function(count = "x") count
+
+#---- null_default_allowed_for_annotated_parameter
+#: @param {integer} count
+#: @param {character} [label]
+#: @return {integer}
+double_count <- function(count, label = NULL) count + count
+#++++
+No diagnostics.

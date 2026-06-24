@@ -1,3 +1,5 @@
+mod common;
+
 use {
     analysis::{Analysis, CheckConfig, DocumentChange, LintConfig, TextPosition, TextRange},
     std::path::PathBuf,
@@ -195,48 +197,25 @@ fn unedited_documents_keep_diagnostics_after_unrelated_edit() {
 #[test]
 #[ignore = "timing benchmark, run manually"]
 fn benchmark_single_file_recheck_in_large_package() {
+    let items_per_file = 30;
     let mut analysis_state = typing_analysis("/pkg");
-    for file_index in 0..500 {
-        let mut source = String::new();
-        for item_index in 0..30 {
-            source.push_str("#: fn(count: integer) -> integer\n");
-            source.push_str(&format!(
-                "fn_{file_index}_{item_index} <- function(count) count + {item_index}L\n"
-            ));
-            if file_index > 0 {
-                source.push_str(&format!(
-                    "value_{file_index}_{item_index} <- fn_{}_{item_index}(2L)\n",
-                    file_index - 1
-                ));
-            }
-        }
-        replace_document(
-            &mut analysis_state,
-            &format!("/pkg/R/file_{file_index:04}.R"),
-            &source,
-        );
+    for (path, source) in common::generate_package(500, items_per_file) {
+        analysis_state
+            .add_document_from_source(path, &source)
+            .expect("document should parse");
     }
 
     let full_start = std::time::Instant::now();
     analysis::run_full(&mut analysis_state);
     let full_elapsed = full_start.elapsed();
 
-    // Body-only edit in one file.
-    replace_document(
-        &mut analysis_state,
-        "/pkg/R/file_0250.R",
-        &{
-            let mut source = String::new();
-            for item_index in 0..30 {
-                source.push_str("#: fn(count: integer) -> integer\n");
-                source.push_str(&format!(
-                    "fn_250_{item_index} <- function(count) {{ count + {item_index}L }}\n"
-                ));
-                source.push_str(&format!("value_250_{item_index} <- fn_249_{item_index}(2L)\n"));
-            }
-            source
-        },
-    );
+    // Body-only edit in one file keeps the exported interface identical.
+    analysis_state
+        .add_document_from_source(
+            common::file_path(250),
+            &common::generate_file(250, items_per_file, true),
+        )
+        .expect("document should parse");
     let incremental_start = std::time::Instant::now();
     let recomputed = analysis::typecheck(&mut analysis_state);
     let incremental_elapsed = incremental_start.elapsed();

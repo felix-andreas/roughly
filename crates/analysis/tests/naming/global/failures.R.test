@@ -159,7 +159,7 @@ x
 #++++
 Symbol(x@b0)
 
-error[syntax-error] Syntax Error: type syntax error: unknown type `Person`
+error[naming] I could not resolve type `Person`.
 --> 1:1-1:10
 | #: Person
 
@@ -180,6 +180,6 @@ value <- 1L
 Assign(value@b0)
   Integer(1L)
 
-error[syntax-error] Syntax Error: type syntax error: unknown type `Person`
+error[naming] I could not resolve type `Person`.
 --> 1:1-1:10
 | #: Person

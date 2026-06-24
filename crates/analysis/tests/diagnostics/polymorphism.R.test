@@ -54,6 +54,21 @@ identity <- function(x) x
 mixed_apply <- apply(identity)
 mixed_apply("ok")
 #++++
-error[type-error] expected a numeric value (`integer` or `double`), found `type1`
---> 1:36-1:37
-| apply <- function(f) function(x) f(x + 1L)
+error[type-error] expected a numeric value (`integer` or `double`), found `character`
+--> 4:13-4:17
+| mixed_apply("ok")
+
+#---- numeric_polymorphic_accepts_integer_and_double
+increment <- function(x) x + 1L
+a <- increment(2L)
+b <- increment(2.5)
+#++++
+No diagnostics.
+
+#---- numeric_polymorphic_rejects_character
+increment <- function(x) x + 1L
+bad <- increment("oops")
+#++++
+error[type-error] expected a numeric value (`integer` or `double`), found `character`
+--> 2:18-2:24
+| bad <- increment("oops")

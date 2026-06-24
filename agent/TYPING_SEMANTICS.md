@@ -4,7 +4,10 @@ This document defines the user-facing typing semantics contract.
 
 Over time, semantic content should move here from older design documents. Until that migration is complete, keep this document focused, high signal, and authoritative for the areas it covers.
 
-All changes to this document must be discussed with the user first.
+Under the current lower-supervision workflow, the agent may decide and record new or changed
+semantics here directly, but every such change must also be recorded in `DECISION_LOG.md` with its
+rationale, backed by fixtures, and surfaced to the user for review. Prefer the simplest principled
+semantics and flag genuinely contentious forks explicitly rather than silently locking them in.
 
 This document and the fixture suites are both part of the contract. Keep them in sync:
 
@@ -901,12 +904,38 @@ When `[` accepts a tuple-like, record-like, or map-like list through coercion, t
 
 Some indexing forms remain unsupported for now. In particular, this document does not currently define `[` on vectors, and tuple-like or fixed-shape record-like `[[` access requires statically known literal indices or names.
 
+### Numeric inference variables
+
+An unannotated value used as a numeric operand is constrained to be numeric rather than rejected.
+A numeric constraint restricts an inference variable to `integer` or `double` (any vector shape).
+
+- when the constraint reaches a binding boundary still unresolved and abstracted by a function
+  parameter, it generalizes into a numeric-constrained type parameter, rendered `<T: numeric>`
+- a numeric-constrained variable that escapes a binding without being abstracted by a function
+  parameter defaults to `double`, matching R's treatment of bare numbers as doubles
+- instantiating a `<T: numeric>` scheme yields a fresh numeric-constrained variable, so calling
+  such a function with a non-numeric argument is a type error at the call site
+- comparison against a concrete numeric operand also constrains a flexible operand to numeric;
+  comparison against a non-numeric family leaves it unconstrained, because the system has no
+  character-or-logical constraint
+
+Examples:
+
+- `function(x) x + 1L` infers as `<T: numeric> fn(x: T) -> T`
+- `function(x) -x` infers as `<T: numeric> fn(x: T) -> T`
+- `function(x) x > 0L` infers as `<T: numeric> fn(x: T) -> logical`
+- `function(a, b) a + b` infers as `<T: numeric> fn(a: T, b: T) -> T`
+- `function(x) x / 2` infers as `<T: numeric> fn(x: T) -> double`
+- calling `(function(x) x + 1L)` with `"oops"` is a type error: `expected a numeric value
+  (`integer` or `double`), found `character``
+
 ### Arithmetic operators
 
 For now, arithmetic operators are defined only for numeric operands:
 
 - `integer`
 - `double`
+- inference variables constrained to be numeric (see `Numeric inference variables`)
 
 Map-like vectors may participate via compatibility with array-like vectors.
 
@@ -1229,7 +1258,12 @@ An unannotated `function(...)` expression infers a function type directly from i
 - every parameter appears as a named parameter using its definition name, because R parameters are always matchable both by name and by position
 - a parameter with a default value is optional at call sites
 - parameter and return types are inferred; unconstrained parameters generalize at binding boundaries like any other inferred type
-- default value expressions are not themselves typechecked yet; a parameter's type comes from its uses, not from its default
+- default value expressions are typechecked: an error inside a default is reported, and a non-`NULL`
+  default for an annotated parameter must be compatible with the declared type
+- a `NULL` default is R's "no value" sentinel for an optional parameter, so it is always allowed
+  regardless of the declared parameter type
+- an unannotated parameter's type still comes from its uses, not from its default, so a non-`NULL`
+  default does not pin the inferred parameter type
 
 Examples:
 
@@ -1262,6 +1296,20 @@ Parameter names describe the call interface, not the identity of a function type
 - an expected-optional parameter promises callers they may omit it, so the actual function must have a default for that parameter:
   - `fn(count: integer, [label]: character) -> integer` does not accept `function(count, label) count`
   - `fn(count: integer, label: character) -> integer` accepts `function(count, label = NULL) count`
+
+Function compatibility is contravariant in parameters and covariant in the return type. A function
+value is compatible with an expected function type when:
+
+- each expected parameter type is compatible with the corresponding actual parameter type
+  (contravariant: the actual function must accept every argument the expected interface may pass)
+- the actual return type is compatible with the expected return type (covariant)
+
+Examples:
+
+- a function of type `fn(integer | NULL) -> integer` is accepted where `fn(integer) -> integer` is
+  expected, because `integer` is compatible with `integer | NULL`
+- a function of type `fn(integer) -> integer` is rejected where `fn(integer | NULL) -> integer` is
+  expected, because the expected interface may pass `NULL`, which the actual function does not accept
 
 ### Higher-order function types
 

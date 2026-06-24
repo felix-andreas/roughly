@@ -84,7 +84,7 @@ TypeDefinition(Team = list{owner: Person})
 Assign(value@b0)
   Integer(1L)
 
-error[syntax-error] Syntax Error: type syntax error: unknown type `Person`
+error[naming] I could not resolve type `Person`.
 --> 1:1-1:36
 | #: @type Team {list{owner: Person}}
 
@@ -151,7 +151,7 @@ value <- 1L
 Assign(value@b0)
   Integer(1L)
 
-error[syntax-error] Syntax Error: type syntax error: unknown type `Person`
+error[naming] I could not resolve type `Person`.
 --> 1:1-1:10
 | #: Person
 
@@ -169,7 +169,7 @@ Assign(value@b0)
     Argument(value)
       Integer(1L)
 
-error[syntax-error] Syntax Error: type syntax error: unknown type `Person`
+error[naming] I could not resolve type `Person`.
 --> 3:1-3:15
 | #: Box<Person>
 
@@ -258,7 +258,7 @@ Assign(value@b0)
     Argument(name)
       Character("\"bob\"")
 
-error[syntax-error] Syntax Error: type syntax error: unknown type `Person`
+error[naming] I could not resolve type `Person`.
 --> 1:1-1:15
 | #: @new Person
 

@@ -60,3 +60,46 @@ double_count: fn(count: integer) -> integer
 apply <- function(f, value) f(value)
 #++++
 apply: <T, U> fn(f: fn(T) -> U, value: T) -> U
+
+#---- numeric_param_plus_literal
+increment <- function(x) x + 1L
+#++++
+increment: <T: numeric> fn(x: T) -> T
+
+#---- numeric_param_negate
+negate <- function(x) -x
+#++++
+negate: <T: numeric> fn(x: T) -> T
+
+#---- numeric_param_compare_literal
+is_positive <- function(x) x > 0L
+#++++
+is_positive: <T: numeric> fn(x: T) -> logical
+
+#---- numeric_two_params_sum
+add <- function(a, b) a + b
+#++++
+add: <T: numeric> fn(a: T, b: T) -> T
+
+#---- numeric_param_double_result
+halve <- function(x) x / 2
+#++++
+halve: <T: numeric> fn(x: T) -> double
+
+#---- numeric_variable_defaults_to_double_when_unpinned
+increment <- function(x) x + 1L
+#: Any
+anything <- 1L
+result <- increment(anything)
+#++++
+increment: <T: numeric> fn(x: T) -> T
+anything: Any
+result: double
+
+#---- numeric_param_polymorphic_through_local_binding
+compute <- function(x) {
+  doubled <- x + x
+  doubled
+}
+#++++
+compute: <T: numeric> fn(x: T) -> T

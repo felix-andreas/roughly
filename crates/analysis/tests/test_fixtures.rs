@@ -362,7 +362,10 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
     let mut analysis_state = Analysis::new(
         PathBuf::new(),
         LintConfig::default(),
-        CheckConfig::default(),
+        CheckConfig {
+            unused: false,
+            typing: true,
+        },
     );
     for entry in &case.initial_generation.entries {
         apply_ide_operation(&mut analysis_state, &entry.operation)?;
@@ -508,6 +511,39 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
                             render_locations(&locations, &declarations)
                         }
                         None => "no references".to_owned(),
+                    }
+                }
+                "signature_help" => {
+                    let request = parse_position_request(contents, "signature_help")?;
+                    match ide::signature_help(analysis_state, &request.path, request.position) {
+                        Some(help) => {
+                            let active = match help.active_parameter {
+                                Some(index) => index.to_string(),
+                                None => "none".to_owned(),
+                            };
+                            format!("{}\nactive parameter: {active}", help.label)
+                        }
+                        None => "no signature help".to_owned(),
+                    }
+                }
+                "inlay_hints" => {
+                    let path = PathBuf::from(contents.trim());
+                    let hints = ide::inlay_hints(analysis_state, &path);
+                    if hints.is_empty() {
+                        "no inlay hints".to_owned()
+                    } else {
+                        hints
+                            .iter()
+                            .map(|hint| {
+                                format!(
+                                    "{}:{}{}",
+                                    hint.position.line_index + 1,
+                                    hint.position.character_index + 1,
+                                    hint.label
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
                     }
                 }
                 _ => {

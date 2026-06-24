@@ -1,0 +1,26 @@
+#==== calls
+#---- active_parameter_advances_with_arguments
+#---- R/main.R
+#: fn(count: integer, label: character) -> integer
+describe <- function(count, label) count
+result <- describe(1L, "x")
+#++++ any
+#!!!! signature_help first.sig
+R/main.R:3:20
+#++++
+fn(count: integer, label: character) -> integer
+active parameter: 0
+#!!!! signature_help second.sig
+R/main.R:3:24
+#++++
+fn(count: integer, label: character) -> integer
+active parameter: 1
+
+#---- no_help_outside_call
+#---- R/main.R
+value <- 1L
+#++++ any
+#!!!! signature_help none.sig
+R/main.R:1:1
+#++++
+no signature help

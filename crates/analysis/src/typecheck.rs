@@ -11,8 +11,9 @@ use {
             is_maybe_undefined_expression,
         },
         types::{
-            Annotation, Atomic, AttachedAnnotation, CoreType, FunctionType, InferenceVariableId,
-            RecordField, SurfaceType, TypeAnnotationKind, TypeScheme,
+            Annotation, Atomic, AttachedAnnotation, Constraint, CoreType, FunctionType,
+            InferenceVariableId, QuantifiedVariable, RecordField, SurfaceType, TypeAnnotationKind,
+            TypeScheme,
         },
     },
     std::collections::{BTreeMap, BTreeSet},
@@ -23,7 +24,7 @@ pub type Level = u32;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InferenceEntry {
-    Unbound { level: Level },
+    Unbound { level: Level, constraint: Constraint },
     Redirect(InferenceVariableId),
     Bound(CoreType),
 }
@@ -35,6 +36,10 @@ pub struct InferenceState {
     entries: BTreeMap<InferenceVariableId, InferenceEntry>,
     environment: BTreeMap<EnvironmentKey, Binding>,
     builtins: BTreeMap<Symbol, BuiltinKind>,
+    // When enabled, every inferred expression's result type is recorded by id so tooling (hover,
+    // inlay hints) can show checked types. Left off during interface rounds to avoid the cost.
+    record_expression_types: bool,
+    recorded_expression_types: BTreeMap<ExpressionId, CoreType>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -46,6 +51,7 @@ enum EnvironmentKey {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleCheck {
     pub expression_types: Vec<CoreType>,
+    pub expression_types_by_id: BTreeMap<ExpressionId, CoreType>,
     pub errors: Vec<InferenceError>,
 }
 
@@ -148,15 +154,72 @@ impl InferenceState {
     }
 
     pub fn fresh_variable(&mut self) -> InferenceVariableId {
+        self.fresh_constrained_variable(Constraint::Unconstrained)
+    }
+
+    pub fn enable_expression_type_recording(&mut self) {
+        self.record_expression_types = true;
+    }
+
+    // Resolves every recorded expression type against the final substitution and clears the
+    // buffer. Variables left unbound (for example a generalized numeric parameter) resolve to
+    // themselves; resolution failures degrade to `Unknown` so a display feature never aborts a check.
+    fn take_recorded_expression_types(&mut self) -> BTreeMap<ExpressionId, CoreType> {
+        let recorded = std::mem::take(&mut self.recorded_expression_types);
+        recorded
+            .into_iter()
+            .map(|(expression_id, core_type)| {
+                (
+                    expression_id,
+                    self.resolve(core_type).unwrap_or(CoreType::Unknown),
+                )
+            })
+            .collect()
+    }
+
+    fn fresh_constrained_variable(&mut self, constraint: Constraint) -> InferenceVariableId {
         let variable = InferenceVariableId(self.next_variable_id);
         self.next_variable_id += 1;
         self.entries.insert(
             variable,
             InferenceEntry::Unbound {
                 level: self.current_level,
+                constraint,
             },
         );
         variable
+    }
+
+    // Raises the bound on whatever `core_type` resolves to. When it resolves to an unbound
+    // variable, the variable records the stronger constraint; when it resolves to a concrete
+    // type, the type itself must already satisfy the constraint.
+    fn constrain_type(
+        &mut self,
+        core_type: CoreType,
+        constraint: Constraint,
+        expression: Option<&Expression>,
+    ) -> Result<(), InferenceError> {
+        if constraint == Constraint::Unconstrained {
+            return Ok(());
+        }
+        match self.resolve(core_type)? {
+            CoreType::Variable(variable) => {
+                if let Some(InferenceEntry::Unbound {
+                    constraint: existing,
+                    ..
+                }) = self.entries.get_mut(&variable)
+                {
+                    *existing = (*existing).max(constraint);
+                }
+                Ok(())
+            }
+            concrete_type if constraint_is_satisfied(constraint, &concrete_type) => Ok(()),
+            concrete_type => Err(constraint_violation_error(
+                constraint,
+                concrete_type,
+                expression,
+            )),
+        }
     }
 
     fn enter_level(&mut self) {
@@ -280,8 +343,10 @@ impl InferenceState {
             }
         }
 
+        let expression_types_by_id = self.take_recorded_expression_types();
         ModuleCheck {
             expression_types,
+            expression_types_by_id,
             errors,
         }
     }
@@ -347,6 +412,26 @@ impl InferenceState {
     }
 
     fn infer_expression_with_context(
+        &mut self,
+        expression: &Expression,
+        arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<CoreType, InferenceError> {
+        let inferred_type = self.infer_expression_kind(
+            expression,
+            arena,
+            resolution_context,
+            type_definitions,
+        )?;
+        if self.record_expression_types {
+            self.recorded_expression_types
+                .insert(expression.id, inferred_type.clone());
+        }
+        Ok(inferred_type)
+    }
+
+    fn infer_expression_kind(
         &mut self,
         expression: &Expression,
         arena: &HirArena,
@@ -470,7 +555,10 @@ impl InferenceState {
                     type_definitions,
                 );
                 self.exit_level();
-                let binding_type = binding_type_result?;
+                // Numeric variables that escape a binding without being bound by a function
+                // parameter cannot stay polymorphic, so they default to `double` here. Variables
+                // reachable only inside a function type are left for generalization.
+                let binding_type = self.default_free_numeric(binding_type_result?)?;
                 if let Some(resolution_context) = resolution_context
                     && resolution_context
                         .top_level_expression_ids
@@ -795,6 +883,44 @@ impl InferenceState {
             parameter_types.push(parameter_type);
         }
 
+        // Default expressions are checked with every parameter already in scope, matching R's lazy
+        // evaluation of defaults in the function frame. A `NULL` default is R's "no value" sentinel
+        // for optional parameters, so it is always allowed regardless of the declared type. A
+        // non-`NULL` default for an annotated parameter must be compatible with the declared type.
+        // An unannotated parameter's type comes from its uses, not from its default, so a non-`NULL`
+        // default does not pin it.
+        for (index, parameter) in parameters.iter().enumerate() {
+            let Some(default_expression_id) = parameter.default else {
+                continue;
+            };
+            let Some(parameter_type) = parameter_types.get(index).cloned() else {
+                continue;
+            };
+            let default_expression = arena.get(default_expression_id);
+            let default_type = self.infer_expression_with_context(
+                default_expression,
+                arena,
+                resolution_context,
+                type_definitions,
+            )?;
+            let resolved_default = self.resolve(default_type.clone())?;
+            if resolved_default == CoreType::Null {
+                continue;
+            }
+            if expected_parameter_types
+                .as_ref()
+                .and_then(|types| types.get(index))
+                .is_some()
+            {
+                self.check_argument(
+                    parameter_type,
+                    default_type,
+                    default_expression,
+                    type_definitions,
+                )?;
+            }
+        }
+
         let inferred_return_type = self.infer_expression_with_context(
             arena.get(body),
             arena,
@@ -814,7 +940,7 @@ impl InferenceState {
             .iter()
             .zip(parameter_types)
             .map(|(parameter, parameter_type)| {
-                RecordField::with_optional(parameter.symbol, parameter_type, parameter.has_default)
+                RecordField::with_optional(parameter.symbol, parameter_type, parameter.has_default())
             })
             .collect();
         let function_type = CoreType::Function(FunctionType::new(
@@ -1131,9 +1257,12 @@ impl InferenceState {
                         return Ok(false);
                     }
 
+                    // Parameters are contravariant: a function used where `expected` is wanted
+                    // must accept every argument the expected interface may pass, so the expected
+                    // parameter type must be compatible with the actual one.
                     if !self.check_compatibility(
-                        actual_param,
                         expected_param,
+                        actual_param,
                         type_definitions,
                         expression,
                     )? {
@@ -1141,6 +1270,7 @@ impl InferenceState {
                     }
                 }
 
+                // Return types stay covariant.
                 self.check_compatibility(
                     *actual_function.return_type,
                     *expected_function.return_type,
@@ -2058,52 +2188,84 @@ impl InferenceState {
         let resolved_left = self.resolve_structural(left_type, type_definitions, Some(arg0))?;
         let resolved_right = self.resolve_structural(right_type, type_definitions, Some(arg1))?;
 
-        let left_shape_atomic = numeric_operand_parts(&resolved_left);
-        let right_shape_atomic = numeric_operand_parts(&resolved_right);
+        let left = classify_numeric_operand(&resolved_left);
+        let right = classify_numeric_operand(&resolved_right);
 
-        let (left_shape, left_atomic) = match left_shape_atomic {
-            Some(parts) => parts,
-            None if matches!(resolved_left, CoreType::Any | CoreType::Unknown) => {
-                return Ok(CoreType::Unknown);
-            }
-            None => {
-                return Err(InferenceError::InvalidOperand {
-                    expected: OperandExpectation::Numeric,
-                    actual: resolved_left.clone(),
-                    range: arg0.range,
-                    expression_id: arg0.id,
-                });
-            }
-        };
-
-        let (right_shape, right_atomic) = match right_shape_atomic {
-            Some(parts) => parts,
-            None if matches!(resolved_right, CoreType::Any | CoreType::Unknown) => {
-                return Ok(CoreType::Unknown);
-            }
-            None => {
-                return Err(InferenceError::InvalidOperand {
-                    expected: OperandExpectation::Numeric,
-                    actual: resolved_right.clone(),
-                    range: arg1.range,
-                    expression_id: arg1.id,
-                });
-            }
-        };
-
-        let result_atomic = match numeric_result_atomic {
-            NumericResultAtomic::Promote => promote_numeric_atomic(left_atomic, right_atomic),
-            NumericResultAtomic::AlwaysDouble => Atomic::Double,
-        };
-        let result_shape = if matches!(left_shape, OperandShape::Vector)
-            || matches!(right_shape, OperandShape::Vector)
+        if let NumericOperand::Invalid = left {
+            return Err(InferenceError::InvalidOperand {
+                expected: OperandExpectation::Numeric,
+                actual: resolved_left,
+                range: arg0.range,
+                expression_id: arg0.id,
+            });
+        }
+        if let NumericOperand::Invalid = right {
+            return Err(InferenceError::InvalidOperand {
+                expected: OperandExpectation::Numeric,
+                actual: resolved_right,
+                range: arg1.range,
+                expression_id: arg1.id,
+            });
+        }
+        if matches!(left, NumericOperand::AnyUnknown) || matches!(right, NumericOperand::AnyUnknown)
         {
+            return Ok(CoreType::Unknown);
+        }
+
+        let result_shape = if left.is_vector() || right.is_vector() {
             OperandShape::Vector
         } else {
             OperandShape::Scalar
         };
 
-        Ok(core_type_for_shape(result_shape, result_atomic))
+        // Constrain every flexible operand to be numeric, collapsing them onto one representative
+        // variable so `x + y` ties the two operands together.
+        let mut flexible_variable: Option<InferenceVariableId> = None;
+        for operand in [left, right] {
+            if let NumericOperand::Variable(variable) = operand {
+                flexible_variable = Some(match flexible_variable {
+                    Some(existing) => match self
+                        .unify(CoreType::Variable(existing), CoreType::Variable(variable))?
+                    {
+                        CoreType::Variable(unified) => unified,
+                        _ => existing,
+                    },
+                    None => variable,
+                });
+            }
+        }
+        if let Some(variable) = flexible_variable {
+            self.constrain_type(
+                CoreType::Variable(variable),
+                Constraint::Numeric,
+                Some(expression),
+            )?;
+        }
+
+        if let NumericResultAtomic::AlwaysDouble = numeric_result_atomic {
+            return Ok(core_type_for_shape(result_shape, Atomic::Double));
+        }
+
+        // Promote: a concrete `double` anywhere forces `double`.
+        if left.concrete_atomic() == Some(Atomic::Double)
+            || right.concrete_atomic() == Some(Atomic::Double)
+        {
+            return Ok(core_type_for_shape(result_shape, Atomic::Double));
+        }
+
+        match (result_shape, flexible_variable) {
+            // `x + 1L` (and `x + y`) stay polymorphic over the numeric operand: integer promotes
+            // to whatever the variable resolves to, so the scalar result is the variable itself.
+            (OperandShape::Scalar, Some(variable)) => Ok(CoreType::Variable(variable)),
+            // A vector result cannot carry an unresolved atomic, so a flexible operand defaults to
+            // `double` here.
+            (OperandShape::Vector, Some(variable)) => {
+                self.bind_variable(variable, CoreType::Scalar(Atomic::Double), Some(expression))?;
+                Ok(CoreType::Vector(Atomic::Double))
+            }
+            // Both operands were concrete integers.
+            (shape, None) => Ok(core_type_for_shape(shape, Atomic::Integer)),
+        }
     }
 
     fn infer_unary_minus(
@@ -2117,12 +2279,18 @@ impl InferenceState {
             self.infer_expression_with_context(value, arena, resolution_context, type_definitions)?;
         let resolved_type = self.resolve_structural(inferred_type, type_definitions, Some(value))?;
 
-        match numeric_operand_parts(&resolved_type) {
-            Some((shape, atomic)) => Ok(core_type_for_shape(shape, atomic)),
-            None if matches!(resolved_type, CoreType::Any | CoreType::Unknown) => {
-                Ok(CoreType::Unknown)
+        match classify_numeric_operand(&resolved_type) {
+            NumericOperand::Concrete(shape, atomic) => Ok(core_type_for_shape(shape, atomic)),
+            NumericOperand::Variable(variable) => {
+                self.constrain_type(
+                    CoreType::Variable(variable),
+                    Constraint::Numeric,
+                    Some(value),
+                )?;
+                Ok(CoreType::Variable(variable))
             }
-            None => Err(InferenceError::InvalidOperand {
+            NumericOperand::AnyUnknown => Ok(CoreType::Unknown),
+            NumericOperand::Invalid => Err(InferenceError::InvalidOperand {
                 expected: OperandExpectation::Numeric,
                 actual: resolved_type,
                 range: value.range,
@@ -2197,24 +2365,32 @@ impl InferenceState {
             return Ok(CoreType::Unknown);
         }
 
-        let Some((left_shape, left_family)) = comparison_operand_parts(&resolved_left) else {
+        let left_parts = comparison_operand_parts(&resolved_left);
+        let right_parts = comparison_operand_parts(&resolved_right);
+        let left_is_variable = matches!(resolved_left, CoreType::Variable(_));
+        let right_is_variable = matches!(resolved_right, CoreType::Variable(_));
+
+        if left_parts.is_none() && !left_is_variable {
             return Err(InferenceError::InvalidOperand {
                 expected: OperandExpectation::Comparable,
                 actual: resolved_left,
                 range: arg0.range,
                 expression_id: arg0.id,
             });
-        };
-        let Some((right_shape, right_family)) = comparison_operand_parts(&resolved_right) else {
+        }
+        if right_parts.is_none() && !right_is_variable {
             return Err(InferenceError::InvalidOperand {
                 expected: OperandExpectation::Comparable,
                 actual: resolved_right,
                 range: arg1.range,
                 expression_id: arg1.id,
             });
-        };
+        }
 
-        if left_family != right_family {
+        // Two concrete operands must belong to the same comparison family.
+        if let (Some((_, left_family)), Some((_, right_family))) = (left_parts, right_parts)
+            && left_family != right_family
+        {
             return Err(InferenceError::TypeMismatch {
                 expected: Box::new(resolved_left),
                 actual: Box::new(resolved_right),
@@ -2223,8 +2399,18 @@ impl InferenceState {
             });
         }
 
-        let result_shape = if matches!(left_shape, OperandShape::Vector)
-            || matches!(right_shape, OperandShape::Vector)
+        // A flexible operand compared against a concrete numeric operand is constrained numeric;
+        // comparison against a non-numeric family leaves it free, since the type system has no
+        // character-or-logical constraint.
+        if left_is_variable && matches!(right_parts, Some((_, ComparisonFamily::Numeric))) {
+            self.constrain_type(resolved_left.clone(), Constraint::Numeric, Some(arg0))?;
+        }
+        if right_is_variable && matches!(left_parts, Some((_, ComparisonFamily::Numeric))) {
+            self.constrain_type(resolved_right.clone(), Constraint::Numeric, Some(arg1))?;
+        }
+
+        let result_shape = if matches!(left_parts, Some((OperandShape::Vector, _)))
+            || matches!(right_parts, Some((OperandShape::Vector, _)))
         {
             OperandShape::Vector
         } else {
@@ -2272,6 +2458,15 @@ impl InferenceState {
                     if is_whole_number_double_literal(argument_expression) => {}
                 CoreType::Scalar(Atomic::Double) => result_atomic = Atomic::Double,
                 CoreType::Any | CoreType::Unknown => return Ok(CoreType::Unknown),
+                // A flexible endpoint such as `1:n` is constrained numeric and treated as an
+                // integer endpoint, matching R's common integer-sequence idiom.
+                CoreType::Variable(variable) => {
+                    self.constrain_type(
+                        CoreType::Variable(variable),
+                        Constraint::Numeric,
+                        Some(argument_expression),
+                    )?;
+                }
                 other_type => {
                     return Err(InferenceError::InvalidOperand {
                         expected: OperandExpectation::ScalarNumeric,
@@ -2478,8 +2673,28 @@ impl InferenceState {
             return Ok(());
         }
 
+        // A numeric-constrained parameter rejected the argument because it is not numeric; report
+        // that directly rather than rendering the bare inference variable as the expected type.
+        let resolved_parameter = self.resolve(parameter_type)?;
+        if let CoreType::Variable(variable) = resolved_parameter
+            && matches!(
+                self.entries.get(&variable),
+                Some(InferenceEntry::Unbound {
+                    constraint: Constraint::Numeric,
+                    ..
+                })
+            )
+        {
+            return Err(InferenceError::ConstraintViolation {
+                constraint: Constraint::Numeric,
+                actual: Box::new(resolved_argument),
+                range: Some(argument_expression.range),
+                expression_id: Some(argument_expression.id),
+            });
+        }
+
         Err(InferenceError::TypeMismatch {
-            expected: Box::new(self.resolve(parameter_type)?),
+            expected: Box::new(resolved_parameter),
             actual: Box::new(resolved_argument),
             range: Some(argument_expression.range),
             expression_id: Some(argument_expression.id),
@@ -2881,13 +3096,17 @@ impl InferenceState {
             });
         }
 
-        let Some(entry) = self.entries.get(&variable) else {
+        let Some(entry) = self.entries.get(&variable).cloned() else {
             return Err(InferenceError::UnknownInferenceVariable(variable));
         };
-        if let InferenceEntry::Unbound { level } = entry {
+        if let InferenceEntry::Unbound { level, constraint } = entry {
+            // A constrained variable may only be bound to a type that satisfies its bound. When
+            // the bound type is itself a variable the constraint propagates there instead, and
+            // when it is concrete and unsatisfying `constrain_type` reports the violation.
+            self.constrain_type(core_type.clone(), constraint, expression)?;
             // Anything reachable from the bound type escapes to this variable's scope, so
             // inner variables drop to its level and stay monomorphic there.
-            self.lower_levels_to(&core_type, *level)?;
+            self.lower_levels_to(&core_type, level)?;
         }
 
         let Some(entry) = self.entries.get_mut(&variable) else {
@@ -2908,6 +3127,7 @@ impl InferenceState {
             };
             if let InferenceEntry::Unbound {
                 level: variable_level,
+                ..
             } = entry
                 && *variable_level > level
             {
@@ -2944,17 +3164,18 @@ impl InferenceState {
             return self.unify(resolved_left, resolved_right);
         }
 
-        let left_level = match self.entries.get(&left) {
-            Some(InferenceEntry::Unbound { level }) => *level,
+        let (left_level, left_constraint) = match self.entries.get(&left) {
+            Some(InferenceEntry::Unbound { level, constraint }) => (*level, *constraint),
             _ => return Err(InferenceError::UnknownInferenceVariable(left)),
         };
         let Some(right_entry) = self.entries.get_mut(&right) else {
             return Err(InferenceError::UnknownInferenceVariable(right));
         };
-        if let InferenceEntry::Unbound { level } = right_entry
-            && *level > left_level
-        {
-            *level = left_level;
+        if let InferenceEntry::Unbound { level, constraint } = right_entry {
+            if *level > left_level {
+                *level = left_level;
+            }
+            *constraint = (*constraint).max(left_constraint);
         }
 
         let Some(entry) = self.entries.get_mut(&left) else {
@@ -2970,12 +3191,15 @@ impl InferenceState {
     // any stray free variable to `Unknown`.
     pub fn import_scheme(&mut self, type_scheme: &TypeScheme) -> TypeScheme {
         let mut substitutions = BTreeMap::new();
-        for variable in &type_scheme.quantified_variables {
-            substitutions.insert(*variable, self.fresh_variable());
+        let mut quantified_variables = Vec::with_capacity(type_scheme.quantified_variables.len());
+        for quantified in &type_scheme.quantified_variables {
+            let fresh = self.fresh_constrained_variable(quantified.constraint);
+            substitutions.insert(quantified.variable, fresh);
+            quantified_variables.push(QuantifiedVariable::new(fresh, quantified.constraint));
         }
 
         TypeScheme {
-            quantified_variables: substitutions.values().copied().collect(),
+            quantified_variables,
             body: import_core_type(&type_scheme.body, &substitutions),
         }
     }
@@ -2986,8 +3210,11 @@ impl InferenceState {
     ) -> Result<CoreType, InferenceError> {
         let mut substitutions = BTreeMap::new();
 
-        for variable in &type_scheme.quantified_variables {
-            substitutions.insert(*variable, self.fresh_variable());
+        for quantified in &type_scheme.quantified_variables {
+            substitutions.insert(
+                quantified.variable,
+                self.fresh_constrained_variable(quantified.constraint),
+            );
         }
 
         self.instantiate_core_type(&type_scheme.body, &substitutions)
@@ -3074,6 +3301,69 @@ impl InferenceState {
         }
     }
 
+    // Binds numeric-constrained variables reachable outside a function type to `double`. A numeric
+    // variable only stays polymorphic when a function parameter abstracts it; anywhere else there
+    // is no caller to choose the concrete numeric type, so it defaults like R's bare numbers.
+    fn default_free_numeric(&mut self, core_type: CoreType) -> Result<CoreType, InferenceError> {
+        let resolved_type = self.resolve(core_type)?;
+        match resolved_type {
+            CoreType::Variable(variable) => {
+                // Only default variables owned by the binding being finalized (created at a deeper
+                // level). A numeric variable that escaped from an enclosing scope, such as an outer
+                // function parameter referenced by a local binding, stays polymorphic until its own
+                // boundary, matching the generalization level rule.
+                if matches!(
+                    self.entries.get(&variable),
+                    Some(InferenceEntry::Unbound {
+                        level,
+                        constraint: Constraint::Numeric,
+                    }) if *level > self.current_level
+                ) {
+                    self.bind_variable(variable, CoreType::Scalar(Atomic::Double), None)?;
+                    return self.resolve(CoreType::Variable(variable));
+                }
+                Ok(CoreType::Variable(variable))
+            }
+            CoreType::Nullable(inner_type) => {
+                Ok(nullable_type(self.default_free_numeric(*inner_type)?))
+            }
+            CoreType::List(item_type) => {
+                Ok(CoreType::List(Box::new(self.default_free_numeric(*item_type)?)))
+            }
+            CoreType::NamedList(item_type) => Ok(CoreType::NamedList(Box::new(
+                self.default_free_numeric(*item_type)?,
+            ))),
+            CoreType::Record(fields) => {
+                let mut defaulted_fields = Vec::with_capacity(fields.len());
+                for field in fields {
+                    defaulted_fields.push(RecordField::with_optional(
+                        field.name,
+                        self.default_free_numeric(field.value)?,
+                        field.optional,
+                    ));
+                }
+                Ok(CoreType::Record(defaulted_fields))
+            }
+            CoreType::Tuple(items) => {
+                let mut defaulted_items = Vec::with_capacity(items.len());
+                for item in items {
+                    defaulted_items.push(self.default_free_numeric(item)?);
+                }
+                Ok(CoreType::Tuple(defaulted_items))
+            }
+            CoreType::Nominal(symbol, type_arguments) => {
+                let mut defaulted_arguments = Vec::with_capacity(type_arguments.len());
+                for type_argument in type_arguments {
+                    defaulted_arguments.push(self.default_free_numeric(type_argument)?);
+                }
+                Ok(CoreType::Nominal(symbol, defaulted_arguments))
+            }
+            // Function parameter and return positions keep their numeric variables for
+            // generalization, so descending into them would wrongly monomorphize them.
+            other_type => Ok(other_type),
+        }
+    }
+
     // Quantifies the variables whose level is deeper than the current one: those were
     // created while inferring the binding's value and cannot escape it. Variables shared
     // with the enclosing scope were lowered to its level when they were unified, so no
@@ -3087,10 +3377,10 @@ impl InferenceState {
             let Some(entry) = self.entries.get(&variable) else {
                 return Err(InferenceError::UnknownInferenceVariable(variable));
             };
-            if let InferenceEntry::Unbound { level } = entry
+            if let InferenceEntry::Unbound { level, constraint } = entry
                 && *level > self.current_level
             {
-                quantified_variables.push(variable);
+                quantified_variables.push(QuantifiedVariable::new(variable, *constraint));
             }
         }
 
@@ -3379,6 +3669,70 @@ fn comparison_operand_parts(core_type: &CoreType) -> Option<(OperandShape, Compa
     Some((shape, family))
 }
 
+// How an operand of an arithmetic operator classifies: a concrete numeric shape, a still-flexible
+// inference variable (which becomes numeric-constrained), an `Any`/`Unknown` short-circuit, or a
+// hard error.
+#[derive(Debug, Clone, Copy)]
+enum NumericOperand {
+    Concrete(OperandShape, Atomic),
+    Variable(InferenceVariableId),
+    AnyUnknown,
+    Invalid,
+}
+
+impl NumericOperand {
+    fn is_vector(self) -> bool {
+        matches!(self, NumericOperand::Concrete(OperandShape::Vector, _))
+    }
+
+    fn concrete_atomic(self) -> Option<Atomic> {
+        match self {
+            NumericOperand::Concrete(_, atomic) => Some(atomic),
+            _ => None,
+        }
+    }
+}
+
+fn classify_numeric_operand(core_type: &CoreType) -> NumericOperand {
+    if let Some((shape, atomic)) = numeric_operand_parts(core_type) {
+        return NumericOperand::Concrete(shape, atomic);
+    }
+    match core_type {
+        CoreType::Variable(variable) => NumericOperand::Variable(*variable),
+        CoreType::Any | CoreType::Unknown => NumericOperand::AnyUnknown,
+        _ => NumericOperand::Invalid,
+    }
+}
+
+fn constraint_is_satisfied(constraint: Constraint, core_type: &CoreType) -> bool {
+    match constraint {
+        Constraint::Unconstrained => true,
+        Constraint::Numeric => is_numeric_core_type(core_type),
+    }
+}
+
+fn is_numeric_core_type(core_type: &CoreType) -> bool {
+    matches!(
+        core_type,
+        CoreType::Scalar(Atomic::Integer | Atomic::Double)
+            | CoreType::Vector(Atomic::Integer | Atomic::Double)
+            | CoreType::NamedVector(Atomic::Integer | Atomic::Double)
+    )
+}
+
+fn constraint_violation_error(
+    constraint: Constraint,
+    actual: CoreType,
+    expression: Option<&Expression>,
+) -> InferenceError {
+    InferenceError::ConstraintViolation {
+        constraint,
+        actual: Box::new(actual),
+        range: expression.map(|expression| expression.range),
+        expression_id: expression.map(|expression| expression.id),
+    }
+}
+
 fn numeric_operand_parts(core_type: &CoreType) -> Option<(OperandShape, Atomic)> {
     match core_type {
         CoreType::Scalar(Atomic::Integer) => Some((OperandShape::Scalar, Atomic::Integer)),
@@ -3410,14 +3764,6 @@ fn promote_combine_atomic(left: Atomic, right: Atomic) -> Option<Atomic> {
             Some(Atomic::Double)
         }
         _ => None,
-    }
-}
-
-fn promote_numeric_atomic(left: Atomic, right: Atomic) -> Atomic {
-    if matches!(left, Atomic::Double) || matches!(right, Atomic::Double) {
-        Atomic::Double
-    } else {
-        Atomic::Integer
     }
 }
 
@@ -3630,6 +3976,12 @@ pub enum InferenceError {
     },
     UnresolvedAnnotationType {
         symbol: Symbol,
+    },
+    ConstraintViolation {
+        constraint: Constraint,
+        actual: Box<CoreType>,
+        range: Option<Range>,
+        expression_id: Option<ExpressionId>,
     },
     InvalidOperand {
         expected: OperandExpectation,

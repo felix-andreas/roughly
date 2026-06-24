@@ -11,7 +11,10 @@ fn fresh_variables_start_unbound() {
 
     assert_eq!(
         inference_state.entry(variable),
-        Some(&InferenceEntry::Unbound { level: 0 })
+        Some(&InferenceEntry::Unbound {
+            level: 0,
+            constraint: analysis::types::Constraint::Unconstrained
+        })
     );
 }
 

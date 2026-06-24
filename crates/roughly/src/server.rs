@@ -11,11 +11,14 @@ use {
             DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
             DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol,
             DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
-            GlobPattern, Hover, HoverContents, HoverParams, HoverProviderCapability,
+            GlobPattern, Hover, HoverContents, HoverParams, HoverProviderCapability, InlayHint,
+            InlayHintKind, InlayHintLabel, InlayHintParams,
             InitializeParams, InitializeResult, InitializedParams, Location, MarkupContent,
             MarkupKind, MessageType, OneOf, Position, PublishDiagnosticsParams, Range,
-            ReferenceParams, Registration, RegistrationParams, RelativePattern, RenameParams,
-            SaveOptions, ServerCapabilities, ServerInfo, ShowMessageParams,
+            ParameterInformation, ParameterLabel, ReferenceParams, Registration,
+            RegistrationParams, RelativePattern, RenameParams, SaveOptions, ServerCapabilities,
+            ServerInfo, ShowMessageParams, SignatureHelp, SignatureHelpOptions,
+            SignatureHelpParams, SignatureInformation,
             TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
             TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceEdit, WorkspaceSymbolParams,
             WorkspaceSymbolResponse,
@@ -207,6 +210,14 @@ impl LanguageServer for ServerState {
                     .experimental_features
                     .hovering
                     .then_some(HoverProviderCapability::Simple(true)),
+                inlay_hint_provider: Some(OneOf::Left(self.analysis_state.typing_enabled())),
+                signature_help_provider: self.analysis_state.typing_enabled().then(|| {
+                    SignatureHelpOptions {
+                        trigger_characters: Some(vec!["(".to_owned(), ",".to_owned()]),
+                        retrigger_characters: None,
+                        work_done_progress_options: Default::default(),
+                    }
+                }),
                 references_provider: Some(OneOf::Left(self.experimental_features.goto_references)),
                 rename_provider: Some(OneOf::Left(self.experimental_features.rename)),
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -737,6 +748,98 @@ impl LanguageServer for ServerState {
         };
 
         box_future(Ok(Some(hover)))
+    }
+
+    //
+    // INLAY HINTS
+    //
+
+    fn inlay_hint(
+        &mut self,
+        params: InlayHintParams,
+    ) -> BoxFuture<'static, Result<Option<Vec<InlayHint>>, ResponseError>> {
+        let uri = params.text_document.uri;
+        let path = uri.to_file_path().unwrap();
+
+        tracing::debug!(?path, "inlay hints");
+
+        if self.opened_document(&path).is_none() {
+            tracing::info!(?path, "document not found");
+            return box_future(Err(path_not_found_error(&path)));
+        }
+
+        let hints = ide::inlay_hints(&mut self.analysis_state, &path)
+            .into_iter()
+            .map(|hint| InlayHint {
+                position: Position::new(
+                    hint.position.line_index as u32,
+                    hint.position.character_index as u32,
+                ),
+                label: InlayHintLabel::String(hint.label),
+                kind: Some(InlayHintKind::TYPE),
+                text_edits: None,
+                tooltip: None,
+                padding_left: Some(false),
+                padding_right: Some(false),
+                data: None,
+            })
+            .collect();
+
+        box_future(Ok(Some(hints)))
+    }
+
+    //
+    // SIGNATURE HELP
+    //
+
+    fn signature_help(
+        &mut self,
+        params: SignatureHelpParams,
+    ) -> BoxFuture<'static, Result<Option<SignatureHelp>, ResponseError>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let path = uri.to_file_path().unwrap();
+        let position = params.text_document_position_params.position;
+
+        tracing::debug!(?path, ?position, "signature help");
+
+        if self.opened_document(&path).is_none() {
+            tracing::info!(?path, "document not found");
+            return box_future(Err(path_not_found_error(&path)));
+        }
+
+        let Some(help) = ide::signature_help(
+            &mut self.analysis_state,
+            &path,
+            TextPosition {
+                line_index: position.line as usize,
+                character_index: position.character as usize,
+            },
+        ) else {
+            return box_future(Ok(None));
+        };
+
+        let active_parameter = help.active_parameter.map(|index| index as u32);
+        let parameters = help
+            .parameters
+            .into_iter()
+            .map(|label| ParameterInformation {
+                label: ParameterLabel::Simple(label),
+                documentation: None,
+            })
+            .collect();
+
+        let signature_help = SignatureHelp {
+            signatures: vec![SignatureInformation {
+                label: help.label,
+                documentation: None,
+                parameters: Some(parameters),
+                active_parameter,
+            }],
+            active_signature: Some(0),
+            active_parameter,
+        };
+
+        box_future(Ok(Some(signature_help)))
     }
 
     //

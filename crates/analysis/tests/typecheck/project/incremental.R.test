@@ -78,7 +78,7 @@ warning[naming] I could not resolve `double_count` in this package, its imports,
 #: Person
 value <- list(name = "bob")
 #++++
-error[syntax-error] Syntax Error: type syntax error: unknown type `Person`
+error[naming] I could not resolve type `Person`.
 --> 1:1-1:10
 | #: Person
 #.... v1

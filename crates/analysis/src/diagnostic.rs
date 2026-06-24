@@ -2,7 +2,7 @@ use {
     crate::{
         interner::{Interner, Symbol},
         typecheck::{InferenceError, OperandExpectation},
-        types::{Atomic, CoreType, InferenceVariableId, TypeScheme},
+        types::{Atomic, Constraint, CoreType, InferenceVariableId, TypeScheme},
     },
     std::{collections::BTreeMap, fmt},
     tree_sitter::{Point, Range},
@@ -68,6 +68,15 @@ impl Diagnostic {
     pub fn naming_warning(range: Range, message: impl Into<String>) -> Self {
         Self {
             severity: Severity::Warning,
+            code: DiagnosticCode::Naming,
+            message: message.into(),
+            range,
+        }
+    }
+
+    pub fn naming_error(range: Range, message: impl Into<String>) -> Self {
+        Self {
+            severity: Severity::Error,
             code: DiagnosticCode::Naming,
             message: message.into(),
             range,
@@ -212,6 +221,25 @@ impl Diagnostic {
                 (
                     fallback_range,
                     format!("I could not resolve type `{name}`."),
+                )
+            }
+            InferenceError::ConstraintViolation {
+                constraint,
+                actual,
+                range,
+                expression_id: _,
+            } => {
+                let mut type_renderer = TypeRenderer::diagnostic(interner);
+                let expected_description = match constraint {
+                    Constraint::Unconstrained => "a value",
+                    Constraint::Numeric => "a numeric value (`integer` or `double`)",
+                };
+                (
+                    range.unwrap_or(fallback_range),
+                    format!(
+                        "expected {expected_description}, found `{}`",
+                        type_renderer.render(actual)
+                    ),
                 )
             }
             InferenceError::InvalidOperand {
@@ -422,11 +450,14 @@ impl<'a> TypeRenderer<'a> {
             .quantified_variables
             .iter()
             .enumerate()
-            .map(|(index, variable)| {
+            .map(|(index, quantified)| {
                 let name = quantified_variable_name(index);
                 self.quantified_variable_names
-                    .insert(*variable, name.clone());
-                name
+                    .insert(quantified.variable, name.clone());
+                match quantified.constraint {
+                    Constraint::Unconstrained => name,
+                    Constraint::Numeric => format!("{name}: numeric"),
+                }
             })
             .collect::<Vec<_>>();
         let rendered_body = self.render_core_type(&type_scheme.body);

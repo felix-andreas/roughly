@@ -25,6 +25,7 @@ export default defineConfig({
 						{ slug: 'getting-started' },
 						{ slug: 'formatter' },
 						{ slug: 'linter' },
+						{ slug: 'type-checking' },
 						{ slug: 'language-server' },
 						{ slug: 'configuration' },
 					],

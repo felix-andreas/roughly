@@ -9,28 +9,28 @@
 
 ## Current priorities
 
-- Discuss arithmetic/comparison on unannotated parameters (needs refinement)
-  - `function(x) x + 1L` currently errors with invalid operand because HM has no numeric-class
-    constraint and the engine refuses to guess between `integer` and `double`
-  - this is the biggest practical usability gap for real R code; options include a numeric
-    constraint kind on inference variables, defaulting, or bidirectional expectations
-- Retain typed expression results for tooling
-  - per-document checking already computes expression types and exported schemes; storing them
-    would let hover and inlay hints show checked types
-- Lower and typecheck parameter default expressions
-  - `has_default` exists on HIR parameters, but default expressions are dropped, so their types
-    do not constrain parameter types
-- Reclassify unknown-type-name diagnostics
-  - the cascade is suppressed, but the remaining diagnostic is still labeled
-    `Syntax Error: type syntax error: unknown type ...`; it should be a naming-owned diagnostic
-    with friendlier wording
-- Cheapen the typecheck no-op path
-  - environment and type-definition fingerprints are rendered strings linear in package size per
-    `typecheck` call; hash or version them
-- `typecheck/project` follow-ups
-  - package winner behavior with conflicting types
-  - `Collate` coverage once the fixture harness models `DESCRIPTION`
-- Decide function-type parameter variance and record it in `TYPING_SEMANTICS.md`
+- Split `typecheck.rs` along the `STRUCTURE.md` seams (inference engine, environment, builtins,
+  compatibility, interface extraction). It is past 3,800 lines and is the top structural debt.
+- Cheapen the typecheck no-op path: environment and type-definition fingerprints are rendered
+  strings linear in package size per `typecheck` call (`just bench` shows linear single-file
+  recheck). Hash or version them. (Larger incremental-naming redesign needs user discussion per
+  `AGENTS.md`.)
+- Round-1 interface worklist to a fixed point (removes the two-pass depth limit / cyclic `Unknown`).
+- Consolidate tree-sitter access on id-based matching and dedupe rope/tree helpers with `roughly`.
+- `resolve_document` public phase entry + edit-time orchestration (`projects/006`).
+- More precise type-syntax error ranges (underline the offending token, not the whole annotation).
+- `typecheck/project` follow-ups: package winner behavior with conflicting types; `Collate`
+  coverage once the fixture harness models `DESCRIPTION`.
+
+### Recently completed
+
+- Numeric constraint on inference variables (`function(x) x + 1L` → `<T: numeric> fn(x: T) -> T`).
+- Typed expression retention + typed hover (`### Typing` section), inlay hints, and signature help.
+- Function-type contravariant parameter variance.
+- Unknown type name reclassified as a naming-owned diagnostic.
+- Parameter default expressions are lowered, named, and typechecked.
+- Synthetic-package generator + `just bench` (10k/100k/200k) and shared generator for incremental
+  benchmark.
 
 ### Active Projects
 

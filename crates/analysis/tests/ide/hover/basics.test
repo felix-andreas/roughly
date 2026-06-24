@@ -20,6 +20,14 @@ Symbol(parameter)
 local resolution: binding `parameter` at R/main.R:1:19
 ```
 
+---
+
+### Typing
+
+```text
+type: ?1
+```
+
 #==== nesting
 #---- call_targets
 #---- R/main.R
@@ -43,6 +51,14 @@ Assign(result)
 ```text
 local resolution: binding `result` at R/main.R:3:1
 ```
+
+---
+
+### Typing
+
+```text
+type: integer
+```
 #!!!! hover callee.hover
 R/main.R:3:12
 #++++
@@ -60,6 +76,14 @@ Symbol(identity)
 local resolution: unresolved `identity`
 package resolution: binding `identity` at R/main.R:1:1
 ```
+
+---
+
+### Typing
+
+```text
+type: fn(argument: integer) -> integer
+```
 #!!!! hover paren.hover
 R/main.R:3:19
 #++++
@@ -67,6 +91,14 @@ R/main.R:3:19
 
 ```text
 Call(arguments: 1)
+```
+
+---
+
+### Typing
+
+```text
+type: integer
 ```
 #!!!! hover argument.hover
 R/main.R:3:20
@@ -84,6 +116,14 @@ Symbol(value)
 ```text
 local resolution: unresolved `value`
 package resolution: binding `value` at R/main.R:2:1
+```
+
+---
+
+### Typing
+
+```text
+type: integer
 ```
 
 #---- binary_operator_targets
@@ -125,6 +165,14 @@ Symbol(value)
 local resolution: unresolved `value`
 package resolution: binding `value` at R/main.R:1:1
 ```
+
+---
+
+### Typing
+
+```text
+type: integer
+```
 #!!!! hover right.hover
 R/main.R:3:20
 #++++
@@ -141,6 +189,14 @@ Symbol(other)
 ```text
 local resolution: unresolved `other`
 package resolution: binding `other` at R/main.R:2:1
+```
+
+---
+
+### Typing
+
+```text
+type: integer
 ```
 
 #---- subset_targets
@@ -174,6 +230,14 @@ Symbol(data)
 local resolution: unresolved `data`
 package resolution: binding `data` at R/main.R:1:1
 ```
+
+---
+
+### Typing
+
+```text
+type: integer
+```
 #!!!! hover argument.hover
 R/main.R:3:17
 #++++
@@ -192,6 +256,14 @@ local resolution: unresolved `index`
 package resolution: binding `index` at R/main.R:2:1
 ```
 
+---
+
+### Typing
+
+```text
+type: integer
+```
+
 #---- subset2_targets
 #---- R/main.R
 data <- 1L
@@ -205,6 +277,14 @@ R/main.R:3:15
 
 ```text
 Subset2(arguments: 1)
+```
+
+---
+
+### Typing
+
+```text
+type: integer
 ```
 #!!!! hover value.hover
 R/main.R:3:12
@@ -223,6 +303,14 @@ Symbol(data)
 local resolution: unresolved `data`
 package resolution: binding `data` at R/main.R:1:1
 ```
+
+---
+
+### Typing
+
+```text
+type: integer
+```
 #!!!! hover argument.hover
 R/main.R:3:18
 #++++
@@ -239,6 +327,14 @@ Symbol(index)
 ```text
 local resolution: unresolved `index`
 package resolution: binding `index` at R/main.R:2:1
+```
+
+---
+
+### Typing
+
+```text
+type: integer
 ```
 
 #---- dollar_targets
@@ -271,6 +367,14 @@ Symbol(data)
 local resolution: unresolved `data`
 package resolution: binding `data` at R/main.R:1:1
 ```
+
+---
+
+### Typing
+
+```text
+type: integer
+```
 #!!!! hover name.hover
 R/main.R:2:17
 #++++
@@ -294,6 +398,14 @@ R/main.R:2:10
 ```text
 Block(expressions: 1, trailing_semicolon: false)
 ```
+
+---
+
+### Typing
+
+```text
+type: integer
+```
 #!!!! hover block_inner.hover
 R/main.R:2:13
 #++++
@@ -311,6 +423,14 @@ Symbol(value)
 local resolution: unresolved `value`
 package resolution: binding `value` at R/main.R:1:1
 ```
+
+---
+
+### Typing
+
+```text
+type: integer
+```
 #!!!! hover unary.hover
 R/main.R:3:12
 #++++
@@ -318,6 +438,14 @@ R/main.R:3:12
 
 ```text
 UnaryMinus
+```
+
+---
+
+### Typing
+
+```text
+type: integer
 ```
 #!!!! hover unary_inner.hover
 R/main.R:3:14
@@ -337,6 +465,14 @@ local resolution: unresolved `value`
 package resolution: binding `value` at R/main.R:1:1
 ```
 
+---
+
+### Typing
+
+```text
+type: integer
+```
+
 #---- control_flow_targets
 #---- R/main.R
 value <- 1L
@@ -354,6 +490,14 @@ R/main.R:3:12
 ```text
 If(alternative: true)
 ```
+
+---
+
+### Typing
+
+```text
+type: integer
+```
 #!!!! hover condition.hover
 R/main.R:3:17
 #++++
@@ -361,6 +505,14 @@ R/main.R:3:17
 
 ```text
 Logical(true)
+```
+
+---
+
+### Typing
+
+```text
+type: logical
 ```
 #!!!! hover consequence.hover
 R/main.R:3:23
@@ -379,6 +531,14 @@ Symbol(value)
 local resolution: unresolved `value`
 package resolution: binding `value` at R/main.R:1:1
 ```
+
+---
+
+### Typing
+
+```text
+type: integer
+```
 #!!!! hover alternative.hover
 R/main.R:3:34
 #++++
@@ -387,6 +547,14 @@ R/main.R:3:34
 ```text
 Integer(0L)
 ```
+
+---
+
+### Typing
+
+```text
+type: integer
+```
 #!!!! hover for.hover
 R/main.R:4:11
 #++++
@@ -394,6 +562,14 @@ R/main.R:4:11
 
 ```text
 For(item)
+```
+
+---
+
+### Typing
+
+```text
+type: NULL
 ```
 #!!!! hover sequence.hover
 R/main.R:4:25
@@ -412,6 +588,14 @@ Symbol(items)
 local resolution: unresolved `items`
 package resolution: binding `items` at R/main.R:2:1
 ```
+
+---
+
+### Typing
+
+```text
+type: integer
+```
 #!!!! hover body.hover
 R/main.R:4:32
 #++++
@@ -429,6 +613,14 @@ Symbol(value)
 local resolution: unresolved `value`
 package resolution: binding `value` at R/main.R:1:1
 ```
+
+---
+
+### Typing
+
+```text
+type: integer
+```
 #!!!! hover while.hover
 R/main.R:5:10
 #++++
@@ -437,6 +629,14 @@ R/main.R:5:10
 ```text
 While
 ```
+
+---
+
+### Typing
+
+```text
+type: NULL
+```
 #!!!! hover while_condition.hover
 R/main.R:5:17
 #++++
@@ -444,6 +644,14 @@ R/main.R:5:17
 
 ```text
 Logical(true)
+```
+
+---
+
+### Typing
+
+```text
+type: logical
 ```
 #!!!! hover while_body.hover
 R/main.R:5:23
@@ -462,6 +670,14 @@ Symbol(value)
 local resolution: unresolved `value`
 package resolution: binding `value` at R/main.R:1:1
 ```
+
+---
+
+### Typing
+
+```text
+type: integer
+```
 #!!!! hover repeat.hover
 R/main.R:6:10
 #++++
@@ -469,6 +685,14 @@ R/main.R:6:10
 
 ```text
 Repeat
+```
+
+---
+
+### Typing
+
+```text
+type: NULL
 ```
 #!!!! hover repeat_body.hover
 R/main.R:6:18
@@ -488,6 +712,14 @@ local resolution: unresolved `value`
 package resolution: binding `value` at R/main.R:1:1
 ```
 
+---
+
+### Typing
+
+```text
+type: integer
+```
+
 #---- function_parameter_sites
 #---- R/main.R
 value <- function(parameter) parameter
@@ -500,6 +732,14 @@ R/main.R:1:10
 ```text
 Function(parameter)
 ```
+
+---
+
+### Typing
+
+```text
+type: fn(parameter: ?1) -> ?1
+```
 #!!!! hover binding.hover
 R/main.R:1:19
 #++++
@@ -507,6 +747,14 @@ R/main.R:1:19
 
 ```text
 Function(parameter)
+```
+
+---
+
+### Typing
+
+```text
+type: fn(parameter: ?1) -> ?1
 ```
 #!!!! hover use.hover
 R/main.R:1:31
@@ -523,6 +771,14 @@ Symbol(parameter)
 
 ```text
 local resolution: binding `parameter` at R/main.R:1:19
+```
+
+---
+
+### Typing
+
+```text
+type: ?1
 ```
 
 #==== workspace
@@ -550,6 +806,14 @@ Symbol(value)
 local resolution: unresolved `value`
 package resolution: binding `value` at R/a.R:1:1
 ```
+
+---
+
+### Typing
+
+```text
+type: integer
+```
 #.... after_move
 #---- move R/a.R -> R/c.R
 #!!!! hover lookup.hover
@@ -568,4 +832,12 @@ Symbol(value)
 ```text
 local resolution: unresolved `value`
 package resolution: binding `value` at R/c.R:1:1
+```
+
+---
+
+### Typing
+
+```text
+type: integer
 ```

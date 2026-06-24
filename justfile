@@ -20,6 +20,9 @@ test-docs:
 test-analysis filter="" *args:
     FIXTURE_FILTER={{ filter }} cargo nextest run -p analysis --test test_fixtures {{ args }}
 
+bench *args:
+    cargo test --release -p analysis --test test_benchmark -- --ignored --nocapture {{ args }}
+
 snapshot *args:
     cargo insta test --review -- --nocapture {{ args }}
 

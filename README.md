@@ -40,15 +40,16 @@ Roughly aims to support the following language server features (some are experim
   - Basic linting rules - *[full list here](https://roughly.felixandreas.me/linter/#semantics-checks)*
   - Warning for unused variables *(🧪 experimental)*
   - Error for undefined variable *(⚠️ missing)*
-  - Argument validation for function calls *(⚠️ missing)*
-  - Type checking *([💡 early design phase](crates/analysis/README.md))*
+  - Argument validation for function calls *(🧪 experimental — part of type checking)*
+  - Static type checking — HM-style inference with nominal/structural types, function types, nullable unions, and numeric constraints, driven by [`#:` typing comments](https://roughly.felixandreas.me/type-checking) *(🧪 experimental)*
 
 - **Editing**
   - Autocomplete local and global variables
   - Autocomplete variables from other packages *(⚠️ missing)*
   - Rename local variables *(🧪 experimental)*
   - Rename global variables *(⚠️ missing)*
-  - Signature help *(🔨 work in progress)*
+  - Signature help — inferred call signature with active parameter *(🧪 experimental — needs type checking)*
+  - Inlay hints — inferred types on unannotated bindings *(🧪 experimental — needs type checking)*
 
 ## Roughly CLI
 

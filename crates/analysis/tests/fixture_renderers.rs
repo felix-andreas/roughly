@@ -20,6 +20,7 @@ pub fn render_expression_error_kind(error: &InferenceError) -> &'static str {
         InferenceError::OccursCheckFailed { .. } => "error: occurs check failed",
         InferenceError::TypeMismatch { .. } => "error: type mismatch",
         InferenceError::UnresolvedAnnotationType { .. } => "error: unresolved annotation type",
+        InferenceError::ConstraintViolation { .. } => "error: constraint violation",
         InferenceError::InvalidOperand { .. } => "error: invalid operand",
         InferenceError::TupleLengthMismatch { .. } => "error: tuple length mismatch",
         InferenceError::MixedListElements { .. } => "error: mixed list elements",

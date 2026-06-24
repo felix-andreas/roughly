@@ -1,3 +1,7 @@
+next goal
+make sure that the project is in a respectable state. fyi the workflow has changed. the human supervision is much lower now. this should be refelected in the steering documents and we should get rid of some of them. rewrite and restructure them as you see fit. they are primarly for you know to accumulate a knowledge base. if it isn't working for you remove them. instead new document .local/human-overview/<name>.html which is a document that gives a human an overview about the current state, total architecture, features, non-obvious designs. like a high-level overview of important things in such a way that it helps to get an overvew. finish off the project. make sure the test coverage is perfect and code is in good shape (so that an programmer with OCD is satifisfied). update the project readme to current state and reference typing semantics. (move them to docs so they are visible to users and also writte a guide). if not allready existing write a test that benchmarks a syntetic 10k, 100k and 200k codebase with number (register it as just command). on the way if you discover something you think needs cleanup write it into some list and work until resolved. also resolve things technical debt document or remove things if they are out-dated
+
+
 # Human Notes (!AIs are not allowed to edit!)
 
 * typecheck:

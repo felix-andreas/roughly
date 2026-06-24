@@ -20,15 +20,36 @@ If code changes make this document inaccurate, update it in the same session.
 
 ## Active continuity
 
-- Typecheck is incremental at document grain (two-round interface model; see `ARCHITECTURE.md`
-  "Incremental model"). Generalization is level-based. Measured: 300k-line synthetic package cold
-  check ~8.6s via CLI; 500-file in-process package: full ~0.7s, single-file recheck ~56ms
-  (ignored benchmark test in `tests/test_incremental.rs`).
-- Cross-file references are scheme-based; no inference flow across files. Scripts have a
-  sequential top level and are typechecked. `analysis::typecheck` returns recomputed document
-  ids; `did_save` republishes those diagnostics.
-- All editor features (hover, completion, rename, goto-definition, references) live in
-  `analysis::ide`; document symbols intentionally stay AST-based in `roughly/src/server.rs`.
-- Biggest known checker gap: arithmetic/comparison on unannotated parameters errors (no numeric
-  constraint kind). Needs a design discussion before fixing; see TODOS.
-- Typed expression results are computed but not retained; hover cannot show checked types yet.
+- Type checker capability landed (all in `crates/analysis/src/`, fixture-backed):
+  - Numeric constraint on inference variables (`types::Constraint`, carried on `Unbound` entries and
+    quantified in `TypeScheme`). `function(x) x + 1L` → `<T: numeric> fn(x: T) -> T`; calling with a
+    non-numeric arg errors at the call site; a numeric var that escapes a binding without being
+    abstracted by a function parameter defaults to `double`. Defaulting is level-gated in
+    `default_free_numeric` so a local binding inside a polymorphic function does not monomorphize the
+    enclosing param.
+  - Typed expression results are retained: round-2 `InferenceState` records each expression's type;
+    `Analysis::checked_expression_type` exposes it. Hover shows a `Typing` section, `ide::inlay_hints`
+    emits inferred-type hints for unannotated bindings (concrete types only), and
+    `ide::signature_help` shows the called function's signature with the active parameter. All three
+    are wired into the LSP server, capabilities gated on typing.
+  - Function compatibility is contravariant in parameters, covariant in returns.
+  - Unresolved type names are naming-owned diagnostics (`Diagnostic::naming_error`, "I could not
+    resolve type ...").
+  - Parameter defaults are lowered/named/typechecked (`hir::Parameter.default: Option<ExpressionId>`);
+    `NULL` default is the optional sentinel (always allowed); annotated non-`NULL` defaults must be
+    compatible; unannotated defaults do not pin the param type.
+- Incremental at document grain (two-round interface model; `ARCHITECTURE.md` "Incremental model").
+  Generalization is level-based. `just bench` generates synthetic 10k/100k/200k packages
+  (`tests/common/mod.rs`, `tests/test_benchmark.rs`); cold full check ~157ms / 2.9s / 10.7s and
+  single-file recheck ~13ms / 291ms / 1.8s — recheck still scales ~linearly (fingerprint rendering +
+  package naming are O(package); see TECHNICAL_DEBT).
+- Cross-file references are scheme-based; no inference flow across files. Scripts have a sequential
+  top level and are typechecked. `analysis::typecheck` returns recomputed document ids.
+- Editor features (hover w/ typed section, completion, rename, goto-definition, references, inlay
+  hints) live in `analysis::ide`; document symbols intentionally stay AST-based in `roughly`.
+- Docs: user guide at `docs/src/content/docs/type-checking.md`; high-level `human-overview.html` at
+  repo root; README features updated.
+- Remaining big items (deliberately deferred, want user input): splitting `typecheck.rs` (contradicts
+  current `STRUCTURE.md` deferral); near-constant incremental recheck (needs the incremental-analysis
+  redesign per `AGENTS.md`); precise type-syntax error ranges (`SurfaceType` carries no per-node
+  ranges); round-1 interface worklist to a fixed point.

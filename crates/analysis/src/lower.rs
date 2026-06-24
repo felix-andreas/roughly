@@ -409,17 +409,20 @@ fn lower_parameters(
                 lowered_parameters.push(Parameter {
                     symbol: intern_node_text(child, rope, lowering_context),
                     range: child.range(),
-                    has_default: false,
+                    default: None,
                 });
             }
             kind::PARAMETER => {
                 if let Some(name) = child.child_by_field_id(field::NAME)
                     && name.kind_id() == kind::IDENTIFIER
                 {
+                    let default = child
+                        .child_by_field_id(field::DEFAULT)
+                        .map(|default| lower_node_with_rope(default, rope, lowering_context));
                     lowered_parameters.push(Parameter {
                         symbol: intern_node_text(name, rope, lowering_context),
                         range: name.range(),
-                        has_default: child.child_by_field_id(field::DEFAULT).is_some(),
+                        default,
                     });
                 }
             }

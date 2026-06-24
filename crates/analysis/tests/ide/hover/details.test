@@ -16,6 +16,14 @@ R/main.R:1:12
 ```text
 Null
 ```
+
+---
+
+### Typing
+
+```text
+type: NULL
+```
 #!!!! hover logical.hover
 R/main.R:2:9
 #++++
@@ -23,6 +31,14 @@ R/main.R:2:9
 
 ```text
 Logical(true)
+```
+
+---
+
+### Typing
+
+```text
+type: logical
 ```
 #!!!! hover integer.hover
 R/main.R:3:10
@@ -32,6 +48,14 @@ R/main.R:3:10
 ```text
 Integer(1L)
 ```
+
+---
+
+### Typing
+
+```text
+type: integer
+```
 #!!!! hover double.hover
 R/main.R:4:10
 #++++
@@ -39,6 +63,14 @@ R/main.R:4:10
 
 ```text
 Double(1.5)
+```
+
+---
+
+### Typing
+
+```text
+type: double
 ```
 #!!!! hover character.hover
 R/main.R:5:10
@@ -48,6 +80,14 @@ R/main.R:5:10
 ```text
 Character("\"hello\"")
 ```
+
+---
+
+### Typing
+
+```text
+type: character
+```
 #!!!! hover string_literal_name.hover
 R/main.R:6:16
 #++++
@@ -55,6 +95,14 @@ R/main.R:6:16
 
 ```text
 StringLiteralName("name")
+```
+
+---
+
+### Typing
+
+```text
+type: character
 ```
 
 #==== hover_annotations
@@ -83,6 +131,14 @@ Assign(checked)
 
 ```text
 local resolution: binding `checked` at R/main.R:2:1
+```
+
+---
+
+### Typing
+
+```text
+type: integer
 ```
 #!!!! hover if_unknown.hover
 R/main.R:4:1
@@ -117,6 +173,14 @@ Assign(trusted)
 
 ```text
 local resolution: binding `trusted` at R/main.R:6:1
+```
+
+---
+
+### Typing
+
+```text
+type: integer
 ```
 
 #---- new_annotation
@@ -200,6 +264,14 @@ Symbol(value)
 ```text
 local resolution: binding `value` at R/main.R:2:13
 local warning: might be undefined
+```
+
+---
+
+### Typing
+
+```text
+type: integer
 ```
 
 #==== hover_none
