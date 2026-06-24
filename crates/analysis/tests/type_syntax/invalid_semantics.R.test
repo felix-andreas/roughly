@@ -53,3 +53,9 @@ InvalidSemantics { message: "generic type `Pair` expects 2 type argument(s), but
 @new Pair<integer>
 #++++
 InvalidSemantics { message: "generic type `Pair` expects 2 type argument(s), but found 1." }
+
+#==== record_semantic_errors
+#---- duplicate_record_field_name
+list{id: integer, id: integer}
+#++++
+InvalidSemantics { message: "duplicate field `id` in `list{...}`." }

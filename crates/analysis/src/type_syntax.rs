@@ -1231,11 +1231,16 @@ impl<'a> TypeParser<'a> {
         }
 
         let mut tuple_items = Vec::new();
-        let mut record_fields = Vec::new();
+        let mut record_fields: Vec<RecordField<SurfaceType>> = Vec::new();
         let mut item_kind = None;
 
         loop {
             self.skip_ascii_whitespace();
+
+            // A trailing comma before the closing brace is allowed.
+            if self.consume_byte(b'}') {
+                break;
+            }
 
             if let Some((field_start, field_end)) = self.peek_record_field_name() {
                 let saved_position = self.position;
@@ -1264,6 +1269,11 @@ impl<'a> TypeParser<'a> {
                         Some(ListBraceItemKind::Field) => {}
                     }
 
+                    if record_fields.iter().any(|field| field.name == name) {
+                        return Err(invalid_semantics(format!(
+                            "duplicate field `{field_name}` in `list{{...}}`."
+                        )));
+                    }
                     record_fields.push(RecordField::new(name, value));
 
                     self.skip_ascii_whitespace();

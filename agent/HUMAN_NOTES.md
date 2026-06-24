@@ -4,6 +4,8 @@ make sure that the project is in a respectable state. fyi the workflow has chang
 
 # Human Notes (!AIs are not allowed to edit!)
 
+* come up with strict mode
+
 * typecheck:
   * do we need: environment: BTreeMap<EnvironmentKey, Binding>,
   * check if we have good coverage for generalization, instantiation, subsitutation, unification

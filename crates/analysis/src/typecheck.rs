@@ -424,11 +424,20 @@ impl InferenceState {
             resolution_context,
             type_definitions,
         )?;
+        // Apply an expression-level annotation such as `#: @new User` on a bare expression (for
+        // example a block's final expression). Annotations that also bind a name are applied by the
+        // assignment path instead, so they are skipped here to avoid double application.
+        let annotated_type = match &expression.annotation {
+            Some(annotation) if !annotation.applies_to_binding() => {
+                self.apply_annotation(annotation, inferred_type, expression, type_definitions)?
+            }
+            _ => inferred_type,
+        };
         if self.record_expression_types {
             self.recorded_expression_types
-                .insert(expression.id, inferred_type.clone());
+                .insert(expression.id, annotated_type.clone());
         }
-        Ok(inferred_type)
+        Ok(annotated_type)
     }
 
     fn infer_expression_kind(

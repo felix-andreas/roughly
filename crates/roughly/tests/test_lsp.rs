@@ -342,11 +342,13 @@ async fn initialize_without_r_directory() {
 }
 
 #[tokio::test]
-async fn hover_returns_identifier_name_without_debug_by_default() {
-    let mut context = setup_test_with_features(&[], &["hovering"]).await;
+async fn hover_returns_identifier_definition_without_debug_by_default() {
+    let mut context = setup_test_with_features(&[], &["hovering", "typing"]).await;
 
     let file_uri = context.file_uri("R/test.R");
-    context.open_file(&file_uri, "variable_name <- 1\n").await;
+    context
+        .open_file(&file_uri, "variable_name <- 1\nresult <- variable_name\n")
+        .await;
 
     let hover = context
         .server
@@ -355,7 +357,7 @@ async fn hover_returns_identifier_name_without_debug_by_default() {
                 text_document: TextDocumentIdentifier {
                     uri: file_uri.clone(),
                 },
-                position: Position::new(0, 0),
+                position: Position::new(1, 12),
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
         })
@@ -368,24 +370,20 @@ async fn hover_returns_identifier_name_without_debug_by_default() {
     };
     let value = markup.value;
     assert!(
-        value.contains("Assign(variable_name)"),
-        "expected hover to include the lowered assignment, got: {value}"
+        value.contains("defined at"),
+        "expected hover to include the variable definition location, got: {value}"
     );
     assert!(
-        value.contains("local resolution: binding `variable_name`"),
-        "expected hover to include the naming resolution, got: {value}"
-    );
-    assert!(
-        !value.contains("### Parsing"),
-        "expected hover to omit parsing section by default, got: {value}"
+        !value.contains("### Debug"),
+        "expected hover to omit the debug section by default, got: {value}"
     );
 
     context.shutdown().await;
 }
 
 #[tokio::test]
-async fn hover_returns_identifier_debug_info_when_debug_enabled() {
-    let mut context = setup_test_with_features(&[], &["hovering", "debug"]).await;
+async fn hover_returns_debug_section_when_debug_enabled() {
+    let mut context = setup_test_with_features(&[], &["hovering", "typing", "debug"]).await;
 
     let file_uri = context.file_uri("R/test_debug.R");
     context.open_file(&file_uri, "variable_name <- 1\n").await;
@@ -410,24 +408,20 @@ async fn hover_returns_identifier_debug_info_when_debug_enabled() {
     };
     let value = markup.value;
     assert!(
+        value.contains("### Debug"),
+        "expected hover to include a debug section when enabled, got: {value}"
+    );
+    assert!(
         value.contains("Assign(variable_name)"),
-        "expected hover to include the lowered assignment, got: {value}"
-    );
-    assert!(
-        value.contains("### Parsing"),
-        "expected hover to include a parsing section when enabled, got: {value}"
-    );
-    assert!(
-        value.contains("- range:"),
-        "expected hover to include the target range, got: {value}"
+        "expected the debug section to include the lowered assignment, got: {value}"
     );
 
     context.shutdown().await;
 }
 
 #[tokio::test]
-async fn hover_returns_literal_value() {
-    let mut context = setup_test_with_features(&[], &["hovering"]).await;
+async fn hover_returns_type_by_default() {
+    let mut context = setup_test_with_features(&[], &["hovering", "typing"]).await;
 
     let file_uri = context.file_uri("R/test_literal.R");
     context.open_file(&file_uri, "x <- \"foo\"\n").await;
@@ -452,20 +446,20 @@ async fn hover_returns_literal_value() {
     };
     let value = markup.value;
     assert!(
-        value.contains(r#"Character("\"foo\"")"#),
-        "expected hover to include the lowered literal, got: {value}"
+        value.contains("character"),
+        "expected hover to include the inferred type, got: {value}"
     );
     assert!(
-        !value.contains("### Parsing"),
-        "expected hover to omit parsing section by default, got: {value}"
+        !value.contains("### Debug"),
+        "expected hover to omit the debug section by default, got: {value}"
     );
 
     context.shutdown().await;
 }
 
 #[tokio::test]
-async fn hover_returns_lowered_expression_for_if() {
-    let mut context = setup_test_with_features(&[], &["hovering"]).await;
+async fn hover_returns_type_for_if() {
+    let mut context = setup_test_with_features(&[], &["hovering", "typing"]).await;
 
     let file_uri = context.file_uri("R/test_if.R");
     context
@@ -492,12 +486,12 @@ async fn hover_returns_lowered_expression_for_if() {
     };
     let value = markup.value;
     assert!(
-        value.contains("If(alternative: false)"),
-        "expected lowered if-expression hover, got: {value}"
+        value.contains("NULL"),
+        "expected hover to include the nullable if-expression type, got: {value}"
     );
     assert!(
-        !value.contains("### Parsing"),
-        "expected hover to omit parsing section by default, got: {value}"
+        !value.contains("### Debug"),
+        "expected hover to omit the debug section by default, got: {value}"
     );
 
     context.shutdown().await;

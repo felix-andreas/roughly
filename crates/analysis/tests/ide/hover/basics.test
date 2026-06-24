@@ -6,26 +6,40 @@ value <- function(parameter) parameter
 #!!!! hover parameter.hover
 R/main.R:1:30
 #++++
-### Lowering
+```
+?1
+```
 
-```text
+Local variable, defined at `R/main.R:1:19`
+#!!!! hover_debug parameter_debug.hover
+R/main.R:1:30
+#++++
+```
+?1
+```
+
+Local variable, defined at `R/main.R:1:19`
+
+---
+
+### Debug
+
+**Lowering**
+
+```
 Symbol(parameter)
 ```
 
----
+**Naming**
 
-### Naming
-
-```text
+```
 local resolution: binding `parameter` at R/main.R:1:19
 ```
 
----
+**Parsing**
 
-### Typing
-
-```text
-type: ?1
+```
+range: 1:30 to 1:39
 ```
 
 #==== nesting
@@ -38,93 +52,33 @@ result <- identity(value)
 #!!!! hover assign.hover
 R/main.R:3:1
 #++++
-### Lowering
-
-```text
-Assign(result)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: binding `result` at R/main.R:3:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Local variable, defined at `R/main.R:3:1`
 #!!!! hover callee.hover
 R/main.R:3:12
 #++++
-### Lowering
-
-```text
-Symbol(identity)
+```
+fn(argument: integer) -> integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `identity`
-package resolution: binding `identity` at R/main.R:1:1
-```
-
----
-
-### Typing
-
-```text
-type: fn(argument: integer) -> integer
-```
+Package global, defined at `R/main.R:1:1`
 #!!!! hover paren.hover
 R/main.R:3:19
 #++++
-### Lowering
-
-```text
-Call(arguments: 1)
 ```
-
----
-
-### Typing
-
-```text
-type: integer
+integer
 ```
 #!!!! hover argument.hover
 R/main.R:3:20
 #++++
-### Lowering
-
-```text
-Symbol(value)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `value`
-package resolution: binding `value` at R/main.R:2:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/main.R:2:1`
 
 #---- binary_operator_targets
 #---- R/main.R
@@ -135,69 +89,23 @@ result <- value + other
 #!!!! hover operator.hover
 R/main.R:3:17
 #++++
-### Lowering
-
-```text
-Symbol(+)
-```
-
----
-
-### Naming
-
-```text
-local resolution: unresolved `+`
-```
+no hover
 #!!!! hover left.hover
 R/main.R:3:12
 #++++
-### Lowering
-
-```text
-Symbol(value)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `value`
-package resolution: binding `value` at R/main.R:1:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/main.R:1:1`
 #!!!! hover right.hover
 R/main.R:3:20
 #++++
-### Lowering
-
-```text
-Symbol(other)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `other`
-package resolution: binding `other` at R/main.R:2:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/main.R:2:1`
 
 #---- subset_targets
 #---- R/main.R
@@ -208,61 +116,23 @@ result <- data[index]
 #!!!! hover container.hover
 R/main.R:3:15
 #++++
-### Lowering
-
-```text
-Subset(arguments: 1)
-```
+no hover
 #!!!! hover value.hover
 R/main.R:3:12
 #++++
-### Lowering
-
-```text
-Symbol(data)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `data`
-package resolution: binding `data` at R/main.R:1:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/main.R:1:1`
 #!!!! hover argument.hover
 R/main.R:3:17
 #++++
-### Lowering
-
-```text
-Symbol(index)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `index`
-package resolution: binding `index` at R/main.R:2:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/main.R:2:1`
 
 #---- subset2_targets
 #---- R/main.R
@@ -273,69 +143,25 @@ result <- data[[index]]
 #!!!! hover container.hover
 R/main.R:3:15
 #++++
-### Lowering
-
-```text
-Subset2(arguments: 1)
 ```
-
----
-
-### Typing
-
-```text
-type: integer
+integer
 ```
 #!!!! hover value.hover
 R/main.R:3:12
 #++++
-### Lowering
-
-```text
-Symbol(data)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `data`
-package resolution: binding `data` at R/main.R:1:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/main.R:1:1`
 #!!!! hover argument.hover
 R/main.R:3:18
 #++++
-### Lowering
-
-```text
-Symbol(index)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `index`
-package resolution: binding `index` at R/main.R:2:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/main.R:2:1`
 
 #---- dollar_targets
 #---- R/main.R
@@ -345,44 +171,19 @@ result <- data$field
 #!!!! hover operator.hover
 R/main.R:2:15
 #++++
-### Lowering
-
-```text
-Dollar(field)
-```
+no hover
 #!!!! hover value.hover
 R/main.R:2:12
 #++++
-### Lowering
-
-```text
-Symbol(data)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `data`
-package resolution: binding `data` at R/main.R:1:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/main.R:1:1`
 #!!!! hover name.hover
 R/main.R:2:17
 #++++
-### Lowering
-
-```text
-Dollar(field)
-```
+no hover
 
 #---- block_and_unary_targets
 #---- R/main.R
@@ -393,85 +194,31 @@ negated <- -value
 #!!!! hover block.hover
 R/main.R:2:10
 #++++
-### Lowering
-
-```text
-Block(expressions: 1, trailing_semicolon: false)
 ```
-
----
-
-### Typing
-
-```text
-type: integer
+integer
 ```
 #!!!! hover block_inner.hover
 R/main.R:2:13
 #++++
-### Lowering
-
-```text
-Symbol(value)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `value`
-package resolution: binding `value` at R/main.R:1:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/main.R:1:1`
 #!!!! hover unary.hover
 R/main.R:3:12
 #++++
-### Lowering
-
-```text
-UnaryMinus
 ```
-
----
-
-### Typing
-
-```text
-type: integer
+integer
 ```
 #!!!! hover unary_inner.hover
 R/main.R:3:14
 #++++
-### Lowering
-
-```text
-Symbol(value)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `value`
-package resolution: binding `value` at R/main.R:1:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/main.R:1:1`
 
 #---- control_flow_targets
 #---- R/main.R
@@ -485,240 +232,85 @@ again <- repeat value
 #!!!! hover if.hover
 R/main.R:3:12
 #++++
-### Lowering
-
-```text
-If(alternative: true)
 ```
-
----
-
-### Typing
-
-```text
-type: integer
+integer
 ```
 #!!!! hover condition.hover
 R/main.R:3:17
 #++++
-### Lowering
-
-```text
-Logical(true)
 ```
-
----
-
-### Typing
-
-```text
-type: logical
+logical
 ```
 #!!!! hover consequence.hover
 R/main.R:3:23
 #++++
-### Lowering
-
-```text
-Symbol(value)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `value`
-package resolution: binding `value` at R/main.R:1:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/main.R:1:1`
 #!!!! hover alternative.hover
 R/main.R:3:34
 #++++
-### Lowering
-
-```text
-Integer(0L)
 ```
-
----
-
-### Typing
-
-```text
-type: integer
+integer
 ```
 #!!!! hover for.hover
 R/main.R:4:11
 #++++
-### Lowering
-
-```text
-For(item)
 ```
-
----
-
-### Typing
-
-```text
-type: NULL
+NULL
 ```
 #!!!! hover sequence.hover
 R/main.R:4:25
 #++++
-### Lowering
-
-```text
-Symbol(items)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `items`
-package resolution: binding `items` at R/main.R:2:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/main.R:2:1`
 #!!!! hover body.hover
 R/main.R:4:32
 #++++
-### Lowering
-
-```text
-Symbol(value)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `value`
-package resolution: binding `value` at R/main.R:1:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/main.R:1:1`
 #!!!! hover while.hover
 R/main.R:5:10
 #++++
-### Lowering
-
-```text
-While
 ```
-
----
-
-### Typing
-
-```text
-type: NULL
+NULL
 ```
 #!!!! hover while_condition.hover
 R/main.R:5:17
 #++++
-### Lowering
-
-```text
-Logical(true)
 ```
-
----
-
-### Typing
-
-```text
-type: logical
+logical
 ```
 #!!!! hover while_body.hover
 R/main.R:5:23
 #++++
-### Lowering
-
-```text
-Symbol(value)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `value`
-package resolution: binding `value` at R/main.R:1:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/main.R:1:1`
 #!!!! hover repeat.hover
 R/main.R:6:10
 #++++
-### Lowering
-
-```text
-Repeat
 ```
-
----
-
-### Typing
-
-```text
-type: NULL
+NULL
 ```
 #!!!! hover repeat_body.hover
 R/main.R:6:18
 #++++
-### Lowering
-
-```text
-Symbol(value)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `value`
-package resolution: binding `value` at R/main.R:1:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/main.R:1:1`
 
 #---- function_parameter_sites
 #---- R/main.R
@@ -727,59 +319,23 @@ value <- function(parameter) parameter
 #!!!! hover keyword.hover
 R/main.R:1:10
 #++++
-### Lowering
-
-```text
-Function(parameter)
 ```
-
----
-
-### Typing
-
-```text
-type: fn(parameter: ?1) -> ?1
+fn(parameter: ?1) -> ?1
 ```
 #!!!! hover binding.hover
 R/main.R:1:19
 #++++
-### Lowering
-
-```text
-Function(parameter)
 ```
-
----
-
-### Typing
-
-```text
-type: fn(parameter: ?1) -> ?1
+fn(parameter: ?1) -> ?1
 ```
 #!!!! hover use.hover
 R/main.R:1:31
 #++++
-### Lowering
-
-```text
-Symbol(parameter)
+```
+?1
 ```
 
----
-
-### Naming
-
-```text
-local resolution: binding `parameter` at R/main.R:1:19
-```
-
----
-
-### Typing
-
-```text
-type: ?1
-```
+Local variable, defined at `R/main.R:1:19`
 
 #==== workspace
 #---- cross_file_use_updates_after_move
@@ -792,52 +348,18 @@ result <- value
 #!!!! hover lookup.hover
 R/b.R:1:11
 #++++
-### Lowering
-
-```text
-Symbol(value)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `value`
-package resolution: binding `value` at R/a.R:1:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/a.R:1:1`
 #.... after_move
 #---- move R/a.R -> R/c.R
 #!!!! hover lookup.hover
 R/b.R:1:11
 #++++
-### Lowering
-
-```text
-Symbol(value)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: unresolved `value`
-package resolution: binding `value` at R/c.R:1:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Package global, defined at `R/c.R:1:1`

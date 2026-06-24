@@ -30,20 +30,17 @@ use {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HoverInfo {
     pub range: TextRange,
-    pub sections: Vec<HoverSection>,
+    // Primary, human-readable, unnamed markdown blocks shown by default: the inferred type and, for
+    // a variable use, where it is defined and whether it is local or package-global.
+    pub contents: Vec<String>,
+    // Phase-by-phase internal facts shown only under a named `Debug` heading when debug is enabled.
+    pub debug: Vec<DebugSection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HoverSection {
-    pub phase: HoverPhase,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HoverPhase {
-    Lowering,
-    Naming,
-    Typing,
+pub struct DebugSection {
+    pub title: String,
+    pub body: String,
 }
 
 pub fn hover(analysis: &mut Analysis, path: &Path, position: TextPosition) -> Option<HoverInfo> {
@@ -61,53 +58,69 @@ pub fn hover(analysis: &mut Analysis, path: &Path, position: TextPosition) -> Op
     let point = Point::new(position.line_index, position.character_index);
     let target = smallest_expression_hover_target(module, point)
         .or_else(|| smallest_definition_hover_target(module, point))?;
-    let mut sections = Vec::new();
 
-    match target {
+    let mut contents = Vec::new();
+    let mut debug = Vec::new();
+
+    let range = match target {
         HoverTarget::Expression(expression_id, range) => {
             let expression = module.arena.get(expression_id);
-            sections.push(HoverSection {
-                phase: HoverPhase::Lowering,
-                value: render_expression_hover(analysis, expression),
-            });
-
-            if let Some(value) =
-                render_expression_naming_hover(analysis, document_id, expression_id)
-            {
-                sections.push(HoverSection {
-                    phase: HoverPhase::Naming,
-                    value,
-                });
-            }
 
             if let Some(core_type) = analysis.checked_expression_type(document_id, expression_id) {
-                sections.push(HoverSection {
-                    phase: HoverPhase::Typing,
-                    value: format!("type: {}", render_core_type(analysis.interner(), core_type)),
-                });
+                contents.push(code_block(&render_core_type(analysis.interner(), core_type)));
+            }
+            if let Some(summary) =
+                variable_definition_summary(analysis, document_id, expression_id)
+            {
+                contents.push(summary);
             }
 
-            Some(HoverInfo {
-                range: text_range(range),
-                sections,
-            })
+            debug.push(DebugSection {
+                title: "Lowering".to_owned(),
+                body: code_block(&render_expression_hover(analysis, expression)),
+            });
+            if let Some(naming) =
+                render_expression_naming_hover(analysis, document_id, expression_id)
+            {
+                debug.push(DebugSection {
+                    title: "Naming".to_owned(),
+                    body: code_block(&naming),
+                });
+            }
+            debug.push(DebugSection {
+                title: "Parsing".to_owned(),
+                body: code_block(&render_range(range)),
+            });
+            range
         }
         HoverTarget::Definition(definition_id, range) => {
             let definition = module
                 .definitions
                 .iter()
                 .find(|definition| definition.id == definition_id)?;
-            sections.push(HoverSection {
-                phase: HoverPhase::Lowering,
-                value: render_definition_hover(analysis, definition),
+            contents.push(code_block(&render_definition_summary(analysis, definition)));
+            debug.push(DebugSection {
+                title: "Lowering".to_owned(),
+                body: code_block(&render_definition_hover(analysis, definition)),
             });
-
-            Some(HoverInfo {
-                range: text_range(range),
-                sections,
-            })
+            debug.push(DebugSection {
+                title: "Parsing".to_owned(),
+                body: code_block(&render_range(range)),
+            });
+            range
         }
+    };
+
+    // Without any primary content there is nothing useful to show, so report no hover.
+    if contents.is_empty() {
+        return None;
     }
+
+    Some(HoverInfo {
+        range: text_range(range),
+        contents,
+        debug,
+    })
 }
 
 //
@@ -292,31 +305,107 @@ pub fn signature_help(
     })
 }
 
-pub fn render_hover_markdown(hover_info: &HoverInfo, include_parsing: bool) -> String {
-    let mut sections = hover_info
-        .sections
-        .iter()
-        .map(|section| {
-            let title = match section.phase {
-                HoverPhase::Lowering => "Lowering",
-                HoverPhase::Naming => "Naming",
-                HoverPhase::Typing => "Typing",
-            };
-            format!("### {}\n\n```text\n{}\n```", title, section.value)
-        })
-        .collect::<Vec<_>>();
+pub fn render_hover_markdown(hover_info: &HoverInfo, include_debug: bool) -> String {
+    let mut rendered = hover_info.contents.join("\n\n");
 
-    if include_parsing {
-        sections.push(format!(
-            "### Parsing\n\n- range: {}:{} to {}:{}",
-            hover_info.range.start.line_index + 1,
-            hover_info.range.start.character_index + 1,
-            hover_info.range.end.line_index + 1,
-            hover_info.range.end.character_index + 1,
-        ));
+    if include_debug && !hover_info.debug.is_empty() {
+        let debug_body = hover_info
+            .debug
+            .iter()
+            .map(|section| format!("**{}**\n\n{}", section.title, section.body))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        rendered.push_str("\n\n---\n\n### Debug\n\n");
+        rendered.push_str(&debug_body);
     }
 
-    sections.join("\n\n---\n\n")
+    rendered
+}
+
+fn code_block(body: &str) -> String {
+    format!("```\n{body}\n```")
+}
+
+fn render_range(range: Range) -> String {
+    format!(
+        "range: {}:{} to {}:{}",
+        range.start_point.row + 1,
+        range.start_point.column + 1,
+        range.end_point.row + 1,
+        range.end_point.column + 1,
+    )
+}
+
+// Where a hovered variable use is defined and whether the definition is file-local or a
+// package-global, rendered as a human-readable line. Other expressions have no definition site.
+fn variable_definition_summary(
+    analysis: &Analysis,
+    document_id: DocumentId,
+    expression_id: ExpressionId,
+) -> Option<String> {
+    let local_naming = analysis.document_naming(document_id)?;
+
+    if let Some(binding_id) = local_naming.expression_resolutions.get(&expression_id) {
+        let binding = local_naming
+            .bindings
+            .get(binding_id)
+            .expect("local hover binding should exist");
+        let location = render_source_location(analysis, binding.module_id, binding.range);
+        let mut summary = format!("Local variable, defined at `{location}`");
+        if is_maybe_undefined_expression(local_naming, expression_id) {
+            summary.push_str("\n\n_May be undefined on some paths._");
+        }
+        return Some(summary);
+    }
+
+    if let Some(symbol) = local_naming.non_locals.get(&expression_id)
+        && let Some(package_naming) = analysis.package_naming()
+        && let Some(export_document_id) = package_naming.global_bindings.get(symbol)
+        && let Some(export_module) = analysis.module(*export_document_id)
+        && let Some(export_document_naming) = analysis.document_naming(*export_document_id)
+        && let Some(binding_id) =
+            find_exported_binding(export_module, export_document_naming, *symbol)
+        && let Some(binding) = export_document_naming.bindings.get(&binding_id)
+    {
+        let location = render_source_location(analysis, binding.module_id, binding.range);
+        return Some(format!("Package global, defined at `{location}`"));
+    }
+
+    None
+}
+
+fn render_definition_summary(analysis: &Analysis, definition: &DefinitionItem) -> String {
+    let keyword = match definition.definition.kind {
+        DefinitionKind::Type => "type",
+        DefinitionKind::Alias => "alias",
+    };
+    let name = analysis
+        .interner()
+        .resolve(definition.definition.name)
+        .unwrap_or("<unknown>");
+    let type_parameters = if definition.definition.type_parameters.is_empty() {
+        String::new()
+    } else {
+        let type_parameters = definition
+            .definition
+            .type_parameters
+            .iter()
+            .map(|symbol| {
+                analysis
+                    .interner()
+                    .resolve(*symbol)
+                    .unwrap_or("<unknown>")
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("<{type_parameters}>")
+    };
+
+    format!(
+        "{keyword} {name}{type_parameters} = {}",
+        render_surface_type(&definition.definition.surface_type, analysis.interner())
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

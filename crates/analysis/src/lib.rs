@@ -28,8 +28,8 @@ pub use crate::{
         ExpressionId, ExpressionKind, Module, ModuleId, Parameter,
     },
     ide::{
-        CompletionItem, CompletionItemKind, CompletionItemSource, HoverInfo, HoverPhase,
-        HoverSection, InlayHint, Location, RenameEdit, RenameResult, SignatureHelp, inlay_hints,
+        CompletionItem, CompletionItemKind, CompletionItemSource, DebugSection, HoverInfo,
+        InlayHint, Location, RenameEdit, RenameResult, SignatureHelp, inlay_hints,
         render_hover_markdown, signature_help,
     },
     interner::{Interner, Symbol},

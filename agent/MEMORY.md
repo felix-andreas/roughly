@@ -28,10 +28,16 @@ If code changes make this document inaccurate, update it in the same session.
     `default_free_numeric` so a local binding inside a polymorphic function does not monomorphize the
     enclosing param.
   - Typed expression results are retained: round-2 `InferenceState` records each expression's type;
-    `Analysis::checked_expression_type` exposes it. Hover shows a `Typing` section, `ide::inlay_hints`
-    emits inferred-type hints for unannotated bindings (concrete types only), and
-    `ide::signature_help` shows the called function's signature with the active parameter. All three
-    are wired into the LSP server, capabilities gated on typing.
+    `Analysis::checked_expression_type` exposes it. Hover is human-readable by default (type +
+    variable definition/scope as unnamed blocks; phase dumps only under a `### Debug` heading when
+    debug is on; `HoverInfo` = `contents` + `debug`). `ide::inlay_hints` emits inferred-type hints for
+    unannotated bindings (concrete types only), and `ide::signature_help` shows the called function's
+    signature with the active parameter. All wired into the LSP server, capabilities gated on typing.
+  - Expression-level annotations (e.g. `#: @new User` on a block's final expression) are applied in
+    the inference wrapper, not only on assignments.
+  - The document interface settles by a bounded fixed-point (deep forward/alias chains resolve);
+    `typecheck` short-circuits when the package version is unchanged (repeated IDE calls are O(1)).
+  - Record types reject duplicate field names and allow a trailing comma.
   - Function compatibility is contravariant in parameters, covariant in returns.
   - Unresolved type names are naming-owned diagnostics (`Diagnostic::naming_error`, "I could not
     resolve type ...").
@@ -49,7 +55,7 @@ If code changes make this document inaccurate, update it in the same session.
   hints) live in `analysis::ide`; document symbols intentionally stay AST-based in `roughly`.
 - Docs: user guide at `docs/src/content/docs/type-checking.md`; high-level `human-overview.html` at
   repo root; README features updated.
-- Remaining big items (deliberately deferred, want user input): splitting `typecheck.rs` (contradicts
-  current `STRUCTURE.md` deferral); near-constant incremental recheck (needs the incremental-analysis
-  redesign per `AGENTS.md`); precise type-syntax error ranges (`SurfaceType` carries no per-node
-  ranges); round-1 interface worklist to a fixed point.
+- Remaining big items: near-constant incremental recheck *after an edit* (needs the incremental
+  package-naming + interface-version redesign per `AGENTS.md`, design with user first); precise
+  type-syntax error ranges (`SurfaceType` carries no per-node ranges, so naming underlines the whole
+  annotation — an invasive change threading ranges through type parsing).

@@ -473,6 +473,14 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
                         None => "no hover".to_owned(),
                     }
                 }
+                "hover_debug" => {
+                    let request = parse_position_request(contents, "hover_debug")?;
+                    let hover = ide::hover(analysis_state, &request.path, request.position);
+                    match hover.as_ref() {
+                        Some(hover) => render_hover_markdown(hover, true),
+                        None => "no hover".to_owned(),
+                    }
+                }
                 "rename" => {
                     let request = parse_rename_request(contents)?;
                     match ide::rename(

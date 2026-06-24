@@ -78,3 +78,17 @@ second <- "two"
 error[type-error] expected `integer`, found `character`
 --> 2:1-2:16
 | second <- "two"
+
+#==== forward_references
+#---- deep_chain_resolves_within_and_across_files
+#---- R/a.R
+third <- second
+second <- first
+first <- 1L
+#++++
+No diagnostics.
+#---- R/b.R
+#: integer
+ok <- third
+#++++
+No diagnostics.

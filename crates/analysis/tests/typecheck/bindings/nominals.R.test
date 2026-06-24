@@ -85,3 +85,14 @@ make_person: fn(name: character) -> Person
 box <- list(value = list(name = "bob"))
 #++++
 box: Box<list{name: character}>
+
+#---- new_annotation_on_block_final_expression
+#: @type User {list{name: character, age: integer}}
+
+#: fn(name: character, age: integer) -> User
+createUser <- function(name, age) {
+  #: @new User
+  list(name = name, age = age)
+}
+#++++
+createUser: fn(name: character, age: integer) -> User

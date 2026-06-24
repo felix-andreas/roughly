@@ -8,32 +8,15 @@ Keep this file focused on concrete, current debt that affects correctness, testa
 
 ## Current debt
 
-### Typechecking and inference-engine concerns are mixed together
+### Single-file recheck still scales with package size
 
-The current `typecheck.rs` file contains multiple responsibilities at once:
-
-- HM-style inference state and unification
-- lexical environment handling
-- annotation application
-- compatibility checking
-- builtin typing rules
-- expression-level typechecking
-
-This makes the file hard to reason about. The file is now past 3,900 lines. `STRUCTURE.md` and
-`DECISION_LOG.md` deliberately defer this split ("keep builtin typing, compatibility logic, and
-interface extraction inside `typecheck.rs` for now") until the internal structure stabilizes. The
-inference engine is now stable and well-organized top-down, so the deferral is ready to revisit:
-pulling the inference state / unification engine, the builtin typing rules, and interface extraction
-into sibling modules would each remove a clear seam. This is a deliberate structural decision to take
-with the user before the move, since it contradicts the current `STRUCTURE.md` deferral.
-
-### Interface fingerprints render strings linear in package size
-
-The round-2 cache key renders every package-global scheme into one environment-fingerprint string on every `typecheck` call, and round-1 renders the full type-definition table. Both are linear in package size per call even when nothing changed. Hashing per-document interface versions (or comparing structured fingerprints) would make the no-op path closer to constant. The `just bench` suite measures this: single-file recheck currently scales roughly linearly with package size (~13ms at 10k LoC, ~1.8s at 200k LoC) instead of staying near-constant.
-
-### Round-1 interfaces degrade cyclic and deeply chained top-level references
-
-The document interface settles in two passes, so acyclic define-then-alias and forward references resolve, but reference chains needing more than two passes and genuinely cyclic top-level definitions export `Unknown`. A worklist to a fixed point (bounded) would remove the depth limit.
+`typecheck` now short-circuits when the package version is unchanged (so repeated IDE requests on an
+unchanged package are O(1)), but a single-file *edit* still pays package-scoped work: `resolve_package`
+rebuilds package naming and the round-2 path rebuilds the package interface table and renders the
+environment fingerprint, all linear in package size. The `just bench` suite measures this: single-file
+recheck after an edit is ~13ms at 10k LoC and ~1.8s at 200k LoC. Making this near-constant needs the
+incremental-analysis redesign (incremental package naming plus interface-version tracking) that
+`AGENTS.md` says to design with the user before large steps.
 
 ### Type-syntax error ranges are coarse
 

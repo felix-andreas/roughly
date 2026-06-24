@@ -47,6 +47,10 @@ pub struct Analysis {
     package_naming_output: Option<PackageOutput<NamesGlobal>>,
     document_interface_outputs: HashMap<DocumentId, InterfaceOutput>,
     document_typecheck_outputs: HashMap<DocumentId, TypecheckDocumentOutput>,
+    // The package version at which `typecheck` last completed. Since the package version bumps on
+    // every document or config change, an unchanged version means every typecheck output is already
+    // current, so a repeated call (e.g. successive hover or inlay-hint requests) returns at once.
+    last_typecheck_package_version: Option<Version>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,10 +134,16 @@ impl Analysis {
             package_naming_output: None,
             document_interface_outputs: HashMap::new(),
             document_typecheck_outputs: HashMap::new(),
+            last_typecheck_package_version: None,
         }
     }
 
     pub fn set_configs(&mut self, lint_config: LintConfig, check_config: CheckConfig) {
+        // A check-config change (for example toggling typing) invalidates the version-keyed
+        // semantic caches, so bump the package version to force the next request to recompute.
+        if self.check_config != check_config {
+            self.bump_package_version();
+        }
         self.lint_config = lint_config;
         self.check_config = check_config;
     }
@@ -525,6 +535,20 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
     });
 }
 
+fn render_interface_fingerprint(exports: &[ExportedValue], interner: &Interner) -> String {
+    exports
+        .iter()
+        .map(|export| {
+            format!(
+                "{}: {}",
+                interner.resolve(export.symbol).unwrap_or("<unknown>"),
+                crate::diagnostic::render_type_scheme(interner, &export.type_scheme)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
 // Typechecking is incremental at document grain. Round 1 computes each package document's
 // exported value schemes in isolation (cross-file references check as `Unknown`), cached by
 // document version plus the package type-definition fingerprint. Round 2 checks every
@@ -533,6 +557,12 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
 // edited document's exported interface rechecks only that document. Returns the documents
 // whose typecheck output was recomputed, so callers can republish exactly those diagnostics.
 pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
+    // Nothing has changed since the last completed typecheck, so every cached output is current and
+    // no document needs rechecking. This keeps repeated IDE requests on an unchanged package cheap.
+    if analysis_state.last_typecheck_package_version == Some(analysis_state.package_version) {
+        return Vec::new();
+    }
+
     resolve_package(analysis_state);
 
     let package_document_ids = analysis_state.package_document_ids();
@@ -605,9 +635,7 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
 
         // The interface is computed in isolation from other documents, but same-document
         // top-level references must still resolve, so the document's own names form the
-        // global table here. A second pass rebinding the first pass's schemes settles
-        // acyclic define-then-alias and forward-reference shapes; cyclic references keep
-        // `Unknown` in the exported interface.
+        // global table here.
         let mut own_naming = NamesGlobal::default();
         let mut own_symbols = Vec::new();
         for expression_id in &module.expressions {
@@ -620,60 +648,47 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
             }
         }
 
-        let mut draft_state = template_state.clone();
-        for (symbol, range) in &own_symbols {
-            draft_state.bind_global_scheme(
-                *symbol,
-                TypeScheme::monomorphic(CoreType::Unknown),
-                *range,
+        // The interface settles by a bounded fixed-point. Each round binds the previous round's
+        // exported schemes for the document's own names, then re-checks. A binding with no self- or
+        // forward-reference resolves in the first round; forward references and define-then-alias
+        // chains take one round per link. The loop stops as soon as no export is `Unknown` or the
+        // exports stop changing, so genuine cycles settle (keeping `Unknown`) rather than looping.
+        const MAX_INTERFACE_ROUNDS: usize = 8;
+        let mut exports = Vec::new();
+        let mut fingerprint = String::new();
+        let mut previous_exports: Vec<ExportedValue> = Vec::new();
+        for round in 0..MAX_INTERFACE_ROUNDS {
+            let mut inference_state = template_state.clone();
+            for export in &previous_exports {
+                let imported_scheme = inference_state.import_scheme(&export.type_scheme);
+                inference_state.bind_global_scheme(export.symbol, imported_scheme, export.range);
+            }
+            for (symbol, range) in &own_symbols {
+                if inference_state.lookup_global_name(*symbol).is_none() {
+                    inference_state.bind_global_scheme(
+                        *symbol,
+                        TypeScheme::monomorphic(CoreType::Unknown),
+                        *range,
+                    );
+                }
+            }
+            let _ = inference_state.check_module_with_naming(
+                *document_id,
+                module,
+                local_naming,
+                &own_naming,
+                &type_definitions,
             );
+            exports = inference_state.exported_value_schemes(module, local_naming);
+            let next_fingerprint =
+                render_interface_fingerprint(&exports, analysis_state.interner());
+            let settled = next_fingerprint == fingerprint;
+            fingerprint = next_fingerprint;
+            if (round > 0 && settled) || !fingerprint.contains("Unknown") {
+                break;
+            }
+            previous_exports = exports.clone();
         }
-        let _ = draft_state.check_module_with_naming(
-            *document_id,
-            module,
-            local_naming,
-            &own_naming,
-            &type_definitions,
-        );
-        let draft_exports = draft_state.exported_value_schemes(module, local_naming);
-
-        let mut inference_state = template_state.clone();
-        for (symbol, range) in &own_symbols {
-            inference_state.bind_global_scheme(
-                *symbol,
-                TypeScheme::monomorphic(CoreType::Unknown),
-                *range,
-            );
-        }
-        for export in &draft_exports {
-            let imported_scheme = inference_state.import_scheme(&export.type_scheme);
-            inference_state.bind_global_scheme(export.symbol, imported_scheme, export.range);
-        }
-        let _ = inference_state.check_module_with_naming(
-            *document_id,
-            module,
-            local_naming,
-            &own_naming,
-            &type_definitions,
-        );
-        let exports = inference_state.exported_value_schemes(module, local_naming);
-        let fingerprint = exports
-            .iter()
-            .map(|export| {
-                format!(
-                    "{}: {}",
-                    analysis_state
-                        .interner()
-                        .resolve(export.symbol)
-                        .unwrap_or("<unknown>"),
-                    crate::diagnostic::render_type_scheme(
-                        analysis_state.interner(),
-                        &export.type_scheme
-                    )
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(";");
         fresh_interfaces.push((
             *document_id,
             InterfaceOutput {
@@ -819,6 +834,7 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
             .insert(document_id, output);
     }
 
+    analysis_state.last_typecheck_package_version = Some(analysis_state.package_version);
     recomputed_document_ids
 }
 
@@ -894,7 +910,6 @@ mod tests {
         },
         crate::{
             Diagnostic, Severity,
-            ide::HoverPhase,
             lint::NameStyle,
             text::{TextPosition, TextRange},
         },
@@ -1259,13 +1274,17 @@ mod tests {
         )
         .expect("hover target should exist");
 
-        assert_eq!(hover.sections[0].phase, HoverPhase::Lowering);
-        assert_eq!(hover.sections[0].value, "Symbol(parameter)");
-        assert_eq!(hover.sections[1].phase, HoverPhase::Naming);
         assert!(
-            hover.sections[1]
-                .value
-                .contains("local resolution: binding `parameter` at R/main.R:1:19")
+            hover
+                .contents
+                .iter()
+                .any(|block| block.contains("Local variable, defined at `R/main.R:1:19`")),
+            "{:?}",
+            hover.contents
+        );
+        assert!(
+            hover.debug.iter().any(|section| section.title == "Lowering"
+                && section.body.contains("Symbol(parameter)"))
         );
     }
 
@@ -1297,16 +1316,17 @@ mod tests {
         )
         .expect("hover target should exist");
 
-        assert_eq!(hover.sections[0].value, "Symbol(value)");
         assert!(
-            hover.sections[1]
-                .value
-                .contains("local resolution: unresolved `value`")
+            hover
+                .contents
+                .iter()
+                .any(|block| block.contains("Package global, defined at `R/a.R:1:1`")),
+            "{:?}",
+            hover.contents
         );
         assert!(
-            hover.sections[1]
-                .value
-                .contains("package resolution: binding `value` at R/a.R:1:1")
+            hover.debug.iter().any(|section| section.title == "Naming"
+                && section.body.contains("package resolution: binding `value` at R/a.R:1:1"))
         );
     }
 

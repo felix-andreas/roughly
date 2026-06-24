@@ -2,6 +2,34 @@
 
 Keep newest decisions at the top.
 
+- hover output is human-readable by default; phase dumps moved under a debug-only section.
+  - Default hover shows unnamed primary blocks — the inferred type and, for a variable use, where it
+    is defined and whether it is local or package-global. The old `Lowering`/`Naming`/`Typing`/`Parsing`
+    phase sections only render under a named `### Debug` heading when debug mode is on. The phase
+    sections were originally a debugging aid; the new default is for humans. `HoverInfo` now carries
+    `contents: Vec<String>` plus `debug: Vec<DebugSection>`.
+
+- an expression-level annotation (for example `#: @new User` on a block's final expression) is
+  applied wherever the expression is inferred, not only on assignments.
+  - `apply_annotation` previously ran only for assignment bindings, so `@new`/checked annotations on a
+    bare expression (such as a function's returned `list(...)`) were silently ignored and the value
+    kept its structural type. The inference wrapper now applies any non-binding attached annotation.
+
+- record types reject duplicate field names and allow a trailing comma.
+  - `list{ id: integer, id: integer }` is now an `InvalidSemantics` error (matching duplicate type
+    parameters); `list{ id: integer, name: character, }` parses, so multi-line record annotations can
+    use a trailing comma.
+
+- the document interface settles by a bounded fixed-point instead of two fixed passes.
+  - Deeply chained top-level references (`a <- b <- c <- 1L`) and forward references now resolve; the
+    loop stops as soon as no export is `Unknown` or the exports stop changing, so genuine cycles still
+    settle (keeping `Unknown`) and shallow cases stay one or two rounds.
+
+- `typecheck` returns immediately when the package version is unchanged since the last completed run.
+  - Repeated IDE requests (successive hover / inlay-hint / signature-help calls without an edit) no
+    longer re-run package-scoped work. The package version bumps on every document or check-config
+    change, so the guard is invalidated exactly when something relevant changed.
+
 - parameter default expressions are lowered, named, and typechecked, but do not pin an unannotated
   parameter's type.
   - Defaults were previously dropped entirely (`Parameter` only stored `has_default`). The default

@@ -11,98 +11,38 @@ named <- text["name"]
 #!!!! hover null.hover
 R/main.R:1:12
 #++++
-### Lowering
-
-```text
-Null
 ```
-
----
-
-### Typing
-
-```text
-type: NULL
+NULL
 ```
 #!!!! hover logical.hover
 R/main.R:2:9
 #++++
-### Lowering
-
-```text
-Logical(true)
 ```
-
----
-
-### Typing
-
-```text
-type: logical
+logical
 ```
 #!!!! hover integer.hover
 R/main.R:3:10
 #++++
-### Lowering
-
-```text
-Integer(1L)
 ```
-
----
-
-### Typing
-
-```text
-type: integer
+integer
 ```
 #!!!! hover double.hover
 R/main.R:4:10
 #++++
-### Lowering
-
-```text
-Double(1.5)
 ```
-
----
-
-### Typing
-
-```text
-type: double
+double
 ```
 #!!!! hover character.hover
 R/main.R:5:10
 #++++
-### Lowering
-
-```text
-Character("\"hello\"")
 ```
-
----
-
-### Typing
-
-```text
-type: character
+character
 ```
 #!!!! hover string_literal_name.hover
 R/main.R:6:16
 #++++
-### Lowering
-
-```text
-StringLiteralName("name")
 ```
-
----
-
-### Typing
-
-```text
-type: character
+character
 ```
 
 #==== hover_annotations
@@ -118,70 +58,23 @@ trusted <- 3L
 #!!!! hover checked.hover
 R/main.R:2:1
 #++++
-### Lowering
-
-```text
-annotation: integer
-Assign(checked)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: binding `checked` at R/main.R:2:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Local variable, defined at `R/main.R:2:1`
 #!!!! hover if_unknown.hover
 R/main.R:4:1
 #++++
-### Lowering
-
-```text
-annotation: @if-unknown integer
-Assign(maybe)
-```
-
----
-
-### Naming
-
-```text
-local resolution: binding `maybe` at R/main.R:4:1
-```
+Local variable, defined at `R/main.R:4:1`
 #!!!! hover trusted.hover
 R/main.R:6:1
 #++++
-### Lowering
-
-```text
-annotation: @trust integer
-Assign(trusted)
+```
+integer
 ```
 
----
-
-### Naming
-
-```text
-local resolution: binding `trusted` at R/main.R:6:1
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+Local variable, defined at `R/main.R:6:1`
 
 #---- new_annotation
 #---- R/main.R
@@ -193,20 +86,7 @@ person <- make_person()
 #!!!! hover new.hover
 R/main.R:4:1
 #++++
-### Lowering
-
-```text
-annotation: @new Person
-Assign(person)
-```
-
----
-
-### Naming
-
-```text
-local resolution: binding `person` at R/main.R:4:1
-```
+Local variable, defined at `R/main.R:4:1`
 
 #==== hover_definitions
 #---- type_and_alias_definitions
@@ -218,26 +98,42 @@ local resolution: binding `person` at R/main.R:4:1
 #!!!! hover type.hover
 R/main.R:1:5
 #++++
-### Lowering
+```
+type Person = list{name: character}
+```
+#!!!! hover_debug type_debug.hover
+R/main.R:1:5
+#++++
+```
+type Person = list{name: character}
+```
 
-```text
+---
+
+### Debug
+
+**Lowering**
+
+```
 TypeDefinition Person = list{name: character}
+```
+
+**Parsing**
+
+```
+range: 1:1 to 1:40
 ```
 #!!!! hover alias.hover
 R/main.R:2:5
 #++++
-### Lowering
-
-```text
-TypeAlias Identifier = character
+```
+alias Identifier = character
 ```
 #!!!! hover generic_type.hover
 R/main.R:3:5
 #++++
-### Lowering
-
-```text
-TypeDefinition Pair<T, U> = list{first: T, second: U}
+```
+type Pair<T, U> = list{first: T, second: U}
 ```
 
 #==== hover_warnings
@@ -251,28 +147,13 @@ wrapper <- function(flag) {
 #!!!! hover maybe_undefined.hover
 R/main.R:3:3
 #++++
-### Lowering
-
-```text
-Symbol(value)
+```
+integer
 ```
 
----
+Local variable, defined at `R/main.R:2:13`
 
-### Naming
-
-```text
-local resolution: binding `value` at R/main.R:2:13
-local warning: might be undefined
-```
-
----
-
-### Typing
-
-```text
-type: integer
-```
+_May be undefined on some paths._
 
 #==== hover_none
 #---- outside_expressions
