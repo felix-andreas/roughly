@@ -1,0 +1,2621 @@
+---
+import '@fontsource/geist-sans/400.css'
+import '@fontsource/geist-sans/500.css'
+import '@fontsource/geist-sans/600.css'
+import '@fontsource/geist-mono/400.css'
+import '@fontsource/geist-mono/500.css'
+
+const navLinks = [
+  { label: 'Docs', href: '/getting-started' },
+  { label: 'Type Checker', href: '/type-checker' },
+  { label: 'Formatter', href: '/formatter' },
+  { label: 'Linter', href: '/linter' },
+  { label: 'Config', href: '/configuration' },
+  { label: 'GitHub', href: 'https://github.com/felix-andreas/roughly' },
+]
+
+const capabilities = [
+  {
+    title: 'Language server',
+    accent: 'cyan',
+    blurb:
+      'Completion, hover, go-to-definition, references, rename, and inlay hints — live in your editor, over LSP.',
+    link: { label: 'Language server', href: '/language-server' },
+  },
+  {
+    title: 'Code analyzer',
+    accent: 'violet',
+    blurb:
+      'Lint diagnostics flag problems before you run, plus the first static type checker for R — fully opt-in.',
+    link: { label: 'Type checker', href: '/type-checker' },
+  },
+  {
+    title: 'Formatter',
+    accent: 'emerald',
+    blurb:
+      'roughly fmt rewrites your whole project to one consistent style, with a --diff mode for CI.',
+    link: { label: 'Formatter', href: '/formatter' },
+  },
+]
+
+const lspTabs = [
+  { key: 'completion', label: 'Completion' },
+  { key: 'hover', label: 'Hover' },
+  { key: 'gotodef', label: 'Go-to-definition' },
+  { key: 'refs', label: 'Find references' },
+  { key: 'rename', label: 'Rename' },
+  { key: 'inlay', label: 'Inlay hints' },
+]
+
+const analysisTabs = [
+  { key: 'typecheck', label: 'Type checking' },
+  { key: 'inference', label: 'Inference' },
+  { key: 'linting', label: 'Linting' },
+]
+
+const formatterTabs = [
+  { key: 'spacing', label: 'Spacing & operators' },
+  { key: 'indent', label: 'Indentation' },
+  { key: 'quotes', label: 'Strings & quotes' },
+]
+
+const footerLinks = [
+  { label: 'Type Checker', href: '/type-checker' },
+  { label: 'Language Server', href: '/language-server' },
+  { label: 'Linter', href: '/linter' },
+  { label: 'Formatter', href: '/formatter' },
+  { label: 'Config', href: '/configuration' },
+  { label: 'Getting started', href: '/getting-started' },
+]
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Roughly — modern developer tooling for R</title>
+    <meta
+      name="description"
+      content="Roughly is a fast, modern toolchain for R — a language server, a code analyzer, and a formatter in one tool, written in Rust."
+    />
+    <link rel="icon" href="/favicon.svg" />
+  </head>
+  <body>
+    <header class="nav" id="nav">
+      <a class="brand" href="/getting-started" aria-label="Roughly home">
+        <img class="logo" src="/logo.svg" alt="" width="24" height="24" />
+        <span class="wordmark">Roughly</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        {
+          navLinks.map((l) => (
+            <a
+              href={l.href}
+              target={l.label === 'GitHub' ? '_blank' : undefined}
+              rel={l.label === 'GitHub' ? 'noreferrer' : undefined}
+            >
+              {l.label}
+            </a>
+          ))
+        }
+        <a class="cta" href="/getting-started">Get started</a>
+      </nav>
+    </header>
+
+    <main>
+      <!-- ---------- hero ---------- -->
+      <section id="hero">
+        <canvas id="hero-canvas" aria-hidden="true"></canvas>
+        <div class="hero-vignette" aria-hidden="true"></div>
+        <div class="hero-copy">
+          <p class="eyebrow">modern r tooling · written in rust</p>
+          <h1>Modern developer tooling for R.</h1>
+          <p class="subhead">
+            A language server, a code analyzer, and a formatter in one fast tool — built in Rust,
+            scaling past 300k lines.
+          </p>
+          <div class="cta-cluster">
+            <a class="cta cta-lg" href="/getting-started">Get started</a>
+            <a
+              class="btn-vscode"
+              href="https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly"
+              target="_blank"
+              rel="noopener"
+            >
+              <svg class="brand-logo" width="18" height="18" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <mask id="vscMaskHero" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+                  <path fill-rule="evenodd" clip-rule="evenodd" d="M70.9119 99.3171C72.4869 99.9307 74.2828 99.8914 75.8725 99.1264L96.4604 89.2197C98.6242 88.1787 100 85.9892 100 83.5872V16.4133C100 14.0113 98.6243 11.8218 96.4605 10.7808L75.8725 0.873756C73.7862 -0.130129 71.3446 0.11576 69.5135 1.44695C69.252 1.63711 69.0028 1.84943 68.769 2.08341L29.3551 38.0387L12.1872 25.0054C10.589 23.7919 8.35363 23.8919 6.86933 25.2444L1.36303 30.2592C-0.453713 31.9133 -0.455738 34.7779 1.35853 36.4347L16.2471 50.0001L1.35853 63.5655C-0.455738 65.2223 -0.453713 68.0869 1.36303 69.7411L6.86933 74.7558C8.35363 76.1084 10.589 76.2083 12.1872 74.9948L29.3551 61.9615L68.769 97.9168C69.3897 98.5345 70.1186 98.9942 70.9119 99.3171ZM75.0152 27.2989L45.1091 50.0001L75.0152 72.7012V27.2989Z" fill="white"/>
+                </mask>
+                <g mask="url(#vscMaskHero)"><rect width="100" height="100" fill="#0098FF"/></g>
+              </svg>
+              <span>Install in VS Code</span>
+            </a>
+            <span class="btn-soon" aria-disabled="true">
+              <span>Zed</span>
+              <span class="soon-pill">soon</span>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- capabilities triad ---------- -->
+      <section id="capabilities" class="band">
+        <div class="col">
+          <p class="eyebrow">three tools, one binary</p>
+          <h2>Three tools, one binary.</h2>
+          <p class="lede">
+            Editor smarts, problem-catching analysis, and one consistent style — all from a single
+            binary. R has world-class statistics; Roughly brings the IDE-grade tooling other
+            ecosystems already take for granted.
+          </p>
+        </div>
+        <div class="col show-col">
+          <div class="cap-grid">
+            {
+              capabilities.map((c) => (
+                <article class={`cap accent-${c.accent}`}>
+                  <span class="cap-badge" aria-hidden="true">
+                    {c.accent === 'cyan' && (
+                      <svg class="cap-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path class="ib" d="M12 5v14" />
+                        <path class="ib" d="M9.5 5h5" />
+                        <path class="ib" d="M9.5 19h5" />
+                        <path class="arc arc-1" d="M15.5 7.5a4 4 0 0 1 0 5" />
+                        <path class="arc arc-2" d="M17.5 6a7 7 0 0 1 0 8" />
+                      </svg>
+                    )}
+                    {c.accent === 'violet' && (
+                      <svg class="cap-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <circle class="lens" cx="11" cy="11" r="6.5" />
+                        <path class="handle" d="M16 16l4 4" />
+                        <circle class="node" cx="9" cy="11" r="1.1" />
+                        <circle class="node" cx="13" cy="9.5" r="1.1" />
+                        <path class="connector" d="M9.9 10.4l2.2-0.8" />
+                      </svg>
+                    )}
+                    {c.accent === 'emerald' && (
+                      <svg class="cap-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path class="rag" d="M5 8h9" />
+                        <path class="rag" d="M5 12h6" />
+                        <path class="rag" d="M5 16h11" />
+                        <path class="guide" d="M19 6v12" />
+                        <path class="tick tick-1" d="M14 8h5" />
+                        <path class="tick tick-2" d="M11 12h8" />
+                      </svg>
+                    )}
+                  </span>
+                  <h3>{c.title}</h3>
+                  <p>{c.blurb}</p>
+                  <a class="doclink" href={c.link.href}>
+                    {c.link.label} <span aria-hidden="true">→</span>
+                  </a>
+                </article>
+              ))
+            }
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- language server ---------- -->
+      <section id="language-server" class="band has-accent accent-cyan">
+        <div class="col">
+          <p class="eyebrow">write</p>
+          <h2>IDE features in your editor.</h2>
+          <p class="lede">
+            Completion, hover, go-to-definition, find references, rename, and inlay hints. Ships as a
+            VS Code extension and speaks LSP, so it drops into any editor that does too.
+          </p>
+        </div>
+        <div class="col show-col">
+          <div class="tabs cap-cyan" data-tabs data-orientation="vertical">
+            <div role="tablist" aria-label="Language server features" aria-orientation="vertical">
+              {
+                lspTabs.map((t, i) => (
+                  <button
+                    role="tab"
+                    id={`tab-${t.key}`}
+                    aria-controls={`panel-${t.key}`}
+                    aria-selected={i === 0 ? 'true' : 'false'}
+                    tabindex={i === 0 ? 0 : -1}
+                  >
+                    {t.label}
+                  </button>
+                ))
+              }
+            </div>
+            <div class="tab-panels">
+              <!-- Completion -->
+              <div role="tabpanel" id="panel-completion" aria-labelledby="tab-completion" tabindex="0">
+                <div class="ed">
+                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">model.R</span></div>
+                  <div class="ed-body">
+                    <div class="ln"><span class="c-fn">df</span> {'<- '}<span class="c-fn">read_csv</span>(<span class="c-str">"data.csv"</span>)</div>
+                    <div class="ln comp-anchor"><span class="c-fn">df</span><span class="t-cap">$</span><span class="caret-blink" aria-hidden="true"></span><span class="ghosttext">count</span>
+                      <div class="comp-pop" role="presentation">
+                        <div class="comp-rowhl" aria-hidden="true"></div>
+                        <div class="comp-row"><span class="kglyph">var</span><span class="comp-name">count</span></div>
+                        <div class="comp-row"><span class="kglyph">var</span><span class="comp-name">category</span></div>
+                        <div class="comp-row"><span class="kglyph">var</span><span class="comp-name">created_at</span></div>
+                        <div class="comp-row"><span class="kglyph">var</span><span class="comp-name">is_active</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- Hover -->
+              <div role="tabpanel" id="panel-hover" aria-labelledby="tab-hover" tabindex="0" hidden>
+                <div class="ed">
+                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">model.R</span></div>
+                  <div class="ed-body hover-wrap">
+                    <div class="hover-tip" aria-hidden="true">
+                      <code class="tip-sig"><span class="t-cap">add</span>: <span class="t-cap">{'<T: numeric>'}</span> fn(a: <span class="t-cap">T</span>, b: <span class="t-cap">T</span>) {'-> '}<span class="t-cap">T</span></code>
+                      <div class="tip-doc">Inferred — no annotation required.</div>
+                      <span class="tip-notch"></span>
+                    </div>
+                    <div class="ln hover-line"><span class="c-fn hover-tok">add</span><span class="hover-underline" aria-hidden="true"></span> {'<- '}<span class="c-kw">function</span>(a, b) a + b</div>
+                  </div>
+                </div>
+              </div>
+              <!-- Go-to-definition -->
+              <div role="tabpanel" id="panel-gotodef" aria-labelledby="tab-gotodef" tabindex="0" hidden>
+                <div class="ed">
+                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">model.R</span></div>
+                  <div class="ed-body gotodef-body">
+                    <svg class="gotodef-connector" viewBox="0 0 320 110" preserveAspectRatio="none" aria-hidden="true">
+                      <path class="gd-line" d="M70 20 C 30 44, 30 66, 58 86" />
+                      <path class="gd-arrow" d="M52 80 l 7 7 l 8 -4" />
+                    </svg>
+                    <div class="ln"><span class="c-fn">total</span> {'<- '}<span class="gd-link">score</span>(x)</div>
+                    <div class="gd-divider" aria-hidden="true"></div>
+                    <div class="ln gd-def"><span class="gd-gutter" aria-hidden="true"></span><span class="c-fn gd-name">score</span> {'<- '}<span class="c-kw">function</span>(x) x * weight</div>
+                  </div>
+                </div>
+              </div>
+              <!-- Find references -->
+              <div role="tabpanel" id="panel-refs" aria-labelledby="tab-refs" tabindex="0" hidden>
+                <div class="refs-wrap">
+                  <div class="refs-head"><span class="refs-chip"><span class="refs-count">3</span> references</span></div>
+                  <div class="ed">
+                    <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">model.R</span></div>
+                    <div class="ed-body">
+                      <div class="ln"><span class="c-fn">score</span> {'<- '}<span class="c-kw">function</span>(x) x * <span class="ref">weight</span></div>
+                      <div class="ln"><span class="c-fn">adj</span> {'<- '}<span class="ref">weight</span> * 2</div>
+                    </div>
+                  </div>
+                  <div class="ed">
+                    <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">score.R</span></div>
+                    <div class="ed-body">
+                      <div class="ln"><span class="ref">weight</span> {'<- '}0.7</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- Rename -->
+              <div role="tabpanel" id="panel-rename" aria-labelledby="tab-rename" tabindex="0" hidden>
+                <div class="ed">
+                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">model.R</span></div>
+                  <div class="ed-body">
+                    <div class="ln"><span class="c-fn">score</span> {'<- '}<span class="c-kw">function</span>(x) x * <span class="rename-box"><span class="rename-text">weight</span><span class="caret-blink" aria-hidden="true"></span></span></div>
+                    <div class="ln"><span class="c-fn">adj</span> {'<- '}<span class="ghost-tok">weight</span> * 2 <span class="will-dot" aria-hidden="true"></span></div>
+                    <div class="ln"><span class="ghost-tok">weight</span> {'<- '}0.7 <span class="will-dot" aria-hidden="true"></span></div>
+                  </div>
+                </div>
+              </div>
+              <!-- Inlay hints -->
+              <div role="tabpanel" id="panel-inlay" aria-labelledby="tab-inlay" tabindex="0" hidden>
+                <div class="ed">
+                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">model.R</span></div>
+                  <div class="ed-body">
+                    <div class="ln"><span class="c-fn">add</span> {'<- '}<span class="c-kw">function</span>(a, b) a + b <span class="inlay-pill">{'<T: numeric>'} fn(a: T, b: T) {'-> '}T</span></div>
+                    <div class="ln"><span class="c-fn">score</span>(<span class="inlay-arg">x:</span> data)</div>
+                  </div>
+                </div>
+                <p class="band-note">The inferred signature shows up as an inlay hint — no annotation required.</p>
+              </div>
+            </div>
+          </div>
+          <a class="doclink" href="/language-server">Language server docs <span aria-hidden="true">→</span></a>
+        </div>
+      </section>
+
+      <!-- ---------- code analysis ---------- -->
+      <section id="code-analysis" class="band band-spotlight has-accent accent-violet">
+        <div class="col">
+          <p class="eyebrow">check</p>
+          <div class="head-row">
+            <h2>Code analysis.</h2>
+            <span class="optin-chip" aria-hidden="true">opt-in</span>
+          </div>
+          <p class="lede">
+            Lint diagnostics flag problems before you run. Go deeper with the first static type
+            checker for R — Hindley-Milner inference that checks most code with zero annotations,
+            fully opt-in.
+          </p>
+        </div>
+        <div class="col show-col">
+          <div class="tabs cap-violet" data-tabs data-orientation="vertical">
+            <div role="tablist" aria-label="Code analysis" aria-orientation="vertical">
+              {
+                analysisTabs.map((t, i) => (
+                  <button
+                    role="tab"
+                    id={`tab-${t.key}`}
+                    aria-controls={`panel-${t.key}`}
+                    aria-selected={i === 0 ? 'true' : 'false'}
+                    tabindex={i === 0 ? 0 : -1}
+                  >
+                    {t.label}
+                  </button>
+                ))
+              }
+            </div>
+            <div class="tab-panels">
+              <!-- Type checking -->
+              <div role="tabpanel" id="panel-typecheck" aria-labelledby="tab-typecheck" tabindex="0">
+                <div class="ed">
+                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">model.R</span></div>
+                  <div class="ed-body">
+                    <div class="ln c-muted"><span class="ann-dot" tabindex="0" role="note" aria-label="A #: comment — an ordinary comment to every other R tool." data-tip="A #: comment — an ordinary comment to every other R tool.">#:</span> fn(count: integer) {'-> '}integer</div>
+                    <div class="ln"><span class="c-fn">double_count</span> {'<- '}<span class="c-kw">function</span>(count) count + count</div>
+                    <div class="ln"><span class="c-fn">double_count</span>(<span class="squig-wrap"><span class="c-str">"two"</span><span class="squig" aria-hidden="true"></span></span>)</div>
+                    <div class="ln caret-line" aria-hidden="true"><span class="caret">             ^^^^^</span></div>
+                    <div class="ln err-line"><span class="c-muted">#</span> <span class="diag-err">error[type-error]</span> expected <span class="pill">integer</span>, found <span class="pill">character</span></div>
+                  </div>
+                </div>
+                <p class="doclink-row"><a class="doclink" href="/type-checker">Type checker docs <span aria-hidden="true">→</span></a></p>
+              </div>
+              <!-- Inference -->
+              <div role="tabpanel" id="panel-inference" aria-labelledby="tab-inference" tabindex="0" hidden>
+                <div class="ed">
+                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">model.R</span></div>
+                  <div class="ed-body">
+                    <div class="ln"><span class="c-fn">add</span> {'<- '}<span class="c-kw">function</span>(<span class="param">a</span>, <span class="param">b</span>) <span class="param">a</span> + <span class="param">b</span>   <span class="infer-hint">{'# inferred: '}<span class="t-cap">{'<T: numeric>'}</span> fn(a: <span class="t-cap">T</span>, b: <span class="t-cap">T</span>) {'-> '}<span class="t-cap">T</span></span></div>
+                  </div>
+                </div>
+                <p class="band-note">Most code needs no annotations at all — inference resolves the types for you.</p>
+                <p class="doclink-row"><a class="doclink" href="/type-checker">How inference works <span aria-hidden="true">→</span></a></p>
+              </div>
+              <!-- Linting -->
+              <div role="tabpanel" id="panel-linting" aria-labelledby="tab-linting" tabindex="0" hidden>
+                <div class="ed term">
+                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">felix@host: ~/project</span></div>
+                  <div class="ed-body">
+                    <div class="ln"><span class="prompt">$</span> <span class="lint-cmd">roughly check</span></div>
+                    <div class="ln lint-err"><span class="diag-err">error:</span> Syntax Error: unexpected <span class="pill">{'"{"'}</span>  <span class="c-muted">(R/main.R)</span></div>
+                    <div class="ln lint-warn"><span class="diag-warn">warning:</span> variable <span class="pill">x</span> is never used  <span class="c-muted">(R/utils.R)</span></div>
+                  </div>
+                </div>
+                <p class="doclink-row"><a class="doclink" href="/linter">Linter docs <span aria-hidden="true">→</span></a></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- formatter ---------- -->
+      <section id="formatter" class="band has-accent accent-emerald">
+        <div class="col">
+          <p class="eyebrow">ship</p>
+          <h2>One consistent style.</h2>
+          <p class="lede">
+            Bad R reflows into formatted R in place — whitespace collapses and grows, indentation
+            snaps to a grid, quotes flip, and changed tokens flash red, then green, then settle.
+            <code>roughly fmt</code> (and <code>--diff</code> for CI).
+          </p>
+        </div>
+        <div class="col show-col">
+          <div class="tabs fmt-tabs cap-emerald" data-tabs data-morph-section data-orientation="horizontal">
+            <div role="tablist" aria-label="Formatter examples" aria-orientation="horizontal">
+              {
+                formatterTabs.map((t, i) => (
+                  <button
+                    role="tab"
+                    id={`tab-${t.key}`}
+                    aria-controls={`panel-${t.key}`}
+                    aria-selected={i === 0 ? 'true' : 'false'}
+                    tabindex={i === 0 ? 0 : -1}
+                  >
+                    {t.label}
+                  </button>
+                ))
+              }
+            </div>
+            <div class="tab-panels">
+              <!-- Spacing & operators -->
+              <div role="tabpanel" id="panel-spacing" aria-labelledby="tab-spacing" tabindex="0">
+                <div class="ed">
+                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">roughly fmt</span></div>
+                  <div class="ed-body fmt-body">
+                    <div class="fmt-morph" aria-hidden="true">
+                      <div class="fln" style="--i:0">
+                        <span class="tk">x_option</span>
+                        <span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span>
+                        <span class="tk">{'<-'}</span>
+                        <span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span>
+                        <span class="tk">function</span>
+                        <span class="tk">(</span>
+                        <span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span>
+                        <span class="tk">x</span>
+                        <span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span>
+                        <span class="tk">)</span>
+                        <span class="sp" style="--w:1ch;--wf:1ch"></span>
+                        <span class="tk">{'{'}</span>
+                      </div>
+                    </div>
+                    <span class="sr-only">x_option &lt;- function(x) {'{'}</span>
+                    <div class="fmt-static" aria-hidden="true">
+                      <div class="c-del">- x_option&lt;-function( x ) {'{'}</div>
+                      <div class="c-add">+ x_option &lt;- function(x) {'{'}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- Indentation -->
+              <div role="tabpanel" id="panel-indent" aria-labelledby="tab-indent" tabindex="0" hidden>
+                <div class="ed">
+                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">roughly fmt</span></div>
+                  <div class="ed-body fmt-body">
+                    <div class="fmt-morph" aria-hidden="true">
+                      <div class="fln" style="--i:0">
+                        <span class="sp" style="--w:2ch;--wf:2ch"></span>
+                        <span class="tk">{'}'}</span>
+                        <span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span>
+                        <span class="tk">else</span>
+                        <span class="sp" style="--w:1ch;--wf:1ch"></span>
+                        <span class="tk">if</span>
+                        <span class="sp" style="--w:1ch;--wf:1ch"></span>
+                        <span class="tk">(x</span>
+                        <span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span>
+                        <span class="tk">==</span>
+                        <span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span>
+                        <span class="tk">"b")</span>
+                        <span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span>
+                        <span class="tk">{'{'}</span>
+                      </div>
+                    </div>
+                    <span class="sr-only">{'  }'} else if (x == "b") {'{'}</span>
+                    <div class="fmt-static" aria-hidden="true">
+                      <div class="c-del">- {'  }'}else if (x=="b"){'{'}</div>
+                      <div class="c-add">+ {'  }'} else if (x == "b") {'{'}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- Strings & quotes -->
+              <div role="tabpanel" id="panel-quotes" aria-labelledby="tab-quotes" tabindex="0" hidden>
+                <div class="ed">
+                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">roughly fmt</span></div>
+                  <div class="ed-body fmt-body">
+                    <div class="fmt-morph" aria-hidden="true">
+                      <div class="fln" style="--i:0">
+                        <span class="sp" style="--w:2ch;--wf:2ch"></span>
+                        <span class="tk">stop(</span>
+                        <span class="ch"><span class="g-before" aria-hidden="true">'</span><span class="g-after">"</span></span>
+                        <span class="tk">Invalid `x` value</span>
+                        <span class="ch"><span class="g-before" aria-hidden="true">'</span><span class="g-after">"</span></span>
+                        <span class="tk">)</span>
+                      </div>
+                    </div>
+                    <span class="sr-only">{'  '}stop("Invalid `x` value")</span>
+                    <div class="fmt-static" aria-hidden="true">
+                      <div class="c-del">- {'  '}stop('Invalid `x` value')</div>
+                      <div class="c-add">+ {'  '}stop("Invalid `x` value")</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <a class="doclink" href="/formatter">Formatter docs <span aria-hidden="true">→</span></a>
+        </div>
+      </section>
+
+      <!-- ---------- get started ---------- -->
+      <section id="get-started" class="band band-closer">
+        <canvas id="closer-canvas" aria-hidden="true"></canvas>
+        <div class="col closer-col">
+          <p class="eyebrow">adopt</p>
+          <h2>Drop it onto your R project.</h2>
+          <p class="lede">
+            Nothing about your existing R has to change. Install Roughly, run it, and add the VS Code
+            extension.
+          </p>
+          <pre class="codeblock"><code><span class="c-muted"># install</span>
+cargo install roughly
+<span class="c-muted"># format, lint, and type-check</span>
+roughly fmt .
+roughly check .</code></pre>
+          <p class="band-note">
+            Grab the <a class="inline-link" href="https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly" target="_blank" rel="noopener">VS Code extension</a>
+            from the Marketplace, then tune behavior in <a class="inline-link" href="/configuration">configuration</a>.
+          </p>
+          <div class="cta-cluster">
+            <a class="cta cta-lg" href="/getting-started">Get started</a>
+            <a
+              class="btn-vscode"
+              href="https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly"
+              target="_blank"
+              rel="noopener"
+            >
+              <svg class="brand-logo" width="18" height="18" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <mask id="vscMaskCloser" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+                  <path fill-rule="evenodd" clip-rule="evenodd" d="M70.9119 99.3171C72.4869 99.9307 74.2828 99.8914 75.8725 99.1264L96.4604 89.2197C98.6242 88.1787 100 85.9892 100 83.5872V16.4133C100 14.0113 98.6243 11.8218 96.4605 10.7808L75.8725 0.873756C73.7862 -0.130129 71.3446 0.11576 69.5135 1.44695C69.252 1.63711 69.0028 1.84943 68.769 2.08341L29.3551 38.0387L12.1872 25.0054C10.589 23.7919 8.35363 23.8919 6.86933 25.2444L1.36303 30.2592C-0.453713 31.9133 -0.455738 34.7779 1.35853 36.4347L16.2471 50.0001L1.35853 63.5655C-0.455738 65.2223 -0.453713 68.0869 1.36303 69.7411L6.86933 74.7558C8.35363 76.1084 10.589 76.2083 12.1872 74.9948L29.3551 61.9615L68.769 97.9168C69.3897 98.5345 70.1186 98.9942 70.9119 99.3171ZM75.0152 27.2989L45.1091 50.0001L75.0152 72.7012V27.2989Z" fill="white"/>
+                </mask>
+                <g mask="url(#vscMaskCloser)"><rect width="100" height="100" fill="#0098FF"/></g>
+              </svg>
+              <span>Install in VS Code</span>
+            </a>
+            <span class="btn-soon" aria-disabled="true">
+              <span>Zed</span>
+              <span class="soon-pill">soon</span>
+            </span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <a class="brand" href="/getting-started" aria-label="Roughly home">
+          <img class="logo" src="/logo.svg" alt="" width="20" height="20" />
+          <span class="wordmark">Roughly</span>
+        </a>
+        <nav class="footer-links" aria-label="Footer">
+          {
+            footerLinks.map((l) => (
+              <a href={l.href}>{l.label}</a>
+            ))
+          }
+        </nav>
+      </div>
+    </footer>
+
+    <script>
+      // ======================================================================
+      // Hero particle field: logo -> particles one-shot intro, then ambient.
+      // ======================================================================
+      type Particle = {
+        x: number
+        y: number
+        vx: number
+        vy: number
+        tx: number
+        ty: number
+        depth: number
+        target: boolean
+        bonded: boolean
+      }
+      type Target = { x: number; y: number }
+
+      const heroCanvas = document.getElementById('hero-canvas') as HTMLCanvasElement | null
+      const heroEl = document.getElementById('hero') as HTMLElement | null
+
+      function initHero() {
+        if (!heroCanvas || !heroEl) return
+        const ctx = heroCanvas.getContext('2d')
+        if (!ctx) return
+        const context = ctx
+        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+        const INTRO_DELAY = 0.25
+        const ASSEMBLE = 1.7
+        const HOLD = 1.3
+        const DISPERSE = 2.0
+        const disperseStart = INTRO_DELAY + ASSEMBLE + HOLD
+
+        let dpr = Math.min(window.devicePixelRatio || 1, 2)
+        let cssW = 0
+        let cssH = 0
+        let particles: Particle[] = []
+        let targets: Target[] = []
+        let running = false
+        let rafId = 0
+        let lastTime = 0
+        let clock = 0
+        let centroidX = 0
+        let centroidY = 0
+        const mouse = { x: -9999, y: -9999, active: false }
+
+        const logoImg = new Image()
+        const logoReady = (async () => {
+          logoImg.src = '/logo.svg'
+          try {
+            await logoImg.decode()
+          } catch {
+            await new Promise<void>((resolve) => {
+              logoImg.onload = () => resolve()
+              logoImg.onerror = () => resolve()
+            })
+          }
+        })()
+
+        function particleCount() {
+          return cssW < 720 ? 2400 : cssW < 1100 ? 3800 : 5000
+        }
+        function sampleStride() {
+          return cssW < 720 ? 4 : 3
+        }
+        function clamp01(t: number) {
+          return t < 0 ? 0 : t > 1 ? 1 : t
+        }
+        function smooth01(t: number) {
+          return t * t * (3 - 2 * t)
+        }
+
+        function hash(ix: number, iy: number) {
+          const n = Math.sin(ix * 127.1 + iy * 311.7) * 43758.5453
+          return n - Math.floor(n)
+        }
+        function valueNoise(x: number, y: number) {
+          const ix = Math.floor(x)
+          const iy = Math.floor(y)
+          const fx = smooth01(x - ix)
+          const fy = smooth01(y - iy)
+          const a = hash(ix, iy)
+          const b = hash(ix + 1, iy)
+          const c = hash(ix, iy + 1)
+          const d = hash(ix + 1, iy + 1)
+          return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy
+        }
+        function flowAngle(x: number, y: number, t: number) {
+          return valueNoise(x * 0.0016 + t * 0.025, y * 0.0016 - t * 0.012) * Math.PI * 4
+        }
+
+        function buildTargets() {
+          const SS = 2
+          const logoH = Math.min(cssH * 0.46, 360)
+          const logoW = logoH * 0.75
+          const left = (cssW - logoW) / 2
+          const top = ((cssH - logoH) / 2) * 0.92
+          centroidX = left + logoW / 2
+          centroidY = top + logoH / 2
+          targets = []
+          if (!logoImg.width || !logoImg.height) return
+
+          const off = document.createElement('canvas')
+          off.width = Math.max(2, Math.round(logoW * SS))
+          off.height = Math.max(2, Math.round(logoH * SS))
+          const octx = off.getContext('2d')
+          if (!octx) return
+          octx.clearRect(0, 0, off.width, off.height)
+          octx.drawImage(logoImg, 0, 0, off.width, off.height)
+          let data: Uint8ClampedArray
+          try {
+            data = octx.getImageData(0, 0, off.width, off.height).data
+          } catch {
+            return
+          }
+
+          const want = Math.round(particleCount() * 0.8)
+          const baseStride = sampleStride() * SS
+          const sample = (st: number) => {
+            const out: Target[] = []
+            for (let sy = Math.floor(st / 2); sy < off.height; sy += st) {
+              for (let sx = Math.floor(st / 2); sx < off.width; sx += st) {
+                const alpha = data[(sy * off.width + sx) * 4 + 3]
+                if (alpha > 128) {
+                  out.push({
+                    x: left + sx / SS + (Math.random() - 0.5),
+                    y: top + sy / SS + (Math.random() - 0.5),
+                  })
+                }
+              }
+            }
+            return out
+          }
+          let pts = sample(baseStride)
+          if (pts.length > want * 1.15) pts = sample(baseStride + 1)
+          else if (pts.length < want * 0.7 && baseStride > SS) pts = sample(baseStride - 1)
+          targets = pts
+        }
+
+        function spawnParticles() {
+          const count = particleCount()
+          particles = []
+          for (let i = 0; i < count; i++) {
+            particles.push({
+              x: Math.random() * cssW,
+              y: Math.random() * cssH,
+              vx: 0,
+              vy: 0,
+              tx: 0,
+              ty: 0,
+              depth: 0.35 + Math.random() * 0.65,
+              target: false,
+              bonded: false,
+            })
+          }
+        }
+
+        function assignTargets() {
+          const n = Math.min(particles.length, targets.length)
+          for (let i = 0; i < particles.length; i++) {
+            const p = particles[i]
+            if (i < n) {
+              p.tx = targets[i].x
+              p.ty = targets[i].y
+              p.target = true
+            } else {
+              p.target = false
+            }
+            p.bonded = false
+          }
+        }
+
+        function relayout() {
+          dpr = Math.min(window.devicePixelRatio || 1, 2)
+          const r = heroEl!.getBoundingClientRect()
+          cssW = r.width
+          cssH = r.height
+          heroCanvas!.width = Math.floor(cssW * dpr)
+          heroCanvas!.height = Math.floor(cssH * dpr)
+          heroCanvas!.style.width = cssW + 'px'
+          heroCanvas!.style.height = cssH + 'px'
+          context.setTransform(dpr, 0, 0, dpr, 0, 0)
+          buildTargets()
+          spawnParticles()
+          assignTargets()
+        }
+
+        function drawStatic() {
+          context.clearRect(0, 0, cssW, cssH)
+          context.fillStyle = '#fff'
+          for (let i = 0; i < particles.length; i++) {
+            const p = particles[i]
+            if (p.target) {
+              const s = p.depth > 0.66 ? 2 : 1
+              context.globalAlpha = Math.min(1, 0.18 + p.depth * 0.34 + 0.22)
+              context.fillRect(p.tx, p.ty, s, s)
+            } else if (i % 7 === 0) {
+              context.globalAlpha = 0.12
+              context.fillRect(p.x, p.y, 1, 1)
+            }
+          }
+          context.globalAlpha = 1
+        }
+
+        function step(now: number) {
+          if (!running) return
+          if (lastTime === 0) lastTime = now
+          let dt = (now - lastTime) / 1000
+          lastTime = now
+          if (dt > 0.05) dt = 0.05
+          const prevClock = clock
+          clock += dt
+
+          const assembleP = clamp01((clock - INTRO_DELAY) / ASSEMBLE)
+          const disperseP = clamp01((clock - disperseStart) / DISPERSE)
+          let focus: number
+          if (clock < INTRO_DELAY) focus = 0
+          else if (clock < INTRO_DELAY + ASSEMBLE) focus = smooth01(assembleP)
+          else if (clock < disperseStart) focus = 1
+          else focus = 1 - smooth01(disperseP)
+          const assembling = clock >= INTRO_DELAY && clock < disperseStart
+          const inHold = clock >= INTRO_DELAY + ASSEMBLE && clock < disperseStart
+          const holdP = inHold ? (clock - (INTRO_DELAY + ASSEMBLE)) / HOLD : 0
+
+          if (prevClock < disperseStart && clock >= disperseStart) {
+            for (const p of particles) {
+              if (!p.target) continue
+              p.vx += (p.x - centroidX) * 0.012 + (Math.random() - 0.5) * 0.3
+              p.vy += (p.y - centroidY) * 0.012 + (Math.random() - 0.5) * 0.3
+            }
+          }
+
+          context.fillStyle = 'rgba(0,0,0,0.14)'
+          context.fillRect(0, 0, cssW, cssH)
+          context.fillStyle = '#fff'
+
+          const k = 0.035 * (0.3 + 0.7 * focus)
+
+          for (let i = 0; i < particles.length; i++) {
+            const p = particles[i]
+            if (assembling && p.target) {
+              p.vx += (p.tx - p.x) * k
+              p.vy += (p.ty - p.y) * k
+              p.vx *= 0.88
+              p.vy *= 0.88
+              p.x += p.vx
+              p.y += p.vy
+              const dx = p.tx - p.x
+              const dy = p.ty - p.y
+              p.bonded = dx * dx + dy * dy < 2.25
+            } else {
+              const ang = flowAngle(p.x, p.y, clock)
+              p.vx += Math.cos(ang) * 0.05
+              p.vy += Math.sin(ang) * 0.05
+              if (mouse.active) {
+                const mdx = p.x - mouse.x
+                const mdy = p.y - mouse.y
+                const d2 = mdx * mdx + mdy * mdy
+                if (d2 < 16000 && d2 > 0.01) {
+                  const f = (1 - d2 / 16000) * 0.9
+                  const inv = 1 / Math.sqrt(d2)
+                  p.vx += mdx * inv * f
+                  p.vy += mdy * inv * f
+                }
+              }
+              p.vx *= 0.92
+              p.vy *= 0.92
+              p.x += p.vx
+              p.y += p.vy
+              if (p.x < -4) p.x += cssW + 8
+              else if (p.x > cssW + 4) p.x -= cssW + 8
+              if (p.y < -4) p.y += cssH + 8
+              else if (p.y > cssH + 4) p.y -= cssH + 8
+              p.bonded = false
+            }
+
+            const s = p.depth > 0.66 ? 2 : 1
+            let a: number
+            if (p.target) {
+              a = (0.18 + p.depth * 0.34) * (0.45 + 0.55 * focus)
+              if (p.bonded) a += 0.22 * focus
+              if (p.bonded && inHold) a += 0.1 * Math.sin(holdP * Math.PI)
+            } else {
+              a = 0.14 + p.depth * 0.22
+            }
+            if (a <= 0.01) continue
+            context.globalAlpha = a > 1 ? 1 : a
+            context.fillRect(p.x, p.y, s, s)
+          }
+
+          context.globalAlpha = 1
+          rafId = requestAnimationFrame(step)
+        }
+
+        function start() {
+          if (running) return
+          running = true
+          lastTime = 0
+          rafId = requestAnimationFrame(step)
+        }
+        function stop() {
+          running = false
+          if (rafId) cancelAnimationFrame(rafId)
+          rafId = 0
+        }
+
+        let resizeTimer = 0
+        window.addEventListener('resize', () => {
+          window.clearTimeout(resizeTimer)
+          resizeTimer = window.setTimeout(() => {
+            relayout()
+            if (reduceMotion) drawStatic()
+          }, 150)
+        })
+        window.addEventListener('mousemove', (e) => {
+          const r = heroCanvas!.getBoundingClientRect()
+          mouse.x = e.clientX - r.left
+          mouse.y = e.clientY - r.top
+          mouse.active = mouse.y >= 0 && mouse.y <= cssH
+        })
+        window.addEventListener('mouseleave', () => (mouse.active = false))
+
+        const begin = () => {
+          relayout()
+          if (reduceMotion) {
+            drawStatic()
+            return
+          }
+          if (typeof IntersectionObserver === 'undefined') {
+            start()
+            return
+          }
+          const observer = new IntersectionObserver(
+            (entries) => {
+              for (const entry of entries) {
+                if (entry.isIntersecting) start()
+                else stop()
+              }
+            },
+            { threshold: 0.04 }
+          )
+          observer.observe(heroEl!)
+        }
+
+        const fontsReady =
+          document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()
+        Promise.all([fontsReady, logoReady]).then(begin).catch(begin)
+      }
+
+      // ======================================================================
+      // Reusable accessible tabs (roving tabindex, arrows, focus-follows).
+      // ======================================================================
+      function setupTabs(root: HTMLElement) {
+        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        const tablist = root.querySelector('[role="tablist"]')
+        const tabs = Array.from(root.querySelectorAll('[role="tab"]')) as HTMLElement[]
+        const panels = tabs.map(
+          (t) => root.querySelector('#' + t.getAttribute('aria-controls')) as HTMLElement | null
+        )
+        const isMorph = root.hasAttribute('data-morph-section')
+        let visible = false
+        let loopTimer = 0
+        const timers = new WeakMap<HTMLElement, number[]>()
+        const intervals = new WeakMap<HTMLElement, number[]>()
+
+        if (reduce && isMorph) root.classList.add('reduced')
+        if (isMorph) {
+          for (const p of panels) if (p) p.classList.add('is-formatted', 'is-settled')
+        }
+        if (reduce) applyReducedEndStates()
+
+        function selectedIndex() {
+          return tabs.findIndex((t) => t.getAttribute('aria-selected') === 'true')
+        }
+
+        function activate(index: number, focusTab: boolean) {
+          tabs.forEach((t, i) => {
+            const sel = i === index
+            t.setAttribute('aria-selected', sel ? 'true' : 'false')
+            t.tabIndex = sel ? 0 : -1
+            const panel = panels[i]
+            if (panel) {
+              if (sel) panel.hidden = false
+              else {
+                panel.hidden = true
+                stopSignature(panel)
+              }
+            }
+          })
+          if (focusTab) tabs[index].focus()
+          const panel = panels[index]
+          if (panel && visible) triggerSignature(panel)
+        }
+
+        function triggerSignature(panel: HTMLElement) {
+          if (reduce) return
+          if (isMorph) {
+            playMorph(panel)
+            return
+          }
+          panel.classList.remove('play')
+          void panel.offsetWidth
+          panel.classList.add('play')
+          runJsSignature(panel)
+        }
+        function stopSignature(panel: HTMLElement) {
+          panel.classList.remove('play')
+          if (isMorph) clearMorphTimers(panel)
+          cancelJs(panel)
+        }
+
+        function clearMorphTimers(panel: HTMLElement) {
+          const ts = timers.get(panel)
+          if (ts) for (const id of ts) clearTimeout(id)
+          timers.set(panel, [])
+        }
+        function playMorph(panel: HTMLElement) {
+          if (reduce) return
+          clearMorphTimers(panel)
+          panel.classList.add('no-anim')
+          panel.classList.remove('is-formatted', 'is-settled')
+          void panel.offsetWidth
+          panel.classList.remove('no-anim')
+          const t1 = window.setTimeout(() => panel.classList.add('is-formatted'), 250)
+          const t2 = window.setTimeout(() => panel.classList.add('is-settled'), 250 + 700 + 350)
+          timers.set(panel, [t1, t2])
+        }
+
+        function runJsSignature(panel: HTMLElement) {
+          cancelJs(panel)
+          if (panel.id === 'panel-refs') {
+            const el = panel.querySelector('.refs-count')
+            if (!el) return
+            let n = 0
+            el.textContent = '0'
+            const id = window.setInterval(() => {
+              n++
+              el.textContent = String(n)
+              if (n >= 3) {
+                window.clearInterval(id)
+              }
+            }, 130)
+            intervals.set(panel, [id])
+          } else if (panel.id === 'panel-rename') {
+            const box = panel.querySelector('.rename-text') as HTMLElement | null
+            const ghosts = Array.from(panel.querySelectorAll('.ghost-tok')) as HTMLElement[]
+            if (!box) return
+            box.textContent = 'weight'
+            ghosts.forEach((g) => {
+              g.textContent = 'weight'
+              g.classList.remove('flip')
+            })
+            const target = 'coefficient'
+            let current = 'weight'
+            let phase = 0
+            const id = window.setInterval(() => {
+              if (phase === 0) {
+                current = current.slice(0, -1)
+                box.textContent = current
+                if (current.length === 0) phase = 1
+              } else {
+                current = target.slice(0, current.length + 1)
+                box.textContent = current
+                if (current === target) {
+                  window.clearInterval(id)
+                  ghosts.forEach((g) => {
+                    g.textContent = 'coefficient'
+                    g.classList.add('flip')
+                  })
+                }
+              }
+            }, 42)
+            intervals.set(panel, [id])
+          }
+        }
+        function cancelJs(panel: HTMLElement) {
+          const ids = intervals.get(panel)
+          if (ids) for (const id of ids) clearInterval(id)
+          intervals.set(panel, [])
+        }
+
+        function applyReducedEndStates() {
+          const rename = root.querySelector('#panel-rename')
+          if (rename) {
+            const box = rename.querySelector('.rename-text')
+            if (box) box.textContent = 'coefficient'
+            rename.querySelectorAll('.ghost-tok').forEach((g) => (g.textContent = 'coefficient'))
+            rename.classList.add('renamed')
+          }
+        }
+
+        if (tablist) {
+          tablist.addEventListener('keydown', (e) => {
+            const ev = e as KeyboardEvent
+            const cur = selectedIndex()
+            const n = tabs.length
+            let next = -1
+            if (ev.key === 'ArrowDown' || ev.key === 'ArrowRight') next = (cur + 1) % n
+            else if (ev.key === 'ArrowUp' || ev.key === 'ArrowLeft') next = (cur - 1 + n) % n
+            else if (ev.key === 'Home') next = 0
+            else if (ev.key === 'End') next = n - 1
+            else return
+            ev.preventDefault()
+            activate(next, true)
+          })
+        }
+        tabs.forEach((t, i) => t.addEventListener('click', () => activate(i, true)))
+
+        function startLoop() {
+          if (!isMorph || reduce) return
+          stopLoop()
+          loopTimer = window.setInterval(() => {
+            if (!visible) return
+            const idx = selectedIndex()
+            const panel = panels[idx >= 0 ? idx : 0]
+            if (panel) playMorph(panel)
+          }, 4500)
+        }
+        function stopLoop() {
+          if (loopTimer) {
+            clearInterval(loopTimer)
+            loopTimer = 0
+          }
+        }
+
+        if (typeof IntersectionObserver !== 'undefined') {
+          const io = new IntersectionObserver(
+            (entries) => {
+              for (const en of entries) {
+                visible = en.intersectionRatio >= 0.35
+                if (visible) {
+                  const idx = selectedIndex()
+                  const panel = panels[idx >= 0 ? idx : 0]
+                  if (panel) triggerSignature(panel)
+                  startLoop()
+                } else {
+                  stopLoop()
+                  for (const p of panels) if (p) stopSignature(p)
+                }
+              }
+            },
+            { threshold: [0, 0.35, 0.6] }
+          )
+          io.observe(root)
+        } else {
+          visible = true
+          const idx = selectedIndex()
+          const panel = panels[idx >= 0 ? idx : 0]
+          if (panel) triggerSignature(panel)
+        }
+      }
+
+      // ======================================================================
+      // Closer: faint static particle dusting.
+      // ======================================================================
+      function initCloser() {
+        const c = document.getElementById('closer-canvas') as HTMLCanvasElement | null
+        const section = document.getElementById('get-started') as HTMLElement | null
+        if (!c || !section) return
+        const ctx = c.getContext('2d')
+        if (!ctx) return
+        function paint() {
+          const dpr = Math.min(window.devicePixelRatio || 1, 2)
+          const r = section!.getBoundingClientRect()
+          const w = Math.max(2, r.width)
+          const h = Math.max(2, r.height)
+          c!.width = Math.floor(w * dpr)
+          c!.height = Math.floor(h * dpr)
+          c!.style.width = w + 'px'
+          c!.style.height = h + 'px'
+          ctx!.setTransform(dpr, 0, 0, dpr, 0, 0)
+          ctx!.clearRect(0, 0, w, h)
+          ctx!.fillStyle = '#fff'
+          const n = w < 720 ? 240 : 420
+          for (let i = 0; i < n; i++) {
+            const depth = Math.random()
+            ctx!.globalAlpha = 0.04 + depth * 0.06
+            ctx!.fillRect(Math.random() * w, Math.random() * h, depth > 0.7 ? 2 : 1, depth > 0.7 ? 2 : 1)
+          }
+          ctx!.globalAlpha = 1
+        }
+        let timer = 0
+        window.addEventListener('resize', () => {
+          window.clearTimeout(timer)
+          timer = window.setTimeout(paint, 150)
+        })
+        paint()
+      }
+
+      function initNav() {
+        const nav = document.getElementById('nav')
+        if (!nav) return
+        const onScroll = () => nav.classList.toggle('scrolled', window.scrollY > 8)
+        onScroll()
+        window.addEventListener('scroll', onScroll, { passive: true })
+      }
+
+      initHero()
+      document
+        .querySelectorAll('[data-tabs]')
+        .forEach((el) => setupTabs(el as HTMLElement))
+      initCloser()
+      initNav()
+    </script>
+
+    <style is:global>
+      :root {
+        color-scheme: dark;
+        --background: oklch(0.145 0 0);
+        --foreground: oklch(0.985 0 0);
+        --card: oklch(0.205 0 0);
+        --muted: oklch(0.708 0 0);
+        --border: oklch(1 0 0 / 10%);
+        --border-strong: oklch(1 0 0 / 16%);
+        --code-bg: oklch(0.21 0.01 286);
+        --radius: 0.5rem;
+        --frame: 1080px;
+        --prose: 720px;
+        --code: 760px;
+
+        /* engineered capability triad */
+        --cap-cyan: oklch(0.8 0.115 215);
+        --cap-violet: oklch(0.72 0.145 292);
+        --cap-emerald: oklch(0.76 0.135 162);
+        /* formatter diff */
+        --del: oklch(0.62 0.17 27);
+        --add: oklch(0.72 0.16 150);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        background: var(--background);
+        color: var(--foreground);
+        font-family: 'Geist Sans', system-ui, sans-serif;
+        font-size: 16px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        overflow-x: hidden;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      code,
+      pre {
+        font-family: 'Geist Mono', ui-monospace, monospace;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      /* ---------- nav (docs header parity) ---------- */
+      .nav {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1.5rem;
+        height: 56px;
+        padding: 0 16px;
+        background: oklch(0.145 0 0 / 0.6);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        border-bottom: 1px solid oklch(1 0 0 / 0.1);
+        transition: background 0.2s ease;
+      }
+      .nav.scrolled {
+        background: oklch(0.145 0 0 / 0.78);
+      }
+      @media (min-width: 1200px) {
+        .nav {
+          padding: 0 24px;
+        }
+      }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .brand .logo {
+        display: block;
+      }
+      .wordmark {
+        font-size: 16px;
+      }
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        font-size: 14px;
+      }
+      .nav-links a {
+        color: oklch(0.985 0 0 / 0.8);
+        transition: color 0.15s ease;
+      }
+      .nav-links a:hover {
+        color: var(--foreground);
+      }
+      .nav-links .cta {
+        color: var(--background);
+        background: var(--foreground);
+        padding: 0.35rem 0.8rem;
+        border-radius: var(--radius);
+        font-weight: 500;
+        transition: opacity 0.15s ease;
+      }
+      .nav-links .cta:hover {
+        opacity: 0.86;
+        color: var(--background);
+      }
+      @media (max-width: 880px) {
+        .nav-links a:not(.cta):not([href*='github']) {
+          display: none;
+        }
+        .nav-links {
+          gap: 16px;
+        }
+      }
+
+      /* ---------- hero ---------- */
+      #hero {
+        position: relative;
+        min-height: calc(100svh - 56px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        border-bottom: 1px solid var(--border);
+      }
+      #hero-canvas {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+      }
+      .hero-vignette {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        pointer-events: none;
+        background: radial-gradient(
+          ellipse 72% 62% at 50% 42%,
+          oklch(0.145 0 0 / 0.64) 0%,
+          oklch(0.145 0 0 / 0.32) 45%,
+          transparent 100%
+        );
+      }
+      .hero-copy {
+        position: relative;
+        z-index: 2;
+        width: 100%;
+        max-width: var(--prose);
+        padding: 3.5rem clamp(1.2rem, 5vw, 2rem) 4rem;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1.25rem;
+        text-align: left;
+      }
+      .hero-copy h1 {
+        margin: 0;
+        font-weight: 600;
+        font-size: clamp(2.4rem, 7vw, 4rem);
+        line-height: 1;
+        letter-spacing: -0.04em;
+      }
+      .hero-copy .subhead {
+        margin: 0;
+        max-width: 48ch;
+        font-size: clamp(1rem, 2.2vw, 1.16rem);
+        color: oklch(0.86 0 0);
+      }
+      .cta-cluster {
+        display: flex;
+        gap: 0.7rem;
+        flex-wrap: wrap;
+        margin-top: 0.3rem;
+        align-items: center;
+      }
+
+      /* ---------- shared eyebrow ---------- */
+      .eyebrow {
+        margin: 0;
+        font-family: 'Geist Mono', monospace;
+        font-size: 0.76rem;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        text-transform: lowercase;
+      }
+
+      /* ---------- buttons (all SOLID) ---------- */
+      .cta {
+        display: inline-flex;
+        align-items: center;
+        color: var(--background);
+        background: var(--foreground);
+        padding: 0.6rem 1.2rem;
+        border-radius: var(--radius);
+        font-weight: 500;
+        font-size: 0.92rem;
+        transition: opacity 0.15s ease;
+      }
+      .cta:hover {
+        opacity: 0.86;
+        color: var(--background);
+      }
+      .cta-lg {
+        padding: 0.62rem 1.25rem;
+      }
+      .btn-vscode {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
+        color: var(--foreground);
+        background: oklch(0.24 0 0);
+        border: 1px solid var(--border-strong);
+        padding: 0.6rem 1.2rem;
+        border-radius: var(--radius);
+        font-weight: 500;
+        font-size: 0.92rem;
+        transition: background 0.15s ease, border-color 0.15s ease;
+      }
+      .btn-vscode:hover {
+        background: oklch(0.28 0 0);
+        border-color: oklch(1 0 0 / 0.24);
+      }
+      .btn-vscode .brand-logo {
+        display: block;
+        flex: none;
+      }
+      .btn-soon {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: var(--muted);
+        background: oklch(0.19 0 0);
+        border: 1px solid var(--border);
+        padding: 0.6rem 1.2rem;
+        border-radius: var(--radius);
+        font-weight: 500;
+        font-size: 0.92rem;
+        cursor: not-allowed;
+      }
+      .soon-pill {
+        font-family: 'Geist Mono', monospace;
+        font-size: 0.66rem;
+        letter-spacing: 0.03em;
+        text-transform: lowercase;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 0.06rem 0.42rem;
+        line-height: 1.4;
+      }
+
+      /* ---------- editorial bands ---------- */
+      .band {
+        position: relative;
+        padding: clamp(2.6rem, 5vw, 4rem) clamp(1.2rem, 5vw, 2.5rem);
+        border-bottom: 1px solid var(--border);
+        overflow: hidden;
+      }
+      .band.has-accent::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        background: radial-gradient(
+          60% 46% at 50% 0%,
+          color-mix(in oklch, var(--cap) 9%, transparent),
+          transparent 72%
+        );
+      }
+      .band > * {
+        position: relative;
+        z-index: 1;
+      }
+      .accent-cyan {
+        --cap: var(--cap-cyan);
+      }
+      .accent-violet {
+        --cap: var(--cap-violet);
+      }
+      .accent-emerald {
+        --cap: var(--cap-emerald);
+      }
+      .col {
+        max-width: var(--prose);
+        margin: 0 auto;
+      }
+      .show-col {
+        max-width: 980px;
+        margin: 1.6rem auto 0;
+      }
+      .band h2 {
+        margin: 0.7rem 0 0.85rem;
+        font-weight: 600;
+        font-size: clamp(1.6rem, 4vw, 2.3rem);
+        letter-spacing: -0.03em;
+        line-height: 1.06;
+      }
+      .head-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+      .head-row h2 {
+        margin-bottom: 0;
+      }
+      .optin-chip {
+        font-family: 'Geist Mono', monospace;
+        font-size: 0.7rem;
+        letter-spacing: 0.03em;
+        color: var(--cap-violet);
+        background: color-mix(in oklch, var(--cap-violet) 12%, transparent);
+        border: 1px solid color-mix(in oklch, var(--cap-violet) 34%, var(--border));
+        border-radius: 999px;
+        padding: 0.1rem 0.55rem;
+        transform: translateY(0.2rem);
+      }
+      .lede {
+        margin: 0;
+        max-width: 58ch;
+        font-size: clamp(1rem, 2vw, 1.1rem);
+        color: oklch(0.86 0 0);
+      }
+      .lede code {
+        color: var(--foreground);
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 0.35rem;
+        padding: 0.02rem 0.32rem;
+        font-size: 0.86em;
+      }
+      .band-note {
+        margin: 1.1rem 0 0;
+        max-width: 58ch;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+      .band-note code {
+        color: var(--foreground);
+        font-size: 0.88em;
+      }
+
+      /* ---------- doc links ---------- */
+      .doclink {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        margin-top: 1.3rem;
+        font-family: 'Geist Mono', monospace;
+        font-size: 0.84rem;
+        color: var(--foreground);
+        border-bottom: 1px solid var(--border-strong);
+        padding-bottom: 0.1rem;
+        transition: border-color 0.15s ease;
+      }
+      .doclink:hover {
+        border-bottom-color: var(--foreground);
+      }
+      .doclink span {
+        transition: transform 0.15s ease;
+      }
+      .doclink:hover span {
+        transform: translateX(2px);
+      }
+      .doclink-row {
+        display: flex;
+        gap: 1.6rem;
+        flex-wrap: wrap;
+        margin: 0;
+      }
+      .inline-link {
+        color: var(--foreground);
+        border-bottom: 1px solid var(--border-strong);
+        transition: border-color 0.15s ease;
+      }
+      .inline-link:hover {
+        border-bottom-color: var(--foreground);
+      }
+
+      /* ---------- capabilities triad ---------- */
+      .cap-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1px;
+        background: var(--border);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+      .cap {
+        background: var(--background);
+        padding: 1.6rem 1.4rem 1.7rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+      }
+      .cap-badge {
+        width: 40px;
+        height: 40px;
+        border-radius: 11px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: color-mix(in oklch, var(--cap) 14%, transparent);
+        border: 1px solid color-mix(in oklch, var(--cap) 38%, var(--border));
+        box-shadow:
+          inset 0 0 0 1px color-mix(in oklch, var(--cap) 10%, transparent),
+          0 0 20px -6px color-mix(in oklch, var(--cap) 30%, transparent);
+        transition: border-color 0.18s ease, box-shadow 0.18s ease;
+        margin-bottom: 0.2rem;
+      }
+      .cap:hover .cap-badge {
+        border-color: color-mix(in oklch, var(--cap) 55%, var(--border));
+        box-shadow:
+          inset 0 0 0 1px color-mix(in oklch, var(--cap) 12%, transparent),
+          0 0 26px -6px color-mix(in oklch, var(--cap) 40%, transparent);
+      }
+      .cap-icon {
+        width: 24px;
+        height: 24px;
+      }
+      .cap-icon path,
+      .cap-icon circle {
+        stroke: var(--cap);
+        stroke-width: 1.75;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .cap-icon .node {
+        fill: var(--cap);
+        stroke: none;
+      }
+      .cap-icon .arc {
+        opacity: 0.7;
+        stroke-dasharray: 16;
+        stroke-dashoffset: 0;
+        transition: stroke-dashoffset 0.5s ease;
+      }
+      .cap:hover .cap-icon .arc-1 {
+        stroke-dashoffset: -16;
+      }
+      .cap:hover .cap-icon .arc-2 {
+        stroke-dashoffset: -16;
+      }
+      .cap-icon .lens,
+      .cap-icon .handle,
+      .cap-icon .node {
+        transition: transform 0.18s ease;
+        transform-origin: 11px 11px;
+      }
+      .cap:hover .cap-icon .lens {
+        transform: scale(1.04);
+      }
+      .cap-icon .connector {
+        stroke-dasharray: 3;
+        stroke-dashoffset: 3;
+        transition: stroke-dashoffset 0.3s ease 0.05s;
+      }
+      .cap:hover .cap-icon .connector {
+        stroke-dashoffset: 0;
+      }
+      .cap-icon .guide {
+        opacity: 0.55;
+      }
+      .cap-icon .tick {
+        opacity: 0.5;
+        transition: transform 0.2s ease;
+        transform-origin: left;
+      }
+      .cap:hover .cap-icon .tick-1 {
+        transform: translateX(1.5px);
+      }
+      .cap:hover .cap-icon .tick-2 {
+        transform: translateX(1.5px);
+      }
+      .cap h3 {
+        margin: 0;
+        font-weight: 600;
+        font-size: 1.1rem;
+        letter-spacing: -0.02em;
+      }
+      .cap p {
+        margin: 0;
+        flex: 1;
+        font-size: 0.9rem;
+        color: oklch(0.8 0 0);
+      }
+      .cap .doclink {
+        margin-top: 0.4rem;
+        font-size: 0.78rem;
+      }
+      @media (max-width: 760px) {
+        .cap-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* ---------- code blocks ---------- */
+      .codeblock {
+        margin: 1.4rem 0 0;
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.1rem 1.25rem;
+        overflow-x: auto;
+        font-family: 'Geist Mono', monospace;
+        font-size: clamp(0.78rem, 1.6vw, 0.9rem);
+        line-height: 1.85;
+        tab-size: 2;
+      }
+      .codeblock code {
+        white-space: pre;
+        display: block;
+      }
+      .c-muted {
+        color: var(--muted);
+      }
+      .c-kw {
+        color: oklch(0.88 0 0);
+      }
+      .c-fn {
+        color: var(--foreground);
+      }
+      .c-str {
+        color: oklch(0.82 0 0);
+      }
+      .caret {
+        color: var(--foreground);
+        letter-spacing: 0;
+        white-space: pre;
+      }
+      /* true diff colors */
+      .c-del {
+        color: var(--del);
+        text-decoration: line-through;
+        text-decoration-color: color-mix(in oklch, var(--del) 60%, transparent);
+      }
+      .c-add {
+        color: var(--add);
+      }
+
+      .band-spotlight {
+        background: color-mix(in oklab, var(--card) 28%, var(--background));
+      }
+
+      /* ---------- tabs (shared) ---------- */
+      .cap-cyan {
+        --cap: var(--cap-cyan);
+      }
+      .cap-violet {
+        --cap: var(--cap-violet);
+      }
+      .cap-emerald {
+        --cap: var(--cap-emerald);
+      }
+      .tabs[data-orientation='vertical'] {
+        display: grid;
+        grid-template-columns: minmax(150px, 200px) 1fr;
+        gap: clamp(1rem, 3vw, 1.8rem);
+        align-items: start;
+      }
+      .tabs[data-orientation='horizontal'] {
+        display: block;
+      }
+      [role='tablist'] {
+        display: flex;
+        gap: 2px;
+      }
+      .tabs[data-orientation='vertical'] [role='tablist'] {
+        flex-direction: column;
+        position: sticky;
+        top: 72px;
+      }
+      .tabs[data-orientation='horizontal'] [role='tablist'] {
+        flex-direction: row;
+        flex-wrap: wrap;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 1.1rem;
+      }
+      [role='tab'] {
+        font-family: 'Geist Sans', sans-serif;
+        font-size: 14px;
+        color: var(--muted);
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        text-align: left;
+        padding: 0.55rem 0.8rem;
+        position: relative;
+        transition: color 0.15s ease, background 0.15s ease;
+      }
+      .tabs[data-orientation='vertical'] [role='tab'] {
+        border-left: 2px solid transparent;
+        border-radius: 0 4px 4px 0;
+      }
+      .tabs[data-orientation='horizontal'] [role='tab'] {
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+      }
+      [role='tab']:hover {
+        color: var(--foreground);
+      }
+      [role='tab'][aria-selected='true'] {
+        color: var(--foreground);
+        background: color-mix(in oklch, var(--cap) 9%, transparent);
+      }
+      .tabs[data-orientation='vertical'] [role='tab'][aria-selected='true'] {
+        border-left-color: var(--cap);
+      }
+      .tabs[data-orientation='horizontal'] [role='tab'][aria-selected='true'] {
+        border-bottom-color: var(--cap);
+      }
+      [role='tab']:focus-visible {
+        outline: 2px solid color-mix(in oklch, var(--cap) 60%, transparent);
+        outline-offset: 2px;
+      }
+      .tab-panels {
+        display: grid;
+        min-width: 0;
+      }
+      .tab-panels > [role='tabpanel'] {
+        grid-area: 1 / 1;
+        min-width: 0;
+      }
+      [role='tabpanel'][hidden] {
+        display: none;
+      }
+      [role='tabpanel']:focus-visible {
+        outline: 2px solid color-mix(in oklch, var(--cap) 45%, transparent);
+        outline-offset: 4px;
+        border-radius: var(--radius);
+      }
+      [role='tabpanel'].play {
+        animation: panelIn 0.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+      }
+      @keyframes panelIn {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      @media (max-width: 760px) {
+        .tabs[data-orientation='vertical'] {
+          grid-template-columns: 1fr;
+        }
+        .tabs[data-orientation='vertical'] [role='tablist'] {
+          flex-direction: row;
+          flex-wrap: wrap;
+          position: static;
+          border-bottom: 1px solid var(--border);
+          padding-bottom: 2px;
+        }
+        .tabs[data-orientation='vertical'] [role='tab'] {
+          border-left: none;
+          border-bottom: 2px solid transparent;
+        }
+        .tabs[data-orientation='vertical'] [role='tab'][aria-selected='true'] {
+          border-left-color: transparent;
+          border-bottom-color: var(--cap);
+        }
+      }
+
+      /* ---------- faux editor frame ---------- */
+      .ed {
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+        font-family: 'Geist Mono', monospace;
+      }
+      .ed-bar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in oklab, var(--code-bg) 78%, #000);
+      }
+      .ed-dot {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: oklch(0.4 0 0);
+      }
+      .ed-name {
+        margin-left: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .ed-body {
+        position: relative;
+        padding: 16px 18px;
+        font-size: clamp(0.8rem, 1.5vw, 0.92rem);
+        line-height: 1.95;
+        overflow-x: auto;
+      }
+      .ln {
+        white-space: pre;
+      }
+      .t-cap {
+        color: var(--cap);
+      }
+      .caret-blink {
+        display: inline-block;
+        width: 2px;
+        height: 1.05em;
+        background: var(--cap);
+        vertical-align: text-bottom;
+        margin: 0 1px;
+        animation: caretBlink 1s steps(1, end) infinite;
+      }
+      @keyframes caretBlink {
+        50% {
+          opacity: 0;
+        }
+      }
+
+      /* completion */
+      #panel-completion .ed-body {
+        overflow: visible;
+        min-height: 220px;
+      }
+      .comp-anchor {
+        position: relative;
+      }
+      .ghosttext {
+        color: oklch(0.985 0 0 / 0.45);
+      }
+      .comp-pop {
+        position: absolute;
+        top: 1.9em;
+        left: 1.5ch;
+        z-index: 3;
+        min-width: 230px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 4px;
+        box-shadow: 0 18px 40px -20px oklch(0 0 0 / 0.9);
+        overflow: hidden;
+      }
+      .play .comp-pop {
+        animation: popIn 0.16s cubic-bezier(0.22, 0.61, 0.36, 1);
+      }
+      @keyframes popIn {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
+      }
+      .comp-row {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 28px;
+        padding: 0 8px;
+        font-size: 0.84rem;
+      }
+      .comp-name {
+        color: oklch(0.9 0 0);
+      }
+      .kglyph {
+        font-size: 0.66rem;
+        letter-spacing: 0.02em;
+        color: var(--cap);
+        background: color-mix(in oklch, var(--cap) 14%, transparent);
+        border: 1px solid color-mix(in oklch, var(--cap) 30%, var(--border));
+        border-radius: 4px;
+        padding: 0 5px;
+        line-height: 1.5;
+      }
+      .comp-rowhl {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 4px;
+        height: 28px;
+        z-index: 0;
+        background: color-mix(in oklch, var(--cap) 16%, transparent);
+        border-left: 2px solid var(--cap);
+      }
+      .play .comp-rowhl {
+        animation: compStep 0.8s 0.6s both;
+      }
+      @keyframes compStep {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        40%,
+        60% {
+          transform: translateY(28px);
+        }
+      }
+
+      /* hover */
+      .hover-wrap {
+        padding-top: 5.4em;
+      }
+      .hover-tok {
+        position: relative;
+      }
+      .hover-underline {
+        position: absolute;
+        left: 0;
+        bottom: -2px;
+        width: 100%;
+        height: 2px;
+        background: var(--cap);
+        transform: scaleX(1);
+        transform-origin: left;
+      }
+      .play .hover-underline {
+        animation: sweep 0.22s ease;
+      }
+      @keyframes sweep {
+        from {
+          transform: scaleX(0);
+        }
+      }
+      .hover-tip {
+        position: absolute;
+        top: 1.1em;
+        left: 18px;
+        max-width: 90%;
+        background: var(--card);
+        border: 1px solid color-mix(in oklch, var(--cap) 26%, var(--border));
+        border-radius: 6px;
+        padding: 10px 12px;
+        box-shadow: 0 18px 40px -20px oklch(0 0 0 / 0.9);
+      }
+      .play .hover-tip {
+        animation: tipRise 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
+      }
+      @keyframes tipRise {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+      }
+      .tip-sig {
+        font-size: 0.84rem;
+        color: oklch(0.9 0 0);
+        white-space: pre-wrap;
+      }
+      .tip-doc {
+        margin-top: 6px;
+        font-size: 0.76rem;
+        color: var(--muted);
+      }
+      .tip-notch {
+        position: absolute;
+        bottom: -6px;
+        left: 26px;
+        width: 10px;
+        height: 10px;
+        background: var(--card);
+        border-right: 1px solid color-mix(in oklch, var(--cap) 26%, var(--border));
+        border-bottom: 1px solid color-mix(in oklch, var(--cap) 26%, var(--border));
+        transform: rotate(45deg);
+      }
+
+      /* go-to-definition */
+      .gotodef-body {
+        position: relative;
+      }
+      .gd-link {
+        color: var(--cap);
+        border-bottom: 1px dashed color-mix(in oklch, var(--cap) 70%, transparent);
+        cursor: pointer;
+      }
+      .gd-divider {
+        height: 1px;
+        background: var(--border);
+        margin: 8px 0;
+      }
+      .gd-def {
+        position: relative;
+        padding-left: 10px;
+      }
+      .gd-gutter {
+        position: absolute;
+        left: -10px;
+        top: 0.15em;
+        bottom: 0.15em;
+        width: 2px;
+        background: var(--cap);
+      }
+      .gd-name {
+        border-radius: 3px;
+        box-shadow: 0 0 0 0 transparent;
+      }
+      .play .gd-name {
+        animation: gdGlow 1.1s ease 0.3s;
+      }
+      @keyframes gdGlow {
+        0% {
+          box-shadow: 0 0 0 4px color-mix(in oklch, var(--cap) 28%, transparent);
+          background: color-mix(in oklch, var(--cap) 18%, transparent);
+        }
+        100% {
+          box-shadow: 0 0 0 0 transparent;
+          background: transparent;
+        }
+      }
+      .gotodef-connector {
+        position: absolute;
+        left: 20px;
+        top: 8px;
+        width: 120px;
+        height: 90px;
+        pointer-events: none;
+        overflow: visible;
+      }
+      .gotodef-connector .gd-line {
+        stroke: var(--cap);
+        stroke-width: 1.5;
+        fill: none;
+        stroke-dasharray: 150;
+        stroke-dashoffset: 0;
+      }
+      .gotodef-connector .gd-arrow {
+        stroke: var(--cap);
+        stroke-width: 1.5;
+        fill: none;
+        opacity: 1;
+      }
+      .play .gotodef-connector .gd-line {
+        animation: gdDraw 0.45s ease;
+      }
+      .play .gotodef-connector .gd-arrow {
+        animation: gdArrow 0.2s ease 0.4s both;
+      }
+      @keyframes gdDraw {
+        from {
+          stroke-dashoffset: 150;
+        }
+      }
+      @keyframes gdArrow {
+        from {
+          opacity: 0;
+        }
+      }
+
+      /* find references */
+      .refs-wrap {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .refs-head {
+        display: flex;
+        justify-content: flex-end;
+      }
+      .refs-chip {
+        font-family: 'Geist Mono', monospace;
+        font-size: 0.72rem;
+        color: var(--cap);
+        background: color-mix(in oklch, var(--cap) 12%, transparent);
+        border: 1px solid color-mix(in oklch, var(--cap) 30%, var(--border));
+        border-radius: 999px;
+        padding: 0.12rem 0.6rem;
+      }
+      .ref {
+        border-radius: 3px;
+        padding: 0 2px;
+        background: color-mix(in oklch, var(--cap) 10%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--cap) 55%, transparent);
+      }
+      .play .ref {
+        animation: refIn 0.14s ease both;
+      }
+      .play .ed:nth-of-type(2) .ref:nth-of-type(1) {
+        animation-delay: 0ms;
+      }
+      .play .ed:nth-of-type(3) .ref {
+        animation-delay: 80ms;
+      }
+      .refs-wrap .ed:nth-of-type(2) .ln:nth-of-type(2) .ref {
+        animation-delay: 80ms;
+      }
+      .refs-wrap .ed:nth-of-type(3) .ref {
+        animation-delay: 160ms;
+      }
+      @keyframes refIn {
+        from {
+          background: transparent;
+          box-shadow: inset 0 0 0 1px transparent;
+        }
+      }
+
+      /* rename */
+      .rename-box {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        background: color-mix(in oklch, var(--cap) 8%, transparent);
+        border: 1px solid color-mix(in oklch, var(--cap) 45%, var(--border));
+        border-radius: 3px;
+        padding: 0 2px;
+      }
+      .rename-text {
+        color: var(--foreground);
+      }
+      .ghost-tok {
+        color: oklch(0.985 0 0 / 0.55);
+      }
+      .ghost-tok.flip {
+        animation: ghostFlip 0.4s ease;
+        color: var(--foreground);
+      }
+      @keyframes ghostFlip {
+        0% {
+          background: color-mix(in oklch, var(--cap) 32%, transparent);
+        }
+        100% {
+          background: transparent;
+        }
+      }
+      .will-dot {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: color-mix(in oklch, var(--cap) 70%, transparent);
+        vertical-align: middle;
+        margin-left: 4px;
+      }
+      .renamed .rename-box::after {
+        content: '✓ renamed';
+        margin-left: 8px;
+        font-size: 0.7rem;
+        color: var(--cap);
+      }
+
+      /* inlay hints */
+      .inlay-pill {
+        display: inline-block;
+        font-size: 0.78em;
+        color: oklch(0.86 0 0);
+        background: var(--card);
+        border: 1px solid color-mix(in oklch, var(--cap) 32%, var(--border));
+        border-radius: 4px;
+        padding: 0 6px;
+        margin-left: 4px;
+        vertical-align: 1px;
+        clip-path: inset(0 0 0 0);
+      }
+      .play .inlay-pill {
+        animation: pillIn 0.18s ease both;
+      }
+      .inlay-arg {
+        font-size: 0.82em;
+        color: oklch(0.985 0 0 / 0.5);
+        background: var(--card);
+        border-radius: 3px;
+        padding: 0 4px;
+        margin-right: 2px;
+        clip-path: inset(0 0 0 0);
+      }
+      .play .inlay-arg {
+        animation: pillIn 0.18s ease 0.1s both;
+      }
+      @keyframes pillIn {
+        from {
+          clip-path: inset(0 100% 0 0);
+          opacity: 0.4;
+        }
+      }
+
+      /* ---------- code-analysis specifics ---------- */
+      .ann-dot {
+        position: relative;
+        color: var(--cap-violet);
+        cursor: help;
+        border-bottom: 1px dotted color-mix(in oklch, var(--cap-violet) 60%, transparent);
+        outline: none;
+      }
+      .ann-dot::before {
+        content: '';
+        position: absolute;
+        top: -0.2em;
+        left: -0.35em;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--cap-violet);
+      }
+      .ann-dot::after {
+        content: attr(data-tip);
+        position: absolute;
+        left: 0;
+        top: 1.8em;
+        z-index: 5;
+        width: max-content;
+        max-width: 280px;
+        white-space: normal;
+        font-family: 'Geist Sans', sans-serif;
+        font-size: 0.74rem;
+        line-height: 1.4;
+        color: oklch(0.9 0 0);
+        background: var(--card);
+        border: 1px solid var(--border-strong);
+        border-radius: 6px;
+        padding: 6px 9px;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(-2px);
+        transition: opacity 0.15s ease, transform 0.15s ease;
+      }
+      .ann-dot:hover::after,
+      .ann-dot:focus-visible::after {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      .squig-wrap {
+        position: relative;
+      }
+      .squig {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: -3px;
+        height: 4px;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='4' viewBox='0 0 6 4'%3E%3Cpath d='M0 3 Q1.5 0 3 3 T6 3' fill='none' stroke='%23e5484d' stroke-width='1'/%3E%3C/svg%3E");
+        background-repeat: repeat-x;
+        transform: scaleX(1);
+        transform-origin: left;
+      }
+      .play .squig {
+        animation: sweep 0.2s ease;
+      }
+      .caret-line {
+        color: oklch(0.62 0.17 27);
+      }
+      .play .caret-line {
+        animation: tick 0.18s ease 0.2s both;
+      }
+      @keyframes tick {
+        from {
+          opacity: 0;
+          transform: translateY(-3px);
+        }
+      }
+      .err-line {
+        color: oklch(0.86 0 0);
+      }
+      .play .err-line {
+        animation: fadeUp 0.28s ease 0.42s both;
+      }
+      @keyframes fadeUp {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
+      }
+      .diag-err {
+        color: oklch(0.62 0.17 27);
+        font-weight: 600;
+      }
+      .diag-warn {
+        color: oklch(0.78 0.13 75);
+        font-weight: 600;
+      }
+      .pill {
+        font-family: 'Geist Mono', monospace;
+        font-size: 0.86em;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 0.3rem;
+        padding: 0.02rem 0.34rem;
+        color: var(--foreground);
+      }
+      .param {
+        color: var(--foreground);
+      }
+      .play .param {
+        animation: paramPulse 0.5s ease both;
+      }
+      @keyframes paramPulse {
+        0%,
+        100% {
+          color: var(--foreground);
+        }
+        45% {
+          color: var(--cap-violet);
+        }
+      }
+      .infer-hint {
+        color: var(--muted);
+        clip-path: inset(0 0 0 0);
+      }
+      .play .infer-hint {
+        animation: pillIn 0.5s ease 0.2s both;
+      }
+      .term .ed-bar {
+        background: oklch(0.17 0 0);
+      }
+      .prompt {
+        color: var(--cap-violet);
+      }
+      .lint-cmd {
+        display: inline-block;
+        color: oklch(0.9 0 0);
+        white-space: nowrap;
+        overflow: hidden;
+        vertical-align: bottom;
+      }
+      .play .lint-cmd {
+        animation: typeCmd 0.4s steps(13, end);
+      }
+      @keyframes typeCmd {
+        from {
+          width: 0;
+        }
+        to {
+          width: 13ch;
+        }
+      }
+      .lint-err {
+        color: oklch(0.86 0 0);
+      }
+      .play .lint-err {
+        animation: fadeUp 0.2s ease 0.55s both;
+      }
+      .lint-warn {
+        color: oklch(0.82 0 0);
+      }
+      .play .lint-warn {
+        animation: fadeUp 0.2s ease 0.7s both;
+      }
+
+      /* ---------- formatter morph ---------- */
+      .fmt-tabs {
+        --dur: 700ms;
+        --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+      }
+      .fmt-body {
+        font-size: clamp(0.85rem, 1.7vw, 1rem);
+        line-height: 2.2;
+      }
+      .fln {
+        white-space: nowrap;
+      }
+      .fmt-morph .tk {
+        color: oklch(0.88 0 0);
+      }
+      .sp {
+        display: inline-block;
+        width: var(--w);
+        transition: width var(--dur) var(--ease);
+        transition-delay: calc(var(--i, 0) * 60ms);
+      }
+      .is-formatted .sp {
+        width: var(--wf);
+      }
+      .no-anim .sp,
+      .no-anim .ch .g-before,
+      .no-anim .ch .g-after {
+        transition: none !important;
+        animation: none !important;
+      }
+      .is-formatted .sp.sp-ch {
+        animation: spFlash var(--dur) var(--ease);
+        animation-delay: calc(var(--i, 0) * 60ms);
+      }
+      @keyframes spFlash {
+        0% {
+          background: color-mix(in oklch, var(--del) 36%, transparent);
+        }
+        45% {
+          background: color-mix(in oklch, var(--add) 40%, transparent);
+        }
+        100% {
+          background: transparent;
+        }
+      }
+      .ch {
+        position: relative;
+        display: inline-block;
+        width: 1ch;
+        text-align: center;
+      }
+      .ch .g-before,
+      .ch .g-after {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 1ch;
+        transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease);
+      }
+      .ch .g-before {
+        opacity: 1;
+        color: var(--del);
+      }
+      .ch .g-after {
+        opacity: 0;
+        color: var(--del);
+      }
+      .is-formatted .ch .g-before {
+        opacity: 0;
+      }
+      .is-formatted .ch .g-after {
+        opacity: 1;
+        color: var(--add);
+      }
+      .is-settled .ch .g-after {
+        color: oklch(0.88 0 0);
+        transition: color 0.5s ease;
+      }
+      .fmt-static {
+        display: none;
+      }
+      .reduced .fmt-morph {
+        display: none;
+      }
+      .reduced .fmt-static {
+        display: block;
+      }
+      .reduced .fmt-static div {
+        white-space: pre;
+      }
+
+      /* ---------- closer ---------- */
+      .band-closer {
+        position: relative;
+        overflow: hidden;
+        border-bottom: none;
+      }
+      #closer-canvas {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+      }
+      .closer-col {
+        position: relative;
+        z-index: 1;
+        max-width: var(--prose);
+        margin: 0 auto;
+      }
+      .closer-col .cta-cluster {
+        margin-top: 1.5rem;
+      }
+
+      /* ---------- footer ---------- */
+      .footer {
+        padding: 2.4rem clamp(1.2rem, 5vw, 2.5rem);
+        background: var(--background);
+        border-top: 1px solid var(--border);
+      }
+      .footer-inner {
+        max-width: var(--frame);
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1.2rem;
+        flex-wrap: wrap;
+      }
+      .footer-links {
+        display: flex;
+        gap: 1.3rem;
+        flex-wrap: wrap;
+        font-size: 0.84rem;
+      }
+      .footer-links a {
+        color: var(--muted);
+        transition: color 0.15s ease;
+      }
+      .footer-links a:hover {
+        color: var(--foreground);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+        .doclink span,
+        .cap-icon .arc,
+        .cap-icon .lens,
+        .cap-icon .connector,
+        .cap-icon .tick {
+          transition: none;
+        }
+        .caret-blink {
+          animation: none;
+        }
+        [role='tabpanel'].play,
+        .play .comp-pop,
+        .play .comp-rowhl,
+        .play .hover-underline,
+        .play .hover-tip,
+        .play .gd-name,
+        .play .gotodef-connector .gd-line,
+        .play .gotodef-connector .gd-arrow,
+        .play .ref,
+        .play .inlay-pill,
+        .play .inlay-arg,
+        .play .squig,
+        .play .caret-line,
+        .play .err-line,
+        .play .param,
+        .play .infer-hint,
+        .play .lint-cmd,
+        .play .lint-err,
+        .play .lint-warn {
+          animation: none !important;
+        }
+        .lint-cmd {
+          width: auto !important;
+        }
+      }
+    </style>
+  </body>
+</html>

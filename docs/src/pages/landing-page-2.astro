@@ -1,0 +1,1935 @@
+---
+import '@fontsource/geist-sans/400.css'
+import '@fontsource/geist-sans/500.css'
+import '@fontsource/geist-sans/600.css'
+import '@fontsource/geist-mono/400.css'
+import '@fontsource/geist-mono/500.css'
+
+const navLinks = [
+  { label: 'Docs', href: '/getting-started' },
+  { label: 'Type Checker', href: '/type-checker' },
+  { label: 'Formatter', href: '/formatter' },
+  { label: 'Linter', href: '/linter' },
+  { label: 'Config', href: '/configuration' },
+  { label: 'GitHub', href: 'https://github.com/felix-andreas/roughly' },
+]
+
+const footerLinks = [
+  { label: 'Type Checker', href: '/type-checker' },
+  { label: 'Language Server', href: '/language-server' },
+  { label: 'Linter', href: '/linter' },
+  { label: 'Formatter', href: '/formatter' },
+  { label: 'Config', href: '/configuration' },
+  { label: 'Getting started', href: '/getting-started' },
+]
+
+const lsTabs = [
+  { key: 'completion', label: 'Completion' },
+  { key: 'hover', label: 'Hover' },
+  { key: 'gotodef', label: 'Go-to-definition' },
+  { key: 'references', label: 'Find references' },
+  { key: 'rename', label: 'Rename' },
+  { key: 'inlay', label: 'Inlay hints' },
+]
+
+const caTabs = [
+  { key: 'typing', label: 'Type checking' },
+  { key: 'inference', label: 'Inference' },
+  { key: 'linting', label: 'Linting' },
+]
+
+const fmtTabs = [
+  { key: 'spacing', label: 'Spacing & operators' },
+  { key: 'indent', label: 'Indentation' },
+  { key: 'strings', label: 'Strings & quotes' },
+]
+
+const year = new Date().getFullYear()
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Roughly — modern developer tooling for R</title>
+    <meta
+      name="description"
+      content="Roughly is a fast, modern toolchain for R — a language server, a code analyzer, and a formatter in one tool, written in Rust. Scales past 300k lines."
+    />
+    <link rel="icon" href="/favicon.svg" />
+  </head>
+  <body>
+    <canvas id="field" aria-hidden="true"></canvas>
+    <div class="field-vignette" aria-hidden="true"></div>
+
+    <header class="nav" id="nav">
+      <div class="nav-inner">
+        <a class="brand" href="/getting-started" aria-label="Roughly home">
+          <img class="logo" src="/logo.svg" width="24" height="24" alt="" />
+          <span class="wordmark">Roughly</span>
+        </a>
+        <nav class="nav-links" aria-label="Primary">
+          {
+            navLinks.map((l) => (
+              <a
+                href={l.href}
+                target={l.label === 'GitHub' ? '_blank' : undefined}
+                rel={l.label === 'GitHub' ? 'noreferrer' : undefined}
+              >
+                {l.label}
+              </a>
+            ))
+          }
+        </nav>
+        <a class="btn solid nav-pill" href="/getting-started">Get started</a>
+      </div>
+    </header>
+
+    <main>
+      <!-- ============================ HERO ============================ -->
+      <section class="hero">
+        <div class="card hero-card">
+          <p class="eyebrow">Modern R tooling, written in Rust</p>
+          <h1>Modern developer tooling for R.</h1>
+          <p class="subhead">
+            A language server, a code analyzer, and a formatter in one fast
+            tool — built in Rust, scaling past 300k lines. R has world-class
+            statistics and dated developer tooling. Roughly is the modern
+            toolchain.
+          </p>
+
+          <div class="cta-row">
+            <a class="btn solid lg" href="/getting-started">Get started</a>
+            <a
+              class="btn vscode lg"
+              href="https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly"
+              target="_blank"
+              rel="noopener"
+            >
+              <svg class="brand-logo" width="18" height="18" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <mask id="vscHeroMask" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+                  <path fill-rule="evenodd" clip-rule="evenodd" d="M70.9119 99.3171C72.4869 99.9307 74.2828 99.8914 75.8725 99.1264L96.4604 89.2197C98.6242 88.1787 100 85.9892 100 83.5872V16.4133C100 14.0113 98.6243 11.8218 96.4605 10.7808L75.8725 0.873756C73.7862 -0.130129 71.3446 0.11576 69.5135 1.44695C69.252 1.63711 69.0028 1.84943 68.769 2.08341L29.3551 38.0387L12.1872 25.0054C10.589 23.7919 8.35363 23.8919 6.86933 25.2444L1.36303 30.2592C-0.453713 31.9133 -0.455738 34.7779 1.35853 36.4347L16.2471 50.0001L1.35853 63.5655C-0.455738 65.2223 -0.453713 68.0869 1.36303 69.7411L6.86933 74.7558C8.35363 76.1084 10.589 76.2083 12.1872 74.9948L29.3551 61.9615L68.769 97.9168C69.3897 98.5345 70.1186 98.9942 70.9119 99.3171ZM75.0152 27.2989L45.1091 50.0001L75.0152 72.7012V27.2989Z" fill="white"/>
+                </mask>
+                <g mask="url(#vscHeroMask)"><rect width="100" height="100" fill="#0098FF"/></g>
+              </svg>
+              <span>Install in VS Code</span>
+            </a>
+            <span class="btn zed lg" aria-disabled="true">
+              <span>Zed</span>
+              <span class="soon-pill">soon</span>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ====================== CAPABILITIES ======================= -->
+      <section class="band">
+        <div class="band-inner">
+          <div class="section-head">
+            <p class="eyebrow">three tools, one binary</p>
+            <h2>Three tools, one binary.</h2>
+            <p class="lede">
+              Editor smarts, problem-catching analysis, and one consistent
+              style — covered by a single tool. Each capability owns its color,
+              and that color threads its whole section below.
+            </p>
+          </div>
+
+          <div class="cap-grid">
+            <article class="cap-card" style="--accent: var(--cap-cyan)">
+              <span class="cap-badge" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 5v14"/>
+                  <path d="M9.5 5h5"/>
+                  <path d="M9.5 19h5"/>
+                  <path class="arc arc-1" d="M15.5 7.5a4 4 0 0 1 0 5"/>
+                  <path class="arc arc-2" d="M17.5 6a7 7 0 0 1 0 8"/>
+                </svg>
+              </span>
+              <span class="cap-index">01</span>
+              <h3>Language server</h3>
+              <p class="cap-blurb">
+                Completion, hover, go-to-definition, references, rename, and
+                inlay hints — a VS Code extension that speaks LSP for any editor.
+              </p>
+              <a class="doclink" href="/language-server">Language server docs <span aria-hidden="true">→</span></a>
+            </article>
+
+            <article class="cap-card" style="--accent: var(--cap-violet)">
+              <span class="cap-badge" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <circle class="lens" cx="11" cy="11" r="6.5"/>
+                  <path d="M16 16l4 4"/>
+                  <circle cx="9" cy="11" r="1.1" fill="currentColor" stroke="none"/>
+                  <circle cx="13" cy="9.5" r="1.1" fill="currentColor" stroke="none"/>
+                  <path class="node-link" d="M9.9 10.4l2.2-0.8"/>
+                </svg>
+              </span>
+              <span class="cap-index">02</span>
+              <h3>Code analyzer</h3>
+              <p class="cap-blurb">
+                Lint diagnostics catch problems before you run — plus an opt-in
+                static type checker, the first for R, with full inference.
+              </p>
+              <a class="doclink" href="/type-checker">Type checker docs <span aria-hidden="true">→</span></a>
+            </article>
+
+            <article class="cap-card" style="--accent: var(--cap-emerald)">
+              <span class="cap-badge" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M5 8h9"/>
+                  <path d="M5 12h6"/>
+                  <path d="M5 16h11"/>
+                  <path class="guide" d="M19 6v12"/>
+                  <path class="tick tick-1" d="M14 8h5"/>
+                  <path class="tick tick-2" d="M11 12h8"/>
+                </svg>
+              </span>
+              <span class="cap-index">03</span>
+              <h3>Code formatter</h3>
+              <p class="cap-blurb">
+                <code>roughly fmt</code> formats your whole project to one
+                consistent style, with a <code>--diff</code> mode for CI.
+              </p>
+              <a class="doclink" href="/formatter">Formatter docs <span aria-hidden="true">→</span></a>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- ====================== LANGUAGE SERVER ======================= -->
+      <section class="band">
+        <div class="band-inner">
+          <div class="section-head">
+            <p class="eyebrow">write</p>
+            <h2>IDE features in your editor.</h2>
+            <p class="lede">
+              Completion, hover, go-to-definition, find references, rename, and
+              inlay hints. Ships as a VS Code extension on the Marketplace and
+              speaks LSP, so it drops into any editor that does too.
+            </p>
+          </div>
+
+          <div
+            class="tabs vertical card showcase"
+            data-tabs
+            style="--accent: var(--cap-cyan)"
+          >
+            <div role="tablist" aria-label="Language server features" aria-orientation="vertical">
+              {
+                lsTabs.map((t, i) => (
+                  <button
+                    role="tab"
+                    id={`tab-ls-${t.key}`}
+                    aria-controls={`panel-ls-${t.key}`}
+                    aria-selected={i === 0 ? 'true' : 'false'}
+                    tabindex={i === 0 ? 0 : -1}
+                  >
+                    {t.label}
+                  </button>
+                ))
+              }
+            </div>
+
+            <div class="tab-panels">
+              <!-- Completion -->
+              <div role="tabpanel" id="panel-ls-completion" aria-labelledby="tab-ls-completion" tabindex="0" class="is-active">
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="frame-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span class="frame-name">model.R</span>
+                  </div>
+                  <div class="frame-body cmp-body">
+                    <div class="eline"><span class="c-fn">summary</span> &lt;- <span class="c-kw">function</span>(df) <span class="cmp-anchor">df<span class="acc">$</span><span class="caret-c"></span><span class="ghost">count</span></span></div>
+                    <div class="cmp-pop" role="presentation">
+                      <div class="cmp-hi" aria-hidden="true"></div>
+                      <div class="cmp-row"><span class="kind">col</span><span class="cmp-name">count</span></div>
+                      <div class="cmp-row"><span class="kind">col</span><span class="cmp-name">category</span></div>
+                      <div class="cmp-row"><span class="kind">col</span><span class="cmp-name">created_at</span></div>
+                      <div class="cmp-row"><span class="kind">col</span><span class="cmp-name">is_active</span></div>
+                    </div>
+                  </div>
+                </div>
+                <p class="panel-cap">Member completion fires the moment you type <code>df$</code> — columns, not guesses.</p>
+              </div>
+
+              <!-- Hover -->
+              <div role="tabpanel" id="panel-ls-hover" aria-labelledby="tab-ls-hover" tabindex="0" hidden>
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="frame-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span class="frame-name">model.R</span>
+                  </div>
+                  <div class="frame-body frame-tall">
+                    <div class="hov-tip" role="presentation">
+                      <div class="sig"><span class="acc">add</span>: &lt;<span class="acc">T</span>: <span class="acc">numeric</span>&gt; fn(a: <span class="acc">T</span>, b: <span class="acc">T</span>) -&gt; <span class="acc">T</span></div>
+                      <div class="doc">Inferred — no annotation required.</div>
+                      <span class="hov-notch" aria-hidden="true"></span>
+                    </div>
+                    <div class="eline hov-line"><span class="hov-target">add</span> &lt;- <span class="c-kw">function</span>(a, b) a + b</div>
+                  </div>
+                </div>
+                <p class="panel-cap">Hover any symbol to read its inferred signature.</p>
+              </div>
+
+              <!-- Go-to-definition -->
+              <div role="tabpanel" id="panel-ls-gotodef" aria-labelledby="tab-ls-gotodef" tabindex="0" hidden>
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="frame-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span class="frame-name">model.R</span>
+                  </div>
+                  <div class="frame-body frame-tall gotodef-body">
+                    <svg class="gotodef-wire" viewBox="0 0 320 120" preserveAspectRatio="none" aria-hidden="true">
+                      <path class="wire" d="M70 26 C 30 40, 30 70, 44 92" />
+                      <path class="wire-head" d="M40 86 l4 8 l6 -5" />
+                    </svg>
+                    <div class="eline">total &lt;- <span class="gd-link">score</span>(x)</div>
+                    <div class="gd-divider" aria-hidden="true"></div>
+                    <div class="eline gd-def"><span class="gd-marker" aria-hidden="true"></span><span class="gd-halo">score</span> &lt;- <span class="c-kw">function</span>(x) x * weight</div>
+                  </div>
+                </div>
+                <p class="panel-cap">Jump from a call straight to its definition — across the project.</p>
+              </div>
+
+              <!-- Find references -->
+              <div role="tabpanel" id="panel-ls-references" aria-labelledby="tab-ls-references" tabindex="0" hidden>
+                <div class="refs-grid">
+                  <div class="frame">
+                    <div class="frame-bar">
+                      <span class="frame-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                      <span class="frame-name">model.R</span>
+                      <span class="refs-chip">3 references</span>
+                    </div>
+                    <div class="frame-body">
+                      <div class="eline">w &lt;- <span class="ref-box ref-1">weight</span></div>
+                      <div class="eline">m &lt;- mean(<span class="ref-box ref-2">weight</span>)</div>
+                    </div>
+                  </div>
+                  <div class="frame">
+                    <div class="frame-bar">
+                      <span class="frame-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                      <span class="frame-name">score.R</span>
+                    </div>
+                    <div class="frame-body">
+                      <div class="eline">score &lt;- <span class="c-kw">function</span>(x) x * <span class="ref-box ref-3">weight</span></div>
+                    </div>
+                  </div>
+                </div>
+                <p class="panel-cap">Every occurrence of a symbol, across files, in one query.</p>
+              </div>
+
+              <!-- Rename -->
+              <div role="tabpanel" id="panel-ls-rename" aria-labelledby="tab-ls-rename" tabindex="0" hidden>
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="frame-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span class="frame-name">score.R</span>
+                  </div>
+                  <div class="frame-body frame-tall">
+                    <div class="eline">score &lt;- <span class="c-kw">function</span>(x) x * <span class="rename-input"><span class="rename-word">coefficient</span><span class="caret-c"></span></span></div>
+                    <div class="eline rename-ghost">w &lt;- <span class="rn-old">weight</span><span class="rn-new">coefficient</span> <span class="rn-dot" aria-hidden="true"></span></div>
+                    <div class="eline rename-ghost">m &lt;- mean(<span class="rn-old">weight</span><span class="rn-new">coefficient</span>) <span class="rn-dot" aria-hidden="true"></span></div>
+                    <span class="rename-done" aria-hidden="true">✓ renamed</span>
+                  </div>
+                </div>
+                <p class="panel-cap">One rename updates every use, atomically, project-wide.</p>
+              </div>
+
+              <!-- Inlay hints -->
+              <div role="tabpanel" id="panel-ls-inlay" aria-labelledby="tab-ls-inlay" tabindex="0" hidden>
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="frame-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span class="frame-name">model.R</span>
+                  </div>
+                  <div class="frame-body frame-tall">
+                    <div class="eline"><span class="c-fn">add</span> &lt;- <span class="c-kw">function</span>(a, b) a + b <span class="inlay-pill">&lt;<span class="acc">T</span>: <span class="acc">numeric</span>&gt; fn(a: T, b: T) -&gt; T</span></div>
+                    <div class="eline">score(<span class="inlay-arg">x:</span> x)</div>
+                  </div>
+                </div>
+                <p class="panel-cap">The inferred signature shows up as an inlay hint — no annotation required.</p>
+              </div>
+            </div>
+          </div>
+
+          <a class="doclink section-doclink" href="/language-server">Language server docs <span aria-hidden="true">→</span></a>
+        </div>
+      </section>
+
+      <!-- ======================== CODE ANALYSIS ======================== -->
+      <section class="band band-spotlight">
+        <div class="band-inner">
+          <div class="section-head">
+            <div class="head-row">
+              <p class="eyebrow">check</p>
+              <span class="optin-chip" style="--accent: var(--cap-violet)">opt-in</span>
+            </div>
+            <h2>Code analysis.</h2>
+            <p class="lede">
+              Lint diagnostics flag problems before you run. Go deeper with the
+              first static type checker for R — Hindley-Milner inference that
+              checks most code with zero annotations, fully opt-in.
+            </p>
+          </div>
+
+          <div
+            class="tabs vertical card showcase"
+            data-tabs
+            style="--accent: var(--cap-violet)"
+          >
+            <div role="tablist" aria-label="Code analysis" aria-orientation="vertical">
+              {
+                caTabs.map((t, i) => (
+                  <button
+                    role="tab"
+                    id={`tab-ca-${t.key}`}
+                    aria-controls={`panel-ca-${t.key}`}
+                    aria-selected={i === 0 ? 'true' : 'false'}
+                    tabindex={i === 0 ? 0 : -1}
+                  >
+                    {t.label}
+                  </button>
+                ))
+              }
+            </div>
+
+            <div class="tab-panels">
+              <!-- Type checking -->
+              <div role="tabpanel" id="panel-ca-typing" aria-labelledby="tab-ca-typing" tabindex="0" class="is-active">
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="frame-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span class="frame-name">count.R</span>
+                  </div>
+                  <div class="frame-body">
+                    <div class="eline"><span class="c-muted">#:<span class="anno-dot" tabindex="0" role="note" aria-label="A #: comment — an ordinary comment to every other R tool." title="A #: comment — an ordinary comment to every other R tool."></span> fn(count: integer) -&gt; integer</span></div>
+                    <div class="eline"><span class="c-fn">double_count</span> &lt;- <span class="c-kw">function</span>(count) count + count</div>
+                    <div class="eline"><span class="c-fn">double_count</span>(<span class="c-str squiggle">"two"</span>)</div>
+                    <div class="eline caret-row"><span class="caret">             ^^^^^</span></div>
+                    <div class="eline diag-line"><span class="diag-err">error[type-error]</span> expected <span class="pill pill-want">integer</span>, found <span class="pill pill-got">character</span></div>
+                  </div>
+                </div>
+                <p class="panel-cap">An annotated type error, caught statically — before the code ever runs. <a class="doclink inline" href="/type-checker">Type checker docs →</a></p>
+              </div>
+
+              <!-- Inference -->
+              <div role="tabpanel" id="panel-ca-inference" aria-labelledby="tab-ca-inference" tabindex="0" hidden>
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="frame-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span class="frame-name">infer.R</span>
+                  </div>
+                  <div class="frame-body frame-tall">
+                    <div class="eline"><span class="c-fn">add</span> &lt;- <span class="c-kw">function</span>(<span class="param">a</span>, <span class="param">b</span>) a + b <span class="infer-inlay"># inferred: &lt;<span class="acc">T</span>: <span class="acc">numeric</span>&gt; fn(a: T, b: T) -&gt; T</span></div>
+                  </div>
+                </div>
+                <p class="panel-cap">Most code needs no annotations at all — inference resolves the types for you. <a class="doclink inline" href="/type-checker">How inference works →</a></p>
+              </div>
+
+              <!-- Linting -->
+              <div role="tabpanel" id="panel-ca-linting" aria-labelledby="tab-ca-linting" tabindex="0" hidden>
+                <div class="frame term">
+                  <div class="frame-bar">
+                    <span class="frame-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span class="frame-name term-title">zsh — roughly</span>
+                  </div>
+                  <div class="frame-body frame-tall">
+                    <div class="eline"><span class="term-prompt">$</span> <span class="term-cmd">roughly check</span><span class="caret-c term-caret"></span></div>
+                    <div class="eline term-out"><span class="diag-err">error:</span> Syntax Error: unexpected "&#123;"  <span class="c-muted">(R/main.R)</span></div>
+                    <div class="eline term-out term-warn-row"><span class="diag-warn">warning:</span> unused variable `tmp`  <span class="c-muted">(R/util.R)</span></div>
+                  </div>
+                </div>
+                <p class="panel-cap">Lint from the CLI in CI or your editor — errors in red, warnings in amber. <a class="doclink inline" href="/linter">Linter docs →</a></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================== FORMATTER ========================== -->
+      <section class="band">
+        <div class="band-inner">
+          <div class="section-head">
+            <p class="eyebrow">ship</p>
+            <h2>One consistent style.</h2>
+            <p class="lede">
+              Badly-formatted R reflows into formatted R in place — whitespace
+              collapses and grows, indentation snaps to a grid, and quotes flip.
+              Run <code>roughly fmt</code>, or <code>--diff</code> to gate CI.
+            </p>
+          </div>
+
+          <div
+            class="tabs horizontal card showcase fmt-tabs"
+            data-tabs
+            data-fmt
+            style="--accent: var(--cap-emerald)"
+          >
+            <div role="tablist" aria-label="Formatter examples" aria-orientation="horizontal">
+              {
+                fmtTabs.map((t, i) => (
+                  <button
+                    role="tab"
+                    id={`tab-fmt-${t.key}`}
+                    aria-controls={`panel-fmt-${t.key}`}
+                    aria-selected={i === 0 ? 'true' : 'false'}
+                    tabindex={i === 0 ? 0 : -1}
+                  >
+                    {t.label}
+                  </button>
+                ))
+              }
+            </div>
+
+            <div class="tab-panels">
+              <!-- Spacing & operators -->
+              <div role="tabpanel" id="panel-fmt-spacing" aria-labelledby="tab-fmt-spacing" tabindex="0" class="is-active">
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="frame-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span class="frame-name">format.R</span>
+                  </div>
+                  <div class="frame-body">
+                    <div class="fmt-panel">
+                      <div class="fmt-anim">
+                        <div class="fmt-line" style="--i:0"><span class="tk"><span class="c-fn">x_option</span></span><span class="sp is-ch" style="--wb:0ch;--wf:1ch"></span><span class="tk">&lt;-</span><span class="sp is-ch" style="--wb:0ch;--wf:1ch"></span><span class="tk"><span class="c-kw">function</span></span><span class="tk">(</span><span class="sp is-ch" style="--wb:1ch;--wf:0ch"></span><span class="tk">x</span><span class="sp is-ch" style="--wb:1ch;--wf:0ch"></span><span class="tk">)</span><span class="sp" style="--wb:1ch;--wf:1ch"></span><span class="tk">&#123;</span></div>
+                      </div>
+                      <div class="fmt-static" aria-hidden="true">
+                        <div class="c-del">x_option&lt;-function( x ) &#123;</div>
+                        <div class="c-add">x_option &lt;- function(x) &#123;</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <p class="panel-cap">Operator spacing grows; padded parentheses collapse.</p>
+              </div>
+
+              <!-- Indentation -->
+              <div role="tabpanel" id="panel-fmt-indent" aria-labelledby="tab-fmt-indent" tabindex="0" hidden>
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="frame-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span class="frame-name">format.R</span>
+                  </div>
+                  <div class="frame-body">
+                    <div class="fmt-panel">
+                      <div class="fmt-anim">
+                        <div class="fmt-line" style="--i:0"><span class="tk">&#125;</span><span class="sp is-ch" style="--wb:0ch;--wf:1ch"></span><span class="tk"><span class="c-kw">else</span></span><span class="sp" style="--wb:1ch;--wf:1ch"></span><span class="tk"><span class="c-kw">if</span></span><span class="sp" style="--wb:1ch;--wf:1ch"></span><span class="tk">(</span><span class="tk">x</span><span class="sp is-ch" style="--wb:0ch;--wf:1ch"></span><span class="tk">==</span><span class="sp is-ch" style="--wb:0ch;--wf:1ch"></span><span class="tk"><span class="c-str">"b"</span></span><span class="tk">)</span><span class="sp is-ch" style="--wb:0ch;--wf:1ch"></span><span class="tk">&#123;</span></div>
+                      </div>
+                      <div class="fmt-static" aria-hidden="true">
+                        <div class="c-del">&#125;else if (x=="b")&#123;</div>
+                        <div class="c-add">&#125; else if (x == "b") &#123;</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <p class="panel-cap">Braces and operators gain their flanking spaces and snap to the grid.</p>
+              </div>
+
+              <!-- Strings & quotes -->
+              <div role="tabpanel" id="panel-fmt-strings" aria-labelledby="tab-fmt-strings" tabindex="0" hidden>
+                <div class="frame">
+                  <div class="frame-bar">
+                    <span class="frame-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <span class="frame-name">format.R</span>
+                  </div>
+                  <div class="frame-body">
+                    <div class="fmt-panel">
+                      <div class="fmt-anim">
+                        <div class="fmt-line" style="--i:0"><span class="tk">stop(</span><span class="ch c-str"><span class="g-before" aria-hidden="true">'</span><span class="g-after">"</span></span><span class="tk c-str">Invalid `x` value</span><span class="ch c-str"><span class="g-before" aria-hidden="true">'</span><span class="g-after">"</span></span><span class="tk">)</span></div>
+                      </div>
+                      <div class="fmt-static" aria-hidden="true">
+                        <div class="c-del">stop('Invalid `x` value')</div>
+                        <div class="c-add">stop("Invalid `x` value")</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <p class="panel-cap">Single quotes flip to double; the backtick content holds.</p>
+              </div>
+            </div>
+          </div>
+
+          <a class="doclink section-doclink" href="/formatter">Formatter docs <span aria-hidden="true">→</span></a>
+        </div>
+      </section>
+
+      <!-- ========================== CLOSER ========================== -->
+      <section class="band band-closer">
+        <div class="band-inner narrow">
+          <div class="card cta-card">
+            <p class="eyebrow">adopt</p>
+            <h2>Drop it onto your R project.</h2>
+            <p class="lede">
+              Nothing about your existing R has to change. Install Roughly, run
+              it, and add the VS Code extension.
+            </p>
+            <pre class="codeblock"><code><span class="c-muted"># install</span>
+cargo install roughly
+<span class="c-muted"># format, lint, and type-check</span>
+roughly fmt .
+roughly check .</code></pre>
+
+            <div class="cta-row">
+              <a class="btn solid lg" href="/getting-started">Get started</a>
+              <a
+                class="btn vscode lg"
+                href="https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly"
+                target="_blank"
+                rel="noopener"
+              >
+                <svg class="brand-logo" width="18" height="18" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <mask id="vscCloserMask" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+                    <path fill-rule="evenodd" clip-rule="evenodd" d="M70.9119 99.3171C72.4869 99.9307 74.2828 99.8914 75.8725 99.1264L96.4604 89.2197C98.6242 88.1787 100 85.9892 100 83.5872V16.4133C100 14.0113 98.6243 11.8218 96.4605 10.7808L75.8725 0.873756C73.7862 -0.130129 71.3446 0.11576 69.5135 1.44695C69.252 1.63711 69.0028 1.84943 68.769 2.08341L29.3551 38.0387L12.1872 25.0054C10.589 23.7919 8.35363 23.8919 6.86933 25.2444L1.36303 30.2592C-0.453713 31.9133 -0.455738 34.7779 1.35853 36.4347L16.2471 50.0001L1.35853 63.5655C-0.455738 65.2223 -0.453713 68.0869 1.36303 69.7411L6.86933 74.7558C8.35363 76.1084 10.589 76.2083 12.1872 74.9948L29.3551 61.9615L68.769 97.9168C69.3897 98.5345 70.1186 98.9942 70.9119 99.3171ZM75.0152 27.2989L45.1091 50.0001L75.0152 72.7012V27.2989Z" fill="white"/>
+                  </mask>
+                  <g mask="url(#vscCloserMask)"><rect width="100" height="100" fill="#0098FF"/></g>
+                </svg>
+                <span>Install in VS Code</span>
+              </a>
+              <span class="btn zed lg" aria-disabled="true">
+                <span>Zed</span>
+                <span class="soon-pill">soon</span>
+              </span>
+            </div>
+            <p class="cta-meta">
+              Tune behavior in a <a href="/configuration">roughly config</a>.
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <a class="brand" href="/getting-started" aria-label="Roughly home">
+          <img class="logo" src="/logo.svg" width="20" height="20" alt="" />
+          <span class="wordmark">Roughly</span>
+        </a>
+        <nav class="footer-links" aria-label="Footer">
+          {footerLinks.map((l) => <a href={l.href}>{l.label}</a>)}
+        </nav>
+        <p class="footer-legal">© {year} Roughly · MIT License</p>
+      </div>
+    </footer>
+
+    <!-- ===================== DOT-MATRIX FIELD ===================== -->
+    <script>
+      const canvas = document.getElementById('field')
+      const ctx = canvas && canvas.getContext('2d', { alpha: false })
+      if (canvas && ctx) {
+        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)')
+        const finePointer = window.matchMedia('(pointer: fine)')
+
+        const RAMP = ' ·∶∷▪█'
+        const RAMP_CODES = RAMP.split('').map((c) => c.charCodeAt(0))
+        const TOKENS = ['integer', 'double', 'character', 'logical', '<T: numeric>', 'fn(..)->']
+
+        const DIR_X = 0.7771, DIR_Y = 0.6294
+        const PERIOD = 13.0
+        const LEVELS = 18
+
+        let dpr = 1
+        let W = 0, H = 0
+        let cellW = 11, cellH = 18
+        let cols = 0, rows = 0
+        let maxProj = 0
+        let bandPx = 0
+        let rowStreams = []
+        let styles = []
+
+        let bx = [], by = [], bc = [], bn = []
+
+        let mouseX = -1e9, mouseY = -1e9, hasMouse = false
+        const probeR = 130
+
+        function buildStyles() {
+          styles = []
+          for (let i = 0; i < LEVELS; i++) {
+            const a = 0.10 + (i / (LEVELS - 1)) * 0.30
+            styles.push('rgba(238,238,238,' + a.toFixed(3) + ')')
+          }
+        }
+
+        function hash3(x, y, z) {
+          let n = (x | 0) * 374761393 + (y | 0) * 668265263 + (z | 0) * 1274126177
+          n = (n ^ (n >> 13)) >>> 0
+          n = Math.imul(n, 1274126177) >>> 0
+          return (n & 0xffffff) / 0x1000000
+        }
+        function smooth(t) { return t * t * (3 - 2 * t) }
+        function vnoise(x, y, z) {
+          const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z)
+          const xf = x - xi, yf = y - yi, zf = z - zi
+          const u = smooth(xf), v = smooth(yf), w = smooth(zf)
+          const c000 = hash3(xi, yi, zi),       c100 = hash3(xi + 1, yi, zi)
+          const c010 = hash3(xi, yi + 1, zi),   c110 = hash3(xi + 1, yi + 1, zi)
+          const c001 = hash3(xi, yi, zi + 1),   c101 = hash3(xi + 1, yi, zi + 1)
+          const c011 = hash3(xi, yi + 1, zi + 1), c111 = hash3(xi + 1, yi + 1, zi + 1)
+          const x00 = c000 + (c100 - c000) * u, x10 = c010 + (c110 - c010) * u
+          const x01 = c001 + (c101 - c001) * u, x11 = c011 + (c111 - c011) * u
+          const y0 = x00 + (x10 - x00) * v, y1 = x01 + (x11 - x01) * v
+          return y0 + (y1 - y0) * w
+        }
+        function fbm(x, y, z) {
+          let f = 0, amp = 0.5, freq = 1
+          for (let o = 0; o < 3; o++) {
+            f += amp * vnoise(x * freq, y * freq, z * freq)
+            freq *= 2.0
+            amp *= 0.5
+          }
+          return f
+        }
+
+        function tokenChar(col, row) {
+          const s = rowStreams[row]
+          if (!s) return 0
+          return s.charCodeAt(col % s.length)
+        }
+
+        function resize() {
+          dpr = Math.min(window.devicePixelRatio || 1, 2)
+          W = window.innerWidth
+          H = window.innerHeight
+          const small = W < 720
+          cellW = small ? 13 : 11
+          cellH = small ? 21 : 18
+          canvas.width = Math.floor(W * dpr)
+          canvas.height = Math.floor(H * dpr)
+          canvas.style.width = W + 'px'
+          canvas.style.height = H + 'px'
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+          ctx.textBaseline = 'top'
+          ctx.textAlign = 'left'
+          ctx.font = Math.round(cellH * 0.82) + "px 'Geist Mono', monospace"
+          cols = Math.ceil(W / cellW) + 1
+          rows = Math.ceil(H / cellH) + 1
+          maxProj = W * DIR_X + H * DIR_Y
+          bandPx = cellW * 2.6
+
+          rowStreams = new Array(rows)
+          for (let r = 0; r < rows; r++) {
+            const seed = Math.floor(hash3(r * 7 + 1, 13, 29) * 1000)
+            let parts = []
+            for (let k = 0; k < 14; k++) {
+              parts.push(TOKENS[(seed + k * 5) % TOKENS.length])
+            }
+            rowStreams[r] = parts.join('  ') + '  '
+          }
+
+          const maxCells = cols * rows
+          bx = []; by = []; bc = []; bn = []
+          for (let i = 0; i <= LEVELS; i++) {
+            bx.push(new Float32Array(maxCells))
+            by.push(new Float32Array(maxCells))
+            bc.push(new Uint16Array(maxCells))
+            bn.push(0)
+          }
+          ctx.fillStyle = '#000'
+          ctx.fillRect(0, 0, W, H)
+        }
+
+        const WHITE = LEVELS
+
+        function render(time) {
+          ctx.fillStyle = 'rgba(0,0,0,0.14)'
+          ctx.fillRect(0, 0, W, H)
+
+          for (let i = 0; i <= LEVELS; i++) bn[i] = 0
+
+          const phase = (time / PERIOD) % 1
+          const frontPos = phase * (maxProj + bandPx * 4) - bandPx * 2
+          const tz = time * 0.15
+
+          for (let r = 0; r < rows; r++) {
+            const py = r * cellH
+            const cy = py + cellH * 0.5
+            for (let c = 0; c < cols; c++) {
+              const px = c * cellW
+              const cx = px + cellW * 0.5
+
+              let b = fbm(px * 0.006 + 11, py * 0.006 + 7, tz)
+              b = (b - 0.25) / 0.5
+              if (b < 0) b = 0; else if (b > 1) b = 1
+
+              const proj = cx * DIR_X + cy * DIR_Y
+              const w = proj - frontPos
+
+              let resolved = w < bandPx && w > -bandPx
+              if (!resolved && hasMouse) {
+                const dx = cx - mouseX, dy = cy - mouseY
+                if (dx * dx + dy * dy < probeR * probeR) {
+                  if (b > 0.32) resolved = true
+                }
+              }
+
+              if (resolved) {
+                const code = tokenChar(c, r)
+                if (code === 32 || code === 0) continue
+                const idx = bn[WHITE]++
+                bx[WHITE][idx] = px
+                by[WHITE][idx] = py
+                bc[WHITE][idx] = code
+                continue
+              }
+
+              if (w <= -bandPx) b = Math.min(1, b + 0.08)
+
+              const gi = Math.min(RAMP_CODES.length - 1, Math.floor(b * RAMP_CODES.length))
+              const code = RAMP_CODES[gi]
+              if (code === 32) continue
+
+              let lvl = Math.round(b * (LEVELS - 1))
+              if (lvl < 0) lvl = 0; else if (lvl >= LEVELS) lvl = LEVELS - 1
+              const idx = bn[lvl]++
+              bx[lvl][idx] = px
+              by[lvl][idx] = py
+              bc[lvl][idx] = code
+            }
+          }
+
+          for (let lvl = 0; lvl < LEVELS; lvl++) {
+            const n = bn[lvl]
+            if (!n) continue
+            ctx.fillStyle = styles[lvl]
+            const xs = bx[lvl], ys = by[lvl], cs = bc[lvl]
+            for (let i = 0; i < n; i++) {
+              ctx.fillText(String.fromCharCode(cs[i]), xs[i], ys[i])
+            }
+          }
+          const wn = bn[WHITE]
+          if (wn) {
+            ctx.fillStyle = '#ffffff'
+            const xs = bx[WHITE], ys = by[WHITE], cs = bc[WHITE]
+            for (let i = 0; i < wn; i++) {
+              ctx.fillText(String.fromCharCode(cs[i]), xs[i], ys[i])
+            }
+          }
+        }
+
+        let running = false
+        let startTime = 0
+        let rafId = 0
+
+        function loop(now) {
+          if (!running) return
+          if (!startTime) startTime = now
+          render((now - startTime) / 1000)
+          rafId = requestAnimationFrame(loop)
+        }
+
+        function start() {
+          if (running) return
+          running = true
+          startTime = 0
+          rafId = requestAnimationFrame(loop)
+        }
+        function stop() {
+          running = false
+          if (rafId) cancelAnimationFrame(rafId)
+        }
+
+        function staticFrame() {
+          ctx.fillStyle = '#000'
+          ctx.fillRect(0, 0, W, H)
+          hasMouse = false
+          render(PERIOD * 0.5)
+        }
+
+        function onMove(e) {
+          mouseX = e.clientX
+          mouseY = e.clientY
+          hasMouse = true
+        }
+        function onLeave() { hasMouse = false }
+
+        function init() {
+          buildStyles()
+          resize()
+
+          if (reduce.matches) {
+            staticFrame()
+          } else {
+            if (finePointer.matches) {
+              window.addEventListener('mousemove', onMove, { passive: true })
+              window.addEventListener('mouseout', onLeave, { passive: true })
+            }
+            const io = new IntersectionObserver((entries) => {
+              for (const en of entries) {
+                if (en.isIntersecting) start()
+                else stop()
+              }
+            }, { threshold: 0 })
+            io.observe(canvas)
+            start()
+          }
+
+          let resizeTimer = 0
+          window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer)
+            resizeTimer = window.setTimeout(() => {
+              stop()
+              resize()
+              if (reduce.matches) staticFrame()
+              else start()
+            }, 150)
+          })
+
+          reduce.addEventListener('change', () => {
+            stop()
+            if (reduce.matches) { staticFrame() } else { start() }
+          })
+        }
+
+        if (document.fonts && document.fonts.ready) {
+          document.fonts.ready.then(init).catch(init)
+        } else {
+          init()
+        }
+      }
+    </script>
+
+    <!-- ============ ACCESSIBLE TABS + SIGNATURE MOTION ============ -->
+    <script>
+      const reduceTabs = window.matchMedia('(prefers-reduced-motion: reduce)')
+
+      function morphReset(node) {
+        if (node._mt1) clearTimeout(node._mt1)
+        if (node._mt2) clearTimeout(node._mt2)
+        node.classList.add('no-anim', 'show-before')
+        node.classList.remove('is-formatted', 'is-settled')
+        void node.offsetWidth
+        node.classList.remove('no-anim')
+      }
+
+      function morphRun(panel) {
+        const node = panel.querySelector('.fmt-panel')
+        if (!node) return
+        morphReset(node)
+        const lines = node.querySelectorAll('.fmt-line').length || 1
+        const stagger = (lines - 1) * 60
+        node._mt1 = window.setTimeout(() => {
+          node.classList.remove('show-before')
+          node.classList.add('is-formatted')
+          node._mt2 = window.setTimeout(() => {
+            node.classList.add('is-settled')
+          }, 700 + stagger + 350)
+        }, 250)
+      }
+
+      function setupTabs(root) {
+        const tablist = root.querySelector('[role="tablist"]')
+        const tabs = Array.from(root.querySelectorAll('[role="tab"]'))
+        if (!tablist || !tabs.length) return
+        const isFmt = root.hasAttribute('data-fmt')
+        const reduced = reduceTabs.matches
+        if (isFmt && reduced) root.classList.add('reduced')
+
+        let inView = false
+        let loopTimer = 0
+
+        const panelFor = (tab) => document.getElementById(tab.getAttribute('aria-controls'))
+        const activeTab = () => tabs.find((t) => t.getAttribute('aria-selected') === 'true') || tabs[0]
+
+        function playSignature(panel) {
+          if (!panel || reduced || !inView) return
+          if (isFmt) { morphRun(panel); return }
+          panel.classList.remove('anim-on')
+          void panel.offsetWidth
+          panel.classList.add('anim-on')
+        }
+
+        function startLoop() {
+          if (!isFmt || reduced) return
+          window.clearInterval(loopTimer)
+          loopTimer = window.setInterval(() => {
+            if (inView) morphRun(panelFor(activeTab()))
+          }, 4500)
+        }
+        function stopLoop() { window.clearInterval(loopTimer) }
+
+        function select(index, focusTab) {
+          tabs.forEach((tab, i) => {
+            const selected = i === index
+            tab.setAttribute('aria-selected', selected ? 'true' : 'false')
+            tab.tabIndex = selected ? 0 : -1
+            const panel = panelFor(tab)
+            if (!panel) return
+            if (selected) {
+              panel.removeAttribute('hidden')
+              panel.classList.add('is-active')
+            } else {
+              panel.setAttribute('hidden', '')
+              panel.classList.remove('is-active', 'anim-on')
+            }
+          })
+          if (focusTab) tabs[index].focus()
+          playSignature(panelFor(tabs[index]))
+        }
+
+        tabs.forEach((tab, i) => {
+          tab.addEventListener('click', () => select(i, true))
+          tab.addEventListener('keydown', (e) => {
+            let target = -1
+            if (e.key === 'ArrowDown' || e.key === 'ArrowRight') target = (i + 1) % tabs.length
+            else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') target = (i - 1 + tabs.length) % tabs.length
+            else if (e.key === 'Home') target = 0
+            else if (e.key === 'End') target = tabs.length - 1
+            if (target >= 0) { e.preventDefault(); select(target, true) }
+          })
+        })
+
+        const io = new IntersectionObserver((entries) => {
+          for (const en of entries) {
+            if (en.isIntersecting && en.intersectionRatio >= 0.35) {
+              if (inView) continue
+              inView = true
+              playSignature(panelFor(activeTab()))
+              startLoop()
+            } else {
+              inView = false
+              stopLoop()
+              tabs.forEach((t) => {
+                const p = panelFor(t)
+                if (p) p.classList.remove('anim-on')
+              })
+            }
+          }
+        }, { threshold: [0, 0.35, 1] })
+        io.observe(root)
+      }
+
+      function initTabs() {
+        const roots = document.querySelectorAll('[data-tabs]')
+        roots.forEach((root) => setupTabs(root))
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initTabs)
+      } else {
+        initTabs()
+      }
+    </script>
+
+    <style is:global>
+      :root {
+        color-scheme: dark;
+        --background: oklch(0.145 0 0);
+        --foreground: oklch(0.985 0 0);
+        --card: oklch(0.205 0 0);
+        --muted: oklch(0.708 0 0);
+        --border: oklch(1 0 0 / 10%);
+        --border-strong: oklch(1 0 0 / 16%);
+        --code-bg: oklch(0.21 0.01 286);
+
+        /* Engineered capability triad — one family, ~90-130deg apart, clear of brand blue. */
+        --cap-cyan: oklch(0.80 0.115 215);
+        --cap-violet: oklch(0.72 0.145 292);
+        --cap-emerald: oklch(0.76 0.135 162);
+
+        /* Semantic diff colors — reserved, never decorative. */
+        --del: oklch(0.62 0.17 27);
+        --add: oklch(0.72 0.16 150);
+        --amber: oklch(0.78 0.13 75);
+
+        --radius: 0.5rem;
+        --sans: 'Geist Sans', system-ui, sans-serif;
+        --mono: 'Geist Mono', ui-monospace, monospace;
+        --col: 1180px;
+        --bar-dot: oklch(0.4 0 0);
+      }
+
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        background: var(--background);
+        color: var(--foreground);
+        font-family: var(--sans);
+        font-size: 16px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        overflow-x: hidden;
+      }
+      a { color: inherit; text-decoration: none; }
+      code, pre { font-family: var(--mono); }
+
+      /* ---------- dot-matrix field (page-2 hero identity) ---------- */
+      #field {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: 0;
+        display: block;
+      }
+      .field-vignette {
+        position: fixed;
+        inset: 0;
+        z-index: 1;
+        pointer-events: none;
+        background:
+          radial-gradient(115% 85% at 50% 44%, oklch(0.145 0 0 / 0.92) 0%, oklch(0.145 0 0 / 0.70) 40%, oklch(0.145 0 0 / 0.18) 72%, oklch(0.145 0 0 / 0) 90%),
+          linear-gradient(to bottom, oklch(0.145 0 0 / 0.55) 0%, oklch(0.145 0 0 / 0) 18%, oklch(0.145 0 0 / 0) 82%, oklch(0.145 0 0 / 0.92) 100%);
+      }
+      main, .nav, .footer { position: relative; z-index: 2; }
+
+      /* ---------- nav (docs header parity) ---------- */
+      .nav {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        border-bottom: 1px solid var(--border);
+        background: oklch(0.145 0 0 / 0.6);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+      }
+      .nav-inner {
+        max-width: var(--col);
+        margin: 0 auto;
+        padding: 0 16px;
+        height: 56px;
+        display: flex;
+        align-items: center;
+        gap: 24px;
+      }
+      .brand { display: inline-flex; align-items: center; gap: 9px; }
+      .brand .logo { display: block; }
+      .wordmark { font-weight: 600; letter-spacing: -0.01em; font-size: 16px; }
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        margin-left: 8px;
+        font-size: 14px;
+      }
+      .nav-links a {
+        color: oklch(0.985 0 0 / 0.8);
+        transition: color 0.15s ease;
+      }
+      .nav-links a:hover { color: var(--foreground); }
+      .nav-pill { margin-left: auto; }
+      @media (max-width: 880px) {
+        .nav-links a:not([href*='github']) { display: none; }
+        .nav-links { gap: 16px; }
+      }
+
+      /* ---------- buttons (all SOLID, never ghost) ---------- */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        font-family: var(--sans);
+        font-size: 13px;
+        font-weight: 500;
+        padding: 7px 14px;
+        border-radius: var(--radius);
+        border: 1px solid transparent;
+        white-space: nowrap;
+        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+      }
+      .btn.lg { font-size: 14px; padding: 10px 18px; gap: 9px; }
+      .btn.solid { background: var(--foreground); color: var(--background); }
+      .btn.solid:hover { background: oklch(0.9 0 0); }
+      .btn.vscode {
+        background: oklch(0.24 0 0);
+        color: var(--foreground);
+        border-color: var(--border-strong);
+      }
+      .btn.vscode:hover { background: oklch(0.275 0 0); border-color: oklch(1 0 0 / 24%); }
+      .btn.vscode .brand-logo { display: block; flex: none; }
+      .btn.zed {
+        background: oklch(0.205 0 0);
+        color: var(--muted);
+        border-color: var(--border);
+        cursor: not-allowed;
+        gap: 8px;
+      }
+      .soon-pill {
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.05em;
+        text-transform: lowercase;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 1px 6px;
+        line-height: 1.4;
+      }
+
+      /* ---------- hero ---------- */
+      .hero {
+        min-height: calc(100vh - 56px);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 72px 16px 56px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: calc(var(--radius) * 1.4);
+        box-shadow:
+          0 1px 0 0 oklch(1 0 0 / 6%) inset,
+          0 40px 90px -34px oklch(0 0 0 / 0.9);
+      }
+      .hero-card { width: 100%; max-width: 720px; padding: 44px 44px 40px; }
+      .eyebrow {
+        margin: 0;
+        font-family: var(--mono);
+        font-size: 12px;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        text-transform: lowercase;
+      }
+      .hero-card .eyebrow { margin-bottom: 18px; }
+      h1 {
+        margin: 0 0 16px;
+        font-size: clamp(34px, 5.4vw, 52px);
+        line-height: 1.04;
+        font-weight: 600;
+        letter-spacing: -0.025em;
+      }
+      .subhead {
+        margin: 0 0 26px;
+        font-size: 16px;
+        line-height: 1.6;
+        color: oklch(0.86 0 0);
+        max-width: 56ch;
+      }
+      .cta-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+
+      /* ---------- section shell ---------- */
+      .band { padding: clamp(48px, 7vw, 76px) 0; }
+      .band-spotlight {
+        background: color-mix(in oklab, var(--card) 26%, transparent);
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+      }
+      .band-inner { max-width: var(--col); margin: 0 auto; padding: 0 16px; }
+      .band-inner.narrow { max-width: 760px; }
+      .section-head { margin-bottom: 26px; max-width: 760px; }
+      .head-row { display: flex; align-items: center; gap: 12px; }
+      .section-head h2 {
+        margin: 8px 0 10px;
+        font-size: clamp(24px, 3.4vw, 33px);
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        line-height: 1.06;
+      }
+      .lede {
+        margin: 0;
+        color: oklch(0.86 0 0);
+        font-size: clamp(15px, 1.6vw, 17px);
+        line-height: 1.55;
+        max-width: 62ch;
+      }
+      .lede code {
+        font-family: var(--mono);
+        font-size: 0.86em;
+        color: var(--foreground);
+        background: oklch(1 0 0 / 6%);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 1px 5px;
+      }
+      .optin-chip {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        color: var(--accent);
+        background: color-mix(in oklab, var(--accent) 12%, transparent);
+        border: 1px solid color-mix(in oklab, var(--accent) 38%, var(--border));
+        border-radius: 999px;
+        padding: 2px 9px;
+      }
+
+      /* ---------- doc links ---------- */
+      .doclink {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        color: oklch(0.985 0 0 / 0.9);
+        border-bottom: 1px solid var(--border-strong);
+        padding-bottom: 1px;
+        transition: border-color 0.15s ease, color 0.15s ease;
+      }
+      .doclink:hover { color: var(--foreground); border-bottom-color: var(--foreground); }
+      .doclink span { transition: transform 0.15s ease; }
+      .doclink:hover span { transform: translateX(2px); }
+      .doclink.inline { border-bottom: none; color: var(--foreground); margin-left: 4px; }
+      .doclink.inline:hover { text-decoration: underline; }
+      .section-doclink { margin-top: 20px; }
+
+      /* ---------- capabilities triad ---------- */
+      .cap-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+      }
+      .cap-card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 24px 22px;
+        display: flex;
+        flex-direction: column;
+      }
+      .cap-badge {
+        width: 40px;
+        height: 40px;
+        border-radius: 11px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--accent);
+        background: color-mix(in oklab, var(--accent) 14%, transparent);
+        border: 1px solid color-mix(in oklab, var(--accent) 38%, var(--border));
+        box-shadow:
+          inset 0 0 0 1px color-mix(in oklab, var(--accent) 10%, transparent),
+          0 0 20px -6px color-mix(in oklab, var(--accent) 30%, transparent);
+        margin-bottom: 18px;
+        transition: border-color 0.18s ease, box-shadow 0.18s ease;
+      }
+      .cap-badge svg { width: 24px; height: 24px; display: block; }
+      .cap-badge .arc { opacity: 0.7; transition: stroke-dashoffset 0.5s ease; }
+      .cap-badge .arc-1 { stroke-dasharray: 12; stroke-dashoffset: 0; }
+      .cap-badge .arc-2 { stroke-dasharray: 18; stroke-dashoffset: 0; }
+      .cap-badge .node-link { transition: stroke-dashoffset 0.4s ease; }
+      .cap-badge .lens { transition: transform 0.2s ease; transform-origin: 11px 11px; }
+      .cap-badge .guide { opacity: 0.55; }
+      .cap-badge .tick { opacity: 0.5; transition: d 0.25s ease; }
+      .cap-card:hover .cap-badge {
+        border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+        box-shadow:
+          inset 0 0 0 1px color-mix(in oklab, var(--accent) 14%, transparent),
+          0 0 26px -6px color-mix(in oklab, var(--accent) 40%, transparent);
+      }
+      .cap-card:hover .cap-badge .arc-1 { stroke-dashoffset: 12; }
+      .cap-card:hover .cap-badge .arc-2 { stroke-dashoffset: 18; }
+      .cap-card:hover .cap-badge .lens { transform: scale(1.04); }
+      .cap-index {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted);
+        letter-spacing: 0.08em;
+        margin-bottom: 12px;
+      }
+      .cap-card h3 {
+        margin: 0 0 10px;
+        font-size: 18px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .cap-blurb {
+        margin: 0 0 18px;
+        color: oklch(0.8 0 0);
+        font-size: 14px;
+        line-height: 1.6;
+        flex: 1;
+      }
+      .cap-blurb code {
+        font-family: var(--mono);
+        font-size: 0.86em;
+        color: var(--foreground);
+      }
+      .cap-card .doclink { align-self: flex-start; }
+
+      /* ---------- tab component (shared, accent-tinted) ---------- */
+      .tabs.vertical {
+        display: grid;
+        grid-template-columns: 210px 1fr;
+        overflow: hidden;
+      }
+      .tabs.horizontal { display: block; overflow: hidden; }
+      .showcase { padding: 0; }
+
+      .tabs [role='tablist'] {
+        display: flex;
+        gap: 2px;
+        padding: 14px;
+      }
+      .tabs.vertical [role='tablist'] {
+        flex-direction: column;
+        border-right: 1px solid var(--border);
+        background: oklch(0.18 0 0 / 0.5);
+      }
+      .tabs.horizontal [role='tablist'] {
+        flex-direction: row;
+        flex-wrap: wrap;
+        border-bottom: 1px solid var(--border);
+        background: oklch(0.18 0 0 / 0.5);
+      }
+      .tabs [role='tab'] {
+        appearance: none;
+        font-family: var(--sans);
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--muted);
+        background: transparent;
+        border: 0;
+        cursor: pointer;
+        text-align: left;
+        padding: 9px 12px;
+        border-radius: 6px;
+        transition: color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+      }
+      .tabs.vertical [role='tab'] { box-shadow: inset 2px 0 0 -2px transparent; }
+      .tabs.horizontal [role='tab'] { box-shadow: inset 0 -2px 0 -2px transparent; }
+      .tabs [role='tab']:hover { color: var(--foreground); }
+      .tabs [role='tab'][aria-selected='true'] {
+        color: var(--foreground);
+        background: color-mix(in oklab, var(--accent) 9%, transparent);
+      }
+      .tabs.vertical [role='tab'][aria-selected='true'] { box-shadow: inset 2px 0 0 0 var(--accent); }
+      .tabs.horizontal [role='tab'][aria-selected='true'] { box-shadow: inset 0 -2px 0 0 var(--accent); }
+      .tabs [role='tab']:focus-visible {
+        outline: 2px solid color-mix(in oklab, var(--accent) 60%, transparent);
+        outline-offset: 2px;
+      }
+
+      .tab-panels { display: grid; padding: 18px; min-width: 0; }
+      .tab-panels > [role='tabpanel'] { grid-area: 1 / 1; min-width: 0; }
+      .tab-panels > [role='tabpanel']:focus-visible {
+        outline: 2px solid color-mix(in oklab, var(--accent) 50%, transparent);
+        outline-offset: 4px;
+        border-radius: 8px;
+      }
+      .tab-panels > [role='tabpanel'][hidden] {
+        display: block;
+        visibility: hidden;
+        pointer-events: none;
+      }
+      .tab-panels > [role='tabpanel'].is-active {
+        animation: panelIn 0.2s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+      }
+      @keyframes panelIn {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .panel-cap {
+        margin: 14px 2px 0;
+        color: var(--muted);
+        font-size: 13.5px;
+        line-height: 1.55;
+      }
+      .panel-cap code { font-family: var(--mono); font-size: 0.9em; color: var(--foreground); }
+
+      /* ---------- faux-editor frame ---------- */
+      .frame {
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+      .frame-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: 34px;
+        padding: 0 12px;
+        border-bottom: 1px solid var(--border);
+        background: oklch(0.18 0 0);
+      }
+      .frame-dots { display: inline-flex; gap: 6px; }
+      .frame-dots i { width: 10px; height: 10px; border-radius: 50%; background: var(--bar-dot); }
+      .frame-name { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+      .frame-body {
+        position: relative;
+        padding: 18px 20px;
+        font-family: var(--mono);
+        font-size: 13.5px;
+        line-height: 1.85;
+        overflow: hidden;
+      }
+      .frame-body.frame-tall { min-height: 150px; }
+      .cmp-body { min-height: 196px; }
+      .eline { white-space: pre; }
+      .acc { color: var(--accent); }
+
+      /* syntax tokens (restrained) */
+      .c-muted { color: var(--muted); }
+      .c-kw { color: oklch(0.88 0 0); }
+      .c-fn { color: var(--foreground); }
+      .c-str { color: oklch(0.82 0.05 150); }
+      .c-del { color: var(--del); }
+      .c-add { color: var(--add); }
+
+      /* blinking caret */
+      .caret-c {
+        display: inline-block;
+        width: 1px;
+        height: 1.05em;
+        margin: 0 1px -0.18em;
+        background: var(--accent);
+        animation: caretBlink 1s steps(1) infinite;
+      }
+      @keyframes caretBlink { 50% { opacity: 0; } }
+
+      /* ---------- LSP: completion ---------- */
+      .cmp-anchor { position: relative; }
+      .ghost { color: oklch(0.985 0 0 / 0.45); }
+      .cmp-pop {
+        position: absolute;
+        top: 46px;
+        left: 96px;
+        width: 220px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        box-shadow: 0 18px 40px -20px oklch(0 0 0 / 0.8);
+        overflow: hidden;
+        z-index: 3;
+      }
+      .is-active.anim-on .cmp-pop {
+        animation: cmpRise 0.16s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+      }
+      @keyframes cmpRise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+      .cmp-row {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 30px;
+        padding: 0 12px;
+        font-size: 12.5px;
+        color: oklch(0.85 0 0);
+      }
+      .cmp-name { letter-spacing: 0; }
+      .cmp-row .kind {
+        font-size: 10.5px;
+        color: var(--accent);
+        background: color-mix(in oklab, var(--accent) 16%, transparent);
+        border-radius: 3px;
+        padding: 1px 5px;
+      }
+      .cmp-hi {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        height: 30px;
+        background: color-mix(in oklab, var(--accent) 16%, transparent);
+        border-left: 2px solid var(--accent);
+        z-index: 0;
+      }
+      .is-active.anim-on .cmp-hi {
+        animation: cmpStep 1.6s cubic-bezier(0.5, 0, 0.2, 1) 0.6s 1 both;
+      }
+      @keyframes cmpStep {
+        0% { transform: translateY(0); }
+        35% { transform: translateY(30px); }
+        70% { transform: translateY(30px); }
+        100% { transform: translateY(0); }
+      }
+
+      /* ---------- LSP: hover ---------- */
+      .hov-target { position: relative; }
+      .hov-tip {
+        position: absolute;
+        left: 20px;
+        top: 14px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 9px 12px;
+        box-shadow: 0 18px 40px -20px oklch(0 0 0 / 0.8);
+        z-index: 3;
+      }
+      .hov-tip .sig { font-size: 12.5px; color: oklch(0.88 0 0); white-space: nowrap; }
+      .hov-tip .doc { margin-top: 5px; font-size: 11.5px; color: var(--muted); }
+      .hov-notch {
+        position: absolute;
+        bottom: -5px;
+        left: 22px;
+        width: 9px;
+        height: 9px;
+        background: var(--card);
+        border-right: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        transform: rotate(45deg);
+      }
+      .hov-line { margin-top: 86px; }
+      .hov-target::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        bottom: -2px;
+        height: 1.5px;
+        width: 100%;
+        background: var(--accent);
+        transform: scaleX(1);
+        transform-origin: left;
+      }
+      .is-active.anim-on .hov-target::after {
+        animation: hovSweep 0.22s ease both;
+      }
+      @keyframes hovSweep { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+      .is-active.anim-on .hov-tip { animation: hovRise 0.26s ease 0.05s both; }
+      @keyframes hovRise { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+      .is-active.anim-on .hov-target {
+        animation: hovFlash 0.6s ease both;
+        border-radius: 3px;
+      }
+      @keyframes hovFlash {
+        0% { background: color-mix(in oklab, var(--accent) 30%, transparent); }
+        100% { background: color-mix(in oklab, var(--accent) 8%, transparent); }
+      }
+      .hov-target { background: color-mix(in oklab, var(--accent) 8%, transparent); border-radius: 3px; }
+
+      /* ---------- LSP: go-to-definition ---------- */
+      .gotodef-body .eline { white-space: pre; }
+      .gd-link {
+        color: var(--accent);
+        text-decoration: underline dotted;
+        text-underline-offset: 3px;
+      }
+      .gd-divider { height: 1px; background: var(--border); margin: 12px 0; }
+      .gd-def { position: relative; padding-left: 12px; }
+      .gd-marker {
+        position: absolute;
+        left: 0;
+        top: 2px;
+        bottom: 2px;
+        width: 2px;
+        background: var(--accent);
+        border-radius: 2px;
+      }
+      .gd-halo {
+        color: var(--foreground);
+        background: color-mix(in oklab, var(--accent) 12%, transparent);
+        border-radius: 3px;
+        padding: 0 2px;
+      }
+      .gotodef-wire {
+        position: absolute;
+        left: 8px;
+        top: 6px;
+        width: 120px;
+        height: 110px;
+        pointer-events: none;
+        overflow: visible;
+        z-index: 2;
+      }
+      .gotodef-wire .wire,
+      .gotodef-wire .wire-head {
+        fill: none;
+        stroke: var(--accent);
+        stroke-width: 1.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .gotodef-wire .wire { stroke-dasharray: 150; stroke-dashoffset: 0; }
+      .gotodef-wire .wire-head { opacity: 1; }
+      .is-active.anim-on .gotodef-wire .wire { animation: gdDraw 0.45s ease both; }
+      @keyframes gdDraw { from { stroke-dashoffset: 150; } to { stroke-dashoffset: 0; } }
+      .is-active.anim-on .gotodef-wire .wire-head { animation: gdHead 0.2s ease 0.4s both; }
+      @keyframes gdHead { from { opacity: 0; } to { opacity: 1; } }
+      .is-active.anim-on .gd-def { animation: gdGlow 0.9s ease 0.4s both; border-radius: 4px; }
+      @keyframes gdGlow {
+        0% { background: color-mix(in oklab, var(--accent) 18%, transparent); }
+        100% { background: transparent; }
+      }
+
+      /* ---------- LSP: find references ---------- */
+      .refs-grid { display: flex; flex-direction: column; gap: 12px; }
+      .refs-chip {
+        margin-left: auto;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--accent);
+        background: color-mix(in oklab, var(--accent) 14%, transparent);
+        border: 1px solid color-mix(in oklab, var(--accent) 34%, var(--border));
+        border-radius: 999px;
+        padding: 1px 8px;
+      }
+      .is-active.anim-on .refs-chip { animation: refChip 0.3s ease both; }
+      @keyframes refChip { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+      .ref-box {
+        border: 1px solid color-mix(in oklab, var(--accent) 70%, transparent);
+        background: color-mix(in oklab, var(--accent) 10%, transparent);
+        border-radius: 3px;
+        padding: 0 2px;
+      }
+      .is-active.anim-on .ref-box { animation: refIn 0.14s ease both; }
+      .is-active.anim-on .ref-1 { animation-delay: 0.05s; }
+      .is-active.anim-on .ref-2 { animation-delay: 0.13s; }
+      .is-active.anim-on .ref-3 { animation-delay: 0.21s; }
+      @keyframes refIn {
+        from { border-color: transparent; background: transparent; }
+        to { border-color: color-mix(in oklab, var(--accent) 70%, transparent); background: color-mix(in oklab, var(--accent) 10%, transparent); }
+      }
+
+      /* ---------- LSP: rename ---------- */
+      .rename-input {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid color-mix(in oklab, var(--accent) 55%, var(--border));
+        background: color-mix(in oklab, var(--accent) 10%, transparent);
+        border-radius: 4px;
+        padding: 0 4px;
+      }
+      .rename-word { display: inline-block; overflow: hidden; white-space: nowrap; vertical-align: bottom; }
+      .is-active.anim-on .rename-word { animation: renameType 0.7s steps(11, end) both; }
+      @keyframes renameType { from { width: 0; } to { width: 11ch; } }
+      .rename-ghost { color: var(--muted); position: relative; }
+      .rn-old { color: var(--muted); }
+      .rn-new { display: none; color: var(--foreground); }
+      .is-active.anim-on .rn-old { animation: rnOut 0.2s ease 0.78s both; }
+      .is-active.anim-on .rn-new { display: inline; animation: rnIn 0.3s ease 0.78s both; }
+      @keyframes rnOut { from { opacity: 1; } to { opacity: 0; position: absolute; } }
+      @keyframes rnIn {
+        0% { opacity: 0; color: var(--accent); }
+        60% { color: var(--accent); }
+        100% { opacity: 1; color: var(--foreground); }
+      }
+      .rn-dot {
+        display: inline-block;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: color-mix(in oklab, var(--accent) 70%, transparent);
+        vertical-align: middle;
+      }
+      .rename-done {
+        position: absolute;
+        right: 16px;
+        bottom: 14px;
+        font-family: var(--sans);
+        font-size: 11.5px;
+        color: var(--accent);
+        opacity: 0;
+      }
+      .is-active.anim-on .rename-done { animation: rnDone 0.3s ease 1s both; }
+      @keyframes rnDone { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+
+      /* ---------- LSP: inlay hints ---------- */
+      .inlay-pill, .inlay-arg {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: oklch(0.86 0 0);
+        background: var(--card);
+        border: 1px solid color-mix(in oklab, var(--accent) 40%, var(--border));
+        border-radius: 4px;
+        padding: 0 6px;
+        white-space: nowrap;
+      }
+      .inlay-arg { color: var(--muted); border-color: color-mix(in oklab, var(--accent) 28%, var(--border)); }
+      .is-active.anim-on .inlay-pill,
+      .is-active.anim-on .inlay-arg {
+        display: inline-block;
+        overflow: hidden;
+        animation: inlayIn 0.18s ease both;
+        transform-origin: left;
+      }
+      .is-active.anim-on .inlay-arg { animation-delay: 0.1s; }
+      @keyframes inlayIn { from { clip-path: inset(0 100% 0 0); opacity: 0.4; } to { clip-path: inset(0 0 0 0); opacity: 1; } }
+
+      /* ---------- code-analysis: type checking ---------- */
+      .anno-dot {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--accent);
+        margin: 0 1px -1px 1px;
+        cursor: help;
+        outline: none;
+      }
+      .anno-dot:focus-visible {
+        box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 55%, transparent);
+      }
+      .squiggle {
+        position: relative;
+        display: inline-block;
+        text-decoration: underline wavy var(--del);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+      }
+      .is-active.anim-on .squiggle { animation: squiggleDraw 0.2s ease both; }
+      @keyframes squiggleDraw { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+      .caret-row .caret { color: var(--del); white-space: pre; }
+      .is-active.anim-on .caret-row { animation: caretIn 0.16s ease 0.22s both; }
+      @keyframes caretIn { from { opacity: 0; } to { opacity: 1; } }
+      .diag-line { color: var(--muted); }
+      .diag-err { color: var(--del); font-weight: 500; }
+      .diag-warn { color: var(--amber); font-weight: 500; }
+      .pill {
+        font-family: var(--mono);
+        font-size: 0.92em;
+        border-radius: 4px;
+        padding: 0 5px;
+      }
+      .pill-want { color: oklch(0.86 0 0); background: oklch(1 0 0 / 7%); border: 1px solid var(--border); }
+      .pill-got { color: var(--del); background: color-mix(in oklab, var(--del) 14%, transparent); border: 1px solid color-mix(in oklab, var(--del) 38%, transparent); }
+      .is-active.anim-on .diag-line { animation: diagUp 0.3s ease 0.42s both; }
+      @keyframes diagUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+      /* ---------- code-analysis: inference ---------- */
+      .param { color: var(--foreground); border-radius: 3px; padding: 0 1px; }
+      .is-active.anim-on .param { animation: paramPulse 0.6s ease both; }
+      @keyframes paramPulse {
+        0% { background: transparent; }
+        40% { background: color-mix(in oklab, var(--accent) 30%, transparent); }
+        100% { background: transparent; }
+      }
+      .infer-inlay { color: color-mix(in oklab, var(--accent) 45%, var(--muted)); }
+      .infer-inlay .acc { color: var(--accent); }
+      .is-active.anim-on .infer-inlay {
+        display: inline-block;
+        overflow: hidden;
+        animation: inferIn 0.5s ease 0.25s both;
+        transform-origin: left;
+      }
+      @keyframes inferIn { from { clip-path: inset(0 100% 0 0); opacity: 0; } to { clip-path: inset(0 0 0 0); opacity: 1; } }
+
+      /* ---------- code-analysis: linting (terminal) ---------- */
+      .frame.term .frame-bar { background: oklch(0.16 0 0); }
+      .term-title { margin-left: 2px; }
+      .term-prompt { color: var(--accent); }
+      .term-cmd { color: var(--foreground); }
+      .is-active.anim-on .term-cmd {
+        display: inline-block;
+        overflow: hidden;
+        white-space: nowrap;
+        vertical-align: bottom;
+        animation: termType 0.4s steps(13, end) both;
+      }
+      @keyframes termType { from { width: 0; } to { width: 13ch; } }
+      .term-out { color: var(--foreground); }
+      .term-warn-row { margin-top: 2px; }
+      .is-active.anim-on .term-out { animation: termOut 0.2s ease both; }
+      .is-active.anim-on .eline.term-out:nth-of-type(2) { animation-delay: 0.7s; }
+      .is-active.anim-on .term-warn-row { animation-delay: 0.85s; }
+      @keyframes termOut { from { opacity: 0; } to { opacity: 1; } }
+      .term-caret { vertical-align: baseline; }
+
+      /* ---------- formatter morph ---------- */
+      .fmt-panel { --dur: 700ms; --ease: cubic-bezier(0.22, 0.61, 0.36, 1); }
+      .fmt-line { font-family: var(--mono); font-size: 14px; line-height: 2; white-space: nowrap; }
+      .fmt-line .tk { white-space: pre; }
+      .fmt-line .sp {
+        display: inline-block;
+        width: var(--wf);
+        transition: width var(--dur) var(--ease);
+        transition-delay: calc(var(--i, 0) * 60ms);
+      }
+      .fmt-panel.show-before .sp { width: var(--wb); }
+      .fmt-panel.is-formatted .sp.is-ch {
+        animation: spFlash var(--dur) var(--ease) both;
+        animation-delay: calc(var(--i, 0) * 60ms);
+      }
+      @keyframes spFlash {
+        0% { box-shadow: inset 0 -2px 0 var(--del); }
+        45% { box-shadow: inset 0 -2px 0 var(--add); }
+        100% { box-shadow: inset 0 0 0 transparent; }
+      }
+      .fmt-line .ch { position: relative; display: inline-block; }
+      .fmt-line .ch .g-before,
+      .fmt-line .ch .g-after { transition: opacity var(--dur) var(--ease); }
+      .fmt-line .ch .g-before { position: absolute; left: 0; top: 0; opacity: 0; }
+      .fmt-line .ch .g-after { opacity: 1; }
+      .fmt-panel.show-before .ch .g-before { opacity: 1; }
+      .fmt-panel.show-before .ch .g-after { opacity: 0; }
+      .fmt-panel.is-formatted .ch { animation: chFlash var(--dur) var(--ease) both; }
+      @keyframes chFlash {
+        0% { color: var(--del); }
+        45% { color: var(--add); }
+        100% { color: var(--add); }
+      }
+      .fmt-panel.is-settled .ch { animation: none; color: inherit; transition: color 0.5s ease; }
+      .fmt-panel.no-anim * { transition: none !important; animation: none !important; }
+      .fmt-static { display: none; }
+      .fmt-static div { font-family: var(--mono); font-size: 14px; line-height: 2; white-space: pre; }
+      .fmt-tabs.reduced .fmt-anim { display: none; }
+      .fmt-tabs.reduced .fmt-static { display: block; }
+
+      /* ---------- closer ---------- */
+      .cta-card { padding: 40px 38px 36px; }
+      .cta-card .eyebrow { margin-bottom: 14px; }
+      .cta-card h2 {
+        margin: 0 0 12px;
+        font-size: clamp(24px, 3.4vw, 30px);
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+      .cta-card .lede { margin-bottom: 22px; max-width: 56ch; }
+      .codeblock {
+        margin: 0 0 24px;
+        background: var(--code-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 16px 18px;
+        overflow-x: auto;
+        font-family: var(--mono);
+        font-size: 13px;
+        line-height: 1.8;
+      }
+      .codeblock code { white-space: pre; display: block; color: oklch(0.85 0 0); }
+      .cta-meta { margin: 20px 0 0; color: var(--muted); font-size: 13.5px; line-height: 1.6; }
+      .cta-meta a { color: var(--foreground); border-bottom: 1px solid var(--border-strong); }
+      .cta-meta a:hover { border-bottom-color: var(--foreground); }
+
+      /* ---------- footer ---------- */
+      .footer { border-top: 1px solid var(--border); margin-top: 0; }
+      .footer-inner {
+        max-width: var(--col);
+        margin: 0 auto;
+        padding: 28px 16px;
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        flex-wrap: wrap;
+      }
+      .footer-links {
+        display: flex;
+        gap: 18px;
+        flex-wrap: wrap;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        color: var(--muted);
+      }
+      .footer-links a { transition: color 0.15s ease; }
+      .footer-links a:hover { color: var(--foreground); }
+      .footer-legal { margin: 0 0 0 auto; font-size: 12.5px; color: var(--muted); }
+
+      /* ---------- responsive ---------- */
+      @media (max-width: 880px) {
+        .cap-grid { grid-template-columns: 1fr; }
+        .tabs.vertical { grid-template-columns: 1fr; }
+        .tabs.vertical [role='tablist'] {
+          flex-direction: row;
+          flex-wrap: wrap;
+          border-right: none;
+          border-bottom: 1px solid var(--border);
+        }
+        .tabs.vertical [role='tab'] { box-shadow: inset 0 -2px 0 -2px transparent; }
+        .tabs.vertical [role='tab'][aria-selected='true'] { box-shadow: inset 0 -2px 0 0 var(--accent); }
+        .footer-legal { margin: 0; width: 100%; }
+        .cmp-pop { left: 60px; }
+      }
+      @media (max-width: 560px) {
+        .hero-card { padding: 30px 22px 28px; }
+        .frame-body { font-size: 12.5px; }
+        .fmt-line, .fmt-static div { font-size: 12.5px; }
+      }
+
+      /* ---------- reduced motion: calm static end-states ---------- */
+      @media (prefers-reduced-motion: reduce) {
+        .caret-c { animation: none; opacity: 1; }
+        .tab-panels > [role='tabpanel'].is-active { animation: none; }
+        .cap-badge, .cap-badge * { transition: none !important; }
+        .is-active.anim-on *,
+        .is-active.anim-on::after { animation: none !important; }
+        .rn-new { display: inline; }
+        .rn-old { display: none; }
+        .rename-word { width: auto; }
+        .doclink span { transition: none; }
+      }
+    </style>
+  </body>
+</html>
