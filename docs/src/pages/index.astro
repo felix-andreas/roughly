@@ -140,7 +140,7 @@ const footerLinks = [
       </section>
 
       <!-- ---------- capabilities triad ---------- -->
-      <section id="capabilities" class="band">
+      <section id="capabilities" class="band dotted">
         <div class="col">
           <p class="eyebrow">three tools, one binary</p>
           <h2>Three tools, one binary.</h2>
@@ -394,7 +394,7 @@ const footerLinks = [
       </section>
 
       <!-- ---------- formatter ---------- -->
-      <section id="formatter" class="band has-accent accent-emerald">
+      <section id="formatter" class="band has-accent accent-emerald dotted">
         <div class="col">
           <p class="eyebrow">ship</p>
           <h2>One consistent style.</h2>
@@ -514,6 +514,7 @@ const footerLinks = [
       <!-- ---------- get started ---------- -->
       <section id="get-started" class="band band-closer">
         <canvas id="closer-canvas" aria-hidden="true"></canvas>
+        <div class="closer-scrim" aria-hidden="true"></div>
         <div class="col closer-col">
           <p class="eyebrow">adopt</p>
           <h2>Drop it onto your R project.</h2>
@@ -1124,40 +1125,328 @@ roughly check .</code></pre>
       }
 
       // ======================================================================
-      // Closer: faint static particle dusting.
+      // Closer: dot-matrix halftone field with a sweeping wavefront.
+      // Self-contained and namespaced; pauses offscreen; static halftone
+      // fallback under reduced motion. Shares no globals with the hero field.
       // ======================================================================
-      function initCloser() {
-        const c = document.getElementById('closer-canvas') as HTMLCanvasElement | null
-        const section = document.getElementById('get-started') as HTMLElement | null
-        if (!c || !section) return
-        const ctx = c.getContext('2d')
+      function initCloserMatrix() {
+        const matrixCanvas = document.getElementById('closer-canvas') as HTMLCanvasElement | null
+        const matrixSection = document.getElementById('get-started') as HTMLElement | null
+        if (!matrixCanvas || !matrixSection) return
+        const ctx = matrixCanvas.getContext('2d', { alpha: false })
         if (!ctx) return
-        function paint() {
-          const dpr = Math.min(window.devicePixelRatio || 1, 2)
-          const r = section!.getBoundingClientRect()
-          const w = Math.max(2, r.width)
-          const h = Math.max(2, r.height)
-          c!.width = Math.floor(w * dpr)
-          c!.height = Math.floor(h * dpr)
-          c!.style.width = w + 'px'
-          c!.style.height = h + 'px'
-          ctx!.setTransform(dpr, 0, 0, dpr, 0, 0)
-          ctx!.clearRect(0, 0, w, h)
-          ctx!.fillStyle = '#fff'
-          const n = w < 720 ? 240 : 420
-          for (let i = 0; i < n; i++) {
-            const depth = Math.random()
-            ctx!.globalAlpha = 0.04 + depth * 0.06
-            ctx!.fillRect(Math.random() * w, Math.random() * h, depth > 0.7 ? 2 : 1, depth > 0.7 ? 2 : 1)
+        const reduceMatrix = window.matchMedia('(prefers-reduced-motion: reduce)')
+        const finePointer = window.matchMedia('(pointer: fine)')
+
+        const BG = '#0a0a0a'
+        const TRAIL = 'rgba(10,10,10,0.14)'
+        const RAMP = ' ·∶∷▪█'
+        const RAMP_CODES = RAMP.split('').map((c) => c.charCodeAt(0))
+        const TOKENS = ['integer', 'double', 'character', 'logical', '<T: numeric>', 'fn(..)->']
+        const DIR_X = 0.7771
+        const DIR_Y = 0.6294
+        const PERIOD = 13.0
+        const LEVELS = 18
+        const WHITE = LEVELS
+        const probeR = 130
+
+        let dpr = 1
+        let W = 0
+        let H = 0
+        let cellW = 11
+        let cellH = 18
+        let cols = 0
+        let rows = 0
+        let maxProj = 0
+        let bandPx = 0
+        let rowStreams: string[] = []
+        let styles: string[] = []
+        let bx: Float32Array[] = []
+        let by: Float32Array[] = []
+        let bc: Uint16Array[] = []
+        let bn: number[] = []
+        let mouseX = -1e9
+        let mouseY = -1e9
+        let hasMouse = false
+
+        function buildStyles() {
+          styles = []
+          for (let i = 0; i < LEVELS; i++) {
+            const a = 0.1 + (i / (LEVELS - 1)) * 0.3
+            styles.push('rgba(238,238,238,' + a.toFixed(3) + ')')
           }
-          ctx!.globalAlpha = 1
         }
-        let timer = 0
-        window.addEventListener('resize', () => {
-          window.clearTimeout(timer)
-          timer = window.setTimeout(paint, 150)
-        })
-        paint()
+
+        function hash3(x: number, y: number, z: number) {
+          let n = (x | 0) * 374761393 + (y | 0) * 668265263 + (z | 0) * 1274126177
+          n = (n ^ (n >> 13)) >>> 0
+          n = Math.imul(n, 1274126177) >>> 0
+          return (n & 0xffffff) / 0x1000000
+        }
+        function smooth(t: number) {
+          return t * t * (3 - 2 * t)
+        }
+        function vnoise(x: number, y: number, z: number) {
+          const xi = Math.floor(x)
+          const yi = Math.floor(y)
+          const zi = Math.floor(z)
+          const xf = x - xi
+          const yf = y - yi
+          const zf = z - zi
+          const u = smooth(xf)
+          const v = smooth(yf)
+          const w = smooth(zf)
+          const c000 = hash3(xi, yi, zi)
+          const c100 = hash3(xi + 1, yi, zi)
+          const c010 = hash3(xi, yi + 1, zi)
+          const c110 = hash3(xi + 1, yi + 1, zi)
+          const c001 = hash3(xi, yi, zi + 1)
+          const c101 = hash3(xi + 1, yi, zi + 1)
+          const c011 = hash3(xi, yi + 1, zi + 1)
+          const c111 = hash3(xi + 1, yi + 1, zi + 1)
+          const x00 = c000 + (c100 - c000) * u
+          const x10 = c010 + (c110 - c010) * u
+          const x01 = c001 + (c101 - c001) * u
+          const x11 = c011 + (c111 - c011) * u
+          const y0 = x00 + (x10 - x00) * v
+          const y1 = x01 + (x11 - x01) * v
+          return y0 + (y1 - y0) * w
+        }
+        function fbm(x: number, y: number, z: number) {
+          let f = 0
+          let amp = 0.5
+          let freq = 1
+          for (let o = 0; o < 3; o++) {
+            f += amp * vnoise(x * freq, y * freq, z * freq)
+            freq *= 2.0
+            amp *= 0.5
+          }
+          return f
+        }
+        function tokenChar(col: number, row: number) {
+          const s = rowStreams[row]
+          if (!s) return 0
+          return s.charCodeAt(col % s.length)
+        }
+
+        function resize() {
+          dpr = Math.min(window.devicePixelRatio || 1, 2)
+          const rect = matrixSection!.getBoundingClientRect()
+          W = Math.max(2, Math.round(rect.width))
+          H = Math.max(2, Math.round(rect.height))
+          const small = W < 720
+          cellW = small ? 13 : 11
+          cellH = small ? 21 : 18
+          matrixCanvas!.width = Math.floor(W * dpr)
+          matrixCanvas!.height = Math.floor(H * dpr)
+          matrixCanvas!.style.width = W + 'px'
+          matrixCanvas!.style.height = H + 'px'
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+          ctx.textBaseline = 'top'
+          ctx.textAlign = 'left'
+          ctx.font = Math.round(cellH * 0.82) + "px 'Geist Mono', monospace"
+          cols = Math.ceil(W / cellW) + 1
+          rows = Math.ceil(H / cellH) + 1
+          maxProj = W * DIR_X + H * DIR_Y
+          bandPx = cellW * 2.6
+
+          rowStreams = new Array(rows)
+          for (let r = 0; r < rows; r++) {
+            const seed = Math.floor(hash3(r * 7 + 1, 13, 29) * 1000)
+            const parts: string[] = []
+            for (let k = 0; k < 14; k++) parts.push(TOKENS[(seed + k * 5) % TOKENS.length])
+            rowStreams[r] = parts.join('  ') + '  '
+          }
+
+          const maxCells = cols * rows
+          bx = []
+          by = []
+          bc = []
+          bn = []
+          for (let i = 0; i <= LEVELS; i++) {
+            bx.push(new Float32Array(maxCells))
+            by.push(new Float32Array(maxCells))
+            bc.push(new Uint16Array(maxCells))
+            bn.push(0)
+          }
+          ctx.fillStyle = BG
+          ctx.fillRect(0, 0, W, H)
+        }
+
+        function render(time: number) {
+          ctx.fillStyle = TRAIL
+          ctx.fillRect(0, 0, W, H)
+
+          for (let i = 0; i <= LEVELS; i++) bn[i] = 0
+
+          const phase = (time / PERIOD) % 1
+          const frontPos = phase * (maxProj + bandPx * 4) - bandPx * 2
+          const tz = time * 0.15
+
+          for (let r = 0; r < rows; r++) {
+            const py = r * cellH
+            const cy = py + cellH * 0.5
+            for (let c = 0; c < cols; c++) {
+              const px = c * cellW
+              const cx = px + cellW * 0.5
+
+              let b = fbm(px * 0.006 + 11, py * 0.006 + 7, tz)
+              b = (b - 0.25) / 0.5
+              if (b < 0) b = 0
+              else if (b > 1) b = 1
+
+              const proj = cx * DIR_X + cy * DIR_Y
+              const w = proj - frontPos
+
+              let resolved = w < bandPx && w > -bandPx
+              if (!resolved && hasMouse) {
+                const dx = cx - mouseX
+                const dy = cy - mouseY
+                if (dx * dx + dy * dy < probeR * probeR && b > 0.32) resolved = true
+              }
+
+              if (resolved) {
+                const code = tokenChar(c, r)
+                if (code === 32 || code === 0) continue
+                const idx = bn[WHITE]++
+                bx[WHITE][idx] = px
+                by[WHITE][idx] = py
+                bc[WHITE][idx] = code
+                continue
+              }
+
+              if (w <= -bandPx) b = Math.min(1, b + 0.08)
+
+              const gi = Math.min(RAMP_CODES.length - 1, Math.floor(b * RAMP_CODES.length))
+              const code = RAMP_CODES[gi]
+              if (code === 32) continue
+
+              let lvl = Math.round(b * (LEVELS - 1))
+              if (lvl < 0) lvl = 0
+              else if (lvl >= LEVELS) lvl = LEVELS - 1
+              const idx = bn[lvl]++
+              bx[lvl][idx] = px
+              by[lvl][idx] = py
+              bc[lvl][idx] = code
+            }
+          }
+
+          for (let lvl = 0; lvl < LEVELS; lvl++) {
+            const n = bn[lvl]
+            if (!n) continue
+            ctx.fillStyle = styles[lvl]
+            const xs = bx[lvl]
+            const ys = by[lvl]
+            const cs = bc[lvl]
+            for (let i = 0; i < n; i++) ctx.fillText(String.fromCharCode(cs[i]), xs[i], ys[i])
+          }
+          const wn = bn[WHITE]
+          if (wn) {
+            ctx.fillStyle = '#ffffff'
+            const xs = bx[WHITE]
+            const ys = by[WHITE]
+            const cs = bc[WHITE]
+            for (let i = 0; i < wn; i++) ctx.fillText(String.fromCharCode(cs[i]), xs[i], ys[i])
+          }
+        }
+
+        let running = false
+        let startTime = 0
+        let rafId = 0
+        let inView = false
+
+        function loop(now: number) {
+          if (!running) return
+          if (!startTime) startTime = now
+          render((now - startTime) / 1000)
+          rafId = requestAnimationFrame(loop)
+        }
+        function start() {
+          if (running) return
+          running = true
+          startTime = 0
+          rafId = requestAnimationFrame(loop)
+        }
+        function stop() {
+          running = false
+          if (rafId) cancelAnimationFrame(rafId)
+          rafId = 0
+        }
+        function staticFrame() {
+          ctx.fillStyle = BG
+          ctx.fillRect(0, 0, W, H)
+          hasMouse = false
+          render(PERIOD * 0.5)
+        }
+
+        function onMove(e: MouseEvent) {
+          const rect = matrixSection!.getBoundingClientRect()
+          const x = e.clientX - rect.left
+          const y = e.clientY - rect.top
+          if (x >= 0 && x <= W && y >= 0 && y <= H) {
+            mouseX = x
+            mouseY = y
+            hasMouse = true
+          } else {
+            hasMouse = false
+          }
+        }
+        function onLeave() {
+          hasMouse = false
+        }
+
+        function setup() {
+          buildStyles()
+          resize()
+
+          if (reduceMatrix.matches) {
+            staticFrame()
+          } else {
+            if (finePointer.matches) {
+              window.addEventListener('mousemove', onMove, { passive: true })
+              window.addEventListener('mouseout', onLeave, { passive: true })
+            }
+            if (typeof IntersectionObserver !== 'undefined') {
+              const observer = new IntersectionObserver(
+                (entries) => {
+                  for (const entry of entries) {
+                    inView = entry.isIntersecting
+                    if (inView) start()
+                    else stop()
+                  }
+                },
+                { threshold: 0 }
+              )
+              observer.observe(matrixSection!)
+            } else {
+              inView = true
+              start()
+            }
+          }
+
+          let resizeTimer = 0
+          window.addEventListener('resize', () => {
+            window.clearTimeout(resizeTimer)
+            resizeTimer = window.setTimeout(() => {
+              stop()
+              resize()
+              if (reduceMatrix.matches) staticFrame()
+              else if (inView) start()
+            }, 150)
+          })
+
+          reduceMatrix.addEventListener('change', () => {
+            stop()
+            if (reduceMatrix.matches) staticFrame()
+            else if (inView) start()
+          })
+        }
+
+        if (document.fonts && document.fonts.ready) {
+          document.fonts.ready.then(setup).catch(setup)
+        } else {
+          setup()
+        }
       }
 
       function initNav() {
@@ -1172,7 +1461,7 @@ roughly check .</code></pre>
       document
         .querySelectorAll('[data-tabs]')
         .forEach((el) => setupTabs(el as HTMLElement))
-      initCloser()
+      initCloserMatrix()
       initNav()
     </script>
 
@@ -1467,6 +1756,30 @@ roughly check .</code></pre>
       .band > * {
         position: relative;
         z-index: 1;
+      }
+      /* subtle dotted backing — shares the closer's dot motif for page rhythm */
+      .dotted::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        background-image: radial-gradient(oklch(1 0 0 / 0.05) 1px, transparent 1.5px);
+        background-size: 22px 22px;
+        -webkit-mask-image: linear-gradient(
+          to bottom,
+          transparent 0%,
+          #000 18%,
+          #000 82%,
+          transparent 100%
+        );
+        mask-image: linear-gradient(
+          to bottom,
+          transparent 0%,
+          #000 18%,
+          #000 82%,
+          transparent 100%
+        );
       }
       .accent-cyan {
         --cap: var(--cap-cyan);
@@ -1800,10 +2113,10 @@ roughly check .</code></pre>
       }
       [role='tab'][aria-selected='true'] {
         color: var(--foreground);
-        background: color-mix(in oklch, var(--cap) 9%, transparent);
+        background: color-mix(in oklch, var(--cap) 14%, transparent);
       }
       .tabs[data-orientation='vertical'] [role='tab'][aria-selected='true'] {
-        border-left-color: var(--cap);
+        border-left-color: var(--border-strong);
       }
       .tabs[data-orientation='horizontal'] [role='tab'][aria-selected='true'] {
         border-bottom-color: var(--cap);
@@ -1981,7 +2294,6 @@ roughly check .</code></pre>
         height: 28px;
         z-index: 0;
         background: color-mix(in oklch, var(--cap) 16%, transparent);
-        border-left: 2px solid var(--cap);
       }
       .play .comp-rowhl {
         animation: compStep 0.8s 0.6s both;
@@ -2088,7 +2400,7 @@ roughly check .</code></pre>
         top: 0.15em;
         bottom: 0.15em;
         width: 2px;
-        background: var(--cap);
+        background: var(--border-strong);
       }
       .gd-name {
         border-radius: 3px;
@@ -2538,9 +2850,22 @@ roughly check .</code></pre>
         z-index: 0;
         pointer-events: none;
       }
+      .closer-scrim {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        pointer-events: none;
+        background: radial-gradient(
+          125% 115% at 50% 50%,
+          oklch(0.145 0 0 / 0.9) 0%,
+          oklch(0.145 0 0 / 0.66) 42%,
+          oklch(0.145 0 0 / 0.2) 74%,
+          oklch(0.145 0 0 / 0) 100%
+        );
+      }
       .closer-col {
         position: relative;
-        z-index: 1;
+        z-index: 2;
         max-width: var(--prose);
         margin: 0 auto;
       }
