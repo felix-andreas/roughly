@@ -5,10 +5,6 @@ use {
     tree_sitter::{Node, Point},
 };
 
-pub fn starts_with_lowercase(name: &str, query: &str) -> bool {
-    query.is_empty() || name.to_lowercase().starts_with(&query.to_lowercase())
-}
-
 pub fn read_to_rope(path: impl AsRef<Path>) -> std::io::Result<Rope> {
     Rope::from_reader(BufReader::new(File::open(path)?))
 }

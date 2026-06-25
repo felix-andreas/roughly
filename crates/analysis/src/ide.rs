@@ -943,8 +943,10 @@ pub fn completion(
 
     let mut items = Vec::new();
 
+    // Keywords are a small fixed set, so they are prefix-completed rather than subsequence-matched;
+    // no one searches for `function` by typing `con`.
     for keyword in RESERVED_WORDS {
-        if starts_with_query(keyword, &query) {
+        if query_prefix_matches(keyword, &query) {
             items.push(CompletionItem {
                 label: (*keyword).to_owned(),
                 kind: CompletionItemKind::Keyword,
@@ -962,7 +964,7 @@ pub fn completion(
             let Some(label) = analysis.interner().resolve(*symbol) else {
                 continue;
             };
-            if !starts_with_query(label, &query) {
+            if !query_matches(label, &query) {
                 continue;
             }
 
@@ -975,7 +977,7 @@ pub fn completion(
         }
     }
 
-    deduplicate_completion_items(items)
+    deduplicate_completion_items(items, &query)
 }
 
 const RESERVED_WORDS: &[&str] = &[
@@ -1066,7 +1068,7 @@ fn rendered_query_matches(
     while let Some(query_match) = matches.next() {
         let identifier = query_match.captures[0].node;
         let label = rope.byte_slice(identifier.byte_range()).to_string();
-        if starts_with_query(&label, query) && label.len() != query.len() {
+        if query_matches(&label, query) && label.len() != query.len() {
             labels.push(label);
         }
     }
@@ -1113,7 +1115,7 @@ fn local_completion_items(
                 }
 
                 let label = document.rope().byte_slice(name.byte_range()).to_string();
-                if starts_with_query(&label, query) {
+                if query_matches(&label, query) {
                     items.push(CompletionItem {
                         label,
                         kind: CompletionItemKind::Variable,
@@ -1154,7 +1156,7 @@ fn collect_local_bindings_in_body(
                 }
 
                 let label = rope.byte_slice(lhs.byte_range()).to_string();
-                if starts_with_query(&label, query) {
+                if query_matches(&label, query) {
                     items.push(CompletionItem {
                         label,
                         kind: CompletionItemKind::Variable,
@@ -1171,7 +1173,7 @@ fn collect_local_bindings_in_body(
                 }
 
                 let label = rope.byte_slice(variable.byte_range()).to_string();
-                if starts_with_query(&label, query) {
+                if query_matches(&label, query) {
                     items.push(CompletionItem {
                         label,
                         kind: CompletionItemKind::Variable,
@@ -1233,7 +1235,10 @@ fn binding_completion_kind(
     }
 }
 
-fn deduplicate_completion_items(items: Vec<CompletionItem>) -> Option<Vec<CompletionItem>> {
+fn deduplicate_completion_items(
+    items: Vec<CompletionItem>,
+    query: &str,
+) -> Option<Vec<CompletionItem>> {
     let mut seen = BTreeSet::new();
     let mut deduplicated = Vec::new();
 
@@ -1243,14 +1248,18 @@ fn deduplicate_completion_items(items: Vec<CompletionItem>) -> Option<Vec<Comple
         }
     }
 
+    // Rank by match quality first (prefix matches before scattered subsequence matches), then keep
+    // the original source/label tiebreakers so equal-quality items stay stable and alphabetical.
     deduplicated.sort_by(|left, right| {
         (
+            search_match(&left.label, query),
             left.source,
             left.label.to_lowercase(),
             left.label.clone(),
             left.kind,
         )
             .cmp(&(
+                search_match(&right.label, query),
                 right.source,
                 right.label.to_lowercase(),
                 right.label.clone(),
@@ -1410,8 +1419,125 @@ fn point_before(left: Point, right: Point) -> bool {
     left.row < right.row || (left.row == right.row && left.column < right.column)
 }
 
-fn starts_with_query(label: &str, query: &str) -> bool {
-    query.is_empty() || label.to_lowercase().starts_with(&query.to_lowercase())
+/// Ranking key for a search match; smaller compares as better. Ordered by match tier first (exact,
+/// prefix, contiguous substring, scattered subsequence), then by the position of the first matched
+/// character. Items with equal scores are left to the caller's own tiebreak (usually alphabetical).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MatchScore {
+    tier: u8,
+    first_match_index: u32,
+}
+
+const TIER_EXACT: u8 = 0;
+const TIER_PREFIX: u8 = 1;
+const TIER_SUBSTRING: u8 = 2;
+const TIER_SUBSEQUENCE: u8 = 3;
+
+/// Shortest query that is matched as a subsequence. Shorter queries fall back to prefix matching, so
+/// a one- or two-character query in completion does not surface scattered, low-signal matches. This
+/// mirrors rust-analyzer, which downgrades very short fuzzy inputs to prefix matching.
+const MIN_SUBSEQUENCE_QUERY_LEN: usize = 3;
+
+/// Match `query` against `candidate` the way rust-analyzer matches symbol-search and completion
+/// queries, and return a [`MatchScore`] for ranking (or `None` when there is no match):
+///
+/// - The rule is **subsequence** matching: every character of `query` must appear in `candidate` in
+///   order, not necessarily contiguously (so `Istrumnt` matches `instrument`).
+/// - Matching is case-insensitive unless `query` contains an uppercase character, in which case it
+///   becomes case-sensitive (**smart case**).
+/// - Queries shorter than [`MIN_SUBSEQUENCE_QUERY_LEN`] use prefix matching instead of subsequence
+///   matching, and an empty query matches everything.
+///
+/// The same function backs every search-like IDE feature (workspace symbols, completion) so they all
+/// match and rank identically.
+pub fn search_match(candidate: &str, query: &str) -> Option<MatchScore> {
+    if query.is_empty() {
+        return Some(MatchScore {
+            tier: TIER_PREFIX,
+            first_match_index: 0,
+        });
+    }
+
+    let case_sensitive = query.chars().any(|character| character.is_uppercase());
+    let equal = |left: char, right: char| {
+        if case_sensitive {
+            left == right
+        } else {
+            left.to_lowercase().eq(right.to_lowercase())
+        }
+    };
+
+    let mut query_chars = query.chars().peekable();
+    let mut first_match_index = None;
+    for (index, candidate_char) in candidate.chars().enumerate() {
+        let Some(&query_char) = query_chars.peek() else {
+            break;
+        };
+        if equal(candidate_char, query_char) {
+            if first_match_index.is_none() {
+                first_match_index = Some(index as u32);
+            }
+            query_chars.next();
+        }
+    }
+
+    if query_chars.peek().is_some() {
+        return None;
+    }
+
+    let tier = if equal_under_case(candidate, query, case_sensitive) {
+        TIER_EXACT
+    } else if prefix_under_case(candidate, query, case_sensitive) {
+        TIER_PREFIX
+    } else if substring_under_case(candidate, query, case_sensitive) {
+        TIER_SUBSTRING
+    } else {
+        TIER_SUBSEQUENCE
+    };
+
+    // A short query only matches as a prefix; a scattered subsequence of one or two characters is
+    // almost always noise.
+    if query.chars().count() < MIN_SUBSEQUENCE_QUERY_LEN && tier > TIER_PREFIX {
+        return None;
+    }
+
+    Some(MatchScore {
+        tier,
+        first_match_index: first_match_index.unwrap_or(0),
+    })
+}
+
+fn equal_under_case(candidate: &str, query: &str, case_sensitive: bool) -> bool {
+    if case_sensitive {
+        candidate == query
+    } else {
+        candidate.eq_ignore_ascii_case(query)
+    }
+}
+
+fn prefix_under_case(candidate: &str, query: &str, case_sensitive: bool) -> bool {
+    if case_sensitive {
+        candidate.starts_with(query)
+    } else {
+        candidate.to_lowercase().starts_with(&query.to_lowercase())
+    }
+}
+
+fn substring_under_case(candidate: &str, query: &str, case_sensitive: bool) -> bool {
+    if case_sensitive {
+        candidate.contains(query)
+    } else {
+        candidate.to_lowercase().contains(&query.to_lowercase())
+    }
+}
+
+fn query_matches(label: &str, query: &str) -> bool {
+    search_match(label, query).is_some()
+}
+
+fn query_prefix_matches(label: &str, query: &str) -> bool {
+    query.is_empty()
+        || prefix_under_case(label, query, query.chars().any(|character| character.is_uppercase()))
 }
 
 fn text_range(range: Range) -> TextRange {
@@ -1444,5 +1570,89 @@ impl<'a> Iterator for RopeByteChunks<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next().map(str::as_bytes)
+    }
+}
+
+#[cfg(test)]
+mod search_match_tests {
+    use super::search_match;
+
+    fn matches(candidate: &str, query: &str) -> bool {
+        search_match(candidate, query).is_some()
+    }
+
+    fn rank<'a>(query: &str, mut candidates: Vec<&'a str>) -> Vec<&'a str> {
+        candidates.sort_by_key(|candidate| {
+            (
+                search_match(candidate, query).expect("candidate should match"),
+                candidate.to_string(),
+            )
+        });
+        candidates
+    }
+
+    #[test]
+    fn subsequence_with_missing_characters_matches() {
+        assert!(matches("instrument", "istrumnt"));
+        assert!(matches("instrument", "inst"));
+        assert!(matches("instrument", "itr")); // scattered, three characters
+        assert!(matches("instrument", "instrument"));
+    }
+
+    #[test]
+    fn non_subsequence_does_not_match() {
+        assert!(!matches("instrument", "xyz"));
+        assert!(!matches("instrument", "trx")); // `x` absent after `t`,`r`
+        assert!(!matches("abc", "abcd")); // query longer than any subsequence
+    }
+
+    #[test]
+    fn short_queries_only_prefix_match() {
+        // one- and two-character queries fall back to prefix matching to avoid noise
+        assert!(matches("instrument", "in"));
+        assert!(!matches("instrument", "tr")); // scattered, but too short to fuzzy-match
+        assert!(!matches("instrument", "ni")); // not a prefix
+    }
+
+    #[test]
+    fn empty_query_matches_everything() {
+        assert!(matches("anything", ""));
+        assert!(matches("", ""));
+    }
+
+    #[test]
+    fn matching_is_case_insensitive_for_lowercase_queries() {
+        assert!(matches("Instrument", "istrumnt"));
+        assert!(matches("INSTRUMENT", "inst"));
+    }
+
+    #[test]
+    fn uppercase_query_forces_case_sensitivity() {
+        // smart case: an uppercase query char only matches an uppercase candidate char
+        assert!(matches("Instrument", "Ins"));
+        assert!(!matches("instrument", "Ins"));
+        assert!(matches("getHTTPResponse", "HTTP"));
+    }
+
+    #[test]
+    fn exact_then_prefix_then_substring_then_subsequence_rank_in_order() {
+        assert_eq!(
+            rank("inst", vec!["my_instrument", "reinstall", "install", "instrument", "inst"]),
+            vec!["inst", "install", "instrument", "reinstall", "my_instrument"],
+        );
+    }
+
+    #[test]
+    fn contiguous_substring_outranks_scattered_subsequence() {
+        // "ive" is contiguous in "derivative" (substring tier) but scattered in "is_verbose"
+        let scored = |candidate: &str| search_match(candidate, "ive").unwrap();
+        assert!(scored("derivative") < scored("is_verbose"));
+    }
+
+    #[test]
+    fn score_is_comparable() {
+        let exact = search_match("inst", "inst").unwrap();
+        let prefix = search_match("instrument", "inst").unwrap();
+        assert!(exact < prefix);
     }
 }

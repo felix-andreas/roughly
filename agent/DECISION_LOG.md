@@ -2,6 +2,22 @@
 
 Keep newest decisions at the top.
 
+- search-like IDE features (workspace symbols, completion) share one subsequence matcher,
+  `ide::search_match`, mirroring rust-analyzer.
+  - The rule is subsequence matching: every query character must appear in the candidate in order,
+    not necessarily contiguously, so `Istrumnt` matches `instrument`. Matching is case-insensitive
+    unless the query contains an uppercase character, in which case it becomes case-sensitive (smart
+    case). Queries shorter than 3 characters fall back to prefix matching (rust-analyzer downgrades
+    very short fuzzy inputs likewise) so a one- or two-character completion query does not surface
+    scattered noise; an empty query matches everything. Results are ranked by a `MatchScore`: tier
+    (exact, prefix, contiguous substring, scattered subsequence) then first-match position, with the
+    caller's alphabetical order as the final tiebreak. Workspace-symbol search collects all matches
+    then sorts and truncates to 128 (previously it prefix-filtered and truncated in arbitrary map
+    order). Completion reuses the same matcher and ranking for locals/globals/fields; the fixed
+    reserved-keyword set stays prefix-only because no one searches `function` by typing `con`.
+    Reference: rust-analyzer `SearchMode`/`Query` in `crates/hir-def/src/import_map.rs` and
+    `crates/ide-db/src/symbol_index.rs`.
+
 - hover, find-references, and rename graduated from experimental flags to always-on LSP capabilities.
   - All three are fixture- and LSP-integration-tested, so they no longer hide behind
     `--experimental-features`. The `goto_references`/`hovering`/`rename` flags now emit the
