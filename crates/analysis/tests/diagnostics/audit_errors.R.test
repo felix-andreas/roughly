@@ -506,3 +506,13 @@ x[1L]
 error[type-error] `[` is not supported on `integer[]`
 --> 2:1-2:6
 | x[1L]
+
+#---- unbound_local_in_uninferred_call_arg_no_panic
+f <- function(x) {
+  switch(x, a = (k <- 1L))
+  k
+}
+#++++
+warning[naming] I could not resolve `switch` in this package, its imports, or builtins.
+--> 2:3-2:9
+|   switch(x, a = (k <- 1L))

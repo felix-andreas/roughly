@@ -6,10 +6,7 @@ use {
         },
         interner::{Interner, Symbol},
         lower::LoweringContext,
-        naming::{
-            BindingId, NamesGlobal, NamesLocal, find_binding, find_exported_binding,
-            is_maybe_undefined_expression,
-        },
+        naming::{BindingId, NamesGlobal, NamesLocal, find_binding, find_exported_binding},
         types::{
             Annotation, Atomic, AttachedAnnotation, Constraint, CoreType, FunctionType,
             InferenceVariableId, QuantifiedVariable, RecordField, SurfaceType, TypeAnnotationKind,
@@ -461,48 +458,20 @@ impl InferenceState {
                         .local_naming
                         .expression_resolutions
                         .get(&expression.id)
-                        .filter(|_| {
-                            !is_maybe_undefined_expression(
-                                resolution_context.local_naming,
-                                expression.id,
-                            )
-                        })
                     {
-                        let type_scheme = self
-                            .lookup_local_name(*binding_id)
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "local binding {:?} should be prebound for typecheck",
-                                    binding_id
-                                )
-                            })
-                            .type_scheme
-                            .clone();
-                        return self.instantiate_type_scheme(&type_scheme);
-                    }
-
-                    if let Some(binding_id) = resolution_context
-                        .local_naming
-                        .expression_resolutions
-                        .get(&expression.id)
-                        .filter(|_| {
-                            is_maybe_undefined_expression(
-                                resolution_context.local_naming,
-                                expression.id,
-                            )
-                        })
-                    {
-                        let type_scheme = self
-                            .lookup_local_name(*binding_id)
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "maybe-undefined local binding {:?} should be prebound for typecheck",
-                                    binding_id
-                                )
-                            })
-                            .type_scheme
-                            .clone();
-                        return self.instantiate_type_scheme(&type_scheme);
+                        // A local reference can resolve to a binding that inference has not bound
+                        // yet: a forward or recursive reference, or a binding introduced only in a
+                        // conditionally executed branch (if/for/while/repeat). Such a binding has no
+                        // known type, so it is `Unknown`. We must not panic here — IDE requests
+                        // (hover, inlay hints) reach this path and crashing the server is not an
+                        // option.
+                        return match self.lookup_local_name(*binding_id) {
+                            Some(binding) => {
+                                let type_scheme = binding.type_scheme.clone();
+                                self.instantiate_type_scheme(&type_scheme)
+                            }
+                            None => Ok(CoreType::Unknown),
+                        };
                     }
 
                     if resolution_context

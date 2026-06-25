@@ -20,6 +20,16 @@ If code changes make this document inaccurate, update it in the same session.
 
 ## Active continuity
 
+- Fixed a production LSP panic: `local binding BindingId(N) should be prebound for typecheck`
+  (typecheck.rs Symbol arm). Root cause: naming creates a local binding for an assignment that
+  typecheck never visits (e.g. an assignment inside a call argument typecheck doesn't infer, like
+  `switch(x, a = (k <- 1L))`, or any Unsupported subtree), so `lookup_local_name` returned `None`
+  and panicked. Fix: the Symbol arm now falls back to `CoreType::Unknown` for any not-yet-bound local
+  (forward/recursive/conditionally-defined/uninferred) instead of panicking — IDE requests must never
+  crash. Regression: `audit_errors_probe__unbound_local_in_uninferred_call_arg_no_panic`. The two
+  former local branches (definite vs maybe-undefined) were merged; `is_maybe_undefined_expression` is
+  no longer used in typecheck.
+
 - Type checker capability landed (all in `crates/analysis/src/`, fixture-backed):
   - Numeric constraint on inference variables (`types::Constraint`, carried on `Unbound` entries and
     quantified in `TypeScheme`). `function(x) x + 1L` → `<T: numeric> fn(x: T) -> T`; calling with a
