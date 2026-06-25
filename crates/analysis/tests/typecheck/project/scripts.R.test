@@ -98,3 +98,19 @@ No diagnostics.
 person <- list(age = 20)
 #++++
 No diagnostics.
+
+#---- script_resolves_its_own_type_declaration
+#---- R/pkg.R
+pkg_value <- 1L
+#++++
+No diagnostics.
+#---- scripts/local.R
+#: @type Widget {list{size: integer}}
+
+#: @new Widget
+w <- list(size = 3L)
+
+#: integer
+s <- w$size
+#++++
+No diagnostics.

@@ -88,27 +88,23 @@ pub(crate) fn rebuild_package_naming(
             types: &types,
             diagnostics: &mut diagnostics,
         };
-
-        for (document_id, module) in &all_modules {
-            for definition in &module.definitions {
-                type_resolver.resolve_definition(definition, *document_id);
-            }
-
-            let local_naming = locals.get(document_id).unwrap_or_else(|| {
-                panic!("missing local naming for module {document_id:?} during package rebuild")
-            });
-            for expression_id in &local_naming.named_type_annotations {
-                let annotation = module
-                    .arena
-                    .get(*expression_id)
-                    .annotation
-                    .as_ref()
-                    .unwrap_or_else(|| {
-                        panic!("named type annotation should exist for {document_id:?}:{expression_id:?}")
-                    });
-                type_resolver.resolve_annotation(annotation, *document_id);
-            }
+        for (document_id, module) in package_modules {
+            let local_naming = expect_local_naming(locals, *document_id);
+            resolve_module_type_references(&mut type_resolver, *document_id, module, local_naming);
         }
+    }
+
+    // Scripts additionally see their own type declarations, which shadow package definitions of the
+    // same name, so a script can declare and use a nominal/alias that the package does not define.
+    for (document_id, module) in extra_modules {
+        let script_types = build_script_local_type_index(&types, module);
+        let mut type_resolver = TypeResolver {
+            interner,
+            types: &script_types,
+            diagnostics: &mut diagnostics,
+        };
+        let local_naming = expect_local_naming(locals, *document_id);
+        resolve_module_type_references(&mut type_resolver, *document_id, module, local_naming);
     }
 
     for (document_id, module) in &all_modules {
@@ -209,6 +205,54 @@ pub fn find_exported_binding(
             })
             .flatten()
     })
+}
+
+fn expect_local_naming(locals: &HashMap<DocumentId, NamesLocal>, document_id: DocumentId) -> &NamesLocal {
+    locals.get(&document_id).unwrap_or_else(|| {
+        panic!("missing local naming for module {document_id:?} during package rebuild")
+    })
+}
+
+fn resolve_module_type_references(
+    type_resolver: &mut TypeResolver<'_>,
+    document_id: DocumentId,
+    module: &Module,
+    local_naming: &NamesLocal,
+) {
+    for definition in &module.definitions {
+        type_resolver.resolve_definition(definition, document_id);
+    }
+    for expression_id in &local_naming.named_type_annotations {
+        let annotation = module
+            .arena
+            .get(*expression_id)
+            .annotation
+            .as_ref()
+            .unwrap_or_else(|| {
+                panic!("named type annotation should exist for {document_id:?}:{expression_id:?}")
+            });
+        type_resolver.resolve_annotation(annotation, document_id);
+    }
+}
+
+// A script resolves type names against the package index plus its own `@type`/`@alias` declarations,
+// which shadow package definitions of the same name. The package index already reports duplicates
+// among package files; a script redefining a package name is intentional shadowing, not a duplicate.
+fn build_script_local_type_index(
+    package_types: &BTreeMap<Symbol, TypeInfo>,
+    module: &Module,
+) -> BTreeMap<Symbol, TypeInfo> {
+    let mut types = package_types.clone();
+    for definition in &module.definitions {
+        types.insert(
+            definition.definition.name,
+            TypeInfo {
+                kind: definition.definition.kind,
+                arity: definition.definition.type_parameters.len(),
+            },
+        );
+    }
+    types
 }
 
 fn build_type_index(
