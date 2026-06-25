@@ -15,6 +15,12 @@ Total: 57 gaps found. Landed green: 557.
   `NULL`, so `c(1L, NA)` → `integer[]`, `c(1L, "a")` → `character[]`, `c(x, NULL)` → `c(x)`.
 - (earlier) record types reject duplicate fields and allow a trailing comma; expression-level
   annotations are applied.
+- **Index/field-access diagnostics (errors + operators dimensions).** `[[`, `$`, and `[` now emit
+  dedicated, range-precise diagnostics instead of the generic `index_type_mismatch`: "field `b` does
+  not exist in `C`", "position 5 does not exist in `C`", "expected a list, found `T`", "cannot index
+  `C` without a statically known position/field name", "`[` is not supported on `T`". Whole-access
+  ranges. New `InferenceError` variants + `SubscriptKind`. Green fixtures in
+  `tests/diagnostics/audit_errors.R.test` and the indexing bindings suites.
 - **Cross-file re-export interfaces (was 3 blockers + 3 high).** The interface phase is now a
   dependency-cached package-level fixed-point, so `second <- first`, `get_base <- function() base`,
   and deep cross-file chains resolve and propagate type errors. Green fixtures in
@@ -25,9 +31,10 @@ Total: 57 gaps found. Landed green: 557.
 1. **Structural constraints on inferred parameters (high).** `function(x) x$name`, `x[[1L]]`,
    `c(x, 1L)` error/leak `type1` instead of constraining `x` to a record/indexable/atomic. Needs
    structural (row/shape) constraints on inference variables, analogous to the numeric constraint.
-3. **Diagnostic wording/ranges (errors dimension).** Index/field/`$` errors say
-   "expected `list{...}`, found `Unknown`" instead of "field `b` does not exist" / "expected a list,
-   found `integer`"; alias-cycle not always reported; `@if-unknown`-on-known wording.
+3. **Diagnostic wording/ranges (errors dimension).** Remaining: alias-cycle not always reported on
+   unused declarations; `@if-unknown`-on-known wording; the `error[syntax-error] Syntax Error:
+   invalid semantics:` doubled prefix + wrong category for annotation-semantic errors. (Index/field/
+   `$` wording + ranges are now dedicated diagnostics — see Fixed.)
 4. **`T`/`F` base bindings and vectorized `&`/`|`** — need a base-environment model and a semantics
    decision respectively.
 

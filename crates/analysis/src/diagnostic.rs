@@ -1,7 +1,7 @@
 use {
     crate::{
         interner::{Interner, Symbol},
-        typecheck::{InferenceError, OperandExpectation},
+        typecheck::{InferenceError, OperandExpectation, SubscriptKind},
         types::{Atomic, Constraint, CoreType, InferenceVariableId, TypeScheme},
     },
     std::{collections::BTreeMap, fmt},
@@ -323,6 +323,78 @@ impl Diagnostic {
                     render_symbols(expected_parameters, interner)
                 ),
             ),
+            InferenceError::NotAList {
+                actual,
+                range,
+                expression_id: _,
+            } => {
+                let mut type_renderer = TypeRenderer::diagnostic(interner);
+                (
+                    *range,
+                    format!("expected a list, found `{}`", type_renderer.render(actual)),
+                )
+            }
+            InferenceError::FieldDoesNotExist {
+                field,
+                container,
+                range,
+                expression_id: _,
+            } => {
+                let name = interner.resolve(*field).unwrap_or("<unknown>");
+                let mut type_renderer = TypeRenderer::diagnostic(interner);
+                (
+                    *range,
+                    format!(
+                        "field `{name}` does not exist in `{}`",
+                        type_renderer.render(container)
+                    ),
+                )
+            }
+            InferenceError::PositionDoesNotExist {
+                position,
+                container,
+                range,
+                expression_id: _,
+            } => {
+                let mut type_renderer = TypeRenderer::diagnostic(interner);
+                (
+                    *range,
+                    format!(
+                        "position {position} does not exist in `{}`",
+                        type_renderer.render(container)
+                    ),
+                )
+            }
+            InferenceError::NonLiteralSubscript {
+                container,
+                by,
+                range,
+                expression_id: _,
+            } => {
+                let detail = match by {
+                    SubscriptKind::Position => "position",
+                    SubscriptKind::FieldName => "field name",
+                };
+                let mut type_renderer = TypeRenderer::diagnostic(interner);
+                (
+                    *range,
+                    format!(
+                        "cannot index `{}` without a statically known {detail}",
+                        type_renderer.render(container)
+                    ),
+                )
+            }
+            InferenceError::UnsupportedSubset {
+                actual,
+                range,
+                expression_id: _,
+            } => {
+                let mut type_renderer = TypeRenderer::diagnostic(interner);
+                (
+                    *range,
+                    format!("`[` is not supported on `{}`", type_renderer.render(actual)),
+                )
+            }
         };
 
         Self::type_error(range, message)

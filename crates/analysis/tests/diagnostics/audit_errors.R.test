@@ -448,3 +448,61 @@ worse <- bad - 2L
 error[type-error] expected `integer`, found `character`
 --> 3:10-3:13
 | bad <- f("x")
+
+#---- dollar_field_does_not_exist
+x <- list(a = 1L)
+x$b
+#++++
+error[type-error] field `b` does not exist in `list{a: integer}`
+--> 2:1-2:4
+| x$b
+
+#---- double_bracket_field_does_not_exist
+x <- list(a = 1L)
+x[["b"]]
+#++++
+error[type-error] field `b` does not exist in `list{a: integer}`
+--> 2:1-2:9
+| x[["b"]]
+
+#---- dollar_on_non_list
+x <- 1L
+x$foo
+#++++
+error[type-error] expected a list, found `integer`
+--> 2:1-2:6
+| x$foo
+
+#---- double_bracket_position_does_not_exist
+x <- list(1L, 2L)
+x[[5L]]
+#++++
+error[type-error] position 5 does not exist in `list{integer, integer}`
+--> 2:1-2:8
+| x[[5L]]
+
+#---- double_bracket_tuple_needs_literal_position
+x <- list(1L, 2L)
+i <- 1L
+x[[i]]
+#++++
+error[type-error] cannot index `list{integer, integer}` without a statically known position
+--> 3:1-3:7
+| x[[i]]
+
+#---- double_bracket_record_needs_literal_name
+x <- list(a = 1L)
+key <- "a"
+x[[key]]
+#++++
+error[type-error] cannot index `list{a: integer}` without a statically known field name
+--> 3:1-3:9
+| x[[key]]
+
+#---- bracket_unsupported_on_vector
+x <- c(1L, 2L)
+x[1L]
+#++++
+error[type-error] `[` is not supported on `integer[]`
+--> 2:1-2:6
+| x[1L]

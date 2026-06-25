@@ -26,7 +26,7 @@ character
 index <- 2L
 list(1L, "foo")[[index]]
 #++++
-error: type mismatch
+error: non-literal subscript
 
 #---- record_literal_name_returns_field_type
 list(foo = 1L, bar = "foo")[["bar"]]
@@ -36,7 +36,7 @@ character
 #---- record_missing_field_is_rejected
 list(foo = 1L)[["bar"]]
 #++++
-error: type mismatch
+error: field does not exist
 
 #---- array_like_list_double_bracket_returns_element
 #: list[integer]
@@ -90,30 +90,30 @@ integer
 value <- 1L
 value[1L]
 #++++
-error: type mismatch
+error: unsupported `[` subset
 
 #---- bracket_on_array_vector_is_rejected
 c(1L, 2L)[1L]
 #++++
-error: type mismatch
+error: unsupported `[` subset
 
 #---- bracket_on_named_vector_is_rejected
 c(foo = 1L)[["foo"]]
 c(foo = 1L)["foo"]
 #++++
-error: type mismatch
+error: unsupported `[` subset
 
 #---- double_bracket_on_function_is_rejected
 f <- function(x) x
 f[[1L]]
 #++++
-error: type mismatch
+error: not a list
 
 #==== boundary_cases
 #---- tuple_out_of_bounds_literal_position_is_rejected
 list(1L, "foo")[[3L]]
 #++++
-error: type mismatch
+error: position does not exist
 
 #---- named_vector_positional_index_returns_element
 c(foo = 1L, bar = 2L)[[1L]]
@@ -138,7 +138,7 @@ integer | NULL
 #---- dollar_missing_record_field_is_rejected
 list(foo = 1L)$bar
 #++++
-error: type mismatch
+error: field does not exist
 
 #---- chained_record_access
 config <- list(server = list(port = 8080L))

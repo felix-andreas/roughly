@@ -2773,44 +2773,33 @@ impl InferenceState {
             self.infer_expression_with_context(value, arena, resolution_context, type_definitions)?;
         let value_type = self.resolve_structural(inferred_value, type_definitions, Some(value))?;
         let arg0_expr = arena.get(arguments[0].expression);
-        let inferred_index = self.infer_expression_with_context(
-            arg0_expr,
-            arena,
-            resolution_context,
-            type_definitions,
-        )?;
-        let index_type = self.resolve(inferred_index)?;
+        self.infer_expression_with_context(arg0_expr, arena, resolution_context, type_definitions)?;
 
+        let unsupported = |actual: CoreType| InferenceError::UnsupportedSubset {
+            actual: Box::new(actual),
+            range: expression.range,
+            expression_id: expression.id,
+        };
         match value_type {
             CoreType::Unknown => Ok(CoreType::Unknown),
             CoreType::Any => Ok(CoreType::Any),
             CoreType::List(item_type) => Ok(CoreType::List(item_type)),
             CoreType::NamedList(item_type) => Ok(CoreType::NamedList(item_type)),
-            CoreType::Tuple(items) => {
-                let Some(item_type) = homogeneous_structural_item_type(&items) else {
-                    return Err(index_type_mismatch(
-                        CoreType::Tuple(items),
-                        index_type,
-                        arg0_expr,
-                    ));
-                };
-                Ok(CoreType::List(Box::new(item_type)))
-            }
+            CoreType::Tuple(items) => match homogeneous_structural_item_type(&items) {
+                Some(item_type) => Ok(CoreType::List(Box::new(item_type))),
+                None => Err(unsupported(CoreType::Tuple(items))),
+            },
             CoreType::Record(fields) => {
                 let field_types = fields
                     .iter()
                     .map(|field| field.value.clone())
                     .collect::<Vec<_>>();
-                let Some(item_type) = homogeneous_structural_item_type(&field_types) else {
-                    return Err(index_type_mismatch(
-                        CoreType::Record(fields),
-                        index_type,
-                        arg0_expr,
-                    ));
-                };
-                Ok(CoreType::NamedList(Box::new(item_type)))
+                match homogeneous_structural_item_type(&field_types) {
+                    Some(item_type) => Ok(CoreType::NamedList(Box::new(item_type))),
+                    None => Err(unsupported(CoreType::Record(fields))),
+                }
             }
-            other_type => Err(index_type_mismatch(other_type, index_type, arg0_expr)),
+            other_type => Err(unsupported(other_type)),
         }
     }
 
@@ -2836,13 +2825,12 @@ impl InferenceState {
             self.infer_expression_with_context(value, arena, resolution_context, type_definitions)?;
         let value_type = self.resolve_structural(inferred_value, type_definitions, Some(value))?;
         let index_expression = arena.get(arguments[0].expression);
-        let inferred_index = self.infer_expression_with_context(
+        self.infer_expression_with_context(
             index_expression,
             arena,
             resolution_context,
             type_definitions,
         )?;
-        let index_type = self.resolve(inferred_index)?;
 
         match value_type {
             CoreType::Unknown => Ok(CoreType::Unknown),
@@ -2860,52 +2848,57 @@ impl InferenceState {
                 if literal_name_symbol(index_expression).is_some() {
                     Ok(nullable_type(*item_type))
                 } else {
-                    Err(index_type_mismatch(
-                        CoreType::NamedList(item_type),
-                        index_type,
-                        index_expression,
-                    ))
+                    Err(InferenceError::NonLiteralSubscript {
+                        container: Box::new(CoreType::NamedList(item_type)),
+                        by: SubscriptKind::FieldName,
+                        range: expression.range,
+                        expression_id: expression.id,
+                    })
                 }
             }
             CoreType::Tuple(items) => {
                 let Some(index) = integer_literal_position(index_expression) else {
-                    return Err(index_type_mismatch(
-                        CoreType::Tuple(items),
-                        index_type,
-                        index_expression,
-                    ));
+                    return Err(InferenceError::NonLiteralSubscript {
+                        container: Box::new(CoreType::Tuple(items)),
+                        by: SubscriptKind::Position,
+                        range: expression.range,
+                        expression_id: expression.id,
+                    });
                 };
-                let Some(item_type) = items.get(index).cloned() else {
-                    return Err(index_type_mismatch(
-                        CoreType::Tuple(items),
-                        index_type,
-                        index_expression,
-                    ));
-                };
-                Ok(item_type)
+                match items.get(index).cloned() {
+                    Some(item_type) => Ok(item_type),
+                    None => Err(InferenceError::PositionDoesNotExist {
+                        position: index + 1,
+                        container: Box::new(CoreType::Tuple(items)),
+                        range: expression.range,
+                        expression_id: expression.id,
+                    }),
+                }
             }
             CoreType::Record(fields) => {
                 let Some(name) = literal_name_symbol(index_expression) else {
-                    return Err(index_type_mismatch(
-                        CoreType::Record(fields),
-                        index_type,
-                        index_expression,
-                    ));
+                    return Err(InferenceError::NonLiteralSubscript {
+                        container: Box::new(CoreType::Record(fields)),
+                        by: SubscriptKind::FieldName,
+                        range: expression.range,
+                        expression_id: expression.id,
+                    });
                 };
-                let Some(field) = fields.into_iter().find(|field| field.name == name) else {
-                    return Err(index_type_mismatch(
-                        CoreType::Record(Vec::new()),
-                        index_type,
-                        index_expression,
-                    ));
-                };
-                Ok(field.value)
+                match fields.iter().find(|field| field.name == name) {
+                    Some(field) => Ok(field.value.clone()),
+                    None => Err(InferenceError::FieldDoesNotExist {
+                        field: name,
+                        container: Box::new(CoreType::Record(fields)),
+                        range: expression.range,
+                        expression_id: expression.id,
+                    }),
+                }
             }
-            other_type => Err(index_type_mismatch(
-                other_type,
-                index_type,
-                index_expression,
-            )),
+            other_type => Err(InferenceError::NotAList {
+                actual: Box::new(other_type),
+                range: expression.range,
+                expression_id: expression.id,
+            }),
         }
     }
 
@@ -2927,21 +2920,28 @@ impl InferenceState {
             CoreType::Any => Ok(CoreType::Any),
             CoreType::NamedVector(atomic) => Ok(nullable_type(CoreType::Scalar(atomic))),
             CoreType::NamedList(item_type) => Ok(nullable_type(*item_type)),
-            CoreType::Record(fields) => {
-                let Some(field) = fields.into_iter().find(|field| field.name == name) else {
-                    return Err(index_type_mismatch(
-                        CoreType::Record(Vec::new()),
-                        CoreType::Unknown,
-                        expression,
-                    ));
-                };
-                Ok(field.value)
+            CoreType::Record(fields) => match fields.iter().find(|field| field.name == name) {
+                Some(field) => Ok(field.value.clone()),
+                None => Err(InferenceError::FieldDoesNotExist {
+                    field: name,
+                    container: Box::new(CoreType::Record(fields)),
+                    range: expression.range,
+                    expression_id: expression.id,
+                }),
+            },
+            container @ (CoreType::Tuple(_) | CoreType::List(_)) => {
+                Err(InferenceError::FieldDoesNotExist {
+                    field: name,
+                    container: Box::new(container),
+                    range: expression.range,
+                    expression_id: expression.id,
+                })
             }
-            other_type => Err(index_type_mismatch(
-                other_type,
-                CoreType::Unknown,
-                expression,
-            )),
+            other_type => Err(InferenceError::NotAList {
+                actual: Box::new(other_type),
+                range: expression.range,
+                expression_id: expression.id,
+            }),
         }
     }
 
@@ -3977,19 +3977,6 @@ fn literal_name_symbol(expression: &Expression) -> Option<Symbol> {
     Some(*symbol)
 }
 
-fn index_type_mismatch(
-    expected: CoreType,
-    actual: CoreType,
-    expression: &Expression,
-) -> InferenceError {
-    InferenceError::TypeMismatch {
-        expected: Box::new(expected),
-        actual: Box::new(actual),
-        range: Some(expression.range),
-        expression_id: Some(expression.id),
-    }
-}
-
 fn alias_cycle_error(symbol: Symbol, expression: Option<&Expression>) -> InferenceError {
     let fallback_range = Range {
         start_byte: 0,
@@ -4092,6 +4079,40 @@ pub enum InferenceError {
         range: Option<Range>,
         expression_id: Option<ExpressionId>,
     },
+    NotAList {
+        actual: Box<CoreType>,
+        range: Range,
+        expression_id: ExpressionId,
+    },
+    FieldDoesNotExist {
+        field: Symbol,
+        container: Box<CoreType>,
+        range: Range,
+        expression_id: ExpressionId,
+    },
+    PositionDoesNotExist {
+        position: usize,
+        container: Box<CoreType>,
+        range: Range,
+        expression_id: ExpressionId,
+    },
+    NonLiteralSubscript {
+        container: Box<CoreType>,
+        by: SubscriptKind,
+        range: Range,
+        expression_id: ExpressionId,
+    },
+    UnsupportedSubset {
+        actual: Box<CoreType>,
+        range: Range,
+        expression_id: ExpressionId,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubscriptKind {
+    Position,
+    FieldName,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
