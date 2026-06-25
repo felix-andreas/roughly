@@ -211,3 +211,19 @@ R/b.R:1:11
 #++++
 R/b.R:1:11..1:16
 R/c.R:1:1..1:6 [declaration]
+
+#==== references_s4
+#---- class_references_across_files
+#---- R/classes.R
+setClass("Animal", representation(name = "character"))
+#++++ any
+#---- R/methods.R
+setMethod("speak", "Animal", function(x) x)
+make <- function() new("Animal")
+#++++ any
+#!!!! references animal_class.references
+R/classes.R:1:12
+#++++
+R/classes.R:1:11..1:17 [declaration]
+R/methods.R:1:21..1:27
+R/methods.R:2:25..2:31

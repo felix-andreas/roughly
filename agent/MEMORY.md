@@ -24,9 +24,10 @@ If code changes make this document inaccurate, update it in the same session.
   `BindingKind` and computes `unused_bindings` (local assignments no symbol use resolves to); gated
   warnings in `document_diagnostics` when `check.unused`. Enable via `[check] unused = true`. Fixtures
   in `tests/unused/`. Excludes params, for-vars, top-level/exported, `.`/`_` names.
-- S4 goto-definition resolves name strings through the workspace index (`index::s4_reference_at` +
-  `s4_definition_ranges`), wired as a fallback in the LSP `definition` handler. References/rename and
-  `@` slot access deferred (see `projects/008`).
+- S4 navigation is unified into `ide::symbol_occurrences_at`: when the cursor is not on an identifier,
+  a structural S4 scan (`s4_symbol_at`/`collect_s4_occurrences` in `analysis::ide`) resolves
+  class/generic names in `setClass`/`setGeneric`/`setMethod`/`new`. goto-def, references, and rename
+  all work cross-file through one path. `@` slot access still `Unsupported` (see `projects/008`).
 - Goto-definition is now O(1) file: `symbol_occurrences_at` takes an `OccurrenceScope`; definition
   scans only the declaring document. `just bench` includes `benchmark_ide_100k/200k`
   (goto-def ~2ms, find-references ~240ms, completion 97ms/20k items — last two are documented debt).

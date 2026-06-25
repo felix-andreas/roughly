@@ -746,8 +746,30 @@ fn symbol_occurrences_at(
     resolve_package(analysis);
 
     let document = analysis.document(path)?;
-    let identifier = identifier_at_position(document.tree(), position)?;
-    let target = symbol_target_for_identifier(analysis, document_id, identifier)?;
+
+    // Identifiers resolve through the naming analysis (the common case).
+    if let Some(identifier) = identifier_at_position(document.tree(), position)
+        && let Some(target) = symbol_target_for_identifier(analysis, document_id, identifier)
+    {
+        return Some(identifier_occurrences(analysis, target, scope));
+    }
+
+    // S4 class/generic/method names are string literals, invisible to the naming analysis, so they
+    // are resolved structurally instead. This keeps goto-definition, references, and rename on a
+    // single occurrence-scanning path.
+    let point = Point::new(position.line_index, position.character_index);
+    if let Some(target) = s4_symbol_at(document.tree(), document.rope(), point) {
+        return Some(s4_occurrences(analysis, &target, scope));
+    }
+
+    None
+}
+
+fn identifier_occurrences(
+    analysis: &Analysis,
+    target: SymbolTarget,
+    scope: OccurrenceScope,
+) -> Vec<SymbolOccurrence> {
     let document_ids = match target {
         SymbolTarget::Local { document_id, .. } => vec![document_id],
         SymbolTarget::Global {
@@ -789,7 +811,7 @@ fn symbol_occurrences_at(
         }
     }
 
-    Some(occurrences)
+    occurrences
 }
 
 fn symbol_target_for_identifier(
@@ -900,6 +922,226 @@ fn symbol_target_for_binding(
         document_id,
         binding_id,
     }
+}
+
+//
+// S4 symbols
+//
+// S4 class, generic, and method names are written as string literals inside `setClass`/`setGeneric`/
+// `setMethod`/`new` calls, so the identifier-based resolution above never sees them. They are
+// resolved structurally here and fed through the same `SymbolOccurrence` machinery, so the S4 path
+// shares goto-definition, references, and rename with ordinary symbols.
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct S4Symbol {
+    name: String,
+    kind: S4SymbolKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum S4SymbolKind {
+    // A class: declared by `setClass`, referenced by a `setMethod` signature and by `new`.
+    Class,
+    // A generic: declared by `setGeneric`, referenced by the function name of a `setMethod`.
+    Generic,
+}
+
+struct S4Occurrence {
+    symbol: S4Symbol,
+    range: Range,
+    is_declaration: bool,
+}
+
+fn s4_symbol_at(tree: &Tree, rope: &Rope, point: Point) -> Option<S4Symbol> {
+    let mut occurrences = Vec::new();
+    collect_s4_occurrences(tree.root_node(), rope, &mut occurrences);
+    occurrences
+        .into_iter()
+        .find(|occurrence| range_contains_position(occurrence.range, point))
+        .map(|occurrence| occurrence.symbol)
+}
+
+fn s4_occurrences(
+    analysis: &Analysis,
+    target: &S4Symbol,
+    scope: OccurrenceScope,
+) -> Vec<SymbolOccurrence> {
+    let mut occurrences = Vec::new();
+    for document_id in analysis.all_document_ids() {
+        let document_path = analysis
+            .path_for_document_id(document_id)
+            .unwrap_or_else(|| panic!("missing path for document {document_id:?}"))
+            .to_path_buf();
+        let document = analysis
+            .document_by_id(document_id)
+            .unwrap_or_else(|| panic!("missing document {document_id:?}"));
+
+        let mut document_occurrences = Vec::new();
+        collect_s4_occurrences(document.tree().root_node(), document.rope(), &mut document_occurrences);
+        for occurrence in document_occurrences {
+            if occurrence.symbol != *target {
+                continue;
+            }
+            if scope == OccurrenceScope::Declaration && !occurrence.is_declaration {
+                continue;
+            }
+            occurrences.push(SymbolOccurrence {
+                location: Location {
+                    path: document_path.clone(),
+                    range: text_range(occurrence.range),
+                },
+                is_declaration: occurrence.is_declaration,
+            });
+        }
+    }
+    occurrences
+}
+
+fn collect_s4_occurrences(node: Node<'_>, rope: &Rope, out: &mut Vec<S4Occurrence>) {
+    if node.kind_id() == crate::tree::kind::CALL {
+        push_call_s4_occurrences(node, rope, out);
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_s4_occurrences(child, rope, out);
+    }
+}
+
+fn push_call_s4_occurrences(call: Node<'_>, rope: &Rope, out: &mut Vec<S4Occurrence>) {
+    let Some(function_name) = call_function_name(call, rope) else {
+        return;
+    };
+    let Some(arguments) = call.child_by_field_name("arguments") else {
+        return;
+    };
+
+    match function_name.as_str() {
+        "setClass" => push_string_occurrence(
+            string_argument(arguments, rope, "Class", 0),
+            S4SymbolKind::Class,
+            true,
+            rope,
+            out,
+        ),
+        "setGeneric" => push_string_occurrence(
+            string_argument(arguments, rope, "name", 0),
+            S4SymbolKind::Generic,
+            true,
+            rope,
+            out,
+        ),
+        "setMethod" => {
+            push_string_occurrence(
+                string_argument(arguments, rope, "f", 0),
+                S4SymbolKind::Generic,
+                false,
+                rope,
+                out,
+            );
+            // The signature is a class name or a `c(...)` of class names.
+            if let Some(signature) = call_argument(arguments, rope, "signature", 1) {
+                for class_string in signature_class_strings(signature) {
+                    push_string_occurrence(Some(class_string), S4SymbolKind::Class, false, rope, out);
+                }
+            }
+        }
+        "new" => push_string_occurrence(
+            string_argument(arguments, rope, "Class", 0),
+            S4SymbolKind::Class,
+            false,
+            rope,
+            out,
+        ),
+        _ => {}
+    }
+}
+
+fn push_string_occurrence(
+    string_node: Option<Node<'_>>,
+    kind: S4SymbolKind,
+    is_declaration: bool,
+    rope: &Rope,
+    out: &mut Vec<S4Occurrence>,
+) {
+    let Some(string_node) = string_node else {
+        return;
+    };
+    let Some(content) = string_node.child_by_field_name("content") else {
+        return;
+    };
+    let name = rope.byte_slice(content.byte_range()).to_string();
+    if name.is_empty() {
+        return;
+    }
+    out.push(S4Occurrence {
+        symbol: S4Symbol { name, kind },
+        range: content.range(),
+        is_declaration,
+    });
+}
+
+fn signature_class_strings<'tree>(signature: Node<'tree>) -> Vec<Node<'tree>> {
+    if signature.kind_id() == crate::tree::kind::STRING {
+        return vec![signature];
+    }
+    // `c("Person", "Other")`: collect the string elements.
+    if signature.kind_id() == crate::tree::kind::CALL
+        && let Some(arguments) = signature.child_by_field_name("arguments")
+    {
+        let mut cursor = arguments.walk();
+        return arguments
+            .children_by_field_name("argument", &mut cursor)
+            .filter_map(|argument| argument.child_by_field_name("value"))
+            .filter(|value| value.kind_id() == crate::tree::kind::STRING)
+            .collect();
+    }
+    Vec::new()
+}
+
+fn call_function_name(call: Node<'_>, rope: &Rope) -> Option<String> {
+    let function = call.child_by_field_name("function")?;
+    match function.kind_id() {
+        crate::tree::kind::IDENTIFIER => Some(rope.byte_slice(function.byte_range()).to_string()),
+        crate::tree::kind::NAMESPACE_OPERATOR => {
+            let rhs = function.child_by_field_name("rhs")?;
+            (rhs.kind_id() == crate::tree::kind::IDENTIFIER)
+                .then(|| rope.byte_slice(rhs.byte_range()).to_string())
+        }
+        _ => None,
+    }
+}
+
+fn string_argument<'tree>(
+    arguments: Node<'tree>,
+    rope: &Rope,
+    name: &str,
+    index: usize,
+) -> Option<Node<'tree>> {
+    let argument = call_argument(arguments, rope, name, index)?;
+    (argument.kind_id() == crate::tree::kind::STRING).then_some(argument)
+}
+
+// Resolves a call argument by name, falling back to the positional slot when it is unnamed.
+fn call_argument<'tree>(
+    arguments: Node<'tree>,
+    rope: &Rope,
+    name: &str,
+    index: usize,
+) -> Option<Node<'tree>> {
+    let mut cursor = arguments.walk();
+    for argument in arguments.children_by_field_name("argument", &mut cursor) {
+        if let Some(argument_name) = argument.child_by_field_name("name")
+            && rope.byte_slice(argument_name.byte_range()) == name
+        {
+            return argument.child_by_field_name("value");
+        }
+    }
+
+    arguments
+        .children_by_field_name("argument", &mut arguments.walk())
+        .nth(index)
+        .filter(|argument| argument.child_by_field_name("name").is_none())
+        .and_then(|argument| argument.child_by_field_name("value"))
 }
 
 //

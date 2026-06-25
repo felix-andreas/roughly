@@ -2,17 +2,20 @@
 
 Keep newest decisions at the top.
 
-- S4 goto-definition resolves through the workspace index, not the naming analysis.
-  - S4 class/generic/method names are string literals in `setClass`/`setGeneric`/`setMethod`/`new`
-    calls, so the identifier-based naming analysis never sees them and goto-definition found nothing.
-    Rather than teach naming about S4 string symbols (a large change to an already-complex phase), the
-    LSP `definition` handler falls back to the existing S4 index when identifier resolution returns
-    nothing: `index::s4_reference_at` classifies the string under the cursor (signature/`new` class →
-    class; `setMethod`/`setGeneric` function name → generic-or-method), and `s4_definition_ranges`
-    matches it against the package's indexed S4 items. This reuses the indexer that already powers
-    document and workspace symbols and stays entirely in the `roughly` crate. Deferred (documented in
-    `projects/008`): S4 find-references/rename (needs use-site tracking the index does not keep) and
-    `@` slot access (still lowered as `Unsupported`). Tests in `crates/roughly/tests/test_index.rs`.
+- S4 class/generic/method navigation is unified into `ide::symbol_occurrences_at`, the same path as
+  ordinary symbols.
+  - S4 names are string literals in `setClass`/`setGeneric`/`setMethod`/`new` calls, invisible to the
+    identifier-based naming analysis. `symbol_occurrences_at` now tries identifier resolution first
+    and, when the cursor is not on an identifier, falls back to a structural S4 scan
+    (`s4_symbol_at`/`collect_s4_occurrences` in `analysis::ide`): a class is declared by `setClass`
+    and referenced by a `setMethod` signature and `new`; a generic is declared by `setGeneric` and
+    referenced by a `setMethod` function name (class and generic are distinct namespaces). Because S4
+    occurrences become ordinary `SymbolOccurrence`s, goto-definition, find-references, and rename all
+    work for S4, cross-file, through one path. Rename edits only the name inside the quotes. An
+    earlier index-based goto-def fallback in the `roughly` server was removed in favour of this.
+    Remaining (see `projects/008`): `@` slot access (still `Unsupported`) and slots-as-class-children
+    in the outline. S4 goto-def/references currently scan all documents; an S4 symbol table is the
+    bounded perf step. Fixtures under `tests/ide/{definition,references,rename}`.
 
 - unused-local-variable detection graduated from an experimental flag to a normal opt-in `[check]`
   config.

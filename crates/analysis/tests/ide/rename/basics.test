@@ -453,3 +453,29 @@ R/def.R:
 renamed <- function(value) value
 R/use.R:
 result <- renamed(1L)
+
+#==== s4
+#---- rename_class_across_files
+#---- R/classes.R
+setClass("Animal", representation(name = "character"))
+#++++ any
+#---- R/methods.R
+setMethod("speak", "Animal", function(x) x)
+make <- function() new("Animal")
+#++++ any
+#!!!! rename animal.rename
+R/classes.R:1:12 -> Creature
+#++++
+before:
+R/classes.R:
+setClass("Animal", representation(name = "character"))
+R/methods.R:
+setMethod("speak", "Animal", function(x) x)
+make <- function() new("Animal")
+
+after:
+R/classes.R:
+setClass("Creature", representation(name = "character"))
+R/methods.R:
+setMethod("speak", "Creature", function(x) x)
+make <- function() new("Creature")

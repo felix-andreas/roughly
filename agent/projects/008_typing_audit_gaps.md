@@ -40,15 +40,14 @@ Total: 57 gaps found. Landed green: 557.
 
 ## S4 navigation follow-ups
 
-S4 goto-definition now resolves class/generic/method name strings through the workspace index (see
-DECISION_LOG). Remaining S4 work:
+S4 goto-definition, find-references, and rename are unified into `ide::symbol_occurrences_at` and work
+cross-file (see DECISION_LOG). Remaining S4 work:
 
-- **find-references / rename for S4 names.** The index only records definitions, so references across
-  `setMethod`/`new`/signature sites are not found. Needs either a use-site index (scan S4 string
-  positions package-wide) or modelling S4 names in naming.
 - **`@` slot access.** `obj@slot` still lowers to `Unsupported`, so it has no hover/completion/type.
   Needs a `Slot` HIR node + lowering + typing (and, for navigation, slot enumeration from `setClass`).
 - **Slots as class children** in the document outline (the commented-out part of `test_index.rs`).
+- **Perf:** S4 goto-def/references scan every document's tree; an S4 symbol table would bound this
+  (same family as the reverse-reference index in `TECHNICAL_DEBT.md`).
 
 The remaining per-dimension gap detail follows.
 

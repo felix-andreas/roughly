@@ -252,3 +252,26 @@ R/def.R:1:1..1:6
 R/use.R:1:11
 #++++
 no definition
+
+#==== definition_s4
+#---- class_reference_in_signature_resolves_to_setclass
+#---- R/classes.R
+setClass("Animal", representation(name = "character"))
+setGeneric("speak", function(x) standardGeneric("speak"))
+#++++ any
+#---- R/methods.R
+setMethod("speak", "Animal", function(x) x)
+make <- function() new("Animal")
+#++++ any
+#!!!! goto_definition class_ref.goto_definition
+R/methods.R:1:22
+#++++
+R/classes.R:1:11..1:17
+#!!!! goto_definition generic_ref.goto_definition
+R/methods.R:1:12
+#++++
+R/classes.R:2:13..2:18
+#!!!! goto_definition new_class_ref.goto_definition
+R/methods.R:2:25
+#++++
+R/classes.R:1:11..1:17
