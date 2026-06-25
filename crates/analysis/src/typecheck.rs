@@ -984,13 +984,24 @@ impl InferenceState {
             return Ok(consequence_type);
         }
 
-        match (consequence_type, alternative_type) {
-            (CoreType::Null, other_type) | (other_type, CoreType::Null) => {
-                Ok(nullable_type(other_type))
-            }
-            (expected, actual) => Err(InferenceError::TypeMismatch {
-                expected: Box::new(expected),
-                actual: Box::new(actual),
+        match (&consequence_type, &alternative_type) {
+            // Exactly one branch is `NULL`: the other becomes nullable.
+            (CoreType::Null, _) => return Ok(nullable_type(alternative_type)),
+            (_, CoreType::Null) => return Ok(nullable_type(consequence_type)),
+            // An unmodelled branch makes the result unmodelled rather than a spurious mismatch,
+            // matching how `Unknown` propagates through the rest of the checker.
+            (CoreType::Unknown, _) | (_, CoreType::Unknown) => return Ok(CoreType::Unknown),
+            _ => {}
+        }
+
+        // Both branches must share a type. Unifying them accepts the chooser idiom
+        // `if (cond) a else b` where each branch is an inference variable, while still reporting a
+        // clean mismatch (with resolved, user-facing types) for genuinely different concrete types.
+        match self.unify(consequence_type.clone(), alternative_type.clone()) {
+            Ok(unified_type) => self.resolve(unified_type),
+            Err(_) => Err(InferenceError::TypeMismatch {
+                expected: Box::new(self.resolve(consequence_type)?),
+                actual: Box::new(self.resolve(alternative_type)?),
                 range: Some(expression.range),
                 expression_id: Some(expression.id),
             }),

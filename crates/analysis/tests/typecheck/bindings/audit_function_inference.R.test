@@ -246,3 +246,9 @@ andlit: fn(x: logical) -> logical
 twiceapply <- function(f) function(x) f(f(x))
 #++++
 twiceapply: <T> fn(f: fn(T) -> T) -> fn(x: T) -> T
+
+#==== branch_unification
+#---- chooser_unifies_branch_variables
+pick <- function(cond, a, b) if (cond) a else b
+#++++
+pick: <T> fn(cond: logical, a: T, b: T) -> T

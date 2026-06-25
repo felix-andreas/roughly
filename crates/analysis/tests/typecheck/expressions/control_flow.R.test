@@ -165,3 +165,11 @@ error: type mismatch
 for (item in function(x) x) item
 #++++
 error: type mismatch
+
+#==== branch_unification
+#---- unknown_branch_propagates
+u <- 1L ~ 2L
+if (TRUE) 1L else u
+#++++
+Unknown
+Unknown
