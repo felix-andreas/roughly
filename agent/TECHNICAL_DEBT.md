@@ -21,6 +21,17 @@ interface fixed-point only revisits affected documents instead of scanning all, 
 package naming. The full near-constant model is the incremental-analysis redesign `AGENTS.md` says to
 design with the user first.
 
+### Find-references and rename scan every document; completion is uncapped
+
+`benchmark_ide_100k` (in `just bench`) measures interactive latency on a 100k-LoC / 1000-file package:
+goto-definition is ~2ms (it now scans only the declaring document), hover ~0.3ms, but
+**find-references / rename are ~240ms** because `symbol_occurrences_at` with `OccurrenceScope::All`
+re-resolves every identifier in every document. A symbol-occurrence / reverse-reference index keyed by
+resolved target would make these scale with the number of uses instead of project size; this overlaps
+with the reverse-dependency index above. Separately, **completion returns the entire matching global
+namespace** (~20k items, ~100ms at 100k LoC) with no result cap — it should cap results and mark the
+list incomplete (rust-analyzer style) so a broad query does not flood the client.
+
 ### Type-syntax error ranges are coarse
 
 Naming reports an unresolved type name (`I could not resolve type ...`, naming-owned) over the whole annotation range rather than the offending token, because `SurfaceType` carries no per-node source ranges. Threading ranges through type-syntax parsing would let `list{age: intgr}` underline only `intgr`.

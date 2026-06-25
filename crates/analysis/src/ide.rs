@@ -636,7 +636,7 @@ pub fn definition(
     path: &Path,
     position: TextPosition,
 ) -> Option<Vec<Location>> {
-    let occurrences = symbol_occurrences_at(analysis, path, position)?;
+    let occurrences = symbol_occurrences_at(analysis, path, position, OccurrenceScope::Declaration)?;
     let definitions = occurrences
         .into_iter()
         .filter(|occurrence| occurrence.is_declaration)
@@ -655,7 +655,7 @@ pub fn references(
     position: TextPosition,
     include_declaration: bool,
 ) -> Option<Vec<Location>> {
-    let occurrences = symbol_occurrences_at(analysis, path, position)?;
+    let occurrences = symbol_occurrences_at(analysis, path, position, OccurrenceScope::All)?;
     let references = occurrences
         .into_iter()
         .filter(|occurrence| include_declaration || !occurrence.is_declaration)
@@ -685,7 +685,7 @@ pub fn rename(
     position: TextPosition,
     new_name: &str,
 ) -> Option<RenameResult> {
-    let occurrences = symbol_occurrences_at(analysis, path, position)?;
+    let occurrences = symbol_occurrences_at(analysis, path, position, OccurrenceScope::All)?;
     let mut edits = BTreeMap::<PathBuf, Vec<RenameEdit>>::new();
 
     for occurrence in occurrences {
@@ -725,10 +725,20 @@ enum SymbolTarget {
     },
 }
 
+// `Declaration` scope restricts a global lookup to the single document that exports the symbol, so
+// goto-definition does not scan the whole project. `All` scope is needed by references and rename,
+// which must find every use across the package.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OccurrenceScope {
+    Declaration,
+    All,
+}
+
 fn symbol_occurrences_at(
     analysis: &mut Analysis,
     path: &Path,
     position: TextPosition,
+    scope: OccurrenceScope,
 ) -> Option<Vec<SymbolOccurrence>> {
     let document_id = analysis.document_id_for_path(path)?;
 
@@ -740,7 +750,12 @@ fn symbol_occurrences_at(
     let target = symbol_target_for_identifier(analysis, document_id, identifier)?;
     let document_ids = match target {
         SymbolTarget::Local { document_id, .. } => vec![document_id],
-        SymbolTarget::Global { .. } => analysis.all_document_ids(),
+        SymbolTarget::Global {
+            export_document_id, ..
+        } => match scope {
+            OccurrenceScope::Declaration => vec![export_document_id],
+            OccurrenceScope::All => analysis.all_document_ids(),
+        },
     };
     let mut occurrences = Vec::new();
 

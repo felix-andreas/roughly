@@ -20,6 +20,14 @@ If code changes make this document inaccurate, update it in the same session.
 
 ## Active continuity
 
+- Workspace symbols + completion now share `ide::search_match` (subsequence matching, smart-case,
+  <3-char queries are prefix-only, ranked by `MatchScore`). Workspace search collects-then-ranks-then
+  -truncates(128). Keywords stay prefix-only. Spec in DECISION_LOG. Unit tests in ide.rs
+  (`search_match_tests`) and symbols.rs (`workspace_tests`).
+- Index/field-access diagnostics are now dedicated (`field does not exist`, `position N does not
+  exist`, `expected a list`, `cannot index … without a statically known position/field name`, `[ is
+  not supported on …`) with whole-access ranges.
+
 - Fixed a production LSP panic: `local binding BindingId(N) should be prebound for typecheck`
   (typecheck.rs Symbol arm). Root cause: naming creates a local binding for an assignment that
   typecheck never visits (e.g. an assignment inside a call argument typecheck doesn't infer, like
