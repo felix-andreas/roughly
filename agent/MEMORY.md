@@ -20,6 +20,14 @@ If code changes make this document inaccurate, update it in the same session.
 
 ## Active continuity
 
+- Type-checker soundness audit (adversarial workflow) ran; 15 confirmed findings, 7 clusters fixed
+  this session (return-position compatibility, if/else branch unification + Unknown propagation,
+  `x[[2]]` double-literal position, `&&`/`||` nominal projection, range `:` → `double[]` for numeric
+  vars, script-local `@type` resolution in naming). Two remain, documented in `projects/008` as
+  needing type-system work: polymorphic function annotations not enforced against the body (needs
+  skolemization / rigid type variables) and generic nominal type arguments checked covariantly
+  regardless of variance (needs per-parameter variance computation). Both unsound; do not rush.
+
 - Unused-local-variable detection landed and graduated from experimental: naming tags bindings with
   `BindingKind` and computes `unused_bindings` (local assignments no symbol use resolves to); gated
   warnings in `document_diagnostics` when `check.unused`. Enable via `[check] unused = true`. Fixtures
