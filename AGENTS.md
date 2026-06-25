@@ -77,6 +77,10 @@ Example — destructive op:
 
 Code/commits/PRs: write normal. "stop caveman" or "normal mode": revert. Level persist until changed or session end.
 
+# Working autonomously
+
+When working autonomously on a larger goal — a workflow, a multi-step change, or any task that spans several logical units — commit after each logical step that builds and passes its tests, instead of saving everything for one final commit. A logical step is a self-contained, reviewable unit (one feature, one fix, one refactor) that leaves the tree green. This keeps progress reviewable and recoverable. Do not commit broken or untested intermediate states, and never commit `agent/HUMAN_NOTES.md`.
+
 # Steering documents
 
 All steering documents live in the repo-root `agent/` directory. Before making significant changes, review the relevant documents and keep them aligned.
