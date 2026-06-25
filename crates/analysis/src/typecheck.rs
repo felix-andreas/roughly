@@ -1088,7 +1088,12 @@ impl InferenceState {
             resolution_context,
             type_definitions,
         )?;
-        self.unify_with_context(CoreType::Scalar(Atomic::Logical), inferred_type, expression)?;
+        // Project a nominal operand to its representation first, so a nominal whose representation is
+        // `logical` is accepted by `&&`/`||` and `if`/`while` conditions, exactly as `!`, arithmetic,
+        // and comparison already project nominals.
+        let resolved_type =
+            self.resolve_structural(inferred_type, type_definitions, Some(expression))?;
+        self.unify_with_context(CoreType::Scalar(Atomic::Logical), resolved_type, expression)?;
         Ok(())
     }
 
@@ -3949,11 +3954,19 @@ fn is_whole_number_double_literal(expression: &Expression) -> bool {
 }
 
 fn integer_literal_position(expression: &Expression) -> Option<usize> {
-    let ExpressionKind::Integer(text) = &expression.kind else {
-        return None;
+    // R indexes identically with `x[[2]]` and `x[[2L]]`, so a whole-number double literal is just as
+    // valid a statically known position as an integer literal.
+    let one_based_index = match &expression.kind {
+        ExpressionKind::Integer(text) => text.trim_end_matches('L').parse::<usize>().ok()?,
+        ExpressionKind::Double(text) => {
+            let value = text.parse::<f64>().ok()?;
+            if value.fract() != 0.0 || value < 1.0 || !value.is_finite() {
+                return None;
+            }
+            value as usize
+        }
+        _ => return None,
     };
-    let integer_text = text.trim_end_matches('L');
-    let one_based_index = integer_text.parse::<usize>().ok()?;
     one_based_index.checked_sub(1)
 }
 

@@ -401,3 +401,14 @@ b[[1L]]
 #++++
 Bag
 integer
+
+#==== audit_operators_indexing_nominal_bool
+#---- nominal_boolean_and_projects
+#: @type Flag {logical}
+
+#: @new Flag
+flag <- TRUE
+flag && TRUE
+#++++
+Flag
+logical

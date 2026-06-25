@@ -146,3 +146,9 @@ config$server$port
 #++++
 list{server: list{port: integer}}
 integer
+
+#==== double_literal_position
+#---- tuple_double_literal_position_returns_element
+list(1L, "foo", TRUE)[[2]]
+#++++
+character
