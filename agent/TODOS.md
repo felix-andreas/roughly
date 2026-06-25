@@ -9,6 +9,11 @@
 
 ## Current priorities
 
+- S4 follow-ups: find-references/rename for S4 names (needs a use-site index) and `@` slot access
+  (needs a `Slot` HIR node + lowering/typing). See `projects/008`.
+- Find-references/rename scan every document, and completion returns the whole global namespace
+  uncapped (~240ms / ~100ms at 100k LoC). A symbol-occurrence index + a completion result cap are the
+  bounded fixes (see `TECHNICAL_DEBT.md`).
 - Near-constant incremental recheck *after an edit* (incremental package naming + interface-version
   tracking). The repeated-call no-op path is already O(1), but an edit still pays package-scoped
   work; this is the incremental-analysis redesign `AGENTS.md` says to design with the user first.
