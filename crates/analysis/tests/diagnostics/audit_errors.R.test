@@ -516,3 +516,30 @@ f <- function(x) {
 warning[naming] I could not resolve `switch` in this package, its imports, or builtins.
 --> 2:3-2:9
 |   switch(x, a = (k <- 1L))
+
+#==== return_position_coercions
+#---- return_nullable_widening_ok
+#: fn() -> integer | NULL
+f <- function() 1L
+#++++
+No diagnostics.
+
+#---- return_scalar_to_array_ok
+#: fn(x: integer) -> integer[]
+f <- function(x) x
+#++++
+No diagnostics.
+
+#---- return_tuple_to_array_list_ok
+#: fn() -> list[integer]
+f <- function() list(1L, 2L)
+#++++
+No diagnostics.
+
+#---- return_incompatible_still_errors
+#: fn() -> integer
+f <- function() "x"
+#++++
+error[type-error] expected `integer`, found `character`
+--> 2:1-2:20
+| f <- function() "x"

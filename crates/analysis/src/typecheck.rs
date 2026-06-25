@@ -906,8 +906,26 @@ impl InferenceState {
             resolution_context,
             type_definitions,
         )?;
+        // The body's return value only needs to be *compatible* with the annotated return type, not
+        // identical to it — return position is covariant, exactly like a call argument checked
+        // against a parameter. Using compatibility lets a body return `integer` satisfy a declared
+        // `integer | NULL`, `integer[]`, or other widening, and the binding keeps the declared type.
         let return_type = if let Some(expected_return_type) = expected_return_type {
-            self.unify_with_context(expected_return_type, inferred_return_type, expression)?
+            let compatible = self.check_compatibility(
+                inferred_return_type.clone(),
+                expected_return_type.clone(),
+                type_definitions,
+                Some(expression),
+            )?;
+            if !compatible {
+                return Err(InferenceError::TypeMismatch {
+                    expected: Box::new(self.resolve(expected_return_type).unwrap_or(CoreType::Unknown)),
+                    actual: Box::new(self.resolve(inferred_return_type).unwrap_or(CoreType::Unknown)),
+                    range: Some(expression.range),
+                    expression_id: Some(expression.id),
+                });
+            }
+            expected_return_type
         } else {
             inferred_return_type
         };
