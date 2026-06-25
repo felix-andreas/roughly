@@ -38,6 +38,18 @@ Total: 57 gaps found. Landed green: 557.
 4. **`T`/`F` base bindings and vectorized `&`/`|`** — need a base-environment model and a semantics
    decision respectively.
 
+## S4 navigation follow-ups
+
+S4 goto-definition now resolves class/generic/method name strings through the workspace index (see
+DECISION_LOG). Remaining S4 work:
+
+- **find-references / rename for S4 names.** The index only records definitions, so references across
+  `setMethod`/`new`/signature sites are not found. Needs either a use-site index (scan S4 string
+  positions package-wide) or modelling S4 names in naming.
+- **`@` slot access.** `obj@slot` still lowers to `Unsupported`, so it has no hover/completion/type.
+  Needs a `Slot` HIR node + lowering + typing (and, for navigation, slot enumeration from `setClass`).
+- **Slots as class children** in the document outline (the commented-out part of `test_index.rs`).
+
 The remaining per-dimension gap detail follows.
 
 

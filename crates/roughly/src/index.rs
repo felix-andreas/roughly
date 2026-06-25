@@ -5,8 +5,155 @@ use {
         collections::HashMap,
         path::{Path, PathBuf},
     },
-    tree_sitter::{Node, Parser},
+    tree_sitter::{Node, Parser, Point},
 };
+
+// S4 class, generic, and method names are written as string literals inside `setClass`/`setGeneric`/
+// `setMethod`/`new` calls, so they are invisible to the identifier-based naming analysis. This module
+// resolves such a name string to the index entries that define it, which gives goto-definition for S4
+// symbols.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum S4ReferenceKind {
+    // A class name: the signature of a `setMethod`, the class of a `new(...)`, or a `setClass` name.
+    Class,
+    // A generic name: the function of a `setMethod`/`setGeneric`. Resolves to generics and methods.
+    GenericOrMethod,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct S4Reference {
+    pub name: String,
+    pub kind: S4ReferenceKind,
+}
+
+// Classifies the string under `point` as an S4 class or generic reference, if it sits in an S4 name
+// position. Returns `None` for any other string so ordinary goto-definition is unaffected.
+pub fn s4_reference_at(root: Node, rope: &Rope, point: Point) -> Option<S4Reference> {
+    let string_node = smallest_string_at(root, point)?;
+    let name = string_node
+        .child_by_field_name("content")
+        .map(|content| rope.byte_slice(content.byte_range()).to_string())
+        .unwrap_or_default();
+    if name.is_empty() {
+        return None;
+    }
+
+    let (call, argument) = enclosing_call_argument(string_node)?;
+    let call_name = call_function_name(call, rope)?;
+    let (argument_name, argument_index) = argument_position(argument, rope);
+
+    // A signature class can be written directly or inside `c("A", "B")`; in the vector case the call
+    // we just found is the `c(...)`, so step out to its own enclosing call/argument.
+    let in_combine = call_name == "c";
+    let (call_name, argument_name, argument_index) = if in_combine {
+        let (outer_call, outer_argument) = enclosing_call_argument(call)?;
+        let outer_name = call_function_name(outer_call, rope)?;
+        let (outer_argument_name, outer_argument_index) = argument_position(outer_argument, rope);
+        (outer_name, outer_argument_name, outer_argument_index)
+    } else {
+        (call_name, argument_name, argument_index)
+    };
+
+    let argument_name = argument_name.as_deref();
+    let kind = match call_name.as_str() {
+        "setClass" if argument_at("Class", 0, argument_name, argument_index) => {
+            S4ReferenceKind::Class
+        }
+        "setGeneric" if argument_at("name", 0, argument_name, argument_index) => {
+            S4ReferenceKind::GenericOrMethod
+        }
+        "setMethod" if argument_at("f", 0, argument_name, argument_index) => {
+            S4ReferenceKind::GenericOrMethod
+        }
+        "setMethod" if argument_at("signature", 1, argument_name, argument_index) => {
+            S4ReferenceKind::Class
+        }
+        "new" if argument_at("Class", 0, argument_name, argument_index) => S4ReferenceKind::Class,
+        _ => return None,
+    };
+
+    Some(S4Reference { name, kind })
+}
+
+// The ranges of the index items that define `reference`, within one file's items.
+pub fn s4_definition_ranges(reference: &S4Reference, items: &[Item]) -> Vec<Range> {
+    items
+        .iter()
+        .filter(|item| item.name == reference.name && s4_item_matches(&item.info, reference.kind))
+        .map(|item| item.selection_range)
+        .collect()
+}
+
+fn s4_item_matches(info: &ItemInfo, kind: S4ReferenceKind) -> bool {
+    match kind {
+        S4ReferenceKind::Class => matches!(info, ItemInfo::S4Class),
+        S4ReferenceKind::GenericOrMethod => {
+            matches!(info, ItemInfo::S4Generic | ItemInfo::S4Method { .. })
+        }
+    }
+}
+
+fn smallest_string_at(root: Node, point: Point) -> Option<Node> {
+    let mut node = root.descendant_for_point_range(point, point)?;
+    loop {
+        if node.kind() == "string" {
+            return Some(node);
+        }
+        node = node.parent()?;
+    }
+}
+
+fn enclosing_call_argument(node: Node) -> Option<(Node, Node)> {
+    let mut current = node;
+    loop {
+        let parent = current.parent()?;
+        if parent.kind() == "arguments" {
+            let call = parent.parent()?;
+            if call.kind() == "call" {
+                return Some((call, current));
+            }
+        }
+        current = parent;
+    }
+}
+
+fn argument_position(argument: Node, rope: &Rope) -> (Option<String>, Option<usize>) {
+    let arguments = match argument.parent() {
+        Some(arguments) if arguments.kind() == "arguments" => arguments,
+        _ => return (None, None),
+    };
+    let name = argument
+        .child_by_field_name("name")
+        .map(|name| rope.byte_slice(name.byte_range()).to_string());
+    let index = arguments
+        .children_by_field_name("argument", &mut arguments.walk())
+        .position(|candidate| candidate.id() == argument.id());
+    (name, index)
+}
+
+fn argument_at(
+    expected_name: &str,
+    expected_index: usize,
+    argument_name: Option<&str>,
+    argument_index: Option<usize>,
+) -> bool {
+    match argument_name {
+        Some(name) => name == expected_name,
+        None => argument_index == Some(expected_index),
+    }
+}
+
+fn call_function_name(call: Node, rope: &Rope) -> Option<String> {
+    let function = call.child_by_field_name("function")?;
+    match function.kind() {
+        "identifier" => Some(rope.byte_slice(function.byte_range()).to_string()),
+        "namespace_operator" => {
+            let rhs = function.child_by_field_name("rhs")?;
+            (rhs.kind() == "identifier").then(|| rope.byte_slice(rhs.byte_range()).to_string())
+        }
+        _ => None,
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Item {

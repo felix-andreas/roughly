@@ -2,6 +2,18 @@
 
 Keep newest decisions at the top.
 
+- S4 goto-definition resolves through the workspace index, not the naming analysis.
+  - S4 class/generic/method names are string literals in `setClass`/`setGeneric`/`setMethod`/`new`
+    calls, so the identifier-based naming analysis never sees them and goto-definition found nothing.
+    Rather than teach naming about S4 string symbols (a large change to an already-complex phase), the
+    LSP `definition` handler falls back to the existing S4 index when identifier resolution returns
+    nothing: `index::s4_reference_at` classifies the string under the cursor (signature/`new` class →
+    class; `setMethod`/`setGeneric` function name → generic-or-method), and `s4_definition_ranges`
+    matches it against the package's indexed S4 items. This reuses the indexer that already powers
+    document and workspace symbols and stays entirely in the `roughly` crate. Deferred (documented in
+    `projects/008`): S4 find-references/rename (needs use-site tracking the index does not keep) and
+    `@` slot access (still lowered as `Unsupported`). Tests in `crates/roughly/tests/test_index.rs`.
+
 - unused-local-variable detection graduated from an experimental flag to a normal opt-in `[check]`
   config.
   - Naming now tags each binding with a `BindingKind` (top-level / local / parameter / for-variable)

@@ -132,6 +132,36 @@ impl ServerState {
             .flatten()
     }
 
+    // Goto-definition for S4 class/generic/method names, which are string literals invisible to the
+    // identifier-based analysis. Resolves the name under the cursor to its `setClass`/`setGeneric`/
+    // `setMethod` definitions via the workspace index.
+    fn s4_definition(&mut self, path: &Path, position: Position) -> Option<GotoDefinitionResponse> {
+        let point = Point::new(position.line as usize, position.character as usize);
+        let reference = {
+            let document = self.document(path)?;
+            index::s4_reference_at(document.tree().root_node(), document.rope(), point)?
+        };
+
+        let mut locations = Vec::new();
+        for (file_path, items) in self.package_items_map() {
+            let uri = Url::from_file_path(&file_path).unwrap();
+            for range in index::s4_definition_ranges(&reference, &items) {
+                locations.push(Location {
+                    uri: uri.clone(),
+                    range,
+                });
+            }
+        }
+
+        match locations.len() {
+            0 => None,
+            1 => Some(GotoDefinitionResponse::Scalar(
+                locations.pop().expect("single S4 definition location"),
+            )),
+            _ => Some(GotoDefinitionResponse::Array(locations)),
+        }
+    }
+
     fn package_items_map(&mut self) -> HashMap<PathBuf, Vec<Item>> {
         self.analysis_state
             .package_document_ids()
@@ -689,7 +719,10 @@ impl LanguageServer for ServerState {
                 ),
                 _ => GotoDefinitionResponse::Array(locations),
             }
-        });
+        })
+        // S4 names are string literals, so identifier-based resolution finds nothing; fall back to
+        // the S4 index.
+        .or_else(|| self.s4_definition(&path, position));
 
         box_future(Ok(response))
     }
