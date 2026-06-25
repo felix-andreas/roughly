@@ -2511,14 +2511,16 @@ impl InferenceState {
                     if is_whole_number_double_literal(argument_expression) => {}
                 CoreType::Scalar(Atomic::Double) => result_atomic = Atomic::Double,
                 CoreType::Any | CoreType::Unknown => return Ok(CoreType::Unknown),
-                // A flexible endpoint such as `1:n` is constrained numeric and treated as an
-                // integer endpoint, matching R's common integer-sequence idiom.
+                // A flexible endpoint such as `1:n` is constrained numeric but is not known to be
+                // `integer`; it may resolve to `double`, so the result must be `double[]`. Claiming
+                // `integer[]` here is unsound when the endpoint instantiates at `double`.
                 CoreType::Variable(variable) => {
                     self.constrain_type(
                         CoreType::Variable(variable),
                         Constraint::Numeric,
                         Some(argument_expression),
                     )?;
+                    result_atomic = Atomic::Double;
                 }
                 other_type => {
                     return Err(InferenceError::InvalidOperand {
