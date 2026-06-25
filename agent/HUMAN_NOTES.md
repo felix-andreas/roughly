@@ -1,14 +1,25 @@
 next goal
-make sure that the project is in a respectable state. fyi the workflow has changed. the human supervision is much lower now. this should be refelected in the steering documents and we should get rid of some of them. rewrite and restructure them as you see fit. they are primarly for you know to accumulate a knowledge base. if it isn't working for you remove them. instead new document .local/human-overview/<name>.html which is a document that gives a human an overview about the current state, total architecture, features, non-obvious designs. like a high-level overview of important things in such a way that it helps to get an overvew. finish off the project. make sure the test coverage is perfect and code is in good shape (so that an programmer with OCD is satifisfied). update the project readme to current state and reference typing semantics. (move them to docs so they are visible to users and also writte a guide). if not allready existing write a test that benchmarks a syntetic 10k, 100k and 200k codebase with number (register it as just command). on the way if you discover something you think needs cleanup write it into some list and work until resolved. also resolve things technical debt document or remove things if they are out-dated
 
+make sure that the project is in a respectable state. fyi the workflow has changed. the human supervision is much lower now. this should be refelected in the steering documents and we should get rid of some of them. rewrite and restructure them as you see fit. they are primarly for you know to accumulate a knowledge base. if it isn't working for you remove them. instead new document .local/human-overview/<name>.html which is a document that gives a human an overview about the current state, total architecture, features, non-obvious designs. like a high-level overview of important things in such a way that it helps to get an overvew. finish off the project. make sure the test coverage is perfect and code is in good shape (so that an programmer with OCD is satifisfied). update the project readme to current state and reference typing semantics. (move them to docs so they are visible to users and also writte a guide). if not allready existing write a test that benchmarks a syntetic 10k, 100k and 200k codebase with number (register it as just command). on the way if you discover something you think needs cleanup write it into some list and work until resolved. also resolve things technical debt document or remove things if they are out-dated
 
 # Human Notes (!AIs are not allowed to edit!)
 
-* come up with strict mode
+website:
+* better slogan (rust-analyzer: Bringing a great IDE experience to the Rust programming language.)
+* make really good landing page
 
-* typecheck:
-  * do we need: environment: BTreeMap<EnvironmentKey, Binding>,
-  * check if we have good coverage for generalization, instantiation, subsitutation, unification
+* reduce number of steering documents
+* ideally typing is not an experimental feature. it should be enabled via config toml 
+* come up with strict mode
+* we need some kind of soundness audit and document unsound behaviour (goal should be to strive for soudness)
+* we need some kind of trait/type classes system (at least internally to support + overloading (s3)), but later we can also expose it
+* when unable to infer type we should make this visible on hover instead of showing nothing
+* typing errors should only be surfaced if typing is enabled in config
+* migrate formatting use custom snapshots framework
+* support builtins
+  * we must have a format for builtins (like a .rtypes file or something)
+* zed extension version shouldn't be coupled to roughly version because it doesn't bundle the language server. instead it should have an independet version number
+* research if we need salsa?
 
 * naming:
   * in conditionals (should the binding still be resolved correctly?). in current fixture tests they are kept unresolved
@@ -16,21 +27,15 @@ make sure that the project is in a respectable state. fyi the workflow has chang
   - (update semantics) maybe later support local types. @new would work only in the same file. also can only be edited in local file (opaque like type)
 * type syntax errors
   * should be more local: list {age: intgr} <- this should only underline intgr
-* we should only have run_full and run_fast (not check)
-* can we get rid of tree.rs in roughly?
-* saved_document_diagnostics is called twice (not needed)
-* must we publish diags for all documents (on change)??
-* current_document_diagnostics and saved_document_diagnostics and document_diagnostics is way to complidated. we always want to show all diags (and merge them) we should leave commetn why this the case (see LSP Contraints in 006)
 
-* currently doesn't support lowering operators like >= (we need to test custom operators)
-* invalidate removes outputs (do we want this?)
-* we must have a format for builtins (like a .rtypes file or something)
+## backlog
+
 * simplify check function (is it used by server.rs? shouldn't return diags)
+* debug shouldn't be an experimentall feature but normal config
 
 * incremental analysis
   * we need a test-suite (we can use multi-file and a dedicated save action)
 
-* should global naming test render global ids or tuple (document_id, binding_id)
 * add wording inherent complexity and irreducible form to agents.md design bar
 
 * resolve_package is to complicated
@@ -40,45 +45,12 @@ make sure that the project is in a respectable state. fyi the workflow has chang
   * we distinghisuh between local binding and global binding?
   * when a file is changed we now all it dependents because can just check which file consumes it, or if a file get's delete we just need to diff globals
 
-I would like to introduce hovering test fixture suite. it should look similar to normal multi-file fixture but has special files: test-case-name.hover another-case.hover
-
-this contain hover position and expecation is hover output. is it easy to implemtn this? let's get the basic test-uite in order (and then we will discuss * should we store a globals table (by interened symbol id)? 
-testing matrix)
-
-test suite should be ide/hover &  and test_fixtures ide_hover
-
-* duplicate symbols should use DiagnosticRelatedInformation
-
-* lsp features
-  * rename
-  * goto defintion
-  * completion
-  * defintion
-  * hover
-    * get closest
-    * should show
-    * lowered hir (also for typing comments)
-    * naming
-    * type checking
-  * references
-  * rename
-  * document symbol
-    * seems like it is executed before didSave. so we must have a fast method here for global sections. (maybe full ast based as it is currently - not part of analysis)
-  * symbol
-* migrate roughly to AnalysisState
-* scripts behaviour
-  * what about type defintions and globals in this file (do they leak) 
-  * we cannot just use a fresh analysis state per script as it needs access to analysis state of package.
   
 * fixtures:
   * add possiblity to simulate (did_change, did_save, did_close and did_watched_files_change)
 
 - what about pull diagnostics??
 
-- integration into roughly is broken
-
-- syntax:
-  - copy syntax phase from roughly
 - naming:
   - we should pass imported symbols, default namespaces, etc
   - should we have two phase: (currently we merge all modules?)
@@ -97,24 +69,6 @@ test suite should be ide/hover &  and test_fixtures ide_hover
   - naming (after naming)
   - typecheck (after typecheck)
 
-- better document split: (https://chatgpt.com/c/69c5985f-f050-8332-bf70-4834bc44b3c4)
-  - Overview / Goals
-  - Requirements
-    - Functional
-    - Non-functional
-  - Behavior
-    - Use cases or flows
-  - Architecture
-  - Interfaces
-  - Constraints
-  - Testing / Acceptance
-
-- hir only supports attaching annotations to assignment
-
-- get rid of old test_infer.
-
-- verify fixtures test suite. can we consoldate different fixture suites?
-
 - new test suits:
   - project tests (multiple files)
   - incremtenal test (or maybe call it e2e??) <- change files
@@ -128,76 +82,7 @@ test suite should be ide/hover &  and test_fixtures ide_hover
 
 - separate tools module to generatively create large R code bases
 
-- scoping rules? (canonicalization in genreal)
-- lsp
-  - inlay hints
-  - hovering
-- ideas
-  - open records?
-
 - combine check and typing (e.g. syntax error checking)
 
 - total phases
   - why is collecting type annotations a separate haset
-
-- write down exact phases (e.g.)
-  - synatx checking
-  - lowering (does it include canonilization)
-  - inference
-  - unifications
-
-- lowering
-  - cache for expressions
-    - keep lowering ids (based on tree-sitter id). only re-lower if tree-sitter changed
-    - maybe expression id = file id + tree-sitter id
-  - proper error handling instead of 
-  - use kind_id & field_id instead of kind and name
-  - don't use node_text for has_trailing_semicolon.
-  - must lowering support all syntax??
-  - do we need lowering?
-  
-- unify usage of rope helpers in roughly and analysis crate
-  - shared tree helpers
-  - shared rope helpers (maybe hide behind opaque struct)
-  
-- do we need lowering?
-  - can't we just have a table for annotations (key is tree-sitter id)
-  - can't even typing check not use tree-sitter directly ??
-  
-- free variables in fixtures:
-
-I have a question in the expression/functions fixture test suite we have:
-
-#---- identity_function
-identity <- function(x) x
-#++++
-fn(type1) -> type1
-
-
-but this should probably rather be <T> fn(T) -> T. shouldn't it?
-
-also if not. shouldn't we render free variables differently in the fixutre ? what syntax whould you recommedn?
-
-- questions?
-  - do we need canonicalization? (is it part of lowering)
-  - when hovering: how do we go from tree-sitter id to type info?
-    - probably use our own ranges for now. tree-sitter id does not map 1:1 to nodes.
-  - do we need separate lowering tests
-  - do we need scoping tests?
-  - is infer the correct name (wound't typecheck by more appropriate?)
-  - how to make type checking incremental: how to handle case if non-opend file depends on type in another file. no only other file changes. how does the type in the other file gets updated?
-
-
-- reasonable fixture split. initially we had this:
-  - `type_syntax` - typing-comment syntax and normalized type rendering
-  - `bindings` - top-level binding result types
-  - `diagnostics` - final user-facing errors
-  - `environment` - rebinding, shadowing, and scheme reuse across scopes
-  - `expressions` - checked expression result types
-  - `generalization` - quantified schemes produced at binding boundaries
-  - `instantiation` - fresh reuse of generalized bindings at use sites
-  - `interfaces` - exported per-file interface shapes
-  - `lowering` - syntax-to-HIR lowering output
-  - `naming` - binding introduction and use-site resolution
-  - `substitution` - propagation of solved types through larger shapes
-  - `unification` - solved monotypes during local inference
