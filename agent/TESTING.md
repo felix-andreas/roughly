@@ -181,6 +181,7 @@ The intended fixture suites are:
 - `type_syntax` - typing-comment syntax and normalized type rendering
 - `bindings` - binding-boundary stored type schemes
 - `diagnostics` - final user-facing errors
+- `unused` - unused-local-binding warnings, run with the `unused` check enabled
 - `expressions` - checked expression result types
 - `interfaces` - exported per-file interface shapes
 - `ide` - editor-facing queries (hover, completion, rename, goto_definition, references) over

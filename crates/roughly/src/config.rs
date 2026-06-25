@@ -92,7 +92,6 @@ impl ConfigToml {
             self.lint.naming_style = Some(case);
         }
 
-        self.check.unused |= experimental.unused;
         self.check.typing |= experimental.typing;
 
         Config {
@@ -111,7 +110,6 @@ impl ConfigToml {
 pub struct ExperimentalFeatures {
     pub debug: bool,
     pub range_formatting: bool,
-    pub unused: bool,
     pub typing: bool,
 }
 
@@ -131,7 +129,6 @@ mod tests {
 
             [lint]
             naming-style = "snake_case"
-            experimental-unused = true
         "#};
         let config = parse(toml);
         assert_eq!(config.format.indent_width, 4);

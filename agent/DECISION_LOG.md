@@ -2,6 +2,18 @@
 
 Keep newest decisions at the top.
 
+- unused-local-variable detection graduated from an experimental flag to a normal opt-in `[check]`
+  config.
+  - Naming now tags each binding with a `BindingKind` (top-level / local / parameter / for-variable)
+    and computes `unused_bindings`: local assignments no symbol use resolves to. Reassignment falls
+    out for free (each `<-` is a fresh binding; only the last is read). Only local assignments are
+    reported — parameters (R does not flag unused params), for-loop variables (often intentional),
+    top-level/package-visible bindings, and `.`/`_`-prefixed throwaways are excluded. Diagnostics are
+    emitted from `document_diagnostics` only when `check.unused` is set, so they stay off by default.
+    Removed `unused` from `ExperimentalFeatures`; it is now configured via `[check] unused = true`
+    (the `--experimental-features unused` flag warns it has graduated). Exhaustive fixtures live in
+    `tests/unused/` (run with the `unused` check on).
+
 - search-like IDE features (workspace symbols, completion) share one subsequence matcher,
   `ide::search_match`, mirroring rust-analyzer.
   - The rule is subsequence matching: every query character must appear in the candidate in order,

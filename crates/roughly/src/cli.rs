@@ -546,13 +546,16 @@ pub fn parse_experimental_flags(flags: &[impl AsRef<str>]) -> ExperimentalFeatur
             "all" => {
                 features.debug = true;
                 features.range_formatting = true;
-                features.unused = true;
                 features.typing = true;
             }
             "debug" => features.debug = true,
             "range_formatting" => features.range_formatting = true,
-            "unused" => features.unused = true,
             "typing" => features.typing = true,
+            "unused" => {
+                warn(
+                    "The 'unused' check is no longer experimental. Enable it with `[check]\nunused = true` in roughly.toml.",
+                );
+            }
             "goto_definition" | "goto_references" | "hovering" | "rename" => {
                 warn(&format!(
                     "The '{flag}' flag has been stabilized. You can remove it."

@@ -25,6 +25,9 @@ pub struct NamesLocal {
     pub maybe_undefined_expressions: BTreeSet<ExpressionId>,
     pub non_locals: BTreeMap<ExpressionId, Symbol>,
     pub named_type_annotations: Vec<ExpressionId>,
+    // Local (function-scoped) assignments whose value is never read. Computed once after resolution;
+    // surfaced as diagnostics only when the `unused` check is enabled.
+    pub unused_bindings: Vec<BindingId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +36,19 @@ pub struct BindingInfo {
     pub module_id: ModuleId,
     pub symbol: Symbol,
     pub range: Range,
+    pub kind: BindingKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BindingKind {
+    // A top-level `name <- value`. Treated as package-visible, so it is never reported as unused.
+    TopLevelAssignment,
+    // A `name <- value` inside a function or block. The only kind reported as unused.
+    LocalAssignment,
+    // A function parameter. R does not treat unused parameters as errors, so they are never reported.
+    Parameter,
+    // A `for (variable in ...)` loop variable. Often intentionally unused, so it is never reported.
+    ForVariable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -664,9 +680,40 @@ impl<'a> DocumentNamingContext<'a> {
         for expression_id in &module.expressions {
             self.resolve_expression(*expression_id);
         }
+        self.compute_unused_bindings();
         DocumentNamingComputation {
             naming: self.document_naming,
             diagnostics: self.diagnostics,
+        }
+    }
+
+    // A local assignment is unused when no symbol use resolves to it. Reassignment falls out for
+    // free: `x <- 1; x <- 2; x` makes a fresh binding per `<-`, and only the last one is read, so the
+    // earlier binding is reported. Names beginning with `.` or `_` are treated as intentional
+    // throwaways and skipped, matching common R linting conventions.
+    fn compute_unused_bindings(&mut self) {
+        let mut used = BTreeSet::new();
+        for (expression_id, binding_id) in &self.document_naming.expression_resolutions {
+            if matches!(self.arena.get(*expression_id).kind, ExpressionKind::Symbol(_)) {
+                used.insert(*binding_id);
+            }
+        }
+
+        for (binding_id, binding) in &self.document_naming.bindings {
+            if binding.kind != BindingKind::LocalAssignment || used.contains(binding_id) {
+                continue;
+            }
+            // A leading `_` is only writable in R as a backtick-quoted name, so strip backticks
+            // before checking the throwaway-name conventions.
+            let name = self
+                .interner
+                .resolve(binding.symbol)
+                .unwrap_or("")
+                .trim_matches('`');
+            if name.starts_with('.') || name.starts_with('_') {
+                continue;
+            }
+            self.document_naming.unused_bindings.push(*binding_id);
         }
     }
 
@@ -716,7 +763,12 @@ impl<'a> DocumentNamingContext<'a> {
             }
             ExpressionKind::Assign { target, value, .. } => {
                 self.resolve_expression(*value);
-                let binding_id = self.fresh_binding(*target, expression.range);
+                let kind = if self.local_scopes.is_empty() {
+                    BindingKind::TopLevelAssignment
+                } else {
+                    BindingKind::LocalAssignment
+                };
+                let binding_id = self.fresh_binding(*target, expression.range, kind);
                 if let Some(scope) = self.local_scopes.last_mut() {
                     scope.insert(*target, binding_id);
                 } else {
@@ -729,7 +781,8 @@ impl<'a> DocumentNamingContext<'a> {
             ExpressionKind::Function { parameters, body } => {
                 let mut scope = BTreeMap::new();
                 for parameter in parameters {
-                    let binding_id = self.fresh_binding(parameter.symbol, parameter.range);
+                    let binding_id =
+                        self.fresh_binding(parameter.symbol, parameter.range, BindingKind::Parameter);
                     scope.insert(parameter.symbol, binding_id);
                 }
                 self.local_scopes.push(scope);
@@ -778,7 +831,8 @@ impl<'a> DocumentNamingContext<'a> {
                 body,
             } => {
                 self.resolve_expression(*sequence);
-                let binding_id = self.fresh_binding(*variable, expression.range);
+                let binding_id =
+                    self.fresh_binding(*variable, expression.range, BindingKind::ForVariable);
                 self.local_scopes
                     .push(BTreeMap::from([(*variable, binding_id)]));
                 let body_bindings = self.resolve_conditionally_executed_expression(*body);
@@ -829,7 +883,7 @@ impl<'a> DocumentNamingContext<'a> {
         }
     }
 
-    fn fresh_binding(&mut self, symbol: Symbol, range: Range) -> BindingId {
+    fn fresh_binding(&mut self, symbol: Symbol, range: Range, kind: BindingKind) -> BindingId {
         let binding_id = BindingId(self.next_binding_id);
         self.next_binding_id += 1;
         self.document_naming.bindings.insert(
@@ -839,6 +893,7 @@ impl<'a> DocumentNamingContext<'a> {
                 module_id: self.document_id,
                 symbol,
                 range,
+                kind,
             },
         );
         binding_id
