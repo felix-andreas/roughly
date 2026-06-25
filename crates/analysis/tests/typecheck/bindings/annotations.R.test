@@ -101,3 +101,10 @@ apply_transform: fn(transform: fn(integer) -> character, count: integer) -> char
 pad <- function(value, width = NULL) value
 #++++
 pad: <T, U> fn(value: T, [width]: U) -> T
+
+#==== polymorphic_annotation
+#---- generic_identity_keeps_declared_scheme
+#: <T> fn(value: T) -> T
+identity <- function(value) value
+#++++
+identity: <T> fn(value: T) -> T

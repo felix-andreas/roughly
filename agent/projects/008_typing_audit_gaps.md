@@ -16,18 +16,18 @@ propagation, no more `type1`/`type2` leak); `x[[2]]` double-literal position; `&
 nominal operands; range `:` over a numeric variable yields `double[]` (was unsoundly `integer[]`);
 script/standalone files resolve their own `@type`/`@alias` in naming.
 
-**Remaining unsound — need dedicated, carefully-reviewed type-system work:**
+**Fixed — polymorphic function annotations are now enforced against the body (skolemization).** A
+`<T>` binder is lowered to a *rigid* (skolem) inference variable while the function body is checked:
+it refuses to be bound to a concrete type or constrained, so `#: <T> fn(value: T) -> T` with body
+`1L` is rejected (`expected T, found integer`) and with body `value + 1L` is rejected (the body would
+require `T: numeric`). Distinct binders are distinct skolems (`<T, U>` returning the wrong parameter
+is rejected). On success the binding takes the declared scheme and generalizes back to `<T>`, and
+instantiation at call sites uses ordinary fresh variables so it stays usable at many types. Rigid
+variables render by their declared name in diagnostics. Function-annotation checking was unified into
+`infer_function_expression` (return checked for a focused message, then whole-signature for parameter
+shape), removing the redundant binding-level re-application that would have double-lowered the binder.
 
-- **Polymorphic function annotations are not enforced against the body (unsound + wrong interface).**
-  `#: <T> fn(value: T) -> T` with body `function(value) 1L` is ACCEPTED and exported as
-  `fn(value: integer) -> integer`; the declared rigid `T` is treated as a unifiable variable, so the
-  body unifies `T := integer` instead of being required to return the caller's `T`. Also
-  `#: <T> fn(value: T) -> T` with body `value + 1L` exports `<T: numeric> ...` — the body's constraint
-  silently rewrites the declared interface. Proper fix: **skolemize** the annotation's type
-  parameters (instantiate `<T>` as rigid constants that do not unify), check the body against the
-  skolemized signature, and on success keep the *declared* scheme. Needs a rigid/skolem notion in the
-  type system (today `CoreType::Variable` is always unifiable). The monomorphic analogue is enforced
-  correctly, so only the generic case is unsound.
+**Remaining unsound — needs dedicated, carefully-reviewed type-system work:**
 
 - **Generic nominal type arguments are checked covariantly regardless of variance (unsound).**
   `Handler<integer>` is accepted where `Handler<integer | NULL>` is expected even when `T` occurs only

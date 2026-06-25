@@ -37,6 +37,12 @@ pub struct InferenceState {
     // inlay hints) can show checked types. Left off during interface rounds to avoid the cost.
     record_expression_types: bool,
     recorded_expression_types: BTreeMap<ExpressionId, CoreType>,
+    // Rigid (skolem) variables introduced by a `<T>` annotation binder while checking a function
+    // body. They model a universally quantified parameter: the body must work for *every* T, so a
+    // rigid variable refuses to be bound to a concrete type or constrained. After the check they are
+    // ordinary free variables again and generalize back into the `<T>` scheme. The map keeps each
+    // one's declared name so diagnostics show `T` rather than an internal `type1`.
+    rigid_variables: BTreeMap<InferenceVariableId, Symbol>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -154,6 +160,78 @@ impl InferenceState {
         self.fresh_constrained_variable(Constraint::Unconstrained)
     }
 
+    fn fresh_rigid_variable(&mut self, name: Symbol) -> InferenceVariableId {
+        let variable = self.fresh_variable();
+        self.rigid_variables.insert(variable, name);
+        variable
+    }
+
+    // Renders a rigid variable as its declared type-parameter name (e.g. `T`) for diagnostics, so a
+    // failed polymorphic-annotation check reads `expected T, found integer` instead of `type1`.
+    fn rigid_display(&self, variable: InferenceVariableId) -> CoreType {
+        match self.rigid_variables.get(&variable) {
+            Some(name) => CoreType::Nominal(*name, Vec::new()),
+            None => CoreType::Variable(variable),
+        }
+    }
+
+    // Resolves `core_type` and replaces every rigid skolem variable with its declared name, so a
+    // diagnostic involving a `<T>` annotation shows `T` rather than an internal `type1`.
+    fn display_with_rigid_names(&mut self, core_type: &CoreType) -> CoreType {
+        let resolved = self.resolve(core_type.clone()).unwrap_or(CoreType::Unknown);
+        self.substitute_rigid_names(&resolved)
+    }
+
+    fn substitute_rigid_names(&self, core_type: &CoreType) -> CoreType {
+        match core_type {
+            CoreType::Variable(variable) => self.rigid_display(*variable),
+            CoreType::Nullable(inner) => nullable_type(self.substitute_rigid_names(inner)),
+            CoreType::List(inner) => CoreType::List(Box::new(self.substitute_rigid_names(inner))),
+            CoreType::NamedList(inner) => {
+                CoreType::NamedList(Box::new(self.substitute_rigid_names(inner)))
+            }
+            CoreType::Tuple(items) => {
+                CoreType::Tuple(items.iter().map(|item| self.substitute_rigid_names(item)).collect())
+            }
+            CoreType::Record(fields) => CoreType::Record(
+                fields
+                    .iter()
+                    .map(|field| {
+                        RecordField::with_optional(
+                            field.name,
+                            self.substitute_rigid_names(&field.value),
+                            field.optional,
+                        )
+                    })
+                    .collect(),
+            ),
+            CoreType::Nominal(name, arguments) => CoreType::Nominal(
+                *name,
+                arguments.iter().map(|argument| self.substitute_rigid_names(argument)).collect(),
+            ),
+            CoreType::Function(function_type) => CoreType::Function(FunctionType::new(
+                function_type
+                    .parameters
+                    .iter()
+                    .map(|parameter| self.substitute_rigid_names(parameter))
+                    .collect(),
+                function_type
+                    .named_parameters
+                    .iter()
+                    .map(|parameter| {
+                        RecordField::with_optional(
+                            parameter.name,
+                            self.substitute_rigid_names(&parameter.value),
+                            parameter.optional,
+                        )
+                    })
+                    .collect(),
+                self.substitute_rigid_names(&function_type.return_type),
+            )),
+            other => other.clone(),
+        }
+    }
+
     pub fn enable_expression_type_recording(&mut self) {
         self.record_expression_types = true;
     }
@@ -201,6 +279,17 @@ impl InferenceState {
         }
         match self.resolve(core_type)? {
             CoreType::Variable(variable) => {
+                // A rigid skolem stands for every possible T; it cannot carry a constraint (e.g. a
+                // `<T>` body that does `value + 1L` would require T to be numeric, which the declared
+                // unconstrained `<T>` does not promise).
+                if self.rigid_variables.contains_key(&variable) {
+                    return Err(InferenceError::ConstraintViolation {
+                        constraint,
+                        actual: Box::new(self.rigid_display(variable)),
+                        range: expression.map(|current| current.range),
+                        expression_id: expression.map(|current| current.id),
+                    });
+                }
                 if let Some(InferenceEntry::Unbound {
                     constraint: existing,
                     ..
@@ -724,36 +813,33 @@ impl InferenceState {
     ) -> Result<CoreType, InferenceError> {
         let annotation = expression.annotation.as_ref();
         let value_expression = arena.get(value);
-        let inferred_value = if let Some(expected_function_type) =
-            self.checked_function_annotation(annotation, type_definitions, expression)?
+
+        // A checked function annotation on a function literal drives the body inference directly
+        // (parameters and return are checked inside `infer_function_expression`). The binding-level
+        // `apply_annotation` below would lower the annotation a second time — a fresh, conflicting set
+        // of rigid binder variables — so this path returns directly and does not re-apply.
+        if let ExpressionKind::Function { parameters, body } = &value_expression.kind
+            && let Some(expected_function_type) =
+                self.checked_function_annotation(annotation, type_definitions, expression)?
         {
-            if let ExpressionKind::Function { parameters, body } = &value_expression.kind {
-                self.infer_function_expression(
-                    value_expression.id,
-                    parameters,
-                    *body,
-                    Some(expected_function_type),
-                    expression,
-                    arena,
-                    resolution_context,
-                    type_definitions,
-                )?
-            } else {
-                self.infer_expression_with_context(
-                    value_expression,
-                    arena,
-                    resolution_context,
-                    type_definitions,
-                )?
-            }
-        } else {
-            self.infer_expression_with_context(
-                value_expression,
+            return self.infer_function_expression(
+                value_expression.id,
+                parameters,
+                *body,
+                Some(expected_function_type),
+                expression,
                 arena,
                 resolution_context,
                 type_definitions,
-            )?
-        };
+            );
+        }
+
+        let inferred_value = self.infer_expression_with_context(
+            value_expression,
+            arena,
+            resolution_context,
+            type_definitions,
+        )?;
 
         if let Some(annotation) = annotation
             && annotation.applies_to_binding()
@@ -814,8 +900,6 @@ impl InferenceState {
             .as_ref()
             .map(flatten_expected_parameter_types)
             .filter(|types| types.len() == parameters.len());
-        let expected_return_type =
-            expected_function_type.map(|function_type| *function_type.return_type);
         let parameter_binding_ids = resolution_context.and_then(|context| {
             (!parameters.is_empty()).then(|| {
                 parameters
@@ -906,11 +990,13 @@ impl InferenceState {
             resolution_context,
             type_definitions,
         )?;
-        // The body's return value only needs to be *compatible* with the annotated return type, not
-        // identical to it — return position is covariant, exactly like a call argument checked
-        // against a parameter. Using compatibility lets a body return `integer` satisfy a declared
-        // `integer | NULL`, `integer[]`, or other widening, and the binding keeps the declared type.
-        let return_type = if let Some(expected_return_type) = expected_return_type {
+
+        // The body's return value only needs to be *compatible* with the annotated return (covariant,
+        // like an argument against a parameter), so a body returning `integer` satisfies a declared
+        // `integer | NULL` or `integer[]`. A `<T>` return is a rigid skolem, so a body returning a
+        // concrete type fails here. This is checked separately to report a focused return message.
+        if let Some(expected_function_type) = &expected_function_type {
+            let expected_return_type = (*expected_function_type.return_type).clone();
             let compatible = self.check_compatibility(
                 inferred_return_type.clone(),
                 expected_return_type.clone(),
@@ -919,20 +1005,17 @@ impl InferenceState {
             )?;
             if !compatible {
                 return Err(InferenceError::TypeMismatch {
-                    expected: Box::new(self.resolve(expected_return_type).unwrap_or(CoreType::Unknown)),
-                    actual: Box::new(self.resolve(inferred_return_type).unwrap_or(CoreType::Unknown)),
+                    expected: Box::new(self.display_with_rigid_names(&expected_return_type)),
+                    actual: Box::new(self.display_with_rigid_names(&inferred_return_type)),
                     range: Some(expression.range),
                     expression_id: Some(expression.id),
                 });
             }
-            expected_return_type
-        } else {
-            inferred_return_type
-        };
+        }
 
-        // R parameters are always matchable by name and by position, so inferred function
-        // types carry every parameter as a named parameter; parameters with a default value
-        // are optional at call sites.
+        // R parameters are always matchable by name and by position, so inferred function types carry
+        // every parameter as a named parameter; parameters with a default value are optional at call
+        // sites.
         let named_parameter_types = parameters
             .iter()
             .zip(parameter_types)
@@ -940,14 +1023,38 @@ impl InferenceState {
                 RecordField::with_optional(parameter.symbol, parameter_type, parameter.has_default())
             })
             .collect();
-        let function_type = CoreType::Function(FunctionType::new(
-            Vec::new(),
-            named_parameter_types,
-            return_type,
-        ));
+        let inferred_function_type =
+            FunctionType::new(Vec::new(), named_parameter_types, inferred_return_type);
 
         self.environment = parent_environment;
-        Ok(function_type)
+
+        // The annotation is the source of truth for the binding's interface. With the return already
+        // checked, this whole-function compatibility catches parameter shape mismatches (positional
+        // vs named, arity, optional vs required) and reports them against the full signature. On
+        // success the binding takes the annotation's exact type, so a `<T>` binder generalizes back
+        // into the declared polymorphic scheme.
+        let Some(expected_function_type) = expected_function_type else {
+            return Ok(CoreType::Function(inferred_function_type));
+        };
+        let compatible = self.check_compatibility(
+            CoreType::Function(inferred_function_type.clone()),
+            CoreType::Function(expected_function_type.clone()),
+            type_definitions,
+            Some(expression),
+        )?;
+        if !compatible {
+            return Err(InferenceError::TypeMismatch {
+                expected: Box::new(self.display_with_rigid_names(&CoreType::Function(
+                    expected_function_type,
+                ))),
+                actual: Box::new(
+                    self.display_with_rigid_names(&CoreType::Function(inferred_function_type)),
+                ),
+                range: Some(expression.range),
+                expression_id: Some(expression.id),
+            });
+        }
+        Ok(CoreType::Function(expected_function_type))
     }
 
     fn infer_if_expression(
@@ -1701,10 +1808,15 @@ impl InferenceState {
                     );
                 }
 
+                // A `<T>` binder introduces a universally quantified parameter. While checking a
+                // function body against the annotation it must be rigid, so the body cannot bind or
+                // constrain it (the body has to work for every T); after the check it generalizes
+                // back into the scheme. Instantiating a stored scheme uses ordinary fresh variables,
+                // so this only makes annotation binders rigid.
                 let mut nested_type_parameters = substitutions.clone();
                 for type_parameter in bound_type_parameters {
                     nested_type_parameters
-                        .insert(*type_parameter, CoreType::Variable(self.fresh_variable()));
+                        .insert(*type_parameter, CoreType::Variable(self.fresh_rigid_variable(*type_parameter)));
                 }
 
                 self.lower_surface_type_with_substitutions(
@@ -3160,6 +3272,17 @@ impl InferenceState {
             });
         }
 
+        // A rigid (skolem) variable models a universally quantified annotation parameter; binding it
+        // to a concrete type would specialize a `<T>` the body promised to handle for every T.
+        if self.rigid_variables.contains_key(&variable) {
+            return Err(InferenceError::TypeMismatch {
+                expected: Box::new(self.rigid_display(variable)),
+                actual: Box::new(core_type),
+                range: expression.map(|current| current.range),
+                expression_id: expression.map(|current| current.id),
+            });
+        }
+
         let Some(entry) = self.entries.get(&variable).cloned() else {
             return Err(InferenceError::UnknownInferenceVariable(variable));
         };
@@ -3228,26 +3351,40 @@ impl InferenceState {
             return self.unify(resolved_left, resolved_right);
         }
 
-        let (left_level, left_constraint) = match self.entries.get(&left) {
+        // Two distinct skolems are different universals and cannot be unified. When exactly one side
+        // is rigid it must survive the union so its identity (and rigidity) is preserved; the
+        // flexible variable redirects to it.
+        let left_rigid = self.rigid_variables.contains_key(&left);
+        let right_rigid = self.rigid_variables.contains_key(&right);
+        if left_rigid && right_rigid {
+            return Err(InferenceError::TypeMismatch {
+                expected: Box::new(self.rigid_display(left)),
+                actual: Box::new(self.rigid_display(right)),
+                range: None,
+                expression_id: None,
+            });
+        }
+        let (survivor, redirected) = if left_rigid { (left, right) } else { (right, left) };
+
+        let (redirected_level, redirected_constraint) = match self.entries.get(&redirected) {
             Some(InferenceEntry::Unbound { level, constraint }) => (*level, *constraint),
-            _ => return Err(InferenceError::UnknownInferenceVariable(left)),
+            _ => return Err(InferenceError::UnknownInferenceVariable(redirected)),
         };
-        let Some(right_entry) = self.entries.get_mut(&right) else {
-            return Err(InferenceError::UnknownInferenceVariable(right));
-        };
-        if let InferenceEntry::Unbound { level, constraint } = right_entry {
-            if *level > left_level {
-                *level = left_level;
+        if let Some(InferenceEntry::Unbound { level, constraint }) =
+            self.entries.get_mut(&survivor)
+        {
+            if *level > redirected_level {
+                *level = redirected_level;
             }
-            *constraint = (*constraint).max(left_constraint);
+            *constraint = (*constraint).max(redirected_constraint);
         }
 
-        let Some(entry) = self.entries.get_mut(&left) else {
-            return Err(InferenceError::UnknownInferenceVariable(left));
+        let Some(entry) = self.entries.get_mut(&redirected) else {
+            return Err(InferenceError::UnknownInferenceVariable(redirected));
         };
-        *entry = InferenceEntry::Redirect(right);
+        *entry = InferenceEntry::Redirect(survivor);
 
-        Ok(CoreType::Variable(right))
+        Ok(CoreType::Variable(survivor))
     }
 
     // Interface schemes computed by another `InferenceState` carry variable ids that mean

@@ -24,9 +24,14 @@ If code changes make this document inaccurate, update it in the same session.
   this session (return-position compatibility, if/else branch unification + Unknown propagation,
   `x[[2]]` double-literal position, `&&`/`||` nominal projection, range `:` → `double[]` for numeric
   vars, script-local `@type` resolution in naming). Two remain, documented in `projects/008` as
-  needing type-system work: polymorphic function annotations not enforced against the body (needs
-  skolemization / rigid type variables) and generic nominal type arguments checked covariantly
-  regardless of variance (needs per-parameter variance computation). Both unsound; do not rush.
+  needing type-system work. Polymorphic function annotations are now enforced via **rigid (skolem)
+  variables**: a `<T>` binder lowers to a rigid var that refuses binding/constraining during the body
+  check, then generalizes back to `<T>` (`rigid_variables` map in `InferenceState`, `fresh_rigid_
+  variable`, checks in `bind_variable`/`unify_variables`/`constrain_type`, rendered by name via
+  `display_with_rigid_names`). Function-annotation checking is unified in `infer_function_expression`
+  (return focused-checked, then whole-signature for param shape); the binding-level re-application was
+  removed. One unsound finding remains: generic nominal type arguments checked covariantly regardless
+  of variance (needs per-parameter variance computation). Do not rush it.
 
 - Unused-local-variable detection landed and graduated from experimental: naming tags bindings with
   `BindingKind` and computes `unused_bindings` (local assignments no symbol use resolves to); gated

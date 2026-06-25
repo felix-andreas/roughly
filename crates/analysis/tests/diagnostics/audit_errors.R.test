@@ -543,3 +543,20 @@ f <- function() "x"
 error[type-error] expected `integer`, found `character`
 --> 2:1-2:20
 | f <- function() "x"
+
+#==== polymorphic_annotation
+#---- generic_body_returns_concrete_is_rejected
+#: <T> fn(value: T) -> T
+f <- function(value) 1L
+#++++
+error[type-error] expected `T`, found `integer`
+--> 2:1-2:24
+| f <- function(value) 1L
+
+#---- generic_body_constrains_param_is_rejected
+#: <T> fn(value: T) -> T
+g <- function(value) value + 1L
+#++++
+error[type-error] expected a numeric value (`integer` or `double`), found `T`
+--> 2:22-2:32
+| g <- function(value) value + 1L
