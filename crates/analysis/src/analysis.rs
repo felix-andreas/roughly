@@ -69,7 +69,11 @@ pub struct LintConfig {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct CheckConfig {
+    // Surface unused-local-binding warnings.
     pub unused: bool,
+    // Surface type-error diagnostics. The typecheck phase still runs on demand for typing IDE
+    // features (hover types, inlay hints, signature help) regardless of this flag; it only controls
+    // whether type errors are reported.
     pub typing: bool,
 }
 
@@ -164,7 +168,9 @@ impl Analysis {
         &self.base_path
     }
 
-    pub fn typing_enabled(&self) -> bool {
+    // Whether type-error diagnostics are surfaced. The typecheck phase still runs on demand for
+    // typing IDE features regardless of this flag; it only gates publishing type errors.
+    pub fn type_errors_enabled(&self) -> bool {
         self.check_config.typing
     }
 
@@ -1188,6 +1194,47 @@ mod tests {
             retained_diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic.severity == Severity::Warning)
+        );
+    }
+
+    #[test]
+    fn type_errors_are_gated_on_config_but_typed_info_is_retained() {
+        // typing off (default): the typecheck phase still runs and retains its output (so IDE
+        // features can read checked types), but the type error is not surfaced as a diagnostic.
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
+        let document_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/main.R"), "1L + \"text\"")
+            .expect("document should parse");
+        super::typecheck(&mut analysis);
+        assert!(
+            analysis.document_diagnostics(document_id).is_empty(),
+            "type errors must be suppressed when `[check] typing` is off"
+        );
+        assert!(
+            analysis.document_typecheck_outputs.contains_key(&document_id),
+            "the typecheck phase must still run and retain output for IDE features"
+        );
+
+        // typing on: the type error is surfaced as a diagnostic.
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig {
+                unused: false,
+                typing: true,
+            },
+        );
+        let document_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/main.R"), "1L + \"text\"")
+            .expect("document should parse");
+        super::typecheck(&mut analysis);
+        assert!(
+            !analysis.document_diagnostics(document_id).is_empty(),
+            "type errors must be surfaced when `[check] typing` is on"
         );
     }
 

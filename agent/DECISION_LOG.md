@@ -2,6 +2,19 @@
 
 Keep newest decisions at the top.
 
+- type checking graduated from experimental; type-error surfacing decoupled from the typecheck phase.
+  - The single `typing` flag used to mean three things at once: run the typecheck phase, power typing
+    IDE features, and surface type errors. Now: the typecheck phase runs **on demand** for the typing
+    IDE features (hover types, inlay hints, signature help), which are **on by default**; type-error
+    **diagnostics** are gated behind `[check] typing = true` (default off). `document_diagnostics`
+    includes type errors only when the flag is set, and `run_full` only typechecks proactively when
+    it is set, so there is no proactive cost when off; IDE features call `typecheck` lazily. Removed
+    `typing` from `ExperimentalFeatures` (the `--experimental-features typing` flag now warns it has
+    graduated); the dead `experimental` parameter was removed from the `Config` loading chain and the
+    `check`/`fmt` CLI commands. `Analysis::typing_enabled()` was renamed `type_errors_enabled()`.
+    Decision recorded with the user: keep the phase (not disabled when off), IDE typing features on by
+    default, config key `[check] typing`.
+
 - S4 class/generic/method navigation is unified into `ide::symbol_occurrences_at`, the same path as
   ordinary symbols.
   - S4 names are string literals in `setClass`/`setGeneric`/`setMethod`/`new` calls, invisible to the

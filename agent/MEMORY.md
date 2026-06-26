@@ -20,6 +20,15 @@ If code changes make this document inaccurate, update it in the same session.
 
 ## Active continuity
 
+- Type checking graduated from experimental. The typecheck phase runs on demand for typing IDE
+  features (hover types, inlay hints, signature help) — all on by default. Type-error **diagnostics**
+  are gated behind `[check] typing = true` (default off): `document_diagnostics` and proactive
+  `run_full` only include/run them when set; IDE features call `typecheck` lazily regardless.
+  `ExperimentalFeatures` no longer has `typing`; the dead `experimental` param was dropped from the
+  `Config` chain and `check`/`fmt` CLI. `typing_enabled()` → `type_errors_enabled()`. NOTE: the
+  user-facing docs page `docs/src/content/docs/type-checker.md` still says typing is "experimental
+  and opt-in" — needs updating, but left untouched because a docs agent is editing `docs/`.
+
 - Type-checker soundness audit (adversarial workflow) ran; 15 confirmed findings, 7 clusters fixed
   this session (return-position compatibility, if/else branch unification + Unknown propagation,
   `x[[2]]` double-literal position, `&&`/`||` nominal projection, range `:` → `double[]` for numeric

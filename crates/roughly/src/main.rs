@@ -30,7 +30,7 @@ fn main() -> ExitCode {
     );
 
     match cli.command {
-        Command::Check { files } => match cli::check(files.as_deref(), experimental_features) {
+        Command::Check { files } => match cli::check(files.as_deref()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(CheckError) => ExitCode::FAILURE,
         },
@@ -39,13 +39,7 @@ fn main() -> ExitCode {
             check,
             diff,
             verbose,
-        } => match cli::fmt(
-            files.as_deref(),
-            check,
-            diff,
-            verbose,
-            experimental_features,
-        ) {
+        } => match cli::fmt(files.as_deref(), check, diff, verbose) {
             Ok(()) => ExitCode::SUCCESS,
             Err(FmtError) => ExitCode::FAILURE,
         },

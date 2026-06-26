@@ -54,7 +54,7 @@ const CONFIG_FILE_NAME: &str = "roughly.toml";
 #[tokio::main(flavor = "current_thread")]
 pub async fn run(experimental_features: ExperimentalFeatures) {
     let (server, _) = async_lsp::MainLoop::new_server(|client| {
-        let config = Config::from_path(Path::new(CONFIG_FILE_NAME), experimental_features)
+        let config = Config::from_path(Path::new(CONFIG_FILE_NAME))
             .unwrap_or_else(|error| {
                 cli::error(&error.to_string());
                 panic!("failed to load config: {error}");
@@ -207,13 +207,11 @@ impl LanguageServer for ServerState {
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
-                inlay_hint_provider: Some(OneOf::Left(self.analysis_state.typing_enabled())),
-                signature_help_provider: self.analysis_state.typing_enabled().then(|| {
-                    SignatureHelpOptions {
-                        trigger_characters: Some(vec!["(".to_owned(), ",".to_owned()]),
-                        retrigger_characters: None,
-                        work_done_progress_options: Default::default(),
-                    }
+                inlay_hint_provider: Some(OneOf::Left(true)),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".to_owned(), ",".to_owned()]),
+                    retrigger_characters: None,
+                    work_done_progress_options: Default::default(),
                 }),
                 references_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Left(true)),
@@ -539,7 +537,7 @@ impl LanguageServer for ServerState {
             tracing::info!(?path, ?typ, "watched file changed");
 
             if path == config_path {
-                match Config::from_path(&config_path, self.experimental_features) {
+                match Config::from_path(&config_path) {
                     Ok(config) => {
                         self.analysis_state.set_configs(config.lint, config.check);
                         self.config = config;

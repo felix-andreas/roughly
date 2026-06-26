@@ -342,7 +342,7 @@ async fn initialize_without_r_directory() {
 
 #[tokio::test]
 async fn hover_returns_identifier_definition_without_debug_by_default() {
-    let mut context = setup_test_with_features(&[], &["typing"]).await;
+    let mut context = setup_test_with_features(&[], &[]).await;
 
     let file_uri = context.file_uri("R/test.R");
     context
@@ -382,7 +382,7 @@ async fn hover_returns_identifier_definition_without_debug_by_default() {
 
 #[tokio::test]
 async fn hover_returns_debug_section_when_debug_enabled() {
-    let mut context = setup_test_with_features(&[], &["typing", "debug"]).await;
+    let mut context = setup_test_with_features(&[], &["debug"]).await;
 
     let file_uri = context.file_uri("R/test_debug.R");
     context.open_file(&file_uri, "variable_name <- 1\n").await;
@@ -420,7 +420,7 @@ async fn hover_returns_debug_section_when_debug_enabled() {
 
 #[tokio::test]
 async fn hover_returns_type_by_default() {
-    let mut context = setup_test_with_features(&[], &["typing"]).await;
+    let mut context = setup_test_with_features(&[], &[]).await;
 
     let file_uri = context.file_uri("R/test_literal.R");
     context.open_file(&file_uri, "x <- \"foo\"\n").await;
@@ -458,7 +458,7 @@ async fn hover_returns_type_by_default() {
 
 #[tokio::test]
 async fn hover_returns_type_for_if() {
-    let mut context = setup_test_with_features(&[], &["typing"]).await;
+    let mut context = setup_test_with_features(&[], &[]).await;
 
     let file_uri = context.file_uri("R/test_if.R");
     context

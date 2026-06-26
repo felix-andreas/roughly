@@ -48,11 +48,10 @@ pub fn hover(analysis: &mut Analysis, path: &Path, position: TextPosition) -> Op
 
     lower(analysis);
     resolve_package(analysis);
-    // Typed hover needs checked expression types, which only `typecheck` retains. It is
-    // incremental, so this is cheap when the package is already fresh.
-    if analysis.typing_enabled() {
-        typecheck(analysis);
-    }
+    // Typed hover needs checked expression types, which only `typecheck` retains. The typing phase
+    // runs on demand for IDE features regardless of whether type-error diagnostics are surfaced; it
+    // is incremental, so this is cheap when the package is already fresh.
+    typecheck(analysis);
 
     let module = analysis.module(document_id)?;
     let point = Point::new(position.line_index, position.character_index);
@@ -140,9 +139,6 @@ pub fn inlay_hints(analysis: &mut Analysis, path: &Path) -> Vec<InlayHint> {
     let Some(document_id) = analysis.document_id_for_path(path) else {
         return Vec::new();
     };
-    if !analysis.typing_enabled() {
-        return Vec::new();
-    }
 
     lower(analysis);
     resolve_package(analysis);
@@ -229,9 +225,6 @@ pub fn signature_help(
     position: TextPosition,
 ) -> Option<SignatureHelp> {
     let document_id = analysis.document_id_for_path(path)?;
-    if !analysis.typing_enabled() {
-        return None;
-    }
 
     lower(analysis);
     resolve_package(analysis);

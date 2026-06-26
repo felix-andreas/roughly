@@ -57,17 +57,14 @@ pub fn error(message: &str) {
 #[derive(Debug)]
 pub struct CheckError;
 
-pub fn check(
-    maybe_files: Option<&[PathBuf]>,
-    experimental_features: ExperimentalFeatures,
-) -> Result<(), CheckError> {
+pub fn check(maybe_files: Option<&[PathBuf]>) -> Result<(), CheckError> {
     let root: Vec<PathBuf> = vec![".".into()];
     let files = maybe_files.unwrap_or(&root);
 
     let targets_with_config = files
         .iter()
         .map(|file| {
-            let config = match config::Config::for_target(file, experimental_features) {
+            let config = match config::Config::for_target(file) {
                 Ok(config) => config,
                 Err(err) => {
                     error(&err.to_string());
@@ -273,7 +270,6 @@ pub fn fmt(
     check: bool,
     diff: bool,
     verbose: bool,
-    experimental_features: ExperimentalFeatures,
 ) -> Result<(), FmtError> {
     let mut parser = tree::new_parser();
 
@@ -283,7 +279,7 @@ pub fn fmt(
     let paths_with_config = files
         .iter()
         .map(|file| {
-            let config = config::Config::for_target(file, experimental_features).map_err(|err| {
+            let config = config::Config::for_target(file).map_err(|err| {
                 error(&err.to_string());
                 FmtError
             })?;
@@ -546,11 +542,14 @@ pub fn parse_experimental_flags(flags: &[impl AsRef<str>]) -> ExperimentalFeatur
             "all" => {
                 features.debug = true;
                 features.range_formatting = true;
-                features.typing = true;
             }
             "debug" => features.debug = true,
             "range_formatting" => features.range_formatting = true,
-            "typing" => features.typing = true,
+            "typing" => {
+                warn(
+                    "Type checking is no longer experimental: it powers IDE features by default. To also surface type-error diagnostics, set `[check]\ntyping = true` in roughly.toml.",
+                );
+            }
             "unused" => {
                 warn(
                     "The 'unused' check is no longer experimental. Enable it with `[check]\nunused = true` in roughly.toml.",
