@@ -5,46 +5,13 @@ description: The precise static-typing semantics contract for Roughly's R type c
 
 This is the authoritative specification of Roughly's typing semantics — the precise contract the type checker implements. For a gentler, example-driven introduction, start with the [Type Checker guide](/type-checker).
 
-Over time, semantic content should move here from older design documents. Until that migration is complete, keep this document focused, high signal, and authoritative for the areas it covers.
-
-Under the current lower-supervision workflow, the agent may decide and record new or changed
-semantics here directly, but every such change must also be recorded in `DECISION_LOG.md` with its
-rationale, backed by fixtures, and surfaced to the user for review. Prefer the simplest principled
-semantics and flag genuinely contentious forks explicitly rather than silently locking them in.
-
-This document and the fixture suites are both part of the contract. Keep them in sync:
-
-- `tests/fixtures/diagnostics/`
-- `tests/fixtures/inference/`
-
-If semantics change, update this document and the relevant fixture expectations in the same session.
-
-## Scope and authority
-
-This document is the single source of truth for user-facing typing semantics.
-
-Use it for:
-
-- type syntax
-- inferred type shapes
-- coercion rules
-- user-facing rendered type forms that appear in fixtures
-
-Other crate documents may summarize or reference these rules, but they should not redefine them.
-
-When semantics are unclear or missing:
-
-1. discuss them with the user first
-2. record the agreed behavior here
-3. keep the fixtures aligned with the agreed behavior
-
-The main motivation for the current restricted union feature is to support `if` expressions without an `else` branch.
+This page is the single source of truth for the user-facing typing semantics: the type syntax, the inferred type shapes, the coercion rules, and the rendered type forms that appear in errors and hovers. The main motivation for the restricted union feature is to support `if` expressions without an `else` branch.
 
 ## Typing comment syntax
 
 Typing annotations use preceding `#:` comments attached to the following binding or expression.
 
-This applies to all typing annotations in this crate, not only function annotations.
+This applies to all typing annotations in Roughly, not only function annotations.
 
 Consecutive `#:` lines with no blank line between them are treated as a single annotation block.
 

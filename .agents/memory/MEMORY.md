@@ -6,7 +6,7 @@ Cross-session knowledge base for the agents building Roughly. Three horizons:
 - **Mid-term** — active priorities, open bugs, and technical debt. Lives across sessions until done.
 - **Long-term** — durable, non-obvious design decisions and their rationale. Only things a future agent would otherwise rediscover. Keep terse and point at code or the docs.
 
-Authoritative specs live in the docs site (`docs/src/content/docs/`), not here: typing reference + guide, architecture, structure, testing. Keep those current; keep this file for state and rationale.
+Authoritative specs live in the docs site (`docs/src/content/docs/`), not here: `typing-reference.md` (the typing contract) + `type-checker.md` (the guide), `architecture.md`, `structure.md`, `testing.md`. Keep those current; keep this file for state and rationale.
 
 ## Short-term
 
