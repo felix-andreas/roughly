@@ -3,7 +3,7 @@
 This README is the authoritative contract for the `tests/typecheck/project/` suite.
 
 If the coverage split or intended semantics coverage changes, update this file and
-`agent/TESTING.md` in the same session as the fixture changes.
+the testing docs page in the same session as the fixture changes.
 
 ## Purpose
 

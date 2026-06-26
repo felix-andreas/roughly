@@ -3,7 +3,7 @@
 This README is the authoritative contract for the `tests/typecheck/unification/` suite if this
 internal suite is retained.
 
-If the suite is renamed or removed, update this file and `agent/TESTING.md` in the same session.
+If the suite is renamed or removed, update this file and the testing docs page in the same session.
 
 ## Purpose
 

@@ -1,8 +1,11 @@
-# Architecture
+---
+title: Architecture
+description: Implementation architecture and durable design constraints of the analysis crate
+---
 
 This document is the authoritative implementation architecture for the `analysis` crate.
 
-`TYPING_SEMANTICS.md` is the authoritative user-facing typing contract. This file defines the implementation boundaries needed to realize that contract. Keep it focused on durable phase boundaries and representation boundaries.
+The [Typing Reference](/typing-reference) is the authoritative user-facing typing contract. This page defines the implementation boundaries needed to realize that contract. Keep it focused on durable phase boundaries and representation boundaries.
 
 ## Role of this document
 
@@ -327,7 +330,7 @@ The intended later project-level stages are:
 
 The architecture should not assume that only full-file rechecking is possible, but it should also not commit yet to reusing unification or inference state across edits.
 
-The desired near-term file split is recorded in `STRUCTURE.md`.
+The desired near-term file split is recorded on the [Structure](/structure) page.
 
 ## Incremental analysis
 

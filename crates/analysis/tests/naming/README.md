@@ -3,7 +3,7 @@
 This README is the authoritative contract for the naming fixture matrix.
 
 If the naming fixture layout, coverage split, or intended semantics coverage changes, update this
-file and `TESTING.md` in the same session as the fixture changes.
+file and the testing docs page in the same session as the fixture changes.
 
 Keep this document aligned with the actual fixture suite. If the suite is still migrating toward
 the contract below, record the remaining gaps here instead of implying that they are already

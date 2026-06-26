@@ -24,16 +24,25 @@ export default defineConfig({
 					items: [
 						{ slug: 'getting-started' },
 						{ slug: 'formatter' },
-						{ slug: 'type-checker' },
 						{ slug: 'linter' },
 						{ slug: 'language-server' },
 						{ slug: 'configuration' },
 					],
 				},
 				{
+					label: 'Typing',
+					items: [
+						{ slug: 'type-checker' },
+						{ slug: 'typing-reference' },
+					],
+				},
+				{
 					label: 'Contributing',
 					items: [
 						{ slug: 'development' },
+						{ slug: 'architecture' },
+						{ slug: 'structure' },
+						{ slug: 'testing' },
 					],
 				},
 			],
@@ -50,7 +59,7 @@ export default defineConfig({
 							link: '/formatter',
 						},
 						{
-							label: 'Type Checker',
+							label: 'Typing',
 							link: '/type-checker',
 						},
 						{

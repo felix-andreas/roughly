@@ -1,6 +1,6 @@
 ---
-title: Type Checker
-description: Roughly's static type checker for R and its typing-comment syntax
+title: Guide
+description: A guide to Roughly's static type checker for R and its typing-comment syntax
 ---
 
 Roughly includes a static type checker for R. R has no type system of its own, so
@@ -12,28 +12,28 @@ Because R has no type-annotation syntax, annotations live in `#:` comments. They
 like comments to every other R tool, so annotated code stays fully compatible with
 regular R.
 
-## Status
+This page is a guide to using the type checker. For the full, precise semantics — every
+coercion, operator, and annotation rule — see the [Typing Reference](/typing-reference).
 
-Type checking is experimental and opt-in. It is off unless you turn it on.
+## Surfacing type errors
 
-Enable it in `roughly.toml`:
+The checker always runs to power editor features (inferred types on hover, inlay hints,
+and signature help work out of the box). Type-*error* diagnostics, however, are opt-in,
+so a project that has not adopted annotations is not flooded with messages.
+
+Turn type errors on in `roughly.toml`:
 
 ```toml
 [check]
 typing = true
 ```
 
-Or pass it as an experimental feature on the command line:
-
-```sh
-roughly check --experimental-features typing
-```
-
-In the VS Code extension, add `"typing"` (or `"all"`) to `roughly.experimentalFeatures`.
+With that set, `roughly check` and your editor report a `type-error` diagnostic wherever
+the types do not line up.
 
 ## What it does
 
-When enabled, the checker infers a type for every expression and reports a
+The checker infers a type for every expression. With type errors enabled it reports a
 `type-error` diagnostic when the types do not line up. A few examples:
 
 ```r

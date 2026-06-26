@@ -3,7 +3,7 @@
 This README is the authoritative contract for the `tests/diagnostics/` fixture suite.
 
 If the diagnostics coverage split or intended contract changes, update this file and
-`agent/TESTING.md` in the same session as the fixture changes.
+the testing docs page in the same session as the fixture changes.
 
 Keep this document aligned with the actual suite. If a future incremental-analysis suite later
 absorbs this contract, record that transition explicitly here rather than silently letting the

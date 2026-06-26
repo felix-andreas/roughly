@@ -38,18 +38,18 @@ Roughly aims to support the following language server features (some are experim
 - **Diagnostics**
   - Syntax errors - *including missing or trailing commas*
   - Basic linting rules - *[full list here](https://roughly.felixandreas.me/linter/#semantics-checks)*
-  - Warning for unused variables *(🧪 experimental)*
+  - Warning for unused variables *(opt-in: `[check] unused`)*
   - Error for undefined variable *(⚠️ missing)*
-  - Argument validation for function calls *(🧪 experimental — part of type checking)*
-  - Static type checking — HM-style inference with nominal/structural types, function types, nullable unions, and numeric constraints, driven by [`#:` typing comments](https://roughly.felixandreas.me/type-checker) *(🧪 experimental)*
+  - Argument validation for function calls *(part of type checking)*
+  - Static type checking — HM-style inference with nominal/structural types, function types, nullable unions, and numeric constraints, driven by [`#:` typing comments](https://roughly.felixandreas.me/type-checker). Inferred types power editor features by default; type-error diagnostics are opt-in via `[check] typing`.
 
 - **Editing**
   - Autocomplete local and global variables
   - Autocomplete variables from other packages *(⚠️ missing)*
   - Rename local variables
   - Rename global variables *(⚠️ missing)*
-  - Signature help — inferred call signature with active parameter *(🧪 experimental — needs type checking)*
-  - Inlay hints — inferred types on unannotated bindings *(🧪 experimental — needs type checking)*
+  - Signature help — inferred call signature with active parameter
+  - Inlay hints — inferred types on unannotated bindings
 
 ## Roughly CLI
 
@@ -135,7 +135,7 @@ You can customize the Roughly extension in VS Code through the following setting
   // Pass custom arguments; defaults to ["server"]
   "roughly.args": ["server", "--verbose"],
   // Enable experimental features
-  "roughly.experimentalFeatures": ["typing", "range_formatting"],
+  "roughly.experimentalFeatures": ["range_formatting"],
 }
 ```
 
@@ -173,18 +173,24 @@ line-ending = "auto" # "lf" or "cr-lf"
 [lint]
 # Control the naming convention for variables and parameters
 naming-style = "snake_case" # or "camelCase", omit to disable this lint entirely
+
+[check]
+# Surface static type-checking errors (inferred types power editor features regardless)
+typing = true
+# Warn about unused local variables
+unused = true
 ```
 
 ## Experimental Features
 
-Roughly includes several experimental features that can be enabled in the VS Code extension settings or via the CLI:
+Roughly includes a few experimental features that can be enabled in the VS Code extension settings or via the CLI:
 
 | Name               | Description                      |
 | ------------------ | -------------------------------- |
 | `all`              | Enable all experimental features |
-| `typing`           | Static type checking             |
 | `range_formatting` | Format selected code ranges      |
-| `unused`           | Warn about unused variables      |
+
+Type checking and unused-variable warnings are no longer experimental — configure them under `[check]` in `roughly.toml` (see above).
 
 ## Development
 

@@ -28,8 +28,8 @@ It also has clear non-goals for v1:
 - NSE and metaprogramming completeness
 - environment and reference semantics
 
-The `analysis` steering documents live in the repo-root [`agent/`](../../agent/) directory rather than under `crates/analysis/`.
-For the current supported semantics, see [`agent/TYPING_SEMANTICS.md`](../../agent/TYPING_SEMANTICS.md). Today the checker focuses on a small set of ideas:
+The `analysis` design docs (architecture, file structure, and the testing contract) live in the Roughly [docs site](https://roughly.felixandreas.me) under Contributing; the agent knowledge base lives in `.agents/memory/`.
+For the current supported semantics, see the [Typing Reference](https://roughly.felixandreas.me/typing-reference). Today the checker focuses on a small set of ideas:
 
 - atomic R types such as `logical`, `integer`, `double`, and `character`
 - scalar-like, array-like, and map-like vector shapes

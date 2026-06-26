@@ -1,6 +1,9 @@
-# TYPING_SEMANTICS
+---
+title: Reference
+description: The precise static-typing semantics contract for Roughly's R type checker
+---
 
-This document defines the user-facing typing semantics contract.
+This is the authoritative specification of Roughly's typing semantics — the precise contract the type checker implements. For a gentler, example-driven introduction, start with the [Type Checker guide](/type-checker).
 
 Over time, semantic content should move here from older design documents. Until that migration is complete, keep this document focused, high signal, and authoritative for the areas it covers.
 

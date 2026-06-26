@@ -1,4 +1,7 @@
-# Testing
+---
+title: Testing
+description: The fixture-testing contract and suite structure
+---
 
 This crate prefers fixture tests for source-driven behavior because they are:
 
@@ -18,7 +21,7 @@ Use ordinary Rust tests only when the behavior is awkward to express as a render
 The current analysis fixture runner lives in `tests/test_fixtures.rs`.
 Fixture parsing itself lives in the separate `fixtures` crate.
 
-Some suites may include a local `README.md` with more detailed strategy, coverage expectations, or renderer-specific guidance. Use `TESTING.md` for crate-level test contracts and suite-local README files for suite-specific concepts that would otherwise make this document too long.
+Some suites may include a local `README.md` with more detailed strategy, coverage expectations, or renderer-specific guidance. Use this page for crate-level test contracts and suite-local README files for suite-specific concepts that would otherwise make this page too long.
 
 The shared naming suite README at `tests/naming/README.md` is authoritative for the naming fixture
 matrix and the local-versus-global suite split. Keep it in sync with naming fixture changes in the

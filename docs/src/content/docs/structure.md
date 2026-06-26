@@ -1,4 +1,7 @@
-# Structure
+---
+title: Structure
+description: The intended file structure of the analysis crate
+---
 
 This document is the authoritative desired file structure for the `analysis` crate.
 
