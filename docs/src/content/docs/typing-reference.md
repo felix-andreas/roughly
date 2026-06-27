@@ -716,6 +716,23 @@ person <- list(value = 1L)
 shape <- person
 ```
 
+#### Type-argument variance
+
+When two applications of the same generic nominal type are checked for compatibility — for example `Box<integer>` against `Box<integer | NULL>` — each type argument is checked in the direction determined by **where its type parameter occurs** in the representation type. The variance of each parameter is computed from its occurrences:
+
+- a **function return** position, a **container or structural element** position (`list` item, `list{...}` field, tuple item, vector element, and nullable inner type), and a **direct** occurrence are *covariant*: they preserve the checking direction, so `Box<integer>` is compatible where `Box<integer | NULL>` is expected (a narrower argument satisfies a wider one);
+- a **function parameter** position is *contravariant*: it flips the checking direction, so for `@type Handler<T> {fn(value: T) -> NULL}`, `Handler<integer | NULL>` is compatible where `Handler<integer>` is expected, but `Handler<integer>` is **not** compatible where `Handler<integer | NULL>` is expected (otherwise a `NULL` could reach a function that only accepts `integer`);
+- a parameter that occurs in **both** a covariant and a contravariant position is *invariant*: its argument must match exactly in both directions, so `Cell<integer>` and `Cell<integer | NULL>` are mutually incompatible for `@type Cell<T> {list{ get: T, set: fn(value: T) -> NULL }}`;
+- a parameter that does not occur constrains nothing and accepts any argument.
+
+When a type parameter occurs inside a **nested generic application** — for example `T` inside `Sink<T>` within `@type Outer<T> {Sink<T>}` — it is treated conservatively as *invariant*, because the inner type's own per-parameter variance is not yet composed with the outer direction. This is sound (it never admits an unsound widening or narrowing); the deferred refinement is to compose the outer polarity with the inner nominal's variance so that sound nested covariant cases are re-admitted.
+
+If a generic nominal has no visible definition, every argument is checked invariantly. This is deliberately conservative: a missing definition over-rejects (requires an exact argument match) rather than over-accepting an unsound widening.
+
+Covariance of container and structural element positions is an explicit assumption: although R lists and vectors are mutable, compatibility treats their element positions covariantly so that `@new`/checked inference and the structural coercions (such as scalar-to-vector and `T` into `T | NULL`) work. This trades the soundness a mutable invariant container would require for the inference ergonomics those coercions depend on.
+
+Unification is the **invariant floor**: when it must produce a single representative type (for example, inferring a type argument shared by two occurrences), it unifies every nominal argument by equality regardless of the parameter's compatibility variance. This is consistent with compatibility, because a unified pair is compatible in both directions — unification is strictly stronger than compatibility.
+
 ### Union types
 
 For now, the only supported union form is a nullable union with `NULL`.

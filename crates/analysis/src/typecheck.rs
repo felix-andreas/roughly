@@ -161,6 +161,129 @@ impl TypeDefinitionEnvironment {
     }
 }
 
+// Variance of a nominal type parameter, derived from where the parameter occurs in the
+// representation type. It controls the direction each type argument is checked in the
+// Nominal-vs-Nominal compatibility arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Variance {
+    // The parameter does not occur in the representation; it constrains nothing, so any argument is
+    // accepted unconditionally. Acts as the identity for `join`.
+    Bivariant,
+    Covariant,
+    Contravariant,
+    Invariant,
+}
+
+impl Variance {
+    // Combines two occurrences of the same parameter: equal stays equal, `Bivariant` is the
+    // identity, and any disagreement (co with contra, or anything with invariant) becomes invariant.
+    fn join(self, other: Variance) -> Variance {
+        match (self, other) {
+            (Variance::Bivariant, value) | (value, Variance::Bivariant) => value,
+            (left, right) if left == right => left,
+            _ => Variance::Invariant,
+        }
+    }
+
+    // Flips polarity when descending into a contravariant position (a function parameter).
+    fn flip(self) -> Variance {
+        match self {
+            Variance::Covariant => Variance::Contravariant,
+            Variance::Contravariant => Variance::Covariant,
+            other => other,
+        }
+    }
+}
+
+// Computes the variance of each of a definition's type parameters (aligned with
+// `definition.type_parameters`) from its occurrences in the representation type. Function-parameter
+// positions flip polarity; function-return, container/structural, and direct positions preserve it;
+// nested nominal arguments preserve it (a precise nested-nominal fixpoint is a deferred refinement);
+// multiple occurrences join. A parameter that never occurs stays `Bivariant`.
+fn parameter_variances(definition: &TypeDefinition) -> Vec<Variance> {
+    let mut variances = BTreeMap::new();
+    accumulate_parameter_variances(
+        &definition.surface_type,
+        Variance::Covariant,
+        &definition.type_parameters,
+        &mut variances,
+    );
+    definition
+        .type_parameters
+        .iter()
+        .map(|parameter| variances.get(parameter).copied().unwrap_or(Variance::Bivariant))
+        .collect()
+}
+
+fn accumulate_parameter_variances(
+    surface_type: &SurfaceType,
+    polarity: Variance,
+    parameters: &[Symbol],
+    variances: &mut BTreeMap<Symbol, Variance>,
+) {
+    match surface_type {
+        SurfaceType::Named(name, arguments) => {
+            if parameters.contains(name) {
+                let entry = variances.entry(*name).or_insert(Variance::Bivariant);
+                *entry = entry.join(polarity);
+            }
+            // A nested generic application's arguments are treated conservatively as invariant: we do
+            // not yet compose the inner nominal's own per-parameter variance, so any parameter that
+            // occurs inside such an argument joins to `Invariant` (sound — it neither over-accepts a
+            // widening nor a narrowing). Precise composition is a deferred refinement.
+            for argument in arguments {
+                accumulate_parameter_variances(
+                    argument,
+                    Variance::Invariant,
+                    parameters,
+                    variances,
+                );
+            }
+        }
+        SurfaceType::Function(function_type) => {
+            for parameter in &function_type.parameters {
+                accumulate_parameter_variances(parameter, polarity.flip(), parameters, variances);
+            }
+            for named_parameter in &function_type.named_parameters {
+                accumulate_parameter_variances(
+                    &named_parameter.value,
+                    polarity.flip(),
+                    parameters,
+                    variances,
+                );
+            }
+            accumulate_parameter_variances(
+                &function_type.return_type,
+                polarity,
+                parameters,
+                variances,
+            );
+        }
+        SurfaceType::Nullable(inner)
+        | SurfaceType::Vector(inner)
+        | SurfaceType::NamedVector(inner)
+        | SurfaceType::List(inner)
+        | SurfaceType::NamedList(inner)
+        | SurfaceType::Binders(_, inner) => {
+            accumulate_parameter_variances(inner, polarity, parameters, variances);
+        }
+        SurfaceType::Record(fields) => {
+            for field in fields {
+                accumulate_parameter_variances(&field.value, polarity, parameters, variances);
+            }
+        }
+        SurfaceType::Tuple(items) => {
+            for item in items {
+                accumulate_parameter_variances(item, polarity, parameters, variances);
+            }
+        }
+        SurfaceType::Any
+        | SurfaceType::Unknown
+        | SurfaceType::Null
+        | SurfaceType::Scalar(_) => {}
+    }
+}
+
 pub fn inference_state_with_builtins(lowering_context: &mut LoweringContext) -> InferenceState {
     inference_state_with_builtins_in_interner(lowering_context.interner_mut())
 }
@@ -1445,15 +1568,56 @@ impl InferenceState {
             ) if actual_name == expected_name
                 && actual_arguments.len() == expected_arguments.len() =>
             {
-                for (actual_argument, expected_argument) in
-                    actual_arguments.into_iter().zip(expected_arguments)
+                // Each type argument is checked in the direction dictated by where the parameter
+                // occurs in the representation: covariant for return/container/direct positions,
+                // contravariant (flipped) for function-parameter positions, and invariant (both
+                // directions) when a parameter occurs in conflicting positions. Without a definition
+                // the variance is unknown, so every argument is checked invariantly.
+                // A missing definition leaves `variances` empty, so every argument defaults to
+                // invariant below. This is conservative: it over-rejects (demands an exact match)
+                // rather than over-accepting an unsound widening.
+                let variances = type_definitions
+                    .get(actual_name)
+                    .map(parameter_variances)
+                    .unwrap_or_default();
+
+                for (index, (actual_argument, expected_argument)) in actual_arguments
+                    .into_iter()
+                    .zip(expected_arguments)
+                    .enumerate()
                 {
-                    if !self.check_compatibility(
-                        actual_argument,
-                        expected_argument,
-                        type_definitions,
-                        expression,
-                    )? {
+                    let variance = variances.get(index).copied().unwrap_or(Variance::Invariant);
+                    let compatible = match variance {
+                        // The parameter never occurs in the representation, so the argument is
+                        // unconstrained and any argument is accepted.
+                        Variance::Bivariant => true,
+                        Variance::Covariant => self.check_compatibility(
+                            actual_argument,
+                            expected_argument,
+                            type_definitions,
+                            expression,
+                        )?,
+                        Variance::Contravariant => self.check_compatibility(
+                            expected_argument,
+                            actual_argument,
+                            type_definitions,
+                            expression,
+                        )?,
+                        Variance::Invariant => {
+                            self.check_compatibility(
+                                actual_argument.clone(),
+                                expected_argument.clone(),
+                                type_definitions,
+                                expression,
+                            )? && self.check_compatibility(
+                                expected_argument,
+                                actual_argument,
+                                type_definitions,
+                                expression,
+                            )?
+                        }
+                    };
+                    if !compatible {
                         return Ok(false);
                     }
                 }
@@ -2241,6 +2405,10 @@ impl InferenceState {
                 CoreType::Nominal(left_name, left_arguments),
                 CoreType::Nominal(right_name, right_arguments),
             ) if left_name == right_name && left_arguments.len() == right_arguments.len() => {
+                // Unification is the invariant floor: it must produce a single representative type,
+                // so every nominal argument is unified by equality regardless of the parameter's
+                // compatibility variance. This is consistent with `check_compatibility` (unified ⇒
+                // compatible in both directions): unify is strictly stronger than compatibility.
                 let mut unified_arguments = Vec::with_capacity(left_arguments.len());
                 for (left_argument, right_argument) in
                     left_arguments.into_iter().zip(right_arguments)
