@@ -1,6 +1,6 @@
 use {
     crate::{
-        Interner,
+        Interner, Symbol,
         diagnostic::Diagnostic,
         document::{Document, DocumentChange, DocumentId},
         hir::{ExpressionId, Module},
@@ -19,7 +19,7 @@ use {
     },
     ropey::Rope,
     std::{
-        collections::{HashMap, HashSet},
+        collections::{BTreeMap, BTreeSet, HashMap, HashSet},
         fs::File,
         io::BufReader,
         path::{Path, PathBuf},
@@ -44,6 +44,11 @@ pub struct Analysis {
     lint_outputs: HashMap<DocumentId, LintOutput>,
     lowering_outputs: HashMap<DocumentId, DocumentOutput<Module>>,
     document_naming_outputs: HashMap<DocumentId, DocumentOutput<NamesLocal>>,
+    // Reverse-dependency index (M3): for each package-global `Symbol`, the set of documents whose
+    // local naming references it. Derived from and patched per document against each document's
+    // `NamesLocal.non_locals`; see `patch_reverse_dependencies` and the maintenance invariant on the
+    // architecture page. Used by invalidation routing to pick recompute candidates.
+    reverse_dependencies: BTreeMap<Symbol, BTreeSet<DocumentId>>,
     package_naming_output: Option<PackageOutput<NamesGlobal>>,
     document_interface_outputs: HashMap<DocumentId, InterfaceOutput>,
     document_typecheck_outputs: HashMap<DocumentId, TypecheckDocumentOutput>,
@@ -144,6 +149,7 @@ impl Analysis {
             lint_outputs: HashMap::new(),
             lowering_outputs: HashMap::new(),
             document_naming_outputs: HashMap::new(),
+            reverse_dependencies: BTreeMap::new(),
             package_naming_output: None,
             document_interface_outputs: HashMap::new(),
             document_typecheck_outputs: HashMap::new(),
@@ -274,6 +280,9 @@ impl Analysis {
         self.document_versions.remove(&document_id);
         self.document_paths.remove(&document_id);
         self.non_package_documents.remove(&document_id);
+        // The document is gone for good, so it contributes nothing to the reverse-dependency index.
+        // Unlike an edit, no recompute will re-patch it, so retract its edges here.
+        self.patch_reverse_dependencies(document_id, &BTreeSet::new());
         self.invalidate_document(document_id);
         self.bump_package_version();
         Ok(())
@@ -313,6 +322,17 @@ impl Analysis {
         self.package_naming_output
             .as_ref()
             .map(|output| &output.output)
+    }
+
+    // The documents whose local naming references `symbol` as a package global (the reverse of
+    // `NamesLocal.non_locals`). Empty when no document references it. Consumed by M3 invalidation
+    // routing to pick the documents to recheck when a package-global interface changes.
+    pub fn documents_referencing(&self, symbol: Symbol) -> impl Iterator<Item = DocumentId> + '_ {
+        self.reverse_dependencies
+            .get(&symbol)
+            .into_iter()
+            .flatten()
+            .copied()
     }
 
     pub fn package_document_ids(&self) -> Vec<DocumentId> {
@@ -506,6 +526,13 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
         };
         let local_naming =
             resolve_document_locally(*document_id, module, analysis_state.interner(), document_kind);
+        let referenced_symbols = local_naming
+            .naming
+            .non_locals
+            .values()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        analysis_state.patch_reverse_dependencies(*document_id, &referenced_symbols);
         analysis_state.document_naming_outputs.insert(
             *document_id,
             DocumentOutput {
@@ -515,6 +542,9 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
             },
         );
     }
+
+    #[cfg(debug_assertions)]
+    analysis_state.assert_reverse_dependencies_consistent();
 
     if analysis_state
         .package_naming_output
@@ -901,11 +931,59 @@ impl Analysis {
     }
 
     fn invalidate_document(&mut self, document_id: DocumentId) {
+        // Drops only the version-keyed caches. The reverse-dependency index is intentionally left
+        // untouched: a document re-patches its own edges when its naming is recomputed (see
+        // `patch_reverse_dependencies`), and that patch derives the document's *old* edges from the
+        // index itself, so it stays correct even though the previous naming output is gone here.
         self.lint_outputs.remove(&document_id);
         self.lowering_outputs.remove(&document_id);
         self.document_naming_outputs.remove(&document_id);
         self.document_interface_outputs.remove(&document_id);
         self.document_typecheck_outputs.remove(&document_id);
+    }
+
+    // Re-derives `document_id`'s edges in the reverse-dependency index to exactly `new_refs`,
+    // patching only the delta. The document's *old* edges are read back from the index (the symbols
+    // where it is currently a member) rather than from its previous naming output, which the
+    // invalidate→recompute path may have already dropped. Passing an empty `new_refs` retracts the
+    // document entirely (used on delete).
+    fn patch_reverse_dependencies(&mut self, document_id: DocumentId, new_refs: &BTreeSet<Symbol>) {
+        let old_refs = self
+            .reverse_dependencies
+            .iter()
+            .filter(|(_, documents)| documents.contains(&document_id))
+            .map(|(symbol, _)| *symbol)
+            .collect::<BTreeSet<_>>();
+        for symbol in old_refs.difference(new_refs) {
+            if let Some(documents) = self.reverse_dependencies.get_mut(symbol) {
+                documents.remove(&document_id);
+                if documents.is_empty() {
+                    self.reverse_dependencies.remove(symbol);
+                }
+            }
+        }
+        for symbol in new_refs.difference(&old_refs) {
+            self.reverse_dependencies
+                .entry(*symbol)
+                .or_default()
+                .insert(document_id);
+        }
+    }
+
+    // Salsa-style verify: rebuilds the index from scratch by folding every current naming output and
+    // asserts it equals the incrementally maintained index. Catches any maintenance bug. Debug-only.
+    #[cfg(debug_assertions)]
+    fn assert_reverse_dependencies_consistent(&self) {
+        let mut rebuilt: BTreeMap<Symbol, BTreeSet<DocumentId>> = BTreeMap::new();
+        for (document_id, output) in &self.document_naming_outputs {
+            for symbol in output.output.non_locals.values() {
+                rebuilt.entry(*symbol).or_default().insert(*document_id);
+            }
+        }
+        assert_eq!(
+            rebuilt, self.reverse_dependencies,
+            "reverse-dependency index drifted from the per-document naming outputs"
+        );
     }
 
     fn bump_version(&mut self) -> Version {
@@ -952,8 +1030,8 @@ impl Analysis {
 mod tests {
     use {
         super::{
-            Analysis, CheckConfig, DocumentChange, LintConfig, lint, lower, resolve_package,
-            run_full,
+            Analysis, CheckConfig, DocumentChange, DocumentId, LintConfig, Symbol, lint, lower,
+            resolve_package, run_full,
         },
         crate::{
             Diagnostic, Severity,
@@ -961,12 +1039,189 @@ mod tests {
             text::{TextPosition, TextRange},
         },
         std::{
+            collections::{BTreeMap, BTreeSet},
             fs,
             path::{Path, PathBuf},
             sync::atomic::{AtomicU64, Ordering},
             time::{SystemTime, UNIX_EPOCH},
         },
     };
+
+    // Folds every current per-document naming output into a reverse-dependency index from scratch.
+    // The maintained `Analysis::reverse_dependencies` must equal this after every operation.
+    fn rebuild_reverse_dependencies(
+        analysis: &Analysis,
+    ) -> BTreeMap<Symbol, BTreeSet<DocumentId>> {
+        let mut rebuilt: BTreeMap<Symbol, BTreeSet<DocumentId>> = BTreeMap::new();
+        for (document_id, output) in &analysis.document_naming_outputs {
+            for symbol in output.output.non_locals.values() {
+                rebuilt.entry(*symbol).or_default().insert(*document_id);
+            }
+        }
+        rebuilt
+    }
+
+    #[test]
+    fn reverse_dependencies_register_cross_and_forward_references() {
+        // `b` references the defined global `g`; `c` references `not_defined`, a global no document
+        // defines. Both must register as referrers — the index keys on the name a reference attempts
+        // to resolve, so a forward reference to a not-yet-defined global still counts.
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
+        analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "g <- function(x) x")
+            .expect("document should parse");
+        let b_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/b.R"), "r <- g(1L)")
+            .expect("document should parse");
+        let c_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/c.R"), "z <- not_defined(2L)")
+            .expect("document should parse");
+        resolve_package(&mut analysis);
+
+        let g_symbol = analysis.interner_mut().intern("g");
+        let not_defined_symbol = analysis.interner_mut().intern("not_defined");
+        assert_eq!(
+            analysis.documents_referencing(g_symbol).collect::<Vec<_>>(),
+            vec![b_id]
+        );
+        assert_eq!(
+            analysis
+                .documents_referencing(not_defined_symbol)
+                .collect::<Vec<_>>(),
+            vec![c_id],
+            "a forward reference to a not-yet-defined global registers as a referrer"
+        );
+        assert_eq!(
+            rebuild_reverse_dependencies(&analysis),
+            analysis.reverse_dependencies
+        );
+    }
+
+    #[test]
+    fn reverse_dependencies_follow_edited_reference_set() {
+        // Editing `b` to reference a different global must move its edge: the old global loses `b`,
+        // the new global gains it, and the index equals a full rebuild.
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
+        analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "g <- 1L\nh <- 2L")
+            .expect("document should parse");
+        let b_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/b.R"), "r <- g")
+            .expect("document should parse");
+        resolve_package(&mut analysis);
+
+        let g_symbol = analysis.interner_mut().intern("g");
+        let h_symbol = analysis.interner_mut().intern("h");
+        assert_eq!(
+            analysis.documents_referencing(g_symbol).collect::<Vec<_>>(),
+            vec![b_id]
+        );
+
+        analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/b.R"), "r <- h")
+            .expect("document should parse");
+        resolve_package(&mut analysis);
+
+        assert!(
+            analysis.documents_referencing(g_symbol).next().is_none(),
+            "the old reference is dropped"
+        );
+        assert_eq!(
+            analysis.documents_referencing(h_symbol).collect::<Vec<_>>(),
+            vec![b_id],
+            "the new reference is registered"
+        );
+        assert_eq!(
+            rebuild_reverse_dependencies(&analysis),
+            analysis.reverse_dependencies
+        );
+    }
+
+    #[test]
+    fn reverse_dependencies_drop_deleted_referrer_and_keep_others() {
+        // `b` and `c` both reference `g`. Deleting `b` removes only its edge; `c` survives.
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
+        analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "g <- 1L")
+            .expect("document should parse");
+        analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/b.R"), "r <- g")
+            .expect("document should parse");
+        let c_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/c.R"), "s <- g")
+            .expect("document should parse");
+        resolve_package(&mut analysis);
+
+        analysis
+            .delete_document(Path::new("/workspace/R/b.R"))
+            .expect("delete should succeed");
+        resolve_package(&mut analysis);
+
+        let g_symbol = analysis.interner_mut().intern("g");
+        assert_eq!(
+            analysis.documents_referencing(g_symbol).collect::<Vec<_>>(),
+            vec![c_id],
+            "the deleted document's edge vanishes; the other referrer remains"
+        );
+        assert_eq!(
+            rebuild_reverse_dependencies(&analysis),
+            analysis.reverse_dependencies
+        );
+    }
+
+    #[test]
+    fn reverse_dependencies_keep_referrer_when_global_is_later_defined() {
+        // `b` references `late` before any document defines it. The edge is registered up front and
+        // persists once `late` gains a defining document, since the reference still attempts the same
+        // package global.
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
+        let b_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/b.R"), "r <- late")
+            .expect("document should parse");
+        resolve_package(&mut analysis);
+
+        let late_symbol = analysis.interner_mut().intern("late");
+        assert_eq!(
+            analysis
+                .documents_referencing(late_symbol)
+                .collect::<Vec<_>>(),
+            vec![b_id],
+            "the referrer is registered before the definition exists"
+        );
+
+        analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "late <- 1L")
+            .expect("document should parse");
+        resolve_package(&mut analysis);
+
+        assert_eq!(
+            analysis
+                .documents_referencing(late_symbol)
+                .collect::<Vec<_>>(),
+            vec![b_id],
+            "the referrer survives the definition appearing"
+        );
+        assert_eq!(
+            rebuild_reverse_dependencies(&analysis),
+            analysis.reverse_dependencies
+        );
+    }
 
     #[test]
     fn package_document_ids_exclude_non_package_paths() {
