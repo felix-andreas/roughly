@@ -198,8 +198,9 @@ impl Variance {
 // Computes the variance of each of a definition's type parameters (aligned with
 // `definition.type_parameters`) from its occurrences in the representation type. Function-parameter
 // positions flip polarity; function-return, container/structural, and direct positions preserve it;
-// nested nominal arguments preserve it (a precise nested-nominal fixpoint is a deferred refinement);
-// multiple occurrences join. A parameter that never occurs stays `Bivariant`.
+// nested nominal arguments are treated conservatively as `Invariant` (a precise nested-nominal
+// fixpoint is a deferred refinement); multiple occurrences join. A parameter that never occurs
+// stays `Bivariant`.
 fn parameter_variances(definition: &TypeDefinition) -> Vec<Variance> {
     let mut variances = BTreeMap::new();
     accumulate_parameter_variances(

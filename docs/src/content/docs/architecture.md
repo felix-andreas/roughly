@@ -205,7 +205,12 @@ Typechecking is incremental at document grain through a two-phase interface mode
 - The check phase checks every document (package files and scripts) against the interface table,
   binding only the schemes the document references. The result is cached by document version plus
   the environment fingerprint, so a body-only edit rechecks one document while an interface change
-  rechecks dependents.
+  rechecks dependents. (Target, not yet fully implemented: the environment fingerprint is
+  package-global, so today an interface change rekeys every document's check cache rather than only
+  its dependents. The reverse-dependency design under
+  [Reverse-dependency invalidation](#reverse-dependency-invalidation-m3) replaces this global key
+  with per-document dependency fingerprints and reverse-dependency routing; until round-2 re-keying
+  lands, read the "rechecks dependents" precision here as the target rather than current behavior.)
 
 Consequences that are part of the contract:
 
@@ -361,6 +366,78 @@ This model should preserve two boundaries:
 - phase boundaries remain stable even if scheduling changes later
 - future finer-grained invalidation should refine package-scoped work, not replace the retained
   artifact model
+
+### Reverse-dependency invalidation (M3)
+
+This is the design M3 implements to make package-scoped invalidation precise instead of
+package-wide. It refines the package-scoped phases above; it does not replace the retained-artifact
+model. (The check-phase prose in [the typecheck incremental model](#incremental-model) still
+describes the package-global environment fingerprint that this design replaces; that wording is
+corrected once round-2 re-keying lands.)
+
+Four pieces:
+
+1. **Per-document dependency re-keying.** The round-2 typecheck (the check phase) is re-keyed on
+   each document's *own* dependency fingerprint — the per-document set of referenced schemes already
+   computed in round-1 — instead of one global environment fingerprint. A document's check cache is
+   then invalidated only when a scheme it actually references changes.
+2. **Reverse-dependency index.** A package-global map from `Symbol` (a package-visible name) to the
+   set of `DocumentId`s that refer to it.
+3. **Per-edit dirty set.** The set of changed `DocumentId`s is carried into the package-scoped
+   phases. The recompute candidate set is `dirty docs ∪ reverse-deps of changed exports`.
+4. **Fixture-visible recompute scope.** The recomputed `DocumentId` set and the reason per document
+   (body-edit vs interface-change) are exposed so the routing is testable, not just an internal
+   optimization.
+
+#### Maintenance invariant (single source of truth)
+
+The reverse-dependency index is a pure function of the per-document naming outputs:
+
+```
+index == ⋃ over docs D of { (s, D) : s ∈ non_locals(D) }
+```
+
+It is *derived and patched per document* — to update a document, remove its own entries (the edges
+keyed by that contributing `DocumentId`) then insert its new ones — never a hand-synced mirror.
+Edges are keyed by the **name a reference attempts to resolve**, not by the resolved target. Keying
+on the attempted name (not the resolved binding) is what keeps the following correct without special
+cases:
+
+- forward references to a not-yet-defined global,
+- shadowing / last-writer-wins winner flips,
+- deletion of a definition,
+- local↔global transitions.
+
+A debug-only assertion compares the patched index against a full rebuild and guards against drift.
+
+#### One-hop correctness premise (contract precondition)
+
+A single reverse-dependency hop suffices to pick recompute candidates **only because inference never
+flows across files**: a document's exported scheme is a pure function of its own source, not of its
+dependencies' bodies or inferred types. So changing document A's exports can only affect the
+documents that directly reference A's exported names — one hop.
+
+Re-exports (a top-level binding that aliases another global) are the genuinely transitive case. They
+are not handled by extra reverse-dependency hops; they are handled by the existing two-round
+interface fixed-point, which remains the convergence safety net.
+
+If cross-file inference is ever added, the one-hop guarantee is void and this routing must be
+replaced by a worklist iterated to a fixed point.
+
+#### Find-references stays on the text prefilter
+
+Find-references intentionally does *not* gain a persistent reverse-reference index. A full
+reverse-*reference* index is exactly the fragile mirrored state rust-analyzer deliberately avoids;
+find-references stays on the text-prefilter path. The reverse-*dependency* index here is the narrow,
+cheaply derivable structure used only for invalidation routing — not a general reference store.
+
+#### Exit proof (targeted, made durable as a fixture)
+
+The design targets, and a fixture makes durable, the following:
+
+- an interface change to a global `G` referenced by `k` documents recomputes exactly `k + 1`
+  documents (`G`'s own document plus its `k` referrers);
+- a body-only edit recomputes exactly `1` document and renders no `O(package)` fingerprint.
 
 ## Diagnostics
 
