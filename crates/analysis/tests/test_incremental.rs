@@ -412,6 +412,69 @@ fn unedited_documents_keep_diagnostics_after_unrelated_edit() {
     );
 }
 
+#[test]
+fn deep_re_export_chain_past_round_cap_is_not_left_stale() {
+    // A re-export chain far longer than the old fixed 32-round interface cap: f0 defines `g`, then each
+    // link `v{i} <- v{i-1}` re-exports it, and the tail calls the deepest link with `+ 1L`. The
+    // interface fixed-point advances one hop per round, so under a fixed cap this chain never converged
+    // and the deep links (and tail) were silently left unresolved — flipping `g`'s return type would not
+    // reach the tail. With the round bound scaled to the package document count the chain converges, so
+    // the tail recomputes against the converged interface and the now-real `character` type error
+    // surfaces instead of a stale clean result.
+    const CHAIN: usize = 40;
+    let mut analysis_state = typing_analysis("/pkg");
+    replace_document(
+        &mut analysis_state,
+        "/pkg/R/f0.R",
+        "#: fn() -> integer\ng <- function() 1L\n",
+    );
+    for index in 1..=CHAIN {
+        let previous = if index == 1 {
+            "g".to_string()
+        } else {
+            format!("v{}", index - 1)
+        };
+        replace_document(
+            &mut analysis_state,
+            &format!("/pkg/R/f{index}.R"),
+            &format!("v{index} <- {previous}\n"),
+        );
+    }
+    let tail_path = "/pkg/R/tail.R";
+    replace_document(
+        &mut analysis_state,
+        tail_path,
+        &format!("result <- v{CHAIN}() + 1L\n"),
+    );
+
+    analysis::run_full(&mut analysis_state);
+    assert_eq!(
+        error_messages(&analysis_state, tail_path).len(),
+        0,
+        "tail is clean while the chain returns integer"
+    );
+
+    replace_document(
+        &mut analysis_state,
+        "/pkg/R/f0.R",
+        "#: fn() -> character\ng <- function() \"x\"\n",
+    );
+    let recomputed = analysis::typecheck(&mut analysis_state);
+    let tail_id = analysis_state
+        .document_id_for_path(std::path::Path::new(tail_path))
+        .expect("document should exist");
+    assert!(
+        recomputed.contains(&tail_id),
+        "deep tail past the round cap must be a recompute candidate via the all-docs fallback: \
+         {recomputed:?}"
+    );
+    assert_eq!(
+        error_messages(&analysis_state, tail_path),
+        vec!["expected a numeric value (`integer` or `double`), found `character`"],
+        "the tail must report the now-character error, not a stale clean result"
+    );
+}
+
 // Run manually with: cargo test -p analysis --release --test test_incremental -- --ignored --nocapture
 #[test]
 #[ignore = "timing benchmark, run manually"]

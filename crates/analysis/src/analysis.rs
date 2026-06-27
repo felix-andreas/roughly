@@ -821,9 +821,23 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     // key moved, and when a recomputed document's exported interface fingerprint actually changes, the
     // referrers of its (old and new) exported names are enqueued for the next round. This converges
     // exactly like a full scan would — re-exports and forward references propagate hop by hop — while
-    // touching only documents that can be affected. The round cap stops genuine cycles (which keep
-    // `Unknown`). A type-definition change considers every package document.
-    const MAX_PACKAGE_INTERFACE_ROUNDS: usize = 32;
+    // touching only documents that can be affected. A type-definition change considers every package
+    // document.
+    //
+    // Bound the loop so it can never truncate legitimate propagation (a fixed cap like 32 silently left
+    // chains deeper than it unresolved, and the round-2 candidate widening below could not repair that
+    // because it reads the same unconverged table). Each round's table is the previous round's output,
+    // so propagation advances one hop per round. Convergence is monotone: every package-global name's
+    // exported scheme transitions at most once (from absent/`Unknown` to a concrete scheme), because the
+    // leaves are stable annotations and literals and names on a genuine cycle stay `Unknown` forever.
+    // Synchronous iteration over such a monotone framework therefore reaches the fixed point in at most
+    // `#package-globals + 1` rounds (every name is final once its longest dependency path — bounded by
+    // the number of distinct names on it — has been walked, then one confirmation round empties the
+    // worklist). The `+ 8` is slack so the `debug_assert` on non-convergence below cannot false-fire on
+    // legitimate input; the common case still breaks out the moment the worklist empties, so the bound
+    // only ceilings the pathological worst case. Bounding by document count instead would be wrong:
+    // measured, a 2-document package with 3 globals needs 4 rounds.
+    let max_package_interface_rounds = package_naming.global_bindings.len().saturating_add(8);
     let mut round1_candidates = if type_definitions_changed {
         package_document_set.clone()
     } else {
@@ -842,8 +856,10 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         candidates
     };
 
-    for _round in 0..MAX_PACKAGE_INTERFACE_ROUNDS {
+    let mut converged = false;
+    for _round in 0..max_package_interface_rounds {
         if round1_candidates.is_empty() {
+            converged = true;
             break;
         }
         let table = build_package_interface_table(
@@ -959,7 +975,15 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     // type-definition change forces the full document set (it can affect any check, see above). This is
     // a superset of every document a full scan would recompute — the per-document cache check below
     // still decides actual recompute — so no document that needs rechecking is ever skipped.
-    let round2_candidates = if type_definitions_changed {
+    //
+    // Defensive net for the (now unreachable in practice) case where round 1 exhausts its bound without
+    // converging: `changed_globals` would be incomplete, so narrowing the candidate set could silently
+    // leave the deepest referrers stale. Fall back to considering every document. This only widens the
+    // *candidate* set — the per-document dependency-fingerprint cache check below still skips documents
+    // that genuinely did not change — so it is conservative (never stale) and never forces extra
+    // recompute. The bound above is sized so legitimate acyclic and cyclic structures always converge,
+    // so reaching this path signals a real fixed-point bug rather than a deep chain.
+    let round2_candidates = if type_definitions_changed || !converged {
         all_document_ids.iter().copied().collect::<BTreeSet<_>>()
     } else {
         let mut candidates = dirty_documents.clone();
@@ -970,6 +994,15 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         }
         candidates
     };
+    // The bound is sized so every legitimate package converges, so non-convergence is a genuine
+    // fixed-point defect (e.g. a non-monotone scheme), not a deep chain: fail loudly in debug/test
+    // builds. Release builds stay correct via the all-docs round-2 fallback above (graceful, never
+    // stale) even if such a defect ever slips through.
+    debug_assert!(
+        converged,
+        "package interface fixed-point did not converge within {max_package_interface_rounds} rounds; \
+         this indicates a fixed-point defect (e.g. a non-monotone exported scheme), not a deep chain"
+    );
     analysis_state.last_candidate_count = round2_candidates.len();
 
     let mut recomputed_document_ids = Vec::new();
