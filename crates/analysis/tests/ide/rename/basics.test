@@ -454,6 +454,41 @@ renamed <- function(value) value
 R/use.R:
 result <- renamed(1L)
 
+#==== rename_global_with_same_named_local
+#---- global_rename_skips_same_named_local
+#---- R/def.R
+value <- 1L
+#++++ any
+#---- R/use.R
+result <- value
+helper <- function() {
+  value <- 99L
+  value
+}
+#++++ any
+#!!!! rename from_global.rename
+R/def.R:1:1 -> renamed
+#++++
+before:
+R/def.R:
+value <- 1L
+R/use.R:
+result <- value
+helper <- function() {
+  value <- 99L
+  value
+}
+
+after:
+R/def.R:
+renamed <- 1L
+R/use.R:
+result <- renamed
+helper <- function() {
+  value <- 99L
+  value
+}
+
 #==== s4
 #---- rename_class_across_files
 #---- R/classes.R

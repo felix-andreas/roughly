@@ -779,6 +779,21 @@ fn identifier_occurrences(
     };
     let mut occurrences = Vec::new();
 
+    // Cheap text prefilter: an identifier whose spelled source differs from the target's name can
+    // never resolve to the target, so skip full resolution for it. Same-spelled identifiers still
+    // go through `symbol_target_for_identifier`, preserving shadowing correctness. If the name
+    // cannot be resolved (it always should), fall back to resolving every identifier.
+    let target_name = match target {
+        SymbolTarget::Global { symbol, .. } => analysis.interner().resolve(symbol),
+        SymbolTarget::Local {
+            document_id,
+            binding_id,
+        } => analysis
+            .document_naming(document_id)
+            .and_then(|naming| naming.bindings.get(&binding_id))
+            .and_then(|binding| analysis.interner().resolve(binding.symbol)),
+    };
+
     for scoped_document_id in document_ids {
         let scoped_path = analysis
             .path_for_document_id(scoped_document_id)
@@ -789,6 +804,18 @@ fn identifier_occurrences(
             .unwrap_or_else(|| panic!("missing document {scoped_document_id:?}"));
 
         for identifier in identifier_nodes(scoped_document.tree()) {
+            if let Some(name) = target_name {
+                let range = identifier.range();
+                if range.end_byte - range.start_byte != name.len()
+                    || scoped_document
+                        .rope()
+                        .byte_slice(range.start_byte..range.end_byte)
+                        != name
+                {
+                    continue;
+                }
+            }
+
             if symbol_target_for_identifier(analysis, scoped_document_id, identifier)
                 != Some(target)
             {

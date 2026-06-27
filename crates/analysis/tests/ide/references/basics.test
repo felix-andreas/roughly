@@ -212,6 +212,29 @@ R/b.R:1:11
 R/b.R:1:11..1:16
 R/c.R:1:1..1:6 [declaration]
 
+#==== references_global_with_same_named_local
+#---- global_excludes_same_named_local
+#---- R/def.R
+value <- 1L
+#++++ any
+#---- R/use.R
+result <- value
+helper <- function() {
+  value <- 99L
+  value
+}
+#++++ any
+#!!!! references from_global_declaration.references
+R/def.R:1:1
+#++++
+R/def.R:1:1..1:6 [declaration]
+R/use.R:1:11..1:16
+#!!!! references from_local_declaration.references
+R/use.R:3:3
+#++++
+R/use.R:3:3..3:8 [declaration]
+R/use.R:4:3..4:8
+
 #==== references_s4
 #---- class_references_across_files
 #---- R/classes.R
