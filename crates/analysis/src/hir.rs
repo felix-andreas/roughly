@@ -5,6 +5,7 @@ use {
         type_syntax::{render_named_type_ref, render_surface_type},
         types::{Atomic, AttachedAnnotation, SurfaceType},
     },
+    std::collections::BTreeMap,
     tree_sitter::Range,
 };
 
@@ -38,6 +39,12 @@ impl HirArena {
         &mut self.expressions[id.0 as usize]
     }
 
+    // IDE paths may hold an ExpressionId that no longer exists after a re-lowering; they must
+    // degrade to `None` rather than panic. Internal phase code uses the infallible `get`.
+    pub fn try_get(&self, id: ExpressionId) -> Option<&Expression> {
+        self.expressions.get(id.0 as usize)
+    }
+
     pub fn expressions(&self) -> &[Expression] {
         &self.expressions
     }
@@ -48,6 +55,9 @@ pub struct Module {
     pub arena: HirArena,
     pub definitions: Vec<DefinitionItem>,
     pub expressions: Vec<ExpressionId>,
+    // Derived from `arena` once at construction so IDE range lookups are O(log n) instead of a
+    // linear arena scan. Keyed by (start_byte, end_byte).
+    span_index: BTreeMap<(usize, usize), ExpressionId>,
 }
 
 impl Module {
@@ -56,11 +66,27 @@ impl Module {
         definitions: Vec<DefinitionItem>,
         expressions: Vec<ExpressionId>,
     ) -> Self {
+        let mut span_index = BTreeMap::new();
+        // Expressions are allocated in ascending ExpressionId order, so `or_insert` keeps the
+        // smallest id when several expressions share a range (e.g. a parent that wraps a single
+        // child). This matches the previous first-match scan over the arena.
+        for expression in arena.expressions() {
+            span_index
+                .entry((expression.range.start_byte, expression.range.end_byte))
+                .or_insert(expression.id);
+        }
         Self {
             arena,
             definitions,
             expressions,
+            span_index,
         }
+    }
+
+    pub fn expression_id_by_range(&self, range: Range) -> Option<ExpressionId> {
+        self.span_index
+            .get(&(range.start_byte, range.end_byte))
+            .copied()
     }
 }
 
@@ -434,5 +460,43 @@ impl Module {
             }
             ExpressionKind::Unsupported => out.push_str(&format!("{prefix}Unsupported\n")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tree_sitter::Point;
+
+    fn range(start_byte: usize, end_byte: usize) -> Range {
+        Range {
+            start_byte,
+            end_byte,
+            start_point: Point::new(0, start_byte),
+            end_point: Point::new(0, end_byte),
+        }
+    }
+
+    // The span index must return the same expression the old linear arena scan did: the first
+    // allocated (smallest ExpressionId) when several expressions share a range.
+    #[test]
+    fn expression_id_by_range_keeps_smallest_id_on_shared_range() {
+        let mut arena = HirArena::new();
+        let shared = range(0, 5);
+        let first = arena.alloc(Expression::new(ExpressionId(0), shared, None, ExpressionKind::Null));
+        let _second =
+            arena.alloc(Expression::new(ExpressionId(0), shared, None, ExpressionKind::Null));
+        let other = arena.alloc(Expression::new(
+            ExpressionId(0),
+            range(6, 9),
+            None,
+            ExpressionKind::Null,
+        ));
+
+        let module = Module::new(arena, Vec::new(), Vec::new());
+
+        assert_eq!(module.expression_id_by_range(shared), Some(first));
+        assert_eq!(module.expression_id_by_range(range(6, 9)), Some(other));
+        assert_eq!(module.expression_id_by_range(range(0, 9)), None);
     }
 }

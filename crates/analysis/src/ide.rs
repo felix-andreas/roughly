@@ -63,7 +63,7 @@ pub fn hover(analysis: &mut Analysis, path: &Path, position: TextPosition) -> Op
 
     let range = match target {
         HoverTarget::Expression(expression_id, range) => {
-            let expression = module.arena.get(expression_id);
+            let expression = module.arena.try_get(expression_id)?;
 
             if let Some(core_type) = analysis.checked_expression_type(document_id, expression_id) {
                 contents.push(code_block(&render_core_type(analysis.interner(), core_type)));
@@ -286,7 +286,12 @@ pub fn signature_help(
     } else {
         let preceding = arguments
             .iter()
-            .filter(|argument| module.arena.get(argument.expression).range.end_point < point)
+            .filter(|argument| {
+                module
+                    .arena
+                    .try_get(argument.expression)
+                    .is_some_and(|expression| expression.range.end_point < point)
+            })
             .count();
         Some(preceding.min(parameters.len() - 1))
     };
@@ -832,7 +837,7 @@ fn symbol_target_for_identifier(
         }
 
         if is_assignment_target(identifier, parent)
-            && let Some(expression_id) = expression_id_by_range(module, parent.range())
+            && let Some(expression_id) = module.expression_id_by_range(parent.range())
         {
             let binding_id = local_naming
                 .expression_resolutions
@@ -863,7 +868,7 @@ fn symbol_target_for_identifier(
         }
     }
 
-    let expression_id = expression_id_by_range(module, identifier.range())?;
+    let expression_id = module.expression_id_by_range(identifier.range())?;
     if let Some(binding_id) = local_naming
         .expression_resolutions
         .get(&expression_id)
@@ -1472,12 +1477,13 @@ fn binding_completion_kind(
         return CompletionItemKind::Variable;
     };
 
-    let expression = module.arena.get(expression_id);
+    let Some(expression) = module.arena.try_get(expression_id) else {
+        return CompletionItemKind::Variable;
+    };
     match expression.kind {
         ExpressionKind::Assign { value, .. } => {
-            let value_expression = module.arena.get(value);
-            match value_expression.kind {
-                ExpressionKind::Function { .. } => CompletionItemKind::Function,
+            match module.arena.try_get(value).map(|expression| &expression.kind) {
+                Some(ExpressionKind::Function { .. }) => CompletionItemKind::Function,
                 _ => CompletionItemKind::Variable,
             }
         }
@@ -1619,15 +1625,6 @@ fn is_for_variable(identifier: Node<'_>, parent: Node<'_>) -> bool {
         && parent
             .child_by_field_id(crate::tree::field::VARIABLE)
             .is_some_and(|variable| variable.id() == identifier.id())
-}
-
-fn expression_id_by_range(module: &Module, range: Range) -> Option<ExpressionId> {
-    module
-        .arena
-        .expressions()
-        .iter()
-        .find(|expression| expression.range == range)
-        .map(|expression| expression.id)
 }
 
 fn identifier_nodes(tree: &Tree) -> Vec<Node<'_>> {
