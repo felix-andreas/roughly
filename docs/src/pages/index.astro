@@ -54,20 +54,12 @@ const analysisTabs = [
 ]
 
 const formatterTabs = [
-  { key: 'function', label: 'Functions & braces' },
+  { key: 'function', label: 'Functions & control flow' },
   { key: 'pipeline', label: 'Pipelines' },
-  { key: 'operators', label: 'Operators & indent' },
-  { key: 'quotes', label: 'Strings & quotes' },
+  { key: 'operators', label: 'Operators & indexing' },
 ]
 
-const footerLinks = [
-  { label: 'Type Checker', href: '/type-checker' },
-  { label: 'Language Server', href: '/language-server' },
-  { label: 'Linter', href: '/linter' },
-  { label: 'Formatter', href: '/formatter' },
-  { label: 'Config', href: '/configuration' },
-  { label: 'Getting started', href: '/getting-started' },
-]
+const year = new Date().getFullYear()
 ---
 
 <!doctype html>
@@ -81,6 +73,15 @@ const footerLinks = [
       content="Roughly is a fast, modern toolchain for R — a language server, a code analyzer, and a formatter in one tool, written in Rust."
     />
     <link rel="icon" href="/favicon.svg" />
+    <script is:inline>
+      // Set the reveal/static mode synchronously before first paint so the
+      // hidden-until-scroll hero choreography never flashes its end state.
+      ;(function () {
+        var reduce =
+          window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        document.documentElement.classList.add(reduce ? 'hero-static' : 'hero-reveal')
+      })()
+    </script>
   </head>
   <body>
     <header class="nav" id="nav">
@@ -107,6 +108,7 @@ const footerLinks = [
     <main>
       <!-- ---------- hero ---------- -->
       <section id="hero">
+        <div class="hero-viewport" id="hero-viewport">
         <canvas id="hero-canvas" aria-hidden="true"></canvas>
         <div class="hero-vignette" aria-hidden="true"></div>
         <div class="hero-copy">
@@ -138,6 +140,11 @@ const footerLinks = [
               <span class="soon-pill">soon</span>
             </span>
           </div>
+        </div>
+        <div class="scroll-hint" aria-hidden="true">
+          <span>scroll</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14" /><path d="m6 13 6 6 6-6" /></svg>
+        </div>
         </div>
       </section>
 
@@ -409,42 +416,42 @@ const footerLinks = [
               }
             </div>
             <div class="tab-panels">
-              <!-- Functions & braces -->
+              <!-- Functions & control flow -->
               <div role="tabpanel" id="panel-function" aria-labelledby="tab-function" tabindex="0">
                 <div class="ed">
                   <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">option.R · roughly fmt</span></div>
                   <div class="ed-body fmt-body">
                     <div class="fmt-morph" aria-hidden="true">
-                      <div class="fln" style="--i:0"><span class="tk">x_option</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">function</span><span class="tk">(</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tk">x</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tk">)</span><span class="sp" style="--w:1ch;--wf:1ch"></span><span class="tk">{'{'}</span></div>
-                      <div class="fln" style="--i:1"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tk">if (x == "a") {'{'}</span></div>
-                      <div class="fln" style="--i:2"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tk">"option 1"</span></div>
-                      <div class="fln" style="--i:3"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tk">{'}'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">else</span><span class="sp" style="--w:1ch;--wf:1ch"></span><span class="tk">if</span><span class="sp" style="--w:1ch;--wf:1ch"></span><span class="tk">(x</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">==</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">"b")</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">{'{'}</span></div>
-                      <div class="fln" style="--i:4"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tk">"option 2"</span></div>
-                      <div class="fln" style="--i:5"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tk">{'} else {'}</span></div>
-                      <div class="fln" style="--i:6"><span class="sp sp-ch" style="--w:2ch;--wf:4ch"></span><span class="tk">stop(</span><span class="ch"><span class="g-before" aria-hidden="true">'</span><span class="g-after">"</span></span><span class="tk">Invalid `x` value</span><span class="ch"><span class="g-before" aria-hidden="true">'</span><span class="g-after">"</span></span><span class="tk">)</span></div>
-                      <div class="fln" style="--i:7"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tk">{'}'}</span></div>
-                      <div class="fln" style="--i:8"><span class="tk">{'}'}</span></div>
+                      <div class="fln" style="--i:0"><span class="tok-id">x_option</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-kw">function</span><span class="tok-op">(</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tok-id">x</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tok-op">)</span><span class="sp" style="--w:1ch;--wf:1ch"></span><span class="tok-op">{'{'}</span></div>
+                      <div class="fln" style="--i:1"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-kw">if</span><span class="tok-op">{' ('}</span><span class="tok-id">x</span><span class="tok-op">{' == '}</span><span class="tok-str">"a"</span><span class="tok-op">{') '}</span><span class="tok-op">{'{'}</span></div>
+                      <div class="fln" style="--i:2"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tok-str">"option 1"</span></div>
+                      <div class="fln" style="--i:3"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-op">{'}'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-kw">else</span><span class="sp" style="--w:1ch;--wf:1ch"></span><span class="tok-kw">if</span><span class="sp" style="--w:1ch;--wf:1ch"></span><span class="tok-op">(</span><span class="tok-id">x</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'=='}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-str">"b"</span><span class="tok-op">)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'{'}</span></div>
+                      <div class="fln" style="--i:4"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tok-str">"option 2"</span></div>
+                      <div class="fln" style="--i:5"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-op">{'} '}</span><span class="tok-kw">else</span><span class="tok-op">{' {'}</span></div>
+                      <div class="fln" style="--i:6"><span class="sp sp-ch" style="--w:2ch;--wf:4ch"></span><span class="tok-fn">stop</span><span class="tok-op">(</span><span class="tok-str">"Invalid `x` value"</span><span class="tok-op">)</span></div>
+                      <div class="fln" style="--i:7"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-op">{'}'}</span></div>
+                      <div class="fln" style="--i:8"><span class="tok-op">{'}'}</span></div>
                     </div>
                     <span class="sr-only">x_option &lt;- function(x) {'{'} if (x == "a") "option 1" else if (x == "b") "option 2" else stop("Invalid `x` value") {'}'}</span>
                     <div class="fmt-static" aria-hidden="true">
-                      <div class="c-del">{'- x_option<-function( x ) {'}</div>
-                      <div class="c-del">{'-   if (x == "a") {'}</div>
-                      <div class="c-del">{'-     "option 1"'}</div>
-                      <div class="c-del">{'-   }else if (x=="b"){'}</div>
-                      <div class="c-del">{'-     "option 2"'}</div>
-                      <div class="c-del">{'-   } else {'}</div>
-                      <div class="c-del">{"-   stop('Invalid `x` value')"}</div>
-                      <div class="c-del">{'-   }'}</div>
-                      <div class="c-del">{'- }'}</div>
-                      <div class="c-add">{'+ x_option <- function(x) {'}</div>
-                      <div class="c-add">{'+   if (x == "a") {'}</div>
-                      <div class="c-add">{'+     "option 1"'}</div>
-                      <div class="c-add">{'+   } else if (x == "b") {'}</div>
-                      <div class="c-add">{'+     "option 2"'}</div>
-                      <div class="c-add">{'+   } else {'}</div>
-                      <div class="c-add">{'+     stop("Invalid `x` value")'}</div>
-                      <div class="c-add">{'+   }'}</div>
-                      <div class="c-add">{'+ }'}</div>
+                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">x_option</span><span class="tok-op">{'<-'}</span><span class="tok-kw">function</span><span class="tok-op">{'( '}</span><span class="tok-id">x</span><span class="tok-op">{' ) '}</span><span class="tok-op">{'{'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-kw">if</span><span class="tok-op">{' ('}</span><span class="tok-id">x</span><span class="tok-op">{' == '}</span><span class="tok-str">"a"</span><span class="tok-op">{') '}</span><span class="tok-op">{'{'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'     '}<span class="tok-str">"option 1"</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-op">{'}'}</span><span class="tok-kw">else</span><span class="tok-op">{' '}</span><span class="tok-kw">if</span><span class="tok-op">{' ('}</span><span class="tok-id">x</span><span class="tok-op">{'=='}</span><span class="tok-str">"b"</span><span class="tok-op">{')'}</span><span class="tok-op">{'{'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'     '}<span class="tok-str">"option 2"</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-op">{'} '}</span><span class="tok-kw">else</span><span class="tok-op">{' {'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-fn">stop</span><span class="tok-op">(</span><span class="tok-str">{"'Invalid `x` value'"}</span><span class="tok-op">)</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-op">{'}'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-op">{'}'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">x_option</span><span class="tok-op">{' <- '}</span><span class="tok-kw">function</span><span class="tok-op">(</span><span class="tok-id">x</span><span class="tok-op">{') '}</span><span class="tok-op">{'{'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-kw">if</span><span class="tok-op">{' ('}</span><span class="tok-id">x</span><span class="tok-op">{' == '}</span><span class="tok-str">"a"</span><span class="tok-op">{') '}</span><span class="tok-op">{'{'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'     '}<span class="tok-str">"option 1"</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-op">{'} '}</span><span class="tok-kw">else</span><span class="tok-op">{' '}</span><span class="tok-kw">if</span><span class="tok-op">{' ('}</span><span class="tok-id">x</span><span class="tok-op">{' == '}</span><span class="tok-str">"b"</span><span class="tok-op">{') '}</span><span class="tok-op">{'{'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'     '}<span class="tok-str">"option 2"</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-op">{'} '}</span><span class="tok-kw">else</span><span class="tok-op">{' {'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'     '}<span class="tok-fn">stop</span><span class="tok-op">(</span><span class="tok-str">"Invalid `x` value"</span><span class="tok-op">)</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-op">{'}'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-op">{'}'}</span></div>
                     </div>
                   </div>
                 </div>
@@ -455,98 +462,64 @@ const footerLinks = [
                   <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">sales.R · roughly fmt</span></div>
                   <div class="ed-body fmt-body">
                     <div class="fmt-morph" aria-hidden="true">
-                      <div class="fln" style="--i:0"><span class="tk">top_sales</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">function</span><span class="tk">(df)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">{'{'}</span></div>
-                      <div class="fln" style="--i:1"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tk">df</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">%>%</span></div>
-                      <div class="fln" style="--i:2"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tk">filter(amount</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">></span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">100)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">%>%</span></div>
-                      <div class="fln" style="--i:3"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tk">group_by(</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tk">region</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tk">)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">%>%</span></div>
-                      <div class="fln" style="--i:4"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tk">summarise(total</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">=</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">sum(amount))</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">%>%</span></div>
-                      <div class="fln" style="--i:5"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tk">arrange(desc(total))</span></div>
-                      <div class="fln" style="--i:6"><span class="tk">{'}'}</span></div>
+                      <div class="fln" style="--i:0"><span class="tok-id">top_sales</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-kw">function</span><span class="tok-op">(</span><span class="tok-id">df</span><span class="tok-op">)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'{'}</span></div>
+                      <div class="fln" style="--i:1"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-id">df</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'%>%'}</span></div>
+                      <div class="fln" style="--i:2"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tok-fn">filter</span><span class="tok-op">(</span><span class="tok-id">amount</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'>'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-num">100</span><span class="tok-op">)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'%>%'}</span></div>
+                      <div class="fln" style="--i:3"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tok-fn">group_by</span><span class="tok-op">(</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tok-id">region</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tok-op">)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'%>%'}</span></div>
+                      <div class="fln" style="--i:4"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tok-fn">summarise</span><span class="tok-op">(</span><span class="tok-id">total</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'='}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-fn">sum</span><span class="tok-op">(</span><span class="tok-id">amount</span><span class="tok-op">{'))'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'%>%'}</span></div>
+                      <div class="fln" style="--i:5"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tok-fn">arrange</span><span class="tok-op">(</span><span class="tok-fn">desc</span><span class="tok-op">(</span><span class="tok-id">total</span><span class="tok-op">{'))'}</span></div>
+                      <div class="fln" style="--i:6"><span class="tok-op">{'}'}</span></div>
                     </div>
                     <span class="sr-only">top_sales &lt;- function(df) {'{'} df %>% filter(amount > 100) %>% group_by(region) %>% summarise(total = sum(amount)) %>% arrange(desc(total)) {'}'}</span>
                     <div class="fmt-static" aria-hidden="true">
-                      <div class="c-del">{'- top_sales<-function(df){'}</div>
-                      <div class="c-del">{'-   df%>%'}</div>
-                      <div class="c-del">{'-     filter(amount>100)%>%'}</div>
-                      <div class="c-del">{'-     group_by( region )%>%'}</div>
-                      <div class="c-del">{'-     summarise(total=sum(amount))%>%'}</div>
-                      <div class="c-del">{'-     arrange(desc(total))'}</div>
-                      <div class="c-del">{'- }'}</div>
-                      <div class="c-add">{'+ top_sales <- function(df) {'}</div>
-                      <div class="c-add">{'+   df %>%'}</div>
-                      <div class="c-add">{'+     filter(amount > 100) %>%'}</div>
-                      <div class="c-add">{'+     group_by(region) %>%'}</div>
-                      <div class="c-add">{'+     summarise(total = sum(amount)) %>%'}</div>
-                      <div class="c-add">{'+     arrange(desc(total))'}</div>
-                      <div class="c-add">{'+ }'}</div>
+                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">top_sales</span><span class="tok-op">{'<-'}</span><span class="tok-kw">function</span><span class="tok-op">(</span><span class="tok-id">df</span><span class="tok-op">{')'}</span><span class="tok-op">{'{'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-id">df</span><span class="tok-op">{'%>%'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'     '}<span class="tok-fn">filter</span><span class="tok-op">(</span><span class="tok-id">amount</span><span class="tok-op">{'>'}</span><span class="tok-num">100</span><span class="tok-op">{')'}</span><span class="tok-op">{'%>%'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'     '}<span class="tok-fn">group_by</span><span class="tok-op">{'( '}</span><span class="tok-id">region</span><span class="tok-op">{' )'}</span><span class="tok-op">{'%>%'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'     '}<span class="tok-fn">summarise</span><span class="tok-op">(</span><span class="tok-id">total</span><span class="tok-op">{'='}</span><span class="tok-fn">sum</span><span class="tok-op">(</span><span class="tok-id">amount</span><span class="tok-op">{'))'}</span><span class="tok-op">{'%>%'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'     '}<span class="tok-fn">arrange</span><span class="tok-op">(</span><span class="tok-fn">desc</span><span class="tok-op">(</span><span class="tok-id">total</span><span class="tok-op">{'))'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-op">{'}'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">top_sales</span><span class="tok-op">{' <- '}</span><span class="tok-kw">function</span><span class="tok-op">(</span><span class="tok-id">df</span><span class="tok-op">{') '}</span><span class="tok-op">{'{'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-id">df</span><span class="tok-op">{' %>%'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'     '}<span class="tok-fn">filter</span><span class="tok-op">(</span><span class="tok-id">amount</span><span class="tok-op">{' > '}</span><span class="tok-num">100</span><span class="tok-op">{') '}</span><span class="tok-op">{'%>%'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'     '}<span class="tok-fn">group_by</span><span class="tok-op">(</span><span class="tok-id">region</span><span class="tok-op">{') '}</span><span class="tok-op">{'%>%'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'     '}<span class="tok-fn">summarise</span><span class="tok-op">(</span><span class="tok-id">total</span><span class="tok-op">{' = '}</span><span class="tok-fn">sum</span><span class="tok-op">(</span><span class="tok-id">amount</span><span class="tok-op">{')) '}</span><span class="tok-op">{'%>%'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'     '}<span class="tok-fn">arrange</span><span class="tok-op">(</span><span class="tok-fn">desc</span><span class="tok-op">(</span><span class="tok-id">total</span><span class="tok-op">{'))'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-op">{'}'}</span></div>
                     </div>
                   </div>
                 </div>
               </div>
-              <!-- Operators & indent -->
+              <!-- Operators & indexing -->
               <div role="tabpanel" id="panel-operators" aria-labelledby="tab-operators" tabindex="0" hidden>
                 <div class="ed">
                   <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">scale.R · roughly fmt</span></div>
                   <div class="ed-body fmt-body">
                     <div class="fmt-morph" aria-hidden="true">
-                      <div class="fln" style="--i:0"><span class="tk">normalize</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">function</span><span class="tk">(v)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">{'{'}</span></div>
-                      <div class="fln" style="--i:1"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tk">m</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">mean(v)</span></div>
-                      <div class="fln" style="--i:2"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tk">s</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">sd(v)</span></div>
-                      <div class="fln" style="--i:3"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tk">z</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">(v</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">-</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">m)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">/</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">s</span></div>
-                      <div class="fln" style="--i:4"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tk">z[is.na(z)]</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">0</span></div>
-                      <div class="fln" style="--i:5"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tk">z</span></div>
-                      <div class="fln" style="--i:6"><span class="tk">{'}'}</span></div>
+                      <div class="fln" style="--i:0"><span class="tok-id">normalize</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-kw">function</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'{'}</span></div>
+                      <div class="fln" style="--i:1"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-id">m</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-fn">mean</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">)</span></div>
+                      <div class="fln" style="--i:2"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-id">s</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-fn">sd</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">)</span></div>
+                      <div class="fln" style="--i:3"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-id">z</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">(</span><span class="tok-id">v</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-id">m</span><span class="tok-op">)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'/'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-id">s</span></div>
+                      <div class="fln" style="--i:4"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-id">z</span><span class="tok-op">{'['}</span><span class="tok-fn">is.na</span><span class="tok-op">(</span><span class="tok-id">z</span><span class="tok-op">{')]'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-num">0</span></div>
+                      <div class="fln" style="--i:5"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-id">z</span></div>
+                      <div class="fln" style="--i:6"><span class="tok-op">{'}'}</span></div>
                     </div>
                     <span class="sr-only">normalize &lt;- function(v) {'{'} m &lt;- mean(v) s &lt;- sd(v) z &lt;- (v - m) / s z[is.na(z)] &lt;- 0 z {'}'}</span>
                     <div class="fmt-static" aria-hidden="true">
-                      <div class="c-del">{'- normalize<-function(v){'}</div>
-                      <div class="c-del">{'-   m<-mean(v)'}</div>
-                      <div class="c-del">{'-   s<-sd(v)'}</div>
-                      <div class="c-del">{'-   z<-(v-m)/s'}</div>
-                      <div class="c-del">{'-   z[is.na(z)]<-0'}</div>
-                      <div class="c-del">{'-   z'}</div>
-                      <div class="c-del">{'- }'}</div>
-                      <div class="c-add">{'+ normalize <- function(v) {'}</div>
-                      <div class="c-add">{'+   m <- mean(v)'}</div>
-                      <div class="c-add">{'+   s <- sd(v)'}</div>
-                      <div class="c-add">{'+   z <- (v - m) / s'}</div>
-                      <div class="c-add">{'+   z[is.na(z)] <- 0'}</div>
-                      <div class="c-add">{'+   z'}</div>
-                      <div class="c-add">{'+ }'}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <!-- Strings & quotes -->
-              <div role="tabpanel" id="panel-quotes" aria-labelledby="tab-quotes" tabindex="0" hidden>
-                <div class="ed">
-                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">greet.R · roughly fmt</span></div>
-                  <div class="ed-body fmt-body">
-                    <div class="fmt-morph" aria-hidden="true">
-                      <div class="fln" style="--i:0"><span class="tk">greet</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">function</span><span class="tk">(name)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">{'{'}</span></div>
-                      <div class="fln" style="--i:1"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tk">msg</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">paste0(</span><span class="ch"><span class="g-before" aria-hidden="true">'</span><span class="g-after">"</span></span><span class="tk">Hello, </span><span class="ch"><span class="g-before" aria-hidden="true">'</span><span class="g-after">"</span></span><span class="tk">,</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">name</span><span class="tk">,</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="ch"><span class="g-before" aria-hidden="true">'</span><span class="g-after">"</span></span><span class="tk">!</span><span class="ch"><span class="g-before" aria-hidden="true">'</span><span class="g-after">"</span></span><span class="tk">)</span></div>
-                      <div class="fln" style="--i:2"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tk">if</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">(name</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">==</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="ch"><span class="g-before" aria-hidden="true">'</span><span class="g-after">"</span></span><span class="ch"><span class="g-before" aria-hidden="true">'</span><span class="g-after">"</span></span><span class="tk">)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tk">{'{'}</span></div>
-                      <div class="fln" style="--i:3"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tk">stop(</span><span class="ch"><span class="g-before" aria-hidden="true">'</span><span class="g-after">"</span></span><span class="tk">name required</span><span class="ch"><span class="g-before" aria-hidden="true">'</span><span class="g-after">"</span></span><span class="tk">)</span></div>
-                      <div class="fln" style="--i:4"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tk">{'}'}</span></div>
-                      <div class="fln" style="--i:5"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tk">message(msg)</span></div>
-                      <div class="fln" style="--i:6"><span class="tk">{'}'}</span></div>
-                    </div>
-                    <span class="sr-only">greet &lt;- function(name) {'{'} msg &lt;- paste0("Hello, ", name, "!") if (name == "") {'{'} stop("name required") {'}'} message(msg) {'}'}</span>
-                    <div class="fmt-static" aria-hidden="true">
-                      <div class="c-del">{'- greet<-function(name){'}</div>
-                      <div class="c-del">{"-   msg<-paste0('Hello, ',name,'!')"}</div>
-                      <div class="c-del">{"-   if(name==''){"}</div>
-                      <div class="c-del">{"-     stop('name required')"}</div>
-                      <div class="c-del">{'-   }'}</div>
-                      <div class="c-del">{'-   message(msg)'}</div>
-                      <div class="c-del">{'- }'}</div>
-                      <div class="c-add">{'+ greet <- function(name) {'}</div>
-                      <div class="c-add">{'+   msg <- paste0("Hello, ", name, "!")'}</div>
-                      <div class="c-add">{'+   if (name == "") {'}</div>
-                      <div class="c-add">{'+     stop("name required")'}</div>
-                      <div class="c-add">{'+   }'}</div>
-                      <div class="c-add">{'+   message(msg)'}</div>
-                      <div class="c-add">{'+ }'}</div>
+                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">normalize</span><span class="tok-op">{'<-'}</span><span class="tok-kw">function</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">{')'}</span><span class="tok-op">{'{'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-id">m</span><span class="tok-op">{'<-'}</span><span class="tok-fn">mean</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">{')'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-id">s</span><span class="tok-op">{'<-'}</span><span class="tok-fn">sd</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">{')'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-id">z</span><span class="tok-op">{'<-'}</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">{'-'}</span><span class="tok-id">m</span><span class="tok-op">{')'}</span><span class="tok-op">{'/'}</span><span class="tok-id">s</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-id">z</span><span class="tok-op">{'['}</span><span class="tok-fn">is.na</span><span class="tok-op">(</span><span class="tok-id">z</span><span class="tok-op">{')]'}</span><span class="tok-op">{'<-'}</span><span class="tok-num">0</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-id">z</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-op">{'}'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">normalize</span><span class="tok-op">{' <- '}</span><span class="tok-kw">function</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">{') '}</span><span class="tok-op">{'{'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-id">m</span><span class="tok-op">{' <- '}</span><span class="tok-fn">mean</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">{')'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-id">s</span><span class="tok-op">{' <- '}</span><span class="tok-fn">sd</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">{')'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-id">z</span><span class="tok-op">{' <- '}</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">{' - '}</span><span class="tok-id">m</span><span class="tok-op">{') / '}</span><span class="tok-id">s</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-id">z</span><span class="tok-op">{'['}</span><span class="tok-fn">is.na</span><span class="tok-op">(</span><span class="tok-id">z</span><span class="tok-op">{')] '}</span><span class="tok-op">{'<- '}</span><span class="tok-num">0</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-id">z</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-op">{'}'}</span></div>
                     </div>
                   </div>
                 </div>
@@ -605,23 +578,31 @@ roughly check .</code></pre>
 
     <footer class="footer">
       <div class="footer-inner">
-        <a class="brand" href="/getting-started" aria-label="Roughly home">
-          <img class="logo" src="/logo.svg" alt="" width="20" height="20" />
-          <span class="wordmark">Roughly</span>
+        <div class="footer-meta">
+          <a class="brand" href="/getting-started" aria-label="Roughly home">
+            <img class="logo" src="/logo.svg" alt="" width="20" height="20" />
+            <span class="wordmark">Roughly</span>
+          </a>
+          <span class="footer-copy">© {year}</span>
+        </div>
+        <a
+          class="footer-legal"
+          href="https://felixandreas.me/legal-notice/"
+          target="_blank"
+          rel="noopener"
+        >
+          Legal Notice
         </a>
-        <nav class="footer-links" aria-label="Footer">
-          {
-            footerLinks.map((l) => (
-              <a href={l.href}>{l.label}</a>
-            ))
-          }
-        </nav>
       </div>
     </footer>
 
     <script>
       // ======================================================================
-      // Hero particle field: logo -> particles one-shot intro, then ambient.
+      // Hero particle field: a continuous loop. The same immortal particle
+      // population assembles the R logo, flows through three canonical code
+      // snippets (the #: annotation, an inferred signature, a type error), then
+      // streams back into the logo and repeats. Nothing is created or destroyed
+      // between phases — the field just keeps re-forming.
       // ======================================================================
       type Particle = {
         x: number
@@ -635,9 +616,21 @@ roughly check .</code></pre>
         bonded: boolean
       }
       type Target = { x: number; y: number }
+      type Phase = { targets: Target[]; morph: number; hold: number }
 
       const heroCanvas = document.getElementById('hero-canvas') as HTMLCanvasElement | null
-      const heroEl = document.getElementById('hero') as HTMLElement | null
+      // The particle field fills the sticky viewport pin (100svh), not the tall
+      // scroll stage (#hero) that drives the reveal choreography.
+      const heroEl = document.getElementById('hero-viewport') as HTMLElement | null
+
+      // Canonical product strings, one per pillar: name a type (#: annotation),
+      // rarely need to (inferred polymorphic signature), catch the bug (type
+      // error). They double as accurate documentation of the tool.
+      const HERO_SNIPPETS: string[][] = [
+        ['#: fn(count: integer) -> integer'],
+        ['add <- function(a, b) a + b', '# <T: numeric> fn(a, b) -> T'],
+        ['double_count("two")', 'error: expected integer, found character'],
+      ]
 
       function initHero() {
         if (!heroCanvas || !heroEl) return
@@ -647,16 +640,16 @@ roughly check .</code></pre>
         const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
         const INTRO_DELAY = 0.25
-        const ASSEMBLE = 1.7
-        const HOLD = 1.3
-        const DISPERSE = 2.0
-        const disperseStart = INTRO_DELAY + ASSEMBLE + HOLD
 
         let dpr = Math.min(window.devicePixelRatio || 1, 2)
         let cssW = 0
         let cssH = 0
         let particles: Particle[] = []
-        let targets: Target[] = []
+        let logoTargets: Target[] = []
+        let snippetTargets: Target[][] = []
+        let phases: Phase[] = []
+        let phaseIndex = 0
+        let phaseClock = 0
         let running = false
         let rafId = 0
         let lastTime = 0
@@ -710,7 +703,36 @@ roughly check .</code></pre>
           return valueNoise(x * 0.0016 + t * 0.025, y * 0.0016 - t * 0.012) * Math.PI * 4
         }
 
-        function buildTargets() {
+        // Shared alpha>128 stride sampler over an already-rendered offscreen
+        // canvas. `place` maps a sampled pixel to a CSS-space target; the
+        // adaptive stride lands the point count near the particle budget.
+        function sampleAlpha(
+          data: Uint8ClampedArray,
+          w: number,
+          h: number,
+          ss: number,
+          place: (sx: number, sy: number) => Target
+        ) {
+          const want = Math.round(particleCount() * 0.8)
+          const baseStride = sampleStride() * ss
+          const run = (st: number) => {
+            const out: Target[] = []
+            for (let sy = Math.floor(st / 2); sy < h; sy += st) {
+              for (let sx = Math.floor(st / 2); sx < w; sx += st) {
+                if (data[(sy * w + sx) * 4 + 3] > 128) out.push(place(sx, sy))
+              }
+            }
+            return out
+          }
+          let pts = run(baseStride)
+          if (pts.length > want * 1.15) pts = run(baseStride + 1)
+          else if (pts.length < want * 0.7 && baseStride > ss) pts = run(baseStride - 1)
+          return pts
+        }
+
+        // Logo target: draw /logo.svg into an offscreen canvas at SS=2 and
+        // sample its alpha. Also fixes the shared centroid the whole loop reuses.
+        function buildLogoTarget(): Target[] {
           const SS = 2
           const logoH = Math.min(cssH * 0.46, 360)
           const logoW = logoH * 0.75
@@ -718,44 +740,85 @@ roughly check .</code></pre>
           const top = ((cssH - logoH) / 2) * 0.92
           centroidX = left + logoW / 2
           centroidY = top + logoH / 2
-          targets = []
-          if (!logoImg.width || !logoImg.height) return
-
+          if (!logoImg.width || !logoImg.height) return []
           const off = document.createElement('canvas')
           off.width = Math.max(2, Math.round(logoW * SS))
           off.height = Math.max(2, Math.round(logoH * SS))
           const octx = off.getContext('2d')
-          if (!octx) return
+          if (!octx) return []
           octx.clearRect(0, 0, off.width, off.height)
           octx.drawImage(logoImg, 0, 0, off.width, off.height)
           let data: Uint8ClampedArray
           try {
             data = octx.getImageData(0, 0, off.width, off.height).data
           } catch {
-            return
+            return []
           }
+          return sampleAlpha(data, off.width, off.height, SS, (sx, sy) => ({
+            x: left + sx / SS + (Math.random() - 0.5),
+            y: top + sy / SS + (Math.random() - 0.5),
+          }))
+        }
 
-          const want = Math.round(particleCount() * 0.8)
-          const baseStride = sampleStride() * SS
-          const sample = (st: number) => {
-            const out: Target[] = []
-            for (let sy = Math.floor(st / 2); sy < off.height; sy += st) {
-              for (let sx = Math.floor(st / 2); sx < off.width; sx += st) {
-                const alpha = data[(sy * off.width + sx) * 4 + 3]
-                if (alpha > 128) {
-                  out.push({
-                    x: left + sx / SS + (Math.random() - 0.5),
-                    y: top + sy / SS + (Math.random() - 0.5),
-                  })
-                }
-              }
-            }
-            return out
+        // Code target: render monospace lines into the same kind of offscreen
+        // canvas, auto-fitting the widest line to ~0.88*cssW, then run the
+        // IDENTICAL alpha sampler. Centered on the logo centroid.
+        function buildTextTarget(lines: string[]): Target[] {
+          const SS = 2
+          const probe = document.createElement('canvas').getContext('2d')
+          if (!probe) return []
+          const basePx = 100
+          probe.font = `500 ${basePx}px 'Geist Mono', monospace`
+          let maxW = 1
+          for (const line of lines) maxW = Math.max(maxW, probe.measureText(line).width)
+          const targetW = cssW * 0.88
+          let fontPx = (basePx * targetW) / maxW
+          const maxFont = Math.min(cssW * 0.085, cssH * 0.16)
+          if (fontPx > maxFont) fontPx = maxFont
+          if (fontPx < 12) fontPx = 12
+          const leading = fontPx * 1.35
+          const blockW = Math.ceil((maxW * fontPx) / basePx) + Math.ceil(fontPx)
+          const blockH = Math.ceil(leading * lines.length + fontPx)
+          const off = document.createElement('canvas')
+          off.width = Math.max(2, Math.round(blockW * SS))
+          off.height = Math.max(2, Math.round(blockH * SS))
+          const octx = off.getContext('2d')
+          if (!octx) return []
+          octx.clearRect(0, 0, off.width, off.height)
+          octx.scale(SS, SS)
+          octx.fillStyle = '#fff'
+          octx.font = `500 ${fontPx}px 'Geist Mono', monospace`
+          octx.textBaseline = 'middle'
+          octx.textAlign = 'center'
+          const midX = blockW / 2
+          const startY = blockH / 2 - (leading * (lines.length - 1)) / 2
+          for (let i = 0; i < lines.length; i++) octx.fillText(lines[i], midX, startY + i * leading)
+          let data: Uint8ClampedArray
+          try {
+            data = octx.getImageData(0, 0, off.width, off.height).data
+          } catch {
+            return []
           }
-          let pts = sample(baseStride)
-          if (pts.length > want * 1.15) pts = sample(baseStride + 1)
-          else if (pts.length < want * 0.7 && baseStride > SS) pts = sample(baseStride - 1)
-          targets = pts
+          const left = centroidX - blockW / 2
+          const top = centroidY - blockH / 2
+          return sampleAlpha(data, off.width, off.height, SS, (sx, sy) => ({
+            x: left + sx / SS + (Math.random() - 0.5),
+            y: top + sy / SS + (Math.random() - 0.5),
+          }))
+        }
+
+        function buildPhases() {
+          const small = cssW < 720
+          const snippets = small ? snippetTargets.slice(0, 2) : snippetTargets
+          phases = [{ targets: logoTargets, morph: 1.3, hold: small ? 1.6 : 2.2 }]
+          snippets.forEach((targets, i) => {
+            const climax = !small && i === snippets.length - 1
+            phases.push({
+              targets,
+              morph: small ? 1.0 : 1.1,
+              hold: small ? 1.4 : climax ? 1.9 : 1.7,
+            })
+          })
         }
 
         function spawnParticles() {
@@ -776,17 +839,53 @@ roughly check .</code></pre>
           }
         }
 
-        function assignTargets() {
-          const n = Math.min(particles.length, targets.length)
-          for (let i = 0; i < particles.length; i++) {
-            const p = particles[i]
-            if (i < n) {
-              p.tx = targets[i].x
-              p.ty = targets[i].y
+        // Continuity-preserving assignment: bucket both the current particle
+        // positions and the incoming targets into vertical columns by x, then
+        // match within a column ordered by y, so particles flow to the nearest
+        // region instead of swirling. Surplus particles fall back to ambient
+        // drift (target=false); leftover targets are filled from spare particles
+        // so dense glyph columns don't develop holes.
+        const BUCKETS = 24
+        function columnOf(x: number) {
+          let c = Math.floor((x / Math.max(1, cssW)) * BUCKETS)
+          if (c < 0) c = 0
+          else if (c >= BUCKETS) c = BUCKETS - 1
+          return c
+        }
+        function assignTargets(points: Target[]) {
+          for (const p of particles) p.target = false
+          const pBuckets: number[][] = []
+          const tBuckets: Target[][] = []
+          for (let c = 0; c < BUCKETS; c++) {
+            pBuckets.push([])
+            tBuckets.push([])
+          }
+          for (let i = 0; i < particles.length; i++) pBuckets[columnOf(particles[i].x)].push(i)
+          for (const t of points) tBuckets[columnOf(t.x)].push(t)
+          const freeParticles: number[] = []
+          const freeTargets: Target[] = []
+          for (let c = 0; c < BUCKETS; c++) {
+            const pb = pBuckets[c]
+            const tb = tBuckets[c]
+            pb.sort((a, b) => particles[a].y - particles[b].y)
+            tb.sort((a, b) => a.y - b.y)
+            const m = Math.min(pb.length, tb.length)
+            for (let j = 0; j < m; j++) {
+              const p = particles[pb[j]]
+              p.tx = tb[j].x
+              p.ty = tb[j].y
               p.target = true
-            } else {
-              p.target = false
+              p.bonded = false
             }
+            for (let j = m; j < pb.length; j++) freeParticles.push(pb[j])
+            for (let j = m; j < tb.length; j++) freeTargets.push(tb[j])
+          }
+          const fill = Math.min(freeParticles.length, freeTargets.length)
+          for (let j = 0; j < fill; j++) {
+            const p = particles[freeParticles[j]]
+            p.tx = freeTargets[j].x
+            p.ty = freeTargets[j].y
+            p.target = true
             p.bonded = false
           }
         }
@@ -801,9 +900,13 @@ roughly check .</code></pre>
           heroCanvas!.style.width = cssW + 'px'
           heroCanvas!.style.height = cssH + 'px'
           context.setTransform(dpr, 0, 0, dpr, 0, 0)
-          buildTargets()
+          logoTargets = buildLogoTarget()
+          snippetTargets = HERO_SNIPPETS.map(buildTextTarget)
+          buildPhases()
           spawnParticles()
-          assignTargets()
+          phaseIndex = 0
+          phaseClock = -INTRO_DELAY
+          assignTargets(phases[0].targets)
         }
 
         function drawStatic() {
@@ -823,33 +926,43 @@ roughly check .</code></pre>
           context.globalAlpha = 1
         }
 
+        function advancePhase() {
+          // Dissolve kick: a brief outward impulse on the old bonded particles so
+          // the previous shape visibly comes apart a frame before the next pulls in.
+          for (const p of particles) {
+            if (!p.bonded) continue
+            p.vx += (p.x - centroidX) * 0.006 + (Math.random() - 0.5) * 0.2
+            p.vy += (p.y - centroidY) * 0.006 + (Math.random() - 0.5) * 0.2
+          }
+          phaseIndex = (phaseIndex + 1) % phases.length
+          assignTargets(phases[phaseIndex].targets)
+        }
+
         function step(now: number) {
           if (!running) return
           if (lastTime === 0) lastTime = now
           let dt = (now - lastTime) / 1000
           lastTime = now
           if (dt > 0.05) dt = 0.05
-          const prevClock = clock
           clock += dt
+          phaseClock += dt
 
-          const assembleP = clamp01((clock - INTRO_DELAY) / ASSEMBLE)
-          const disperseP = clamp01((clock - disperseStart) / DISPERSE)
-          let focus: number
-          if (clock < INTRO_DELAY) focus = 0
-          else if (clock < INTRO_DELAY + ASSEMBLE) focus = smooth01(assembleP)
-          else if (clock < disperseStart) focus = 1
-          else focus = 1 - smooth01(disperseP)
-          const assembling = clock >= INTRO_DELAY && clock < disperseStart
-          const inHold = clock >= INTRO_DELAY + ASSEMBLE && clock < disperseStart
-          const holdP = inHold ? (clock - (INTRO_DELAY + ASSEMBLE)) / HOLD : 0
-
-          if (prevClock < disperseStart && clock >= disperseStart) {
-            for (const p of particles) {
-              if (!p.target) continue
-              p.vx += (p.x - centroidX) * 0.012 + (Math.random() - 0.5) * 0.3
-              p.vy += (p.y - centroidY) * 0.012 + (Math.random() - 0.5) * 0.3
-            }
+          let phase = phases[phaseIndex]
+          if (phase && phaseClock >= phase.morph + phase.hold) {
+            phaseClock -= phase.morph + phase.hold
+            advancePhase()
+            phase = phases[phaseIndex]
           }
+          if (!phase) {
+            rafId = requestAnimationFrame(step)
+            return
+          }
+
+          // Per-phase clock: ramp focus 0->1 across the morph, hold at 1.
+          const morphP = clamp01(phaseClock / phase.morph)
+          const inHold = phaseClock >= phase.morph
+          const focus = inHold ? 1 : smooth01(morphP)
+          const holdP = inHold ? clamp01((phaseClock - phase.morph) / phase.hold) : 0
 
           context.fillStyle = 'rgba(0,0,0,0.14)'
           context.fillRect(0, 0, cssW, cssH)
@@ -859,9 +972,15 @@ roughly check .</code></pre>
 
           for (let i = 0; i < particles.length; i++) {
             const p = particles[i]
-            if (assembling && p.target) {
+            if (p.target) {
               p.vx += (p.tx - p.x) * k
               p.vy += (p.ty - p.y) * k
+              // Held text breathes instead of freezing: a tiny flow jitter.
+              if (inHold) {
+                const ang = flowAngle(p.x, p.y, clock)
+                p.vx += Math.cos(ang) * 0.015
+                p.vy += Math.sin(ang) * 0.015
+              }
               p.vx *= 0.88
               p.vy *= 0.88
               p.x += p.vx
@@ -902,7 +1021,7 @@ roughly check .</code></pre>
               if (p.bonded) a += 0.22 * focus
               if (p.bonded && inHold) a += 0.1 * Math.sin(holdP * Math.PI)
             } else {
-              a = 0.14 + p.depth * 0.22
+              a = 0.08 + p.depth * 0.14
             }
             if (a <= 0.01) continue
             context.globalAlpha = a > 1 ? 1 : a
@@ -1594,12 +1713,80 @@ roughly check .</code></pre>
         window.addEventListener('scroll', onScroll, { passive: true })
       }
 
+      // ======================================================================
+      // Hero reveal: the first viewport shows only the pinned particle field;
+      // scrolling through the tall stage slides the header in and parallaxes
+      // the hero copy into place. Drives transform/opacity via CSS variables
+      // from a single rAF-coalesced scroll handler — no layout reads per frame
+      // beyond scrollY / innerHeight, no layout thrash.
+      // ======================================================================
+      function initHeroReveal() {
+        const stage = document.getElementById('hero')
+        const nav = document.getElementById('nav')
+        const copy = stage
+          ? (stage.querySelector('.hero-copy') as HTMLElement | null)
+          : null
+        const canvas = document.getElementById('hero-canvas')
+        const hint = stage
+          ? (stage.querySelector('.scroll-hint') as HTMLElement | null)
+          : null
+        if (!stage || !nav || !copy) return
+
+        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        if (reduce) {
+          // Static hero: header and copy are shown in normal flow; no hidden
+          // chrome, no parallax. The <html> class is already 'hero-static'.
+          nav.style.setProperty('--reveal', '1')
+          return
+        }
+
+        const clamp = (t: number) => (t < 0 ? 0 : t > 1 ? 1 : t)
+        const smooth = (t: number) => t * t * (3 - 2 * t)
+        let ticking = false
+
+        function update() {
+          ticking = false
+          const vh = window.innerHeight || 1
+          const y = window.scrollY || window.pageYOffset || 0
+          const scrollable = Math.max(1, stage!.offsetHeight - vh)
+          const progress = clamp(y / scrollable)
+
+          // Header: hidden at the top, slides + fades in once past ~12vh.
+          const headerP = clamp((y - vh * 0.12) / (vh * 0.16))
+          nav!.style.setProperty('--reveal', String(headerP))
+
+          // Hero copy: parallax in over the lower-middle of the stage and settle.
+          const copyP = smooth(clamp((progress - 0.16) / 0.46))
+          copy!.style.setProperty('--copy-op', String(copyP))
+          copy!.style.setProperty('--copy-y', (1 - copyP) * 64 + 'px')
+
+          // Canvas depth: dim and scale up subtly as the copy settles.
+          if (canvas) {
+            canvas.style.setProperty('--canvas-dim', String(1 - copyP * 0.4))
+            canvas.style.setProperty('--canvas-scale', String(1 + progress * 0.06))
+          }
+
+          if (hint) hint.style.setProperty('--hint-op', String(clamp(1 - y / (vh * 0.16))))
+        }
+
+        const onScroll = () => {
+          if (!ticking) {
+            ticking = true
+            requestAnimationFrame(update)
+          }
+        }
+        window.addEventListener('scroll', onScroll, { passive: true })
+        window.addEventListener('resize', onScroll, { passive: true })
+        update()
+      }
+
       initHero()
       document
         .querySelectorAll('[data-tabs]')
         .forEach((el) => setupTabs(el as HTMLElement))
       initCloserMatrix()
       initNav()
+      initHeroReveal()
     </script>
 
     <style is:global>
@@ -1665,8 +1852,10 @@ roughly check .</code></pre>
 
       /* ---------- nav (docs header parity) ---------- */
       .nav {
-        position: sticky;
+        position: fixed;
         top: 0;
+        left: 0;
+        right: 0;
         z-index: 50;
         display: flex;
         align-items: center;
@@ -1735,21 +1924,127 @@ roughly check .</code></pre>
         }
       }
 
-      /* ---------- hero ---------- */
+      /* ---------- hero (experiment: tall scroll stage + pinned canvas) ---------- */
+      /* #hero is a tall scroll track; .hero-viewport is the 100svh pin that the
+         particle field fills and the header/copy reveal over as a parallax overlay. */
       #hero {
         position: relative;
-        min-height: calc(100svh - 56px);
+        height: 200svh;
+        border-bottom: 1px solid var(--border);
+      }
+      .hero-viewport {
+        position: sticky;
+        top: 0;
+        height: 100svh;
         display: flex;
         align-items: center;
         justify-content: center;
         overflow: hidden;
-        border-bottom: 1px solid var(--border);
       }
       #hero-canvas {
         position: absolute;
         inset: 0;
         z-index: 0;
         pointer-events: none;
+        opacity: var(--canvas-dim, 1);
+        transform: scale(var(--canvas-scale, 1));
+        transform-origin: 50% 42%;
+        will-change: transform, opacity;
+      }
+
+      /* ultra-subtle scroll affordance, only in the dynamic reveal mode */
+      .scroll-hint {
+        position: absolute;
+        left: 50%;
+        bottom: clamp(1.4rem, 4vh, 2.4rem);
+        transform: translateX(-50%);
+        z-index: 2;
+        display: inline-flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.35rem;
+        font-family: 'Geist Mono', monospace;
+        font-size: 0.62rem;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: oklch(0.985 0 0 / 0.5);
+        opacity: 0;
+        pointer-events: none;
+      }
+      .scroll-hint svg {
+        animation: hint-bob 1.8s ease-in-out infinite;
+      }
+      @keyframes hint-bob {
+        0%,
+        100% {
+          transform: translateY(0);
+          opacity: 0.55;
+        }
+        50% {
+          transform: translateY(4px);
+          opacity: 1;
+        }
+      }
+
+      /* dynamic reveal mode: the bar chrome + nav links + copy + hint start hidden
+         (brand logo + Get started pill stay visible from the top), driven by JS vars */
+      /* The bar itself stays in place; only its chrome fades in with --reveal, so
+         the brand and Get started float over the animation while the bar is invisible. */
+      .hero-reveal .nav {
+        background: oklch(0.145 0 0 / calc(0.6 * var(--reveal, 0)));
+        backdrop-filter: blur(calc(8px * var(--reveal, 0)));
+        -webkit-backdrop-filter: blur(calc(8px * var(--reveal, 0)));
+        border-bottom-color: oklch(1 0 0 / calc(0.1 * var(--reveal, 0)));
+      }
+      /* Keep the brand legible over the animation while no bar background sits behind it. */
+      .hero-reveal .brand {
+        text-shadow: 0 1px 12px oklch(0 0 0 / 0.55);
+      }
+      .hero-reveal .brand .logo {
+        filter: drop-shadow(0 1px 8px oklch(0 0 0 / 0.5));
+      }
+      /* Only the non-CTA links hide at the top; the Get started pill (.cta) and the
+         brand stay at full opacity from scrollTop 0. */
+      .hero-reveal .nav-links a:not(.cta) {
+        opacity: var(--reveal, 0);
+        transform: translateY(calc((1 - var(--reveal, 0)) * 6px));
+      }
+      /* Keyboard focus on a hidden link reveals the bar chrome and the links. */
+      .hero-reveal .nav:focus-within {
+        background: oklch(0.145 0 0 / 0.6);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        border-bottom-color: oklch(1 0 0 / 0.1);
+      }
+      .hero-reveal .nav:focus-within .nav-links a:not(.cta) {
+        opacity: 1;
+        transform: none;
+      }
+      .hero-reveal .hero-copy {
+        opacity: var(--copy-op, 0);
+        transform: translateY(var(--copy-y, 4rem));
+        will-change: transform, opacity;
+      }
+      .hero-reveal .hero-copy:focus-within {
+        opacity: 1 !important;
+        transform: none !important;
+      }
+      .hero-reveal .scroll-hint {
+        opacity: var(--hint-op, 1);
+      }
+
+      /* static / reduced-motion mode: a normal single-viewport hero */
+      .hero-static #hero {
+        height: auto;
+      }
+      .hero-static .hero-viewport {
+        position: relative;
+        height: auto;
+        min-height: calc(100svh - 56px);
+        padding-top: 56px;
+      }
+      .hero-static .scroll-hint {
+        display: none;
       }
       .hero-vignette {
         position: absolute;
@@ -2837,8 +3132,31 @@ roughly check .</code></pre>
       .fln {
         white-space: nowrap;
       }
-      .fmt-morph .tk {
+      /* Syntax tokens — restrained, dark-monochrome palette. Hierarchy is
+         encoded in lightness as well as hue, so it survives grayscale: dim
+         tokens (comments, operators) sit well below the code tokens, and only
+         .tok-fn carries real emerald saturation as the anchored accent. */
+      .tok-id {
         color: oklch(0.88 0 0);
+      }
+      .tok-kw {
+        color: oklch(0.8 0.055 300);
+      }
+      .tok-str {
+        color: oklch(0.83 0.065 80);
+      }
+      .tok-fn {
+        color: oklch(0.84 0.085 165);
+      }
+      .tok-op {
+        color: oklch(0.6 0.008 200);
+      }
+      .tok-num {
+        color: oklch(0.8 0.06 235);
+      }
+      .tok-com {
+        color: oklch(0.52 0.012 160);
+        font-style: italic;
       }
       .sp {
         display: inline-block;
@@ -2849,9 +3167,7 @@ roughly check .</code></pre>
       .is-formatted .sp {
         width: var(--wf);
       }
-      .no-anim .sp,
-      .no-anim .ch .g-before,
-      .no-anim .ch .g-after {
+      .no-anim .sp {
         transition: none !important;
         animation: none !important;
       }
@@ -2870,50 +3186,43 @@ roughly check .</code></pre>
           background: transparent;
         }
       }
-      .ch {
-        position: relative;
+      /* Reduced-motion diff: the +/- gutter and a faint side-tinted background
+         carry the add/del semantics, while .tok-* coloring composes on top. */
+      .fmt-static {
+        display: none;
+      }
+      .fmt-static .dl {
+        white-space: pre;
+      }
+      .fmt-static .dsign {
         display: inline-block;
         width: 1ch;
         text-align: center;
+        font-weight: 600;
       }
-      .ch .g-before,
-      .ch .g-after {
-        position: absolute;
-        left: 0;
-        top: 0;
-        width: 1ch;
-        transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease);
+      .fmt-static .c-del,
+      .fmt-static .c-add {
+        text-decoration: none;
       }
-      .ch .g-before {
-        opacity: 1;
+      .fmt-static .c-del {
+        background: color-mix(in oklch, var(--del) 9%, transparent);
+        box-shadow: inset 2px 0 0 color-mix(in oklch, var(--del) 65%, transparent);
+      }
+      .fmt-static .c-add {
+        background: color-mix(in oklch, var(--add) 9%, transparent);
+        box-shadow: inset 2px 0 0 color-mix(in oklch, var(--add) 65%, transparent);
+      }
+      .fmt-static .c-del .dsign {
         color: var(--del);
       }
-      .ch .g-after {
-        opacity: 0;
-        color: var(--del);
-      }
-      .is-formatted .ch .g-before {
-        opacity: 0;
-      }
-      .is-formatted .ch .g-after {
-        opacity: 1;
+      .fmt-static .c-add .dsign {
         color: var(--add);
-      }
-      .is-settled .ch .g-after {
-        color: oklch(0.88 0 0);
-        transition: color 0.5s ease;
-      }
-      .fmt-static {
-        display: none;
       }
       .reduced .fmt-morph {
         display: none;
       }
       .reduced .fmt-static {
         display: block;
-      }
-      .reduced .fmt-static div {
-        white-space: pre;
       }
 
       /* ---------- closer ---------- */
@@ -2966,17 +3275,21 @@ roughly check .</code></pre>
         gap: 1.2rem;
         flex-wrap: wrap;
       }
-      .footer-links {
-        display: flex;
-        gap: 1.3rem;
-        flex-wrap: wrap;
-        font-size: 0.84rem;
+      .footer-meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.7rem;
       }
-      .footer-links a {
+      .footer-copy {
+        font-size: 0.84rem;
+        color: var(--muted);
+      }
+      .footer-legal {
+        font-size: 0.84rem;
         color: var(--muted);
         transition: color 0.15s ease;
       }
-      .footer-links a:hover {
+      .footer-legal:hover {
         color: var(--foreground);
       }
 
