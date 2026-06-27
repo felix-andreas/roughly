@@ -914,6 +914,10 @@ fn annotation_parse_diagnostic(range: Range, error: TypeParseError) -> Diagnosti
         TypeParseError::UnknownType { name } => {
             Diagnostic::syntax_error(range, format!("type syntax error: unknown type `{name}`"))
         }
+        TypeParseError::RecursionLimitExceeded { limit } => Diagnostic::syntax_error(
+            range,
+            format!("This type annotation is nested too deeply to parse (more than {limit} levels)."),
+        ),
     }
 }
 

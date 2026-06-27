@@ -1642,6 +1642,32 @@ impl InferenceState {
         type_definitions: &TypeDefinitionEnvironment,
         expression: Option<&Expression>,
     ) -> Result<CoreType, InferenceError> {
+        // Lowering can recurse deeper than the parsed annotation when an alias body expands (see the
+        // `SurfaceType::Named` alias arm), so it carries its own guard rather than relying on the
+        // type-syntax parser's depth bound.
+        if self.recursion_depth >= RECURSION_LIMIT {
+            return Err(InferenceError::RecursionLimitExceeded);
+        }
+        self.recursion_depth += 1;
+        let result = self.lower_surface_type_with_substitutions_inner(
+            surface_type,
+            substitutions,
+            expanding_aliases,
+            type_definitions,
+            expression,
+        );
+        self.recursion_depth -= 1;
+        result
+    }
+
+    fn lower_surface_type_with_substitutions_inner(
+        &mut self,
+        surface_type: &SurfaceType,
+        substitutions: &BTreeMap<Symbol, CoreType>,
+        expanding_aliases: &mut BTreeSet<Symbol>,
+        type_definitions: &TypeDefinitionEnvironment,
+        expression: Option<&Expression>,
+    ) -> Result<CoreType, InferenceError> {
         match surface_type {
             SurfaceType::Any => Ok(CoreType::Any),
             SurfaceType::Unknown => Ok(CoreType::Unknown),

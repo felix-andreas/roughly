@@ -13,12 +13,21 @@ pub enum TypeSyntax {
     Definitions(Vec<Definition>),
 }
 
+// Recursive-descent depth bound for type-syntax parsing (`list[...]`, `fn(...)`, nested generic
+// arguments). A pathologically nested annotation would otherwise recurse until the stack overflows
+// before typecheck ever runs; this turns it into a clean diagnostic. It sits above the inference
+// `RECURSION_LIMIT` (128) so a merely deep — but parseable — annotation is rejected by the inference
+// "nested too deeply to check" guard rather than here, yet stays well below the ~200-frame overflow
+// of the 2 MB worker/test-thread stack.
+pub(crate) const TYPE_SYNTAX_RECURSION_LIMIT: usize = 160;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeParseError {
     InvalidSyntax { message: String },
     InvalidSemantics { message: String },
     UnsupportedConstruct { message: String },
     UnknownType { name: String },
+    RecursionLimitExceeded { limit: usize },
 }
 
 pub fn render_type_syntax(item: &TypeSyntax, interner: &Interner) -> String {
@@ -948,6 +957,7 @@ struct TypeParser<'a> {
     interner: &'a mut Interner,
     source: &'a str,
     position: usize,
+    depth: usize,
 }
 
 impl<'a> TypeParser<'a> {
@@ -956,6 +966,7 @@ impl<'a> TypeParser<'a> {
             interner,
             source,
             position: 0,
+            depth: 0,
         }
     }
 
@@ -1015,6 +1026,21 @@ impl<'a> TypeParser<'a> {
     }
 
     fn parse_type_until(
+        &mut self,
+        stop_context: StopContext,
+    ) -> Result<SurfaceType, TypeParseError> {
+        if self.depth >= TYPE_SYNTAX_RECURSION_LIMIT {
+            return Err(TypeParseError::RecursionLimitExceeded {
+                limit: TYPE_SYNTAX_RECURSION_LIMIT,
+            });
+        }
+        self.depth += 1;
+        let result = self.parse_type_until_inner(stop_context);
+        self.depth -= 1;
+        result
+    }
+
+    fn parse_type_until_inner(
         &mut self,
         stop_context: StopContext,
     ) -> Result<SurfaceType, TypeParseError> {
