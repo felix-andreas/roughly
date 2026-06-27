@@ -202,15 +202,16 @@ Typechecking is incremental at document grain through a two-phase interface mode
 - The package interface table maps each package-global name to the winning document's exported
   scheme. Its rendered form, together with the type-definition fingerprint, is the environment
   fingerprint.
-- The check phase checks every document (package files and scripts) against the interface table,
-  binding only the schemes the document references. The result is cached by document version plus
-  the environment fingerprint, so a body-only edit rechecks one document while an interface change
-  rechecks dependents. (Target, not yet fully implemented: the environment fingerprint is
-  package-global, so today an interface change rekeys every document's check cache rather than only
-  its dependents. The reverse-dependency design under
-  [Reverse-dependency invalidation](#reverse-dependency-invalidation-m3) replaces this global key
-  with per-document dependency fingerprints and reverse-dependency routing; until round-2 re-keying
-  lands, read the "rechecks dependents" precision here as the target rather than current behavior.)
+- The check phase checks every candidate document (package files and scripts) against the interface
+  table, binding only the schemes the document references. The result is cached by document version,
+  the type-definition fingerprint, and that document's own dependency fingerprint — the rendered
+  schemes of exactly the package-global names it references — rather than a package-global key. The
+  candidate set is chosen by reverse-dependency routing (`dirty docs ∪ reverse-deps of changed
+  exports`; see [Reverse-dependency invalidation](#reverse-dependency-invalidation-m3)), so a
+  body-only edit rechecks just the edited document, and an interface change rechecks exactly the
+  changed document plus the documents that reference the changed name (`k + 1`), leaving independent
+  documents untouched. A type-definition change is still package-global today and falls back to the
+  full document set.
 
 Consequences that are part of the contract:
 
@@ -371,9 +372,10 @@ This model should preserve two boundaries:
 
 This is the design M3 implements to make package-scoped invalidation precise instead of
 package-wide. It refines the package-scoped phases above; it does not replace the retained-artifact
-model. (The check-phase prose in [the typecheck incremental model](#incremental-model) still
-describes the package-global environment fingerprint that this design replaces; that wording is
-corrected once round-2 re-keying lands.)
+model. Per-document dependency re-keying, the reverse-dependency index, the per-edit dirty set, and
+the fixture-visible recompute scope are implemented; the check-phase prose in
+[the typecheck incremental model](#incremental-model) describes the per-document dependency
+fingerprints and reverse-dependency routing that are now in effect.
 
 Four pieces:
 

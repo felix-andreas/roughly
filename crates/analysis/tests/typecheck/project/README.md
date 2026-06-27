@@ -30,12 +30,37 @@ exist, revisit this contract.
 - `types.R.test` — cross-file alias and nominal use, cross-file `@new`, forward type references
 - `scripts.R.test` — scripts read package globals; script bindings and type declarations stay
   script-local; package and script files may reuse a type name
+- `audit_cross_file.R.test` — audited cross-file diagnostics
+- `incremental.R.test` — workspace-edit generations: interface vs body edits, deletes, and forward
+  type definitions across generations
+- `recompute_scope.R.test` — the M3 recompute-scope exit proof: an interface edit recomputes the
+  edited file plus its referrers (`k + 1`), a body-only edit recomputes just the edited file
+
+## The `recompute` action
+
+A generation may assert which documents the incremental typecheck recomputed, and why, with a
+project-suite IDE action:
+
+```text
+#!!!! recompute recompute.scope
+#++++
+R/a.R: body-edit
+R/b.R: interface-change(double_count)
+```
+
+- `#!!!! recompute <path>` takes no request body; `<path>` is only the output key for the rendered
+  scope within the snapshot
+- the output lists every recomputed document, sorted by path, as `path: reason`
+- the reason is `body-edit` when the document's own version changed, or
+  `interface-change(name, ...)` naming the changed package-globals it references that forced the
+  recheck (a document attributed to its own edit is `body-edit` even if it also references a changed
+  global)
+- like other IDE actions the scope is snapshot-local and does not carry forward
 
 ## Current gaps
 
 - package winner behavior with conflicting types is not yet covered
 - `Collate`-driven file order needs harness support for `DESCRIPTION`
-- workspace-edit generations (`#.... vN`) are not used yet
 
 ## What does not belong here
 

@@ -76,6 +76,21 @@ pub struct Analysis {
     // per-document cache check decides actual recompute). Exposed for tests that prove the scan is
     // bounded — a body-only edit must examine O(1) documents, not O(package).
     last_candidate_count: usize,
+    // Why each document recomputed in the last `typecheck`, in recompute order. The proximate cause is
+    // either the document's own edit (`BodyEdit`) or a changed package-global it references
+    // (`InterfaceChange`). Exposed so fixtures can assert the recompute scope and reason, not just the
+    // count; see the M3 reverse-dependency invalidation design.
+    last_recompute_reasons: Vec<(DocumentId, RecomputeReason)>,
+}
+
+// Why a document was rechecked by `typecheck`. A document is attributed to its proximate cause: a
+// document whose own version changed is a `BodyEdit` even if it also references a changed global,
+// because its own edit, not the interface, is what forced the recheck. `InterfaceChange` carries the
+// changed package-globals the document references that triggered the recheck.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecomputeReason {
+    BodyEdit,
+    InterfaceChange(Vec<Symbol>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,6 +193,7 @@ impl Analysis {
             last_type_definitions_fingerprint: None,
             last_typecheck_global_bindings: None,
             last_candidate_count: 0,
+            last_recompute_reasons: Vec::new(),
         }
     }
 
@@ -364,6 +380,12 @@ impl Analysis {
     // document; see the M3 reverse-dependency invalidation design.
     pub fn last_candidate_count(&self) -> usize {
         self.last_candidate_count
+    }
+
+    // The documents the last `typecheck` recomputed, each with the proximate reason it recomputed
+    // (its own edit versus a changed package-global it references). Empty when nothing recomputed.
+    pub fn last_recompute_reasons(&self) -> &[(DocumentId, RecomputeReason)] {
+        &self.last_recompute_reasons
     }
 
     pub fn package_document_ids(&self) -> Vec<DocumentId> {
@@ -695,6 +717,10 @@ fn render_dependency_fingerprint(
 // rechecks only the documents that reference the changed name. Returns the documents whose
 // typecheck output was recomputed, so callers can republish exactly those diagnostics.
 pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
+    // Cleared up front so the recompute-reason memo always reflects this call: an early return below
+    // (nothing changed) correctly leaves it empty, and the normal path overwrites it at the end.
+    analysis_state.last_recompute_reasons.clear();
+
     // Nothing has changed since the last completed typecheck, so every cached output is current and
     // no document needs rechecking. This keeps repeated IDE requests on an unchanged package cheap.
     if analysis_state.last_typecheck_package_version == Some(analysis_state.package_version) {
@@ -947,6 +973,7 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     analysis_state.last_candidate_count = round2_candidates.len();
 
     let mut recomputed_document_ids = Vec::new();
+    let mut recompute_reasons = Vec::new();
     let mut fresh_outputs = Vec::new();
     for document_id in &round2_candidates {
         let Some(document_version) = analysis_state.document_version(*document_id) else {
@@ -1033,6 +1060,20 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 expression_types,
             },
         ));
+        // The proximate cause: a document whose own version changed is a body edit even if it also
+        // references a changed global; otherwise it recomputed because a package-global it references
+        // moved, so name the responsible globals (the changed globals it actually references).
+        let reason = if dirty_documents.contains(document_id) {
+            RecomputeReason::BodyEdit
+        } else {
+            RecomputeReason::InterfaceChange(
+                changed_globals
+                    .intersection(&referenced_symbols)
+                    .copied()
+                    .collect(),
+            )
+        };
+        recompute_reasons.push((*document_id, reason));
         recomputed_document_ids.push(*document_id);
     }
     for (document_id, output) in fresh_outputs {
@@ -1045,6 +1086,7 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     analysis_state.last_type_definitions_fingerprint = Some(type_definitions_fingerprint);
     analysis_state.last_typecheck_global_bindings = Some(package_naming.global_bindings.clone());
     analysis_state.dirty_documents.clear();
+    analysis_state.last_recompute_reasons = recompute_reasons;
     recomputed_document_ids
 }
 

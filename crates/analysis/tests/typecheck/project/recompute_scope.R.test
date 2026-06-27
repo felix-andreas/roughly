@@ -1,0 +1,45 @@
+#==== recompute_scope
+#---- interface_edit_recomputes_referrers_not_independent
+#---- R/a.R
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+#++++
+No diagnostics.
+#---- R/b.R
+b_ref <- double_count
+#++++
+No diagnostics.
+#---- R/e.R
+e_ref <- double_count
+#++++
+No diagnostics.
+#---- R/c.R
+c_value <- 99L
+#++++
+No diagnostics.
+#!!!! recompute recompute.scope
+#++++
+R/a.R: body-edit
+R/b.R: body-edit
+R/c.R: body-edit
+R/e.R: body-edit
+#.... interface_edit
+#---- R/a.R
+#: fn(count: double) -> double
+double_count <- function(count) count + count
+#++++ R/a.R
+No diagnostics.
+#!!!! recompute recompute.scope
+#++++
+R/a.R: body-edit
+R/b.R: interface-change(double_count)
+R/e.R: interface-change(double_count)
+#.... body_only_edit
+#---- R/a.R
+#: fn(count: double) -> double
+double_count <- function(count) count - count
+#++++ R/a.R
+No diagnostics.
+#!!!! recompute recompute.scope
+#++++
+R/a.R: body-edit
