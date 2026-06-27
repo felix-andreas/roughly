@@ -441,6 +441,107 @@ The design targets, and a fixture makes durable, the following:
   documents (`G`'s own document plus its `k` referrers);
 - a body-only edit recomputes exactly `1` document and renders no `O(package)` fingerprint.
 
+### Incremental package naming (M4 — target)
+
+This is the design implemented next; it is **not yet in effect**. M3 made the interface fixed-point
+and round-2 typecheck `O(blast-radius)`, but `resolve_package` still calls
+`rebuild_package_naming`, which rebuilds the entire global binding table by scanning every package
+document on each `package_version` bump (~111ms single-file recheck at 500 files). That is the last
+`O(package)` cost on a body-only edit. M4 makes package naming incremental: when a document's
+exported top-level names change, patch the affected names instead of rebuilding.
+
+#### Source of truth and derived structures
+
+Same discipline as the M3 reverse-dependency index — a pure fold of per-document naming outputs,
+never a hand-synced mirror:
+
+- **Per-document exported names.** Each document `D` contributes the set of `(Symbol, BindingInfo)`
+  for its top-level assignments — exactly `NamesLocal.bindings` filtered to
+  `kind == BindingKind::TopLevelAssignment`. A pure function of `D`'s local naming.
+- **Per-name candidate index.** For each package-global `Symbol` `N`, the set of documents defining
+  `N`, ordered by the **same** package document order winner selection uses — package
+  path-lexicographic order (`package_document_ids`), **not** `DocumentId` numeric order.
+  `Winner(N)` = the last candidate in path order (last-writer-wins).
+  `global_bindings[N] == Winner(N)`, materialized for `O(1)` lookup.
+
+#### Maintenance invariant (single source of truth)
+
+```
+candidate_index == ⋃ over docs D of { (N, D, binding) : N is a top-level binding of D }
+global_bindings[N] == the path-last candidate of N
+```
+
+The index is patched per document at the local-naming recompute site and on delete (remove `D`'s own
+entries by contributing `DocumentId`, then insert its new exported set), driven by the M3 dirty set.
+A debug-only full-rebuild drift assertion (as in M3) guards it.
+
+#### Incremental update on a document change
+
+- Compute `D`'s new exported set; diff against `D`'s prior contribution (read from the candidate
+  index's current membership of `D`). Affected names = (names `D` drops) ∪ (names `D` adds). A pure
+  body edit that changes no top-level name leaves the exported set identical → zero affected names →
+  no `global_bindings` change, which is the flat-recheck win.
+- For each dropped name, remove `D` from `candidate_index[N]`; for each added name, insert `D` in
+  path order. Recompute `Winner(N)` = path-last candidate for every affected `N` and update
+  `global_bindings` (or remove `N` if it has no candidates left).
+
+#### Diagnostics (correctness-critical)
+
+Keep overwrite-warning pairs exact.
+
+- **Overwrite warnings** are a pure function of a name's *ordered* candidate list: every candidate
+  except the last gets "overwritten by a later top-level binding"; every candidate except the first
+  gets "overwrites an earlier top-level binding". So they are name-keyed: when `candidate_index[N]`
+  changes, regenerate `N`'s overwrite diagnostics for exactly the documents in `candidate_index[N]`,
+  replacing the prior set for `N`. Store naming diagnostics so a name's overwrite contributions can
+  be replaced without dropping unrelated diagnostics.
+- **Builtin/namespace-shadow warnings** are per-`(document, binding)` and independent of winner
+  selection; they are regenerated from `D`'s own bindings when `D` changes.
+
+#### Correctness premise (contract precondition)
+
+Winner selection is last-writer-wins in package path order, so a name's winner depends **only** on
+the set of documents defining it and their path order — never on document bodies — so patching per
+affected name is complete. The debug full-rebuild assertion enforces equality with a from-scratch
+rebuild.
+
+#### Scope and a deferred piece
+
+M4 targets the value `global_bindings` table plus its naming diagnostics. The type-definition index
+(`build_type_index` over `@type` / `@alias`) is also rebuilt in `rebuild_package_naming` today;
+making it incremental pairs naturally with tightening the still-package-global
+`type_definitions_fingerprint` from M3. This is **deferred**, not done.
+
+#### Trigger change
+
+Replace the monolithic `package_naming_output.version == package_version` full-rebuild guard with
+incremental maintenance driven by the dirty set: `resolve_package` patches the dirty documents'
+contributions and recomputes only affected names, leaving `package_naming_output` as the
+materialized, versioned result.
+
+#### Test plan (focused shadowing fixture suite)
+
+Each case asserts both the resolved winner (via name resolution / a global-naming fixture) **and**
+the exact overwrite-warning set, and that an incremental update matches a full rebuild:
+
+- a document newly defining a name another document also defines (winner flips if the new one is
+  path-later; both gain/lose the paired overwrite warnings);
+- a document dropping a name (winner falls back to the next path-latest; the dropped document's and
+  old winner's overwrite warnings update);
+- the sole definer of a name being deleted (the name leaves `global_bindings`);
+- adding an earlier-path document (it becomes a loser to later definers);
+- rename and re-add.
+
+#### Slice plan
+
+- **M4.1** — add the per-document exported-names + per-name candidate index, maintained incrementally
+  with the drift assertion; `global_bindings` still derived by full rebuild (pure addition, no
+  behavior change).
+- **M4.2** — make `resolve_package` patch `global_bindings` + overwrite diagnostics from the
+  candidate index incrementally (the behavior-changing slice; guarded by the shadowing fixture suite
+  + drift assertion + existing `naming_global` fixtures).
+- **M4.3** (deferred/optional) — incremental type index, paired with per-doc type-def fingerprint.
+
 ## Diagnostics
 
 Diagnostics are part of the product surface, not a side effect.
