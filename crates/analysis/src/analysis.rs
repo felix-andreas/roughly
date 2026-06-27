@@ -7,7 +7,7 @@ use {
         lint::{self as lint_phase, NameStyle},
         lower::lower_with_shared_interner,
         naming::{
-            DocumentKind, NamesGlobal, NamesLocal, rebuild_package_naming,
+            BindingKind, DocumentKind, NamesGlobal, NamesLocal, rebuild_package_naming,
             resolve_document_locally,
         },
         tree,
@@ -49,6 +49,14 @@ pub struct Analysis {
     // `NamesLocal.non_locals`; see `patch_reverse_dependencies` and the maintenance invariant on the
     // architecture page. Used by invalidation routing to pick recompute candidates.
     reverse_dependencies: BTreeMap<Symbol, BTreeSet<DocumentId>>,
+    // Package-definition candidate index (M4): for each package-global `Symbol`, the set of package
+    // documents that define it as a top-level binding (the definition-side analog of
+    // `reverse_dependencies`). Derived from and patched per document against each document's
+    // top-level `NamesLocal.bindings`; see `patch_package_definitions`. The path-last candidate per
+    // name is the winner, which must equal `global_bindings`. Not yet load-bearing: `global_bindings`
+    // still comes from `rebuild_package_naming`; this index runs in parallel and is asserted
+    // consistent, de-risking the M4.2 switch to incremental winner maintenance.
+    package_definitions: BTreeMap<Symbol, BTreeSet<DocumentId>>,
     // The documents changed since the last completed `typecheck`, accumulated in `invalidate_document`
     // (the single funnel every add/edit/delete passes through) and cleared at the end of `typecheck`.
     // It seeds the M3 recompute candidate set: combined with the reverse-dependency index it bounds the
@@ -185,6 +193,7 @@ impl Analysis {
             lowering_outputs: HashMap::new(),
             document_naming_outputs: HashMap::new(),
             reverse_dependencies: BTreeMap::new(),
+            package_definitions: BTreeMap::new(),
             dirty_documents: BTreeSet::new(),
             package_naming_output: None,
             document_interface_outputs: HashMap::new(),
@@ -320,9 +329,11 @@ impl Analysis {
         self.document_versions.remove(&document_id);
         self.document_paths.remove(&document_id);
         self.non_package_documents.remove(&document_id);
-        // The document is gone for good, so it contributes nothing to the reverse-dependency index.
-        // Unlike an edit, no recompute will re-patch it, so retract its edges here.
+        // The document is gone for good, so it contributes nothing to the reverse-dependency or
+        // package-definition indexes. Unlike an edit, no recompute will re-patch it, so retract its
+        // entries from both here.
         self.patch_reverse_dependencies(document_id, &BTreeSet::new());
+        self.patch_package_definitions(document_id, &BTreeSet::new());
         self.invalidate_document(document_id);
         self.bump_package_version();
         Ok(())
@@ -396,27 +407,25 @@ impl Analysis {
             .filter(|document_id| !self.non_package_documents.contains(document_id))
             .collect::<Vec<_>>();
         document_ids.sort_by(|left_document_id, right_document_id| {
-            let left_path = self
-                .path_for_document_id(*left_document_id)
-                .map(|path| {
-                    path.strip_prefix(&self.base_path)
-                        .unwrap_or(path)
-                        .to_string_lossy()
-                        .replace('\\', "/")
-                })
-                .unwrap_or_default();
-            let right_path = self
-                .path_for_document_id(*right_document_id)
-                .map(|path| {
-                    path.strip_prefix(&self.base_path)
-                        .unwrap_or(path)
-                        .to_string_lossy()
-                        .replace('\\', "/")
-                })
-                .unwrap_or_default();
-            left_path.cmp(&right_path)
+            self.package_path_key(*left_document_id)
+                .cmp(&self.package_path_key(*right_document_id))
         });
         document_ids
+    }
+
+    // The package-relative, slash-normalized path used to order package documents. This is the single
+    // source of truth for package document order: `package_document_ids` sorts by it and the M4
+    // candidate-index winner derivation (last-writer-wins) takes the path-last definer by it. Winner
+    // selection must use this, never `DocumentId` numeric order.
+    fn package_path_key(&self, document_id: DocumentId) -> String {
+        self.path_for_document_id(document_id)
+            .map(|path| {
+                path.strip_prefix(&self.base_path)
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .unwrap_or_default()
     }
 
     pub fn lint_diagnostics(&self, document_id: DocumentId) -> Vec<Diagnostic> {
@@ -586,6 +595,21 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
             .copied()
             .collect::<BTreeSet<_>>();
         analysis_state.patch_reverse_dependencies(*document_id, &referenced_symbols);
+        // Only package documents define package globals (scripts/extra modules do not), matching
+        // `build_global_bindings`, which folds only `package_modules`. A script contributes the empty
+        // set, which also retracts any prior entries if a document changed from package to script.
+        let defined_symbols = if matches!(document_kind, DocumentKind::Package) {
+            local_naming
+                .naming
+                .bindings
+                .values()
+                .filter(|binding| binding.kind == BindingKind::TopLevelAssignment)
+                .map(|binding| binding.symbol)
+                .collect::<BTreeSet<_>>()
+        } else {
+            BTreeSet::new()
+        };
+        analysis_state.patch_package_definitions(*document_id, &defined_symbols);
         analysis_state.document_naming_outputs.insert(
             *document_id,
             DocumentOutput {
@@ -599,49 +623,52 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
     #[cfg(debug_assertions)]
     analysis_state.assert_reverse_dependencies_consistent();
 
-    if analysis_state
+    let package_naming_current = analysis_state
         .package_naming_output
         .as_ref()
-        .is_some_and(|output| output.version == analysis_state.package_version)
-    {
-        return;
+        .is_some_and(|output| output.version == analysis_state.package_version);
+    if !package_naming_current {
+        let document_ids = analysis_state.package_document_ids();
+        let all_document_ids = analysis_state.all_document_ids();
+        let package_modules = document_ids
+            .iter()
+            .filter_map(|document_id| {
+                analysis_state
+                    .module(*document_id)
+                    .map(|module| (*document_id, module))
+            })
+            .collect::<Vec<_>>();
+        let extra_modules = all_document_ids
+            .iter()
+            .filter(|document_id| !document_ids.contains(document_id))
+            .filter_map(|document_id| {
+                analysis_state
+                    .module(*document_id)
+                    .map(|module| (*document_id, module))
+            })
+            .collect::<Vec<_>>();
+        let naming_locals = analysis_state
+            .document_naming_outputs
+            .iter()
+            .map(|(document_id, output)| (*document_id, output.output.clone()))
+            .collect::<HashMap<_, _>>();
+        let naming_computation = rebuild_package_naming(
+            &package_modules,
+            &extra_modules,
+            &naming_locals,
+            analysis_state.interner(),
+        );
+        analysis_state.package_naming_output = Some(PackageOutput {
+            version: analysis_state.package_version,
+            output: naming_computation.naming,
+            diagnostics: naming_computation.diagnostics,
+        });
     }
 
-    let document_ids = analysis_state.package_document_ids();
-    let all_document_ids = analysis_state.all_document_ids();
-    let package_modules = document_ids
-        .iter()
-        .filter_map(|document_id| {
-            analysis_state
-                .module(*document_id)
-                .map(|module| (*document_id, module))
-        })
-        .collect::<Vec<_>>();
-    let extra_modules = all_document_ids
-        .iter()
-        .filter(|document_id| !document_ids.contains(document_id))
-        .filter_map(|document_id| {
-            analysis_state
-                .module(*document_id)
-                .map(|module| (*document_id, module))
-        })
-        .collect::<Vec<_>>();
-    let naming_locals = analysis_state
-        .document_naming_outputs
-        .iter()
-        .map(|(document_id, output)| (*document_id, output.output.clone()))
-        .collect::<HashMap<_, _>>();
-    let naming_computation = rebuild_package_naming(
-        &package_modules,
-        &extra_modules,
-        &naming_locals,
-        analysis_state.interner(),
-    );
-    analysis_state.package_naming_output = Some(PackageOutput {
-        version: analysis_state.package_version,
-        output: naming_computation.naming,
-        diagnostics: naming_computation.diagnostics,
-    });
+    // Runs whether or not `package_naming_output` was rebuilt above, so `global_bindings` is current
+    // when the candidate-index winners are checked against it.
+    #[cfg(debug_assertions)]
+    analysis_state.assert_package_definitions_consistent();
 }
 
 fn render_interface_fingerprint(exports: &[ExportedValue], interner: &Interner) -> String {
@@ -1153,36 +1180,43 @@ impl Analysis {
         self.document_typecheck_outputs.remove(&document_id);
     }
 
-    // Re-derives `document_id`'s edges in the reverse-dependency index to exactly `new_refs`,
-    // patching only the delta. The document's *old* edges are read back from the index (the symbols
-    // where it is currently a member) rather than from its previous naming output, which the
-    // invalidate→recompute path may have already dropped. Passing an empty `new_refs` retracts the
-    // document entirely (used on delete).
+    // Re-derives `document_id`'s edges in the reverse-dependency index (the package globals it
+    // references, from `NamesLocal.non_locals`) to exactly `new_refs`. Empty `new_refs` retracts the
+    // document (used on delete).
     fn patch_reverse_dependencies(&mut self, document_id: DocumentId, new_refs: &BTreeSet<Symbol>) {
-        let old_refs = self
-            .reverse_dependencies
-            .iter()
-            .filter(|(_, documents)| documents.contains(&document_id))
-            .map(|(symbol, _)| *symbol)
-            .collect::<BTreeSet<_>>();
-        for symbol in old_refs.difference(new_refs) {
-            if let Some(documents) = self.reverse_dependencies.get_mut(symbol) {
-                documents.remove(&document_id);
-                if documents.is_empty() {
-                    self.reverse_dependencies.remove(symbol);
-                }
-            }
-        }
-        for symbol in new_refs.difference(&old_refs) {
-            self.reverse_dependencies
-                .entry(*symbol)
-                .or_default()
-                .insert(document_id);
-        }
+        patch_document_symbol_index(&mut self.reverse_dependencies, document_id, new_refs);
     }
 
-    // Salsa-style verify: rebuilds the index from scratch by folding every current naming output and
-    // asserts it equals the incrementally maintained index. Catches any maintenance bug. Debug-only.
+    // Re-derives `document_id`'s entries in the package-definition candidate index (the package
+    // globals it defines as top-level bindings) to exactly `new_definitions`. Empty `new_definitions`
+    // retracts the document (used on delete, and for scripts, which define no package globals).
+    fn patch_package_definitions(
+        &mut self,
+        document_id: DocumentId,
+        new_definitions: &BTreeSet<Symbol>,
+    ) {
+        patch_document_symbol_index(&mut self.package_definitions, document_id, new_definitions);
+    }
+
+    // The winner of each package-global name derived from the candidate index: the path-last definer
+    // (last-writer-wins in package path order, via `package_path_key` — the same order
+    // `build_global_bindings` uses). This must equal `global_bindings`; M4.2 will use it to replace
+    // the `rebuild_package_naming` winner table, so for M4.1 it exists only to be asserted equal.
+    #[cfg(debug_assertions)]
+    fn derived_global_bindings(&self) -> BTreeMap<Symbol, DocumentId> {
+        self.package_definitions
+            .iter()
+            .filter_map(|(symbol, documents)| {
+                documents
+                    .iter()
+                    .max_by_key(|document_id| self.package_path_key(**document_id))
+                    .map(|winner| (*symbol, *winner))
+            })
+            .collect()
+    }
+
+    // Salsa-style verify for the reverse-dependency index: rebuilds it from scratch by folding every
+    // current naming output and asserts it equals the incrementally maintained index. Debug-only.
     #[cfg(debug_assertions)]
     fn assert_reverse_dependencies_consistent(&self) {
         let mut rebuilt: BTreeMap<Symbol, BTreeSet<DocumentId>> = BTreeMap::new();
@@ -1194,6 +1228,44 @@ impl Analysis {
         assert_eq!(
             rebuilt, self.reverse_dependencies,
             "reverse-dependency index drifted from the per-document naming outputs"
+        );
+    }
+
+    // Salsa-style verify for the package-definition candidate index. Two parts: (a) the maintained
+    // index equals a full rebuild folding every package document's top-level bindings, and (b) the
+    // path-last winners derived from it equal `global_bindings` as produced by `rebuild_package_naming`
+    // — the proof that the candidate index plus path-order winner selection reproduces the existing
+    // winner table exactly, which is what makes the M4.2 switch safe. Debug-only.
+    #[cfg(debug_assertions)]
+    fn assert_package_definitions_consistent(&self) {
+        let mut rebuilt: BTreeMap<Symbol, BTreeSet<DocumentId>> = BTreeMap::new();
+        for (document_id, output) in &self.document_naming_outputs {
+            if self.non_package_documents.contains(document_id) {
+                continue;
+            }
+            for binding in output.output.bindings.values() {
+                if binding.kind == BindingKind::TopLevelAssignment {
+                    rebuilt
+                        .entry(binding.symbol)
+                        .or_default()
+                        .insert(*document_id);
+                }
+            }
+        }
+        assert_eq!(
+            rebuilt, self.package_definitions,
+            "package-definition candidate index drifted from the per-document naming outputs"
+        );
+
+        let global_bindings = self
+            .package_naming_output
+            .as_ref()
+            .map(|output| output.output.global_bindings.clone())
+            .unwrap_or_default();
+        assert_eq!(
+            self.derived_global_bindings(),
+            global_bindings,
+            "path-last candidate winners disagree with rebuild_package_naming global_bindings"
         );
     }
 
@@ -1237,6 +1309,35 @@ impl Analysis {
     }
 }
 
+// Re-derives `document_id`'s membership in a per-document symbol index (`Symbol -> documents`) to
+// exactly `new_symbols`, patching only the delta. The document's *old* symbols are read back from the
+// index itself (the symbols where it is currently a member), not from its previous naming output,
+// which the invalidate→recompute path may already have dropped; this keeps the patch correct across
+// invalidate→recompute and delete. Shared by the reverse-dependency and package-definition indexes,
+// which maintain the identical "remove own entries by contributing `DocumentId`, then insert" shape.
+fn patch_document_symbol_index(
+    index: &mut BTreeMap<Symbol, BTreeSet<DocumentId>>,
+    document_id: DocumentId,
+    new_symbols: &BTreeSet<Symbol>,
+) {
+    let old_symbols = index
+        .iter()
+        .filter(|(_, documents)| documents.contains(&document_id))
+        .map(|(symbol, _)| *symbol)
+        .collect::<BTreeSet<_>>();
+    for symbol in old_symbols.difference(new_symbols) {
+        if let Some(documents) = index.get_mut(symbol) {
+            documents.remove(&document_id);
+            if documents.is_empty() {
+                index.remove(symbol);
+            }
+        }
+    }
+    for symbol in new_symbols.difference(&old_symbols) {
+        index.entry(*symbol).or_default().insert(document_id);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use {
@@ -1247,6 +1348,7 @@ mod tests {
         crate::{
             Diagnostic, Severity,
             lint::NameStyle,
+            naming::BindingKind,
             text::{TextPosition, TextRange},
         },
         std::{
@@ -1431,6 +1533,220 @@ mod tests {
         assert_eq!(
             rebuild_reverse_dependencies(&analysis),
             analysis.reverse_dependencies
+        );
+    }
+
+    // Folds every current package document's top-level bindings into a candidate index from scratch.
+    // The maintained `Analysis::package_definitions` must equal this after every operation. Mirrors
+    // the debug `assert_package_definitions_consistent` fold; scripts contribute nothing.
+    fn rebuild_package_definitions(analysis: &Analysis) -> BTreeMap<Symbol, BTreeSet<DocumentId>> {
+        let mut rebuilt: BTreeMap<Symbol, BTreeSet<DocumentId>> = BTreeMap::new();
+        for (document_id, output) in &analysis.document_naming_outputs {
+            if analysis.non_package_documents.contains(document_id) {
+                continue;
+            }
+            for binding in output.output.bindings.values() {
+                if binding.kind == BindingKind::TopLevelAssignment {
+                    rebuilt
+                        .entry(binding.symbol)
+                        .or_default()
+                        .insert(*document_id);
+                }
+            }
+        }
+        rebuilt
+    }
+
+    fn global_winner(analysis: &Analysis, symbol: Symbol) -> Option<DocumentId> {
+        analysis
+            .package_naming()
+            .and_then(|naming| naming.global_bindings.get(&symbol).copied())
+    }
+
+    #[test]
+    fn package_definitions_register_overlapping_definitions_and_exclude_scripts() {
+        // `a` and `m` both define `shared` (overlap); a script defines `script_local`, which must not
+        // enter the index. The winner of `shared` is the path-last definer `m`.
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
+        let a_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "g <- 1L\nshared <- 1L")
+            .expect("document should parse");
+        let m_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/m.R"), "shared <- 2L\nh <- 3L")
+            .expect("document should parse");
+        analysis
+            .add_document_from_source(
+                PathBuf::from("/workspace/scripts/use.R"),
+                "script_local <- 5L",
+            )
+            .expect("document should parse");
+        resolve_package(&mut analysis);
+
+        let shared_symbol = analysis.interner_mut().intern("shared");
+        let g_symbol = analysis.interner_mut().intern("g");
+        let h_symbol = analysis.interner_mut().intern("h");
+        let script_local_symbol = analysis.interner_mut().intern("script_local");
+
+        assert_eq!(
+            analysis.package_definitions.get(&shared_symbol),
+            Some(&BTreeSet::from([a_id, m_id])),
+            "both definers of an overlapping name are candidates"
+        );
+        assert!(
+            !analysis.package_definitions.contains_key(&script_local_symbol),
+            "a script does not define package globals"
+        );
+        assert_eq!(global_winner(&analysis, shared_symbol), Some(m_id));
+        assert_eq!(global_winner(&analysis, g_symbol), Some(a_id));
+        assert_eq!(global_winner(&analysis, h_symbol), Some(m_id));
+        assert_eq!(
+            rebuild_package_definitions(&analysis),
+            analysis.package_definitions
+        );
+    }
+
+    #[test]
+    fn package_definitions_follow_edited_top_level_bindings() {
+        // Editing `a` from defining `g` to defining `h` drops `g` (its sole definer) and adds `h`.
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
+        let a_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "g <- 1L")
+            .expect("document should parse");
+        resolve_package(&mut analysis);
+
+        let g_symbol = analysis.interner_mut().intern("g");
+        assert_eq!(
+            analysis.package_definitions.get(&g_symbol),
+            Some(&BTreeSet::from([a_id]))
+        );
+
+        analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "h <- 2L")
+            .expect("document should parse");
+        resolve_package(&mut analysis);
+
+        let h_symbol = analysis.interner_mut().intern("h");
+        assert!(
+            !analysis.package_definitions.contains_key(&g_symbol),
+            "the dropped top-level binding leaves the index"
+        );
+        assert_eq!(global_winner(&analysis, g_symbol), None);
+        assert_eq!(
+            analysis.package_definitions.get(&h_symbol),
+            Some(&BTreeSet::from([a_id]))
+        );
+        assert_eq!(global_winner(&analysis, h_symbol), Some(a_id));
+        assert_eq!(
+            rebuild_package_definitions(&analysis),
+            analysis.package_definitions
+        );
+    }
+
+    #[test]
+    fn package_definitions_drop_deleted_definer_and_winner_falls_back() {
+        // `a` and `m` both define `g`; the winner is `m`. Deleting `m` retracts its candidate and the
+        // winner falls back to the remaining path-latest definer `a`.
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
+        let a_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "g <- 1L")
+            .expect("document should parse");
+        let m_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/m.R"), "g <- 2L")
+            .expect("document should parse");
+        resolve_package(&mut analysis);
+
+        let g_symbol = analysis.interner_mut().intern("g");
+        assert_eq!(
+            analysis.package_definitions.get(&g_symbol),
+            Some(&BTreeSet::from([a_id, m_id]))
+        );
+        assert_eq!(global_winner(&analysis, g_symbol), Some(m_id));
+
+        analysis
+            .delete_document(Path::new("/workspace/R/m.R"))
+            .expect("delete should succeed");
+        resolve_package(&mut analysis);
+
+        assert_eq!(
+            analysis.package_definitions.get(&g_symbol),
+            Some(&BTreeSet::from([a_id])),
+            "the deleted definer's candidate vanishes; the other remains"
+        );
+        assert_eq!(
+            global_winner(&analysis, g_symbol),
+            Some(a_id),
+            "the winner falls back to the path-latest surviving definer"
+        );
+        assert_eq!(
+            rebuild_package_definitions(&analysis),
+            analysis.package_definitions
+        );
+    }
+
+    #[test]
+    fn package_definitions_winner_is_path_last_and_flips_on_definer_changes() {
+        // `g` defined across documents; the winner is always the path-last definer, never the
+        // numerically-newest `DocumentId`. Adding a later-path definer flips the winner; deleting it
+        // flips back; adding an earlier-path definer leaves the winner unchanged.
+        let mut analysis = Analysis::new(
+            PathBuf::from("/workspace"),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
+        analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "g <- 1L")
+            .expect("document should parse");
+        let m_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/m.R"), "g <- 2L")
+            .expect("document should parse");
+        resolve_package(&mut analysis);
+        let g_symbol = analysis.interner_mut().intern("g");
+        assert_eq!(
+            global_winner(&analysis, g_symbol),
+            Some(m_id),
+            "path-last of {{a, m}} is m"
+        );
+
+        // A later-path definer (z > m) becomes the new winner.
+        let z_id = analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/z.R"), "g <- 3L")
+            .expect("document should parse");
+        resolve_package(&mut analysis);
+        assert_eq!(global_winner(&analysis, g_symbol), Some(z_id));
+
+        // Deleting the later-path definer flips the winner back to m.
+        analysis
+            .delete_document(Path::new("/workspace/R/z.R"))
+            .expect("delete should succeed");
+        resolve_package(&mut analysis);
+        assert_eq!(global_winner(&analysis, g_symbol), Some(m_id));
+
+        // An earlier-path definer (a < b < m) is a loser; the winner stays m even though b has the
+        // newest DocumentId.
+        analysis
+            .add_document_from_source(PathBuf::from("/workspace/R/b.R"), "g <- 4L")
+            .expect("document should parse");
+        resolve_package(&mut analysis);
+        assert_eq!(
+            global_winner(&analysis, g_symbol),
+            Some(m_id),
+            "the newest DocumentId is an earlier-path loser; the path-last winner is unchanged"
+        );
+        assert_eq!(
+            rebuild_package_definitions(&analysis),
+            analysis.package_definitions
         );
     }
 
