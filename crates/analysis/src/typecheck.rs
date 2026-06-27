@@ -52,8 +52,44 @@ pub struct InferenceState {
     rigid_variables: BTreeMap<InferenceVariableId, Symbol>,
     // Current depth of type-structure recursion, bounded by `RECURSION_LIMIT`. Transient: it returns
     // to zero whenever a top-level traversal finishes, so it carries no logical state (it is always
-    // zero at the points where an `InferenceState` is cloned or compared).
+    // zero at the points where an `InferenceState` is cloned or compared). It is deliberately NOT
+    // captured by `Snapshot` and NOT touched by snapshot/rollback/commit: a snapshot reverses
+    // union-find writes only, never the in-flight recursion counter.
     recursion_depth: usize,
+    // ena-style undo log for speculative unification. While a snapshot is active (`snapshot_depth >
+    // 0`) every union-find write records the prior entry here so it can be reversed on rollback; on
+    // the normal committed path (`snapshot_depth == 0`) nothing is recorded, so the log stays empty
+    // and cannot grow unbounded. Empty (and `snapshot_depth == 0`) at every clone/compare point,
+    // because recording only happens inside a probe that always commits or rolls back before
+    // returning — so the derived `Clone`/`PartialEq` stay correct.
+    undo_log: Vec<UndoStep>,
+    snapshot_depth: usize,
+}
+
+// A single reversible union-find write: `previous` is the entry that existed before the write
+// (`None` if the variable was freshly inserted, so rollback removes the key).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum UndoStep {
+    Entry {
+        variable: InferenceVariableId,
+        previous: Option<InferenceEntry>,
+    },
+    // A rigid (skolem) marker written by `fresh_rigid_variable`. The id is always fresh, so
+    // `previous` is `None` in practice, but recording it keeps rollback symmetric with `Entry` and
+    // robust if the marker is ever re-set on an existing id.
+    Rigid {
+        variable: InferenceVariableId,
+        previous: Option<Symbol>,
+    },
+}
+
+// A cheap marker into the undo log. Rolling back truncates the log to `log_len` and restores
+// `next_variable_id`, reclaiming any variables allocated since the snapshot. It captures no entries
+// and never references `recursion_depth`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Snapshot {
+    log_len: usize,
+    next_variable_id: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -173,7 +209,7 @@ impl InferenceState {
 
     fn fresh_rigid_variable(&mut self, name: Symbol) -> InferenceVariableId {
         let variable = self.fresh_variable();
-        self.rigid_variables.insert(variable, name);
+        self.set_rigid(variable, name);
         variable
     }
 
@@ -263,10 +299,118 @@ impl InferenceState {
             .collect()
     }
 
+    // Begins a speculative region for probing (e.g. a trial unification) that can be discarded.
+    //
+    // Probe contract — what a snapshot does and does NOT reverse:
+    // - REVERSED: every union-find write (`entries`, via `set_entry`), every rigid-variable marker
+    //   (`rigid_variables`, via `set_rigid`), and `next_variable_id` (so ids allocated inside the
+    //   probe are reclaimed). These are exactly the fields the resolve / unify / check_compatibility
+    //   / representation- and alias-lowering paths touch, which is all a `check_compatibility` probe
+    //   can reach.
+    // - NOT reversed: `environment`, `recorded_expression_types`, and `current_level`. This is safe
+    //   for the intended probe use: `environment` and `recorded_expression_types` are mutated only by
+    //   binding inference and expression-type recording, never by the compatibility/unification paths
+    //   a probe runs; and `current_level` is balanced by paired `enter_level`/`exit_level`, so a probe
+    //   that does not leak an unbalanced level change leaves it untouched. `recursion_depth` is
+    //   likewise transient and deliberately excluded. M2.2 must keep its probes within this contract.
+    //
+    // Nested snapshots compose: an inner rollback truncates the log to the inner mark, leaving outer
+    // writes intact.
+    pub fn snapshot(&mut self) -> Snapshot {
+        self.snapshot_depth += 1;
+        Snapshot {
+            log_len: self.undo_log.len(),
+            next_variable_id: self.next_variable_id,
+        }
+    }
+
+    // Reverses every recorded write made since `snapshot` (see the probe contract on `snapshot`),
+    // restoring entries and rigid markers and reclaiming the variable ids allocated in between.
+    // Leaves `recursion_depth` and the non-reversed fields untouched.
+    pub fn rollback_to(&mut self, snapshot: Snapshot) {
+        debug_assert!(self.snapshot_depth > 0, "rollback_to without an open snapshot");
+        while self.undo_log.len() > snapshot.log_len {
+            match self.undo_log.pop() {
+                Some(UndoStep::Entry { variable, previous }) => match previous {
+                    Some(entry) => {
+                        self.entries.insert(variable, entry);
+                    }
+                    None => {
+                        self.entries.remove(&variable);
+                    }
+                },
+                Some(UndoStep::Rigid { variable, previous }) => match previous {
+                    Some(name) => {
+                        self.rigid_variables.insert(variable, name);
+                    }
+                    None => {
+                        self.rigid_variables.remove(&variable);
+                    }
+                },
+                None => break,
+            }
+        }
+
+        // Variable ids allocated after the snapshot are reclaimed. The log already removes their
+        // `entries` and `rigid_variables` records; dropping any survivor with an id at or above the
+        // restored counter is a safety net, since all ids are allocated monotonically and so cannot
+        // predate the snapshot (and therefore cannot collide with a pre-existing variable or rigid).
+        let stale_variables = self
+            .entries
+            .range(InferenceVariableId(snapshot.next_variable_id)..)
+            .map(|(variable, _)| *variable)
+            .collect::<Vec<_>>();
+        for variable in stale_variables {
+            self.entries.remove(&variable);
+        }
+        let stale_rigids = self
+            .rigid_variables
+            .range(InferenceVariableId(snapshot.next_variable_id)..)
+            .map(|(variable, _)| *variable)
+            .collect::<Vec<_>>();
+        for variable in stale_rigids {
+            self.rigid_variables.remove(&variable);
+        }
+        self.next_variable_id = snapshot.next_variable_id;
+
+        self.snapshot_depth -= 1;
+    }
+
+    // Keeps every write made since `snapshot`. The log is retained while an outer snapshot is still
+    // active (it may yet roll back over these writes) and cleared once the outermost region commits.
+    pub fn commit(&mut self, snapshot: Snapshot) {
+        debug_assert!(self.snapshot_depth > 0, "commit without an open snapshot");
+        debug_assert!(self.undo_log.len() >= snapshot.log_len);
+        self.snapshot_depth -= 1;
+        if self.snapshot_depth == 0 {
+            self.undo_log.clear();
+        }
+    }
+
+    // The single chokepoint for union-find writes: records the prior entry (when a snapshot is
+    // active) before overwriting, so the undo log stays complete and the committed path stays free.
+    fn set_entry(&mut self, variable: InferenceVariableId, entry: InferenceEntry) {
+        if self.snapshot_depth > 0 {
+            let previous = self.entries.get(&variable).cloned();
+            self.undo_log.push(UndoStep::Entry { variable, previous });
+        }
+        self.entries.insert(variable, entry);
+    }
+
+    // The chokepoint for rigid-variable markers, mirroring `set_entry` so a probe can reverse a
+    // skolem allocation that would otherwise leave a reclaimed id wrongly marked rigid.
+    fn set_rigid(&mut self, variable: InferenceVariableId, name: Symbol) {
+        if self.snapshot_depth > 0 {
+            let previous = self.rigid_variables.get(&variable).copied();
+            self.undo_log.push(UndoStep::Rigid { variable, previous });
+        }
+        self.rigid_variables.insert(variable, name);
+    }
+
     fn fresh_constrained_variable(&mut self, constraint: Constraint) -> InferenceVariableId {
         let variable = InferenceVariableId(self.next_variable_id);
         self.next_variable_id += 1;
-        self.entries.insert(
+        self.set_entry(
             variable,
             InferenceEntry::Unbound {
                 level: self.current_level,
@@ -301,12 +445,18 @@ impl InferenceState {
                         expression_id: expression.map(|current| current.id),
                     });
                 }
-                if let Some(InferenceEntry::Unbound {
-                    constraint: existing,
-                    ..
-                }) = self.entries.get_mut(&variable)
-                {
-                    *existing = (*existing).max(constraint);
+                let raised_entry = match self.entries.get(&variable) {
+                    Some(InferenceEntry::Unbound {
+                        level,
+                        constraint: existing,
+                    }) => Some(InferenceEntry::Unbound {
+                        level: *level,
+                        constraint: (*existing).max(constraint),
+                    }),
+                    _ => None,
+                };
+                if let Some(entry) = raised_entry {
+                    self.set_entry(variable, entry);
                 }
                 Ok(())
             }
@@ -3322,16 +3472,17 @@ impl InferenceState {
         variable: InferenceVariableId,
         resolved_type: &CoreType,
     ) -> Result<(), InferenceError> {
-        let Some(entry) = self.entries.get_mut(&variable) else {
+        if !self.entries.contains_key(&variable) {
             return Err(InferenceError::UnknownInferenceVariable(variable));
-        };
+        }
 
-        *entry = match resolved_type {
+        let compressed_entry = match resolved_type {
             CoreType::Variable(other_variable) if *other_variable != variable => {
                 InferenceEntry::Redirect(*other_variable)
             }
             other_type => InferenceEntry::Bound(other_type.clone()),
         };
+        self.set_entry(variable, compressed_entry);
 
         Ok(())
     }
@@ -3375,10 +3526,10 @@ impl InferenceState {
             self.lower_levels_to(&core_type, level)?;
         }
 
-        let Some(entry) = self.entries.get_mut(&variable) else {
+        if !self.entries.contains_key(&variable) {
             return Err(InferenceError::UnknownInferenceVariable(variable));
-        };
-        *entry = InferenceEntry::Bound(core_type);
+        }
+        self.set_entry(variable, InferenceEntry::Bound(core_type));
         Ok(())
     }
 
@@ -3388,16 +3539,19 @@ impl InferenceState {
         level: Level,
     ) -> Result<(), InferenceError> {
         for variable in self.free_type_variables_in_core_type(core_type)? {
-            let Some(entry) = self.entries.get_mut(&variable) else {
-                return Err(InferenceError::UnknownInferenceVariable(variable));
+            let lowered_entry = match self.entries.get(&variable) {
+                None => return Err(InferenceError::UnknownInferenceVariable(variable)),
+                Some(InferenceEntry::Unbound {
+                    level: variable_level,
+                    constraint,
+                }) if *variable_level > level => Some(InferenceEntry::Unbound {
+                    level,
+                    constraint: *constraint,
+                }),
+                Some(_) => None,
             };
-            if let InferenceEntry::Unbound {
-                level: variable_level,
-                ..
-            } = entry
-                && *variable_level > level
-            {
-                *variable_level = level;
+            if let Some(entry) = lowered_entry {
+                self.set_entry(variable, entry);
             }
         }
         Ok(())
@@ -3449,19 +3603,23 @@ impl InferenceState {
             Some(InferenceEntry::Unbound { level, constraint }) => (*level, *constraint),
             _ => return Err(InferenceError::UnknownInferenceVariable(redirected)),
         };
-        if let Some(InferenceEntry::Unbound { level, constraint }) =
-            self.entries.get_mut(&survivor)
-        {
-            if *level > redirected_level {
-                *level = redirected_level;
+        let merged_survivor = match self.entries.get(&survivor) {
+            Some(InferenceEntry::Unbound { level, constraint }) => {
+                Some(InferenceEntry::Unbound {
+                    level: (*level).min(redirected_level),
+                    constraint: (*constraint).max(redirected_constraint),
+                })
             }
-            *constraint = (*constraint).max(redirected_constraint);
+            _ => None,
+        };
+        if let Some(entry) = merged_survivor {
+            self.set_entry(survivor, entry);
         }
 
-        let Some(entry) = self.entries.get_mut(&redirected) else {
+        if !self.entries.contains_key(&redirected) {
             return Err(InferenceError::UnknownInferenceVariable(redirected));
-        };
-        *entry = InferenceEntry::Redirect(survivor);
+        }
+        self.set_entry(redirected, InferenceEntry::Redirect(survivor));
 
         Ok(CoreType::Variable(survivor))
     }
@@ -4362,4 +4520,37 @@ pub enum SubscriptKind {
 pub struct Binding {
     pub type_scheme: TypeScheme,
     pub range: Range,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{interner::Interner, types::Atomic};
+
+    // Exercises the private rigid-variable allocation path, which the integration tests cannot reach.
+    // Without recording the `rigid_variables` insert, a rollback would reclaim the id but leave it
+    // marked rigid, so the next `fresh_variable()` would wrongly refuse to bind.
+    #[test]
+    fn rollback_reclaims_a_rigid_id_so_it_is_no_longer_rigid() {
+        let mut interner = Interner::new();
+        let name = interner.intern("T");
+        let mut inference_state = InferenceState::new();
+
+        let snapshot = inference_state.snapshot();
+        let rigid = inference_state.fresh_rigid_variable(name);
+        assert!(
+            inference_state
+                .unify(CoreType::Variable(rigid), CoreType::Scalar(Atomic::Integer))
+                .is_err(),
+            "a rigid skolem must not bind to a concrete type"
+        );
+
+        inference_state.rollback_to(snapshot);
+
+        let reused = inference_state.fresh_variable();
+        assert_eq!(reused, rigid, "the rigid id should be reclaimed");
+        inference_state
+            .unify(CoreType::Variable(reused), CoreType::Scalar(Atomic::Integer))
+            .expect("the reclaimed id must no longer be treated as rigid");
+    }
 }
