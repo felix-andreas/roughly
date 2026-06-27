@@ -19,6 +19,13 @@ use {
 
 pub type Level = u32;
 
+// Type-structure recursion (resolve, unification, compatibility, free-variable collection) follows
+// the shape of annotation and inferred types. A pathologically nested type would otherwise recurse
+// until the stack overflows; this bound turns that into a clean diagnostic instead of a crash. It is
+// far deeper than any realistic type, yet low enough to fire well before the 2 MB worker/test-thread
+// stack overflows (empirically around depth 200 for these passes).
+pub(crate) const RECURSION_LIMIT: usize = 128;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InferenceEntry {
     Unbound { level: Level, constraint: Constraint },
@@ -43,6 +50,10 @@ pub struct InferenceState {
     // ordinary free variables again and generalize back into the `<T>` scheme. The map keeps each
     // one's declared name so diagnostics show `T` rather than an internal `type1`.
     rigid_variables: BTreeMap<InferenceVariableId, Symbol>,
+    // Current depth of type-structure recursion, bounded by `RECURSION_LIMIT`. Transient: it returns
+    // to zero whenever a top-level traversal finishes, so it carries no logical state (it is always
+    // zero at the points where an `InferenceState` is cloned or compared).
+    recursion_depth: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -1222,8 +1233,25 @@ impl InferenceState {
         type_definitions: &TypeDefinitionEnvironment,
         expression: Option<&Expression>,
     ) -> Result<bool, InferenceError> {
-        let actual_type = self.resolve(actual_type).unwrap_or(CoreType::Unknown);
-        let expected_type = self.resolve(expected_type).unwrap_or(CoreType::Unknown);
+        if self.recursion_depth >= RECURSION_LIMIT {
+            return Err(InferenceError::RecursionLimitExceeded);
+        }
+        self.recursion_depth += 1;
+        let result =
+            self.check_compatibility_inner(actual_type, expected_type, type_definitions, expression);
+        self.recursion_depth -= 1;
+        result
+    }
+
+    fn check_compatibility_inner(
+        &mut self,
+        actual_type: CoreType,
+        expected_type: CoreType,
+        type_definitions: &TypeDefinitionEnvironment,
+        expression: Option<&Expression>,
+    ) -> Result<bool, InferenceError> {
+        let actual_type = self.resolve(actual_type)?;
+        let expected_type = self.resolve(expected_type)?;
 
         if expected_type == CoreType::Any || actual_type == CoreType::Any {
             return Ok(true);
@@ -1902,6 +1930,16 @@ impl InferenceState {
     }
 
     pub fn resolve(&mut self, core_type: CoreType) -> Result<CoreType, InferenceError> {
+        if self.recursion_depth >= RECURSION_LIMIT {
+            return Err(InferenceError::RecursionLimitExceeded);
+        }
+        self.recursion_depth += 1;
+        let result = self.resolve_inner(core_type);
+        self.recursion_depth -= 1;
+        result
+    }
+
+    fn resolve_inner(&mut self, core_type: CoreType) -> Result<CoreType, InferenceError> {
         match core_type {
             CoreType::Variable(variable) => self.resolve_variable(variable),
             CoreType::Nullable(inner_type) => {
@@ -1966,6 +2004,21 @@ impl InferenceState {
     }
 
     fn unify_internal(
+        &mut self,
+        left: CoreType,
+        right: CoreType,
+        expression: Option<&Expression>,
+    ) -> Result<CoreType, InferenceError> {
+        if self.recursion_depth >= RECURSION_LIMIT {
+            return Err(InferenceError::RecursionLimitExceeded);
+        }
+        self.recursion_depth += 1;
+        let result = self.unify_internal_inner(left, right, expression);
+        self.recursion_depth -= 1;
+        result
+    }
+
+    fn unify_internal_inner(
         &mut self,
         left: CoreType,
         right: CoreType,
@@ -3595,6 +3648,19 @@ impl InferenceState {
         &mut self,
         core_type: &CoreType,
     ) -> Result<BTreeSet<InferenceVariableId>, InferenceError> {
+        if self.recursion_depth >= RECURSION_LIMIT {
+            return Err(InferenceError::RecursionLimitExceeded);
+        }
+        self.recursion_depth += 1;
+        let result = self.free_type_variables_in_core_type_inner(core_type);
+        self.recursion_depth -= 1;
+        result
+    }
+
+    fn free_type_variables_in_core_type_inner(
+        &mut self,
+        core_type: &CoreType,
+    ) -> Result<BTreeSet<InferenceVariableId>, InferenceError> {
         match self.resolve(core_type.clone())? {
             CoreType::Any
             | CoreType::Unknown
@@ -4257,6 +4323,7 @@ pub enum InferenceError {
         range: Range,
         expression_id: ExpressionId,
     },
+    RecursionLimitExceeded,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

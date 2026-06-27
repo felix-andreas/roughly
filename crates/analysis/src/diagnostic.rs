@@ -1,7 +1,7 @@
 use {
     crate::{
         interner::{Interner, Symbol},
-        typecheck::{InferenceError, OperandExpectation, SubscriptKind},
+        typecheck::{InferenceError, OperandExpectation, RECURSION_LIMIT, SubscriptKind},
         types::{Atomic, Constraint, CoreType, InferenceVariableId, TypeScheme},
     },
     std::{collections::BTreeMap, fmt},
@@ -395,6 +395,12 @@ impl Diagnostic {
                     format!("`[` is not supported on `{}`", type_renderer.render(actual)),
                 )
             }
+            InferenceError::RecursionLimitExceeded => (
+                fallback_range,
+                format!(
+                    "This type is nested too deeply to check (more than {RECURSION_LIMIT} levels)."
+                ),
+            ),
         };
 
         Self::type_error(range, message)
