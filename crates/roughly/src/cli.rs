@@ -3,6 +3,7 @@ use {
         config::{self, ExperimentalFeatures},
         diagnostics, format, index,
         lsp_types::DiagnosticSeverity,
+        position::PositionEncoding,
         server, tree, utils,
     },
     analysis::{self, Analysis},
@@ -141,8 +142,14 @@ pub fn check(maybe_files: Option<&[PathBuf]>) -> Result<(), CheckError> {
                 ));
                 continue;
             };
-            let diagnostics =
-                diagnostics::convert_diagnostics(analysis_state.document_diagnostics(document_id));
+            let diagnostics = diagnostics::convert_diagnostics(
+                analysis_state.document_diagnostics(document_id),
+                analysis_state
+                    .document(&path)
+                    .unwrap_or_else(|| panic!("analysis document missing for {}", path.display()))
+                    .rope(),
+                PositionEncoding::Utf8,
+            );
 
             for diagnostic in diagnostics {
                 n_errors += 1;
@@ -468,8 +475,8 @@ pub fn index(paths: Option<&[PathBuf]>, nested: bool, print_items: bool) -> Resu
                 for symbol in &symbols {
                     eprintln!(
                         "    {:04}:{:03} {} ({})",
-                        symbol.range.start.line,
-                        symbol.range.start.character,
+                        symbol.range.start.line_index,
+                        symbol.range.start.character_index,
                         style(&symbol.name).bold(),
                         style(match symbol.info {
                             index::ItemInfo::Unknown => "unknown",

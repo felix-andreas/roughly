@@ -12,13 +12,14 @@ pub struct TextRange {
     pub end: TextPosition,
 }
 
-pub fn line_character_to_character_index(rope: &Rope, position: TextPosition) -> Option<usize> {
-    let line_start_character = rope.try_line_to_char(position.line_index).ok()?;
+// A `TextPosition` column is a UTF-8 byte offset within its line (tree-sitter `Point` semantics),
+// so resolving it against the rope yields an absolute byte index.
+pub fn line_character_to_byte_index(rope: &Rope, position: TextPosition) -> Option<usize> {
+    let line_start_byte = rope.try_line_to_byte(position.line_index).ok()?;
     let line_text = rope.get_line(position.line_index)?;
-    let line_character_count = line_text.len_chars();
 
-    (position.character_index <= line_character_count)
-        .then_some(line_start_character + position.character_index)
+    (position.character_index <= line_text.len_bytes())
+        .then_some(line_start_byte + position.character_index)
 }
 
 pub fn node_text(rope: &Rope, node: Node<'_>) -> Option<String> {

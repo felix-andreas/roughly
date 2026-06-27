@@ -3,6 +3,7 @@ pub mod config;
 pub mod diagnostics;
 pub mod format;
 pub mod index;
+pub mod position;
 pub mod server;
 pub mod symbols;
 pub mod tree;

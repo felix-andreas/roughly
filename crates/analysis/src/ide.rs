@@ -1275,8 +1275,11 @@ fn extract_completion_context(
     rope: &Rope,
 ) -> Option<(CompletionContext, String)> {
     let line = rope.get_line(position.line_index)?;
+    // The column is a UTF-8 byte offset within the line, so scan only the bytes preceding the
+    // cursor before walking their characters.
+    let prefix = line.get_byte_slice(..position.character_index.min(line.len_bytes()))?;
     let mut previous = None;
-    Some(line.chars().take(position.character_index).fold(
+    Some(prefix.chars().fold(
         (CompletionContext::Default, String::new()),
         |(mut context, mut query), character| {
             if character.is_alphabetic()

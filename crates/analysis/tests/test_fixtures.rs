@@ -14,7 +14,7 @@ use {
         lower::{self, LoweringContext},
         naming::{DocumentKind, resolve_document_locally},
         render_diagnostics, render_hover_markdown, render_type_scheme, resolve_package,
-        text::line_character_to_character_index,
+        text::line_character_to_byte_index,
         tree::new_parser,
         type_syntax::{parse_type_syntax, render_type_syntax},
         typecheck::{TypeDefinitionEnvironment, inference_state_with_builtins},
@@ -758,9 +758,9 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
         let mut replacements = edits
             .iter()
             .map(|edit| {
-                let start = line_character_to_character_index(&rope, edit.range.start)
+                let start = line_character_to_byte_index(&rope, edit.range.start)
                     .ok_or_else(|| "rename edit start is out of bounds".to_owned())?;
-                let end = line_character_to_character_index(&rope, edit.range.end)
+                let end = line_character_to_byte_index(&rope, edit.range.end)
                     .ok_or_else(|| "rename edit end is out of bounds".to_owned())?;
                 Ok((start, end, edit.replacement_text.clone()))
             })

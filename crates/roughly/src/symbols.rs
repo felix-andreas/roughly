@@ -1,22 +1,34 @@
 use {
     crate::{
         index::{Item, ItemInfo, SymbolsMap},
-        lsp_types::{DocumentSymbol, Location, OneOf, SymbolKind, Url as Uri, WorkspaceSymbol},
+        lsp_types::{
+            DocumentSymbol, Location, OneOf, Range, SymbolKind, Url as Uri, WorkspaceSymbol,
+        },
     },
-    analysis::ide::{MatchScore, search_match},
+    analysis::{
+        TextRange,
+        ide::{MatchScore, search_match},
+    },
+    std::path::Path,
 };
 
-pub fn document(items: &[Item]) -> Vec<DocumentSymbol> {
+// `Item` ranges are byte columns; symbol output is encoded into the negotiated LSP encoding by the
+// `to_lsp` converter the server boundary supplies (it carries the document rope and encoding).
+pub fn document(items: &[Item], to_lsp: &impl Fn(TextRange) -> Range) -> Vec<DocumentSymbol> {
     items
         .iter()
         .filter(|item| !item.name.is_empty()) // lsp: doens't allow empty names
-        .map(to_document_symbol)
+        .map(|item| to_document_symbol(item, to_lsp))
         .collect()
 }
 
 const WORKSPACE_SYMBOL_LIMIT: usize = 128;
 
-pub fn workspace(query: &str, workspace_symbols: &impl SymbolsMap) -> Vec<WorkspaceSymbol> {
+pub fn workspace(
+    query: &str,
+    workspace_symbols: &impl SymbolsMap,
+    to_lsp: &impl Fn(&Path, TextRange) -> Range,
+) -> Vec<WorkspaceSymbol> {
     // Collect every subsequence match with its ranking score, then sort and truncate. Truncating
     // during collection (the previous behaviour) would drop good matches in arbitrary map order.
     let mut matches: Vec<(MatchScore, String, WorkspaceSymbol)> = workspace_symbols.filter_map(
@@ -47,7 +59,7 @@ pub fn workspace(query: &str, workspace_symbols: &impl SymbolsMap) -> Vec<Worksp
                             container_name: container_name.map(str::to_string),
                             location: OneOf::Left(Location {
                                 uri: uri.clone(),
-                                range: symbol.range,
+                                range: to_lsp(path, symbol.range),
                             }),
                             data: None,
                         },
@@ -67,18 +79,18 @@ pub fn workspace(query: &str, workspace_symbols: &impl SymbolsMap) -> Vec<Worksp
         .collect()
 }
 
-pub fn to_document_symbol(item: &Item) -> DocumentSymbol {
+pub fn to_document_symbol(item: &Item, to_lsp: &impl Fn(TextRange) -> Range) -> DocumentSymbol {
     DocumentSymbol {
         name: item.display_name(),
         kind: to_symbol_kind(&item.info),
         detail: item.detail.clone(),
         tags: None,
-        range: item.range,
-        selection_range: item.selection_range,
+        range: to_lsp(item.range),
+        selection_range: to_lsp(item.selection_range),
         children: item
             .children
             .as_ref()
-            .map(|children| children.iter().map(to_document_symbol).collect()),
+            .map(|children| children.iter().map(|child| to_document_symbol(child, to_lsp)).collect()),
         #[allow(deprecated)]
         deprecated: None,
     }
@@ -107,17 +119,31 @@ mod workspace_tests {
         super::workspace,
         crate::{
             index::{Item, ItemInfo},
-            lsp_types::Range,
+            lsp_types::{Position, Range},
         },
+        analysis::{TextPosition, TextRange},
         std::{collections::HashMap, path::PathBuf},
     };
+
+    fn zero_range() -> TextRange {
+        TextRange {
+            start: TextPosition {
+                line_index: 0,
+                character_index: 0,
+            },
+            end: TextPosition {
+                line_index: 0,
+                character_index: 0,
+            },
+        }
+    }
 
     fn item(name: &str) -> Item {
         Item::new(
             name.to_owned(),
             None,
-            Range::default(),
-            Range::default(),
+            zero_range(),
+            zero_range(),
             None,
             ItemInfo::Function,
         )
@@ -129,10 +155,12 @@ mod workspace_tests {
             PathBuf::from("/pkg/R/main.R"),
             candidates.iter().map(|name| item(name)).collect(),
         );
-        workspace(query, &map)
-            .into_iter()
-            .map(|symbol| symbol.name)
-            .collect()
+        workspace(query, &map, &|_path, _range| {
+            Range::new(Position::new(0, 0), Position::new(0, 0))
+        })
+        .into_iter()
+        .map(|symbol| symbol.name)
+        .collect()
     }
 
     #[test]

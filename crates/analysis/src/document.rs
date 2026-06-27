@@ -48,23 +48,25 @@ impl Document {
         // based on: https://github.com/marceline-cramer/saturn-v/blob/93d1c8fd02/lsp/src/lib.rs
         let (rope, tree) = (&mut self.rope, &mut self.tree);
         for change in changes {
+            // Columns are UTF-8 byte offsets within their line (tree-sitter `Point` semantics),
+            // so the change range maps directly onto byte offsets in the rope.
             let start_line = change.range.start.line_index;
             let start_column = change.range.start.character_index;
             let end_line = change.range.end.line_index;
             let end_column = change.range.end.character_index;
 
-            let start_character = rope.line_to_char(start_line) + start_column;
-            let end_character = rope.line_to_char(end_line) + end_column;
-
-            let start_byte = rope.char_to_byte(start_character);
-            let old_end_byte = rope.char_to_byte(end_character);
+            let start_byte = rope.line_to_byte(start_line) + start_column;
+            let old_end_byte = rope.line_to_byte(end_line) + end_column;
             let new_end_byte = start_byte + change.text.len();
+
+            let start_character = rope.byte_to_char(start_byte);
+            let end_character = rope.byte_to_char(old_end_byte);
 
             rope.remove(start_character..end_character);
             rope.insert(start_character, &change.text);
 
             let new_end_line = rope.byte_to_line(new_end_byte);
-            let new_end_column = rope.byte_to_char(new_end_byte) - rope.line_to_char(new_end_line);
+            let new_end_column = new_end_byte - rope.line_to_byte(new_end_line);
 
             tree.edit(&InputEdit {
                 start_byte,

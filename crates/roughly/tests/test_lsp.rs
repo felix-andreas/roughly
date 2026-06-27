@@ -3,14 +3,15 @@ use {
         LanguageServer,
         concurrency::{Concurrency, ConcurrencyLayer},
         lsp_types::{
-            CompletionParams, CompletionResponse, DidChangeWatchedFilesParams,
+            ClientCapabilities, CompletionParams, CompletionResponse, DidChangeWatchedFilesParams,
             DidOpenTextDocumentParams, DocumentFormattingParams, DocumentSymbolParams,
             DocumentSymbolResponse, FileChangeType, FileEvent, FormattingOptions,
-            GotoDefinitionParams, GotoDefinitionResponse, HoverContents, HoverParams,
-            HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
-            PartialResultParams, Position, PublishDiagnosticsParams, ReferenceContext,
-            ReferenceParams, RenameParams, TextDocumentIdentifier, TextDocumentItem,
-            TextDocumentPositionParams, Url, WorkDoneProgressParams, WorkspaceFolder,
+            GeneralClientCapabilities, GotoDefinitionParams, GotoDefinitionResponse, HoverContents,
+            HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
+            InitializedParams, PartialResultParams, Position, PositionEncodingKind,
+            PublishDiagnosticsParams, ReferenceContext, ReferenceParams, RenameParams,
+            TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
+            WorkDoneProgressParams, WorkspaceFolder,
             notification::{PublishDiagnostics, ShowMessage},
             request::RegisterCapability,
         },
@@ -132,6 +133,21 @@ async fn setup_test_with_r_dir_and_features(
     initial_files: &[(&str, &str)],
     experimental_features: &[&str],
 ) -> TestContext {
+    setup_test_inner(
+        create_r_directory,
+        initial_files,
+        experimental_features,
+        ClientCapabilities::default(),
+    )
+    .await
+}
+
+async fn setup_test_inner(
+    create_r_directory: bool,
+    initial_files: &[(&str, &str)],
+    experimental_features: &[&str],
+    capabilities: ClientCapabilities,
+) -> TestContext {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
     let workspace_dir = temp_dir.path().to_path_buf();
     if create_r_directory {
@@ -168,6 +184,7 @@ async fn setup_test_with_r_dir_and_features(
                 uri: root_uri,
                 name: "root".into(),
             }]),
+            capabilities,
             ..InitializeParams::default()
         })
         .await
@@ -200,6 +217,20 @@ async fn setup_test_with_features(
     experimental_features: &[&str],
 ) -> TestContext {
     setup_test_with_r_dir_and_features(true, initial_files, experimental_features).await
+}
+
+async fn setup_test_with_position_encodings(
+    initial_files: &[(&str, &str)],
+    position_encodings: &[PositionEncodingKind],
+) -> TestContext {
+    let capabilities = ClientCapabilities {
+        general: Some(GeneralClientCapabilities {
+            position_encodings: Some(position_encodings.to_vec()),
+            ..GeneralClientCapabilities::default()
+        }),
+        ..ClientCapabilities::default()
+    };
+    setup_test_inner(true, initial_files, &[], capabilities).await
 }
 
 impl TestContext {
@@ -1003,6 +1034,274 @@ async fn config_reload_on_change() {
         reloaded_edits[0].new_text.contains("    x + 1"),
         "expected 4-space indentation after config reload, got:\n{}",
         reloaded_edits[0].new_text
+    );
+
+    context.shutdown().await;
+}
+
+// Position-encoding negotiation. The analysis crate addresses text with UTF-8 byte columns
+// (tree-sitter `Point` semantics); these tests assert that the server translates LSP positions to
+// and from the negotiated encoding so non-ASCII lines still produce correct spans.
+
+#[tokio::test]
+async fn initialize_negotiates_utf16_by_default() {
+    let context = setup_test(&[]).await;
+    assert_eq!(
+        context.init_result.capabilities.position_encoding,
+        Some(PositionEncodingKind::UTF16),
+        "without client-offered encodings the server must advertise UTF-16"
+    );
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn initialize_negotiates_utf8_when_offered() {
+    let context = setup_test_with_position_encodings(&[], &[PositionEncodingKind::UTF8]).await;
+    assert_eq!(
+        context.init_result.capabilities.position_encoding,
+        Some(PositionEncodingKind::UTF8),
+        "the server must prefer UTF-8 when the client offers it"
+    );
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn hover_range_under_utf16_with_bmp_non_ascii() {
+    let mut context = setup_test_with_features(&[], &[]).await;
+
+    let file_uri = context.file_uri("R/bmp.R");
+    // `é` is one UTF-16 code unit but two UTF-8 bytes, so the byte column of `target` (16) differs
+    // from its UTF-16 column (15).
+    context
+        .open_file(&file_uri, "target <- 1L\ny <- f(\"café\", target)\n")
+        .await;
+
+    let hover = context
+        .server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(1, 17),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover request failed")
+        .expect("hover response missing");
+
+    let range = hover.range.expect("hover should report a range");
+    assert_eq!(range.start.line, 1);
+    assert_eq!(
+        (range.start.character, range.end.character),
+        (15, 21),
+        "expected the UTF-16 span of `target`, got: {range:?}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn hover_range_under_utf16_with_non_bmp_emoji() {
+    let mut context = setup_test_with_features(&[], &[]).await;
+
+    let file_uri = context.file_uri("R/emoji.R");
+    // `🦀` is a non-BMP code point: two UTF-16 code units, four UTF-8 bytes, one scalar. So the byte
+    // column of `target` (15) and its UTF-16 column (13) diverge by more than one.
+    context
+        .open_file(&file_uri, "target <- 1L\ny <- f(\"🦀\", target)\n")
+        .await;
+
+    let hover = context
+        .server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(1, 14),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover request failed")
+        .expect("hover response missing");
+
+    let range = hover.range.expect("hover should report a range");
+    assert_eq!(range.start.line, 1);
+    assert_eq!(
+        (range.start.character, range.end.character),
+        (13, 19),
+        "expected the UTF-16 span of `target` after an emoji, got: {range:?}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn hover_range_under_utf8_negotiation() {
+    let mut context = setup_test_with_position_encodings(&[], &[PositionEncodingKind::UTF8]).await;
+    assert_eq!(
+        context.init_result.capabilities.position_encoding,
+        Some(PositionEncodingKind::UTF8),
+    );
+
+    let file_uri = context.file_uri("R/utf8.R");
+    context
+        .open_file(&file_uri, "target <- 1L\ny <- f(\"café\", target)\n")
+        .await;
+
+    let hover = context
+        .server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                // Under UTF-8, characters are byte offsets, so `target` starts at byte column 16.
+                position: Position::new(1, 18),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover request failed")
+        .expect("hover response missing");
+
+    let range = hover.range.expect("hover should report a range");
+    assert_eq!(
+        (range.start.character, range.end.character),
+        (16, 22),
+        "expected the UTF-8 byte span of `target`, got: {range:?}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn goto_definition_range_under_utf16_with_non_ascii() {
+    let mut context = setup_test_with_features(&[], &[]).await;
+
+    let file_uri = context.file_uri("R/goto.R");
+    // The identifier `caféx` is five scalars / five UTF-16 units but six UTF-8 bytes, so its
+    // definition span ends at UTF-16 column 5 rather than byte column 6.
+    context
+        .open_file(&file_uri, "caféx <- 1L\ny <- caféx\n")
+        .await;
+
+    let result = context
+        .server
+        .definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(1, 7),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("definition request failed")
+        .expect("expected a definition response");
+
+    let location = match result {
+        GotoDefinitionResponse::Scalar(location) => location,
+        GotoDefinitionResponse::Array(mut locations) => {
+            locations.pop().expect("expected at least one location")
+        }
+        GotoDefinitionResponse::Link(_) => panic!("unexpected link response"),
+    };
+
+    assert_eq!(location.uri, file_uri);
+    assert_eq!(location.range.start.line, 0);
+    assert_eq!(location.range.start.character, 0);
+    assert_eq!(
+        location.range.end.character, 5,
+        "expected the UTF-16 end column of `caféx`, got: {:?}",
+        location.range
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn document_symbol_selection_range_under_utf16_with_non_ascii() {
+    let mut context = setup_test(&[]).await;
+
+    let file_uri = context.file_uri("R/symbol.R");
+    // `café_fn` is seven scalars / seven UTF-16 units but eight UTF-8 bytes (`é` is two bytes), so
+    // its selection range ends at UTF-16 column 7, not byte column 8.
+    context.open_file(&file_uri, "café_fn <- function() 1\n").await;
+
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    let result = context
+        .server
+        .document_symbol(DocumentSymbolParams {
+            text_document: TextDocumentIdentifier {
+                uri: file_uri.clone(),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("document_symbol request failed")
+        .expect("expected document symbols");
+
+    let symbols = match result {
+        DocumentSymbolResponse::Nested(symbols) => symbols,
+        DocumentSymbolResponse::Flat(_) => panic!("expected nested document symbols"),
+    };
+
+    let symbol = symbols
+        .iter()
+        .find(|symbol| symbol.name == "café_fn")
+        .expect("expected the café_fn symbol");
+
+    assert_eq!(symbol.selection_range.start.character, 0);
+    assert_eq!(
+        symbol.selection_range.end.character, 7,
+        "expected the UTF-16 end column of `café_fn`, got: {:?}",
+        symbol.selection_range
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn diagnostics_range_under_utf16_with_non_bmp_emoji() {
+    let mut context = setup_test(&[]).await;
+
+    // Line layout of `"🦀"; x <- T`:
+    //   scalar idx:  " =0  🦀 =1  " =2  ; =3  ' '=4  x =5  ' '=6  < =7  - =8  ' '=9  T =10
+    // `🦀` is non-BMP: 2 UTF-16 code units / 4 UTF-8 bytes / 1 scalar. The `T` lint span is one
+    // token, so its columns diverge: UTF-16 = 11..12, UTF-8 byte = 13..14. Under default utf-16
+    // negotiation the server must report the UTF-16 columns (11, 12), not the byte columns.
+    let source = "\"🦀\"; x <- T\n";
+    let file_path = context.workspace_dir.join("R/emoji_diag.R");
+    std::fs::write(&file_path, source).expect("failed to write test file");
+
+    let file_uri = context.file_uri("R/emoji_diag.R");
+    context.open_file(&file_uri, source).await;
+
+    let diagnostics = recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
+
+    let true_diagnostic = diagnostics
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("TRUE"))
+        .unwrap_or_else(|| panic!("expected a T-vs-TRUE diagnostic, got: {:?}", diagnostics.diagnostics));
+
+    assert_eq!(true_diagnostic.range.start.line, 0);
+    assert_eq!(
+        (
+            true_diagnostic.range.start.character,
+            true_diagnostic.range.end.character,
+        ),
+        (11, 12),
+        "expected the UTF-16 span of `T`, got: {:?}",
+        true_diagnostic.range
     );
 
     context.shutdown().await;

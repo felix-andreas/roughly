@@ -4,6 +4,7 @@ use {
         config::{Config, ExperimentalFeatures},
         diagnostics, format,
         index::{self, IndexError, Item},
+        position::{self, PositionEncoding},
         lsp_types::{
             CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionOptions,
             CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
@@ -24,7 +25,7 @@ use {
             WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
         },
-        symbols, utils,
+        symbols,
     },
     analysis::{self, Analysis, DocumentChange, TextPosition, TextRange, ide},
     async_lsp::{
@@ -97,6 +98,7 @@ struct ServerState {
     workspace_root: PathBuf,
     open_documents: HashSet<PathBuf>,
     analysis_state: Analysis,
+    position_encoding: PositionEncoding,
 }
 
 impl ServerState {
@@ -114,6 +116,7 @@ impl ServerState {
             workspace_root: workspace_root.clone(),
             open_documents: HashSet::new(),
             analysis_state: Analysis::new(workspace_root.clone(), config.lint, config.check),
+            position_encoding: PositionEncoding::Utf16,
         })
     }
 
@@ -130,6 +133,78 @@ impl ServerState {
             .contains(path)
             .then(|| self.document(path))
             .flatten()
+    }
+
+    fn to_internal_position(&self, path: &Path, position: Position) -> Option<TextPosition> {
+        let rope = self.document(path)?.rope();
+        Some(position::lsp_position_to_internal(
+            rope,
+            self.position_encoding,
+            position,
+        ))
+    }
+
+    fn to_internal_range(&self, path: &Path, range: Range) -> Option<TextRange> {
+        let rope = self.document(path)?.rope();
+        Some(position::lsp_range_to_internal(
+            rope,
+            self.position_encoding,
+            range,
+        ))
+    }
+
+    // The target of a definition, reference, or rename edit may live in a different document than
+    // the request, so the outgoing range is encoded against that document's rope.
+    fn to_lsp_range_in(&self, path: &Path, range: TextRange) -> Range {
+        match self.document(path) {
+            Some(document) => {
+                position::internal_range_to_lsp(document.rope(), self.position_encoding, range)
+            }
+            None => Range::new(
+                Position::new(
+                    range.start.line_index as u32,
+                    range.start.character_index as u32,
+                ),
+                Position::new(
+                    range.end.line_index as u32,
+                    range.end.character_index as u32,
+                ),
+            ),
+        }
+    }
+
+    fn to_lsp_position_in(&self, path: &Path, position: TextPosition) -> Position {
+        match self.document(path) {
+            Some(document) => position::internal_position_to_lsp(
+                document.rope(),
+                self.position_encoding,
+                position,
+            ),
+            None => Position::new(position.line_index as u32, position.character_index as u32),
+        }
+    }
+
+    fn convert_document_diagnostics(
+        &self,
+        document_id: analysis::DocumentId,
+    ) -> Vec<crate::lsp_types::Diagnostic> {
+        let rope = self
+            .analysis_state
+            .document_by_id(document_id)
+            .expect("diagnostics document present in analysis state")
+            .rope();
+        diagnostics::convert_diagnostics(
+            self.analysis_state.document_diagnostics(document_id),
+            rope,
+            self.position_encoding,
+        )
+    }
+
+    fn convert_location(&self, location: analysis::ide::Location) -> Location {
+        Location {
+            uri: Url::from_file_path(&location.path).expect("location path should convert to URI"),
+            range: self.to_lsp_range_in(&location.path, location.range),
+        }
     }
 
     fn package_items_map(&mut self) -> HashMap<PathBuf, Vec<Item>> {
@@ -167,9 +242,16 @@ impl LanguageServer for ServerState {
 
     fn initialize(
         &mut self,
-        _: InitializeParams,
+        params: InitializeParams,
     ) -> BoxFuture<'static, Result<InitializeResult, ResponseError>> {
         tracing::info!(?self.experimental_features, "initialize");
+
+        let client_encodings = params
+            .capabilities
+            .general
+            .and_then(|general| general.position_encodings);
+        self.position_encoding = PositionEncoding::negotiate(client_encodings.as_deref());
+        tracing::info!(?self.position_encoding, "negotiated position encoding");
 
         let workspace_r_path = self.workspace_r_path();
 
@@ -196,6 +278,7 @@ impl LanguageServer for ServerState {
 
         box_future(Ok(InitializeResult {
             capabilities: ServerCapabilities {
+                position_encoding: Some(self.position_encoding.kind()),
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec!["$".into(), "@".into(), ":".into()]),
                     ..Default::default()
@@ -236,8 +319,6 @@ impl LanguageServer for ServerState {
     }
 
     fn initialized(&mut self, _: InitializedParams) -> ControlFlow<async_lsp::Result<()>> {
-        // TODO: consider to negotiate client capabilities
-        // see: https://github.com/oxalica/nil/blob/870a4b1b5f/crates/nil/src/capabilities.rs
         let workspace_r_path = self.workspace_r_path();
 
         let params = RegistrationParams {
@@ -321,8 +402,7 @@ impl LanguageServer for ServerState {
                 )
             });
         analysis::run_fast(&mut self.analysis_state);
-        let diagnostics =
-            diagnostics::convert_diagnostics(self.analysis_state.document_diagnostics(document_id));
+        let diagnostics = self.convert_document_diagnostics(document_id);
 
         if let Err(error) = self
             .client
@@ -397,38 +477,35 @@ impl LanguageServer for ServerState {
             path.display()
         ));
 
-        let changes = content_changes
-            .into_iter()
-            .map(|change| {
-                let range = change.range.unwrap_or_else(|| {
-                    panic!(
-                        "incremental did_change for {} must include a range",
-                        path.display()
-                    )
-                });
-                DocumentChange {
-                    range: TextRange {
-                        start: TextPosition {
-                            line_index: range.start.line as usize,
-                            character_index: range.start.character as usize,
-                        },
-                        end: TextPosition {
-                            line_index: range.end.line as usize,
-                            character_index: range.end.character as usize,
-                        },
-                    },
-                    text: change.text,
-                }
-            })
-            .collect::<Vec<_>>();
-        self.analysis_state
-            .edit_document(&path, &changes)
-            .unwrap_or_else(|error| {
+        // Each incremental change's range refers to the document state after the previous changes
+        // in the batch are applied, so positions are converted and applied against the live rope
+        // one change at a time rather than all up front.
+        for change in content_changes {
+            let range = change.range.unwrap_or_else(|| {
                 panic!(
-                    "failed to edit analysis document {} incrementally: {error:?}",
+                    "incremental did_change for {} must include a range",
                     path.display()
                 )
             });
+            let internal_range = self.to_internal_range(&path, range).unwrap_or_else(|| {
+                panic!(
+                    "analysis document not found while converting did_change range for {}",
+                    path.display()
+                )
+            });
+            let document_change = DocumentChange {
+                range: internal_range,
+                text: change.text,
+            };
+            self.analysis_state
+                .edit_document(&path, std::slice::from_ref(&document_change))
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "failed to edit analysis document {} incrementally: {error:?}",
+                        path.display()
+                    )
+                });
+        }
 
         let document_id = self
             .analysis_state
@@ -440,8 +517,7 @@ impl LanguageServer for ServerState {
                 )
             });
         analysis::run_fast(&mut self.analysis_state);
-        let diagnostics =
-            diagnostics::convert_diagnostics(self.analysis_state.document_diagnostics(document_id));
+        let diagnostics = self.convert_document_diagnostics(document_id);
 
         if let Err(error) = self
             .client
@@ -507,10 +583,7 @@ impl LanguageServer for ServerState {
                     Err(()) => continue,
                 }
             };
-            let diagnostics = diagnostics::convert_diagnostics(
-                self.analysis_state
-                    .document_diagnostics(affected_document_id),
-            );
+            let diagnostics = self.convert_document_diagnostics(affected_document_id);
             if let Err(error) = self
                 .client
                 .publish_diagnostics(PublishDiagnosticsParams::new(affected_uri, diagnostics, None))
@@ -613,38 +686,41 @@ impl LanguageServer for ServerState {
             return box_future(Err(path_not_found_error(&path)));
         }
 
-        let completions = ide::completion(
-            &mut self.analysis_state,
-            &path,
-            TextPosition {
-                line_index: position.line as usize,
-                character_index: position.character as usize,
-            },
-        )
-        .map(|items| {
-            CompletionResponse::Array(
-                items
-                    .into_iter()
-                    .map(|item| CompletionItem {
-                        label: item.label,
-                        label_details: Some(CompletionItemLabelDetails {
-                            detail: None,
-                            description: Some(match item.source {
-                                analysis::CompletionItemSource::Keyword => "Keyword".into(),
-                                analysis::CompletionItemSource::Local => "Local".into(),
-                                analysis::CompletionItemSource::Global => "Global".into(),
+        let internal_position = self
+            .to_internal_position(&path, position)
+            .expect("opened document rope available for completion");
+        let completions = ide::completion(&mut self.analysis_state, &path, internal_position).map(
+            |items| {
+                CompletionResponse::Array(
+                    items
+                        .into_iter()
+                        .map(|item| CompletionItem {
+                            label: item.label,
+                            label_details: Some(CompletionItemLabelDetails {
+                                detail: None,
+                                description: Some(match item.source {
+                                    analysis::CompletionItemSource::Keyword => "Keyword".into(),
+                                    analysis::CompletionItemSource::Local => "Local".into(),
+                                    analysis::CompletionItemSource::Global => "Global".into(),
+                                }),
                             }),
-                        }),
-                        kind: Some(match item.kind {
-                            analysis::CompletionItemKind::Keyword => CompletionItemKind::KEYWORD,
-                            analysis::CompletionItemKind::Variable => CompletionItemKind::VARIABLE,
-                            analysis::CompletionItemKind::Function => CompletionItemKind::FUNCTION,
-                        }),
-                        ..Default::default()
-                    })
-                    .collect(),
-            )
-        });
+                            kind: Some(match item.kind {
+                                analysis::CompletionItemKind::Keyword => {
+                                    CompletionItemKind::KEYWORD
+                                }
+                                analysis::CompletionItemKind::Variable => {
+                                    CompletionItemKind::VARIABLE
+                                }
+                                analysis::CompletionItemKind::Function => {
+                                    CompletionItemKind::FUNCTION
+                                }
+                            }),
+                            ..Default::default()
+                        })
+                        .collect(),
+                )
+            },
+        );
 
         box_future(Ok(completions))
     }
@@ -668,26 +744,22 @@ impl LanguageServer for ServerState {
             return box_future(Err(path_not_found_error(&path)));
         }
 
-        let response = ide::definition(
-            &mut self.analysis_state,
-            &path,
-            TextPosition {
-                line_index: position.line as usize,
-                character_index: position.character as usize,
-            },
-        )
-        .map(|locations| {
-            let mut locations = locations
-                .into_iter()
-                .map(convert_location)
-                .collect::<Vec<_>>();
-            match locations.len() {
-                1 => GotoDefinitionResponse::Scalar(
-                    locations.pop().expect("single definition location"),
-                ),
-                _ => GotoDefinitionResponse::Array(locations),
-            }
-        });
+        let internal_position = self
+            .to_internal_position(&path, position)
+            .expect("opened document rope available for definition");
+        let response =
+            ide::definition(&mut self.analysis_state, &path, internal_position).map(|locations| {
+                let mut locations = locations
+                    .into_iter()
+                    .map(|location| self.convert_location(location))
+                    .collect::<Vec<_>>();
+                match locations.len() {
+                    1 => GotoDefinitionResponse::Scalar(
+                        locations.pop().expect("single definition location"),
+                    ),
+                    _ => GotoDefinitionResponse::Array(locations),
+                }
+            });
 
         box_future(Ok(response))
     }
@@ -711,14 +783,10 @@ impl LanguageServer for ServerState {
             return box_future(Err(path_not_found_error(&path)));
         }
 
-        let Some(hover_info) = ide::hover(
-            &mut self.analysis_state,
-            &path,
-            TextPosition {
-                line_index: position.line as usize,
-                character_index: position.character as usize,
-            },
-        ) else {
+        let internal_position = self
+            .to_internal_position(&path, position)
+            .expect("opened document rope available for hover");
+        let Some(hover_info) = ide::hover(&mut self.analysis_state, &path, internal_position) else {
             tracing::debug!(?position, "hover target not found");
             return box_future(Ok(None));
         };
@@ -730,16 +798,7 @@ impl LanguageServer for ServerState {
                 kind: MarkupKind::Markdown,
                 value,
             }),
-            range: Some(Range::new(
-                Position::new(
-                    hover_info.range.start.line_index as u32,
-                    hover_info.range.start.character_index as u32,
-                ),
-                Position::new(
-                    hover_info.range.end.line_index as u32,
-                    hover_info.range.end.character_index as u32,
-                ),
-            )),
+            range: Some(self.to_lsp_range_in(&path, hover_info.range)),
         };
 
         box_future(Ok(Some(hover)))
@@ -763,13 +822,11 @@ impl LanguageServer for ServerState {
             return box_future(Err(path_not_found_error(&path)));
         }
 
-        let hints = ide::inlay_hints(&mut self.analysis_state, &path)
+        let raw_hints = ide::inlay_hints(&mut self.analysis_state, &path);
+        let hints = raw_hints
             .into_iter()
             .map(|hint| InlayHint {
-                position: Position::new(
-                    hint.position.line_index as u32,
-                    hint.position.character_index as u32,
-                ),
+                position: self.to_lsp_position_in(&path, hint.position),
                 label: InlayHintLabel::String(hint.label),
                 kind: Some(InlayHintKind::TYPE),
                 text_edits: None,
@@ -802,14 +859,11 @@ impl LanguageServer for ServerState {
             return box_future(Err(path_not_found_error(&path)));
         }
 
-        let Some(help) = ide::signature_help(
-            &mut self.analysis_state,
-            &path,
-            TextPosition {
-                line_index: position.line as usize,
-                character_index: position.character as usize,
-            },
-        ) else {
+        let internal_position = self
+            .to_internal_position(&path, position)
+            .expect("opened document rope available for signature help");
+        let Some(help) = ide::signature_help(&mut self.analysis_state, &path, internal_position)
+        else {
             return box_future(Ok(None));
         };
 
@@ -867,19 +921,19 @@ impl LanguageServer for ServerState {
             }
         };
 
+        let rope = document.rope();
+        let last_line = rope.len_lines().saturating_sub(1);
+        let document_end = position::internal_position_to_lsp(
+            rope,
+            self.position_encoding,
+            TextPosition {
+                line_index: last_line,
+                character_index: rope.line(last_line).len_bytes(),
+            },
+        );
         let edits = vec![TextEdit {
             new_text,
-            range: Range::new(
-                Position::new(0, 0),
-                Position::new(
-                    (document.rope().len_lines() - 1) as u32,
-                    (document.rope().len_chars()
-                        - document
-                            .rope()
-                            .line_to_char(document.rope().len_lines() - 1))
-                        as u32,
-                ),
-            ),
+            range: Range::new(Position::new(0, 0), document_end),
         }];
 
         box_future(Ok(Some(edits)))
@@ -900,9 +954,18 @@ impl LanguageServer for ServerState {
             return box_future(Err(path_not_found_error(&path)));
         };
 
+        let internal_range = self
+            .to_internal_range(&path, range)
+            .expect("opened document rope available for range formatting");
         let Some(node) = document.tree().root_node().descendant_for_point_range(
-            Point::new(range.start.line as usize, range.start.character as usize),
-            Point::new(range.end.line as usize, range.end.character as usize),
+            Point::new(
+                internal_range.start.line_index,
+                internal_range.start.character_index,
+            ),
+            Point::new(
+                internal_range.end.line_index,
+                internal_range.end.character_index,
+            ),
         ) else {
             tracing::info!(?range, "no node for range");
             return box_future(Ok(None));
@@ -918,7 +981,11 @@ impl LanguageServer for ServerState {
 
         let edits = vec![TextEdit {
             new_text,
-            range: utils::node_range(node),
+            range: position::tree_sitter_range_to_lsp(
+                document.rope(),
+                self.position_encoding,
+                node.range(),
+            ),
         }];
 
         box_future(Ok(Some(edits)))
@@ -944,16 +1011,17 @@ impl LanguageServer for ServerState {
             return box_future(Err(path_not_found_error(&path)));
         }
 
-        let references = ide::references(
-            &mut self.analysis_state,
-            &path,
-            TextPosition {
-                line_index: position.line as usize,
-                character_index: position.character as usize,
-            },
-            include_declaration,
-        )
-        .map(|locations| locations.into_iter().map(convert_location).collect());
+        let internal_position = self
+            .to_internal_position(&path, position)
+            .expect("opened document rope available for references");
+        let references =
+            ide::references(&mut self.analysis_state, &path, internal_position, include_declaration)
+                .map(|locations| {
+                    locations
+                        .into_iter()
+                        .map(|location| self.convert_location(location))
+                        .collect()
+                });
 
         box_future(Ok(references))
     }
@@ -978,47 +1046,35 @@ impl LanguageServer for ServerState {
             return box_future(Err(path_not_found_error(&path)));
         }
 
-        let workspace_edit = ide::rename(
-            &mut self.analysis_state,
-            &path,
-            TextPosition {
-                line_index: position.line as usize,
-                character_index: position.character as usize,
-            },
-            &new_name,
-        )
-        .map(|rename_result| {
-            let changes = rename_result
-                .edits
-                .into_iter()
-                .map(|(path, edits)| {
-                    let uri =
-                        Url::from_file_path(path).expect("rename edit path should convert to URI");
-                    let edits = edits
+        let internal_position = self
+            .to_internal_position(&path, position)
+            .expect("opened document rope available for rename");
+        let workspace_edit =
+            ide::rename(&mut self.analysis_state, &path, internal_position, &new_name).map(
+                |rename_result| {
+                    let changes = rename_result
+                        .edits
                         .into_iter()
-                        .map(|edit| TextEdit {
-                            range: Range::new(
-                                Position::new(
-                                    edit.range.start.line_index as u32,
-                                    edit.range.start.character_index as u32,
-                                ),
-                                Position::new(
-                                    edit.range.end.line_index as u32,
-                                    edit.range.end.character_index as u32,
-                                ),
-                            ),
-                            new_text: edit.replacement_text,
+                        .map(|(edit_path, edits)| {
+                            let uri = Url::from_file_path(&edit_path)
+                                .expect("rename edit path should convert to URI");
+                            let edits = edits
+                                .into_iter()
+                                .map(|edit| TextEdit {
+                                    range: self.to_lsp_range_in(&edit_path, edit.range),
+                                    new_text: edit.replacement_text,
+                                })
+                                .collect();
+                            (uri, edits)
                         })
                         .collect();
-                    (uri, edits)
-                })
-                .collect();
 
-            WorkspaceEdit {
-                changes: Some(changes),
-                ..Default::default()
-            }
-        });
+                    WorkspaceEdit {
+                        changes: Some(changes),
+                        ..Default::default()
+                    }
+                },
+            );
 
         box_future(Ok(workspace_edit))
     }
@@ -1042,7 +1098,8 @@ impl LanguageServer for ServerState {
         // they intentionally read the parsed tree directly instead of running the analysis
         // pipeline.
         let items = index::index(document.tree().root_node(), document.rope(), false, false);
-        let symbols: Vec<DocumentSymbol> = symbols::document(&items);
+        let symbols: Vec<DocumentSymbol> =
+            symbols::document(&items, &|range| self.to_lsp_range_in(&path, range));
 
         box_future(Ok(Some(DocumentSymbolResponse::Nested(symbols))))
     }
@@ -1056,7 +1113,9 @@ impl LanguageServer for ServerState {
         tracing::debug!(?query);
 
         let workspace_items = self.package_items_map();
-        let symbols = symbols::workspace(&query, &workspace_items);
+        let symbols = symbols::workspace(&query, &workspace_items, &|path, range| {
+            self.to_lsp_range_in(path, range)
+        });
 
         box_future(Ok(Some(WorkspaceSymbolResponse::Nested(symbols))))
     }
@@ -1074,18 +1133,3 @@ fn path_not_found_error(path: &Path) -> ResponseError {
     )
 }
 
-fn convert_location(location: analysis::ide::Location) -> Location {
-    Location {
-        uri: Url::from_file_path(&location.path).expect("location path should convert to URI"),
-        range: Range::new(
-            Position::new(
-                location.range.start.line_index as u32,
-                location.range.start.character_index as u32,
-            ),
-            Position::new(
-                location.range.end.line_index as u32,
-                location.range.end.character_index as u32,
-            ),
-        ),
-    }
-}

@@ -1,5 +1,6 @@
 use {
-    crate::{lsp_types::Range, tree, utils},
+    crate::{tree, utils},
+    analysis::TextRange,
     ropey::Rope,
     std::{
         collections::HashMap,
@@ -12,8 +13,10 @@ use {
 pub struct Item {
     pub name: String,
     pub detail: Option<String>,
-    pub range: Range,
-    pub selection_range: Range,
+    // Byte-column ranges (tree-sitter `Point` semantics); the server converts them to the
+    // negotiated LSP encoding when emitting document/workspace symbols.
+    pub range: TextRange,
+    pub selection_range: TextRange,
     pub children: Option<Vec<Item>>,
     pub info: ItemInfo,
 }
@@ -43,8 +46,8 @@ impl Item {
     pub fn new(
         name: String,
         detail: Option<String>,
-        range: Range,
-        selection_range: Range,
+        range: TextRange,
+        selection_range: TextRange,
         children: Option<Vec<Item>>,
         info: ItemInfo,
     ) -> Item {

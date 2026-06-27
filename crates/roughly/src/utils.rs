@@ -1,5 +1,5 @@
 use {
-    crate::lsp_types::{Position, Range},
+    analysis::{TextPosition, TextRange},
     ropey::Rope,
     std::{fs::File, io::BufReader, path::Path},
     tree_sitter::{Node, Point},
@@ -9,16 +9,21 @@ pub fn read_to_rope(path: impl AsRef<Path>) -> std::io::Result<Rope> {
     Rope::from_reader(BufReader::new(File::open(path)?))
 }
 
-pub fn node_range(node: Node) -> Range {
-    Range::new(
-        point_to_position(node.start_position()),
-        point_to_position(node.end_position()),
-    )
+// Tree-sitter `Point` columns are UTF-8 byte offsets, which is the internal `TextRange`
+// convention; callers convert to the negotiated LSP encoding at the server boundary.
+pub fn node_range(node: Node) -> TextRange {
+    TextRange {
+        start: point_to_text_position(node.start_position()),
+        end: point_to_text_position(node.end_position()),
+    }
 }
 
 #[inline(always)]
-fn point_to_position(point: Point) -> Position {
-    Position::new(point.row as u32, point.column as u32)
+fn point_to_text_position(point: Point) -> TextPosition {
+    TextPosition {
+        line_index: point.row,
+        character_index: point.column,
+    }
 }
 
 // adapted from https://doc.rust-lang.org/stable/nightly-rustc/src/clippy_utils/str_utils.rs.html
