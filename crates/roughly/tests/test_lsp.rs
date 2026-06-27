@@ -8,7 +8,8 @@ use {
             DocumentSymbolResponse, FileChangeType, FileEvent, FormattingOptions,
             GeneralClientCapabilities, GotoDefinitionParams, GotoDefinitionResponse, HoverContents,
             HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-            InitializedParams, PartialResultParams, Position, PositionEncodingKind,
+            InitializedParams, InlayHintParams, PartialResultParams, Position, PositionEncodingKind,
+            Range,
             PublishDiagnosticsParams, ReferenceContext, ReferenceParams, RenameParams,
             TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
             WorkDoneProgressParams, WorkspaceFolder,
@@ -755,6 +756,36 @@ async fn completion() {
         labels.iter().any(|label| *label == "my_function"),
         "expected 'my_function' in completions, got: {labels:?}"
     );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn inlay_hints_respect_requested_viewport() {
+    let mut context = setup_test(&[]).await;
+
+    let file_uri = context.file_uri("R/hints.R");
+    let source = "count <- 1L\nlabel <- \"hello\"\nratio <- 2L\n";
+    context.open_file(&file_uri, source).await;
+
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    // Request only the middle line; hints on the surrounding lines must not be returned.
+    let hints = context
+        .server
+        .inlay_hint(InlayHintParams {
+            text_document: TextDocumentIdentifier {
+                uri: file_uri.clone(),
+            },
+            range: Range::new(Position::new(1, 0), Position::new(1, 16)),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("inlay hint request failed")
+        .expect("expected inlay hints");
+
+    let lines: Vec<u32> = hints.iter().map(|hint| hint.position.line).collect();
+    assert_eq!(lines, vec![1], "only the in-viewport hint should be returned");
 
     context.shutdown().await;
 }

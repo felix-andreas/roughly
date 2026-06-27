@@ -135,7 +135,14 @@ pub struct InlayHint {
 // Inferred-type hints for unannotated `name <- value` bindings, shown after the binding name like
 // rust-analyzer's let hints. Annotated bindings are skipped because the type is already written, and
 // `Unknown` is skipped because it carries no information.
-pub fn inlay_hints(analysis: &mut Analysis, path: &Path) -> Vec<InlayHint> {
+// `viewport` is an internal byte-offset range; only hints overlapping it are returned, so a client
+// scrolled to one part of a large file does not pay for hints across the whole document. `None`
+// returns hints for the entire file.
+pub fn inlay_hints(
+    analysis: &mut Analysis,
+    path: &Path,
+    viewport: Option<TextRange>,
+) -> Vec<InlayHint> {
     let Some(document_id) = analysis.document_id_for_path(path) else {
         return Vec::new();
     };
@@ -153,6 +160,11 @@ pub fn inlay_hints(analysis: &mut Analysis, path: &Path) -> Vec<InlayHint> {
         let ExpressionKind::Assign { target, .. } = &expression.kind else {
             continue;
         };
+        if let Some(viewport) = &viewport
+            && !expression_overlaps_viewport(expression.range, viewport)
+        {
+            continue;
+        }
         if expression.annotation.is_some() {
             continue;
         }
@@ -178,6 +190,18 @@ pub fn inlay_hints(analysis: &mut Analysis, path: &Path) -> Vec<InlayHint> {
 
     hints.sort_by_key(|hint| (hint.position.line_index, hint.position.character_index));
     hints
+}
+
+// Tree-sitter points and the internal `TextRange` share units (row, UTF-8 byte column), so the two
+// ranges overlap iff neither lies entirely before the other. Touching endpoints count as overlap so
+// a hint sitting on the viewport boundary is kept.
+fn expression_overlaps_viewport(range: Range, viewport: &TextRange) -> bool {
+    let expression_start = (range.start_point.row, range.start_point.column);
+    let expression_end = (range.end_point.row, range.end_point.column);
+    let viewport_start = (viewport.start.line_index, viewport.start.character_index);
+    let viewport_end = (viewport.end.line_index, viewport.end.character_index);
+
+    expression_start <= viewport_end && viewport_start <= expression_end
 }
 
 fn is_concrete_type(core_type: &CoreType) -> bool {
@@ -2015,5 +2039,51 @@ mod completion_limit_tests {
 
         assert_eq!(result.items.len(), count);
         assert!(!result.is_incomplete);
+    }
+}
+
+#[cfg(test)]
+mod inlay_viewport_tests {
+    use {
+        super::inlay_hints,
+        crate::{
+            analysis::{Analysis, CheckConfig, LintConfig},
+            text::{TextPosition, TextRange},
+        },
+        std::path::{Path, PathBuf},
+    };
+
+    fn analysis_with_three_bindings() -> Analysis {
+        let mut analysis = Analysis::new(PathBuf::new(), LintConfig::default(), CheckConfig::default());
+        analysis
+            .add_document_from_source(
+                PathBuf::from("R/main.R"),
+                "count <- 1L\nlabel <- \"hello\"\nratio <- 2L\n",
+            )
+            .expect("source parses");
+        analysis
+    }
+
+    #[test]
+    fn full_document_returns_all_hints() {
+        let mut analysis = analysis_with_three_bindings();
+        let hints = inlay_hints(&mut analysis, Path::new("R/main.R"), None);
+
+        let lines: Vec<usize> = hints.iter().map(|hint| hint.position.line_index).collect();
+        assert_eq!(lines, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn viewport_excludes_hints_outside_range() {
+        let mut analysis = analysis_with_three_bindings();
+        // Cover only the middle line; the surrounding bindings must drop out.
+        let viewport = TextRange {
+            start: TextPosition { line_index: 1, character_index: 0 },
+            end: TextPosition { line_index: 1, character_index: 99 },
+        };
+        let hints = inlay_hints(&mut analysis, Path::new("R/main.R"), Some(viewport));
+
+        let lines: Vec<usize> = hints.iter().map(|hint| hint.position.line_index).collect();
+        assert_eq!(lines, vec![1]);
     }
 }

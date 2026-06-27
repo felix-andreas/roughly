@@ -824,7 +824,10 @@ impl LanguageServer for ServerState {
             return box_future(Err(path_not_found_error(&path)));
         }
 
-        let raw_hints = ide::inlay_hints(&mut self.analysis_state, &path);
+        let viewport = self
+            .to_internal_range(&path, params.range)
+            .expect("opened document rope available for inlay hints");
+        let raw_hints = ide::inlay_hints(&mut self.analysis_state, &path, Some(viewport));
         let hints = raw_hints
             .into_iter()
             .map(|hint| InlayHint {

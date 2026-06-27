@@ -569,7 +569,7 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
                 }
                 "inlay_hints" => {
                     let path = PathBuf::from(contents.trim());
-                    let hints = ide::inlay_hints(analysis_state, &path);
+                    let hints = ide::inlay_hints(analysis_state, &path, None);
                     if hints.is_empty() {
                         "no inlay hints".to_owned()
                     } else {
