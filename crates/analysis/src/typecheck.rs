@@ -1387,8 +1387,18 @@ impl InferenceState {
             return Err(InferenceError::RecursionLimitExceeded);
         }
         self.recursion_depth += 1;
+        // Probe the structural check speculatively. A successful check keeps the inference-variable
+        // bindings it makes (the two `Variable` arms binding against the other side is how `@new` and
+        // checked annotations infer their type arguments), but any false-or-erroring check reverses
+        // every mutation. This makes the predicate pure on failure, so it leaks nothing and its result
+        // is order-independent. The snapshot does not capture `recursion_depth`.
+        let snapshot = self.snapshot();
         let result =
             self.check_compatibility_inner(actual_type, expected_type, type_definitions, expression);
+        match &result {
+            Ok(true) => self.commit(snapshot),
+            Ok(false) | Err(_) => self.rollback_to(snapshot),
+        }
         self.recursion_depth -= 1;
         result
     }
@@ -1654,11 +1664,19 @@ impl InferenceState {
                         )? {
                             Ok(expected_type)
                         } else {
-                            match self.unify_with_context(
+                            // The check failed and its speculative bindings were already reverted by
+                            // the `check_compatibility` wrapper. Re-running unification can surface a
+                            // more specific cause (occurs check, constraint violation, arity) than the
+                            // bare `TypeMismatch`; run it inside a snapshot that is always rolled back
+                            // so this error extraction leaves no net mutation.
+                            let snapshot = self.snapshot();
+                            let unify_result = self.unify_with_context(
                                 expected_type.clone(),
                                 actual_type.clone(),
                                 expression,
-                            ) {
+                            );
+                            self.rollback_to(snapshot);
+                            match unify_result {
                                 Err(error) => Err(error),
                                 Ok(_) => Err(InferenceError::TypeMismatch {
                                     expected: Box::new(expected_type),
@@ -4552,5 +4570,134 @@ mod tests {
         inference_state
             .unify(CoreType::Variable(reused), CoreType::Scalar(Atomic::Integer))
             .expect("the reclaimed id must no longer be treated as rigid");
+    }
+
+    // `check_compatibility` is private, so the S1 acceptance evidence lives in-crate rather than in
+    // the external `tests/test_typecheck.rs`.
+    fn builtins_state() -> InferenceState {
+        let mut interner = Interner::new();
+        inference_state_with_builtins_in_interner(&mut interner)
+    }
+
+    fn tuple(items: Vec<CoreType>) -> CoreType {
+        CoreType::Tuple(items)
+    }
+
+    fn check(state: &mut InferenceState, actual: CoreType, expected: CoreType) -> bool {
+        state
+            .check_compatibility(actual, expected, &TypeDefinitionEnvironment::default(), None)
+            .expect("structural compatibility check should not error")
+    }
+
+    // The boolean outcome of a check must not depend on the order it runs in: because a failed check
+    // reverses its speculative bindings, a check on a structural pair gives the same result whichever
+    // side is `actual` (each side's variable binds against the other on the way to the verdict).
+    #[test]
+    fn check_compatibility_outcome_is_order_independent() {
+        // Incompatible pair: element 0 binds a variable, element 1 fails -> false either direction.
+        let mut forward = builtins_state();
+        let a = forward.fresh_variable();
+        let forward_incompatible = check(
+            &mut forward,
+            tuple(vec![CoreType::Variable(a), CoreType::Scalar(Atomic::Logical)]),
+            tuple(vec![
+                CoreType::Scalar(Atomic::Integer),
+                CoreType::Scalar(Atomic::Integer),
+            ]),
+        );
+        let mut backward = builtins_state();
+        let b = backward.fresh_variable();
+        let backward_incompatible = check(
+            &mut backward,
+            tuple(vec![
+                CoreType::Scalar(Atomic::Integer),
+                CoreType::Scalar(Atomic::Integer),
+            ]),
+            tuple(vec![CoreType::Variable(b), CoreType::Scalar(Atomic::Logical)]),
+        );
+        assert!(!forward_incompatible);
+        assert_eq!(forward_incompatible, backward_incompatible);
+
+        // Compatible pair: both elements succeed -> true either direction.
+        let mut forward = builtins_state();
+        let a = forward.fresh_variable();
+        let forward_compatible = check(
+            &mut forward,
+            tuple(vec![CoreType::Variable(a), CoreType::Scalar(Atomic::Integer)]),
+            tuple(vec![
+                CoreType::Scalar(Atomic::Integer),
+                CoreType::Scalar(Atomic::Integer),
+            ]),
+        );
+        let mut backward = builtins_state();
+        let b = backward.fresh_variable();
+        let backward_compatible = check(
+            &mut backward,
+            tuple(vec![
+                CoreType::Scalar(Atomic::Integer),
+                CoreType::Scalar(Atomic::Integer),
+            ]),
+            tuple(vec![CoreType::Variable(b), CoreType::Scalar(Atomic::Integer)]),
+        );
+        assert!(forward_compatible);
+        assert_eq!(forward_compatible, backward_compatible);
+    }
+
+    // A check that returns `false` after binding an inner field must leave ZERO net mutation: under
+    // the pre-purity code, element 0 below bound `a` to `integer` before element 1 failed, leaking a
+    // partial binding. The wrapper now rolls that back.
+    #[test]
+    fn failing_check_leaves_no_partial_binding() {
+        let mut state = builtins_state();
+        let a = state.fresh_variable();
+        let b = state.fresh_variable();
+        let entry_count_before = state.entries.len();
+        let next_id_before = state.next_variable_id;
+
+        let result = check(
+            &mut state,
+            tuple(vec![CoreType::Variable(a), CoreType::Scalar(Atomic::Logical)]),
+            tuple(vec![
+                CoreType::Scalar(Atomic::Integer),
+                CoreType::Scalar(Atomic::Integer),
+            ]),
+        );
+
+        assert!(!result, "logical is not compatible with integer");
+        assert_eq!(state.entry(a), Some(&unbound()), "the partial binding of `a` must be reversed");
+        assert_eq!(state.entry(b), Some(&unbound()));
+        assert_eq!(state.entries.len(), entry_count_before, "no leaked entries");
+        assert_eq!(state.next_variable_id, next_id_before, "no leaked variable ids");
+    }
+
+    // The complement of purity: a SUCCESSFUL check keeps the bindings it makes, which is how `@new`
+    // and checked annotations infer their type arguments.
+    #[test]
+    fn successful_check_keeps_its_bindings() {
+        let mut state = builtins_state();
+        let a = state.fresh_variable();
+
+        let result = check(
+            &mut state,
+            tuple(vec![CoreType::Variable(a), CoreType::Scalar(Atomic::Integer)]),
+            tuple(vec![
+                CoreType::Scalar(Atomic::Integer),
+                CoreType::Scalar(Atomic::Integer),
+            ]),
+        );
+
+        assert!(result);
+        assert_eq!(
+            state.entry(a),
+            Some(&InferenceEntry::Bound(CoreType::Scalar(Atomic::Integer))),
+            "a successful check must keep its inferred binding"
+        );
+    }
+
+    fn unbound() -> InferenceEntry {
+        InferenceEntry::Unbound {
+            level: 0,
+            constraint: Constraint::Unconstrained,
+        }
     }
 }
