@@ -6,8 +6,8 @@ use {
         index::{self, IndexError, Item},
         position::{self, PositionEncoding},
         lsp_types::{
-            CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionOptions,
-            CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+            CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionList,
+            CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
             DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
             DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
             DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol,
@@ -690,9 +690,11 @@ impl LanguageServer for ServerState {
             .to_internal_position(&path, position)
             .expect("opened document rope available for completion");
         let completions = ide::completion(&mut self.analysis_state, &path, internal_position).map(
-            |items| {
-                CompletionResponse::Array(
-                    items
+            |result| {
+                CompletionResponse::List(CompletionList {
+                    is_incomplete: result.is_incomplete,
+                    items: result
+                        .items
                         .into_iter()
                         .map(|item| CompletionItem {
                             label: item.label,
@@ -718,7 +720,7 @@ impl LanguageServer for ServerState {
                             ..Default::default()
                         })
                         .collect(),
-                )
+                })
             },
         );
 

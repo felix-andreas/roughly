@@ -744,10 +744,11 @@ async fn completion() {
         .expect("completion request failed");
 
     let result = result.expect("expected completions");
-    let items = match result {
-        CompletionResponse::Array(items) => items,
-        CompletionResponse::List(list) => list.items,
+    let CompletionResponse::List(list) = result else {
+        panic!("expected a CompletionList response carrying isIncomplete");
     };
+    assert!(!list.is_incomplete, "small candidate set should not be marked incomplete");
+    let items = list.items;
 
     let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
     assert!(

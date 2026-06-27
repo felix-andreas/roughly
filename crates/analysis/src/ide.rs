@@ -1194,11 +1194,24 @@ pub enum CompletionItemSource {
     Global,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionResult {
+    pub items: Vec<CompletionItem>,
+    // True when the candidate set was capped at `COMPLETION_LIMIT`; the server forwards this as the
+    // LSP `isIncomplete` flag so the client keeps re-querying as the prefix narrows instead of
+    // filtering a stale, truncated list locally.
+    pub is_incomplete: bool,
+}
+
+// Matches the workspace-symbol cap. The full global namespace can exceed 20k entries; returning it
+// all produces a huge payload and lets the client cache a complete list and stop re-querying.
+pub const COMPLETION_LIMIT: usize = 128;
+
 pub fn completion(
     analysis: &mut Analysis,
     path: &Path,
     position: TextPosition,
-) -> Option<Vec<CompletionItem>> {
+) -> Option<CompletionResult> {
     let document_id = analysis.document_id_for_path(path)?;
 
     lower(analysis);
@@ -1212,13 +1225,18 @@ pub fn completion(
     match context {
         CompletionContext::Default => {}
         CompletionContext::Field => {
-            return Some(rendered_query_matches(tree, rope, FIELD_QUERY, &query));
+            return Some(complete_result(rendered_query_matches(tree, rope, FIELD_QUERY, &query)));
         }
         CompletionContext::Item => {
-            return Some(rendered_query_matches(tree, rope, ITEM_QUERY, &query));
+            return Some(complete_result(rendered_query_matches(tree, rope, ITEM_QUERY, &query)));
         }
         CompletionContext::Namespace => {
-            return Some(rendered_query_matches(tree, rope, NAMESPACE_QUERY, &query));
+            return Some(complete_result(rendered_query_matches(
+                tree,
+                rope,
+                NAMESPACE_QUERY,
+                &query,
+            )));
         }
         CompletionContext::MaybeNamespace => return None,
     }
@@ -1521,10 +1539,14 @@ fn binding_completion_kind(
     }
 }
 
+fn complete_result(items: Vec<CompletionItem>) -> CompletionResult {
+    CompletionResult { items, is_incomplete: false }
+}
+
 fn deduplicate_completion_items(
     items: Vec<CompletionItem>,
     query: &str,
-) -> Option<Vec<CompletionItem>> {
+) -> Option<CompletionResult> {
     let mut seen = BTreeSet::new();
     let mut deduplicated = Vec::new();
 
@@ -1553,7 +1575,12 @@ fn deduplicate_completion_items(
             ))
     });
 
-    (!deduplicated.is_empty()).then_some(deduplicated)
+    // Keep only the best-ranked window. Marking the list incomplete makes the client re-query as
+    // the prefix narrows rather than filtering a truncated list locally.
+    let is_incomplete = deduplicated.len() > COMPLETION_LIMIT;
+    deduplicated.truncate(COMPLETION_LIMIT);
+
+    (!deduplicated.is_empty()).then_some(CompletionResult { items: deduplicated, is_incomplete })
 }
 
 //
@@ -1931,5 +1958,62 @@ mod search_match_tests {
         let exact = search_match("inst", "inst").unwrap();
         let prefix = search_match("instrument", "inst").unwrap();
         assert!(exact < prefix);
+    }
+}
+
+#[cfg(test)]
+mod completion_limit_tests {
+    use {
+        super::{COMPLETION_LIMIT, completion},
+        crate::{
+            analysis::{Analysis, CheckConfig, LintConfig},
+            text::TextPosition,
+        },
+        std::path::{Path, PathBuf},
+    };
+
+    fn analysis_with_globals(count: usize) -> Analysis {
+        let mut source = String::new();
+        for index in 0..count {
+            source.push_str(&format!("g{index:04} <- function() NULL\n"));
+        }
+
+        let mut analysis = Analysis::new(PathBuf::new(), LintConfig::default(), CheckConfig::default());
+        analysis
+            .add_document_from_source(PathBuf::from("R/globals.R"), &source)
+            .expect("globals parse");
+        // A bare prefix to complete against the global namespace.
+        analysis
+            .add_document_from_source(PathBuf::from("R/main.R"), "g\n")
+            .expect("main parse");
+        analysis
+    }
+
+    fn complete_prefix_g(analysis: &mut Analysis) -> super::CompletionResult {
+        completion(
+            analysis,
+            Path::new("R/main.R"),
+            TextPosition { line_index: 0, character_index: 1 },
+        )
+        .expect("completions present")
+    }
+
+    #[test]
+    fn caps_at_limit_and_marks_incomplete() {
+        let mut analysis = analysis_with_globals(COMPLETION_LIMIT + 10);
+        let result = complete_prefix_g(&mut analysis);
+
+        assert_eq!(result.items.len(), COMPLETION_LIMIT);
+        assert!(result.is_incomplete);
+    }
+
+    #[test]
+    fn returns_all_when_under_limit() {
+        let count = 5;
+        let mut analysis = analysis_with_globals(count);
+        let result = complete_prefix_g(&mut analysis);
+
+        assert_eq!(result.items.len(), count);
+        assert!(!result.is_incomplete);
     }
 }

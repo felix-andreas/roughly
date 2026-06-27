@@ -110,7 +110,7 @@ fn run_ide_benchmark(target_loc: usize) {
                 character_index: reference_column + 3,
             },
         )
-        .map(|items| items.len())
+        .map(|result| result.items.len())
         .unwrap_or(0)
     );
 }

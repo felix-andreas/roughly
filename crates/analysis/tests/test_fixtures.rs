@@ -531,7 +531,7 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
                 "completion" => {
                     let request = parse_position_request(contents, "completion")?;
                     match ide::completion(analysis_state, &request.path, request.position) {
-                        Some(items) => render_completion_items(&items),
+                        Some(result) => render_completion_items(&result),
                         None => "no completions".to_owned(),
                     }
                 }
@@ -704,8 +704,9 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
             .join("\n")
     }
 
-    fn render_completion_items(items: &[analysis::CompletionItem]) -> String {
-        items
+    fn render_completion_items(result: &analysis::CompletionResult) -> String {
+        let mut rendered = result
+            .items
             .iter()
             .map(|item| {
                 let source = match item.source {
@@ -721,7 +722,16 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
                 format!("{} [{source} {kind}]", item.label)
             })
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("\n");
+
+        if result.is_incomplete {
+            if !rendered.is_empty() {
+                rendered.push('\n');
+            }
+            rendered.push_str("[truncated]");
+        }
+
+        rendered
     }
 
     fn render_rename_result(
