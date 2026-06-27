@@ -11,6 +11,7 @@ use {
             InitializedParams, InlayHintParams, PartialResultParams, Position, PositionEncodingKind,
             Range,
             PublishDiagnosticsParams, ReferenceContext, ReferenceParams, RenameParams,
+            SignatureHelpParams,
             TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
             WorkDoneProgressParams, WorkspaceFolder,
             notification::{PublishDiagnostics, ShowMessage},
@@ -1335,6 +1336,281 @@ async fn diagnostics_range_under_utf16_with_non_bmp_emoji() {
         "expected the UTF-16 span of `T`, got: {:?}",
         true_diagnostic.range
     );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn hover_range_under_utf8_with_non_bmp_emoji() {
+    let mut context = setup_test_with_position_encodings(&[], &[PositionEncodingKind::UTF8]).await;
+    assert_eq!(
+        context.init_result.capabilities.position_encoding,
+        Some(PositionEncodingKind::UTF8),
+    );
+
+    let file_uri = context.file_uri("R/utf8_emoji.R");
+    // Under UTF-8 negotiation, columns ARE byte offsets, so the non-BMP `🦀` counts as 4. Line
+    // `y <- f("🦀", target)`, scalar idx of `target` start = 12; bytes before it: chars 0..7 = 8
+    // bytes, `🦀` = 4 bytes, `"` `,` ` ` = 3 bytes -> `target` byte span = 15..21 (vs UTF-16 13..19).
+    context
+        .open_file(&file_uri, "target <- 1L\ny <- f(\"🦀\", target)\n")
+        .await;
+
+    let hover = context
+        .server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                // byte column 17 is inside `target` (bytes 15..21)
+                position: Position::new(1, 17),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover request failed")
+        .expect("hover response missing");
+
+    let range = hover.range.expect("hover should report a range");
+    assert_eq!(
+        (range.start.character, range.end.character),
+        (15, 21),
+        "expected the UTF-8 byte span of `target` after an emoji, got: {range:?}"
+    );
+
+    context.shutdown().await;
+}
+
+// S6: out-of-bounds / stale position safety on every IDE entry point. The document has an empty
+// line 1, so `Position::new(1, 50)` is a character past the end of a (zero-length) line, and
+// `Position::new(50, 0)` is a line past the last line. The position-encoding conversion
+// (`to_internal_position`/`to_internal_range`) clamps the character to the line length and leaves
+// an out-of-range line untouched (its `get_line` returns `None`), so neither path panics; the IDE
+// lookups then return `None` instead of panicking.
+
+const OOB_DOC: &str = "alpha <- 1\n\nbeta <- 2\n";
+
+fn oob_positions() -> [Position; 2] {
+    // character past end of the empty line 1, and a line past the last line
+    [Position::new(1, 50), Position::new(50, 0)]
+}
+
+#[tokio::test]
+async fn hover_out_of_bounds_position_is_safe() {
+    let mut context = setup_test(&[]).await;
+    let file_uri = context.file_uri("R/oob_hover.R");
+    context.open_file(&file_uri, OOB_DOC).await;
+
+    for position in oob_positions() {
+        let hover = context
+            .server
+            .hover(HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: file_uri.clone(),
+                    },
+                    position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .expect("hover request must not panic the server");
+        assert!(hover.is_none(), "OOB hover should be None at {position:?}, got: {hover:?}");
+    }
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn goto_definition_out_of_bounds_position_is_safe() {
+    let mut context = setup_test(&[]).await;
+    let file_uri = context.file_uri("R/oob_goto.R");
+    context.open_file(&file_uri, OOB_DOC).await;
+
+    for position in oob_positions() {
+        let result = context
+            .server
+            .definition(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: file_uri.clone(),
+                    },
+                    position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .expect("definition request must not panic the server");
+        assert!(result.is_none(), "OOB goto should be None at {position:?}, got: {result:?}");
+    }
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn references_out_of_bounds_position_is_safe() {
+    let mut context = setup_test(&[]).await;
+    let file_uri = context.file_uri("R/oob_refs.R");
+    context.open_file(&file_uri, OOB_DOC).await;
+
+    for position in oob_positions() {
+        let result = context
+            .server
+            .references(ReferenceParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: file_uri.clone(),
+                    },
+                    position,
+                },
+                context: ReferenceContext {
+                    include_declaration: true,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .expect("references request must not panic the server");
+        assert!(
+            result.as_ref().map_or(true, |locations| locations.is_empty()),
+            "OOB references should be None/empty at {position:?}, got: {result:?}"
+        );
+    }
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn rename_out_of_bounds_position_is_safe() {
+    let mut context = setup_test(&[]).await;
+    let file_uri = context.file_uri("R/oob_rename.R");
+    context.open_file(&file_uri, OOB_DOC).await;
+
+    for position in oob_positions() {
+        let result = context
+            .server
+            .rename(RenameParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: file_uri.clone(),
+                    },
+                    position,
+                },
+                new_name: "renamed".into(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .expect("rename request must not panic the server");
+        assert!(
+            result.is_none(),
+            "OOB rename must produce no edits at {position:?}, got: {result:?}"
+        );
+    }
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn completion_out_of_bounds_position_is_safe() {
+    let mut context = setup_test(&[]).await;
+    let file_uri = context.file_uri("R/oob_completion.R");
+    context.open_file(&file_uri, OOB_DOC).await;
+
+    // A line past the last line cannot resolve a line slice, so completion is None.
+    let past_last_line = context
+        .server
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(50, 0),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .expect("completion request must not panic the server");
+    assert!(
+        past_last_line.is_none(),
+        "OOB-line completion should be None, got: {past_last_line:?}"
+    );
+
+    // A character past the end of a line clamps to the line end (a valid completion position), so
+    // completion legitimately returns keyword/global candidates; the contract here is only that the
+    // clamped request does not panic.
+    let _past_line_end = context
+        .server
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(1, 50),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .expect("completion request must not panic the server");
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn signature_help_out_of_bounds_position_is_safe() {
+    let mut context = setup_test(&[]).await;
+    let file_uri = context.file_uri("R/oob_sighelp.R");
+    context.open_file(&file_uri, OOB_DOC).await;
+
+    for position in oob_positions() {
+        let result = context
+            .server
+            .signature_help(SignatureHelpParams {
+                context: None,
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: file_uri.clone(),
+                    },
+                    position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .expect("signature_help request must not panic the server");
+        assert!(
+            result.is_none(),
+            "OOB signature help should be None at {position:?}, got: {result:?}"
+        );
+    }
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn inlay_hint_on_document_is_safe() {
+    let mut context = setup_test(&[]).await;
+    let file_uri = context.file_uri("R/oob_inlay.R");
+    context.open_file(&file_uri, OOB_DOC).await;
+
+    // `inlay_hint` takes no position (it scans the whole document), so there is no OOB position to
+    // pass; this asserts the entry point itself resolves without panicking on this document.
+    let hints = context
+        .server
+        .inlay_hint(InlayHintParams {
+            text_document: TextDocumentIdentifier {
+                uri: file_uri.clone(),
+            },
+            range: Range::new(Position::new(0, 0), Position::new(50, 50)),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("inlay_hint request must not panic the server");
+    assert!(hints.is_some(), "inlay_hint should return a (possibly empty) list");
 
     context.shutdown().await;
 }
