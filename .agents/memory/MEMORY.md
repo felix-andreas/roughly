@@ -10,14 +10,22 @@ Authoritative specs live in the docs site (`docs/src/content/docs/`), not here: 
 
 ## Short-term
 
-- Steering docs were restructured to agents-first (this is the result): a single `.agents/memory/MEMORY.md` replaces the old `MEMORY`/`DECISION_LOG`/`TODOS`/`TECHNICAL_DEBT`/`DISCUSS`. The authoritative specs (`TYPING_SEMANTICS`/`ARCHITECTURE`/`STRUCTURE`/`TESTING`) moved into the docs site. `agent/` was dissolved; the human's notes live in `.local/` (untracked).
+- **M1 (audit P0/quick-wins) landed** on `feat/hm-type-checker` as 8 green commits (`abf6f36`..`60b4096`). Each: own commit, `cargo test -p analysis` + `-p roughly` green, `cargo check --all-targets` clean. Items:
+  - span→ExpressionId index (`Module.span_index`, O(arena)→O(log n)) + `HirArena::try_get` non-panicking IDE access.
+  - UTF-16 positionEncoding negotiation (prefer utf-8, else utf-16); internal column = UTF-8 byte offset (tree-sitter Point); single conversion seam in `roughly/src/position.rs`; symbol/diagnostic paths routed through it (Item now carries byte-column `TextRange`).
+  - resolve-error propagation in `check_compatibility` (no more `unwrap_or(Unknown)`); recursion-depth guards (inference `RECURSION_LIMIT=128`; type-syntax parser `TYPE_SYNTAX_RECURSION_LIMIT=160`; separate lowering guard for alias-body expansion). Native annotation overflow ≈200; ordering 128<141<160<200.
+  - references/rename text prefilter (no persistent index) — find-refs@100k 218ms→67ms; provably equivalent (interner bijection over the same byte range).
+  - completion cap 128 + `isIncomplete` (`CompletionResult`); inlay-hint viewport filter.
+  - **`ROUGHLY_BLESS=1` auto-bless** for the fixture harness (rewrites `#++++` block bodies in place; idempotent on the real suite; leaves `#++++ any` alone). Use it for intentional expectation changes. Documented in `testing.md`.
+- Known wording quirk (pre-existing): the parser recursion diagnostic renders as `error[syntax-error] Syntax Error: ...` (doubled prefix) — same as other annotation-syntax errors; tracked under the diagnostic-wording mid-term item.
+- Steering docs are agents-first: single `.agents/memory/MEMORY.md`; authoritative specs in the docs site; human notes in `.local/` (untracked).
 
 ## Mid-term
 
 Active priorities and debt:
 
 - **Incremental recheck after an edit still scales with package size.** `typecheck` short-circuits on an unchanged package version (repeated IDE calls are O(1)), but an edit still pays package-scoped work: `resolve_package` rebuilds package naming, the interface fixed-point scans every document to compare its dependency fingerprint (O(documents)), and the global env fingerprint is rendered over all globals. ~13ms@10k, ~0.4s@100k (`just bench`). Bounded next steps: a reverse-dependency index (name → referencing documents) and incremental package naming. The full near-constant model is the incremental redesign — design with the user first and record it on the docs architecture page.
-- **Find-references / rename re-resolve every identifier in every document** (~240ms@100k); **completion returns the whole matching global namespace uncapped** (~100ms / ~20k items). Fix: a symbol-occurrence / reverse-reference index keyed by resolved target; cap completion results and mark the list incomplete (rust-analyzer style). goto-definition is already O(1)-file.
+- **Find-references / rename / completion: M1 cheap wins landed; structural reuse still pending.** A text prefilter cut find-refs@100k 218ms→67ms (commit `31be96d`) and completion is now capped at 128 + `isIncomplete` (`b93ba77`). Remaining cost is the per-document tree walk across all docs — the deeper fix is the **reverse-dependency index** (package-global Symbol → referring DocumentIds) feeding both refs/rename and the interface fixed-point. That index is the M-series keystone (also unblocks per-doc round-2 typecheck keying). goto-definition is already O(1)-file.
 - **Type-syntax error ranges are coarse.** `SurfaceType` carries no per-node ranges, so unresolved-type / annotation errors underline the whole annotation. Thread ranges through type-syntax parsing so `list{age: intgr}` underlines only `intgr`.
 - **Tree-sitter access is string-based in the `analysis` front end** (`kind()`/`child_by_field_name()`), while `roughly` uses `kind_id()`/`field_id()`. Consolidate on id-based matching; dedupe the rope/tree helpers and the AST-walking symbol indexer shared with `roughly` (`roughly/src/index.rs`).
 - `resolve_document` public phase entry + edit-time orchestration.
