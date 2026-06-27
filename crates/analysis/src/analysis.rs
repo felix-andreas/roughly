@@ -49,6 +49,11 @@ pub struct Analysis {
     // `NamesLocal.non_locals`; see `patch_reverse_dependencies` and the maintenance invariant on the
     // architecture page. Used by invalidation routing to pick recompute candidates.
     reverse_dependencies: BTreeMap<Symbol, BTreeSet<DocumentId>>,
+    // The documents changed since the last completed `typecheck`, accumulated in `invalidate_document`
+    // (the single funnel every add/edit/delete passes through) and cleared at the end of `typecheck`.
+    // It seeds the M3 recompute candidate set: combined with the reverse-dependency index it bounds the
+    // package-scoped phases to `dirty docs ∪ reverse-deps of changed exports` instead of every document.
+    dirty_documents: BTreeSet<DocumentId>,
     package_naming_output: Option<PackageOutput<NamesGlobal>>,
     document_interface_outputs: HashMap<DocumentId, InterfaceOutput>,
     document_typecheck_outputs: HashMap<DocumentId, TypecheckDocumentOutput>,
@@ -56,6 +61,21 @@ pub struct Analysis {
     // every document or config change, an unchanged version means every typecheck output is already
     // current, so a repeated call (e.g. successive hover or inlay-hint requests) returns at once.
     last_typecheck_package_version: Option<Version>,
+    // The package-global type-definition fingerprint at the last completed `typecheck`. The fingerprint
+    // is package-global today, so when it changes every document must be reconsidered; comparing against
+    // this memo is how `typecheck` decides whether to fall back to the full document set as candidates.
+    last_type_definitions_fingerprint: Option<String>,
+    // The package-global bindings (each global's winning document) at the last completed `typecheck`.
+    // The winner-diff that seeds `changed_globals` must compare against *this* frozen baseline, not the
+    // live `package_naming_output`: intervening `resolve_package` calls (completion, references, rename,
+    // `run_full` with typing off) refresh `package_naming_output` without clearing `dirty_documents`, so
+    // a live baseline would already be post-edit and a winner flip would diff to nothing — leaving its
+    // referrers stale. Frozen at the last typecheck, the delta survives those intervening refreshes.
+    last_typecheck_global_bindings: Option<BTreeMap<Symbol, DocumentId>>,
+    // Number of documents the last `typecheck` examined in round 2 (the candidate set size, before the
+    // per-document cache check decides actual recompute). Exposed for tests that prove the scan is
+    // bounded — a body-only edit must examine O(1) documents, not O(package).
+    last_candidate_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,10 +170,14 @@ impl Analysis {
             lowering_outputs: HashMap::new(),
             document_naming_outputs: HashMap::new(),
             reverse_dependencies: BTreeMap::new(),
+            dirty_documents: BTreeSet::new(),
             package_naming_output: None,
             document_interface_outputs: HashMap::new(),
             document_typecheck_outputs: HashMap::new(),
             last_typecheck_package_version: None,
+            last_type_definitions_fingerprint: None,
+            last_typecheck_global_bindings: None,
+            last_candidate_count: 0,
         }
     }
 
@@ -333,6 +357,13 @@ impl Analysis {
             .into_iter()
             .flatten()
             .copied()
+    }
+
+    // Documents examined by the last `typecheck` round 2 (the candidate-set size before the
+    // per-document cache check). A bounded value proves the package-scoped scan did not walk every
+    // document; see the M3 reverse-dependency invalidation design.
+    pub fn last_candidate_count(&self) -> usize {
+        self.last_candidate_count
     }
 
     pub fn package_document_ids(&self) -> Vec<DocumentId> {
@@ -670,6 +701,8 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         return Vec::new();
     }
 
+    let dirty_documents = analysis_state.dirty_documents.clone();
+
     resolve_package(analysis_state);
 
     let package_document_ids = analysis_state.package_document_ids();
@@ -724,14 +757,69 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         .output
         .clone();
 
-    // Package interface fixed-point. Each round builds the current package-global table, recomputes
-    // every document whose version, the type definitions, or a referenced scheme changed, then
-    // rebuilds the table from the fresh exports. Because a document's interface is checked against
-    // that table, re-exports and forward references resolve within and across files; the
-    // dependency-fingerprint cache keeps an edit from re-deriving documents it cannot affect, and
-    // the round cap stops genuine cycles (which keep `Unknown`).
+    let package_document_set = package_document_ids
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+
+    // A type-definition change is package-global today: it can alter any document's check, so it is not
+    // captured by the per-document dependency fingerprint and forces every document into the candidate
+    // set. Tightening to per-document type dependencies is a later slice.
+    let type_definitions_changed = analysis_state
+        .last_type_definitions_fingerprint
+        .as_deref()
+        != Some(type_definitions_fingerprint.as_str());
+
+    // `changed_globals` accumulates every package-global symbol whose exported scheme may have changed.
+    // It seeds the recompute candidate set (via the reverse-dependency index) for both rounds and grows
+    // as the round-1 worklist discovers transitively affected exports (re-exports). It is a superset:
+    // membership only means a referrer must be *examined*; the per-document cache check still decides
+    // whether it actually recomputes.
+    // Winner-diff against the bindings frozen at the last completed typecheck (not the live, possibly
+    // post-edit `package_naming_output`). This catches a global whose winning document changed, was
+    // added, or was removed since the last typecheck, even when the new winner is itself unchanged — the
+    // case the worklist's fingerprint-change propagation cannot see, because a dirty document's old
+    // interface output (and thus its old exported names) was already dropped by `invalidate_document`.
+    let mut changed_globals = BTreeSet::<Symbol>::new();
+    if let Some(previous) = &analysis_state.last_typecheck_global_bindings {
+        let current = &package_naming.global_bindings;
+        for symbol in previous.keys().chain(current.keys()) {
+            if previous.get(symbol) != current.get(symbol) {
+                changed_globals.insert(*symbol);
+            }
+        }
+    }
+
+    // Package interface fixed-point, bounded by a worklist. Round 0 examines the dirty package documents
+    // plus the referrers of any winner-changed global; each round recomputes the candidates whose cache
+    // key moved, and when a recomputed document's exported interface fingerprint actually changes, the
+    // referrers of its (old and new) exported names are enqueued for the next round. This converges
+    // exactly like a full scan would — re-exports and forward references propagate hop by hop — while
+    // touching only documents that can be affected. The round cap stops genuine cycles (which keep
+    // `Unknown`). A type-definition change considers every package document.
     const MAX_PACKAGE_INTERFACE_ROUNDS: usize = 32;
+    let mut round1_candidates = if type_definitions_changed {
+        package_document_set.clone()
+    } else {
+        let mut candidates = dirty_documents
+            .iter()
+            .copied()
+            .filter(|document_id| package_document_set.contains(document_id))
+            .collect::<BTreeSet<_>>();
+        for symbol in &changed_globals {
+            for referrer in analysis_state.documents_referencing(*symbol) {
+                if package_document_set.contains(&referrer) {
+                    candidates.insert(referrer);
+                }
+            }
+        }
+        candidates
+    };
+
     for _round in 0..MAX_PACKAGE_INTERFACE_ROUNDS {
+        if round1_candidates.is_empty() {
+            break;
+        }
         let table = build_package_interface_table(
             &package_naming,
             &analysis_state.document_interface_outputs,
@@ -739,7 +827,8 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         );
 
         let mut fresh_interfaces = Vec::new();
-        for document_id in &package_document_ids {
+        let mut next_candidates = BTreeSet::<DocumentId>::new();
+        for document_id in &round1_candidates {
             let Some(document_version) = analysis_state.document_version(*document_id) else {
                 continue;
             };
@@ -754,17 +843,24 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
             let dependency_fingerprint =
                 render_dependency_fingerprint(&referenced, &table, analysis_state.interner());
 
-            if analysis_state
-                .document_interface_outputs
-                .get(document_id)
-                .is_some_and(|output| {
-                    output.version == document_version
-                        && output.type_definitions_fingerprint == type_definitions_fingerprint
-                        && output.dependency_fingerprint == dependency_fingerprint
-                })
-            {
+            let previous_interface = analysis_state.document_interface_outputs.get(document_id);
+            if previous_interface.is_some_and(|output| {
+                output.version == document_version
+                    && output.type_definitions_fingerprint == type_definitions_fingerprint
+                    && output.dependency_fingerprint == dependency_fingerprint
+            }) {
                 continue;
             }
+            let previous_fingerprint = previous_interface.map(|output| output.fingerprint.clone());
+            let previous_export_symbols = previous_interface
+                .map(|output| {
+                    output
+                        .exports
+                        .iter()
+                        .map(|export| export.symbol)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
 
             let module = analysis_state.module(*document_id).unwrap_or_else(|| {
                 panic!("missing lowered module for typecheck {document_id:?}")
@@ -785,6 +881,25 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
             );
             let exports = inference_state.exported_value_schemes(module, local_naming);
             let fingerprint = render_interface_fingerprint(&exports, analysis_state.interner());
+
+            // The interface actually moved, so referrers of its exported names (old and new, to cover a
+            // dropped export) may now see a different scheme: mark those names changed and enqueue their
+            // package referrers for the next round.
+            if previous_fingerprint.as_deref() != Some(fingerprint.as_str()) {
+                let affected_symbols = exports
+                    .iter()
+                    .map(|export| export.symbol)
+                    .chain(previous_export_symbols.iter().copied());
+                for symbol in affected_symbols {
+                    changed_globals.insert(symbol);
+                    for referrer in analysis_state.documents_referencing(symbol) {
+                        if package_document_set.contains(&referrer) {
+                            next_candidates.insert(referrer);
+                        }
+                    }
+                }
+            }
+
             fresh_interfaces.push((
                 *document_id,
                 InterfaceOutput {
@@ -797,14 +912,12 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
             ));
         }
 
-        if fresh_interfaces.is_empty() {
-            break;
-        }
         for (document_id, output) in fresh_interfaces {
             analysis_state
                 .document_interface_outputs
                 .insert(document_id, output);
         }
+        round1_candidates = next_candidates;
     }
 
     // The converged package interface table. It both keys each document's round-2 cache (via the
@@ -816,9 +929,26 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         fallback_range,
     );
 
+    // Round-2 candidate set: the dirty documents plus every referrer of a changed global. A
+    // type-definition change forces the full document set (it can affect any check, see above). This is
+    // a superset of every document a full scan would recompute — the per-document cache check below
+    // still decides actual recompute — so no document that needs rechecking is ever skipped.
+    let round2_candidates = if type_definitions_changed {
+        all_document_ids.iter().copied().collect::<BTreeSet<_>>()
+    } else {
+        let mut candidates = dirty_documents.clone();
+        for symbol in &changed_globals {
+            for referrer in analysis_state.documents_referencing(*symbol) {
+                candidates.insert(referrer);
+            }
+        }
+        candidates
+    };
+    analysis_state.last_candidate_count = round2_candidates.len();
+
     let mut recomputed_document_ids = Vec::new();
     let mut fresh_outputs = Vec::new();
-    for document_id in &all_document_ids {
+    for document_id in &round2_candidates {
         let Some(document_version) = analysis_state.document_version(*document_id) else {
             continue;
         };
@@ -912,6 +1042,9 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     }
 
     analysis_state.last_typecheck_package_version = Some(analysis_state.package_version);
+    analysis_state.last_type_definitions_fingerprint = Some(type_definitions_fingerprint);
+    analysis_state.last_typecheck_global_bindings = Some(package_naming.global_bindings.clone());
+    analysis_state.dirty_documents.clear();
     recomputed_document_ids
 }
 
@@ -931,6 +1064,9 @@ impl Analysis {
     }
 
     fn invalidate_document(&mut self, document_id: DocumentId) {
+        // Every add/edit/delete funnels through here, so this is the single place that records which
+        // documents changed since the last typecheck. `typecheck` consumes and clears the set.
+        self.dirty_documents.insert(document_id);
         // Drops only the version-keyed caches. The reverse-dependency index is intentionally left
         // untouched: a document re-patches its own edges when its naming is recomputed (see
         // `patch_reverse_dependencies`), and that patch derives the document's *old* edges from the

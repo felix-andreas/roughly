@@ -231,6 +231,154 @@ fn interface_change_leaves_document_referencing_other_global_cached() {
 }
 
 #[test]
+fn body_only_edit_examines_constant_number_of_candidates() {
+    // Slice-3 perf-correctness proof: a body-only edit in a large package must bound the package
+    // scan to O(1) candidates, not O(documents). Without the dirty-set + reverse-dependency routing
+    // the round-2 scan would examine every document.
+    let file_count = 25;
+    let items_per_file = 3;
+    let mut analysis_state = typing_analysis("/pkg");
+    for (path, source) in common::generate_package(file_count, items_per_file) {
+        analysis_state
+            .add_document_from_source(path, &source)
+            .expect("document should parse");
+    }
+    analysis::run_full(&mut analysis_state);
+
+    // Body-only edit (braced bodies) to a single file; its exported interface is unchanged.
+    analysis_state
+        .add_document_from_source(
+            common::file_path(12),
+            &common::generate_file(12, items_per_file, true),
+        )
+        .expect("document should parse");
+    let recomputed = analysis::typecheck(&mut analysis_state);
+
+    assert_eq!(recomputed.len(), 1, "body edit rechecks exactly one document");
+    let candidate_count = analysis_state.last_candidate_count();
+    assert!(
+        candidate_count <= 2,
+        "a body-only edit must examine O(1) documents, examined {candidate_count} of {file_count}"
+    );
+}
+
+#[test]
+fn interface_change_propagates_through_a_re_export() {
+    // A defines `first`; B re-exports it as `second <- first`; C references `second`. Changing
+    // `first`'s scheme must propagate transitively through the round-1 worklist to A, B, and C, and
+    // must leave the unrelated document D cached.
+    let mut analysis_state = typing_analysis("/pkg");
+    replace_document(
+        &mut analysis_state,
+        "/pkg/R/a.R",
+        "#: fn(count: integer) -> integer\nfirst <- function(count) count + count\n",
+    );
+    replace_document(&mut analysis_state, "/pkg/R/b.R", "second <- first\n");
+    replace_document(&mut analysis_state, "/pkg/R/c.R", "result <- second(2L)\n");
+    replace_document(&mut analysis_state, "/pkg/R/d.R", "d_value <- 1L\n");
+    let first_run = analysis::typecheck(&mut analysis_state);
+    assert_eq!(first_run.len(), 4, "initial run checks every document");
+
+    replace_document(
+        &mut analysis_state,
+        "/pkg/R/a.R",
+        "#: fn(count: character) -> integer\nfirst <- function(count) 1L\n",
+    );
+    let second_run = analysis::typecheck(&mut analysis_state);
+    let a_id = analysis_state
+        .document_id_for_path(std::path::Path::new("/pkg/R/a.R"))
+        .expect("document should exist");
+    let b_id = analysis_state
+        .document_id_for_path(std::path::Path::new("/pkg/R/b.R"))
+        .expect("document should exist");
+    let c_id = analysis_state
+        .document_id_for_path(std::path::Path::new("/pkg/R/c.R"))
+        .expect("document should exist");
+    let d_id = analysis_state
+        .document_id_for_path(std::path::Path::new("/pkg/R/d.R"))
+        .expect("document should exist");
+    assert!(
+        second_run.contains(&a_id) && second_run.contains(&b_id) && second_run.contains(&c_id),
+        "the re-export chain A -> B -> C must all recheck: {second_run:?}"
+    );
+    assert!(
+        !second_run.contains(&d_id),
+        "the unrelated document must stay cached: {second_run:?}"
+    );
+}
+
+#[test]
+fn defining_a_forward_referenced_global_rechecks_the_referrer() {
+    // B references `late` before any document defines it (a forward reference, which still registers
+    // a reverse-dependency edge). Adding a document that defines `late` changes the global's winner,
+    // so B must be picked as a candidate and rechecked.
+    let mut analysis_state = typing_analysis("/pkg");
+    replace_document(&mut analysis_state, "/pkg/R/b.R", "result <- late(3L)\n");
+    analysis::run_full(&mut analysis_state);
+
+    replace_document(
+        &mut analysis_state,
+        "/pkg/R/late.R",
+        "#: fn(value: integer) -> integer\nlate <- function(value) value\n",
+    );
+    let second_run = analysis::typecheck(&mut analysis_state);
+    let b_id = analysis_state
+        .document_id_for_path(std::path::Path::new("/pkg/R/b.R"))
+        .expect("document should exist");
+    assert!(
+        second_run.contains(&b_id),
+        "the forward referrer rechecks once its global is defined: {second_run:?}"
+    );
+}
+
+#[test]
+fn winner_flip_with_intervening_resolve_package_still_rechecks_referrer() {
+    // Reproduces the slice-3 baseline-staleness blocker. b.R references `helper`, whose winning
+    // definition is a2.R (integer). Dropping `helper` from a2.R flips the winner to a1.R (character),
+    // which must make b.R error. An intervening `resolve_package` (as completion / references / rename /
+    // typing-off `run_full` would trigger) refreshes the live package naming without clearing the dirty
+    // set; the winner-diff must compare against the bindings frozen at the last completed typecheck, not
+    // the live ones, or b.R is never selected as a candidate and keeps a stale (empty) result.
+    let mut analysis_state = typing_analysis("/pkg");
+    replace_document(
+        &mut analysis_state,
+        "/pkg/R/a1.R",
+        "#: fn() -> character\nhelper <- function() \"x\"\n",
+    );
+    replace_document(
+        &mut analysis_state,
+        "/pkg/R/a2.R",
+        "#: fn() -> integer\nhelper <- function() 1L\n",
+    );
+    replace_document(&mut analysis_state, "/pkg/R/b.R", "result <- helper() + 1L\n");
+    analysis::typecheck(&mut analysis_state);
+    assert_eq!(
+        error_messages(&analysis_state, "/pkg/R/b.R").len(),
+        0,
+        "b is initially clean because the integer winner a2 is in scope"
+    );
+
+    // Drop `helper` from a2.R so the winner flips to a1.R (character).
+    replace_document(&mut analysis_state, "/pkg/R/a2.R", "unrelated <- 1L\n");
+    // Intervening resolve_package-driving operation BEFORE the authoritative typecheck. This refreshes
+    // the live package naming (as completion / references / rename would) while the dirty set persists.
+    analysis::resolve_package(&mut analysis_state);
+
+    let recomputed = analysis::typecheck(&mut analysis_state);
+    let b_id = analysis_state
+        .document_id_for_path(std::path::Path::new("/pkg/R/b.R"))
+        .expect("document should exist");
+    assert!(
+        recomputed.contains(&b_id),
+        "the referrer must recompute after the winner flip despite the intervening resolve_package: {recomputed:?}"
+    );
+    assert!(
+        !error_messages(&analysis_state, "/pkg/R/b.R").is_empty(),
+        "b must report the now-character helper as a type error, not keep its stale empty result"
+    );
+}
+
+#[test]
 fn unedited_documents_keep_diagnostics_after_unrelated_edit() {
     let mut analysis_state = typing_analysis("/pkg");
     replace_document(&mut analysis_state, "/pkg/R/a.R", "#: integer\na <- \"bad\"\n");
