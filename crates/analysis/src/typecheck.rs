@@ -348,6 +348,8 @@ impl InferenceState {
     // Resolves `core_type` and replaces every rigid skolem variable with its declared name, so a
     // diagnostic involving a `<T>` annotation shows `T` rather than an internal `type1`.
     fn display_with_rigid_names(&mut self, core_type: &CoreType) -> CoreType {
+        // Pure display path: a resolve failure degrades to `Unknown` rather than propagating, so
+        // rendering a diagnostic or hover never aborts the check that produced it.
         let resolved = self.resolve(core_type.clone()).unwrap_or(CoreType::Unknown);
         self.substitute_rigid_names(&resolved)
     }
@@ -4523,6 +4525,9 @@ fn import_core_type(
                 .collect(),
             import_core_type(&function_type.return_type, substitutions),
         )),
+        // A variable absent from `substitutions` is a free scheme variable that belongs to another
+        // document's `InferenceState`; it has no meaning here, so importing erases it to `Unknown`.
+        // This is a deliberate erasure of a map lookup miss, not a discarded error.
         CoreType::Variable(variable) => substitutions
             .get(variable)
             .copied()
