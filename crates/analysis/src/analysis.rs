@@ -108,7 +108,12 @@ struct InterfaceOutput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TypecheckDocumentOutput {
     version: Version,
-    environment_fingerprint: String,
+    type_definitions_fingerprint: String,
+    // Fingerprint of exactly the package-global schemes this document references, rendered against
+    // the converged interface table. The round-2 check is recomputed only when its own version, the
+    // type definitions, or one of the schemes it actually depends on changes, so a value-interface
+    // change rechecks only the documents that reference the changed name.
+    dependency_fingerprint: String,
     diagnostics: Vec<Diagnostic>,
     expression_types: HashMap<ExpressionId, CoreType>,
 }
@@ -624,9 +629,10 @@ fn render_dependency_fingerprint(
 // exported value schemes in isolation (cross-file references check as `Unknown`), cached by
 // document version plus the package type-definition fingerprint. Round 2 checks every
 // document against the package interface table built from round 1, cached by document
-// version plus the rendered environment fingerprint, so an edit that does not change the
-// edited document's exported interface rechecks only that document. Returns the documents
-// whose typecheck output was recomputed, so callers can republish exactly those diagnostics.
+// version, the type-definition fingerprint, plus that document's own dependency fingerprint
+// (the schemes it references, rendered against the converged table), so a value-interface change
+// rechecks only the documents that reference the changed name. Returns the documents whose
+// typecheck output was recomputed, so callers can republish exactly those diagnostics.
 pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     // Nothing has changed since the last completed typecheck, so every cached output is current and
     // no document needs rechecking. This keeps repeated IDE requests on an unchanged package cheap.
@@ -771,31 +777,14 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         }
     }
 
-    let global_schemes = build_package_interface_table(
+    // The converged package interface table. It both keys each document's round-2 cache (via the
+    // per-document dependency fingerprint rendered against it) and supplies the schemes bound when a
+    // document actually runs inference.
+    let final_table = build_package_interface_table(
         &package_naming,
         &analysis_state.document_interface_outputs,
         fallback_range,
-    )
-    .into_values()
-    .collect::<Vec<_>>();
-    let environment_fingerprint = {
-        let mut parts = Vec::with_capacity(global_schemes.len() + 1);
-        parts.push(type_definitions_fingerprint.clone());
-        for export in &global_schemes {
-            parts.push(format!(
-                "{}: {}",
-                analysis_state
-                    .interner()
-                    .resolve(export.symbol)
-                    .unwrap_or("<unknown>"),
-                crate::diagnostic::render_type_scheme(
-                    analysis_state.interner(),
-                    &export.type_scheme
-                )
-            ));
-        }
-        parts.join(";")
-    };
+    );
 
     let mut recomputed_document_ids = Vec::new();
     let mut fresh_outputs = Vec::new();
@@ -803,12 +792,30 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         let Some(document_version) = analysis_state.document_version(*document_id) else {
             continue;
         };
+        let local_naming = analysis_state
+            .document_naming(*document_id)
+            .unwrap_or_else(|| panic!("missing local naming for typecheck {document_id:?}"));
+        // Only the names this document actually references need to be in scope; binding the
+        // whole package interface would make every check linear in package size. The same set keys
+        // the cache: a document rechecks only when its version or one of these schemes changes.
+        let referenced_symbols = local_naming
+            .non_locals
+            .values()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        let per_doc_dependency_fingerprint = render_dependency_fingerprint(
+            &referenced_symbols,
+            &final_table,
+            analysis_state.interner(),
+        );
+
         if analysis_state
             .document_typecheck_outputs
             .get(document_id)
             .is_some_and(|output| {
                 output.version == document_version
-                    && output.environment_fingerprint == environment_fingerprint
+                    && output.type_definitions_fingerprint == type_definitions_fingerprint
+                    && output.dependency_fingerprint == per_doc_dependency_fingerprint
             })
         {
             continue;
@@ -817,9 +824,6 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         let module = analysis_state
             .module(*document_id)
             .unwrap_or_else(|| panic!("missing lowered module for typecheck {document_id:?}"));
-        let local_naming = analysis_state
-            .document_naming(*document_id)
-            .unwrap_or_else(|| panic!("missing local naming for typecheck {document_id:?}"));
         // Script-local type declarations are visible only inside the script itself and
         // shadow package definitions of the same name.
         let document_type_definitions =
@@ -832,19 +836,11 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 type_definitions.clone()
             };
         let mut inference_state = template_state.clone();
-        // Only the names this document actually references need to be in scope; binding the
-        // whole package interface would make every check linear in package size.
-        let referenced_symbols = local_naming
-            .non_locals
-            .values()
-            .copied()
-            .collect::<std::collections::BTreeSet<_>>();
-        for export in &global_schemes {
-            if !referenced_symbols.contains(&export.symbol) {
-                continue;
+        for symbol in &referenced_symbols {
+            if let Some(export) = final_table.get(symbol) {
+                let imported_scheme = inference_state.import_scheme(&export.type_scheme);
+                inference_state.bind_global_scheme(*symbol, imported_scheme, export.range);
             }
-            let imported_scheme = inference_state.import_scheme(&export.type_scheme);
-            inference_state.bind_global_scheme(export.symbol, imported_scheme, export.range);
         }
         // Round 2 is the authoritative per-document check, so it records expression types for
         // hover and inlay hints.
@@ -871,7 +867,8 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
             *document_id,
             TypecheckDocumentOutput {
                 version: document_version,
-                environment_fingerprint: environment_fingerprint.clone(),
+                type_definitions_fingerprint: type_definitions_fingerprint.clone(),
+                dependency_fingerprint: per_doc_dependency_fingerprint,
                 diagnostics,
                 expression_types,
             },

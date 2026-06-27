@@ -160,6 +160,77 @@ fn interface_change_rechecks_dependents_and_reports_dependent_errors() {
 }
 
 #[test]
+fn interface_change_rechecks_exactly_referrers_not_independent() {
+    // A defines global `g`; B references `g`; C references no global. Changing A's exported
+    // interface must recheck exactly A and its single referrer B (k + 1 = 2), and must leave the
+    // independent document C on its cache.
+    let mut analysis_state = typing_analysis("/pkg");
+    replace_document(
+        &mut analysis_state,
+        "/pkg/R/a.R",
+        "#: fn(count: integer) -> integer\ng <- function(count) count + count\n",
+    );
+    replace_document(&mut analysis_state, "/pkg/R/b.R", "result <- g(2L)\n");
+    replace_document(&mut analysis_state, "/pkg/R/c.R", "c_value <- 1L\n");
+    let first_run = analysis::typecheck(&mut analysis_state);
+    assert_eq!(first_run.len(), 3, "initial run checks every document");
+
+    // Change `g`'s exported scheme.
+    replace_document(
+        &mut analysis_state,
+        "/pkg/R/a.R",
+        "#: fn(count: character) -> integer\ng <- function(count) 1L\n",
+    );
+    let second_run = analysis::typecheck(&mut analysis_state);
+    let a_id = analysis_state
+        .document_id_for_path(std::path::Path::new("/pkg/R/a.R"))
+        .expect("document should exist");
+    let b_id = analysis_state
+        .document_id_for_path(std::path::Path::new("/pkg/R/b.R"))
+        .expect("document should exist");
+    assert_eq!(
+        second_run,
+        vec![a_id, b_id],
+        "exactly the changed document and its referrer recheck"
+    );
+}
+
+#[test]
+fn interface_change_leaves_document_referencing_other_global_cached() {
+    // A defines `g`; B references `g`; D defines `h`; C references only `h`. Changing A's interface
+    // must not recheck C, whose only dependency (`h`) is unchanged.
+    let mut analysis_state = typing_analysis("/pkg");
+    replace_document(
+        &mut analysis_state,
+        "/pkg/R/a.R",
+        "#: fn(count: integer) -> integer\ng <- function(count) count + count\n",
+    );
+    replace_document(&mut analysis_state, "/pkg/R/b.R", "result <- g(2L)\n");
+    replace_document(
+        &mut analysis_state,
+        "/pkg/R/d.R",
+        "#: fn(value: integer) -> integer\nh <- function(value) value\n",
+    );
+    replace_document(&mut analysis_state, "/pkg/R/c.R", "c_value <- h(3L)\n");
+    let first_run = analysis::typecheck(&mut analysis_state);
+    assert_eq!(first_run.len(), 4, "initial run checks every document");
+
+    replace_document(
+        &mut analysis_state,
+        "/pkg/R/a.R",
+        "#: fn(count: character) -> integer\ng <- function(count) 1L\n",
+    );
+    let second_run = analysis::typecheck(&mut analysis_state);
+    let c_id = analysis_state
+        .document_id_for_path(std::path::Path::new("/pkg/R/c.R"))
+        .expect("document should exist");
+    assert!(
+        !second_run.contains(&c_id),
+        "document referencing an unchanged global stays cached: {second_run:?}"
+    );
+}
+
+#[test]
 fn unedited_documents_keep_diagnostics_after_unrelated_edit() {
     let mut analysis_state = typing_analysis("/pkg");
     replace_document(&mut analysis_state, "/pkg/R/a.R", "#: integer\na <- \"bad\"\n");
