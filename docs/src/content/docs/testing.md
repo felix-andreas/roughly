@@ -177,6 +177,32 @@ Default crate test command:
 cargo test -p analysis
 ```
 
+## Blessing expectations
+
+Set `ROUGHLY_BLESS=1` to rewrite the `#++++` expectation blocks in the source `.test` files in
+place from the actual runner output instead of failing on a mismatch:
+
+```sh
+ROUGHLY_BLESS=1 cargo test -p analysis --test test_fixtures
+```
+
+Behavior:
+
+- only the content body of each `#++++` (or `#++++ path`) block is rewritten; directive lines, file
+  order, and surrounding blank-line spacing are preserved, so a blessed file is byte-identical to
+  what a human would have written and re-running without bless passes
+- `#++++ any` blocks are left untouched
+- carried-forward expectations are blessed at the generation where their block is written, not where
+  they are reasserted by carry-forward
+- `FIXTURE_FILTER` still applies, so you can bless a single case
+- blessing an already-correct suite changes no bytes
+- bless only repairs expectation drift; a fixture with a structural mismatch (wrong snapshot count,
+  a missing or extra output path, or duplicate outputs) is still reported as a failure with the
+  normal diff rather than rewritten
+
+Review every blessed change before committing: bless captures whatever the runner currently
+produces, so it will happily record an intentionally wrong outcome if the implementation is wrong.
+
 ## Suite direction
 
 The intended fixture suites are:

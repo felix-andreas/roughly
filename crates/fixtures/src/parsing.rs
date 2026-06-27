@@ -1,4 +1,4 @@
-use {serde_json::from_str, std::path::PathBuf, thiserror::Error};
+use {serde_json::from_str, std::ops::Range, std::path::PathBuf, thiserror::Error};
 
 #[derive(Debug)]
 pub struct FixtureFile {
@@ -121,6 +121,42 @@ pub fn parse_file(text: &str) -> Result<FixtureFile, ParseFixtureError> {
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(FixtureFile { groups })
+}
+
+// Byte ranges, into the source `.test` text, of every `#++++` expectation block's content body
+// (the bytes a human edits between a `#++++` directive line and the next directive line or EOF).
+// These are captured only on the bless path; they are deliberately kept out of the parsed fixture
+// structs so normal runs and their equality semantics stay unchanged. Every `#++++` directive in a
+// valid fixture file maps to exactly one parsed expectation, so the ranges returned here line up
+// one-to-one, in file order, with the `Some` expectations enumerated from `parse_file`.
+pub fn expectation_content_spans(text: &str) -> Vec<Range<usize>> {
+    let lines = text.split_inclusive('\n').collect::<Vec<_>>();
+    let mut line_offsets = Vec::with_capacity(lines.len() + 1);
+    let mut running_offset = 0;
+    for line in &lines {
+        line_offsets.push(running_offset);
+        running_offset += line.len();
+    }
+    line_offsets.push(running_offset);
+
+    let mut spans = Vec::new();
+    let mut line_index = 0;
+    while line_index < lines.len() {
+        if !starts_with_directive(lines[line_index], "#++++") {
+            line_index += 1;
+            continue;
+        }
+
+        let body_start = line_offsets[line_index + 1];
+        let mut body_end_line = line_index + 1;
+        while body_end_line < lines.len() && !is_directive_line(lines[body_end_line]) {
+            body_end_line += 1;
+        }
+        spans.push(body_start..line_offsets[body_end_line]);
+        line_index = body_end_line;
+    }
+
+    spans
 }
 
 fn parse_group(block: &str) -> Result<FixtureGroup, ParseFixtureError> {

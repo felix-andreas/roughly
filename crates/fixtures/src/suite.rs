@@ -1,11 +1,12 @@
 use {
     crate::{
-        Fixture, FixtureExpectedOutput, FixtureGroup, FixtureKind, FixtureOperation,
-        MultiFileFixture, parse_file,
+        Fixture, FixtureExpectedOutput, FixtureGenerationEntry, FixtureGroup, FixtureKind,
+        FixtureOperation, MultiFileFixture, expectation_content_spans, parse_file,
     },
     std::{
         collections::{BTreeMap, BTreeSet},
         fs,
+        ops::Range,
         path::{Path, PathBuf},
     },
 };
@@ -22,12 +23,26 @@ pub struct FixtureExpectedPaths {
     pub paths: Vec<PathBuf>,
 }
 
-pub fn run_fixture_suite<RunFixture>(directory_path: &str, mut run_fixture: RunFixture)
+pub fn run_fixture_suite<RunFixture>(directory_path: &str, run_fixture: RunFixture)
 where
+    RunFixture: FnMut(&Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String>,
+{
+    run_fixture_suite_with_bless(directory_path, run_fixture, bless_enabled());
+}
+
+// Tests force the bless flag here rather than through `ROUGHLY_BLESS`: the suite tests run as
+// parallel threads in one binary, so a process-wide environment variable would leak into unrelated
+// fixture runs.
+pub fn run_fixture_suite_with_bless<RunFixture>(
+    directory_path: &str,
+    mut run_fixture: RunFixture,
+    bless: bool,
+) where
     RunFixture: FnMut(&Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String>,
 {
     let groups = read_fixture_suite(directory_path);
     let maybe_filter = std::env::var("FIXTURE_FILTER").ok();
+    let mut bless_state = bless.then(|| build_bless_state(directory_path));
     let mut snapshot_names = BTreeSet::new();
     let mut failures = Vec::new();
     let mut executed_fixture_count = 0;
@@ -70,12 +85,28 @@ where
                 }
             };
 
+            if let Some(bless_state) = bless_state.as_mut() {
+                bless_or_record_failure(
+                    bless_state,
+                    fixture,
+                    &fixture_name,
+                    &expected_outputs,
+                    &actual_outputs,
+                    &mut failures,
+                );
+                continue;
+            }
+
             if let Some(failure) =
                 compare_fixture_outputs(fixture, &fixture_name, &expected_outputs, &actual_outputs)
             {
                 failures.push(failure);
             }
         }
+    }
+
+    if let Some(bless_state) = bless_state {
+        apply_bless_rewrites(bless_state);
     }
 
     if !failures.is_empty() {
@@ -87,6 +118,262 @@ where
     }
 
     eprintln!("{} fixture(s) passed", executed_fixture_count);
+}
+
+fn bless_enabled() -> bool {
+    matches!(std::env::var("ROUGHLY_BLESS").as_deref(), Ok("1"))
+}
+
+// Schedules content rewrites for a fixture's drifted `#++++` blocks. When the fixture is not
+// structurally blessable (snapshot count, missing/extra paths, or duplicate outputs), bless cannot
+// repair it, so it falls back to recording the normal rich-diff failure instead.
+fn bless_or_record_failure(
+    bless_state: &mut BlessState,
+    fixture: &Fixture,
+    fixture_name: &str,
+    expected_outputs: &[ExpectedFixtureOutput],
+    actual_outputs: &[Vec<FixtureRunFile>],
+    failures: &mut Vec<String>,
+) {
+    let target = bless_state.targets.get(fixture_name).unwrap_or_else(|| {
+        panic!("missing bless target for fixture `{fixture_name}`; span capture is out of sync")
+    });
+    let source_path = target.source_path.clone();
+    let spans = target.spans.clone();
+    let source_text = bless_state
+        .sources
+        .get(&source_path)
+        .expect("bless source text should be captured")
+        .clone();
+    let locations = case_expectations_in_order(fixture);
+
+    match plan_bless_rewrites(
+        expected_outputs,
+        actual_outputs,
+        &locations,
+        &spans,
+        &source_text,
+    ) {
+        Some(rewrites) => {
+            if !rewrites.is_empty() {
+                bless_state
+                    .rewrites
+                    .entry(source_path)
+                    .or_default()
+                    .extend(rewrites);
+            }
+        }
+        None => {
+            if let Some(failure) =
+                compare_fixture_outputs(fixture, fixture_name, expected_outputs, actual_outputs)
+            {
+                failures.push(failure);
+            }
+        }
+    }
+}
+
+// Computes the content rewrites needed to bless a fixture's `#++++` blocks, or `None` when the
+// fixture is not structurally blessable (snapshot count, missing/extra paths, or duplicate outputs)
+// and should instead be reported with the normal rich diff. Only drifted `Exact` blocks are
+// rewritten; `#++++ any` blocks are left untouched.
+fn plan_bless_rewrites(
+    expected_outputs: &[ExpectedFixtureOutput],
+    actual_outputs: &[Vec<FixtureRunFile>],
+    locations: &[ExpectationLocation],
+    spans: &[Range<usize>],
+    source_text: &str,
+) -> Option<Vec<(Range<usize>, String)>> {
+    if actual_outputs.len() != expected_outputs.len() || locations.len() != spans.len() {
+        return None;
+    }
+
+    let mut actual_snapshots = Vec::with_capacity(actual_outputs.len());
+    for snapshot in actual_outputs {
+        let mut files = BTreeMap::new();
+        for file in snapshot {
+            if files
+                .insert(file.path.clone(), file.output.trim_end().to_owned())
+                .is_some()
+            {
+                return None;
+            }
+        }
+        actual_snapshots.push(files);
+    }
+
+    for (expected_output, actual_files) in expected_outputs.iter().zip(&actual_snapshots) {
+        for path in actual_files.keys() {
+            if !expected_output.files.contains_key(path) {
+                return None;
+            }
+        }
+        for path in expected_output.files.keys() {
+            if !actual_files.contains_key(path) {
+                return None;
+            }
+        }
+    }
+
+    let mut rewrites = Vec::new();
+    for (location, span) in locations.iter().zip(spans) {
+        let Some(expected_text) = &location.expected else {
+            continue;
+        };
+        let actual_text = actual_snapshots
+            .get(location.generation_index)
+            .and_then(|files| files.get(&location.path))?;
+        if actual_text != expected_text {
+            rewrites.push((span.clone(), blessed_block_body(source_text, span, actual_text)));
+        }
+    }
+
+    Some(rewrites)
+}
+
+// Builds the replacement bytes for one expectation block. The trailing whitespace of the existing
+// block (the blank-line spacing before the next directive) is preserved so a blessed file matches
+// hand-written formatting and re-running without bless is byte-stable. An empty block has no
+// trailing newline, so one is added to keep the new content off the following directive line.
+fn blessed_block_body(source_text: &str, span: &Range<usize>, actual_text: &str) -> String {
+    let original_body = &source_text[span.clone()];
+    let trailing_whitespace = &original_body[original_body.trim_end().len()..];
+    if trailing_whitespace.contains('\n') {
+        format!("{actual_text}{trailing_whitespace}")
+    } else {
+        format!("{actual_text}{trailing_whitespace}\n")
+    }
+}
+
+fn case_expectations_in_order(fixture: &Fixture) -> Vec<ExpectationLocation> {
+    match &fixture.kind {
+        FixtureKind::Simple(case) => vec![ExpectationLocation {
+            generation_index: 0,
+            path: PathBuf::new(),
+            expected: Some(case.expected.clone()),
+        }],
+        FixtureKind::MultiFile(case) => {
+            let mut locations = Vec::new();
+            push_generation_expectations(&mut locations, 0, &case.initial_generation.entries);
+            for (generation_offset, generation) in case.generations.iter().enumerate() {
+                push_generation_expectations(
+                    &mut locations,
+                    generation_offset + 1,
+                    &generation.entries,
+                );
+            }
+            locations
+        }
+    }
+}
+
+fn push_generation_expectations(
+    locations: &mut Vec<ExpectationLocation>,
+    generation_index: usize,
+    entries: &[FixtureGenerationEntry],
+) {
+    for entry in entries {
+        let Some(expectation) = &entry.expectation else {
+            continue;
+        };
+        locations.push(ExpectationLocation {
+            generation_index,
+            path: expectation.path.clone(),
+            expected: match &expectation.output {
+                FixtureExpectedOutput::Exact(text) => Some(text.clone()),
+                FixtureExpectedOutput::Any => None,
+            },
+        });
+    }
+}
+
+fn build_bless_state(directory_path: &str) -> BlessState {
+    let mut targets = BTreeMap::new();
+    let mut sources = BTreeMap::new();
+
+    for fixture_path in collect_fixture_paths(directory_path) {
+        let source_text = fs::read_to_string(&fixture_path).unwrap_or_else(|error| {
+            panic!(
+                "failed to read fixture file `{}`: {error}",
+                fixture_path.display()
+            )
+        });
+        let fixture_file = parse_file(&source_text).unwrap_or_else(|error| {
+            panic!(
+                "failed to parse fixture file `{}`: {error}",
+                fixture_path.display()
+            )
+        });
+        let spans = expectation_content_spans(&source_text);
+
+        let mut span_index = 0;
+        for group in &fixture_file.groups {
+            for fixture in &group.cases {
+                let expectation_count = case_expectations_in_order(fixture).len();
+                let span_end = span_index + expectation_count;
+                if span_end > spans.len() {
+                    panic!(
+                        "bless span capture out of sync in `{}`: not enough `#++++` blocks",
+                        fixture_path.display()
+                    );
+                }
+                let case_spans = spans[span_index..span_end].to_vec();
+                span_index = span_end;
+                let fixture_name = format!("{}__{}", group.name, fixture.name);
+                targets.insert(
+                    fixture_name,
+                    BlessTarget {
+                        source_path: fixture_path.clone(),
+                        spans: case_spans,
+                    },
+                );
+            }
+        }
+
+        if span_index != spans.len() {
+            panic!(
+                "bless span capture out of sync in `{}`: {} `#++++` blocks, {} consumed",
+                fixture_path.display(),
+                spans.len(),
+                span_index
+            );
+        }
+
+        sources.insert(fixture_path, source_text);
+    }
+
+    BlessState {
+        targets,
+        sources,
+        rewrites: BTreeMap::new(),
+    }
+}
+
+fn apply_bless_rewrites(bless_state: BlessState) {
+    for (source_path, mut rewrites) in bless_state.rewrites {
+        let source_text = bless_state
+            .sources
+            .get(&source_path)
+            .expect("bless source text should be captured");
+        rewrites.sort_by(|left, right| right.0.start.cmp(&left.0.start));
+
+        let mut blessed_text = source_text.clone();
+        for (span, new_body) in &rewrites {
+            blessed_text.replace_range(span.clone(), new_body);
+        }
+
+        fs::write(&source_path, &blessed_text).unwrap_or_else(|error| {
+            panic!(
+                "failed to write blessed fixture file `{}`: {error}",
+                source_path.display()
+            )
+        });
+        eprintln!(
+            "blessed {} block(s) in {}",
+            rewrites.len(),
+            source_path.display()
+        );
+    }
 }
 
 pub fn read_fixture_suite(directory_path: &str) -> Vec<FixtureGroup> {
@@ -503,6 +790,23 @@ fn display_fixture_path(path: &Path) -> String {
     } else {
         path.display().to_string()
     }
+}
+
+struct BlessState {
+    targets: BTreeMap<String, BlessTarget>,
+    sources: BTreeMap<PathBuf, String>,
+    rewrites: BTreeMap<PathBuf, Vec<(Range<usize>, String)>>,
+}
+
+struct BlessTarget {
+    source_path: PathBuf,
+    spans: Vec<Range<usize>>,
+}
+
+struct ExpectationLocation {
+    generation_index: usize,
+    path: PathBuf,
+    expected: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

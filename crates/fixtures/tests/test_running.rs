@@ -1,13 +1,13 @@
 use {
     fixtures::{
         FixtureKind, FixtureRunFile, expected_output_paths_for_generation, parse_file,
-        run_fixture_suite,
+        run_fixture_suite, run_fixture_suite_with_bless,
     },
     indoc::indoc,
     std::{
         fs,
         panic::{AssertUnwindSafe, catch_unwind},
-        path::PathBuf,
+        path::{Path, PathBuf},
         sync::atomic::{AtomicU64, Ordering},
     },
 };
@@ -488,6 +488,193 @@ fn rejects_empty_paths_in_generational_initial_generation() {
     .expect_err("fixture suite should fail");
 
     assert!(panic_message(panic).contains("document path must not be empty"));
+}
+
+#[test]
+fn blesses_simple_fixture_expectation() {
+    let fixture_directory = write_fixture_suite(indoc! {"
+        #==== basics
+        #---- scalar
+        value <- 1
+        #++++
+        WRONG
+    "});
+
+    run_fixture_suite_with_bless(
+        path_to_string(&fixture_directory).as_str(),
+        |_fixture| {
+            Ok(vec![vec![FixtureRunFile {
+                path: PathBuf::new(),
+                output: "value: integer".to_owned(),
+            }]])
+        },
+        true,
+    );
+
+    assert_eq!(
+        read_suite_file(&fixture_directory),
+        indoc! {"
+            #==== basics
+            #---- scalar
+            value <- 1
+            #++++
+            value: integer
+        "}
+    );
+
+    // Re-running without bless against the same actual output must now pass.
+    run_fixture_suite(path_to_string(&fixture_directory).as_str(), |_fixture| {
+        Ok(vec![vec![FixtureRunFile {
+            path: PathBuf::new(),
+            output: "value: integer".to_owned(),
+        }]])
+    });
+}
+
+#[test]
+fn blesses_multi_file_and_generation_expectations() {
+    let fixture_directory = write_fixture_suite(indoc! {"
+        #==== workspace
+        #---- generational
+        #---- a.R
+        alpha <- 1
+        #++++
+        WRONG a v1
+        #---- b.R
+        beta <- alpha
+        #++++
+        WRONG b v1
+        #.... v2
+        #---- edit a.R 1:11-1:11 -> \" + 2\"
+        #++++
+        WRONG a v2
+    "});
+
+    let run_fixture = |_fixture: &fixtures::Fixture| {
+        Ok(vec![
+            vec![
+                FixtureRunFile {
+                    path: PathBuf::from("a.R"),
+                    output: "a v1".to_owned(),
+                },
+                FixtureRunFile {
+                    path: PathBuf::from("b.R"),
+                    output: "b v1".to_owned(),
+                },
+            ],
+            vec![
+                FixtureRunFile {
+                    path: PathBuf::from("a.R"),
+                    output: "a v2".to_owned(),
+                },
+                FixtureRunFile {
+                    path: PathBuf::from("b.R"),
+                    output: "b v1".to_owned(),
+                },
+            ],
+        ])
+    };
+
+    run_fixture_suite_with_bless(path_to_string(&fixture_directory).as_str(), run_fixture, true);
+
+    assert_eq!(
+        read_suite_file(&fixture_directory),
+        indoc! {"
+            #==== workspace
+            #---- generational
+            #---- a.R
+            alpha <- 1
+            #++++
+            a v1
+            #---- b.R
+            beta <- alpha
+            #++++
+            b v1
+            #.... v2
+            #---- edit a.R 1:11-1:11 -> \" + 2\"
+            #++++
+            a v2
+        "}
+    );
+
+    // The carried-forward `b.R` expectation must still hold in the second generation.
+    run_fixture_suite(path_to_string(&fixture_directory).as_str(), run_fixture);
+}
+
+#[test]
+fn leaves_any_expectations_untouched_when_blessing() {
+    let fixture_directory = write_fixture_suite(indoc! {"
+        #==== workspace
+        #---- mixed
+        #---- a.R
+        alpha <- 1
+        #++++
+        WRONG a
+        #---- b.R
+        beta <- alpha
+        #++++ any
+    "});
+
+    run_fixture_suite_with_bless(
+        path_to_string(&fixture_directory).as_str(),
+        |_fixture| {
+            Ok(vec![vec![
+                FixtureRunFile {
+                    path: PathBuf::from("a.R"),
+                    output: "a out".to_owned(),
+                },
+                FixtureRunFile {
+                    path: PathBuf::from("b.R"),
+                    output: "b out".to_owned(),
+                },
+            ]])
+        },
+        true,
+    );
+
+    assert_eq!(
+        read_suite_file(&fixture_directory),
+        indoc! {"
+            #==== workspace
+            #---- mixed
+            #---- a.R
+            alpha <- 1
+            #++++
+            a out
+            #---- b.R
+            beta <- alpha
+            #++++ any
+        "}
+    );
+}
+
+#[test]
+fn blessing_a_correct_suite_changes_no_bytes() {
+    let original = indoc! {"
+        #==== basics
+        #---- scalar
+        value <- 1
+        #++++
+        value: integer
+    "};
+    let fixture_directory = write_fixture_suite(original);
+
+    run_fixture_suite_with_bless(
+        path_to_string(&fixture_directory).as_str(),
+        |_fixture| {
+            Ok(vec![vec![FixtureRunFile {
+                path: PathBuf::new(),
+                output: "value: integer".to_owned(),
+            }]])
+        },
+        true,
+    );
+
+    assert_eq!(read_suite_file(&fixture_directory), original);
+}
+
+fn read_suite_file(fixture_directory: &Path) -> String {
+    fs::read_to_string(fixture_directory.join("suite.test")).expect("suite file should be readable")
 }
 
 fn write_fixture_suite(contents: &str) -> PathBuf {
