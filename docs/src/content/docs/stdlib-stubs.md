@@ -3,12 +3,15 @@ title: Stdlib Stubs (Proposal)
 description: Design note proposing a standard-library stub framework so the type checker knows base/stats/utils instead of resolving them to Unknown
 ---
 
-:::caution[Status: proposal]
-This page is a **design note for review**, not a contract. Nothing here is implemented yet,
-and the documented behavior is not binding until it is. Implementation is sequenced **after**
-the M3/M4 incremental-analysis work (see [Sequencing](#sequencing)). The authoritative typing
-contract remains the [Typing Reference](/typing-reference); this note only proposes how to feed
-the standard library into that contract.
+:::caution[Status: partially implemented]
+The **stdlib-embedded first increment is implemented**: `T`/`F`/`pi` plus a curated set of base
+functions ship as `#:` declaration-only stubs (`crates/analysis/src/stdlib_base.R`), loaded once at
+`Analysis::new` into the inference template, with the LT2 isolation oracle (`assert_stub_isolation`)
+enforcing that an un-shadowed stub never becomes a package value. Still **proposed / not yet built**:
+the CRAN tier (per-project introspection), R-version keying of the embedded corpus, the stubtest CI
+validator, `pkg::name` (`NamespaceGet`), and the LT2 zero-per-edit-cost benchmark. Sections below mark
+which is which. The authoritative typing contract remains the [Typing Reference](/typing-reference);
+this note describes how the standard library feeds that contract.
 :::
 
 ## Problem
@@ -116,14 +119,23 @@ are never invalidated by user edits.
 ### Incremental hygiene (the one subtle correctness risk)
 
 Stub schemes are bound into the **template environment**, **not** into `global_bindings` and **not**
-into the package interface table. Therefore they:
+into the package interface table. The isolation property that matters is that a stub never becomes a
+package **value** — never a package-definition, a package global, an interface export, or a naming
+dirty-name — so it never enters `render_dependency_fingerprint` (which renders only interface-table
+entries) and one edit can never spuriously invalidate package-wide through a base name.
 
-- never enter `render_dependency_fingerprint`;
-- never create reverse-dependency edges.
+A stub name **may** still appear as a key in two indexes, harmlessly:
 
-Extend the M3 debug drift assertion to assert that base names never appear as dependency edges. If
-stubs leaked into the package-global fingerprint, every base name would trigger spurious package-wide
-invalidation.
+- the **reverse-dependency index**: a value reference to a stub is indexed exactly like a reference
+  to an as-yet-undefined name. This is required, not a leak — if a later package binding *shadows* the
+  stub, the reference's defined-ness flips and the referrers must be revalidated via category D, which
+  walks that very edge. The edge is otherwise inert, because a stub never enters the dirty set.
+- the **type-definition / type-reference indices**: those are the *type* namespace, and a user type
+  that happens to share a stub value's name (`#: @type T` vs the value `T`) is an unrelated entity.
+
+The LT2 debug isolation assertion therefore checks only the package-*value* indexes (package
+definitions, `global_bindings`, interface exports, dirty-names), not the reverse-dependency or
+type-namespace indices.
 
 ### Two required integration edits
 
