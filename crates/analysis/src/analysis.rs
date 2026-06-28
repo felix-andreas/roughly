@@ -142,6 +142,7 @@ pub enum AnalysisError {
     DocumentNotFound(PathBuf),
     ParseFailed(PathBuf),
     DocumentRead(PathBuf, String),
+    InvalidEditRange(PathBuf),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
@@ -396,12 +397,15 @@ impl Analysis {
             .documents
             .get_mut(&document_id)
             .expect("document should exist");
-        document.edit(&mut self.parser, changes);
+        // A malformed change range is rejected without mutating the rope, but earlier changes in the
+        // batch may already be applied (and the tree is always reparsed to match), so the document is
+        // still coherent and its caches must be invalidated regardless before the error propagates.
+        let edit_result = document.edit(&mut self.parser, changes);
         let version = self.bump_version();
         self.document_versions.insert(document_id, version);
         self.bump_package_version();
         self.invalidate_document(document_id);
-        Ok(())
+        edit_result.map_err(|_| AnalysisError::InvalidEditRange(path.to_path_buf()))
     }
 
     pub fn delete_document(&mut self, path: &Path) -> Result<(), AnalysisError> {
