@@ -1,4 +1,5 @@
 use {
+    fixtures::{Fixture, FixtureKind, FixtureRunFile, run_fixture_suite},
     indoc::indoc,
     regex::{Captures, Regex},
     ropey::Rope,
@@ -6,32 +7,35 @@ use {
         format::{Config, FormatError, LineEnding, format},
         tree,
     },
-    std::fs,
+    std::{fs, path::PathBuf},
 };
 
 #[test]
-fn base() {
-    const BASE_TESTS: &str = include_str!("format/base.R.test");
-    run_test_groups(&parse_test_file(BASE_TESTS));
+fn format_fixtures() {
+    run_fixture_suite("tests/format", run_format_fixture);
+}
+
+fn run_format_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String> {
+    let FixtureKind::Simple(case) = &fixture.kind else {
+        return Err("format fixtures must use the `Simple` shape".to_owned());
+    };
+    let output = match format_str(&case.input) {
+        Ok(formatted) => formatted,
+        Err(error) => format!("error: {error:?}"),
+    };
+
+    Ok(vec![vec![FixtureRunFile {
+        path: PathBuf::new(),
+        output,
+    }]])
 }
 
 #[test]
-fn special() {
-    const SPECIAL_TESTS: &str = include_str!("format/special.R.test");
-    run_test_groups(&parse_test_file(SPECIAL_TESTS));
-}
-
-#[test]
-fn misc() {
-    const MISC_TESTS: &str = include_str!("format/misc.R.test");
-    run_test_groups(&parse_test_file(MISC_TESTS));
-}
-
-#[test]
-fn docs() {
-    // This tests all code examples in the formatter documentation.
-    // It updates the formatted output as needed to keep the
-    // documentation consistent with the formatter's behavior.
+fn documentation_examples() {
+    // Formats every code example in the formatter documentation template and renders the result into
+    // `docs/src/content/docs/formatter.md`. The generated docs page is the golden output: run with
+    // `ROUGHLY_BLESS=1` to rewrite it, otherwise the test fails when the page drifts from the
+    // formatter's current behavior.
     let markdown = fs::read_to_string("tests/format/formatter.template.md").unwrap();
 
     let regex = Regex::new(r#"(?m)```r\n([\s\S]*?)```"#).unwrap();
@@ -48,17 +52,14 @@ MAKE CHANGES TO tests/format/formatter.template.md INSTEAD";
                 .and_then(|(comment, text)| {
                     comment
                         .split_once(":")
-                        .map(|(name, directive)| ((name.trim(), directive.trim()), text))
+                        .map(|(_name, directive)| (directive.trim(), text))
                 })
-                .map(|((name, directive), text)| {
+                .map(|(directive, text)| {
                     if directive == "skip" {
                         return text.into();
                     }
 
-                    let snapshot = format!("documentation_examples__{name}");
                     let code = format_str(text).unwrap();
-                    insta::assert_snapshot!(snapshot, code);
-
                     match directive {
                         "compare" => {
                             format!("# Before formatting\n{text}\n# After formatting\n{code}")
@@ -72,10 +73,22 @@ MAKE CHANGES TO tests/format/formatter.template.md INSTEAD";
         })
         .replace(BEFORE, AFTER);
 
-    // note: we cannot write file during nix build
     let path = "../../docs/src/content/docs/formatter.md";
-    if fs::metadata(path).is_ok() {
-        fs::write(path, formatted).unwrap();
+    if matches!(std::env::var("ROUGHLY_BLESS").as_deref(), Ok("1")) {
+        // Note: we cannot write the file during a nix build, where the source tree is read-only.
+        if fs::metadata(path).is_ok() {
+            fs::write(path, &formatted).unwrap();
+        }
+        return;
+    }
+
+    // When the generated page is available, assert it matches; under a sandboxed build where the docs
+    // tree is absent there is nothing to compare against.
+    if let Ok(existing) = fs::read_to_string(path) {
+        assert_eq!(
+            existing, formatted,
+            "docs/src/content/docs/formatter.md is out of date; rerun with ROUGHLY_BLESS=1"
+        );
     }
 }
 
@@ -151,61 +164,4 @@ fn format_str(text: &str) -> Result<String, FormatError> {
             line_ending: LineEnding::Auto,
         },
     )
-}
-
-#[derive(Debug)]
-struct TestGroup {
-    name: &'static str,
-    cases: Vec<TestCase>,
-}
-
-#[derive(Debug)]
-struct TestCase {
-    name: &'static str,
-    code: &'static str,
-}
-
-fn parse_test_file(text: &'static str) -> Vec<TestGroup> {
-    text.split("#====")
-        .filter_map(|block| {
-            if block.trim().is_empty() {
-                return None;
-            }
-            let (name, cases) = block.split_once('\n').unwrap();
-            Some(TestGroup {
-                name: name.trim(), // trim potental \r
-                cases: cases
-                    .split("#----")
-                    .filter_map(|case| {
-                        if case.trim().is_empty() {
-                            return None;
-                        }
-                        let (name, code) = case.split_once("\n").unwrap();
-                        Some(TestCase {
-                            name: name.trim(), // trim potental \r
-                            code,
-                        })
-                    })
-                    .collect(),
-            })
-        })
-        .collect()
-}
-
-fn run_test_groups(groups: &[TestGroup]) {
-    let maybe_filter = std::env::var("FORMAT_FILTER").ok();
-    for group in groups {
-        for case in &group.cases {
-            let snapshot = format!("{}__{}", group.name, case.name);
-            if maybe_filter
-                .as_ref()
-                .is_some_and(|filter| !snapshot.contains(filter))
-            {
-                continue;
-            }
-
-            let code = format_str(case.code).unwrap();
-            insta::assert_snapshot!(snapshot, code);
-        }
-    }
 }

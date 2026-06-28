@@ -1,8 +1,10 @@
-# fmt: skip-file
 #==== program
 #---- empty
+#++++
 
 #---- basic
+x
+#++++
 x
 
 #---- joins_consecutive_newlines
@@ -10,9 +12,16 @@ x
 
 
 y
+#++++
+x
+
+y
 
 #---- changes_semicolon_to_newline
 x; y
+#++++
+x
+y
 
 #---- comments
 #!/usr/bin/env Rscript
@@ -28,6 +37,20 @@ x; y
 #' @param
 #'comment'
 #"comment"
+#++++
+#!/usr/bin/env Rscript
+# comment
+# comment
+#  comment
+#   comment
+##comment
+## comment
+##  comment
+##   comment
+#' @param
+#' @param
+#'comment'
+# "comment"
 
 #---- comment_with_special_meaning
 # special comments should preserve format
@@ -40,8 +63,23 @@ x; y
 #'@param text
 #*@param text
 #:@param text
+#++++
+# special comments should preserve format
+#' roxygen comment
+#* plumber comment
+#: roughly comment
+#' roxygen comment
+#* plumber comment
+#: roughly comment
+#' @param text
+#* @param text
+#: @param text
 
 #---- comments_all_positions
+# 1
+program # program
+# 2
+#++++
 # 1
 program # program
 # 2
@@ -57,8 +95,23 @@ NA
 NA_real_
 NA_character_
 NA_complex_
+#++++
+TRUE
+FALSE
+NULL
+Inf
+NaN
+NA
+NA_real_
+NA_character_
+NA_complex_
 
 #---- keywords
+return
+next
+break
+...
+#++++
 return
 next
 break
@@ -69,8 +122,19 @@ break
 0L
 0xDEADL
 1e1L
+#++++
+42L
+0L
+0xDEADL
+1e1L
 
 #---- floats
+.66
+123.4123
+1e322
+1e-3
+1.8e10
+#++++
 .66
 123.4123
 1e322
@@ -83,6 +147,12 @@ break
 1e2i
 1+2i
 1.5+2.5i
+#++++
+1i
+1.5i
+1e2i
+1 + 2i
+1.5 + 2.5i
 
 #---- strings
 ""
@@ -90,6 +160,13 @@ break
 "x y"
 'x'
 'x y'
+'"'
+#++++
+""
+"x"
+"x y"
+"x"
+"x y"
 '"'
 
 #---- strings_escaping
@@ -99,8 +176,20 @@ break
 '\"x"'
 '\\"x\\"'
 "\\\"x\\\""
+#++++
+'"x"'
+"\"x\""
+"\'x\'"
+'\"x"'
+'\\"x\\"'
+"\\\"x\\\""
 
 #---- strings_multiline
+"x
+    x"
+call("x
+    y")
+#++++
 "x
     x"
 call("x
@@ -110,12 +199,26 @@ call("x
     "x
         y
             z"
+#++++
+"x
+        y
+            z"
 
 #---- dot_dot_i
 ..1
 ..10
+#++++
+..1
+..10
 
 #---- identifiers
+x
+x2
+x.y
+.x.y
+`_x`
+`a "literal"`
+#++++
 x
 x2
 x.y
@@ -129,16 +232,29 @@ x.y
 +x
 -x
 ~x
+#++++
+!x
++x
+-x
+~x
 
 #---- spacing
 ! x
 + x
 - x
 ~x
+#++++
+!x
++x
+-x
+~x
 
 #---- comments_all_positions
 - # 1
 rhs
+#++++
+- # 1
+  rhs
 
 #==== binary_operator
 #---- basic
@@ -149,6 +265,14 @@ x / y
 x ^ y
 x %% y
 x %/% y
+#++++
+x + y
+x - y
+x * y
+x / y
+x^y
+x %% y
+x %/% y
 
 #---- spacing
 x+y
@@ -156,13 +280,30 @@ x-y
 x*y
 x/y
 x ^ y
+#++++
+x + y
+x - y
+x * y
+x / y
+x^y
 
 #---- assignment
 x <- y
 x <<- y
 x = y
+#++++
+x <- y
+x <<- y
+x = y
 
-#---- comparison  
+#---- comparison
+x == y
+x != y
+x < y
+x > y
+x <= y
+x >= y
+#++++
 x == y
 x != y
 x < y
@@ -175,8 +316,18 @@ x & y
 x | y
 x && y
 x || y
+#++++
+x & y
+x | y
+x && y
+x || y
 
 #---- special
+x:y
+x %in% y
+x %>% y
+x |> y
+#++++
 x:y
 x %in% y
 x %>% y
@@ -188,6 +339,12 @@ x:y
 x^y
 x : y
 x ^ y
+#++++
+# colon and caret should not have spacing
+x:y
+x^y
+x:y
+x^y
 
 #---- multiline
 x +
@@ -209,6 +366,26 @@ x + {
 } + {
     y
 }
+#++++
+x +
+  y
+
+x |> y |>
+  z
+
+x + {
+  y
+}
+
+{
+  x
+} + y
+
+{
+  x
+} + {
+  y
+}
 
 #---- comments_all_positions
 lhs + # 1
@@ -221,12 +398,29 @@ lhs + # 1
     # 2
     rhs # rhs
 )
+#++++
+lhs + # 1
+  rhs # 2
+
+(
+  lhs # lhs
+    # 1
+    + # operator
+    # 2
+    rhs # rhs
+)
 
 #---- comment_after_lhs
 # allow operator and rhs on same line if there is a comment after lhs
 (
     lhs # lhs
         + rhs
+)
+#++++
+# allow operator and rhs on same line if there is a comment after lhs
+(
+  lhs # lhs
+    + rhs
 )
 
 #==== braced
@@ -237,6 +431,12 @@ lhs + # 1
 
 {
 }
+#++++
+{}
+
+{}
+
+{}
 
 #---- basic
 { x }
@@ -253,6 +453,21 @@ x
     x
     y
 }
+#++++
+{ x }
+
+{
+  x
+}
+
+{
+  x
+}
+
+{
+  x
+  y
+}
 
 #---- spacing
 {x}
@@ -262,6 +477,15 @@ x
 {
 x
 y
+}
+#++++
+{ x }
+
+{ x; y }
+
+{
+  x
+  y
 }
 
 #---- hugging
@@ -285,6 +509,30 @@ x }
 
 {
 x + y }
+#++++
+{ x }
+
+{
+  x
+}
+
+{ x + y }
+
+{
+  x +
+    y
+}
+
+{
+  x +
+    y
+}
+
+{ x + y }
+
+{
+  x + y
+}
 
 #---- semicolon
 { x; y }
@@ -304,6 +552,31 @@ x; y
 
 { x; y +
     z }
+#++++
+{ x; y }
+
+{
+  x
+  y
+}
+
+{ x; y }
+
+{
+  x
+  y
+}
+
+{
+  x
+  y
+}
+
+{
+  x
+  y +
+    z
+}
 
 #---- comments_all_positions
 { # {
@@ -311,13 +584,28 @@ x; y
     body # body
     # 2
 } # }
+#++++
+{ # {
+  # 1
+  body # body
+  # 2
+} # }
 
 #---- comment_hugging
 { expr # comment
 }
+#++++
+{
+  expr # comment
+}
 
 #==== call
 #---- basic
+f()
+f(x)
+f(x, y)
+f(a = x, b = y)
+#++++
 f()
 f(x)
 f(x, y)
@@ -328,6 +616,11 @@ f( )
 f( x )
 f( x,y )
 f( a=x,b=y )
+#++++
+f()
+f(x)
+f(x, y)
+f(a = x, b = y)
 
 #---- multiline
 f(
@@ -343,6 +636,20 @@ f(
     a = x,
     b = y
 )
+#++++
+f(
+  x
+)
+
+f(
+  x,
+  y
+)
+
+f(
+  a = x,
+  b = y
+)
 
 #---- hugging_single_line_args
 fn(arg)
@@ -356,6 +663,18 @@ arg)
 fn(
 arg
 )
+#++++
+fn(arg)
+
+fn(arg)
+
+fn(
+  arg
+)
+
+fn(
+  arg
+)
 
 #---- hugging_single_line_block
 fn({ body })
@@ -368,6 +687,18 @@ fn(
 
 fn(
 { body }
+)
+#++++
+fn({ body })
+
+fn({ body })
+
+fn(
+  { body }
+)
+
+fn(
+  { body }
 )
 
 #---- hugging_multi_line_block
@@ -390,6 +721,26 @@ fn(
     body
 }
 )
+#++++
+fn({
+  body
+})
+
+fn({
+  body
+})
+
+fn(
+  {
+    body
+  }
+)
+
+fn(
+  {
+    body
+  }
+)
 
 #---- hugging_multiple_arguments
 fn(arg1, fn(
@@ -411,6 +762,26 @@ fn(arg1, arg2 = value, function() {
 fn(arg1, arg2 = value, if(condition) {
     body
 })
+#++++
+fn(arg1, fn(
+  arg
+))
+
+fn(arg1, arg2 = fn(
+  arg
+))
+
+fn(arg1, {
+  body
+})
+
+fn(arg1, arg2 = value, function() {
+  body
+})
+
+fn(arg1, arg2 = value, if (condition) {
+  body
+})
 
 #---- hugging_last_argument_different_line
 fn(arg1, {
@@ -419,6 +790,14 @@ fn(arg1, {
 
 fn(arg1 = value, function() {
     body
+}, arg2 = value)
+#++++
+fn(arg1, {
+  body
+}, arg2)
+
+fn(arg1 = value, function() {
+  body
 }, arg2 = value)
 
 #---- hugging_nested
@@ -439,11 +818,36 @@ fn(fn(fn(
 fn(arg = fn(arg =fn(
     arg
 )))
+#++++
+fn(fn(arg))
+
+fn(fn(
+  arg
+))
+
+fn(fn(
+  arg
+))
+
+fn(fn(fn(
+  arg
+)))
+
+fn(arg = fn(arg = fn(
+  arg
+)))
 
 #---- hugging_comments
 fn(arg1, fn(
     arg
 ) # comment
+)
+#++++
+fn(
+  arg1,
+  fn(
+    arg
+  ) # comment
 )
 
 #---- comments_all_positions
@@ -454,19 +858,36 @@ fn( # (
     arg2 # arg2
     # 2
 ) # )
+#++++
+fn( # (
+  # 1
+  arg1 # arg1
+  , # ,
+  arg2 # arg2
+  # 2
+) # )
 
 #==== extract
 #---- basic
+x$y
+x@y
+#++++
 x$y
 x@y
 
 #---- spacing
 x $ y
 x @ y
+#++++
+x$y
+x@y
 
 #---- chained
 x$y$z
 x $ y $ z
+#++++
+x$y$z
+x$y$z
 
 #---- multiline
 x$
@@ -475,8 +896,21 @@ y
 (
     x
 )$y
+#++++
+x$
+  y
+
+(
+  x
+)$y
 
 #---- empty_line
+# note: this is not parsed correctly
+# see: https://github.com/r-lib/tree-sitter-r/issues/166
+# list(a = 1)$
+#
+# a
+#++++
 # note: this is not parsed correctly
 # see: https://github.com/r-lib/tree-sitter-r/issues/166
 # list(a = 1)$
@@ -494,10 +928,23 @@ lhs$
     fn(x
     )$
     fn(x,y)
+#++++
+lhs$
+  fn(x)$
+  fn(x, y)
+
+({
+  expr
+})$
+  fn(x)$
+  fn(x, y)
 
 #---- comments_all_positions
 x$ # 1
     y # 2
+#++++
+x$ # 1
+  y # 2
 
 #==== for_statement
 #---- basic
@@ -506,6 +953,12 @@ for (item in sequence) {}
 for (item in sequence) {
     body
 }
+#++++
+for (item in sequence) {}
+
+for (item in sequence) {
+  body
+}
 
 #---- spacing
 for( item in sequence ){ }
@@ -513,12 +966,26 @@ for( item in sequence ){ }
 for( item in sequence ){
 body
 }
+#++++
+for (item in sequence) {}
+
+for (item in sequence) {
+  body
+}
 
 #---- auto_braces
 for (item in sequence) body
 
 for (item in sequence)
     body
+#++++
+for (item in sequence) {
+  body
+}
+
+for (item in sequence) {
+  body
+}
 
 #---- multiline
 for (
@@ -528,6 +995,15 @@ for (
 for (
     item
     in sequence
+) {}
+#++++
+for (
+  item in sequence
+) {}
+
+for (
+  item
+  in sequence
 ) {}
 
 #---- multiline_sequence
@@ -539,6 +1015,16 @@ for (
     item in {
         sequence
     }
+) {}
+#++++
+for (item in {
+  sequence
+}) {}
+
+for (
+  item in {
+    sequence
+  }
 ) {}
 
 #---- hugging
@@ -557,6 +1043,24 @@ in sequence
 for (
 item
 in sequence) {}
+#++++
+for (item in sequence) {}
+
+for (item in sequence) {}
+
+for (
+  item in sequence
+) {}
+
+for (
+  item
+  in sequence
+) {}
+
+for (
+  item
+  in sequence
+) {}
 
 #---- comments_multiline_sequence
 for (
@@ -573,10 +1077,32 @@ in
 {
     sequence
 }) {}
+#++++
+for (
+  item
+  # 1
+  in {
+    sequence
+  }
+) {}
+
+for (
+  item
+  in
+  # 2
+  {
+    sequence
+  }
+) {}
 
 #---- comment_but_no_block
 for (item in sequence) # 1
     body
+#++++
+for (item in sequence) # 1
+{
+  body
+}
 
 #---- comments_all_positions
 for
@@ -594,6 +1120,22 @@ for
 {
     body
 }
+#++++
+for
+# 1
+( # (
+  # 2
+  item # item
+  # 3
+  in # in
+  # 4
+  sequence # sequence
+  # 5
+) # )
+# 6
+{
+  body
+}
 
 #==== function_definition
 #---- basic
@@ -605,6 +1147,16 @@ function(a, b = c) { body }
 
 function(a, b = c) {
     body
+}
+#++++
+function(a, b) {}
+
+function(a, b = c) {}
+
+function(a, b = c) { body }
+
+function(a, b = c) {
+  body
 }
 
 #---- empty
@@ -618,6 +1170,14 @@ function()
 
 function(
 ) {}
+#++++
+function() {}
+
+function() {}
+
+function() {}
+
+function() {}
 
 #---- spacing
 function(a,b=c){body}
@@ -625,8 +1185,16 @@ function(a,b=c){body}
 function(a,b=c){
 body
 }
+#++++
+function(a, b = c) { body }
+
+function(a, b = c) {
+  body
+}
 
 #---- hugging_params
+function(a, b = c) { body }
+#++++
 function(a, b = c) { body }
 
 #---- hugging_body
@@ -641,6 +1209,20 @@ body }
 function() {
     body
 }
+#++++
+function() { body }
+
+function() {
+  body
+}
+
+function() {
+  body
+}
+
+function() {
+  body
+}
 
 #---- immediately_invocated
 (\(a, b) a * b)(x, y)
@@ -650,6 +1232,14 @@ function() {
 
 (\(a, b)
 a * b)(x, y)
+#++++
+(\(a, b) a * b)(x, y)
+
+(\(a, b) a * b)(x, y)
+
+(\(a, b) {
+  a * b
+})(x, y)
 
 #---- auto_braces
 function()
@@ -663,6 +1253,21 @@ call(
     a = 1,
     b = 1
 )
+#++++
+function() {
+  body
+}
+
+function() {
+  call(a = 1, b = 1)
+}
+
+function() {
+  call(
+    a = 1,
+    b = 1
+  )
+}
 
 #---- no_auto_braces
 function() body
@@ -672,6 +1277,15 @@ function() call(a = 1, b = 1)
 function() call(
     a = 1,
     b = 1
+)
+#++++
+function() body
+
+function() call(a = 1, b = 1)
+
+function() call(
+  a = 1,
+  b = 1
 )
 
 #---- comments_all_positions
@@ -686,6 +1300,19 @@ function() call(
     ) # )
     # 4
     {}
+)
+#++++
+# hack: only parses correctly with surrounding parentheses
+(
+  function # function
+  # 1
+  ( # (
+    # 2
+    parameter # parameter
+    # 3
+  ) # )
+  # 4
+  {}
 )
 
 #==== if_statement
@@ -703,6 +1330,20 @@ if (condition) {
 } else {
     body
 }
+#++++
+if (condition) body
+
+if (condition) {
+  body
+}
+
+if (condition) { body } else { body }
+
+if (condition) {
+  body
+} else {
+  body
+}
 
 #---- empty
 if (condition) {}
@@ -710,6 +1351,10 @@ if (condition) {}
 if (condition) {
 } else {
 }
+#++++
+if (condition) {}
+
+if (condition) {} else {}
 
 #---- nested
 if (a) { x } else if (b) { y } else if (c) { z }
@@ -721,6 +1366,16 @@ if (a) {
 } else if (c) {
     z
 }
+#++++
+if (a) { x } else if (b) { y } else if (c) { z }
+
+if (a) {
+  x
+} else if (b) {
+  y
+} else if (c) {
+  z
+}
 
 #---- spacing
 if(condition){body}else{body}
@@ -729,6 +1384,14 @@ if(condition){
 body
 }else{
 body
+}
+#++++
+if (condition) { body } else { body }
+
+if (condition) {
+  body
+} else {
+  body
 }
 
 #---- auto_braces
@@ -745,19 +1408,51 @@ if (condition)
 #     } else # else
 #         body
 # "#};
+#++++
+if (condition) {
+  body
+}
+
+if (condition) {
+  body
+} else {
+  alternative
+}
+
+# TODO: tree-sitter-r cannot parse the code generated by this
+# assert_fmt! {r#"
+#     if (condition) {
+#         body
+#     } else # else
+#         body
+# "#};
 
 #---- auto_braces_not_transitive
 # fmt_multiline is not transitive (it doesn't break single line if-else)
 function()
     if (x) y else z
+#++++
+# fmt_multiline is not transitive (it doesn't break single line if-else)
+function() {
+  if (x) y else z
+}
 
 #---- no_auto_braces_if_comment
 if (condition) # 1
     body
+#++++
+if (condition) # 1
+{
+  body
+}
 
 #---- multiline_condition
 if (
     condition
+) {}
+#++++
+if (
+  condition
 ) {}
 
 #---- hugging
@@ -777,6 +1472,23 @@ if (condition
 
 if ({ x;
 y }) {}
+#++++
+if (condition) {}
+
+if (
+  condition
+) {}
+
+if (
+  condition
+) {}
+
+if (condition) {} else if (condition) {}
+
+if ({
+  x
+  y
+}) {}
 
 #---- hugging_with_comments
 if ( # comment
@@ -795,6 +1507,28 @@ if ({
     condition
 }
 # 1
+) {}
+#++++
+if ( # comment
+  condition
+) {}
+
+if (
+  condition # comment
+) {}
+
+if (
+  # 1
+  {
+    condition
+  }
+) {}
+
+if (
+  {
+    condition
+  }
+  # 1
 ) {}
 
 #---- comments_all_positions
@@ -820,15 +1554,44 @@ if ({
     }
     # after
 )
+#++++
+# for some weird reason this is only parsed correctly if in a parentheses
+(
+  # before
+  if # if
+  # 1
+  ( # open
+    # 2
+    condition # condition
+    # 3
+  ) # close
+  # 4
+  {
+    y
+  }
+  # 5
+  else # else
+  # 6
+  {
+    4
+  }
+  # after
+)
 
 #==== namespace
 #---- basic
+x::y
+x:::y
+#++++
 x::y
 x:::y
 
 #---- spacing
 x :: y
 x ::: y
+#++++
+x::y
+x:::y
 
 #==== parenthesized
 #---- basic
@@ -836,6 +1599,11 @@ x ::: y
 ( x )
 (x + y)
 ( x + y )
+#++++
+(x)
+(x)
+(x + y)
+(x + y)
 
 #---- multiline
 (
@@ -844,6 +1612,14 @@ x ::: y
 
 (
     x + y
+)
+#++++
+(
+  x
+)
+
+(
+  x + y
 )
 
 #---- hugging
@@ -872,6 +1648,33 @@ lhs +
 
 (lhs +
     rhs)
+#++++
+(lhs + rhs)
+
+(lhs + rhs)
+
+(
+  lhs + rhs
+)
+
+(
+  lhs + rhs
+)
+
+(
+  lhs + rhs # comment
+)
+
+(
+  lhs +
+    rhs
+)
+
+(lhs +
+  rhs)
+
+(lhs +
+  rhs)
 
 #---- hugging_braced
 ({})
@@ -908,12 +1711,52 @@ lhs +
         body
     }
 )
+#++++
+({})
+
+({})
+
+({ body })
+
+(
+  { body }
+)
+
+(
+  { body }
+)
+
+({
+  body
+})
+
+({
+  body
+})
+
+(
+  {
+    body
+  }
+)
+
+(
+  {
+    body
+  }
+)
 
 #---- comments_all_positions
 ( # open
     # 1
     body # body
     # 2
+) # close
+#++++
+( # open
+  # 1
+  body # body
+  # 2
 ) # close
 
 #==== repeat
@@ -923,12 +1766,24 @@ repeat { body }
 repeat {
     body
 }
+#++++
+repeat {
+  body
+}
+
+repeat {
+  body
+}
 
 #---- empty
 repeat {}
 
 repeat {
 }
+#++++
+repeat {}
+
+repeat {}
 
 #---- spacing
 repeat{body}
@@ -936,27 +1791,61 @@ repeat{body}
 repeat{
 body
 }
+#++++
+repeat {
+  body
+}
+
+repeat {
+  body
+}
 
 #---- auto_braces
 repeat body
 
 repeat
     body
+#++++
+repeat {
+  body
+}
+
+repeat {
+  body
+}
 
 #---- no_auto_braces_if_comment
 repeat # 1
     body
 repeat # 1
 { body }
+#++++
+repeat # 1
+{
+  body
+}
+repeat # 1
+{
+  body
+}
 
 #---- comments_all_positions
 repeat # repeat
 # 1
 {
 }
+#++++
+repeat # repeat
+# 1
+{}
 
 #==== subset
 #---- basic
+x[]
+x[x]
+x[x, y]
+x[a = x, b = y]
+#++++
 x[]
 x[x]
 x[x, y]
@@ -967,11 +1856,20 @@ x[ ]
 x[ x ]
 x[ x,y ]
 x[ a=x,b=y ]
+#++++
+x[]
+x[x]
+x[x, y]
+x[a = x, b = y]
 
 #---- commas
 x[x,,]
 x[,x ]
 x[,,x]
+#++++
+x[x,, ]
+x[, x]
+x[,, x]
 
 #---- multiline
 x[
@@ -985,6 +1883,19 @@ x[
 x[, x, y + call(
     arg
 )]
+#++++
+x[
+  x
+]
+
+x[
+  x,
+  y
+]
+
+x[, x, y + call(
+  arg
+)]
 
 #---- comments_all_positions
 fn[ # [
@@ -992,9 +1903,20 @@ fn[ # [
     argument # argument
     # 2
 ] # ]
+#++++
+fn[ # [
+  # 1
+  argument # argument
+  # 2
+] # ]
 
 #==== subset2
 #---- basic
+x[[]]
+x[[x]]
+x[[x, y]]
+x[[a = x, b = y]]
+#++++
 x[[]]
 x[[x]]
 x[[x, y]]
@@ -1005,11 +1927,20 @@ x[[ ]]
 x[[ x ]]
 x[[ x,y ]]
 x[[ a=x,b=y ]]
+#++++
+x[[]]
+x[[x]]
+x[[x, y]]
+x[[a = x, b = y]]
 
 #---- commas
 x[[x,,]]
 x[[,x ]]
 x[[,,x]]
+#++++
+x[[x,, ]]
+x[[, x]]
+x[[,, x]]
 
 #---- multiline
 x[[
@@ -1023,12 +1954,31 @@ x[[
 x[[, x, y + call(
     arg
 )]]
+#++++
+x[[
+  x
+]]
+
+x[[
+  x,
+  y
+]]
+
+x[[, x, y + call(
+  arg
+)]]
 
 #---- comments_all_positions
 fn[[ # [[
     # 1
     argument # argument
     # 2
+]] # ]]
+#++++
+fn[[ # [[
+  # 1
+  argument # argument
+  # 2
 ]] # ]]
 
 #==== while_statement
@@ -1038,27 +1988,59 @@ while (condition) { body }
 while (condition) {
     body
 }
+#++++
+while (condition) {
+  body
+}
+
+while (condition) {
+  body
+}
 
 #---- empty
 while (condition) {}
 
 while (condition) {
 }
+#++++
+while (condition) {}
+
+while (condition) {}
 
 #---- spacing
 while( condition ){body}
 
 while( condition ){body}
+#++++
+while (condition) {
+  body
+}
+
+while (condition) {
+  body
+}
 
 #---- auto_braces
 while (condition) body
 
 while (condition)
     body
+#++++
+while (condition) {
+  body
+}
+
+while (condition) {
+  body
+}
 
 #---- multiline_condition
 while (
     condition
+) {}
+#++++
+while (
+  condition
 ) {}
 
 #---- hugging
@@ -1074,6 +2056,20 @@ while (call(
 
 while ({
     expr
+}) {}
+#++++
+while (condition) {}
+
+while (
+  condition
+) {}
+
+while (call(
+  arg
+)) {}
+
+while ({
+  expr
 }) {}
 
 #---- hugging_with_comments
@@ -1094,6 +2090,28 @@ while ({
 }
 # 1
 ) {}
+#++++
+while ( # 1
+  condition
+) {}
+
+while (
+  condition # 1
+) {}
+
+while (
+  # 1
+  {
+    condition
+  }
+) {}
+
+while (
+  {
+    condition
+  }
+  # 1
+) {}
 
 #---- comments_all_positions
 while # while
@@ -1102,6 +2120,16 @@ while # while
     # 2
     condition # condition
     # 3
+) # )
+# 4
+{}
+#++++
+while # while
+# 1
+( # (
+  # 2
+  condition # condition
+  # 3
 ) # )
 # 4
 {}
@@ -1114,7 +2142,19 @@ while(
     # 2
 )
 {}
+#++++
+while (
+  # 1
+  x && # x
+    y # y
+  # 2
+) {}
 
 #---- comment_but_no_block
 while (condition) # 1
     body
+#++++
+while (condition) # 1
+{
+  body
+}

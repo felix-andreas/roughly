@@ -1,8 +1,0 @@
----
-source: crates/roughly/tests/test_format.rs
-expression: code
----
-42L
-0L
-0xDEADL
-1e1L

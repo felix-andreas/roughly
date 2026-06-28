@@ -38,6 +38,7 @@ tokio-util.workspace = true
 
 [dev-dependencies]
 async-lsp.workspace = true
+fixtures = { path = "../fixtures" }
 futures.workspace = true
 insta.workspace = true
 regex.workspace = true

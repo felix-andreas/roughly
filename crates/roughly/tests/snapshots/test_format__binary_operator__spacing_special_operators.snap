@@ -1,9 +1,0 @@
----
-source: crates/roughly/tests/test_format.rs
-expression: code
----
-# colon and caret should not have spacing
-x:y
-x^y
-x:y
-x^y

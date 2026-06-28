@@ -1,6 +1,0 @@
----
-source: crates/roughly/tests/test_format.rs
-expression: code
----
-add <- function(x, y) x + y
-double <- function(x) { x * 2 }

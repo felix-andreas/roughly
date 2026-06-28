@@ -1,8 +1,0 @@
----
-source: crates/roughly/tests/test_format.rs
-expression: code
----
-function(x) {
-  names(foo[[x]]) <- bar
-  foo[x]
-}

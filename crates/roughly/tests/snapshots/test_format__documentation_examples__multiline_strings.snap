@@ -1,9 +1,0 @@
----
-source: crates/roughly/tests/test_format.rs
-expression: code
----
-# { <- parent block gets deleted
-x <- "This is a multi-line string.
-          It preserves
-          indentation and line breaks."
-# }

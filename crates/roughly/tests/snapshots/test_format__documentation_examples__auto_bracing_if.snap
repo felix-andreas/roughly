@@ -1,8 +1,0 @@
----
-source: crates/roughly/tests/test_format.rs
-expression: code
----
-if (condition) {
-  line1
-}
-line2 # <- this line gets added

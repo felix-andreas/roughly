@@ -1,9 +1,0 @@
----
-source: crates/roughly/tests/test_format.rs
-expression: code
----
-.66
-123.4123
-1e322
-1e-3
-1.8e10
