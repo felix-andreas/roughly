@@ -31,7 +31,7 @@ parsed syntax -> `lint` -> `lower` -> `naming` -> `typecheck` -> checked-file re
 
 `check` is the orchestration entry point around that pipeline. It wires phases together and returns file results, but it is not itself a semantic phase.
 
-Syntax parsing is not a `analysis` crate phase. The checker may receive already-parsed syntax from `roughly` or from tests.
+Syntax parsing is not an `analysis` crate phase. The checker may receive already-parsed syntax from `roughly` or from tests.
 
 Diagnostics are not a separate phase. They are structured outputs produced by lint, lowering, naming, and typechecking.
 
