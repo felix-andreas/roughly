@@ -613,7 +613,7 @@ index/reference oracles enforce equality with a from-scratch rebuild on every ru
 - **M4.1** (done) — the per-name `package_definitions` candidate index, maintained incrementally with
   a drift assertion; `global_bindings` still derived by full rebuild (pure addition, no behavior
   change).
-- **M4.2** — make `resolve_package` patch `global_bindings` and all four diagnostic categories from
+- **M4.2** (done) — make `resolve_package` patch `global_bindings` and all four diagnostic categories from
   the candidate + reverse-dependency indexes incrementally (the behavior-changing slice; guarded by
   the shadowing fixture suite, the (D) defined-ness-flip-on-non-dirty-referrer fixture, the
   four-category drift oracle, and the existing `naming_global` fixtures).
