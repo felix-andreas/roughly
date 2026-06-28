@@ -98,11 +98,22 @@ bump-version $version:
     set -euo pipefail
 
     sed -i 's/^version = "[a-zA-Z0-9._-]*"/version = "{{ version }}"/' Cargo.toml
-    sed -i 's/"version": "[a-zA-Z0-9._-]*"/"version": "{{ version }}"/' editors/code/package.json
-    sed -i 's/^version = "[a-zA-Z0-9._-]*"/version = "{{ version }}"/' editors/zed/extension.toml
+
+    # The VS Marketplace rejects semver pre-release suffixes (e.g. `-alpha.N`), so the
+    # extension gets a plain X.Y.Z derived from the CLI version: a pre-release
+    # `X.Y.0-alpha.N` publishes as `X.Y.N` (the `--pre-release` flag marks the channel);
+    # a clean `X.Y.Z` is used as-is.
+    vscode_version="{{ version }}"
+    if [[ "$vscode_version" =~ ^([0-9]+)\.([0-9]+)\.[0-9]+-[a-z]+\.([0-9]+)$ ]]; then
+        vscode_version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+    fi
+    sed -i "s/\"version\": \"[a-zA-Z0-9._-]*\"/\"version\": \"$vscode_version\"/" editors/code/package.json
+
+    # editors/zed/extension.toml is intentionally NOT version-bumped: the Zed extension
+    # does not bundle the binary, so its version is decoupled from the release version.
 
     cargo check # bonus: also updates version in lock file
-    git add Cargo.toml Cargo.lock editors/code/package.json editors/zed/extension.toml
+    git add Cargo.toml Cargo.lock editors/code/package.json
     git commit -m "chore: Release v{{ version }}"
 
 release $version $kind:
