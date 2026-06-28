@@ -4,7 +4,7 @@ members = ["crates/*", "editors/zed"]
 default-members = ["crates/roughly"]
 
 [workspace.package]
-version = "0.2.3-alpha"
+version = "0.2.4-alpha"
 
 [workspace.dependencies]
 clap = { version = "4.5.40", features = ["derive"] }
