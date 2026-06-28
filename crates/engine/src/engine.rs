@@ -11,7 +11,8 @@
 //! are two flavors:
 //!
 //! - **Input queries** — set from the outside via [`Engine::set_input`] (source text, config, the stdlib
-//!   stub library). The engine never computes these.
+//!   stub library) and removed via [`Engine::remove_input`] (file deletion). The engine never computes
+//!   these.
 //! - **Derived queries** — computed by [`QueryGroup::execute`], which reads other queries through
 //!   [`Engine::fetch`]. Their results are memoized.
 //!
@@ -47,16 +48,28 @@
 //!
 //! The core assumes an **acyclic** dependency graph. R has exactly one cyclic query — the package
 //! interface fixed-point for mutual re-exports — and it is handled inside that query's own body (bounded
-//! fixed-point iteration with `Unknown`-pinning), not by the core. Cancellation, parallelism, and memo
-//! eviction are designed for but not implemented in this phase; see `DESIGN.md`.
+//! fixed-point iteration with `Unknown`-pinning), not by the core. Any *other* cycle is an accidental host
+//! bug: a re-entered query body panics with a clear message instead of overflowing the stack. Cancellation,
+//! parallelism, and memo eviction are designed for but not implemented in this phase; see `DESIGN.md`.
 
 use std::{
     any::Any,
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
+    fmt::Debug,
     hash::Hash,
     rc::Rc,
 };
+
+/// Shared-ownership handle for memoized values. Aliased in one place so the future parallel retrofit
+/// (`DESIGN.md` §6) swaps `Rc` for `Arc` here instead of pervasively. Today the engine is single-threaded;
+/// `Rc` is the right cost until parallelism is added on measured evidence.
+pub type Shared<T> = Rc<T>;
+
+/// The memo table type, aliased alongside [`Shared`] as the second half of the concurrency hedge: a
+/// parallel retrofit replaces this single `RefCell<HashMap<…>>` with a concurrency-safe map (sharded /
+/// `RwLock` / lock-free) in one place, leaving the red-green algorithm untouched.
+type MemoTable<K> = RefCell<HashMap<K, Slot<K>>>;
 
 /// The engine's logical clock. Bumped once per [`Engine::set_input`]; memos are validated against it.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -78,7 +91,7 @@ impl Revision {
 /// still handing typed values back through [`Engine::fetch`]. The captured comparator is what powers
 /// value-equality backdating and early cutoff without the engine knowing any concrete type.
 pub struct Stored {
-    value: Rc<dyn Any>,
+    value: Shared<dyn Any>,
     equals: fn(&dyn Any, &dyn Any) -> bool,
 }
 
@@ -87,7 +100,7 @@ impl Stored {
     /// early cutoff exact: two computations that produce equal `T`s do not propagate.
     pub fn new<T: Any + PartialEq>(value: T) -> Stored {
         Stored {
-            value: Rc::new(value),
+            value: Shared::new(value),
             equals: equals::<T>,
         }
     }
@@ -101,7 +114,8 @@ impl Stored {
 /// hands it back through [`Engine::group`].
 pub trait QueryGroup: Sized + 'static {
     /// Identifies a query. Cheap to clone and hash — it is stored on every memo and dependency edge.
-    type Key: Clone + Eq + Hash;
+    /// `Debug` is required only so the accidental-cycle guard can name the offending key.
+    type Key: Clone + Eq + Hash + Debug;
 
     /// Compute one derived query. Read dependencies through `engine` ([`Engine::fetch`]); the engine
     /// records them automatically. Must only be called for derived keys — input keys are set externally
@@ -113,11 +127,16 @@ pub trait QueryGroup: Sized + 'static {
 pub struct Engine<G: QueryGroup> {
     group: G,
     revision: Cell<Revision>,
-    slots: RefCell<HashMap<G::Key, Slot<G::Key>>>,
+    slots: MemoTable<G::Key>,
     // One frame per in-flight derived body. `fetch` pushes the read key onto the top frame, so a body's
     // dependency list is collected at runtime with no host declaration. An empty stack means a read made
     // outside any body (a top-level fetch or internal validation), which records nothing.
     dependency_stack: RefCell<Vec<Vec<G::Key>>>,
+    // The keys whose bodies are on the current `recompute` stack. Re-entering one is an accidental query
+    // cycle (a derived body transitively fetching itself); without this marker that recurses until the
+    // stack overflows. The one *intended* cycle (the package-interface fixed-point) is resolved inside a
+    // single body and never re-enters `fetch` on its own key, so it never trips this guard.
+    computing: RefCell<HashSet<G::Key>>,
 }
 
 impl<G: QueryGroup> Engine<G> {
@@ -127,6 +146,7 @@ impl<G: QueryGroup> Engine<G> {
             revision: Cell::new(Revision::START),
             slots: RefCell::new(HashMap::new()),
             dependency_stack: RefCell::new(Vec::new()),
+            computing: RefCell::new(HashSet::new()),
         }
     }
 
@@ -156,7 +176,9 @@ impl<G: QueryGroup> Engine<G> {
         let changed_at = match slots.get(&key) {
             Some(previous)
                 if previous.is_input
-                    && (stored.equals)(previous.value.as_ref(), stored.value.as_ref()) =>
+                    && previous.value.as_ref().is_some_and(|previous_value| {
+                        (stored.equals)(previous_value.as_ref(), stored.value.as_ref())
+                    }) =>
             {
                 previous.changed_at
             }
@@ -165,9 +187,30 @@ impl<G: QueryGroup> Engine<G> {
         slots.insert(
             key,
             Slot {
-                value: stored.value,
+                value: Some(stored.value),
                 verified_at: revision,
                 changed_at,
+                dependencies: Vec::new(),
+                is_input: true,
+            },
+        );
+    }
+
+    /// Remove an input, e.g. when its source file is deleted. Bumps the revision (it is a clock event) and
+    /// leaves a **tombstone** — a valueless input slot marked changed at this revision — so that every
+    /// dependent that recorded the input revalidates and observes it changed. The intended consumer is a
+    /// query that folds over a *set* of inputs (the package-file set in the real graph): on revalidation it
+    /// recomputes against the now-smaller set and never fetches the removed input. A body that fetches a
+    /// removed input directly is a host bug and panics in [`fetch`]. Takes `&mut self` like [`set_input`].
+    pub fn remove_input(&mut self, key: &G::Key) {
+        let revision = self.revision.get().next();
+        self.revision.set(revision);
+        self.slots.borrow_mut().insert(
+            key.clone(),
+            Slot {
+                value: None,
+                verified_at: revision,
+                changed_at: revision,
                 dependencies: Vec::new(),
                 is_input: true,
             },
@@ -177,14 +220,14 @@ impl<G: QueryGroup> Engine<G> {
     /// Fetch a query's value, computing or validating it as needed, and record the read as a dependency
     /// of the body currently executing (if any). Panics if the stored value is not a `T` — a body asking
     /// for the wrong type for a key is a host bug, not a recoverable condition.
-    pub fn fetch<T: Any>(&self, key: G::Key) -> Rc<T> {
+    pub fn fetch<T: Any>(&self, key: G::Key) -> Shared<T> {
         let value = self.fetch_any(&key);
         value
             .downcast::<T>()
             .unwrap_or_else(|_| panic!("query value type mismatch on fetch"))
     }
 
-    fn fetch_any(&self, key: &G::Key) -> Rc<dyn Any> {
+    fn fetch_any(&self, key: &G::Key) -> Shared<dyn Any> {
         if let Some(frame) = self.dependency_stack.borrow_mut().last_mut() {
             frame.push(key.clone());
         }
@@ -192,8 +235,8 @@ impl<G: QueryGroup> Engine<G> {
         self.slots
             .borrow()
             .get(key)
-            .map(|slot| Rc::clone(&slot.value))
-            .expect("slot present after validate")
+            .and_then(|slot| slot.value.as_ref().map(Shared::clone))
+            .unwrap_or_else(|| panic!("fetched query {key:?} has no value (a removed input?)"))
     }
 
     /// Validate one query against the current revision and return its `changed_at`. This is the red-green
@@ -237,15 +280,21 @@ impl<G: QueryGroup> Engine<G> {
 
     fn recompute(&self, key: &G::Key) -> Revision {
         let revision = self.revision.get();
+        if !self.computing.borrow_mut().insert(key.clone()) {
+            panic!("query cycle detected: {key:?} is already being computed");
+        }
         self.dependency_stack.borrow_mut().push(Vec::new());
         let stored = self.group.execute(self, key);
         let dependencies = self.dependency_stack.borrow_mut().pop().unwrap_or_default();
+        self.computing.borrow_mut().remove(key);
 
         let mut slots = self.slots.borrow_mut();
         // Cutoff propagation: an equal recompute keeps the old `changed_at`, so consumers stay green.
         let changed_at = match slots.get(key) {
             Some(previous)
-                if (stored.equals)(previous.value.as_ref(), stored.value.as_ref()) =>
+                if previous.value.as_ref().is_some_and(|previous_value| {
+                    (stored.equals)(previous_value.as_ref(), stored.value.as_ref())
+                }) =>
             {
                 previous.changed_at
             }
@@ -254,7 +303,7 @@ impl<G: QueryGroup> Engine<G> {
         slots.insert(
             key.clone(),
             Slot {
-                value: stored.value,
+                value: Some(stored.value),
                 verified_at: revision,
                 changed_at,
                 dependencies,
@@ -266,7 +315,11 @@ impl<G: QueryGroup> Engine<G> {
 }
 
 struct Slot<K> {
-    value: Rc<dyn Any>,
+    // `None` is a tombstone left by [`Engine::remove_input`]: the input is gone but the slot is retained so
+    // dependents that recorded it still validate (it reads as changed at the removal revision) instead of
+    // recursing into a recompute of a now-absent input. A tombstone is never fetched for its value — a body
+    // that fetches a removed input is a host bug and panics.
+    value: Option<Shared<dyn Any>>,
     verified_at: Revision,
     changed_at: Revision,
     dependencies: Vec<K>,
