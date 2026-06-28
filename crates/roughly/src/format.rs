@@ -273,7 +273,14 @@ fn traverse(
         kind::COMPLEX => fmt_raw(out, node)?,
         kind::FLOAT => fmt_raw(out, node)?,
         kind::STRING => {
-            if let Some(content) = field_optional(node, field::CONTENT) {
+            let node_text = get_raw(node, context.rope);
+            // Raw string literals (R 4.0+: `r"(...)"`, `R"[...]"`, `r"---(...)---"`, etc.) start with
+            // an `r`/`R` prefix; their delimiters and content must be preserved byte-for-byte, since
+            // re-quoting would corrupt embedded quotes and backslashes (or, when tree-sitter does not
+            // expose a content field, erase the literal entirely).
+            if matches!(node_text.chars().next(), Some('r' | 'R')) {
+                out.push_str(&node_text);
+            } else if let Some(content) = field_optional(node, field::CONTENT) {
                 let raw = get_raw(content, context.rope);
                 let mut all_quotes_escaped = true;
                 let mut prev_was_escape = false;

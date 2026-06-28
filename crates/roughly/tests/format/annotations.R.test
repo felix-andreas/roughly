@@ -184,6 +184,17 @@
 #: b: double
 #: ) -> logical
 
+#---- indented_continuation_is_left_aligned
+#: fn(
+#:     a: integer,
+#:     b: double
+#: ) -> logical
+#++++
+#: fn(
+#: a: integer,
+#: b: double
+#: ) -> logical
+
 #==== annotation_preserve
 #---- empty
 #:
@@ -214,3 +225,19 @@
 #: see http://example.com
 #++++
 #: see http://example.com
+
+#---- double_colon_is_spaced
+#: a::b
+#++++
+#: a:: b
+
+#==== annotation_inline
+#---- after_assignment
+x <- 1L #:integer
+#++++
+x <- 1L #: integer
+
+#---- after_call
+foo(bar) #:  list[ integer ]
+#++++
+foo(bar) #: list[integer]

@@ -379,6 +379,14 @@ Multi-line string literals always keep their original indentation and line break
 # }
 ```
 
+[Raw string literals](https://search.r-project.org/R/refmans/base/html/Quotes.html) (`r"(...)"`, `R"[...]"`, and their custom-dash variants) are preserved byte-for-byte. Quote normalization is never applied to them, since their whole purpose is to hold characters — including quotes and backslashes — that would otherwise need escaping.
+
+```r
+# raw_strings : compare
+path <- r"(C:\Users\me)"
+quoted <- r"(He said "hi")"
+```
+
 ### R6 Class Definitions
 
 Class definitions with empty lines between methods are preserved:

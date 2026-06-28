@@ -204,6 +204,25 @@ call("x
         y
             z"
 
+#---- strings_raw
+r"(plain)"
+R"(plain)"
+r"(it's "quoted")"
+r"(a\b)"
+r"---[bracketed]---"
+x <- r"(value)"
+r"(line1
+line2)"
+#++++
+r"(plain)"
+R"(plain)"
+r"(it's "quoted")"
+r"(a\b)"
+r"---[bracketed]---"
+x <- r"(value)"
+r"(line1
+line2)"
+
 #---- dot_dot_i
 ..1
 ..10
