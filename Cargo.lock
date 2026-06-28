@@ -1221,6 +1221,7 @@ dependencies = [
  "async-lsp",
  "clap",
  "console 0.16.1",
+ "fixtures",
  "futures",
  "ignore",
  "indoc",
