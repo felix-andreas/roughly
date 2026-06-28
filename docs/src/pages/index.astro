@@ -54,9 +54,9 @@ const analysisTabs = [
 ]
 
 const formatterTabs = [
-  { key: 'function', label: 'Functions & control flow' },
+  { key: 'spacing', label: 'Operators & spacing' },
   { key: 'pipeline', label: 'Pipelines' },
-  { key: 'operators', label: 'Operators & indexing' },
+  { key: 'normalize', label: 'Quotes, comments & types' },
 ]
 
 const year = new Date().getFullYear()
@@ -399,9 +399,10 @@ const year = new Date().getFullYear()
           <p class="eyebrow">ship</p>
           <h2>One consistent style.</h2>
           <p class="lede">
-            Bad R reflows into formatted R in place — whitespace collapses and grows, indentation
-            snaps to a grid, quotes flip, and changed tokens flash red, then green, then settle.
-            <code>roughly fmt</code> (and <code>--diff</code> for CI).
+            Bad R reflows into formatted R in place — spacing tightens around some operators and
+            opens around others, indentation snaps to a grid, quotes and comments normalize, and
+            changed tokens flash red, then green, then settle. <code>roughly fmt</code> (and
+            <code>--diff</code> for CI).
           </p>
         </div>
         <div class="col show-col">
@@ -422,42 +423,30 @@ const year = new Date().getFullYear()
               }
             </div>
             <div class="tab-panels">
-              <!-- Functions & control flow -->
-              <div role="tabpanel" id="panel-function" aria-labelledby="tab-function" tabindex="0">
+              <!-- Operators & spacing -->
+              <div role="tabpanel" id="panel-spacing" aria-labelledby="tab-spacing" tabindex="0">
                 <div class="ed">
-                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">option.R · roughly fmt</span></div>
+                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">operators.R · roughly fmt</span></div>
                   <div class="ed-body fmt-body">
                     <div class="fmt-morph" aria-hidden="true">
-                      <div class="fln" style="--i:0"><span class="tok-id">x_option</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-kw">function</span><span class="tok-op">(</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tok-id">x</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tok-op">)</span><span class="sp" style="--w:1ch;--wf:1ch"></span><span class="tok-op">{'{'}</span></div>
-                      <div class="fln" style="--i:1"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-kw">if</span><span class="tok-op">{' ('}</span><span class="tok-id">x</span><span class="tok-op">{' == '}</span><span class="tok-str">"a"</span><span class="tok-op">{') '}</span><span class="tok-op">{'{'}</span></div>
-                      <div class="fln" style="--i:2"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tok-str">"option 1"</span></div>
-                      <div class="fln" style="--i:3"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-op">{'}'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-kw">else</span><span class="sp" style="--w:1ch;--wf:1ch"></span><span class="tok-kw">if</span><span class="sp" style="--w:1ch;--wf:1ch"></span><span class="tok-op">(</span><span class="tok-id">x</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'=='}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-str">"b"</span><span class="tok-op">)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'{'}</span></div>
-                      <div class="fln" style="--i:4"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tok-str">"option 2"</span></div>
-                      <div class="fln" style="--i:5"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-op">{'} '}</span><span class="tok-kw">else</span><span class="tok-op">{' {'}</span></div>
-                      <div class="fln" style="--i:6"><span class="sp sp-ch" style="--w:2ch;--wf:4ch"></span><span class="tok-fn">stop</span><span class="tok-op">(</span><span class="tok-str">"Invalid `x` value"</span><span class="tok-op">)</span></div>
-                      <div class="fln" style="--i:7"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-op">{'}'}</span></div>
-                      <div class="fln" style="--i:8"><span class="tok-op">{'}'}</span></div>
+                      <div class="fln" style="--i:0"><span class="tok-id">total</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-id">a</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'+'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-id">b</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'*'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-id">c</span></div>
+                      <div class="fln" style="--i:1"><span class="tok-id">growth</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-id">base</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tok-op">{'^'}</span><span class="tok-id">years</span></div>
+                      <div class="fln" style="--i:2"><span class="tok-id">window</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-num">1</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tok-op">{':'}</span><span class="tok-id">n</span></div>
+                      <div class="fln" style="--i:3"><span class="tok-id">name</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-id">record</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tok-op">{'$'}</span><span class="tok-id">name</span></div>
+                      <div class="fln" style="--i:4"><span class="tok-id">clean</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-id">dplyr</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tok-op">{'::'}</span><span class="tok-fn">filter</span><span class="tok-op">{'('}</span><span class="tok-id">df</span><span class="tok-op">{')'}</span></div>
                     </div>
-                    <span class="sr-only">x_option &lt;- function(x) {'{'} if (x == "a") "option 1" else if (x == "b") "option 2" else stop("Invalid `x` value") {'}'}</span>
+                    <span class="sr-only">total &lt;- a + b * c growth &lt;- base^years window &lt;- 1:n name &lt;- record$name clean &lt;- dplyr::filter(df)</span>
                     <div class="fmt-static" aria-hidden="true">
-                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">x_option</span><span class="tok-op">{'<-'}</span><span class="tok-kw">function</span><span class="tok-op">{'( '}</span><span class="tok-id">x</span><span class="tok-op">{' ) '}</span><span class="tok-op">{'{'}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-kw">if</span><span class="tok-op">{' ('}</span><span class="tok-id">x</span><span class="tok-op">{' == '}</span><span class="tok-str">"a"</span><span class="tok-op">{') '}</span><span class="tok-op">{'{'}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'     '}<span class="tok-str">"option 1"</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-op">{'}'}</span><span class="tok-kw">else</span><span class="tok-op">{' '}</span><span class="tok-kw">if</span><span class="tok-op">{' ('}</span><span class="tok-id">x</span><span class="tok-op">{'=='}</span><span class="tok-str">"b"</span><span class="tok-op">{')'}</span><span class="tok-op">{'{'}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'     '}<span class="tok-str">"option 2"</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-op">{'} '}</span><span class="tok-kw">else</span><span class="tok-op">{' {'}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-fn">stop</span><span class="tok-op">(</span><span class="tok-str">{"'Invalid `x` value'"}</span><span class="tok-op">)</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-op">{'}'}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-op">{'}'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">x_option</span><span class="tok-op">{' <- '}</span><span class="tok-kw">function</span><span class="tok-op">(</span><span class="tok-id">x</span><span class="tok-op">{') '}</span><span class="tok-op">{'{'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-kw">if</span><span class="tok-op">{' ('}</span><span class="tok-id">x</span><span class="tok-op">{' == '}</span><span class="tok-str">"a"</span><span class="tok-op">{') '}</span><span class="tok-op">{'{'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'     '}<span class="tok-str">"option 1"</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-op">{'} '}</span><span class="tok-kw">else</span><span class="tok-op">{' '}</span><span class="tok-kw">if</span><span class="tok-op">{' ('}</span><span class="tok-id">x</span><span class="tok-op">{' == '}</span><span class="tok-str">"b"</span><span class="tok-op">{') '}</span><span class="tok-op">{'{'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'     '}<span class="tok-str">"option 2"</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-op">{'} '}</span><span class="tok-kw">else</span><span class="tok-op">{' {'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'     '}<span class="tok-fn">stop</span><span class="tok-op">(</span><span class="tok-str">"Invalid `x` value"</span><span class="tok-op">)</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-op">{'}'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-op">{'}'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">total</span><span class="tok-op">{'<-'}</span><span class="tok-id">a</span><span class="tok-op">{'+'}</span><span class="tok-id">b</span><span class="tok-op">{'*'}</span><span class="tok-id">c</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">growth</span><span class="tok-op">{'<-'}</span><span class="tok-id">base</span><span class="tok-op">{' ^'}</span><span class="tok-id">years</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">window</span><span class="tok-op">{'<-'}</span><span class="tok-num">1</span><span class="tok-op">{' :'}</span><span class="tok-id">n</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">name</span><span class="tok-op">{'<-'}</span><span class="tok-id">record</span><span class="tok-op">{' $'}</span><span class="tok-id">name</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">clean</span><span class="tok-op">{'<-'}</span><span class="tok-id">dplyr</span><span class="tok-op">{' ::'}</span><span class="tok-fn">filter</span><span class="tok-op">{'('}</span><span class="tok-id">df</span><span class="tok-op">{')'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">total</span><span class="tok-op">{' <- '}</span><span class="tok-id">a</span><span class="tok-op">{' + '}</span><span class="tok-id">b</span><span class="tok-op">{' * '}</span><span class="tok-id">c</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">growth</span><span class="tok-op">{' <- '}</span><span class="tok-id">base</span><span class="tok-op">{'^'}</span><span class="tok-id">years</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">window</span><span class="tok-op">{' <- '}</span><span class="tok-num">1</span><span class="tok-op">{':'}</span><span class="tok-id">n</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">name</span><span class="tok-op">{' <- '}</span><span class="tok-id">record</span><span class="tok-op">{'$'}</span><span class="tok-id">name</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">clean</span><span class="tok-op">{' <- '}</span><span class="tok-id">dplyr</span><span class="tok-op">{'::'}</span><span class="tok-fn">filter</span><span class="tok-op">{'('}</span><span class="tok-id">df</span><span class="tok-op">{')'}</span></div>
                     </div>
                   </div>
                 </div>
@@ -496,36 +485,27 @@ const year = new Date().getFullYear()
                   </div>
                 </div>
               </div>
-              <!-- Operators & indexing -->
-              <div role="tabpanel" id="panel-operators" aria-labelledby="tab-operators" tabindex="0" hidden>
+              <!-- Quotes, comments & types -->
+              <div role="tabpanel" id="panel-normalize" aria-labelledby="tab-normalize" tabindex="0" hidden>
                 <div class="ed">
-                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">scale.R · roughly fmt</span></div>
+                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">strings.R · roughly fmt</span></div>
                   <div class="ed-body fmt-body">
                     <div class="fmt-morph" aria-hidden="true">
-                      <div class="fln" style="--i:0"><span class="tok-id">normalize</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-kw">function</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'{'}</span></div>
-                      <div class="fln" style="--i:1"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-id">m</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-fn">mean</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">)</span></div>
-                      <div class="fln" style="--i:2"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-id">s</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-fn">sd</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">)</span></div>
-                      <div class="fln" style="--i:3"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-id">z</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">(</span><span class="tok-id">v</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-id">m</span><span class="tok-op">)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'/'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-id">s</span></div>
-                      <div class="fln" style="--i:4"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-id">z</span><span class="tok-op">{'['}</span><span class="tok-fn">is.na</span><span class="tok-op">(</span><span class="tok-id">z</span><span class="tok-op">{')]'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-num">0</span></div>
-                      <div class="fln" style="--i:5"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-id">z</span></div>
-                      <div class="fln" style="--i:6"><span class="tok-op">{'}'}</span></div>
+                      <div class="fln" style="--i:0"><span class="tok-id">msg</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-str">"Hello world"</span></div>
+                      <div class="fln" style="--i:1"><span class="tok-id">note</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-str">{`'Say "hi"'`}</span></div>
+                      <div class="fln" style="--i:2"><span class="tok-com">#</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-com">clean the data</span></div>
+                      <div class="fln" style="--i:3"><span class="tok-com">#:</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-com">fn(x:</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-com">integer)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-com">{'->'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-com">double</span></div>
                     </div>
-                    <span class="sr-only">normalize &lt;- function(v) {'{'} m &lt;- mean(v) s &lt;- sd(v) z &lt;- (v - m) / s z[is.na(z)] &lt;- 0 z {'}'}</span>
+                    <span class="sr-only">msg &lt;- "Hello world" note &lt;- 'Say "hi"' # clean the data #: fn(x: integer) -&gt; double</span>
                     <div class="fmt-static" aria-hidden="true">
-                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">normalize</span><span class="tok-op">{'<-'}</span><span class="tok-kw">function</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">{')'}</span><span class="tok-op">{'{'}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-id">m</span><span class="tok-op">{'<-'}</span><span class="tok-fn">mean</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">{')'}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-id">s</span><span class="tok-op">{'<-'}</span><span class="tok-fn">sd</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">{')'}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-id">z</span><span class="tok-op">{'<-'}</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">{'-'}</span><span class="tok-id">m</span><span class="tok-op">{')'}</span><span class="tok-op">{'/'}</span><span class="tok-id">s</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-id">z</span><span class="tok-op">{'['}</span><span class="tok-fn">is.na</span><span class="tok-op">(</span><span class="tok-id">z</span><span class="tok-op">{')]'}</span><span class="tok-op">{'<-'}</span><span class="tok-num">0</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-id">z</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-op">{'}'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">normalize</span><span class="tok-op">{' <- '}</span><span class="tok-kw">function</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">{') '}</span><span class="tok-op">{'{'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-id">m</span><span class="tok-op">{' <- '}</span><span class="tok-fn">mean</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">{')'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-id">s</span><span class="tok-op">{' <- '}</span><span class="tok-fn">sd</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">{')'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-id">z</span><span class="tok-op">{' <- '}</span><span class="tok-op">(</span><span class="tok-id">v</span><span class="tok-op">{' - '}</span><span class="tok-id">m</span><span class="tok-op">{') / '}</span><span class="tok-id">s</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-id">z</span><span class="tok-op">{'['}</span><span class="tok-fn">is.na</span><span class="tok-op">(</span><span class="tok-id">z</span><span class="tok-op">{')] '}</span><span class="tok-op">{'<- '}</span><span class="tok-num">0</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-id">z</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-op">{'}'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">msg</span><span class="tok-op">{'<-'}</span><span class="tok-str">{`'Hello world'`}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">note</span><span class="tok-op">{'<-'}</span><span class="tok-str">{`'Say "hi"'`}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-com">{'#clean the data'}</span></div>
+                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-com">{'#:fn(x:integer)->double'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">msg</span><span class="tok-op">{' <- '}</span><span class="tok-str">"Hello world"</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">note</span><span class="tok-op">{' <- '}</span><span class="tok-str">{`'Say "hi"'`}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-com">{'# clean the data'}</span></div>
+                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-com">{'#: fn(x: integer) -> double'}</span></div>
                     </div>
                   </div>
                 </div>
