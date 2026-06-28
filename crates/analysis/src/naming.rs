@@ -66,72 +66,57 @@ pub(crate) struct PackageNamingComputation {
     pub diagnostics: HashMap<DocumentId, Vec<Diagnostic>>,
 }
 
+// The full-rebuild oracle for package naming. After M4.2, production is the incremental maintenance
+// in `analysis::resolve_package`; this from-scratch rebuild is retained as the debug drift oracle that
+// the maintained `global_bindings` and per-document diagnostic sets are asserted equal to. It and the
+// incremental path share `package_document_diagnostics`, so the assertion verifies the incremental
+// *routing* (which documents are re-diagnosed), not duplicated diagnostic logic.
 pub(crate) fn rebuild_package_naming(
     package_modules: &[(DocumentId, &Module)],
     extra_modules: &[(DocumentId, &Module)],
     locals: &HashMap<DocumentId, NamesLocal>,
     interner: &Interner,
 ) -> PackageNamingComputation {
-    let all_modules = package_modules
-        .iter()
-        .chain(extra_modules.iter())
-        .copied()
-        .collect::<Vec<_>>();
-    let mut diagnostics = HashMap::<DocumentId, Vec<Diagnostic>>::new();
-    let types = build_type_index(package_modules, interner, &mut diagnostics);
-    let global_bindings =
-        build_global_bindings(package_modules, locals, interner, &mut diagnostics);
+    let (types, duplicate_type_names, _fingerprint) = build_type_index(package_modules, interner);
+    let candidate_order = build_candidate_order(package_modules, locals);
+    let global_bindings = winners_from_candidate_order(&candidate_order);
 
-    {
-        let mut type_resolver = TypeResolver {
-            interner,
+    let mut diagnostics = HashMap::<DocumentId, Vec<Diagnostic>>::new();
+    for (document_id, module) in package_modules {
+        let local_naming = expect_local_naming(locals, *document_id);
+        let document_diagnostics = package_document_diagnostics(&PackageDocumentDiagnosticContext {
+            document_id: *document_id,
+            module,
+            local_naming,
+            is_script: false,
             types: &types,
-            diagnostics: &mut diagnostics,
-        };
-        for (document_id, module) in package_modules {
-            let local_naming = expect_local_naming(locals, *document_id);
-            resolve_module_type_references(&mut type_resolver, *document_id, module, local_naming);
+            duplicate_type_names: &duplicate_type_names,
+            global_bindings: &global_bindings,
+            candidate_order: &candidate_order,
+            interner,
+        });
+        if !document_diagnostics.is_empty() {
+            diagnostics.insert(*document_id, document_diagnostics);
         }
     }
-
     // Scripts additionally see their own type declarations, which shadow package definitions of the
     // same name, so a script can declare and use a nominal/alias that the package does not define.
     for (document_id, module) in extra_modules {
-        let script_types = build_script_local_type_index(&types, module);
-        let mut type_resolver = TypeResolver {
-            interner,
-            types: &script_types,
-            diagnostics: &mut diagnostics,
-        };
         let local_naming = expect_local_naming(locals, *document_id);
-        resolve_module_type_references(&mut type_resolver, *document_id, module, local_naming);
-    }
-
-    for (document_id, module) in &all_modules {
-        let local_naming = locals.get(document_id).unwrap_or_else(|| {
-            panic!("missing local naming for module {document_id:?} during package rebuild")
+        let script_types = build_script_local_type_index(&types, module);
+        let document_diagnostics = package_document_diagnostics(&PackageDocumentDiagnosticContext {
+            document_id: *document_id,
+            module,
+            local_naming,
+            is_script: true,
+            types: &script_types,
+            duplicate_type_names: &duplicate_type_names,
+            global_bindings: &global_bindings,
+            candidate_order: &candidate_order,
+            interner,
         });
-
-        for (expression_id, symbol) in &local_naming.non_locals {
-            if global_bindings.contains_key(symbol)
-                || is_namespace_symbol(*symbol, *document_id)
-                || is_builtin_symbol(interner, *symbol)
-            {
-                continue;
-            }
-
-            let name = interner.resolve(*symbol).unwrap_or("<unknown>");
-            let range = module.arena.get(*expression_id).range;
-            push_diagnostic(
-                &mut diagnostics,
-                *document_id,
-                Diagnostic::naming_warning(
-                    range,
-                    format!(
-                        "I could not resolve `{name}` in this package, its imports, or builtins."
-                    ),
-                ),
-            );
+        if !document_diagnostics.is_empty() {
+            diagnostics.insert(*document_id, document_diagnostics);
         }
     }
 
@@ -139,6 +124,228 @@ pub(crate) fn rebuild_package_naming(
         naming: NamesGlobal { global_bindings },
         diagnostics,
     }
+}
+
+// All package-naming diagnostics a single document contributes, in a fixed category order:
+// (T) duplicate-type-definition, (B) builtin/namespace shadow, (A) overwrite pairs, (C) type-reference
+// resolution, (D) unresolved reference. A pure function of the document's naming plus the package-level
+// inputs it reads (the type index, the global bindings it resolves references against, and the
+// path-ordered candidate list it takes its overwrite position from). Used both by the rebuild oracle
+// above (over all documents) and by incremental maintenance (over the affected documents only).
+pub(crate) struct PackageDocumentDiagnosticContext<'a> {
+    pub document_id: DocumentId,
+    pub module: &'a Module,
+    pub local_naming: &'a NamesLocal,
+    pub is_script: bool,
+    pub types: &'a BTreeMap<Symbol, TypeInfo>,
+    pub duplicate_type_names: &'a BTreeSet<Symbol>,
+    pub global_bindings: &'a BTreeMap<Symbol, DocumentId>,
+    pub candidate_order: &'a BTreeMap<Symbol, Vec<DocumentId>>,
+    pub interner: &'a Interner,
+}
+
+pub(crate) fn package_document_diagnostics(
+    context: &PackageDocumentDiagnosticContext<'_>,
+) -> Vec<Diagnostic> {
+    let interner = context.interner;
+    let mut diagnostics = Vec::new();
+
+    // (A)/(B)/(T) apply only to package documents. Scripts define no package globals and their type
+    // declarations are local, so they contribute only (C) and (D).
+    if !context.is_script {
+        for definition in &context.module.definitions {
+            if context
+                .duplicate_type_names
+                .contains(&definition.definition.name)
+            {
+                let name = interner
+                    .resolve(definition.definition.name)
+                    .unwrap_or("<unknown>");
+                diagnostics.push(Diagnostic::syntax_error(
+                    definition.range,
+                    format!(
+                        "invalid semantics: type name `{name}` is already defined by another top-level @type or @alias declaration in this package."
+                    ),
+                ));
+            }
+        }
+
+        // Overwrite warnings are per top-level *assignment*, not per document: `x <- 1; x <- 2` in one
+        // file overwrites within that file. So a name's earlier/later neighbours can be in a path-earlier
+        // or path-later document (its position in the candidate order) *or* an earlier/later assignment
+        // to the same name in this document. The two are combined below.
+        let mut occurrence_totals = BTreeMap::<Symbol, usize>::new();
+        for expression_id in &context.module.expressions {
+            if let ExpressionKind::Assign { target, .. } =
+                context.module.arena.get(*expression_id).kind
+                && top_level_binding(context.local_naming, *expression_id).is_some()
+            {
+                *occurrence_totals.entry(target).or_default() += 1;
+            }
+        }
+
+        let mut occurrences_seen = BTreeMap::<Symbol, usize>::new();
+        for expression_id in &context.module.expressions {
+            let ExpressionKind::Assign { target, .. } = context.module.arena.get(*expression_id).kind
+            else {
+                continue;
+            };
+            let Some(binding) = top_level_binding(context.local_naming, *expression_id) else {
+                continue;
+            };
+
+            if is_namespace_symbol(target, context.document_id) {
+                let name = interner.resolve(target).unwrap_or("<unknown>");
+                diagnostics.push(Diagnostic::naming_warning(
+                    binding.range,
+                    format!("Top-level binding `{name}` shadows an imported namespace symbol."),
+                ));
+            }
+            if is_builtin_symbol(interner, target) {
+                let name = interner.resolve(target).unwrap_or("<unknown>");
+                diagnostics.push(Diagnostic::naming_warning(
+                    binding.range,
+                    format!("Top-level binding `{name}` shadows a builtin."),
+                ));
+            }
+
+            let (document_position, candidate_count) = match context.candidate_order.get(&target) {
+                Some(candidates) => (
+                    candidates
+                        .iter()
+                        .position(|candidate| *candidate == context.document_id)
+                        .unwrap_or(0),
+                    candidates.len(),
+                ),
+                None => (0, 1),
+            };
+            let occurrence_index = *occurrences_seen.entry(target).or_default();
+            *occurrences_seen.get_mut(&target).expect("occurrence counter exists") += 1;
+            let occurrences_in_document = occurrence_totals.get(&target).copied().unwrap_or(1);
+            let has_earlier = document_position > 0 || occurrence_index > 0;
+            let has_later = document_position + 1 < candidate_count
+                || occurrence_index + 1 < occurrences_in_document;
+
+            if has_earlier {
+                let name = interner.resolve(target).unwrap_or("<unknown>");
+                diagnostics.push(Diagnostic::naming_warning(
+                    binding.range,
+                    format!(
+                        "Top-level binding `{name}` overwrites an earlier top-level binding in this package."
+                    ),
+                ));
+            }
+            if has_later {
+                let name = interner.resolve(target).unwrap_or("<unknown>");
+                diagnostics.push(Diagnostic::naming_warning(
+                    binding.range,
+                    format!(
+                        "Top-level binding `{name}` is overwritten by a later top-level binding in this package."
+                    ),
+                ));
+            }
+        }
+    }
+
+    let mut type_diagnostics = HashMap::<DocumentId, Vec<Diagnostic>>::new();
+    {
+        let mut type_resolver = TypeResolver {
+            interner,
+            types: context.types,
+            diagnostics: &mut type_diagnostics,
+        };
+        resolve_module_type_references(
+            &mut type_resolver,
+            context.document_id,
+            context.module,
+            context.local_naming,
+        );
+    }
+    if let Some(entries) = type_diagnostics.remove(&context.document_id) {
+        diagnostics.extend(entries);
+    }
+
+    for (expression_id, symbol) in &context.local_naming.non_locals {
+        if context.global_bindings.contains_key(symbol)
+            || is_namespace_symbol(*symbol, context.document_id)
+            || is_builtin_symbol(interner, *symbol)
+        {
+            continue;
+        }
+        let name = interner.resolve(*symbol).unwrap_or("<unknown>");
+        let range = context.module.arena.get(*expression_id).range;
+        diagnostics.push(Diagnostic::naming_warning(
+            range,
+            format!("I could not resolve `{name}` in this package, its imports, or builtins."),
+        ));
+    }
+
+    diagnostics
+}
+
+// The path-ordered candidate list per package-global name: the documents whose top-level assignments
+// bind the name, in `package_modules` order (package path order). `Winner(N)` is the last entry. Built
+// in a single pass; `global_bindings` is derived from it as the path-last candidate.
+pub(crate) fn build_candidate_order(
+    package_modules: &[(DocumentId, &Module)],
+    locals: &HashMap<DocumentId, NamesLocal>,
+) -> BTreeMap<Symbol, Vec<DocumentId>> {
+    let mut candidate_order = BTreeMap::<Symbol, Vec<DocumentId>>::new();
+    for (document_id, module) in package_modules {
+        let local_naming = expect_local_naming(locals, *document_id);
+        for expression_id in &module.expressions {
+            let ExpressionKind::Assign { target, .. } = module.arena.get(*expression_id).kind else {
+                continue;
+            };
+            if top_level_binding(local_naming, *expression_id).is_none() {
+                continue;
+            }
+            let candidates = candidate_order.entry(target).or_default();
+            if !candidates.contains(document_id) {
+                candidates.push(*document_id);
+            }
+        }
+    }
+    candidate_order
+}
+
+// The package-global names a single document defines: the targets of its top-level `Assign`
+// expressions (those appearing directly in `module.expressions` with a top-level binding resolution).
+// A conditionally-executed assignment nested in `if`/`for`/`while` is rolled back out of the top-level
+// scope but still leaves a `TopLevelAssignment`-kinded entry in `bindings`, so folding binding kinds
+// would over-count it; iterating `module.expressions` here is the same membership `build_candidate_order`
+// uses, keeping the candidate index (`package_definitions`) consistent with the rebuild oracle.
+pub(crate) fn document_package_definitions(
+    module: &Module,
+    local_naming: &NamesLocal,
+) -> BTreeSet<Symbol> {
+    let mut symbols = BTreeSet::new();
+    for expression_id in &module.expressions {
+        let ExpressionKind::Assign { target, .. } = module.arena.get(*expression_id).kind else {
+            continue;
+        };
+        if top_level_binding(local_naming, *expression_id).is_some() {
+            symbols.insert(target);
+        }
+    }
+    symbols
+}
+
+pub(crate) fn winners_from_candidate_order(
+    candidate_order: &BTreeMap<Symbol, Vec<DocumentId>>,
+) -> BTreeMap<Symbol, DocumentId> {
+    candidate_order
+        .iter()
+        .filter_map(|(symbol, candidates)| candidates.last().map(|winner| (*symbol, *winner)))
+        .collect()
+}
+
+fn top_level_binding(local_naming: &NamesLocal, expression_id: ExpressionId) -> Option<&BindingInfo> {
+    let binding_id = local_naming
+        .expression_resolutions
+        .get(&expression_id)
+        .copied()?;
+    local_naming.bindings.get(&binding_id)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,7 +445,7 @@ fn resolve_module_type_references(
 // A script resolves type names against the package index plus its own `@type`/`@alias` declarations,
 // which shadow package definitions of the same name. The package index already reports duplicates
 // among package files; a script redefining a package name is intentional shadowing, not a duplicate.
-fn build_script_local_type_index(
+pub(crate) fn build_script_local_type_index(
     package_types: &BTreeMap<Symbol, TypeInfo>,
     module: &Module,
 ) -> BTreeMap<Symbol, TypeInfo> {
@@ -255,11 +462,15 @@ fn build_script_local_type_index(
     types
 }
 
-fn build_type_index(
+// The package type index: each uniquely-defined `@type`/`@alias` name maps to its `TypeInfo`. A name
+// defined by more than one package document is *not* indexed (so references to it stay unresolved) and
+// is returned in `duplicate_type_names` so `package_document_diagnostics` can emit the duplicate-type
+// warning at each site. The fingerprint captures every type definition (name, kind, arity, multiplicity)
+// so incremental maintenance regenerates type-reference diagnostics package-wide only when it changes.
+pub(crate) fn build_type_index(
     package_modules: &[(DocumentId, &Module)],
     interner: &Interner,
-    diagnostics: &mut HashMap<DocumentId, Vec<Diagnostic>>,
-) -> BTreeMap<Symbol, TypeInfo> {
+) -> (BTreeMap<Symbol, TypeInfo>, BTreeSet<Symbol>, String) {
     let mut definitions_by_symbol = BTreeMap::<Symbol, Vec<TypeDefinitionSite>>::new();
 
     for (document_id, module) in package_modules {
@@ -277,12 +488,19 @@ fn build_type_index(
     }
 
     let mut types = BTreeMap::new();
+    let mut duplicate_type_names = BTreeSet::new();
+    let mut fingerprint_parts = Vec::new();
     for (symbol, definition_sites) in definitions_by_symbol {
-        if definition_sites.len() == 1 {
-            let definition_site = definition_sites
-                .into_iter()
-                .next()
-                .expect("single-site type definition should exist");
+        let name = interner.resolve(symbol).unwrap_or("<unknown>");
+        fingerprint_parts.push(format!(
+            "{name}={}",
+            definition_sites
+                .iter()
+                .map(|site| format!("{:?}/{}", site.kind, site.arity))
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+        if let [definition_site] = definition_sites.as_slice() {
             types.insert(
                 symbol,
                 TypeInfo {
@@ -290,117 +508,12 @@ fn build_type_index(
                     arity: definition_site.arity,
                 },
             );
-            continue;
-        }
-
-        let name = interner.resolve(symbol).unwrap_or("<unknown>").to_owned();
-        for definition_site in definition_sites {
-            push_diagnostic(
-                diagnostics,
-                definition_site.document_id,
-                Diagnostic::syntax_error(
-                    definition_site.range,
-                    format!(
-                        "invalid semantics: type name `{name}` is already defined by another top-level @type or @alias declaration in this package."
-                    ),
-                ),
-            );
+        } else {
+            duplicate_type_names.insert(symbol);
         }
     }
 
-    types
-}
-
-fn build_global_bindings(
-    package_modules: &[(DocumentId, &Module)],
-    locals: &HashMap<DocumentId, NamesLocal>,
-    interner: &Interner,
-    diagnostics: &mut HashMap<DocumentId, Vec<Diagnostic>>,
-) -> BTreeMap<Symbol, DocumentId> {
-    let mut global_bindings = BTreeMap::<Symbol, DocumentId>::new();
-    let mut winning_bindings = BTreeMap::<Symbol, BindingInfo>::new();
-
-    for (document_id, module) in package_modules {
-        let local_naming = locals.get(document_id).unwrap_or_else(|| {
-            panic!("missing local naming for package module {document_id:?} during package rebuild")
-        });
-
-        for expression_id in &module.expressions {
-            let expression = module.arena.get(*expression_id);
-            let ExpressionKind::Assign { target, .. } = expression.kind else {
-                continue;
-            };
-
-            let binding_id = local_naming
-                .expression_resolutions
-                .get(expression_id)
-                .copied()
-                .unwrap_or_else(|| {
-                    panic!(
-                        "top-level assignment should have local binding resolution for {document_id:?}:{expression_id:?}"
-                    )
-                });
-            let binding = local_naming
-                .bindings
-                .get(&binding_id)
-                .unwrap_or_else(|| {
-                    panic!("top-level binding should exist for {document_id:?}:{binding_id:?}")
-                })
-                .clone();
-
-            if is_namespace_symbol(target, *document_id) {
-                let name = interner.resolve(target).unwrap_or("<unknown>");
-                push_diagnostic(
-                    diagnostics,
-                    *document_id,
-                    Diagnostic::naming_warning(
-                        binding.range,
-                        format!("Top-level binding `{name}` shadows an imported namespace symbol."),
-                    ),
-                );
-            }
-
-            if is_builtin_symbol(interner, target) {
-                let name = interner.resolve(target).unwrap_or("<unknown>");
-                push_diagnostic(
-                    diagnostics,
-                    *document_id,
-                    Diagnostic::naming_warning(
-                        binding.range,
-                        format!("Top-level binding `{name}` shadows a builtin."),
-                    ),
-                );
-            }
-
-            if let Some(previous_binding) = winning_bindings.insert(target, binding.clone()) {
-                let name = interner.resolve(target).unwrap_or("<unknown>").to_owned();
-                push_diagnostic(
-                    diagnostics,
-                    previous_binding.module_id,
-                    Diagnostic::naming_warning(
-                        previous_binding.range,
-                        format!(
-                            "Top-level binding `{name}` is overwritten by a later top-level binding in this package."
-                        ),
-                    ),
-                );
-                push_diagnostic(
-                    diagnostics,
-                    binding.module_id,
-                    Diagnostic::naming_warning(
-                        binding.range,
-                        format!(
-                            "Top-level binding `{name}` overwrites an earlier top-level binding in this package."
-                        ),
-                    ),
-                );
-            }
-
-            global_bindings.insert(target, *document_id);
-        }
-    }
-
-    global_bindings
+    (types, duplicate_type_names, fingerprint_parts.join(";"))
 }
 
 fn push_diagnostic(
@@ -1037,7 +1150,7 @@ fn collect_new_symbols(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct TypeInfo {
+pub(crate) struct TypeInfo {
     kind: DefinitionKind,
     arity: usize,
 }
