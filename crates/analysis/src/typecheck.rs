@@ -44,6 +44,11 @@ pub struct InferenceState {
     // inlay hints) can show checked types. Left off during interface rounds to avoid the cost.
     record_expression_types: bool,
     recorded_expression_types: BTreeMap<ExpressionId, CoreType>,
+    // Sites that introduce a genuine `Unknown` into the type lattice, collected while recording is
+    // enabled (the authoritative round-2 check). Strict mode reports these origins; ordinary
+    // propagation of `Unknown` is never recorded here, so a single root cause yields one diagnostic.
+    // Drained and filtered to still-`Unknown` recorded types by `check_module_with_naming`.
+    strict_origins: Vec<StrictUnknownOrigin>,
     // Rigid (skolem) variables introduced by a `<T>` annotation binder while checking a function
     // body. They model a universally quantified parameter: the body must work for *every* T, so a
     // rigid variable refuses to be bound to a concrete type or constrained. After the check they are
@@ -103,6 +108,29 @@ pub struct ModuleCheck {
     pub expression_types: Vec<CoreType>,
     pub expression_types_by_id: BTreeMap<ExpressionId, CoreType>,
     pub errors: Vec<InferenceError>,
+    // Origins of genuine `Unknown` types, each already confirmed to resolve to `Unknown` in the
+    // final substitution. Strict mode turns each into one diagnostic; non-strict checks ignore them.
+    pub strict_origins: Vec<StrictUnknownOrigin>,
+}
+
+// A site that first introduces a non-error `Unknown` into the type lattice. Strict mode flags these
+// origins; it never flags expressions that merely propagate `Unknown` from a child or referenced
+// binding (see the strict-mode section of the typing reference).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StrictUnknownOrigin {
+    pub expression_id: ExpressionId,
+    pub range: Range,
+    pub kind: StrictOriginKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StrictOriginKind {
+    // A syntactically valid construct the checker does not yet model.
+    UnsupportedConstruct,
+    // A name reference whose resolved binding has no known type (a base-environment or library
+    // binding that is itself `Unknown`). Composes with library typing: once the binding is stubbed,
+    // it resolves to a real type and is no longer an origin.
+    UndeterminedReference(Symbol),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -407,6 +435,19 @@ impl InferenceState {
 
     pub fn enable_expression_type_recording(&mut self) {
         self.record_expression_types = true;
+    }
+
+    // Records a strict-mode `Unknown` origin, but only while expression-type recording is on (the
+    // authoritative round-2 check). The interface rounds discard their `ModuleCheck`, so collecting
+    // origins there would be wasted work and would leave the buffer non-empty in cloned states.
+    fn record_strict_origin(&mut self, expression_id: ExpressionId, range: Range, kind: StrictOriginKind) {
+        if self.record_expression_types {
+            self.strict_origins.push(StrictUnknownOrigin {
+                expression_id,
+                range,
+                kind,
+            });
+        }
     }
 
     // Resolves every recorded expression type against the final substitution and clears the
@@ -717,10 +758,22 @@ impl InferenceState {
         }
 
         let expression_types_by_id = self.take_recorded_expression_types();
+        // Keep only origins whose expression still resolves to `Unknown` in the final substitution.
+        // This drops any origin whose `Unknown` was later overridden (for example a `@trust Any`
+        // annotation makes the expression `Any`, which strict mode tolerates) and any origin under a
+        // top-level statement that failed to type-check (its error is recorded separately and the
+        // failed expression is never recorded here, so no double-report).
+        let strict_origins = std::mem::take(&mut self.strict_origins)
+            .into_iter()
+            .filter(|origin| {
+                expression_types_by_id.get(&origin.expression_id) == Some(&CoreType::Unknown)
+            })
+            .collect();
         ModuleCheck {
             expression_types,
             expression_types_by_id,
             errors,
+            strict_origins,
         }
     }
 
@@ -877,15 +930,26 @@ impl InferenceState {
                     }
                 }
 
-                self.lookup_global_name(*symbol)
-                    .cloned()
-                    .map(|binding| self.instantiate_type_scheme(&binding.type_scheme))
-                    .transpose()?
-                    .ok_or(InferenceError::UnknownName {
+                let Some(binding) = self.lookup_global_name(*symbol).cloned() else {
+                    return Err(InferenceError::UnknownName {
                         symbol: *symbol,
                         range: expression.range,
                         expression_id: expression.id,
-                    })
+                    });
+                };
+                let resolved_type = self.instantiate_type_scheme(&binding.type_scheme)?;
+                // A base-environment or library binding that has no known type is a strict origin:
+                // the reference is where that `Unknown` enters the lattice. Package-global and local
+                // bindings reach `Unknown` through the paths above instead, so their origin is the
+                // defining site, not this reference.
+                if resolved_type == CoreType::Unknown {
+                    self.record_strict_origin(
+                        expression.id,
+                        expression.range,
+                        StrictOriginKind::UndeterminedReference(*symbol),
+                    );
+                }
+                Ok(resolved_type)
             }
             ExpressionKind::Block {
                 expressions,
@@ -1086,7 +1150,14 @@ impl InferenceState {
                 resolution_context,
                 type_definitions,
             ),
-            ExpressionKind::Unsupported => Ok(CoreType::Unknown),
+            ExpressionKind::Unsupported => {
+                self.record_strict_origin(
+                    expression.id,
+                    expression.range,
+                    StrictOriginKind::UnsupportedConstruct,
+                );
+                Ok(CoreType::Unknown)
+            }
         }
     }
 

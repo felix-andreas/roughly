@@ -3,7 +3,7 @@ use {
         Interner, Symbol,
         diagnostic::Diagnostic,
         document::{Document, DocumentChange, DocumentId},
-        hir::{ExpressionId, Module},
+        hir::{ExpressionId, ExpressionKind, Module},
         lint::{self as lint_phase, NameStyle},
         lower::lower_with_shared_interner,
         naming::{
@@ -15,7 +15,8 @@ use {
         tree,
         type_syntax::render_surface_type,
         typecheck::{
-            ExportedValue, TypeDefinitionEnvironment, inference_state_with_builtins_in_interner,
+            ExportedValue, StrictOriginKind, StrictUnknownOrigin, TypeDefinitionEnvironment,
+            inference_state_with_builtins_in_interner,
         },
         types::{CoreType, TypeScheme},
     },
@@ -152,6 +153,11 @@ pub struct CheckConfig {
     // features (hover types, inlay hints, signature help) regardless of this flag; it only controls
     // whether type errors are reported.
     pub typing: bool,
+    // Surface strict-mode diagnostics: report each site that originates a genuine `Unknown` type
+    // (an unsupported construct or a reference to a binding with no known type). Like `typing`, the
+    // typecheck phase computes these regardless; this flag only controls whether they are published.
+    // See the strict-mode section of the typing reference.
+    pub strict: bool,
 }
 
 type Version = u64;
@@ -192,6 +198,10 @@ struct TypecheckDocumentOutput {
     // change rechecks only the documents that reference the changed name.
     dependency_fingerprint: String,
     diagnostics: Vec<Diagnostic>,
+    // Strict-mode `Unknown`-origin diagnostics, computed alongside the type errors from the same
+    // inputs and cached on the same keys. Published only when `[check] strict` is on, exactly as
+    // `diagnostics` is published only when `[check] typing` is on.
+    strict_diagnostics: Vec<Diagnostic>,
     expression_types: HashMap<ExpressionId, CoreType>,
 }
 
@@ -267,6 +277,12 @@ impl Analysis {
     // typing IDE features regardless of this flag; it only gates publishing type errors.
     pub fn type_errors_enabled(&self) -> bool {
         self.check_config.typing
+    }
+
+    // Whether strict-mode `Unknown`-origin diagnostics are surfaced. Like `type_errors_enabled`, the
+    // typecheck phase computes the strict diagnostics regardless; this only gates publishing them.
+    pub fn strict_enabled(&self) -> bool {
+        self.check_config.strict
     }
 
     pub fn add_document(&mut self, path: PathBuf, document: Document) -> DocumentId {
@@ -511,10 +527,13 @@ impl Analysis {
         {
             diagnostics.extend(package_diagnostics.iter().cloned());
         }
-        if self.check_config.typing
-            && let Some(output) = self.document_typecheck_outputs.get(&document_id)
-        {
-            diagnostics.extend(output.diagnostics.iter().cloned());
+        if let Some(output) = self.document_typecheck_outputs.get(&document_id) {
+            if self.check_config.typing {
+                diagnostics.extend(output.diagnostics.iter().cloned());
+            }
+            if self.check_config.strict {
+                diagnostics.extend(output.strict_diagnostics.iter().cloned());
+            }
         }
         diagnostics
     }
@@ -538,7 +557,7 @@ impl Analysis {
 pub fn run_full(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     lint(analysis_state);
 
-    if analysis_state.check_config.typing {
+    if analysis_state.check_config.typing || analysis_state.check_config.strict {
         typecheck(analysis_state)
     } else {
         resolve_package(analysis_state);
@@ -1346,6 +1365,8 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 Diagnostic::from_inference_error(error, fallback_range, analysis_state.interner())
             })
             .collect();
+        let strict_diagnostics =
+            strict_origin_diagnostics(module, &module_check.strict_origins, analysis_state.interner());
         let expression_types = module_check
             .expression_types_by_id
             .into_iter()
@@ -1357,6 +1378,7 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 type_definitions_fingerprint: type_definitions_fingerprint.clone(),
                 dependency_fingerprint: per_doc_dependency_fingerprint,
                 diagnostics,
+                strict_diagnostics,
                 expression_types,
             },
         ));
@@ -1388,6 +1410,47 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     analysis_state.dirty_documents.clear();
     analysis_state.last_recompute_reasons = recompute_reasons;
     recomputed_document_ids
+}
+
+// Renders each strict `Unknown` origin into a diagnostic. An origin that is the value of an
+// assignment is phrased against the bound name (the actionable fix is to annotate that binding);
+// any other origin is phrased against the expression itself.
+fn strict_origin_diagnostics(
+    module: &Module,
+    strict_origins: &[StrictUnknownOrigin],
+    interner: &Interner,
+) -> Vec<Diagnostic> {
+    if strict_origins.is_empty() {
+        return Vec::new();
+    }
+    let mut assignment_targets = HashMap::new();
+    for expression in module.arena.expressions() {
+        if let ExpressionKind::Assign { target, value } = &expression.kind {
+            assignment_targets.insert(*value, *target);
+        }
+    }
+    strict_origins
+        .iter()
+        .map(|origin| {
+            let message = if let Some(target) = assignment_targets.get(&origin.expression_id) {
+                let name = interner.resolve(*target).unwrap_or("<unknown>");
+                format!("strict mode: could not determine the type of `{name}`; add a type annotation")
+            } else {
+                match &origin.kind {
+                    StrictOriginKind::UnsupportedConstruct => {
+                        "strict mode: this expression has an undetermined type (`Unknown`)".to_owned()
+                    }
+                    StrictOriginKind::UndeterminedReference(symbol) => {
+                        let name = interner.resolve(*symbol).unwrap_or("<unknown>");
+                        format!(
+                            "strict mode: could not determine the type of `{name}`; it has no known type"
+                        )
+                    }
+                }
+            };
+            Diagnostic::strict(origin.range, message)
+        })
+        .collect()
 }
 
 impl Analysis {
@@ -2429,6 +2492,7 @@ mod tests {
             CheckConfig {
                 unused: false,
                 typing: true,
+                strict: false,
             },
         );
         let document_id = analysis
@@ -2552,6 +2616,7 @@ mod tests {
             CheckConfig {
                 unused: false,
                 typing: true,
+                strict: false,
             },
         );
         analysis

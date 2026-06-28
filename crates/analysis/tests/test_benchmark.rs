@@ -52,6 +52,7 @@ fn run_ide_benchmark(target_loc: usize) {
         CheckConfig {
             unused: false,
             typing: true,
+            strict: false,
         },
     );
     for (path, source) in &files {
@@ -131,6 +132,7 @@ fn run_benchmark(target_loc: usize) {
         CheckConfig {
             unused: false,
             typing: true,
+            strict: false,
         },
     );
     for (path, source) in &files {

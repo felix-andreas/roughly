@@ -106,6 +106,15 @@ impl Diagnostic {
         }
     }
 
+    pub fn strict(range: Range, message: impl Into<String>) -> Self {
+        Self {
+            severity: Severity::Warning,
+            code: DiagnosticCode::Strict,
+            message: message.into(),
+            range,
+        }
+    }
+
     pub fn annotation_error(range: Range, message: impl Into<String>) -> Self {
         Self {
             severity: Severity::Error,
@@ -447,6 +456,7 @@ pub enum DiagnosticCode {
     SyntaxError,
     TypeError,
     AnnotationError,
+    Strict,
 }
 
 impl fmt::Display for DiagnosticCode {
@@ -457,6 +467,7 @@ impl fmt::Display for DiagnosticCode {
             Self::SyntaxError => formatter.write_str("syntax-error"),
             Self::TypeError => formatter.write_str("type-error"),
             Self::AnnotationError => formatter.write_str("annotation-error"),
+            Self::Strict => formatter.write_str("strict"),
         }
     }
 }

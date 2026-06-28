@@ -12,6 +12,7 @@ fn typing_analysis(base: &str) -> Analysis {
         CheckConfig {
             unused: false,
             typing: true,
+            strict: false,
         },
     )
 }
