@@ -418,6 +418,28 @@ Additional exceptions to this rule are:
 - Commented-out strings such as `#'string'` are left unchanged, since inserting a space (e.g., `#' string'`) would alter the content of the string.
 - [Shebangs](https://en.wikipedia.org/wiki/Shebang_(Unix)), for example `#!/usr/bin/env Rscript`, remain unchanged.
 
+### Type Annotations
+
+Roughly's type annotations are written in `#:` comments. The formatter normalizes the spacing inside an annotation to the canonical surface-type form used throughout the [typing reference](/typing-reference): one space after `#:`, no space before `,` or `:` and one space after, spaces around `|` and `->`, and no padding inside `(`, `[`, `{`, or generic `<...>`. A leading type-parameter binder such as `<T>` is followed by a space.
+
+```r
+# type_annotations_compact : compare
+#:fn( x:integer,y:double )->character
+#: list[ named : double ]
+#: Either< E , A >|NULL
+```
+
+The reformat is deliberately non-invasive: it only adjusts whitespace. Token order, identifier casing, and your line breaks are preserved, so a multi-line expanded annotation (one written with `@param` / `@return` lines) keeps its shape rather than being collapsed into a compact `fn(...)`.
+
+```r
+# type_annotations_expanded : compare
+#: @param { integer } count
+#: @param { fn(integer)->character } render
+#: @returns { character }
+```
+
+Anything that is not a well-formed annotation — prose, or a type containing characters outside the annotation alphabet (for example a dotted name) — is left untouched beyond ensuring the single space after `#:`, so the formatter never corrupts a comment it does not understand.
+
 ### Line Spacing
 
 The formatter normalizes line spacing between expressions, allowing at most one empty line:

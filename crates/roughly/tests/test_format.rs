@@ -93,6 +93,33 @@ MAKE CHANGES TO tests/format/formatter.template.md INSTEAD";
 }
 
 #[test]
+fn annotation_formatting_is_idempotent() {
+    // Every annotation fixture's blessed output must be a fixed point: re-formatting the canonical
+    // form leaves it byte-identical. Together with the `format_fixtures` suite (which pins
+    // format(input) == expected) this proves format(format(input)) == format(input).
+    let mut checked = 0;
+    for group in fixtures::read_fixture_suite("tests/format") {
+        if !group.name.starts_with("annotation") {
+            continue;
+        }
+        for case in group.cases {
+            let FixtureKind::Simple(simple) = case.kind else {
+                panic!("annotation fixtures must be simple cases");
+            };
+            let expected = format!("{}\n", simple.expected);
+            let reformatted = format_str(&expected).unwrap();
+            assert_eq!(
+                reformatted, expected,
+                "annotation case `{}__{}` is not a formatting fixed point",
+                group.name, case.name
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "expected annotation fixtures to be present");
+}
+
+#[test]
 fn trailing_spaces_in_comments() {
     assert_eq!(format_str("#' \n#' comment  ").unwrap(), "#'\n#' comment\n");
 }

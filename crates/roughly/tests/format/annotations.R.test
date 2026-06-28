@@ -1,0 +1,216 @@
+#==== annotation_compact
+#---- atomic
+#:integer
+#++++
+#: integer
+
+#---- collapse_spaces
+#:    integer
+#++++
+#: integer
+
+#---- already_canonical
+#: integer
+#++++
+#: integer
+
+#---- vector
+#: integer [ ]
+#++++
+#: integer[]
+
+#---- named_vector
+#: double [ named ]
+#++++
+#: double[named]
+
+#---- union_null
+#: character|NULL
+#++++
+#: character | NULL
+
+#---- nullable_already_canonical
+#: integer | NULL
+#++++
+#: integer | NULL
+
+#==== annotation_lists
+#---- list_array
+#: list [ integer ]
+#++++
+#: list[integer]
+
+#---- list_named
+#: list[ named : character ]
+#++++
+#: list[named: character]
+
+#---- record
+#: list{ name : character , age : double }
+#++++
+#: list{name: character, age: double}
+
+#---- tuple
+#: list{ integer , double }
+#++++
+#: list{integer, double}
+
+#---- nested
+#: list[ list{ x : integer } ]
+#++++
+#: list[list{x: integer}]
+
+#==== annotation_functions
+#---- positional
+#: fn(integer,double)->character
+#++++
+#: fn(integer, double) -> character
+
+#---- named_params
+#: fn( a : integer , b : double )->logical
+#++++
+#: fn(a: integer, b: double) -> logical
+
+#---- no_return
+#: fn( x : integer )
+#++++
+#: fn(x: integer)
+
+#---- optional_param
+#: fn( [ x ] : integer )->logical
+#++++
+#: fn([x]: integer) -> logical
+
+#---- nested_function
+#: fn( cb : fn(integer)->character )->integer
+#++++
+#: fn(cb: fn(integer) -> character) -> integer
+
+#==== annotation_generics_binders
+#---- generic
+#: Map< K , V >
+#++++
+#: Map<K, V>
+
+#---- nested_generic
+#: Map< K , List< V > >
+#++++
+#: Map<K, List<V>>
+
+#---- generic_vector
+#: Foo< A > [ ]
+#++++
+#: Foo<A>[]
+
+#---- binder
+#: < T >fn( x : T )->T
+#++++
+#: <T> fn(x: T) -> T
+
+#---- binder_multi
+#: <T,U> fn(a: T, b: U) -> T
+#++++
+#: <T, U> fn(a: T, b: U) -> T
+
+#==== annotation_directives
+#---- trust
+#:@trust integer
+#++++
+#: @trust integer
+
+#---- if_unknown
+#: @if-unknown   character
+#++++
+#: @if-unknown character
+
+#---- new
+#:@new Person
+#++++
+#: @new Person
+
+#---- new_generic
+#: @new Person< T >
+#++++
+#: @new Person<T>
+
+#---- type_definition
+#: @type Person { list{ name : character } }
+#++++
+#: @type Person {list{name: character}}
+
+#---- alias_definition
+#: @alias Id { integer }
+#++++
+#: @alias Id {integer}
+
+#---- type_parameters
+#: @type Box< T > { list{ value : T } }
+#++++
+#: @type Box<T> {list{value: T}}
+
+#==== annotation_expanded
+#---- params_and_return
+#: @param { integer } count
+#: @param { fn(integer)->character } render
+#: @returns { character }
+#++++
+#: @param {integer} count
+#: @param {fn(integer) -> character} render
+#: @returns {character}
+
+#---- optional_param
+#: @param { character } [ label ]
+#++++
+#: @param {character} [label]
+
+#---- forall
+#: @forall T , U
+#: @param { T } a
+#: @return { U }
+#++++
+#: @forall T, U
+#: @param {T} a
+#: @return {U}
+
+#==== annotation_multiline_compact
+#---- function_across_lines
+#: fn(
+#:   a : integer ,
+#:   b : double
+#: )->logical
+#++++
+#: fn(
+#: a: integer,
+#: b: double
+#: ) -> logical
+
+#==== annotation_preserve
+#---- empty
+#:
+#++++
+#:
+
+#---- prose_leading_space
+#: this is not a type
+#++++
+#: this is not a type
+
+#---- dotted_name_verbatim
+#: data.frame
+#++++
+#: data.frame
+
+#---- dotted_name_no_space
+#:data.frame
+#++++
+#: data.frame
+
+#---- bare_minus_verbatim
+#: a - b
+#++++
+#: a - b
+
+#---- url_verbatim
+#: see http://example.com
+#++++
+#: see http://example.com

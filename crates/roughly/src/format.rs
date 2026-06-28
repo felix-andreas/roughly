@@ -235,7 +235,9 @@ fn traverse(
             let _ = chars.next(); // Skip the '#'
             // reformat comments like #foo to # foo but keep #' foo
             match chars.next() {
-                Some(char @ ('\'' | '*' | ':')) => {
+                // `#:` introduces a Roughly type annotation; reformat its body to canonical spacing.
+                Some(':') => format_type_annotation_comment(out, raw),
+                Some(char @ ('\'' | '*')) => {
                     match chars.next() {
                         Some(' ') | None => out.push_str(raw),
                         // avoid formatting #'string'
@@ -1177,6 +1179,190 @@ fn parse_directive(text: &str) -> Option<Directive> {
             "off" => Some(Directive::Off),
             _ => None,
         })
+}
+
+// Reformats a `#:` type-annotation comment in place. The body is tokenized over the surface-type
+// alphabet and re-emitted with the canonical spacing of the typing reference (the same spacing
+// `analysis::type_syntax::render_surface_type` produces). Formatting is line-local and only adjusts
+// whitespace, so token order, identifier casing, and the user's line breaks across a multi-line `#:`
+// block are all preserved; in particular expanded `@param`/`@return` blocks are never collapsed into
+// a compact `fn(...)`. If the body contains anything outside the annotation alphabet the comment is
+// left untouched (beyond ensuring a single space after `#:`), so prose and malformed annotations are
+// never corrupted.
+fn format_type_annotation_comment(out: &mut String, raw: &str) {
+    let body = &raw[2..];
+    match normalize_annotation_body(body) {
+        Some(normalized) if normalized.is_empty() => out.push_str("#:"),
+        Some(normalized) => {
+            out.push_str("#: ");
+            out.push_str(&normalized);
+        }
+        None => match body.chars().next() {
+            Some(' ') | None => out.push_str(raw),
+            Some(_) => {
+                out.push_str("#: ");
+                out.push_str(body.trim_start());
+            }
+        },
+    }
+}
+
+fn normalize_annotation_body(body: &str) -> Option<String> {
+    let tokens = tokenize_annotation(body)?;
+    let mut out = String::new();
+    for (index, token) in tokens.iter().enumerate() {
+        if index > 0 && annotation_space_between(&tokens[index - 1], token) {
+            out.push(' ');
+        }
+        out.push_str(&token.text);
+    }
+    Some(out)
+}
+
+// Decides whether a single space separates two adjacent annotation tokens, reproducing the canonical
+// surface-type spacing: `,` and `:` hug their left neighbor, `|` and `->` are surrounded by spaces,
+// brackets/braces/parens/generic angle brackets hug what they apply to, and a leading `<...>` binder
+// is followed by a space.
+fn annotation_space_between(previous: &AnnotationToken, current: &AnnotationToken) -> bool {
+    use AnnotationTokenKind::*;
+
+    match current.kind {
+        Comma | Colon | CloseParen | CloseBracket | CloseBrace | AngleClose | GenericOpen => {
+            return false;
+        }
+        OpenParen if matches!(previous.kind, Word) => return false,
+        OpenBracket if matches!(previous.kind, Word | AngleClose) => return false,
+        OpenBrace if matches!(previous.kind, Word) && previous.text == "list" => return false,
+        Pipe | Arrow => return true,
+        _ => {}
+    }
+
+    !matches!(
+        previous.kind,
+        OpenParen | OpenBracket | OpenBrace | GenericOpen | BinderOpen
+    )
+}
+
+// Tokenizes an annotation body over the surface-type alphabet. Returns `None` (so the caller leaves
+// the comment verbatim) on any byte outside that alphabet, which keeps prose and malformed
+// annotations untouched.
+fn tokenize_annotation(body: &str) -> Option<Vec<AnnotationToken>> {
+    let bytes = body.as_bytes();
+    let mut tokens: Vec<AnnotationToken> = Vec::new();
+    let mut index = 0;
+
+    while index < bytes.len() {
+        let byte = bytes[index];
+
+        if byte.is_ascii_whitespace() {
+            index += 1;
+            continue;
+        }
+
+        let (kind, text) = match byte {
+            b'(' => (AnnotationTokenKind::OpenParen, "("),
+            b')' => (AnnotationTokenKind::CloseParen, ")"),
+            b'[' => (AnnotationTokenKind::OpenBracket, "["),
+            b']' => (AnnotationTokenKind::CloseBracket, "]"),
+            b'{' => (AnnotationTokenKind::OpenBrace, "{"),
+            b'}' => (AnnotationTokenKind::CloseBrace, "}"),
+            b',' => (AnnotationTokenKind::Comma, ","),
+            b':' => (AnnotationTokenKind::Colon, ":"),
+            b'|' => (AnnotationTokenKind::Pipe, "|"),
+            b'>' => (AnnotationTokenKind::AngleClose, ">"),
+            b'<' => {
+                // A `<` that follows a type name is a generic application (`Foo<...>`); otherwise it
+                // opens a leading type-parameter binder (`<T> ...`).
+                let kind = if matches!(tokens.last().map(|token| &token.kind), Some(AnnotationTokenKind::Word)) {
+                    AnnotationTokenKind::GenericOpen
+                } else {
+                    AnnotationTokenKind::BinderOpen
+                };
+                tokens.push(AnnotationToken { kind, text: "<".to_owned() });
+                index += 1;
+                continue;
+            }
+            b'-' => {
+                if bytes.get(index + 1) == Some(&b'>') {
+                    tokens.push(AnnotationToken {
+                        kind: AnnotationTokenKind::Arrow,
+                        text: "->".to_owned(),
+                    });
+                    index += 2;
+                    continue;
+                }
+                return None;
+            }
+            b'@' => {
+                let start = index;
+                index += 1;
+                while index < bytes.len() && is_directive_byte(bytes[index]) {
+                    index += 1;
+                }
+                tokens.push(AnnotationToken {
+                    kind: AnnotationTokenKind::Directive,
+                    text: body[start..index].to_owned(),
+                });
+                continue;
+            }
+            _ if is_identifier_start_byte(byte) => {
+                let start = index;
+                index += 1;
+                while index < bytes.len() && is_identifier_continue_byte(bytes[index]) {
+                    index += 1;
+                }
+                tokens.push(AnnotationToken {
+                    kind: AnnotationTokenKind::Word,
+                    text: body[start..index].to_owned(),
+                });
+                continue;
+            }
+            _ => return None,
+        };
+
+        tokens.push(AnnotationToken {
+            kind,
+            text: text.to_owned(),
+        });
+        index += 1;
+    }
+
+    Some(tokens)
+}
+
+fn is_directive_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
+}
+
+fn is_identifier_start_byte(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || byte == b'_'
+}
+
+fn is_identifier_continue_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+struct AnnotationToken {
+    kind: AnnotationTokenKind,
+    text: String,
+}
+
+enum AnnotationTokenKind {
+    Word,
+    Directive,
+    Arrow,
+    Pipe,
+    Comma,
+    Colon,
+    OpenParen,
+    CloseParen,
+    OpenBracket,
+    CloseBracket,
+    OpenBrace,
+    CloseBrace,
+    GenericOpen,
+    BinderOpen,
+    AngleClose,
 }
 
 #[cfg(test)]
