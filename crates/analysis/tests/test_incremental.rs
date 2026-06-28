@@ -479,11 +479,22 @@ fn deep_re_export_chain_past_round_cap_is_not_left_stale() {
 // Drives the public `Analysis` API through a long, deterministic stream of add / edit / delete
 // operations over a small pool of paths and names, so the same names overwrite, re-export, and flip
 // winners across the package path order repeatedly, and the type names cycle kind/arity/presence.
-// `resolve_package` after every operation runs (under `debug_assertions`, i.e. the dev profile this
-// test runs in) all five drift assertions — reverse-dependency index, value/type candidate indexes,
-// materialized type index, and the four-category package-naming oracle — each comparing the
-// incrementally maintained state to a from-scratch rebuild. Any drift panics, so this is in-tree,
-// re-runnable coverage of the incremental path equalling the full rebuild across thousands of states.
+//
+// `resolve_package` after every operation runs all five drift assertions — reverse-dependency index,
+// value/type candidate indexes, materialized type index, and the four-category package-naming oracle —
+// each comparing the incrementally maintained state to a from-scratch rebuild. Those assertions are
+// compiled in under `debug_assertions` (the default dev profile this test runs in) and, in release,
+// under the `verify-incremental` feature; see `just verify-incremental`. Any drift panics, so this is
+// in-tree, re-runnable coverage of the incremental path equalling the full rebuild across thousands of
+// states.
+//
+// Beyond random single operations the generator also produces three interleavings that map to bug
+// classes we have actually hit:
+//   1. edit -> IDE query -> edit: the intervening read drives `resolve_package` (and the drift
+//      assertions) between two mutations — the shape that exposed the winner-diff frozen-baseline bug.
+//   2. add -> delete -> re-add of the same path: document churn / id reuse.
+//   3. package <-> script moves: a document flips between an `R/*.R` package path and a script path,
+//      so its `non_package_documents` membership flips and the script-vs-package exclusion is exercised.
 //
 // Every step also drives the incremental `typecheck` and, periodically, asserts its diagnostics match
 // a from-scratch full rebuild's. This exercises the package interface fixed-point under the same
@@ -498,49 +509,110 @@ fn seeded_soak_incremental_matches_full_rebuild() {
     // it every few steps rather than every step; the cheap incremental `typecheck` still runs every
     // step so the fixed-point (and its cycle handling) is exercised on every state.
     const FULL_REBUILD_EVERY: usize = 10;
-    let paths = [
-        "/pkg/R/f0.R",
-        "/pkg/R/f1.R",
-        "/pkg/R/f2.R",
-        "/pkg/R/f3.R",
-        "/pkg/R/f4.R",
-        "/pkg/R/f5.R",
-    ];
+    const SLOT_COUNT: usize = 6;
 
     let mut analysis_state = typing_analysis("/pkg");
     let mut rng = Xorshift(0x9E37_79B9_7F4A_7C15);
-    let mut live_sources: Vec<Option<String>> = vec![None; paths.len()];
+    let mut live: Vec<Option<LiveDocument>> = (0..SLOT_COUNT).map(|_| None).collect();
 
     for step in 0..OPERATION_COUNT {
-        let index = rng.below(paths.len());
-        let path = paths[index];
-        match (&live_sources[index], rng.below(10)) {
-            (Some(_), 0) => {
+        let index = rng.below(SLOT_COUNT);
+        match (&live[index], rng.below(10)) {
+            // Delete a live document.
+            (Some(document), 0) => {
+                let path = slot_path(index, document.is_script);
                 analysis_state
-                    .delete_document(std::path::Path::new(path))
+                    .delete_document(std::path::Path::new(&path))
                     .expect("delete should succeed for a live document");
-                live_sources[index] = None;
+                live[index] = None;
             }
-            (Some(current), 1..=3) => {
-                let range = whole_document_range(current);
+            // edit -> IDE query -> edit: the intervening read drives `resolve_package` (and the drift
+            // assertions) on the post-first-edit state, the interleaving behind the winner-diff
+            // frozen-baseline bug. The hover result is intentionally not asserted.
+            (Some(document), 1..=2) => {
+                let is_script = document.is_script;
+                let path = slot_path(index, is_script);
+                let first = random_source(&mut rng);
+                apply_whole_edit(&mut analysis_state, &path, &document.source, &first);
+                let _ = analysis::ide::hover(
+                    &mut analysis_state,
+                    std::path::Path::new(&path),
+                    TextPosition {
+                        line_index: 0,
+                        character_index: 0,
+                    },
+                );
+                let second = random_source(&mut rng);
+                apply_whole_edit(&mut analysis_state, &path, &first, &second);
+                live[index] = Some(LiveDocument {
+                    is_script,
+                    source: second,
+                });
+            }
+            // Plain whole-document edit.
+            (Some(document), 3..=4) => {
+                let is_script = document.is_script;
+                let path = slot_path(index, is_script);
+                let new_source = random_source(&mut rng);
+                apply_whole_edit(&mut analysis_state, &path, &document.source, &new_source);
+                live[index] = Some(LiveDocument {
+                    is_script,
+                    source: new_source,
+                });
+            }
+            // package <-> script move: delete the current path and re-add under the flipped path so the
+            // document's `non_package_documents` membership flips.
+            (Some(document), 5) => {
+                let old_path = slot_path(index, document.is_script);
+                let is_script = !document.is_script;
+                let new_path = slot_path(index, is_script);
+                analysis_state
+                    .delete_document(std::path::Path::new(&old_path))
+                    .expect("delete should succeed for a live document");
                 let new_source = random_source(&mut rng);
                 analysis_state
-                    .edit_document(
-                        std::path::Path::new(path),
-                        &[DocumentChange {
-                            range,
-                            text: new_source.clone(),
-                        }],
-                    )
-                    .expect("whole-document edit should apply");
-                live_sources[index] = Some(new_source);
-            }
-            _ => {
-                let new_source = random_source(&mut rng);
-                analysis_state
-                    .add_document_from_source(PathBuf::from(path), &new_source)
+                    .add_document_from_source(PathBuf::from(&new_path), &new_source)
                     .expect("generated source should parse");
-                live_sources[index] = Some(new_source);
+                live[index] = Some(LiveDocument {
+                    is_script,
+                    source: new_source,
+                });
+            }
+            // add -> delete -> re-add of the same path (document churn / id reuse). Each sub-step runs
+            // its own `resolve_package` so the drift assertions see the empty-then-repopulated states.
+            (_, 6) => {
+                let is_script = matches!(&live[index], Some(document) if document.is_script);
+                let path = slot_path(index, is_script);
+                let first = random_source(&mut rng);
+                analysis_state
+                    .add_document_from_source(PathBuf::from(&path), &first)
+                    .expect("generated source should parse");
+                analysis::resolve_package(&mut analysis_state);
+                analysis_state
+                    .delete_document(std::path::Path::new(&path))
+                    .expect("delete should succeed for the just-added document");
+                analysis::resolve_package(&mut analysis_state);
+                let second = random_source(&mut rng);
+                analysis_state
+                    .add_document_from_source(PathBuf::from(&path), &second)
+                    .expect("generated source should parse");
+                live[index] = Some(LiveDocument {
+                    is_script,
+                    source: second,
+                });
+            }
+            // Plain add / replace at the slot's current path kind.
+            _ => {
+                let is_script = matches!(&live[index], Some(document) if document.is_script);
+                let path = slot_path(index, is_script);
+                let new_source = random_source(&mut rng);
+                analysis_state
+                    .add_document_from_source(PathBuf::from(&path), &new_source)
+                    .expect("generated source should parse");
+                live[index] = Some(LiveDocument {
+                    is_script,
+                    source: new_source,
+                });
             }
         }
 
@@ -548,8 +620,8 @@ fn seeded_soak_incremental_matches_full_rebuild() {
         analysis::typecheck(&mut analysis_state);
 
         if step % FULL_REBUILD_EVERY == 0 {
-            let incremental = soak_diagnostics(&analysis_state, &paths, &live_sources);
-            let full = soak_full_rebuild_diagnostics(&paths, &live_sources);
+            let incremental = soak_diagnostics(&analysis_state, &live);
+            let full = soak_full_rebuild_diagnostics(&live);
             assert_eq!(
                 incremental, full,
                 "incremental typecheck diverged from a full rebuild at step {step}"
@@ -558,20 +630,50 @@ fn seeded_soak_incremental_matches_full_rebuild() {
     }
 }
 
+// A live document in the soak's slot pool: its source and whether it currently sits at a script path
+// (a non-package path, outside `R/`) rather than its package path. The slot index plus this flag fully
+// determine the path via `slot_path`.
+struct LiveDocument {
+    is_script: bool,
+    source: String,
+}
+
+// The package or script path for a slot. Package documents live under `R/`; script documents under
+// `scripts/` (a non-package path), so moving between them flips `non_package_documents` membership.
+fn slot_path(index: usize, is_script: bool) -> String {
+    if is_script {
+        format!("/pkg/scripts/f{index}.R")
+    } else {
+        format!("/pkg/R/f{index}.R")
+    }
+}
+
+// Replace a document's entire contents in one edit (the generated sources are ASCII).
+fn apply_whole_edit(analysis_state: &mut Analysis, path: &str, current: &str, new_source: &str) {
+    let range = whole_document_range(current);
+    analysis_state
+        .edit_document(
+            std::path::Path::new(path),
+            &[DocumentChange {
+                range,
+                text: new_source.to_owned(),
+            }],
+        )
+        .expect("whole-document edit should apply");
+}
+
 // The per-document diagnostics of the currently live package, keyed by path and sorted so the
 // comparison is independent of diagnostic emission order.
 fn soak_diagnostics(
     analysis_state: &Analysis,
-    paths: &[&str],
-    live_sources: &[Option<String>],
+    live: &[Option<LiveDocument>],
 ) -> std::collections::BTreeMap<String, Vec<String>> {
     let mut diagnostics = std::collections::BTreeMap::new();
-    for (index, source) in live_sources.iter().enumerate() {
-        if source.is_none() {
-            continue;
-        }
+    for (index, slot) in live.iter().enumerate() {
+        let Some(document) = slot else { continue };
+        let path = slot_path(index, document.is_script);
         let document_id = analysis_state
-            .document_id_for_path(std::path::Path::new(paths[index]))
+            .document_id_for_path(std::path::Path::new(&path))
             .expect("live document should exist");
         let mut messages = analysis_state
             .document_diagnostics(document_id)
@@ -579,7 +681,7 @@ fn soak_diagnostics(
             .map(|diagnostic| format!("{:?} {}", diagnostic.range, diagnostic.message))
             .collect::<Vec<_>>();
         messages.sort();
-        diagnostics.insert(paths[index].to_owned(), messages);
+        diagnostics.insert(path, messages);
     }
     diagnostics
 }
@@ -587,19 +689,21 @@ fn soak_diagnostics(
 // The same diagnostics computed by a fresh `Analysis` built from scratch over the live sources, the
 // oracle the incremental typecheck must match.
 fn soak_full_rebuild_diagnostics(
-    paths: &[&str],
-    live_sources: &[Option<String>],
+    live: &[Option<LiveDocument>],
 ) -> std::collections::BTreeMap<String, Vec<String>> {
     let mut fresh = typing_analysis("/pkg");
-    for (index, source) in live_sources.iter().enumerate() {
-        if let Some(source) = source {
+    for (index, slot) in live.iter().enumerate() {
+        if let Some(document) = slot {
             fresh
-                .add_document_from_source(PathBuf::from(paths[index]), source)
+                .add_document_from_source(
+                    PathBuf::from(slot_path(index, document.is_script)),
+                    &document.source,
+                )
                 .expect("generated source should parse");
         }
     }
     analysis::run_full(&mut fresh);
-    soak_diagnostics(&fresh, paths, live_sources)
+    soak_diagnostics(&fresh, live)
 }
 
 // A deterministic xorshift64 generator: a fixed nonzero seed makes the whole soak run reproducible

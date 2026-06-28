@@ -6,6 +6,11 @@ version.workspace = true
 [lib]
 path = "src/lib.rs"
 
+[features]
+# Additive, empty: only enables the incremental-drift runtime assertions (and the seeded
+# soak's internal oracles) in release builds. No API or behavior change otherwise.
+verify-incremental = []
+
 [dependencies]
 ropey.workspace = true
 serde = { workspace = true, features = ["derive"] }

@@ -679,7 +679,7 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
         re_derived_documents.push(*document_id);
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, feature = "verify-incremental"))]
     {
         analysis_state.assert_reverse_dependencies_consistent();
         analysis_state.assert_type_references_consistent();
@@ -693,7 +693,7 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
         maintain_package_naming(analysis_state, &re_derived_documents);
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, feature = "verify-incremental"))]
     {
         analysis_state.assert_package_definitions_consistent();
         analysis_state.assert_type_definitions_consistent();
@@ -1492,7 +1492,7 @@ impl Analysis {
 
     // Salsa-style verify for the reverse-dependency index: rebuilds it from scratch by folding every
     // current naming output and asserts it equals the incrementally maintained index. Debug-only.
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, feature = "verify-incremental"))]
     fn assert_reverse_dependencies_consistent(&self) {
         let mut rebuilt: BTreeMap<Symbol, BTreeSet<DocumentId>> = BTreeMap::new();
         for (document_id, output) in &self.document_naming_outputs {
@@ -1508,7 +1508,7 @@ impl Analysis {
 
     // Salsa-style verify for the package-definition candidate index: the maintained index equals a
     // full rebuild folding every package document's top-level bindings. Debug-only.
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, feature = "verify-incremental"))]
     fn assert_package_definitions_consistent(&self) {
         let mut rebuilt: BTreeMap<Symbol, BTreeSet<DocumentId>> = BTreeMap::new();
         for (document_id, output) in &self.document_naming_outputs {
@@ -1530,7 +1530,7 @@ impl Analysis {
 
     // Salsa-style verify for the type reverse-dependency index: rebuilds it from scratch by folding
     // every current document's `document_type_references` and asserts it equals the maintained index.
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, feature = "verify-incremental"))]
     fn assert_type_references_consistent(&self) {
         let mut rebuilt: BTreeMap<Symbol, BTreeSet<DocumentId>> = BTreeMap::new();
         for (document_id, output) in &self.document_naming_outputs {
@@ -1553,7 +1553,7 @@ impl Analysis {
     // and asserts all three equal the maintained structures. Together with `assert_package_naming_consistent`
     // (which re-derives type-reference and duplicate diagnostics through the same `build_type_index`),
     // this proves the incremental type index and its derived diagnostics match a from-scratch rebuild.
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, feature = "verify-incremental"))]
     fn assert_type_definitions_consistent(&self) {
         let mut rebuilt_candidates: BTreeMap<Symbol, BTreeMap<DocumentId, Vec<TypeInfo>>> =
             BTreeMap::new();
@@ -1595,7 +1595,7 @@ impl Analysis {
     // maintained diagnostic set (overwrite + shadow + type-reference + unresolved-reference) equals the
     // oracle's, compared order-insensitively. This is the safety net for the diagnostics refactor: it
     // verifies the incremental routing re-diagnosed exactly the documents a full rebuild would. Debug-only.
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, feature = "verify-incremental"))]
     fn assert_package_naming_consistent(&self) {
         let package_document_ids = self.package_document_ids();
         let package_modules = package_document_ids

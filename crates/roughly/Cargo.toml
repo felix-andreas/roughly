@@ -28,6 +28,11 @@ async-lsp.workspace = true
 tower.workspace = true
 futures.workspace = true
 
+[features]
+# Forwards to `analysis/verify-incremental` so the incremental-drift assertions compile into release
+# builds of the whole workspace; lets `cargo ... --features verify-incremental` work from the root.
+verify-incremental = ["analysis/verify-incremental"]
+
 [target.'cfg(not(unix))'.dependencies]
 tokio-util.workspace = true
 
