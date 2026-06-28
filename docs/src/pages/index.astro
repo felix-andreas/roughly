@@ -651,6 +651,27 @@ roughly check .</code></pre>
 
         const INTRO_DELAY = 0.25
 
+        // Pre-rendered round particle sprite. Each dot is blitted from this
+        // instead of fillRect, so particles read as organic discs (with a soft
+        // edge) rather than hard square pixels — most visible when they condense
+        // into the logo. Sprite softness/size are the taste knobs here.
+        const DOT = document.createElement('canvas')
+        DOT.width = DOT.height = 12
+        const dotCtx = DOT.getContext('2d')
+        if (dotCtx) {
+          const grad = dotCtx.createRadialGradient(6, 6, 0, 6, 6, 6)
+          grad.addColorStop(0, 'rgba(255,255,255,1)')
+          grad.addColorStop(0.55, 'rgba(255,255,255,0.92)')
+          grad.addColorStop(1, 'rgba(255,255,255,0)')
+          dotCtx.fillStyle = grad
+          dotCtx.beginPath()
+          dotCtx.arc(6, 6, 6, 0, Math.PI * 2)
+          dotCtx.fill()
+        }
+        function blit(x: number, y: number, d: number) {
+          context.drawImage(DOT, x - d / 2, y - d / 2, d, d)
+        }
+
         let dpr = Math.min(window.devicePixelRatio || 1, 2)
         let cssW = 0
         let cssH = 0
@@ -927,10 +948,10 @@ roughly check .</code></pre>
             if (p.target) {
               const s = p.depth > 0.66 ? 2 : 1
               context.globalAlpha = Math.min(1, 0.18 + p.depth * 0.34 + 0.22)
-              context.fillRect(p.tx, p.ty, s, s)
+              blit(p.tx, p.ty, s + 1.4)
             } else if (i % 7 === 0) {
               context.globalAlpha = 0.12
-              context.fillRect(p.x, p.y, 1, 1)
+              blit(p.x, p.y, 1.8)
             }
           }
           context.globalAlpha = 1
@@ -1035,7 +1056,7 @@ roughly check .</code></pre>
             }
             if (a <= 0.01) continue
             context.globalAlpha = a > 1 ? 1 : a
-            context.fillRect(p.x, p.y, s, s)
+            blit(p.x, p.y, s + 1.4)
           }
 
           context.globalAlpha = 1
