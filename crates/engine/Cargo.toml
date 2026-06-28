@@ -1,0 +1,8 @@
+[package]
+name = "engine"
+edition = "2024"
+version.workspace = true
+
+# Descriptive lib root per the repo guideline (no default lib.rs).
+[lib]
+path = "src/engine.rs"
