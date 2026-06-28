@@ -159,3 +159,55 @@ No diagnostics.
 fourth <- third
 #++++
 No diagnostics.
+
+#==== reexport_cycles
+#---- mutual_reexport_cycle_resolves_to_unknown
+#---- R/a.R
+a <- b
+#++++
+No diagnostics.
+#---- R/b.R
+b <- a
+#++++
+No diagnostics.
+#---- R/c.R
+result <- a(2L)
+#++++
+No diagnostics.
+
+#---- typed_mutual_reexport_cycle_does_not_panic
+#---- R/a.R
+#: fn(value: integer) -> integer
+seed <- function(value) value
+a <- b
+#++++
+No diagnostics.
+#---- R/b.R
+b <- a
+#++++
+No diagnostics.
+#---- R/c.R
+good <- seed(2L)
+bad <- seed("two")
+#++++
+error[type-error] expected `integer`, found `character`
+--> 2:13-2:18
+| bad <- seed("two")
+
+#---- three_file_reexport_cycle_resolves_to_unknown
+#---- R/a.R
+ring_one <- ring_two
+#++++
+No diagnostics.
+#---- R/b.R
+ring_two <- ring_three
+#++++
+No diagnostics.
+#---- R/c.R
+ring_three <- ring_one
+#++++
+No diagnostics.
+#---- R/d.R
+result <- ring_one(1L)
+#++++
+No diagnostics.

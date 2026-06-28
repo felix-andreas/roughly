@@ -475,18 +475,29 @@ fn deep_re_export_chain_past_round_cap_is_not_left_stale() {
     );
 }
 
-// Fixed-seed soak test for the incremental package-naming and type-index maintenance. Drives the
-// public `Analysis` API through a long, deterministic stream of add / edit / delete operations over a
-// small pool of paths and names, so the same names overwrite, re-export, and flip winners across the
-// package path order repeatedly, and the type names cycle kind/arity/presence. `resolve_package` after
-// every operation runs (under `debug_assertions`, i.e. the dev profile this test runs in) all five
-// drift assertions — reverse-dependency index, value/type candidate indexes, materialized type index,
-// and the four-category package-naming oracle — each comparing the incrementally maintained state to a
-// from-scratch rebuild. Any drift panics, so this is in-tree, re-runnable coverage of the incremental
-// path equalling the full rebuild across thousands of states. Fixed seed = reproducible.
+// Fixed-seed soak test for the incremental package-naming, type-index, and typecheck maintenance.
+// Drives the public `Analysis` API through a long, deterministic stream of add / edit / delete
+// operations over a small pool of paths and names, so the same names overwrite, re-export, and flip
+// winners across the package path order repeatedly, and the type names cycle kind/arity/presence.
+// `resolve_package` after every operation runs (under `debug_assertions`, i.e. the dev profile this
+// test runs in) all five drift assertions — reverse-dependency index, value/type candidate indexes,
+// materialized type index, and the four-category package-naming oracle — each comparing the
+// incrementally maintained state to a from-scratch rebuild. Any drift panics, so this is in-tree,
+// re-runnable coverage of the incremental path equalling the full rebuild across thousands of states.
+//
+// Every step also drives the incremental `typecheck` and, periodically, asserts its diagnostics match
+// a from-scratch full rebuild's. This exercises the package interface fixed-point under the same
+// churn, including the typed mutual re-export cycles (`a <- b`; `b <- a`) the small name pool produces
+// repeatedly: such cycles have no monotone fixed point, so the fixed-point's oscillation guard must
+// pin them to `Unknown` and converge rather than spinning the round bound and tripping its convergence
+// assert. Fixed seed = reproducible.
 #[test]
 fn seeded_soak_incremental_matches_full_rebuild() {
     const OPERATION_COUNT: usize = 3000;
+    // Comparing the incremental result against a full from-scratch rebuild is the expensive part, so do
+    // it every few steps rather than every step; the cheap incremental `typecheck` still runs every
+    // step so the fixed-point (and its cycle handling) is exercised on every state.
+    const FULL_REBUILD_EVERY: usize = 10;
     let paths = [
         "/pkg/R/f0.R",
         "/pkg/R/f1.R",
@@ -500,7 +511,7 @@ fn seeded_soak_incremental_matches_full_rebuild() {
     let mut rng = Xorshift(0x9E37_79B9_7F4A_7C15);
     let mut live_sources: Vec<Option<String>> = vec![None; paths.len()];
 
-    for _ in 0..OPERATION_COUNT {
+    for step in 0..OPERATION_COUNT {
         let index = rng.below(paths.len());
         let path = paths[index];
         match (&live_sources[index], rng.below(10)) {
@@ -534,7 +545,61 @@ fn seeded_soak_incremental_matches_full_rebuild() {
         }
 
         analysis::resolve_package(&mut analysis_state);
+        analysis::typecheck(&mut analysis_state);
+
+        if step % FULL_REBUILD_EVERY == 0 {
+            let incremental = soak_diagnostics(&analysis_state, &paths, &live_sources);
+            let full = soak_full_rebuild_diagnostics(&paths, &live_sources);
+            assert_eq!(
+                incremental, full,
+                "incremental typecheck diverged from a full rebuild at step {step}"
+            );
+        }
     }
+}
+
+// The per-document diagnostics of the currently live package, keyed by path and sorted so the
+// comparison is independent of diagnostic emission order.
+fn soak_diagnostics(
+    analysis_state: &Analysis,
+    paths: &[&str],
+    live_sources: &[Option<String>],
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut diagnostics = std::collections::BTreeMap::new();
+    for (index, source) in live_sources.iter().enumerate() {
+        if source.is_none() {
+            continue;
+        }
+        let document_id = analysis_state
+            .document_id_for_path(std::path::Path::new(paths[index]))
+            .expect("live document should exist");
+        let mut messages = analysis_state
+            .document_diagnostics(document_id)
+            .into_iter()
+            .map(|diagnostic| format!("{:?} {}", diagnostic.range, diagnostic.message))
+            .collect::<Vec<_>>();
+        messages.sort();
+        diagnostics.insert(paths[index].to_owned(), messages);
+    }
+    diagnostics
+}
+
+// The same diagnostics computed by a fresh `Analysis` built from scratch over the live sources, the
+// oracle the incremental typecheck must match.
+fn soak_full_rebuild_diagnostics(
+    paths: &[&str],
+    live_sources: &[Option<String>],
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut fresh = typing_analysis("/pkg");
+    for (index, source) in live_sources.iter().enumerate() {
+        if let Some(source) = source {
+            fresh
+                .add_document_from_source(PathBuf::from(paths[index]), source)
+                .expect("generated source should parse");
+        }
+    }
+    analysis::run_full(&mut fresh);
+    soak_diagnostics(&fresh, paths, live_sources)
 }
 
 // A deterministic xorshift64 generator: a fixed nonzero seed makes the whole soak run reproducible

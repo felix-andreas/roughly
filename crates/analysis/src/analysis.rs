@@ -1032,10 +1032,13 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     // Bound the loop so it can never truncate legitimate propagation (a fixed cap like 32 silently left
     // chains deeper than it unresolved, and the round-2 candidate widening below could not repair that
     // because it reads the same unconverged table). Each round's table is the previous round's output,
-    // so propagation advances one hop per round. Convergence is monotone: every package-global name's
-    // exported scheme transitions at most once (from absent/`Unknown` to a concrete scheme), because the
-    // leaves are stable annotations and literals and names on a genuine cycle stay `Unknown` forever.
-    // Synchronous iteration over such a monotone framework therefore reaches the fixed point in at most
+    // so propagation advances one hop per round. An acyclic chain progresses monotonically: every
+    // package-global name's exported rendering transitions at most once (from `Unknown` to a concrete
+    // scheme) as the wavefront reaches it, because the leaves are stable annotations and literals.
+    // A genuine re-export cycle (file a: `a <- b`, file b: `b <- a`) is *not* monotone — its members'
+    // schemes swap every round and never settle — so the oscillation guard inside the loop pins such a
+    // name to `Unknown` (see below), after which the cycle collapses and the framework is monotone
+    // again. Synchronous iteration over a monotone framework reaches the fixed point in at most
     // `#package-globals + 1` rounds (every name is final once its longest dependency path — bounded by
     // the number of distinct names on it — has been walked, then one confirmation round empties the
     // worklist). The `+ 8` is slack so the `debug_assert` on non-convergence below cannot false-fire on
@@ -1061,17 +1064,69 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         candidates
     };
 
+    // A package global on a genuine re-export cycle has no fixed point under this synchronous
+    // iteration: its exported scheme swaps between the cycle members' values every round instead of
+    // settling, so the raw worklist spins the full round bound and the convergence assert below fires
+    // on legitimate input. `pinned_unknown` records the names found to be cyclic, which are forced to
+    // `Unknown` in every table from then on; `symbol_value_history` keeps the per-name sequence of
+    // table renderings used to detect the oscillation.
+    let mut pinned_unknown = BTreeSet::<Symbol>::new();
+    let mut symbol_value_history = HashMap::<Symbol, Vec<String>>::new();
     let mut converged = false;
     for _round in 0..max_package_interface_rounds {
         if round1_candidates.is_empty() {
             converged = true;
             break;
         }
-        let table = build_package_interface_table(
+        let mut table = build_package_interface_table(
             &package_naming,
             &analysis_state.document_interface_outputs,
             fallback_range,
         );
+        for symbol in &pinned_unknown {
+            if let Some(export) = table.get_mut(symbol) {
+                export.type_scheme = TypeScheme::monomorphic(CoreType::Unknown);
+            }
+        }
+
+        // Oscillation guard, over exactly the names being recomputed this round (their winning
+        // document is a candidate). A name whose table rendering returns to a value it already had in
+        // an earlier round while differing from the previous round is swapping on a re-export cycle,
+        // not progressing monotonically: pin it to the conservative `Unknown` and force its referrers
+        // to recompute against the pinned value. An acyclic name's rendering only ever transitions
+        // away from `Unknown` and never returns, so it is never pinned — the assert below still
+        // catches a genuine truncated-propagation bug.
+        let mut newly_pinned = Vec::new();
+        for (symbol, winner_document_id) in &package_naming.global_bindings {
+            if pinned_unknown.contains(symbol) || !round1_candidates.contains(winner_document_id) {
+                continue;
+            }
+            let Some(export) = table.get(symbol) else {
+                continue;
+            };
+            let rendered = crate::diagnostic::render_type_scheme(
+                analysis_state.interner(),
+                &export.type_scheme,
+            );
+            let history = symbol_value_history.entry(*symbol).or_default();
+            if history.last().is_some_and(|last| *last != rendered) && history.contains(&rendered) {
+                newly_pinned.push(*symbol);
+            } else {
+                history.push(rendered);
+            }
+        }
+        let mut forced_candidates = BTreeSet::<DocumentId>::new();
+        for symbol in newly_pinned {
+            pinned_unknown.insert(symbol);
+            if let Some(export) = table.get_mut(&symbol) {
+                export.type_scheme = TypeScheme::monomorphic(CoreType::Unknown);
+            }
+            for referrer in analysis_state.documents_referencing(symbol) {
+                if package_document_set.contains(&referrer) {
+                    forced_candidates.insert(referrer);
+                }
+            }
+        }
 
         let mut fresh_interfaces = Vec::new();
         let mut next_candidates = BTreeSet::<DocumentId>::new();
@@ -1164,17 +1219,24 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 .document_interface_outputs
                 .insert(document_id, output);
         }
+        next_candidates.extend(forced_candidates);
         round1_candidates = next_candidates;
     }
 
     // The converged package interface table. It both keys each document's round-2 cache (via the
     // per-document dependency fingerprint rendered against it) and supplies the schemes bound when a
-    // document actually runs inference.
-    let final_table = build_package_interface_table(
+    // document actually runs inference. Names pinned during the fixed-point are forced to `Unknown`
+    // here too, so the round-2 checks see the same cycle-resolved interface the iteration converged on.
+    let mut final_table = build_package_interface_table(
         &package_naming,
         &analysis_state.document_interface_outputs,
         fallback_range,
     );
+    for symbol in &pinned_unknown {
+        if let Some(export) = final_table.get_mut(symbol) {
+            export.type_scheme = TypeScheme::monomorphic(CoreType::Unknown);
+        }
+    }
 
     // Round-2 candidate set: the dirty documents plus every referrer of a changed global. A
     // type-definition change forces the full document set (it can affect any check, see above). This is

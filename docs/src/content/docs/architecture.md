@@ -200,13 +200,18 @@ Typechecking is incremental at document grain through a two-phase interface mode
   scheme even when `first` lives in another file). Each document's interface is cached by document
   version, the type-definition fingerprint, and a dependency fingerprint of the referenced schemes,
   so an edit only re-derives the changed document and its dependents. Propagation advances one hop per
-  round, and every package-global's exported scheme transitions at most once (`Unknown` to concrete;
-  leaves are stable annotations and literals, and names on a genuine cycle stay `Unknown`), so the
-  worklist converges in at most `#package-globals + 1` rounds and is bounded accordingly. That bound
-  can never truncate legitimate propagation — a fixed cap would silently leave chains deeper than it
-  unresolved — so non-convergence is a fixed-point defect that fails a debug assertion in debug and
-  test builds, with a conservative all-document round-2 candidate fallback keeping release builds
-  correct (never stale).
+  round, and every acyclic package-global's exported scheme transitions at most once (`Unknown` to
+  concrete; leaves are stable annotations and literals), so the worklist converges in at most
+  `#package-globals + 1` rounds and is bounded accordingly. A genuine re-export cycle (file a:
+  `a <- b`, file b: `b <- a`) is *not* monotone — under synchronous iteration its members' schemes
+  swap every round and never settle — so the round drives an oscillation guard: a name whose table
+  rendering returns to a value it already produced in an earlier round (while differing from the
+  previous round) is pinned to the conservative `Unknown`, collapsing the cycle and restoring
+  monotone progress. Cyclic re-exports are legitimate R input, so they resolve to `Unknown` rather
+  than erroring or panicking. That bound can never truncate legitimate propagation — a fixed cap
+  would silently leave chains deeper than it unresolved — so non-convergence is a fixed-point defect
+  that fails a debug assertion in debug and test builds, with a conservative all-document round-2
+  candidate fallback keeping release builds correct (never stale).
 - The package interface table maps each package-global name to the winning document's exported
   scheme. Its rendered form, together with the type-definition fingerprint, is the environment
   fingerprint.
