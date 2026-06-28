@@ -3,7 +3,7 @@
 	"displayName": "Roughly",
 	"description": "R language support",
 	"author": "Felix Andreas",
-	"version": "0.2.3-alpha",
+	"version": "0.2.3",
 	"publisher": "felix-andreas",
 	"license": "UPL-1.0",
 	"homepage": "https://roughly.felixandreas.me",

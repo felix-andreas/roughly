@@ -2,41 +2,10 @@
 
 (!AIs are not allowed to edit!)
 
-simplify/restrucutre steering documents:
-* the workflow has changed. the project was written by ai under human supervision. the human supervision is much lower now. more of the code is written agentic. instead now a ai drives the development
-* this must be reflected in the steering documents
-* the restructuring of the working documents should make it easier for agents to work
-* we should get rid of some of them, because it is micro-managind
-* i need you input on how trewrite and restructure them as you see fit.
-* their primary gaol is to accumulate a knowledge base. so certain things to have to be rediscovered all the time
-* goal is also to spent less time on steering documents and more on implemnetation
-
-my suggestions:
-* get rid of discuss.md (if the human wants to give detailed feedback in an document it can be done in .local folder with is not in tree)
-* i would like to conslidate DECISION_LOG, TODOS, TECHINCAL_DEBT.md and MEMORY and only keep MEMORY.md. i would probpose to have three sections short, mid and long-term memory. the short-term memory should be cleaned-up very aggressively. mid and long-term memory should be filled with info that is relevant over multiple sessions.
-* furthermore i propose the steering doucments to organized by bullets points 
-* you don't need to mention 
-* currently we have:
-  - persistent authoritative documents: durable contract documents
-  - working documents: durable engineering-state documents
-  - ephemeral documents: short-lived session documents
-* basically i would combine working and ephemeral documents into a single MEMORY.md located at .agents/memory/MEMORY.md. you are free to also move the projects to .agents/memory/projects but you can delete them if you think they are useless
-* persistent authoritative documents should be moved to official documentation (note that it is still mandadtory to keep them up to date)
-  * typing should be its own section in docs
-  - `TYPING_SEMANTICS.md` <- this should be hard-core technical reference/specification. furthermore we should have a tutorial (it is partly there)
-  these should got into contributing section (this probably more a human overview. contributing is a euphemism here)
-  - `ARCHITECTURE.md`
-    - `STRUCTURE.md`
-    - `TESTING.md`
-* goal is also here to make sure docs are in really good shape (we should make this clear in agents.md as well)
-* generally speaking i would also recommend to keep steering documents bullet points
-
-
-
-
 
 ## backlog
 
+* restructure justfile to infer kind from alpha or beta-postfix
 
 website:
 * better slogan (rust-analyzer: Bringing a great IDE experience to the Rust programming language.)
