@@ -52,6 +52,10 @@
 //! bug: a re-entered query body panics with a clear message instead of overflowing the stack. Cancellation,
 //! parallelism, and memo eviction are designed for but not implemented in this phase; see `DESIGN.md`.
 
+// The R-specific query group lives here, on top of the generic core below. The core stays analysis-free;
+// only `queries` depends on the `analysis` crate.
+pub mod queries;
+
 use std::{
     any::Any,
     cell::{Cell, RefCell},

@@ -419,6 +419,10 @@ checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 [[package]]
 name = "engine"
 version = "0.2.0-alpha.2"
+dependencies = [
+ "analysis",
+ "tree-sitter",
+]
 
 [[package]]
 name = "equivalent"

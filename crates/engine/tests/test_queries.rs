@@ -1,0 +1,207 @@
+// Granularity tests for the R query group (`DESIGN.md` §3, R1 acceptance condition 1). They drive the
+// real `analysis` phase chain through the generic engine and assert *exact* body-execution counts on the
+// group, the same instrumentation style as the engine smoke tests.
+//
+// The graph under test:
+//
+//   SourceText(f) -> Parse(f) -> Lower(f) -> LocalNaming(f) -> ExportedNames(f) --+
+//   DocumentKind(f) ------------------------------------------------------------+ |
+//   ProjectFiles ---------------------------------------> PackageSymbolIndex <----+
+//                                                              |  (names only)
+//                                                              v
+//                                                       DefiningItem(symbol)  (firewall)
+//                                                              v
+//                                                       GlobalScheme(symbol)
+//                                                              v
+//   Config ------------------------------------------>   Typecheck(f) -> Diagnostics(f)
+//
+// Files: a.R defines `x`, b.R references `x`, c.R references nothing external.
+
+use engine::{
+    Engine,
+    queries::{Config, FileId, Key, RoughlyQueries},
+};
+
+const A: FileId = 0; // defines `x`
+const B: FileId = 1; // references `x`
+const C: FileId = 2; // references nothing external
+
+fn setup(sources: &[(FileId, &str)]) -> Engine<RoughlyQueries> {
+    let mut engine = Engine::new(RoughlyQueries::new());
+    let files: Vec<FileId> = sources.iter().map(|(file, _)| *file).collect();
+    engine.set_input(Key::ProjectFiles, files);
+    engine.set_input(Key::Config, Config::default());
+    for (file, source) in sources {
+        engine.set_input(Key::SourceText(*file), (*source).to_owned());
+        engine.set_input(Key::DocumentKind(*file), analysis::naming::DocumentKind::Package);
+    }
+    engine
+}
+
+fn realize_all(engine: &Engine<RoughlyQueries>) {
+    for file in [A, B, C] {
+        let _ = engine.fetch::<engine::queries::FileDiagnostics>(Key::Diagnostics(file));
+    }
+}
+
+// The whole `parse -> ... -> diagnostics` chain runs on real R input and each body runs exactly once.
+#[test]
+fn full_chain_runs_once_on_real_r() {
+    let engine = setup(&[
+        (A, "x <- function() 1"),
+        (B, "z <- x()"),
+        (C, "w <- 5"),
+    ]);
+    realize_all(&engine);
+
+    let group = engine.group();
+    assert_eq!(group.parse_runs(A), 1);
+    assert_eq!(group.lower_runs(A), 1);
+    assert_eq!(group.local_naming_runs(A), 1);
+    assert_eq!(group.exported_names_runs(A), 1);
+    assert_eq!(group.package_symbol_index_runs(), 1, "the one all-files fold runs once");
+    assert_eq!(group.typecheck_runs(B), 1);
+    assert_eq!(group.diagnostics_runs(B), 1);
+    // b references x, so its typecheck pulled x's global scheme through the per-symbol firewall.
+    let x = group.intern("x");
+    assert_eq!(group.global_scheme_runs(x), 1, "x's scheme computed once for its referrer");
+}
+
+// ACCEPTANCE CONDITION 1 — the headline. Editing a function *body* (not its exported name) must trigger
+// ZERO `PackageSymbolIndex` body folds, because `ExportedNames(a)` recomputes to an equal names-only value
+// and cuts off. The referrer `b` re-typechecks ONLY because `x`'s `GlobalScheme` changed; an unrelated `c`
+// does not re-typecheck at all.
+#[test]
+fn body_edit_does_not_refold_index_and_confines_to_referrers() {
+    let engine = setup(&[
+        (A, "x <- function() 1"),
+        (B, "z <- x()"),
+        (C, "w <- 5"),
+    ]);
+    realize_all(&engine);
+
+    let x = engine.group().intern("x");
+    let index_before = engine.group().package_symbol_index_runs();
+    let exported_names_a_before = engine.group().exported_names_runs(A);
+    let global_scheme_x_before = engine.group().global_scheme_runs(x);
+    let typecheck_b_before = engine.group().typecheck_runs(B);
+    let typecheck_c_before = engine.group().typecheck_runs(C);
+
+    // Body-only edit: same exported name `x`, but its return type goes integer -> string.
+    let mut engine = engine;
+    engine.set_input(Key::SourceText(A), "x <- function() \"two\"".to_owned());
+    realize_all(&engine);
+    let group = engine.group();
+
+    // The names-only cutoff: ExportedNames(a) recomputed (its inputs changed) ...
+    assert_eq!(
+        group.exported_names_runs(A),
+        exported_names_a_before + 1,
+        "ExportedNames(a) recomputes on a body edit"
+    );
+    // ... but produced an EQUAL value, so the lone all-files fold did NOT run. This is the headline win.
+    assert_eq!(
+        group.package_symbol_index_runs(),
+        index_before,
+        "body edit triggers ZERO PackageSymbolIndex folds (ExportedNames cut off)"
+    );
+
+    // x's scheme changed (integer -> string), so its one referrer re-typechecks ...
+    assert_eq!(
+        group.global_scheme_runs(x),
+        global_scheme_x_before + 1,
+        "x's GlobalScheme recomputes (its winning file's lower changed)"
+    );
+    assert_eq!(
+        group.typecheck_runs(B),
+        typecheck_b_before + 1,
+        "the referrer b re-typechecks because x's scheme changed"
+    );
+    // ... and the unrelated file, which references no symbol whose scheme changed, does not.
+    assert_eq!(
+        group.typecheck_runs(C),
+        typecheck_c_before,
+        "c references nothing x-related, so it does not re-typecheck"
+    );
+}
+
+// A body edit whose derived scheme is UNCHANGED must not re-typecheck the referrer either: `GlobalScheme`
+// value-eq cutoff stops propagation even though it recomputed. Editing the body to another integer keeps
+// `x : () -> integer`.
+#[test]
+fn body_edit_with_unchanged_scheme_cuts_off_at_global_scheme() {
+    let engine = setup(&[
+        (A, "x <- function() 1"),
+        (B, "z <- x()"),
+        (C, "w <- 5"),
+    ]);
+    realize_all(&engine);
+
+    let x = engine.group().intern("x");
+    let global_scheme_x_before = engine.group().global_scheme_runs(x);
+    let typecheck_b_before = engine.group().typecheck_runs(B);
+
+    let mut engine = engine;
+    engine.set_input(Key::SourceText(A), "x <- function() 2".to_owned()); // still () -> integer
+    realize_all(&engine);
+    let group = engine.group();
+
+    assert_eq!(
+        group.global_scheme_runs(x),
+        global_scheme_x_before + 1,
+        "GlobalScheme(x) recomputes (lower changed)"
+    );
+    assert_eq!(
+        group.typecheck_runs(B),
+        typecheck_b_before,
+        "but its value is unchanged, so the referrer cuts off and does not re-typecheck"
+    );
+}
+
+// STRUCTURAL EDIT — adding a top-level binding to a.R DOES re-fold `PackageSymbolIndex` once, but the
+// `DefiningItem` firewall plus `GlobalScheme` value-eq confine propagation: `x`'s winner is unchanged and
+// its scheme is unchanged, so the referrer `b` does not re-typecheck.
+#[test]
+fn structural_edit_refolds_index_once_but_firewall_confines_propagation() {
+    let engine = setup(&[
+        (A, "x <- function() 1"),
+        (B, "z <- x()"),
+        (C, "w <- 5"),
+    ]);
+    realize_all(&engine);
+
+    let x = engine.group().intern("x");
+    let index_before = engine.group().package_symbol_index_runs();
+    let typecheck_b_before = engine.group().typecheck_runs(B);
+    let typecheck_c_before = engine.group().typecheck_runs(C);
+
+    // Add a new top-level binding `y` to a.R: the exported-name set changes {x} -> {x, y}.
+    let mut engine = engine;
+    engine.set_input(Key::SourceText(A), "x <- function() 1\ny <- 2".to_owned());
+    realize_all(&engine);
+    let group = engine.group();
+
+    // The names-only set changed, so the all-files fold runs exactly once more.
+    assert_eq!(
+        group.package_symbol_index_runs(),
+        index_before + 1,
+        "a structural export edit re-folds the index exactly once"
+    );
+    // The firewall: x's winner (a) and scheme (() -> integer) are both unchanged, so its referrer is not
+    // disturbed. (GlobalScheme(x) does recompute via its lower(a) edge, but value-eq cuts it off.)
+    assert_eq!(
+        group.typecheck_runs(B),
+        typecheck_b_before,
+        "x's winner and scheme are unchanged -> referrer b does not re-typecheck"
+    );
+    assert_eq!(
+        group.typecheck_runs(C),
+        typecheck_c_before,
+        "c is untouched by the structural edit"
+    );
+
+    // The new symbol y resolves to a winning file (a) through the same firewall.
+    let y = group.intern("y");
+    let defining_y = engine.fetch::<Option<FileId>>(Key::DefiningItem(y));
+    assert_eq!(*defining_y, Some(A), "the newly added binding y wins in a.R");
+}
