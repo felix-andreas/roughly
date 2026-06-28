@@ -8,7 +8,8 @@ use {
         lower::lower_with_shared_interner,
         naming::{
             DocumentKind, NamesGlobal, NamesLocal, PackageDocumentDiagnosticContext, TypeInfo,
-            build_script_local_type_index, build_type_index, document_package_definitions,
+            apply_type_definition_outcome, build_script_local_type_index, build_type_index,
+            document_package_definitions, document_type_definitions, document_type_references,
             package_document_diagnostics, rebuild_package_naming, resolve_document_locally,
         },
         tree,
@@ -63,10 +64,28 @@ pub struct Analysis {
     // Accumulated by `patch_package_definitions` (the single choke point for `package_definitions`
     // edits, so it captures both document edits and deletes) and consumed by `maintain_package_naming`.
     naming_dirty_names: BTreeSet<Symbol>,
-    // Fingerprint of the package type index at the last package-naming maintenance. When it changes,
-    // type-reference and duplicate-type diagnostics are regenerated package-wide; otherwise they are
-    // regenerated only for the re-diagnosed documents. The type index itself stays a full rebuild (M4.3).
-    package_type_fingerprint: Option<String>,
+    // Type-definition candidate index (M4.3): for each `@type`/`@alias` name, per contributing package
+    // document the `TypeInfo`s it declares (the type-side analog of `package_definitions`). The source
+    // of truth for the materialized type index; patched per document at the naming recompute site and on
+    // delete via `patch_type_definitions`. A name is resolved iff it has exactly one site across the
+    // whole package, so a `Vec` per document preserves a document that declares the same name twice.
+    type_definitions: BTreeMap<Symbol, BTreeMap<DocumentId, Vec<TypeInfo>>>,
+    // Materialized package type index: each uniquely-defined type name's `TypeInfo`, plus the set of
+    // names defined more than once (kept out of the resolved index, diagnosed as duplicates). Derived
+    // from `type_definitions` by collating each affected name, the type-side analog of `global_bindings`;
+    // materialized for O(1) lookup during type-reference resolution. Guarded by a debug drift assertion.
+    package_type_index: BTreeMap<Symbol, TypeInfo>,
+    duplicate_type_names: BTreeSet<Symbol>,
+    // Type reverse-dependency index (M4.3): for each type name, the documents whose definitions or
+    // annotations reference it (the type-side analog of `reverse_dependencies`). Patched per document
+    // against `document_type_references`. A type name whose materialized entry changes re-diagnoses its
+    // referrers here, even when they are not themselves dirty — a single reverse hop.
+    type_references: BTreeMap<Symbol, BTreeSet<DocumentId>>,
+    // Type names whose candidate contribution changed since the last package-naming maintenance — the
+    // affected names whose materialized entry is re-collated and whose co-definers (their duplicate
+    // diagnostic) and referrers (their type-reference diagnostic) are re-diagnosed. The type-side analog
+    // of `naming_dirty_names`, accumulated by `patch_type_definitions` and consumed by maintenance.
+    naming_dirty_type_names: BTreeSet<Symbol>,
     // The documents changed since the last completed `typecheck`, accumulated in `invalidate_document`
     // (the single funnel every add/edit/delete passes through) and cleared at the end of `typecheck`.
     // It seeds the M3 recompute candidate set: combined with the reverse-dependency index it bounds the
@@ -205,7 +224,11 @@ impl Analysis {
             reverse_dependencies: BTreeMap::new(),
             package_definitions: BTreeMap::new(),
             naming_dirty_names: BTreeSet::new(),
-            package_type_fingerprint: None,
+            type_definitions: BTreeMap::new(),
+            package_type_index: BTreeMap::new(),
+            duplicate_type_names: BTreeSet::new(),
+            type_references: BTreeMap::new(),
+            naming_dirty_type_names: BTreeSet::new(),
             dirty_documents: BTreeSet::new(),
             package_naming_output: None,
             document_interface_outputs: HashMap::new(),
@@ -341,11 +364,13 @@ impl Analysis {
         self.document_versions.remove(&document_id);
         self.document_paths.remove(&document_id);
         self.non_package_documents.remove(&document_id);
-        // The document is gone for good, so it contributes nothing to the reverse-dependency or
-        // package-definition indexes. Unlike an edit, no recompute will re-patch it, so retract its
-        // entries from both here.
+        // The document is gone for good, so it contributes nothing to the reverse-dependency,
+        // package-definition, or type indexes. Unlike an edit, no recompute will re-patch it, so retract
+        // its entries from all of them here.
         self.patch_reverse_dependencies(document_id, &BTreeSet::new());
         self.patch_package_definitions(document_id, &BTreeSet::new());
+        self.patch_type_references(document_id, &BTreeSet::new());
+        self.patch_type_definitions(document_id, &BTreeMap::new());
         self.invalidate_document(document_id);
         self.bump_package_version();
         Ok(())
@@ -392,6 +417,18 @@ impl Analysis {
     // routing to pick the documents to recheck when a package-global interface changes.
     pub fn documents_referencing(&self, symbol: Symbol) -> impl Iterator<Item = DocumentId> + '_ {
         self.reverse_dependencies
+            .get(&symbol)
+            .into_iter()
+            .flatten()
+            .copied()
+    }
+
+    // The documents whose definitions or annotations reference the type name `symbol` (the reverse of
+    // `document_type_references`). Empty when no document references it. Drives M4.3 type-index
+    // invalidation routing: a document re-evaluates its type-reference diagnostics when a type it
+    // references changes, even when it is not itself dirty.
+    fn documents_type_referencing(&self, symbol: Symbol) -> impl Iterator<Item = DocumentId> + '_ {
+        self.type_references
             .get(&symbol)
             .into_iter()
             .flatten()
@@ -618,8 +655,19 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
         } else {
             BTreeSet::new()
         };
+        // Scripts define no package-global types, but they do reference them (their annotations resolve
+        // against the package index), so the type reverse-dependency index covers all documents while the
+        // type-definition candidate index covers package documents only — mirroring the value side.
+        let defined_types = if matches!(document_kind, DocumentKind::Package) {
+            document_type_definitions(module)
+        } else {
+            BTreeMap::new()
+        };
+        let referenced_types = document_type_references(module, &local_naming.naming);
         analysis_state.patch_reverse_dependencies(*document_id, &referenced_symbols);
         analysis_state.patch_package_definitions(*document_id, &defined_symbols);
+        analysis_state.patch_type_references(*document_id, &referenced_types);
+        analysis_state.patch_type_definitions(*document_id, &defined_types);
         analysis_state.document_naming_outputs.insert(
             *document_id,
             DocumentOutput {
@@ -632,7 +680,10 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
     }
 
     #[cfg(debug_assertions)]
-    analysis_state.assert_reverse_dependencies_consistent();
+    {
+        analysis_state.assert_reverse_dependencies_consistent();
+        analysis_state.assert_type_references_consistent();
+    }
 
     let package_naming_current = analysis_state
         .package_naming_output
@@ -645,35 +696,43 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
     #[cfg(debug_assertions)]
     {
         analysis_state.assert_package_definitions_consistent();
+        analysis_state.assert_type_definitions_consistent();
         analysis_state.assert_package_naming_consistent();
     }
 }
 
-// Incremental package-naming maintenance (M4.2). Patches the materialized `global_bindings` for the
-// names whose candidate set changed (`naming_dirty_names`) and regenerates package-naming diagnostics
-// for exactly the affected documents:
+// Incremental package-naming maintenance (M4.2/M4.3). Patches the materialized `global_bindings` and
+// the materialized type index for the names whose candidate set changed (`naming_dirty_names` /
+// `naming_dirty_type_names`) and regenerates package-naming diagnostics for exactly the affected
+// documents:
 //   - the re-derived documents (their own naming changed);
-//   - the co-definers of every affected name (their overwrite position may have moved);
-//   - the referrers of every name that flipped defined-ness (their "could not resolve" diagnostic
-//     appears or disappears) — a single reverse-dependency hop;
-//   - every document, only when the package type fingerprint changed (type-reference and
-//     duplicate-type diagnostics depend on the still-full type index).
-// The result equals a from-scratch `rebuild_package_naming`, which the debug oracle asserts.
+//   - the co-definers of every affected value name (their overwrite position may have moved);
+//   - the referrers of every value name that flipped defined-ness (their "could not resolve"
+//     diagnostic appears or disappears) — a single value reverse-dependency hop;
+//   - the co-definers of every affected type name (their duplicate-type diagnostic may appear or
+//     disappear) and the referrers of every affected type name (their type-reference diagnostic may
+//     change as the name's kind/arity/presence/duplicate status moves) — a single type reverse hop.
+// Neither the value nor the type index is rebuilt across the package: a body-only edit changes no
+// candidate set, so both `affected` sets are empty and the type index is untouched. The result equals
+// a from-scratch `rebuild_package_naming`, which the debug oracle asserts.
 fn maintain_package_naming(analysis_state: &mut Analysis, re_derived_documents: &[DocumentId]) {
-    let (types, duplicate_type_names, type_fingerprint) = {
-        let package_document_ids = analysis_state.package_document_ids();
-        let package_modules = package_document_ids
-            .iter()
-            .filter_map(|document_id| {
-                analysis_state
-                    .module(*document_id)
-                    .map(|module| (*document_id, module))
-            })
+    // Re-collate only the type names whose contribution changed into the materialized type index and
+    // duplicate set; both persist across edits, so an unchanged type definition is never re-collated.
+    let affected_type_names = std::mem::take(&mut analysis_state.naming_dirty_type_names);
+    for name in &affected_type_names {
+        let sites = analysis_state
+            .type_definitions
+            .get(name)
+            .into_iter()
+            .flat_map(|documents| documents.values().flatten().copied())
             .collect::<Vec<_>>();
-        build_type_index(&package_modules, analysis_state.interner())
-    };
-    let type_index_changed =
-        analysis_state.package_type_fingerprint.as_deref() != Some(type_fingerprint.as_str());
+        apply_type_definition_outcome(
+            *name,
+            &sites,
+            &mut analysis_state.package_type_index,
+            &mut analysis_state.duplicate_type_names,
+        );
+    }
 
     let affected_names = std::mem::take(&mut analysis_state.naming_dirty_names);
     let mut output = analysis_state
@@ -733,8 +792,16 @@ fn maintain_package_naming(analysis_state: &mut Analysis, re_derived_documents: 
     for name in &flipped_names {
         recompute_documents.extend(analysis_state.documents_referencing(*name));
     }
-    if type_index_changed {
-        recompute_documents.extend(analysis_state.all_document_ids());
+    // A changed type name re-diagnoses both its co-definers (their duplicate-type diagnostic, which
+    // depends on the multiplicity that just moved) and its referrers (their type-reference diagnostic,
+    // which depends on the materialized kind/arity/presence). The referrer hop is the type analog of
+    // the value defined-ness flip: a non-dirty document referencing the type re-evaluates without an
+    // edit to itself.
+    for name in &affected_type_names {
+        if let Some(definers) = analysis_state.type_definitions.get(name) {
+            recompute_documents.extend(definers.keys().copied());
+        }
+        recompute_documents.extend(analysis_state.documents_type_referencing(*name));
     }
 
     let mut fresh_diagnostics = Vec::new();
@@ -748,10 +815,11 @@ fn maintain_package_naming(analysis_state: &mut Analysis, re_derived_documents: 
         let is_script = analysis_state.non_package_documents.contains(document_id);
         let script_types;
         let document_types: &BTreeMap<Symbol, TypeInfo> = if is_script {
-            script_types = build_script_local_type_index(&types, module);
+            script_types =
+                build_script_local_type_index(&analysis_state.package_type_index, module);
             &script_types
         } else {
-            &types
+            &analysis_state.package_type_index
         };
         let document_diagnostics = package_document_diagnostics(&PackageDocumentDiagnosticContext {
             document_id: *document_id,
@@ -759,7 +827,7 @@ fn maintain_package_naming(analysis_state: &mut Analysis, re_derived_documents: 
             local_naming,
             is_script,
             types: document_types,
-            duplicate_type_names: &duplicate_type_names,
+            duplicate_type_names: &analysis_state.duplicate_type_names,
             global_bindings: &output.output.global_bindings,
             candidate_order: &candidate_order,
             interner: analysis_state.interner(),
@@ -779,7 +847,6 @@ fn maintain_package_naming(analysis_state: &mut Analysis, re_derived_documents: 
     output.version = analysis_state.package_version;
 
     analysis_state.package_naming_output = Some(output);
-    analysis_state.package_type_fingerprint = Some(type_fingerprint);
 }
 
 fn render_interface_fingerprint(exports: &[ExportedValue], interner: &Interner) -> String {
@@ -1313,6 +1380,54 @@ impl Analysis {
         self.naming_dirty_names.extend(affected);
     }
 
+    // Re-derives `document_id`'s edges in the type reverse-dependency index (the type names it
+    // references, from `document_type_references`) to exactly `new_refs`. Empty `new_refs` retracts the
+    // document (used on delete).
+    fn patch_type_references(&mut self, document_id: DocumentId, new_refs: &BTreeSet<Symbol>) {
+        patch_document_symbol_index(&mut self.type_references, document_id, new_refs);
+    }
+
+    // Re-derives `document_id`'s entries in the type-definition candidate index to exactly
+    // `new_definitions` (its `@type`/`@alias` declarations and their `TypeInfo`s). Empty
+    // `new_definitions` retracts the document (used on delete, and for scripts, which define no package
+    // types). Unlike the value-side candidate index this carries a per-document value (the declared
+    // `TypeInfo`s), so a name whose membership is unchanged but whose kind or arity moved still counts
+    // as affected — that is what makes a referrer of a kind/arity-flipped type re-evaluate.
+    fn patch_type_definitions(
+        &mut self,
+        document_id: DocumentId,
+        new_definitions: &BTreeMap<Symbol, Vec<TypeInfo>>,
+    ) {
+        let old_names = self
+            .type_definitions
+            .iter()
+            .filter(|(_, documents)| documents.contains_key(&document_id))
+            .map(|(name, _)| *name)
+            .collect::<BTreeSet<_>>();
+        for name in &old_names {
+            if new_definitions.contains_key(name) {
+                continue;
+            }
+            if let Some(documents) = self.type_definitions.get_mut(name) {
+                documents.remove(&document_id);
+                if documents.is_empty() {
+                    self.type_definitions.remove(name);
+                }
+            }
+            self.naming_dirty_type_names.insert(*name);
+        }
+        for (name, sites) in new_definitions {
+            let previous = self
+                .type_definitions
+                .entry(*name)
+                .or_default()
+                .insert(document_id, sites.clone());
+            if previous.as_ref() != Some(sites) {
+                self.naming_dirty_type_names.insert(*name);
+            }
+        }
+    }
+
     // Salsa-style verify for the reverse-dependency index: rebuilds it from scratch by folding every
     // current naming output and asserts it equals the incrementally maintained index. Debug-only.
     #[cfg(debug_assertions)]
@@ -1348,6 +1463,67 @@ impl Analysis {
         assert_eq!(
             rebuilt, self.package_definitions,
             "package-definition candidate index drifted from the per-document naming outputs"
+        );
+    }
+
+    // Salsa-style verify for the type reverse-dependency index: rebuilds it from scratch by folding
+    // every current document's `document_type_references` and asserts it equals the maintained index.
+    #[cfg(debug_assertions)]
+    fn assert_type_references_consistent(&self) {
+        let mut rebuilt: BTreeMap<Symbol, BTreeSet<DocumentId>> = BTreeMap::new();
+        for (document_id, output) in &self.document_naming_outputs {
+            let Some(module) = self.module(*document_id) else {
+                continue;
+            };
+            for symbol in document_type_references(module, &output.output) {
+                rebuilt.entry(symbol).or_default().insert(*document_id);
+            }
+        }
+        assert_eq!(
+            rebuilt, self.type_references,
+            "type reverse-dependency index drifted from the per-document naming outputs"
+        );
+    }
+
+    // Non-circular drift oracle for the incrementally maintained type index. Rebuilds the candidate
+    // index and the materialized type index + duplicate set from PRIMARY inputs (the lowered package
+    // modules, via `document_type_definitions` and `build_type_index`), never from the patched state,
+    // and asserts all three equal the maintained structures. Together with `assert_package_naming_consistent`
+    // (which re-derives type-reference and duplicate diagnostics through the same `build_type_index`),
+    // this proves the incremental type index and its derived diagnostics match a from-scratch rebuild.
+    #[cfg(debug_assertions)]
+    fn assert_type_definitions_consistent(&self) {
+        let mut rebuilt_candidates: BTreeMap<Symbol, BTreeMap<DocumentId, Vec<TypeInfo>>> =
+            BTreeMap::new();
+        for document_id in self.package_document_ids() {
+            let Some(module) = self.module(document_id) else {
+                continue;
+            };
+            for (symbol, sites) in document_type_definitions(module) {
+                rebuilt_candidates
+                    .entry(symbol)
+                    .or_default()
+                    .insert(document_id, sites);
+            }
+        }
+        assert_eq!(
+            rebuilt_candidates, self.type_definitions,
+            "type-definition candidate index drifted from the per-document modules"
+        );
+
+        let package_modules = self
+            .package_document_ids()
+            .into_iter()
+            .filter_map(|document_id| self.module(document_id).map(|module| (document_id, module)))
+            .collect::<Vec<_>>();
+        let (rebuilt_types, rebuilt_duplicates) = build_type_index(&package_modules);
+        assert_eq!(
+            rebuilt_types, self.package_type_index,
+            "materialized package type index drifted from the full rebuild"
+        );
+        assert_eq!(
+            rebuilt_duplicates, self.duplicate_type_names,
+            "materialized duplicate-type-name set drifted from the full rebuild"
         );
     }
 

@@ -77,7 +77,7 @@ pub(crate) fn rebuild_package_naming(
     locals: &HashMap<DocumentId, NamesLocal>,
     interner: &Interner,
 ) -> PackageNamingComputation {
-    let (types, duplicate_type_names, _fingerprint) = build_type_index(package_modules, interner);
+    let (types, duplicate_type_names) = build_type_index(package_modules);
     let candidate_order = build_candidate_order(package_modules, locals);
     let global_bindings = winners_from_candidate_order(&candidate_order);
 
@@ -462,58 +462,175 @@ pub(crate) fn build_script_local_type_index(
     types
 }
 
-// The package type index: each uniquely-defined `@type`/`@alias` name maps to its `TypeInfo`. A name
-// defined by more than one package document is *not* indexed (so references to it stay unresolved) and
-// is returned in `duplicate_type_names` so `package_document_diagnostics` can emit the duplicate-type
-// warning at each site. The fingerprint captures every type definition (name, kind, arity, multiplicity)
-// so incremental maintenance regenerates type-reference diagnostics package-wide only when it changes.
+// The full-rebuild oracle for the package type index: each uniquely-defined `@type`/`@alias` name
+// maps to its `TypeInfo`; a name defined by more than one package site stays out of the index (so
+// references to it remain unresolved) and is returned in `duplicate_type_names` so
+// `package_document_diagnostics` can emit the duplicate-type warning at each site. After M4.3 the
+// production index is maintained incrementally in `analysis`; this rebuild is the drift oracle the
+// maintained index is asserted equal to. Both fold `document_type_definitions` and collate with
+// `apply_type_definition_outcome`, so the membership and winner/duplicate rules have one source.
 pub(crate) fn build_type_index(
     package_modules: &[(DocumentId, &Module)],
-    interner: &Interner,
-) -> (BTreeMap<Symbol, TypeInfo>, BTreeSet<Symbol>, String) {
-    let mut definitions_by_symbol = BTreeMap::<Symbol, Vec<TypeDefinitionSite>>::new();
-
-    for (document_id, module) in package_modules {
-        for definition in &module.definitions {
-            definitions_by_symbol
-                .entry(definition.definition.name)
-                .or_default()
-                .push(TypeDefinitionSite {
-                    document_id: *document_id,
-                    range: definition.range,
-                    kind: definition.definition.kind,
-                    arity: definition.definition.type_parameters.len(),
-                });
+) -> (BTreeMap<Symbol, TypeInfo>, BTreeSet<Symbol>) {
+    let mut sites_by_symbol = BTreeMap::<Symbol, Vec<TypeInfo>>::new();
+    for (_, module) in package_modules {
+        for (symbol, sites) in document_type_definitions(module) {
+            sites_by_symbol.entry(symbol).or_default().extend(sites);
         }
     }
 
     let mut types = BTreeMap::new();
     let mut duplicate_type_names = BTreeSet::new();
-    let mut fingerprint_parts = Vec::new();
-    for (symbol, definition_sites) in definitions_by_symbol {
-        let name = interner.resolve(symbol).unwrap_or("<unknown>");
-        fingerprint_parts.push(format!(
-            "{name}={}",
-            definition_sites
-                .iter()
-                .map(|site| format!("{:?}/{}", site.kind, site.arity))
-                .collect::<Vec<_>>()
-                .join(",")
-        ));
-        if let [definition_site] = definition_sites.as_slice() {
-            types.insert(
-                symbol,
-                TypeInfo {
-                    kind: definition_site.kind,
-                    arity: definition_site.arity,
-                },
-            );
-        } else {
+    for (symbol, sites) in &sites_by_symbol {
+        apply_type_definition_outcome(*symbol, sites, &mut types, &mut duplicate_type_names);
+    }
+    (types, duplicate_type_names)
+}
+
+// The package type definitions a single document contributes: for each `@type`/`@alias` name, the
+// `TypeInfo`s it declares, in declaration order (a document may declare the same name more than once,
+// which makes the name a duplicate). Shared by the incremental type-definition candidate index and by
+// `build_type_index`, so the two cannot disagree on a document's contribution.
+pub(crate) fn document_type_definitions(module: &Module) -> BTreeMap<Symbol, Vec<TypeInfo>> {
+    let mut definitions = BTreeMap::<Symbol, Vec<TypeInfo>>::new();
+    for definition in &module.definitions {
+        definitions
+            .entry(definition.definition.name)
+            .or_default()
+            .push(TypeInfo {
+                kind: definition.definition.kind,
+                arity: definition.definition.type_parameters.len(),
+            });
+    }
+    definitions
+}
+
+// Collate a type name's package-wide definition sites into the materialized type index and duplicate
+// set: a single site resolves to its `TypeInfo`; zero sites removes the name; two or more sites mark it
+// a duplicate (and keep it out of the resolved index). The one source of truth for the winner/duplicate
+// rule, applied by both the full rebuild and incremental maintenance into fresh or maintained maps.
+pub(crate) fn apply_type_definition_outcome(
+    symbol: Symbol,
+    sites: &[TypeInfo],
+    types: &mut BTreeMap<Symbol, TypeInfo>,
+    duplicate_type_names: &mut BTreeSet<Symbol>,
+) {
+    match sites {
+        [single] => {
+            types.insert(symbol, *single);
+            duplicate_type_names.remove(&symbol);
+        }
+        [] => {
+            types.remove(&symbol);
+            duplicate_type_names.remove(&symbol);
+        }
+        _ => {
+            types.remove(&symbol);
             duplicate_type_names.insert(symbol);
         }
     }
+}
 
-    (types, duplicate_type_names, fingerprint_parts.join(";"))
+// The package type names a document references (the type analog of `NamesLocal.non_locals`): every
+// named type appearing in its `@type`/`@alias` definitions' representation types and in its inline
+// type annotations, excluding type names bound as local type parameters at the reference site. This is
+// exactly the set of names `resolve_module_type_references` looks up in the type index, so when one of
+// those names' index entry changes (kind, arity, presence, or duplicate status), this document's
+// type-reference diagnostics must be recomputed. Drives the type reverse-dependency index.
+pub(crate) fn document_type_references(
+    module: &Module,
+    local_naming: &NamesLocal,
+) -> BTreeSet<Symbol> {
+    let mut references = BTreeSet::new();
+    for definition in &module.definitions {
+        let local_type_parameters = definition
+            .definition
+            .type_parameters
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        collect_surface_type_references(
+            &definition.definition.surface_type,
+            &local_type_parameters,
+            &mut references,
+        );
+    }
+    for expression_id in &local_naming.named_type_annotations {
+        let Some(annotation) = module.arena.get(*expression_id).annotation.as_ref() else {
+            continue;
+        };
+        match annotation.annotation() {
+            Annotation::Type { surface_type, .. } => {
+                collect_surface_type_references(surface_type, &BTreeSet::new(), &mut references);
+            }
+            Annotation::New { nominal_type } => {
+                references.insert(nominal_type.name);
+                for type_argument in &nominal_type.type_arguments {
+                    collect_surface_type_references(type_argument, &BTreeSet::new(), &mut references);
+                }
+            }
+        }
+    }
+    references
+}
+
+// Mirrors `TypeResolver::resolve_surface_type`'s traversal, collecting the named types it would look
+// up instead of diagnosing them. Local type parameters in scope are not references.
+fn collect_surface_type_references(
+    surface_type: &SurfaceType,
+    local_type_parameters: &BTreeSet<Symbol>,
+    references: &mut BTreeSet<Symbol>,
+) {
+    match surface_type {
+        SurfaceType::Named(name, arguments) => {
+            if !local_type_parameters.contains(name) {
+                references.insert(*name);
+            }
+            for argument in arguments {
+                collect_surface_type_references(argument, local_type_parameters, references);
+            }
+        }
+        SurfaceType::Nullable(inner_type)
+        | SurfaceType::Vector(inner_type)
+        | SurfaceType::NamedVector(inner_type)
+        | SurfaceType::List(inner_type)
+        | SurfaceType::NamedList(inner_type) => {
+            collect_surface_type_references(inner_type, local_type_parameters, references);
+        }
+        SurfaceType::Record(fields) => {
+            for field in fields {
+                collect_surface_type_references(&field.value, local_type_parameters, references);
+            }
+        }
+        SurfaceType::Tuple(items) => {
+            for item in items {
+                collect_surface_type_references(item, local_type_parameters, references);
+            }
+        }
+        SurfaceType::Function(function_type) => {
+            for parameter in &function_type.parameters {
+                collect_surface_type_references(parameter, local_type_parameters, references);
+            }
+            for parameter in &function_type.named_parameters {
+                collect_surface_type_references(&parameter.value, local_type_parameters, references);
+            }
+            collect_surface_type_references(
+                &function_type.return_type,
+                local_type_parameters,
+                references,
+            );
+        }
+        SurfaceType::Binders(type_parameters, inner_type) => {
+            if type_parameters.is_empty() {
+                collect_surface_type_references(inner_type, local_type_parameters, references);
+                return;
+            }
+            let mut nested_type_parameters = local_type_parameters.clone();
+            nested_type_parameters.extend(type_parameters.iter().copied());
+            collect_surface_type_references(inner_type, &nested_type_parameters, references);
+        }
+        SurfaceType::Any | SurfaceType::Unknown | SurfaceType::Null | SurfaceType::Scalar(_) => {}
+    }
 }
 
 fn push_diagnostic(
@@ -1151,14 +1268,6 @@ fn collect_new_symbols(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TypeInfo {
-    kind: DefinitionKind,
-    arity: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct TypeDefinitionSite {
-    document_id: DocumentId,
-    range: Range,
     kind: DefinitionKind,
     arity: usize,
 }
