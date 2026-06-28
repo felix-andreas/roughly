@@ -50,6 +50,17 @@ opt-in diagnostics above only control what `roughly check` reports. See the
 [Type Checker](/type-checker) for the inference model — nominal and structural types, function
 types, nullable unions, and numeric constraints, all written in [`#:` comments](/type-checker).
 
+### Diagnostics delivery
+
+Roughly implements the LSP **pull** diagnostics model (`textDocument/diagnostic`) and advertises
+`inter_file_dependencies`, so an edit that moves diagnostics in dependent files is reflected when
+those files are pulled. Each report carries a content-hash `resultId`; if the client sends back a
+matching `previousResultId`, the server answers `Unchanged` instead of resending the items.
+
+Delivery is negotiated at startup: when the client advertises pull-diagnostics support it owns the
+request cadence, and the server stops pushing `publishDiagnostics`. Clients without pull support keep
+receiving pushed diagnostics. Workspace-wide pull (`workspace/diagnostic`) is not yet implemented.
+
 ## Planned
 
 Not yet available:
