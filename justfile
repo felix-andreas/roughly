@@ -99,14 +99,19 @@ bump-version $version:
 
     sed -i 's/^version = "[a-zA-Z0-9._-]*"/version = "{{ version }}"/' Cargo.toml
 
-    # The VS Marketplace rejects semver pre-release suffixes (e.g. `-alpha.N`), so the
-    # extension gets a plain X.Y.Z derived from the CLI version: a pre-release
-    # `X.Y.0-alpha.N` publishes as `X.Y.N` (the `--pre-release` flag marks the channel);
-    # a clean `X.Y.Z` is used as-is.
-    vscode_version="{{ version }}"
-    if [[ "$vscode_version" =~ ^([0-9]+)\.([0-9]+)\.[0-9]+-[a-z]+\.([0-9]+)$ ]]; then
-        vscode_version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
-    fi
+    # Versioning schema, and the marketplace constraint that drives it:
+    #   The VS Marketplace only accepts a plain `X.Y.Z` and REJECTS semver pre-release
+    #   suffixes such as `-alpha.3`. So releases use this schema:
+    #     pre-release : `X.Y.Z-alpha` / `X.Y.Z-beta`  — the PATCH (Z) is a single
+    #                   monotonically increasing counter and the suffix names the
+    #                   channel, e.g. 0.2.1-alpha, 0.2.2-alpha, ..., 0.2.14-beta.
+    #     stable      : a bare `X.Y.Z`.
+    #   The extension version is the CLI version with the channel suffix stripped — a
+    #   valid, monotonic `X.Y.Z` — and the `--pre-release` flag marks the channel on
+    #   the marketplace. Keeping the counter in the PATCH (not the suffix) is what makes
+    #   stripping collision-free: 0.2.1-alpha and 0.2.2-alpha map to distinct 0.2.1 / 0.2.2.
+    cli_version="{{ version }}"
+    vscode_version="${cli_version%%-*}"
     sed -i "s/\"version\": \"[a-zA-Z0-9._-]*\"/\"version\": \"$vscode_version\"/" editors/code/package.json
 
     # editors/zed/extension.toml is intentionally NOT version-bumped: the Zed extension
