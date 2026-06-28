@@ -31,6 +31,11 @@ typing = true
 With that set, `roughly check` and your editor report a `type-error` diagnostic wherever
 the types do not line up.
 
+A separate switch, `strict = true`, additionally flags every place the checker could
+*not* determine a type — an unsupported construct, or a reference to a binding with no
+known type. It only adds `strict` diagnostics; it does not change inference. See
+[strict mode](/typing-reference#strict-mode) for the precise rules.
+
 ## What it does
 
 The checker infers a type for every expression. With type errors enabled it reports a

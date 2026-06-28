@@ -811,7 +811,7 @@ It is a type error when the branches do not match and neither branch is `NULL`.
 
 Examples:
 
-- `if (flag) 1L else \"foo\"` is a type error
+- `if (flag) 1L else "foo"` is a type error
 - `if (c(TRUE, FALSE)) 1L else 2L` is invalid because the condition is not scalar `logical`
 
 ### Blocks
@@ -851,7 +851,7 @@ Argument checking is compatibility-based, not exact-equality-based:
 
 `[` is the general subsetting operator in R. In the current supported semantics, it is defined only for certain list forms.
 
-`$name` is syntactic sugar for `[[\"name\"]]`.
+`$name` is syntactic sugar for `[["name"]]`.
 
 Backtick-quoted names follow the same rule.
 
