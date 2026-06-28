@@ -135,11 +135,15 @@ const year = new Date().getFullYear()
               </svg>
               <span>Install in VS Code</span>
             </a>
-            <span class="btn-soon" role="img" aria-disabled="true" aria-label="Zed extension — coming soon">
+            <a
+              class="btn-vscode"
+              href="https://zed.dev/extensions/roughly"
+              target="_blank"
+              rel="noopener"
+            >
               <svg class="brand-logo zed-logo" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 128 128" aria-hidden="true"><path fill="#ffffff" d="M12 8a4 4 0 0 0-4 4v88H0V12C0 5.373 5.373 0 12 0h107.172c5.345 0 8.022 6.463 4.242 10.243L57.407 76.25H76V68h8v10.25a6 6 0 0 1-6 6H49.407L35.657 98H98V48h8v50a8 8 0 0 1-8 8H27.657l-14 14H116a4 4 0 0 0 4-4V28h8v88c0 6.627-5.373 12-12 12H8.828c-5.345 0-8.022-6.463-4.242-10.243L70.343 52H52v8h-8V50a6 6 0 0 1 6-6h28.343l14-14H30v50h-8V30a8 8 0 0 1 8-8h70.343l14-14Z"/></svg>
-              <span>Zed</span>
-              <span class="soon-pill">soon</span>
-            </span>
+              <span>Install in Zed</span>
+            </a>
           </div>
         </div>
         <div class="scroll-hint" aria-hidden="true">
@@ -568,11 +572,15 @@ roughly check .</code></pre>
               </svg>
               <span>Install in VS Code</span>
             </a>
-            <span class="btn-soon" role="img" aria-disabled="true" aria-label="Zed extension — coming soon">
+            <a
+              class="btn-vscode"
+              href="https://zed.dev/extensions/roughly"
+              target="_blank"
+              rel="noopener"
+            >
               <svg class="brand-logo zed-logo" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 128 128" aria-hidden="true"><path fill="#ffffff" d="M12 8a4 4 0 0 0-4 4v88H0V12C0 5.373 5.373 0 12 0h107.172c5.345 0 8.022 6.463 4.242 10.243L57.407 76.25H76V68h8v10.25a6 6 0 0 1-6 6H49.407L35.657 98H98V48h8v50a8 8 0 0 1-8 8H27.657l-14 14H116a4 4 0 0 0 4-4V28h8v88c0 6.627-5.373 12-12 12H8.828c-5.345 0-8.022-6.463-4.242-10.243L70.343 52H52v8h-8V50a6 6 0 0 1 6-6h28.343l14-14H30v50h-8V30a8 8 0 0 1 8-8h70.343l14-14Z"/></svg>
-              <span>Zed</span>
-              <span class="soon-pill">soon</span>
-            </span>
+              <span>Install in Zed</span>
+            </a>
           </div>
         </div>
       </section>
@@ -2143,36 +2151,8 @@ roughly check .</code></pre>
         display: block;
         flex: none;
       }
-      .btn-soon {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.55rem;
-        color: var(--foreground);
-        background: oklch(0.24 0 0);
-        border: 1px solid var(--border-strong);
-        padding: 0.6rem 1.2rem;
-        border-radius: var(--radius);
-        font-weight: 500;
-        font-size: 0.92rem;
-        cursor: not-allowed;
-      }
-      .btn-soon .brand-logo {
-        display: block;
-        flex: none;
-      }
       .zed-logo {
         color: var(--foreground);
-      }
-      .soon-pill {
-        font-family: 'Geist Mono', monospace;
-        font-size: 0.66rem;
-        letter-spacing: 0.03em;
-        text-transform: lowercase;
-        color: var(--muted);
-        border: 1px solid var(--border);
-        border-radius: 999px;
-        padding: 0.06rem 0.42rem;
-        line-height: 1.4;
       }
 
       /* ---------- editorial bands ---------- */
