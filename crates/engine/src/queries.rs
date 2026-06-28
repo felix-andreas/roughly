@@ -39,9 +39,9 @@ use {
             ExportedValue, InferenceError, ModuleCheck, TypeDefinitionEnvironment,
             inference_state_with_builtins_in_interner,
         },
-        types::TypeScheme,
+        types::{CoreType, TypeScheme},
     },
-    analysis::diagnostic::Diagnostic,
+    analysis::diagnostic::{Diagnostic, render_type_scheme},
     std::{
         cell::{Cell, RefCell},
         collections::{BTreeMap, BTreeSet, HashMap},
@@ -82,6 +82,22 @@ pub enum Key {
     DefiningItem(Symbol),
     /// The per-symbol exported scheme. Editing a function body recomputes only *its* `GlobalScheme`.
     GlobalScheme(Symbol),
+    /// The single out-edge of the re-export graph: `Some(b)` iff `symbol`'s winning definition is a pure
+    /// re-export `a <- b` of another package global `b`, else `None`. A global re-exports at most one
+    /// other, so the graph is *functional* (out-degree ≤ 1) — which is what makes SCC detection a chain
+    /// walk (see [`Key::ReexportScc`]).
+    ReexportTarget(Symbol),
+    /// The strongly-connected component of the re-export graph containing `symbol`, as the **canonical
+    /// (sorted)** member list. Empty means a trivial, non-self-looping SCC (acyclic — keep the R1a
+    /// `GlobalScheme` fetch-recursion path); a non-empty list is a pure re-export cycle through `symbol`
+    /// (route `GlobalScheme` through [`Key::ReexportInterface`]). Every cycle member projects the *same*
+    /// sorted list, so they share one `ReexportInterface` memo.
+    ReexportScc(Symbol),
+    /// The converged exported-scheme sub-table for one cyclic re-export SCC, computed by a single bounded
+    /// synchronous fixed-point body (`DESIGN.md` §5). Keyed by the canonical SCC member list. Owning the
+    /// whole component in one body is what keeps the core's accidental-cycle guard intact: no
+    /// `GlobalScheme`/`ReexportInterface` key ever re-enters itself.
+    ReexportInterface(Vec<Symbol>),
     Typecheck(FileId),
     Diagnostics(FileId),
 }
@@ -166,6 +182,26 @@ impl RoughlyQueries {
 
     pub fn global_scheme_runs(&self, symbol: Symbol) -> u64 {
         per_key(&self.counters.global_scheme, symbol)
+    }
+
+    pub fn reexport_target_runs(&self, symbol: Symbol) -> u64 {
+        per_key(&self.counters.reexport_target, symbol)
+    }
+
+    pub fn reexport_scc_runs(&self, symbol: Symbol) -> u64 {
+        per_key(&self.counters.reexport_scc, symbol)
+    }
+
+    /// How many times the SCC fixed-point body ran for one canonical member list — the convergence
+    /// witness: a cyclic interface is computed once and shared by every member, so this stays small (it
+    /// never spins the round cap).
+    pub fn reexport_interface_runs(&self, members: &[Symbol]) -> u64 {
+        self.counters
+            .reexport_interface
+            .borrow()
+            .get(members)
+            .copied()
+            .unwrap_or(0)
     }
 
     pub fn typecheck_runs(&self, file: FileId) -> u64 {
@@ -260,30 +296,62 @@ impl QueryGroup for RoughlyQueries {
                 Stored::new(index.get(symbol).copied())
             }
 
-            Key::GlobalScheme(symbol) => {
-                bump(&self.counters.global_scheme, *symbol);
+            Key::ReexportTarget(symbol) => {
+                bump(&self.counters.reexport_target, *symbol);
                 let defining = engine.fetch::<Option<FileId>>(Key::DefiningItem(*symbol));
-                // For a direct definition or an acyclic re-export `a <- b`, inferring the winning file
-                // binds the referenced globals (via `GlobalScheme(b)`, recorded as a dependency) and the
-                // export falls out of `exported_value_schemes`.
-                //
-                // R1b TODO (re-export *cycles*): `a <- b`, `b <- a` would make `GlobalScheme(a)` fetch
-                // `GlobalScheme(b)` fetch `GlobalScheme(a)`, re-entering a key on the recompute stack and
-                // tripping the core's accidental-cycle guard. The fixed-point body that owns the whole SCC
-                // (`DESIGN.md` §5: bounded iteration with `Unknown`-pinning) plugs in *here* — a
-                // `ReexportInterface(scc)` query this body projects from. Until then a genuine cycle
-                // panics loudly rather than returning a silently-stale scheme; acyclic re-exports work.
-                let scheme = match *defining {
-                    Some(defining_file) => {
-                        let (_check, exports) = infer_file(self, engine, defining_file);
-                        exports
-                            .into_iter()
-                            .find(|export| export.symbol == *symbol)
-                            .map(|export| export.type_scheme)
+                let target = match *defining {
+                    Some(file) => {
+                        let module = engine.fetch::<Module>(Key::Lower(file));
+                        let naming =
+                            engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(file));
+                        reexport_target_of(&module, &naming.naming, *symbol)
                     }
                     None => None,
                 };
-                Stored::new(scheme)
+                Stored::new(target)
+            }
+
+            Key::ReexportScc(symbol) => {
+                bump(&self.counters.reexport_scc, *symbol);
+                // Functional graph: follow the single re-export out-edge from `symbol`. If the walk returns
+                // to `symbol`, it is on a cycle (the visited chain is the SCC); if it dead-ends or meets a
+                // cycle that does *not* include `symbol`, `symbol` sits on an acyclic tail (trivial SCC).
+                Stored::new(reexport_scc_members(engine, *symbol))
+            }
+
+            Key::GlobalScheme(symbol) => {
+                bump(&self.counters.global_scheme, *symbol);
+                let scc = engine.fetch::<Vec<Symbol>>(Key::ReexportScc(*symbol));
+                if scc.is_empty() {
+                    // Acyclic: a direct definition or an acyclic re-export chain `a <- b <- …`. Inferring
+                    // the winning file binds referenced globals via *their* `GlobalScheme` (recorded as a
+                    // dependency), so a chain resolves by plain fetch recursion — unbounded depth, no round
+                    // cap to truncate it — and the export falls out of `exported_value_schemes`.
+                    let defining = engine.fetch::<Option<FileId>>(Key::DefiningItem(*symbol));
+                    let scheme = match *defining {
+                        Some(defining_file) => {
+                            let (_check, exports) = infer_file(self, engine, defining_file);
+                            exports
+                                .into_iter()
+                                .find(|export| export.symbol == *symbol)
+                                .map(|export| export.type_scheme)
+                        }
+                        None => None,
+                    };
+                    Stored::new(scheme)
+                } else {
+                    // Cyclic: route through the SCC fixed-point body, which owns the whole component and
+                    // never re-enters `fetch` on a `GlobalScheme`/`ReexportInterface` key — so the core's
+                    // accidental-cycle guard stays intact for *real* graph bugs. Project this member out.
+                    let interface = engine
+                        .fetch::<BTreeMap<Symbol, TypeScheme>>(Key::ReexportInterface((*scc).clone()));
+                    Stored::new(interface.get(symbol).cloned())
+                }
+            }
+
+            Key::ReexportInterface(members) => {
+                bump(&self.counters.reexport_interface, members.clone());
+                Stored::new(resolve_reexport_interface(self, engine, members))
             }
 
             Key::Typecheck(file) => {
@@ -362,6 +430,171 @@ fn infer_file(
     (check, exports)
 }
 
+// The re-export out-edge of one package global: `Some(b)` iff `symbol`'s winning definition is a bare
+// reference to another package global `b` (`a <- b`). The winner is the *last* top-level assignment of
+// `symbol` that resolves to a package binding (last-writer-wins within the file), mirroring how
+// `exported_value_schemes` picks the exported definition. A value that is anything but a free-symbol
+// reference (a function, a literal, a call, or a reference resolving to a *local* binding) is not a
+// re-export, so it has no out-edge and cannot lie on a re-export cycle.
+fn reexport_target_of(
+    module: &Module,
+    local_naming: &NamesLocal,
+    symbol: Symbol,
+) -> Option<Symbol> {
+    let mut winning_value: Option<ExpressionId> = None;
+    collect_winning_assignment_value(
+        module,
+        local_naming,
+        &module.expressions,
+        symbol,
+        &mut winning_value,
+    );
+    let value = winning_value?;
+    match module.arena.get(value).kind {
+        // A bare `Symbol` value that names dropped into `non_locals` resolves to a package global, not a
+        // file-local binding — that, and only that, is a cross-file re-export edge.
+        ExpressionKind::Symbol(_) => local_naming.non_locals.get(&value).copied(),
+        _ => None,
+    }
+}
+
+fn collect_winning_assignment_value(
+    module: &Module,
+    local_naming: &NamesLocal,
+    expressions: &[ExpressionId],
+    symbol: Symbol,
+    winning_value: &mut Option<ExpressionId>,
+) {
+    for expression_id in expressions {
+        match &module.arena.get(*expression_id).kind {
+            ExpressionKind::Assign { target, value } if *target == symbol => {
+                let resolves_to_binding = local_naming
+                    .expression_resolutions
+                    .get(expression_id)
+                    .and_then(|binding_id| local_naming.bindings.get(binding_id))
+                    .is_some();
+                if resolves_to_binding {
+                    *winning_value = Some(*value);
+                }
+            }
+            ExpressionKind::Block { expressions, .. } => {
+                collect_winning_assignment_value(
+                    module,
+                    local_naming,
+                    expressions,
+                    symbol,
+                    winning_value,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+// The SCC of `symbol` over the functional re-export graph, as the canonical (sorted) member list (empty =
+// acyclic). Each global has out-degree ≤ 1, so SCC detection is a chain walk: follow `ReexportTarget`
+// (recording each edge as a dependency, so the SCC re-derives incrementally when an edge changes). The
+// walk closes back to `symbol` only when `symbol` lies on the cycle; reaching a dead end or an interior
+// repeat means `symbol` is on an acyclic tail.
+fn reexport_scc_members(engine: &Engine<RoughlyQueries>, symbol: Symbol) -> Vec<Symbol> {
+    let mut chain = vec![symbol];
+    let mut seen = BTreeSet::from([symbol]);
+    loop {
+        let current = *chain.last().expect("re-export chain is never empty");
+        let target = engine.fetch::<Option<Symbol>>(Key::ReexportTarget(current));
+        match *target {
+            None => return Vec::new(),
+            Some(next) if next == symbol => {
+                chain.sort();
+                return chain;
+            }
+            Some(next) if seen.contains(&next) => return Vec::new(),
+            Some(next) => {
+                seen.insert(next);
+                chain.push(next);
+            }
+        }
+    }
+}
+
+// The bounded synchronous fixed-point for one cyclic re-export SCC (`DESIGN.md` §5), ported from
+// `analysis.rs`'s `typecheck` package-interface loop. Every cycle member is a re-export whose target is
+// another member, so the framework carries no concrete base and the fixed point is all-`Unknown` — the
+// correct answer (a pure mutual re-export cycle holds no information). The iteration, the
+// `#members + slack` round cap, and the oscillation guard are ported faithfully as the convergence
+// machinery and the safety net for any non-monotone history. The body fetches only `ReexportTarget` for
+// its members, so it is self-contained and never re-enters `GlobalScheme`/`ReexportInterface`.
+fn resolve_reexport_interface(
+    group: &RoughlyQueries,
+    engine: &Engine<RoughlyQueries>,
+    members: &[Symbol],
+) -> BTreeMap<Symbol, TypeScheme> {
+    let member_set: BTreeSet<Symbol> = members.iter().copied().collect();
+    let mut targets: BTreeMap<Symbol, Option<Symbol>> = BTreeMap::new();
+    for member in members {
+        let target = engine.fetch::<Option<Symbol>>(Key::ReexportTarget(*member));
+        targets.insert(*member, *target);
+    }
+
+    let unknown = TypeScheme::monomorphic(CoreType::Unknown);
+    let mut table: BTreeMap<Symbol, TypeScheme> =
+        members.iter().map(|member| (*member, unknown.clone())).collect();
+    let mut pinned: BTreeSet<Symbol> = BTreeSet::new();
+    let mut history: HashMap<Symbol, Vec<String>> = HashMap::new();
+
+    // Round cap = `#members-in-scc + slack`, proportional to the SCC (not a fixed cap like M3's 32), so a
+    // large cycle whose oscillation needs several rounds to detect still converges; the common case breaks
+    // out the moment a round makes no change.
+    let round_cap = members.len().saturating_add(2);
+    for _round in 0..round_cap {
+        let mut next = table.clone();
+        for member in members {
+            if pinned.contains(member) {
+                next.insert(*member, unknown.clone());
+                continue;
+            }
+            // A re-export member takes its target's current scheme; an out-of-set target cannot occur for
+            // a genuine functional cycle and is treated as `Unknown` (defensive).
+            let scheme = match targets.get(member).copied().flatten() {
+                Some(target) if member_set.contains(&target) => table.get(&target).cloned(),
+                _ => None,
+            };
+            next.insert(*member, scheme.unwrap_or_else(|| unknown.clone()));
+        }
+
+        // Oscillation guard: a member whose rendering returns to an earlier value while differing from the
+        // previous round is swapping on a cycle, not progressing monotonically — pin it to `Unknown`,
+        // which collapses the cycle and restores convergence. A pure re-export cycle never carries a
+        // concrete value here, so this is the defensive net; the all-`Unknown` fixed point is reached
+        // directly. Rendering reuses the shared interner (no `fetch` held across this borrow).
+        {
+            let lowering = group.lowering.borrow();
+            for member in members {
+                if pinned.contains(member) {
+                    continue;
+                }
+                let rendered = render_type_scheme(
+                    lowering.interner(),
+                    next.get(member).unwrap_or(&unknown),
+                );
+                let entry = history.entry(*member).or_default();
+                if entry.last().is_some_and(|last| *last != rendered) && entry.contains(&rendered) {
+                    pinned.insert(*member);
+                    next.insert(*member, unknown.clone());
+                } else {
+                    entry.push(rendered);
+                }
+            }
+        }
+
+        if next == table {
+            return next;
+        }
+        table = next;
+    }
+    table
+}
+
 // The file's package-global definition names. Mirrors `analysis::naming::document_package_definitions`
 // (which is `pub(crate)`, so it cannot be called from here) using only the public `NamesLocal` fields: a
 // top-level `Assign` target whose expression resolves to a binding is a package global, recursing into
@@ -418,6 +651,9 @@ struct Counters {
     package_symbol_index: Cell<u64>,
     defining_item: RefCell<HashMap<Symbol, u64>>,
     global_scheme: RefCell<HashMap<Symbol, u64>>,
+    reexport_target: RefCell<HashMap<Symbol, u64>>,
+    reexport_scc: RefCell<HashMap<Symbol, u64>>,
+    reexport_interface: RefCell<HashMap<Vec<Symbol>, u64>>,
     typecheck: RefCell<HashMap<FileId, u64>>,
     diagnostics: RefCell<HashMap<FileId, u64>>,
 }
