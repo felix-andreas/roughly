@@ -95,18 +95,44 @@ fn typecheck_unification() {
     run_fixture_suite("tests/typecheck/unification", run_unification_fixture);
 }
 
+#[test]
+fn typecheck_strict() {
+    run_fixture_suite("tests/typecheck/strict", run_strict_fixture);
+}
+
 fn run_project_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String> {
-    let FixtureKind::MultiFile(case) = &fixture.kind else {
-        return Err("unsupported fixture".to_owned());
-    };
-    let mut analysis_state = Analysis::new(
-        PathBuf::new(),
-        LintConfig::default(),
+    run_multifile_diagnostics_fixture(
+        fixture,
         CheckConfig {
             unused: false,
             typing: true,
+            strict: false,
         },
-    );
+    )
+}
+
+// Strict mode reuses the multi-file diagnostics rendering with `[check] strict` on (and `typing` on
+// too, so the no-double-report cases can show that a type error is reported without an accompanying
+// strict diagnostic).
+fn run_strict_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String> {
+    run_multifile_diagnostics_fixture(
+        fixture,
+        CheckConfig {
+            unused: false,
+            typing: true,
+            strict: true,
+        },
+    )
+}
+
+fn run_multifile_diagnostics_fixture(
+    fixture: &Fixture,
+    check_config: CheckConfig,
+) -> Result<Vec<Vec<FixtureRunFile>>, String> {
+    let FixtureKind::MultiFile(case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+    let mut analysis_state = Analysis::new(PathBuf::new(), LintConfig::default(), check_config);
 
     for entry in &case.initial_generation.entries {
         apply_project_operation(&mut analysis_state, &entry.operation)?;
@@ -321,6 +347,7 @@ fn run_diagnostics_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>
         CheckConfig {
             unused: false,
             typing: true,
+            strict: false,
         },
     );
     analysis_state.add_document(PathBuf::from("R/main.R"), document);
@@ -349,6 +376,7 @@ fn run_unused_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, Str
         CheckConfig {
             unused: true,
             typing: false,
+            strict: false,
         },
     );
     analysis_state.add_document(PathBuf::from("R/main.R"), document);
@@ -452,6 +480,7 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
         CheckConfig {
             unused: false,
             typing: true,
+            strict: false,
         },
     );
     for entry in &case.initial_generation.entries {

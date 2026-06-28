@@ -1,0 +1,54 @@
+#==== strict_unknown
+#---- unsupported_construct_bare__flags_the_expression
+#---- R/main.R
+1L %then% 2L
+#++++
+warning[strict] strict mode: this expression has an undetermined type (`Unknown`)
+--> 1:1-1:13
+| 1L %then% 2L
+
+#---- unsupported_construct_binding__flags_the_binding_name
+#---- R/main.R
+x <- 1L %then% 2L
+#++++
+warning[strict] strict mode: could not determine the type of `x`; add a type annotation
+--> 1:6-1:18
+| x <- 1L %then% 2L
+
+#---- cascade_single_origin__one_origin_used_downstream_flags_once
+#---- R/main.R
+x <- 1L %then% 2L
+y <- x + 1L
+z <- x * 2L
+#++++
+warning[strict] strict mode: could not determine the type of `x`; add a type annotation
+--> 1:6-1:18
+| x <- 1L %then% 2L
+
+#---- existing_type_error__does_not_also_strict_flag
+#---- R/main.R
+x <- "foo"
+bad <- x + 1L
+#++++
+error[type-error] expected a numeric value (`integer` or `double`), found `character`
+--> 2:8-2:9
+| bad <- x + 1L
+
+#---- any_is_tolerated__trust_any_over_unsupported
+#---- R/main.R
+#: @trust Any
+1L %then% 2L
+#++++
+No diagnostics.
+
+#---- cross_file_unknown_global__origin_flagged_once_reference_not_flagged
+#---- R/a.R
+x <- 1L %then% 2L
+#++++
+warning[strict] strict mode: could not determine the type of `x`; add a type annotation
+--> 1:6-1:18
+| x <- 1L %then% 2L
+#---- R/b.R
+y <- x
+#++++
+No diagnostics.
