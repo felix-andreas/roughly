@@ -90,6 +90,10 @@ Top-level value names are package-global across files.
 - if several files define the same top-level value name, the later file wins
 - if several package files define the same top-level value name, both the overwritten earlier
   definition and the overwriting later definition should warn
+- a bare top-level `{ }` block executes unconditionally, so its direct-child assignments are
+  package globals too, exactly like a top-level `name <- value`; assignments inside `if`/`for`/`while`
+  bodies are conditionally executed and are not yet package globals (a cross-file reference to such a
+  name is unresolved), pending a future conditional-global tier
 
 Cross-file references are scheme-based:
 

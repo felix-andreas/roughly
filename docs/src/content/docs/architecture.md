@@ -152,6 +152,8 @@ The file-local preparation pass is authoritative for local lexical facts.
 The project-global pass is authoritative for package-visible top-level value and type resolution.
 This split does not require a separate durable intermediate artifact. The project-global pass may update the same naming result built by file-local resolution, leaving still-unresolved names in place when lookup fails.
 
+Known limitation — which top-level assignments are package globals: a bare top-level `{ }` block executes unconditionally, so its direct-child assignments (including nested bare blocks) are package globals, exactly like a top-level `name <- value`. Assignments inside `if`/`for`/`while` bodies are conditionally executed and are not yet package globals — a cross-file reference to such a name reports "could not resolve" — pending a future conditional-global (weak-global) tier. This single membership rule is shared by the candidate index, the rebuild oracle, and the export lookup so they cannot disagree.
+
 Top-level declarations should not keep their preliminary file-local binding ids as their final package-visible identities.
 The project-global pass should assign distinct project-level ids for package-visible declarations so cross-file naming facts are owned by the package-level result rather than by incidental file-local traversal order.
 
