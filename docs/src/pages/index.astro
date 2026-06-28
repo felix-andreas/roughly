@@ -19,14 +19,14 @@ const capabilities = [
     title: 'Language server',
     accent: 'cyan',
     blurb:
-      'Completion, hover, go-to-definition, references, rename, and inlay hints — live in your editor, over LSP.',
+      'Completion, hover, go-to-definition, references, rename, and inlay hints — live in your editor.',
     link: { label: 'Language server', href: '/language-server' },
   },
   {
     title: 'Code analyzer',
     accent: 'violet',
     blurb:
-      'Lint diagnostics run by default; the first static type checker for R is opt-in.',
+      'Lint diagnostics on by default — plus the first static type checker for R, opt-in.',
     link: { label: 'Type checker', href: '/type-checker' },
   },
   {
@@ -67,10 +67,10 @@ const year = new Date().getFullYear()
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Roughly — modern developer tooling for R</title>
+    <title>Roughly — the first type checker for R, and the tooling to match</title>
     <meta
       name="description"
-      content="Roughly is a fast, modern toolchain for R — a language server, a code analyzer, and a formatter in one tool, written in Rust."
+      content="Roughly is a fast Rust toolchain for R: the first static type checker, a full language server, and a project formatter in one tool. Catch type errors before you run — without changing your existing code."
     />
     <link rel="icon" href="/favicon.svg" />
     <script is:inline>
@@ -112,11 +112,12 @@ const year = new Date().getFullYear()
         <canvas id="hero-canvas" aria-hidden="true"></canvas>
         <div class="hero-vignette" aria-hidden="true"></div>
         <div class="hero-copy">
-          <p class="eyebrow">modern r tooling · written in rust</p>
-          <h1>Modern developer tooling for R.</h1>
+          <p class="eyebrow">the first type checker for R · written in rust</p>
+          <h1>The first type checker for R.</h1>
           <p class="subhead">
-            A language server, a code analyzer, and a formatter in one fast tool — built in Rust,
-            scaling past 300k lines.
+            Roughly is a fast, Rust-built toolchain — a static type checker, a language server, and a
+            formatter in one. It catches type errors before you run your code, works in your editor,
+            and changes nothing about the R you already have.
           </p>
           <div class="cta-cluster">
             <a class="cta cta-lg" href="/getting-started">Get started</a>
@@ -154,9 +155,10 @@ const year = new Date().getFullYear()
           <p class="eyebrow">three tools, one binary</p>
           <h2>Three tools, one binary.</h2>
           <p class="lede">
-            Editor smarts, problem-catching analysis, and one consistent style — all from a single
-            binary. R has world-class statistics; Roughly brings the IDE-grade tooling other
-            ecosystems already take for granted.
+            Built for R users who have outgrown RStudio: editor smarts, problem-catching analysis,
+            and one consistent style from a single binary. R has world-class statistics — Roughly
+            brings the IDE-grade tooling other ecosystems already take for granted, fast enough to
+            scale past 300k lines.
           </p>
         </div>
         <div class="col show-col">
@@ -323,8 +325,8 @@ const year = new Date().getFullYear()
           <h2>Code analysis.</h2>
           <p class="lede">
             Lint diagnostics run by default, flagging problems before you even run your code. Go
-            deeper with the first static type checker for R — Hindley-Milner inference that checks
-            most code with zero annotations — and the type checker stays opt-in.
+            deeper with the first static type checker for R — automatic inference checks most of your
+            code with zero annotations, and the type checker stays opt-in.
           </p>
         </div>
         <div class="col show-col">
@@ -538,10 +540,10 @@ const year = new Date().getFullYear()
           <p class="eyebrow">adopt</p>
           <h2>Drop it onto your R project.</h2>
           <p class="lede">
-            Nothing about your existing R has to change. Install Roughly, run it, and add the VS Code
-            extension.
+            Nothing about your existing R has to change. Install the VS Code extension in one click —
+            no toolchain required — or grab the CLI and point Roughly at your project.
           </p>
-          <pre class="codeblock"><code><span class="c-muted"># install</span>
+          <pre class="codeblock"><code><span class="c-muted"># install the CLI</span>
 cargo install roughly
 <span class="c-muted"># format, lint, and type-check</span>
 roughly fmt .
