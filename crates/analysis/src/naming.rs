@@ -293,42 +293,52 @@ pub(crate) fn build_candidate_order(
     let mut candidate_order = BTreeMap::<Symbol, Vec<DocumentId>>::new();
     for (document_id, module) in package_modules {
         let local_naming = expect_local_naming(locals, *document_id);
-        for expression_id in &module.expressions {
-            let ExpressionKind::Assign { target, .. } = module.arena.get(*expression_id).kind else {
-                continue;
-            };
-            if top_level_binding(local_naming, *expression_id).is_none() {
-                continue;
-            }
-            let candidates = candidate_order.entry(target).or_default();
-            if !candidates.contains(document_id) {
-                candidates.push(*document_id);
-            }
+        // `document_package_definitions` is the single shared membership rule; each target appears
+        // once per document, so the document is pushed onto a symbol's candidate list at most once.
+        for target in document_package_definitions(module, local_naming) {
+            candidate_order.entry(target).or_default().push(*document_id);
         }
     }
     candidate_order
 }
 
-// The package-global names a single document defines: the targets of its top-level `Assign`
-// expressions (those appearing directly in `module.expressions` with a top-level binding resolution).
-// A conditionally-executed assignment nested in `if`/`for`/`while` is rolled back out of the top-level
-// scope but still leaves a `TopLevelAssignment`-kinded entry in `bindings`, so folding binding kinds
-// would over-count it; iterating `module.expressions` here is the same membership `build_candidate_order`
-// uses, keeping the candidate index (`package_definitions`) consistent with the rebuild oracle.
+// The package-global names a single document defines. The membership rule, shared with
+// `build_candidate_order` so the candidate index and the rebuild oracle can never disagree: a target
+// counts when it is the target of a top-level `Assign` that resolves to a top-level binding.
+//
+// A bare top-level `{ }` block executes unconditionally, so its direct-child assigns are package
+// globals too; we recurse into bare `Block` expressions (including nested bare blocks). We do *not*
+// recurse into `if`/`for`/`while`/function bodies — those are `If`/`For`/`While`/`Function`
+// expressions, not bare `Block`s, so a conditionally-executed assign such as `if (TRUE) { x <- 1 }`
+// stays excluded even though it leaves a `TopLevelAssignment`-kinded entry in `bindings`.
 pub(crate) fn document_package_definitions(
     module: &Module,
     local_naming: &NamesLocal,
 ) -> BTreeSet<Symbol> {
     let mut symbols = BTreeSet::new();
-    for expression_id in &module.expressions {
-        let ExpressionKind::Assign { target, .. } = module.arena.get(*expression_id).kind else {
-            continue;
-        };
-        if top_level_binding(local_naming, *expression_id).is_some() {
-            symbols.insert(target);
+    collect_package_definitions(module, local_naming, &module.expressions, &mut symbols);
+    symbols
+}
+
+fn collect_package_definitions(
+    module: &Module,
+    local_naming: &NamesLocal,
+    expressions: &[ExpressionId],
+    symbols: &mut BTreeSet<Symbol>,
+) {
+    for expression_id in expressions {
+        match &module.arena.get(*expression_id).kind {
+            ExpressionKind::Assign { target, .. } => {
+                if top_level_binding(local_naming, *expression_id).is_some() {
+                    symbols.insert(*target);
+                }
+            }
+            ExpressionKind::Block { expressions, .. } => {
+                collect_package_definitions(module, local_naming, expressions, symbols);
+            }
+            _ => {}
         }
     }
-    symbols
 }
 
 pub(crate) fn winners_from_candidate_order(
@@ -393,25 +403,36 @@ pub fn find_binding(
         .map(|binding| binding.id)
 }
 
+// The binding a package-global `symbol` resolves to inside its winning document: the last (source
+// order) top-level `Assign` of `symbol`, recursing into bare top-level `{ }` blocks so a block-bound
+// global is found. The bare-block recursion mirrors `document_package_definitions`, keeping the export
+// lookup in step with the membership rule that admitted the global in the first place.
 pub fn find_exported_binding(
     module: &Module,
     local_naming: &NamesLocal,
     symbol: Symbol,
 ) -> Option<BindingId> {
-    module.expressions.iter().rev().find_map(|expression_id| {
-        let expression = module.arena.get(*expression_id);
-        let ExpressionKind::Assign { target, .. } = expression.kind else {
-            return None;
-        };
-        (target == symbol)
-            .then(|| {
-                local_naming
-                    .expression_resolutions
-                    .get(expression_id)
-                    .copied()
-            })
-            .flatten()
-    })
+    find_exported_binding_in(module, local_naming, symbol, &module.expressions)
+}
+
+fn find_exported_binding_in(
+    module: &Module,
+    local_naming: &NamesLocal,
+    symbol: Symbol,
+    expressions: &[ExpressionId],
+) -> Option<BindingId> {
+    expressions
+        .iter()
+        .rev()
+        .find_map(|expression_id| match &module.arena.get(*expression_id).kind {
+            ExpressionKind::Assign { target, .. } => (*target == symbol)
+                .then(|| local_naming.expression_resolutions.get(expression_id).copied())
+                .flatten(),
+            ExpressionKind::Block { expressions, .. } => {
+                find_exported_binding_in(module, local_naming, symbol, expressions)
+            }
+            _ => None,
+        })
 }
 
 fn expect_local_naming(locals: &HashMap<DocumentId, NamesLocal>, document_id: DocumentId) -> &NamesLocal {

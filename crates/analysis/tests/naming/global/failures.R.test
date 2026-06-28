@@ -21,6 +21,25 @@ warning[naming] I could not resolve `x` in this package, its imports, or builtin
 --> 1:17-1:18
 | f <- function() x
 
+#---- conditional_top_level_block_assign_is_not_package_global
+#---- R/a.R
+if (TRUE) {
+  x <- 1L
+}
+#++++
+If
+  Logical(true)
+  Block
+    Assign(x@b0)
+      Integer(1L)
+#---- R/b.R
+x
+#++++
+Symbol(x@?)
+
+warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+--> 1:1-1:2
+| x
 #==== global_warnings
 #---- top_level_binding_shadows_builtin
 #---- R/main.R

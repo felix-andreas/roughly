@@ -170,3 +170,18 @@ warning[naming] Top-level binding `x` overwrites an earlier top-level binding in
 x
 #++++
 Symbol(x@b2)
+
+#==== bare_block_globals
+#---- bare_top_level_block_assign_is_package_global
+#---- R/a.R
+{
+  x <- 1L
+}
+#++++
+Block
+  Assign(x@b0)
+    Integer(1L)
+#---- R/b.R
+x
+#++++
+Symbol(x@b0)
