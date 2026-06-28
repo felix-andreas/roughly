@@ -109,6 +109,10 @@ struct ServerState {
     // When the client advertises pull-diagnostics support it owns the request cadence, so the
     // server stops pushing `publish_diagnostics` and answers `textDocument/diagnostic` instead.
     client_supports_pull_diagnostics: bool,
+    // When a pull client also supports `workspace/diagnostic/refresh`, a package-visible save that
+    // moves diagnostics in OTHER documents asks the client to re-pull. Push is suppressed for pull
+    // clients, so without this their non-visible dependents would go stale after such a save.
+    client_supports_diagnostic_refresh: bool,
 }
 
 impl ServerState {
@@ -128,6 +132,7 @@ impl ServerState {
             analysis_state: Analysis::new(workspace_root.clone(), config.lint, config.check),
             position_encoding: PositionEncoding::Utf16,
             client_supports_pull_diagnostics: false,
+            client_supports_diagnostic_refresh: false,
         })
     }
 
@@ -271,8 +276,16 @@ impl LanguageServer for ServerState {
             .as_ref()
             .and_then(|text_document| text_document.diagnostic.as_ref())
             .is_some();
+        self.client_supports_diagnostic_refresh = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.diagnostic.as_ref())
+            .and_then(|diagnostic| diagnostic.refresh_support)
+            .unwrap_or(false);
         tracing::info!(
             pull_diagnostics = self.client_supports_pull_diagnostics,
+            diagnostic_refresh = self.client_supports_diagnostic_refresh,
             "negotiated diagnostics delivery"
         );
 
@@ -592,14 +605,27 @@ impl LanguageServer for ServerState {
                 )
             });
 
-        // Pull clients re-request diagnostics on their own cadence (and run_full on demand in the
-        // pull handler), so the server neither recomputes nor republishes here.
+        // Pull clients re-request the saved (visible) document on their own cadence, so the server
+        // does not push. But push is suppressed for them, so a save that moved diagnostics in OTHER
+        // (non-visible) documents would leave those dependents stale. Precisely detecting which
+        // dependents moved is not reliably available here — `run_full` reports an affected set only
+        // when type checking is enabled, yet cross-file naming diagnostics (e.g. "could not resolve")
+        // move regardless — so conservatively ask the client to re-pull on every save. Saves are
+        // infrequent and the client only re-pulls the documents it has open.
         if self.client_supports_pull_diagnostics {
+            if self.client_supports_diagnostic_refresh {
+                let mut client = self.client.clone();
+                tokio::spawn(async move {
+                    if let Err(error) = client.workspace_diagnostic_refresh(()).await {
+                        tracing::error!(?error, "failed to request workspace diagnostic refresh");
+                    }
+                });
+            }
             return ControlFlow::Continue(());
         }
 
-        // Package-visible changes can move diagnostics in dependent files, so every
-        // document whose typecheck output changed gets republished, not only the saved one.
+        // Package-visible changes can move diagnostics in dependent files, so every document whose
+        // typecheck output changed gets republished, not only the saved one.
         let mut affected_document_ids = analysis::run_full(&mut self.analysis_state);
         if !affected_document_ids.contains(&document_id) {
             affected_document_ids.push(document_id);

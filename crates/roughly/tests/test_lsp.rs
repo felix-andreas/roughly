@@ -4,8 +4,10 @@ use {
         concurrency::{Concurrency, ConcurrencyLayer},
         lsp_types::{
             ClientCapabilities, CompletionParams, CompletionResponse, DiagnosticClientCapabilities,
-            DiagnosticServerCapabilities, DidChangeWatchedFilesParams,
-            DidOpenTextDocumentParams, DocumentDiagnosticParams, DocumentDiagnosticReport,
+            DiagnosticServerCapabilities, DiagnosticWorkspaceClientCapabilities,
+            DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+            DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
+            DocumentDiagnosticReport,
             DocumentDiagnosticReportResult, DocumentFormattingParams, DocumentSymbolParams,
             DocumentSymbolResponse, FileChangeType, FileEvent, FormattingOptions,
             GeneralClientCapabilities, GotoDefinitionParams, GotoDefinitionResponse, HoverContents,
@@ -14,11 +16,12 @@ use {
             Range,
             PublishDiagnosticsParams, ReferenceContext, ReferenceParams, RenameParams,
             SignatureHelpParams,
-            TextDocumentClientCapabilities, TextDocumentIdentifier, TextDocumentItem,
-            TextDocumentPositionParams, Url,
-            WorkDoneProgressParams, WorkspaceFolder,
+            TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier,
+            TextDocumentItem,
+            TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
+            WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceFolder,
             notification::{PublishDiagnostics, ShowMessage},
-            request::RegisterCapability,
+            request::{RegisterCapability, WorkspaceDiagnosticRefresh},
         },
         panic::{CatchUnwind, CatchUnwindLayer},
         router::Router,
@@ -36,6 +39,7 @@ use {
 
 struct TestClientState {
     diagnostics_sender: mpsc::UnboundedSender<PublishDiagnosticsParams>,
+    refresh_sender: mpsc::UnboundedSender<()>,
 }
 
 struct Stop;
@@ -44,9 +48,13 @@ type TestService = CatchUnwind<Concurrency<Router<TestClientState>>>;
 
 fn build_test_client(
     diagnostics_sender: mpsc::UnboundedSender<PublishDiagnosticsParams>,
+    refresh_sender: mpsc::UnboundedSender<()>,
 ) -> (async_lsp::MainLoop<TestService>, async_lsp::ServerSocket) {
     async_lsp::MainLoop::new_client(|_server| {
-        let mut router = Router::new(TestClientState { diagnostics_sender });
+        let mut router = Router::new(TestClientState {
+            diagnostics_sender,
+            refresh_sender,
+        });
 
         router.notification::<PublishDiagnostics>(|state, params| {
             state
@@ -57,6 +65,11 @@ fn build_test_client(
         });
 
         router.request::<RegisterCapability, _>(|_, _| std::future::ready(Ok(())));
+
+        router.request::<WorkspaceDiagnosticRefresh, _>(|state, _| {
+            let _ = state.refresh_sender.send(());
+            std::future::ready(Ok(()))
+        });
 
         router.notification::<ShowMessage>(|_, _| ControlFlow::Continue(()));
 
@@ -120,6 +133,7 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 struct TestContext {
     server: async_lsp::ServerSocket,
     diagnostics_receiver: mpsc::UnboundedReceiver<PublishDiagnosticsParams>,
+    refresh_receiver: mpsc::UnboundedReceiver<()>,
     mainloop_handle: tokio::task::JoinHandle<()>,
     init_result: InitializeResult,
     _temp_dir: tempfile::TempDir,
@@ -168,7 +182,8 @@ async fn setup_test_inner(
     }
 
     let (diagnostics_sender, diagnostics_receiver) = mpsc::unbounded_channel();
-    let (mainloop, mut server) = build_test_client(diagnostics_sender);
+    let (refresh_sender, refresh_receiver) = mpsc::unbounded_channel();
+    let (mainloop, mut server) = build_test_client(diagnostics_sender, refresh_sender);
 
     let mut child = spawn_server_with_experimental_features(&workspace_dir, experimental_features);
     let stdout = child.stdout.take().expect("missing stdout").compat();
@@ -206,6 +221,7 @@ async fn setup_test_inner(
     TestContext {
         server,
         diagnostics_receiver,
+        refresh_receiver,
         mainloop_handle,
         init_result,
         _temp_dir: temp_dir,
@@ -243,6 +259,23 @@ async fn setup_test_with_pull_diagnostics(initial_files: &[(&str, &str)]) -> Tes
         text_document: Some(TextDocumentClientCapabilities {
             diagnostic: Some(DiagnosticClientCapabilities::default()),
             ..TextDocumentClientCapabilities::default()
+        }),
+        ..ClientCapabilities::default()
+    };
+    setup_test_inner(true, initial_files, &[], capabilities).await
+}
+
+async fn setup_test_with_pull_and_refresh(initial_files: &[(&str, &str)]) -> TestContext {
+    let capabilities = ClientCapabilities {
+        text_document: Some(TextDocumentClientCapabilities {
+            diagnostic: Some(DiagnosticClientCapabilities::default()),
+            ..TextDocumentClientCapabilities::default()
+        }),
+        workspace: Some(WorkspaceClientCapabilities {
+            diagnostic: Some(DiagnosticWorkspaceClientCapabilities {
+                refresh_support: Some(true),
+            }),
+            ..WorkspaceClientCapabilities::default()
         }),
         ..ClientCapabilities::default()
     };
@@ -289,6 +322,40 @@ impl TestContext {
             })
             .await
             .expect("document_diagnostic request failed")
+    }
+
+    // Replaces `range` of the open document with `text` (incremental sync) at `version`.
+    fn change_file(&mut self, uri: &Url, version: i32, range: Range, text: &str) {
+        self.server
+            .did_change(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: Some(range),
+                    range_length: None,
+                    text: text.into(),
+                }],
+            })
+            .expect("did_change failed");
+    }
+
+    fn save_file(&mut self, uri: &Url) {
+        self.server
+            .did_save(DidSaveTextDocumentParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                text: None,
+            })
+            .expect("did_save failed");
+    }
+
+    // Waits briefly for a `workspace/diagnostic/refresh` request, returning whether one arrived.
+    async fn received_refresh(&mut self) -> bool {
+        tokio::time::timeout(Duration::from_secs(2), self.refresh_receiver.recv())
+            .await
+            .map(|received| received.is_some())
+            .unwrap_or(false)
     }
 
     fn notify_watched_file_changed(&mut self, relative_path: &str, change_type: FileChangeType) {
@@ -1818,6 +1885,77 @@ async fn inlay_hint_on_document_is_safe() {
         .await
         .expect("inlay_hint request must not panic the server");
     assert!(hints.is_some(), "inlay_hint should return a (possibly empty) list");
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn dependency_affecting_save_requests_diagnostic_refresh() {
+    // `R/a.R` defines the global `x`; `R/b.R` references it and resolves cleanly.
+    let mut context =
+        setup_test_with_pull_and_refresh(&[("R/a.R", "x <- 1L\n"), ("R/b.R", "y <- x\n")]).await;
+    let a_uri = context.file_uri("R/a.R");
+    let b_uri = context.file_uri("R/b.R");
+
+    // Baseline pull (runs the full check), so the later save is measured against a known state.
+    let (baseline, _) = full_report_messages(context.document_diagnostic(&b_uri, None).await);
+    assert!(
+        baseline.is_empty(),
+        "`y <- x` should resolve while `x` is defined, got: {baseline:?}"
+    );
+
+    context.open_file(&a_uri, "x <- 1L\n").await;
+    // Rename the global `x` to `z` (replace the first character), so `R/b.R`'s reference to `x`
+    // becomes unresolved — a package-visible change in a *different* document than the saved one.
+    context.change_file(
+        &a_uri,
+        1,
+        Range {
+            start: Position { line: 0, character: 0 },
+            end: Position { line: 0, character: 1 },
+        },
+        "z",
+    );
+    context.save_file(&a_uri);
+
+    assert!(
+        context.received_refresh().await,
+        "a save that moves a dependent file's diagnostics must request workspace/diagnostic/refresh"
+    );
+
+    // The dependent's moved diagnostic is observable on the next pull.
+    let (after, _) = full_report_messages(context.document_diagnostic(&b_uri, None).await);
+    assert!(
+        after.iter().any(|message| message.contains("resolve")),
+        "after renaming `x`, `R/b.R` should report an unresolved reference, got: {after:?}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn pull_client_without_refresh_support_gets_no_refresh() {
+    // A pull client that does not advertise `workspace/diagnostic/refresh` must never receive a
+    // refresh request — the server respects the negotiated capability.
+    let mut context = setup_test_with_pull_diagnostics(&[("R/solo.R", "x <- 1L\n")]).await;
+    let solo_uri = context.file_uri("R/solo.R");
+
+    context.open_file(&solo_uri, "x <- 1L\n").await;
+    context.change_file(
+        &solo_uri,
+        1,
+        Range {
+            start: Position { line: 0, character: 0 },
+            end: Position { line: 0, character: 1 },
+        },
+        "z",
+    );
+    context.save_file(&solo_uri);
+
+    assert!(
+        !context.received_refresh().await,
+        "a client without refresh support must not receive a refresh request"
+    );
 
     context.shutdown().await;
 }
