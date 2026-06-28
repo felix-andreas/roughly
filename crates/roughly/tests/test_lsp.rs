@@ -3,8 +3,10 @@ use {
         LanguageServer,
         concurrency::{Concurrency, ConcurrencyLayer},
         lsp_types::{
-            ClientCapabilities, CompletionParams, CompletionResponse, DidChangeWatchedFilesParams,
-            DidOpenTextDocumentParams, DocumentFormattingParams, DocumentSymbolParams,
+            ClientCapabilities, CompletionParams, CompletionResponse, DiagnosticClientCapabilities,
+            DiagnosticServerCapabilities, DidChangeWatchedFilesParams,
+            DidOpenTextDocumentParams, DocumentDiagnosticParams, DocumentDiagnosticReport,
+            DocumentDiagnosticReportResult, DocumentFormattingParams, DocumentSymbolParams,
             DocumentSymbolResponse, FileChangeType, FileEvent, FormattingOptions,
             GeneralClientCapabilities, GotoDefinitionParams, GotoDefinitionResponse, HoverContents,
             HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
@@ -12,7 +14,8 @@ use {
             Range,
             PublishDiagnosticsParams, ReferenceContext, ReferenceParams, RenameParams,
             SignatureHelpParams,
-            TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
+            TextDocumentClientCapabilities, TextDocumentIdentifier, TextDocumentItem,
+            TextDocumentPositionParams, Url,
             WorkDoneProgressParams, WorkspaceFolder,
             notification::{PublishDiagnostics, ShowMessage},
             request::RegisterCapability,
@@ -235,6 +238,17 @@ async fn setup_test_with_position_encodings(
     setup_test_inner(true, initial_files, &[], capabilities).await
 }
 
+async fn setup_test_with_pull_diagnostics(initial_files: &[(&str, &str)]) -> TestContext {
+    let capabilities = ClientCapabilities {
+        text_document: Some(TextDocumentClientCapabilities {
+            diagnostic: Some(DiagnosticClientCapabilities::default()),
+            ..TextDocumentClientCapabilities::default()
+        }),
+        ..ClientCapabilities::default()
+    };
+    setup_test_inner(true, initial_files, &[], capabilities).await
+}
+
 impl TestContext {
     async fn shutdown(mut self) {
         self.server.shutdown(()).await.expect("shutdown failed");
@@ -258,6 +272,23 @@ impl TestContext {
                 },
             })
             .expect("did_open failed");
+    }
+
+    async fn document_diagnostic(
+        &mut self,
+        uri: &Url,
+        previous_result_id: Option<String>,
+    ) -> DocumentDiagnosticReportResult {
+        self.server
+            .document_diagnostic(DocumentDiagnosticParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                identifier: Some("roughly".into()),
+                previous_result_id,
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .await
+            .expect("document_diagnostic request failed")
     }
 
     fn notify_watched_file_changed(&mut self, relative_path: &str, change_type: FileChangeType) {
@@ -1587,6 +1618,182 @@ async fn signature_help_out_of_bounds_position_is_safe() {
             "OOB signature help should be None at {position:?}, got: {result:?}"
         );
     }
+
+    context.shutdown().await;
+}
+
+// Pull diagnostics (`textDocument/diagnostic`, LSP 3.17). The pull result must equal what the push
+// path would send for the same state, and is additive: push remains the default for clients that do
+// not advertise pull support.
+
+fn full_report_messages(result: DocumentDiagnosticReportResult) -> (Vec<String>, Option<String>) {
+    match result {
+        DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(full)) => {
+            let report = full.full_document_diagnostic_report;
+            let messages = report.items.iter().map(|item| item.message.clone()).collect();
+            (messages, report.result_id)
+        }
+        other => panic!("expected a full diagnostic report, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn initialize_advertises_diagnostic_provider() {
+    let context = setup_test(&[]).await;
+
+    let provider = context
+        .init_result
+        .capabilities
+        .diagnostic_provider
+        .as_ref()
+        .expect("expected a diagnostic_provider capability");
+    let DiagnosticServerCapabilities::Options(options) = provider else {
+        panic!("expected DiagnosticServerCapabilities::Options, got: {provider:?}");
+    };
+    assert_eq!(options.identifier.as_deref(), Some("roughly"));
+    assert!(
+        options.inter_file_dependencies,
+        "package-visible edits move diagnostics in dependent files"
+    );
+    assert!(
+        !options.workspace_diagnostics,
+        "workspace/diagnostic is not implemented yet"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn pull_diagnostics_report_known_diagnostics() {
+    let mut context = setup_test(&[]).await;
+
+    let file_uri = context.file_uri("R/pull.R");
+    context.open_file(&file_uri, "x <- T\ny = 1\n").await;
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    let (messages, result_id) = full_report_messages(context.document_diagnostic(&file_uri, None).await);
+
+    assert!(
+        messages.iter().any(|message| message.contains("TRUE")),
+        "expected a T-vs-TRUE diagnostic in the pull report, got: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| message.contains("<-")),
+        "expected an = vs <- diagnostic in the pull report, got: {messages:?}"
+    );
+    assert!(result_id.is_some(), "a non-empty report must carry a result id");
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn pull_diagnostics_empty_for_clean_file() {
+    let mut context = setup_test(&[]).await;
+
+    let file_uri = context.file_uri("R/pull_clean.R");
+    context.open_file(&file_uri, "x <- 1\ny <- x + 2\n").await;
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    let (messages, _) = full_report_messages(context.document_diagnostic(&file_uri, None).await);
+
+    assert!(
+        messages.is_empty(),
+        "expected an empty full report for a clean file, got: {messages:?}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn pull_diagnostics_untracked_document_is_empty() {
+    let mut context = setup_test(&[]).await;
+
+    // A pull can arrive for a document the server never opened or preloaded; it must answer with an
+    // empty full report rather than panicking.
+    let file_uri = context.file_uri("R/never_opened.R");
+    let (messages, _) = full_report_messages(context.document_diagnostic(&file_uri, None).await);
+
+    assert!(
+        messages.is_empty(),
+        "expected an empty report for an untracked document, got: {messages:?}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn pull_diagnostics_unchanged_on_repeat() {
+    let mut context = setup_test(&[]).await;
+
+    let file_uri = context.file_uri("R/pull_unchanged.R");
+    context.open_file(&file_uri, "x <- T\n").await;
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    let (_, result_id) = full_report_messages(context.document_diagnostic(&file_uri, None).await);
+    let result_id = result_id.expect("first pull must carry a result id");
+
+    let repeat = context
+        .document_diagnostic(&file_uri, Some(result_id.clone()))
+        .await;
+    match repeat {
+        DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Unchanged(unchanged)) => {
+            assert_eq!(
+                unchanged.unchanged_document_diagnostic_report.result_id, result_id,
+                "an unchanged report echoes the still-current result id"
+            );
+        }
+        other => panic!("expected an unchanged report on repeat pull, got: {other:?}"),
+    }
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn pull_diagnostics_match_pushed_across_files() {
+    // A multi-file workspace: each file is pushed on open (default client has no pull support), and a
+    // subsequent pull for the same state must return the identical diagnostics.
+    let mut context = setup_test(&[]).await;
+
+    let file_a_uri = context.file_uri("R/match_a.R");
+    let file_b_uri = context.file_uri("R/match_b.R");
+    context.open_file(&file_a_uri, "x <- T\n").await;
+    context.open_file(&file_b_uri, "y = 1\n").await;
+
+    let pushed_a = recv_diagnostics(&mut context.diagnostics_receiver, &file_a_uri, TIMEOUT).await;
+    let pushed_b = recv_diagnostics(&mut context.diagnostics_receiver, &file_b_uri, TIMEOUT).await;
+    let pushed_a: Vec<String> = pushed_a.diagnostics.iter().map(|d| d.message.clone()).collect();
+    let pushed_b: Vec<String> = pushed_b.diagnostics.iter().map(|d| d.message.clone()).collect();
+
+    let (pulled_a, _) = full_report_messages(context.document_diagnostic(&file_a_uri, None).await);
+    let (pulled_b, _) = full_report_messages(context.document_diagnostic(&file_b_uri, None).await);
+
+    assert_eq!(pulled_a, pushed_a, "pulled file A diagnostics must equal the pushed ones");
+    assert_eq!(pulled_b, pushed_b, "pulled file B diagnostics must equal the pushed ones");
+    assert!(!pulled_a.is_empty() && !pulled_b.is_empty(), "both files should report diagnostics");
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn pull_capable_client_suppresses_push() {
+    let mut context = setup_test_with_pull_diagnostics(&[]).await;
+
+    let file_uri = context.file_uri("R/pull_only.R");
+    context.open_file(&file_uri, "x <- T\n").await;
+
+    // The client advertised pull support, so the server must not push. Give the server time to
+    // process did_open, then assert nothing landed on the push channel.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        context.diagnostics_receiver.try_recv().is_err(),
+        "a pull-capable client must not receive pushed diagnostics"
+    );
+
+    let (messages, _) = full_report_messages(context.document_diagnostic(&file_uri, None).await);
+    assert!(
+        messages.iter().any(|message| message.contains("TRUE")),
+        "the pull report must still carry the diagnostic, got: {messages:?}"
+    );
 
     context.shutdown().await;
 }

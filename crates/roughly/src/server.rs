@@ -7,21 +7,27 @@ use {
         position::{self, PositionEncoding},
         lsp_types::{
             CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionList,
-            CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+            CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
+            DiagnosticOptions, DiagnosticServerCapabilities, DidChangeTextDocumentParams,
             DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
             DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+            DocumentDiagnosticParams, DocumentDiagnosticReport, DocumentDiagnosticReportResult,
             DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol,
             DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
-            GlobPattern, Hover, HoverContents, HoverParams, HoverProviderCapability, InlayHint,
+            FullDocumentDiagnosticReport, GlobPattern, Hover, HoverContents, HoverParams,
+            HoverProviderCapability, InlayHint,
             InlayHintKind, InlayHintLabel, InlayHintParams,
             InitializeParams, InitializeResult, InitializedParams, Location, MarkupContent,
             MarkupKind, MessageType, OneOf, Position, PublishDiagnosticsParams, Range,
             ParameterInformation, ParameterLabel, ReferenceParams, Registration,
-            RegistrationParams, RelativePattern, RenameParams, SaveOptions, ServerCapabilities,
+            RegistrationParams, RelatedFullDocumentDiagnosticReport,
+            RelatedUnchangedDocumentDiagnosticReport, RelativePattern, RenameParams, SaveOptions,
+            ServerCapabilities,
             ServerInfo, ShowMessageParams, SignatureHelp, SignatureHelpOptions,
             SignatureHelpParams, SignatureInformation,
             TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-            TextDocumentSyncSaveOptions, TextEdit, Url, WorkspaceEdit, WorkspaceSymbolParams,
+            TextDocumentSyncSaveOptions, TextEdit, UnchangedDocumentDiagnosticReport, Url,
+            WorkspaceEdit, WorkspaceSymbolParams,
             WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
         },
@@ -40,7 +46,8 @@ use {
     },
     futures::future::BoxFuture,
     std::{
-        collections::{HashMap, HashSet},
+        collections::{HashMap, HashSet, hash_map::DefaultHasher},
+        hash::{Hash, Hasher},
         ops::ControlFlow,
         path::{Path, PathBuf},
         time::Instant,
@@ -99,6 +106,9 @@ struct ServerState {
     open_documents: HashSet<PathBuf>,
     analysis_state: Analysis,
     position_encoding: PositionEncoding,
+    // When the client advertises pull-diagnostics support it owns the request cadence, so the
+    // server stops pushing `publish_diagnostics` and answers `textDocument/diagnostic` instead.
+    client_supports_pull_diagnostics: bool,
 }
 
 impl ServerState {
@@ -117,6 +127,7 @@ impl ServerState {
             open_documents: HashSet::new(),
             analysis_state: Analysis::new(workspace_root.clone(), config.lint, config.check),
             position_encoding: PositionEncoding::Utf16,
+            client_supports_pull_diagnostics: false,
         })
     }
 
@@ -249,9 +260,21 @@ impl LanguageServer for ServerState {
         let client_encodings = params
             .capabilities
             .general
-            .and_then(|general| general.position_encodings);
-        self.position_encoding = PositionEncoding::negotiate(client_encodings.as_deref());
+            .as_ref()
+            .and_then(|general| general.position_encodings.as_deref());
+        self.position_encoding = PositionEncoding::negotiate(client_encodings);
         tracing::info!(?self.position_encoding, "negotiated position encoding");
+
+        self.client_supports_pull_diagnostics = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|text_document| text_document.diagnostic.as_ref())
+            .is_some();
+        tracing::info!(
+            pull_diagnostics = self.client_supports_pull_diagnostics,
+            "negotiated diagnostics delivery"
+        );
 
         let workspace_r_path = self.workspace_r_path();
 
@@ -284,6 +307,12 @@ impl LanguageServer for ServerState {
                     ..Default::default()
                 }),
                 definition_provider: Some(OneOf::Left(true)),
+                diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
+                    identifier: Some("roughly".into()),
+                    inter_file_dependencies: true,
+                    workspace_diagnostics: false,
+                    work_done_progress_options: Default::default(),
+                })),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(
                     self.experimental_features.range_formatting,
@@ -402,17 +431,18 @@ impl LanguageServer for ServerState {
                 )
             });
         analysis::run_fast(&mut self.analysis_state);
-        let diagnostics = self.convert_document_diagnostics(document_id);
-
-        if let Err(error) = self
-            .client
-            .publish_diagnostics(PublishDiagnosticsParams::new(
-                uri,
-                diagnostics,
-                Some(params.text_document.version),
-            ))
-        {
-            tracing::error!(?error, "failed to publish diagnostics");
+        if !self.client_supports_pull_diagnostics {
+            let diagnostics = self.convert_document_diagnostics(document_id);
+            if let Err(error) = self
+                .client
+                .publish_diagnostics(PublishDiagnosticsParams::new(
+                    uri,
+                    diagnostics,
+                    Some(params.text_document.version),
+                ))
+            {
+                tracing::error!(?error, "failed to publish diagnostics");
+            }
         }
 
         ControlFlow::Continue(())
@@ -517,17 +547,18 @@ impl LanguageServer for ServerState {
                 )
             });
         analysis::run_fast(&mut self.analysis_state);
-        let diagnostics = self.convert_document_diagnostics(document_id);
-
-        if let Err(error) = self
-            .client
-            .publish_diagnostics(PublishDiagnosticsParams::new(
-                uri.clone(),
-                diagnostics,
-                Some(params.text_document.version),
-            ))
-        {
-            tracing::error!(?error, "failed to publish diagnostics");
+        if !self.client_supports_pull_diagnostics {
+            let diagnostics = self.convert_document_diagnostics(document_id);
+            if let Err(error) = self
+                .client
+                .publish_diagnostics(PublishDiagnosticsParams::new(
+                    uri.clone(),
+                    diagnostics,
+                    Some(params.text_document.version),
+                ))
+            {
+                tracing::error!(?error, "failed to publish diagnostics");
+            }
         }
 
         tracing::debug!(elapsed = start.elapsed().as_millis());
@@ -560,6 +591,13 @@ impl LanguageServer for ServerState {
                     path.display()
                 )
             });
+
+        // Pull clients re-request diagnostics on their own cadence (and run_full on demand in the
+        // pull handler), so the server neither recomputes nor republishes here.
+        if self.client_supports_pull_diagnostics {
+            return ControlFlow::Continue(());
+        }
+
         // Package-visible changes can move diagnostics in dependent files, so every
         // document whose typecheck output changed gets republished, not only the saved one.
         let mut affected_document_ids = analysis::run_full(&mut self.analysis_state);
@@ -661,6 +699,56 @@ impl LanguageServer for ServerState {
     ) -> ControlFlow<async_lsp::Result<()>> {
         // Stub implementation to satisfy Zed's requirements; does not apply any configuration changes.
         ControlFlow::Continue(())
+    }
+
+    //
+    // PULL DIAGNOSTICS
+    //
+
+    fn document_diagnostic(
+        &mut self,
+        params: DocumentDiagnosticParams,
+    ) -> BoxFuture<'static, Result<DocumentDiagnosticReportResult, ResponseError>> {
+        let uri = params.text_document.uri;
+        let path = uri.to_file_path().unwrap();
+
+        tracing::debug!(?path, "document diagnostic");
+
+        // Unlike the sync notifications, a pull can legitimately target a document the server does
+        // not track; answer with an empty full report rather than panicking.
+        let Some(document_id) = self.analysis_state.document_id_for_path(&path) else {
+            tracing::debug!(?path, "pull diagnostic for untracked document");
+            return box_future(Ok(empty_full_diagnostic_report()));
+        };
+
+        // The full pipeline (typecheck included) is required so the pulled report equals what the
+        // push path would send and reflects package-visible edits in dependent files.
+        analysis::run_full(&mut self.analysis_state);
+        let items = self.convert_document_diagnostics(document_id);
+        let result_id = diagnostics_result_id(&items);
+
+        // The result id is a content hash of the report, so an unchanged answer is correct even
+        // under inter-file dependencies where the document's own edit version did not move.
+        if params.previous_result_id.as_deref() == Some(result_id.as_str()) {
+            return box_future(Ok(DocumentDiagnosticReportResult::Report(
+                DocumentDiagnosticReport::Unchanged(RelatedUnchangedDocumentDiagnosticReport {
+                    related_documents: None,
+                    unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
+                        result_id,
+                    },
+                }),
+            )));
+        }
+
+        box_future(Ok(DocumentDiagnosticReportResult::Report(
+            DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
+                related_documents: None,
+                full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                    result_id: Some(result_id),
+                    items,
+                },
+            }),
+        )))
     }
 
     //
@@ -1129,6 +1217,28 @@ impl LanguageServer for ServerState {
 #[inline(always)]
 fn box_future<T: Send + 'static>(content: T) -> BoxFuture<'static, T> {
     Box::pin(async { content })
+}
+
+fn empty_full_diagnostic_report() -> DocumentDiagnosticReportResult {
+    DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(
+        RelatedFullDocumentDiagnosticReport {
+            related_documents: None,
+            full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                result_id: None,
+                items: Vec::new(),
+            },
+        },
+    ))
+}
+
+// A content hash of the report, used as the pull `resultId`: a later pull carrying this id can be
+// answered with `Unchanged` whenever the recomputed diagnostics hash to the same value.
+fn diagnostics_result_id(items: &[Diagnostic]) -> String {
+    let serialized =
+        serde_json::to_vec(items).expect("lsp diagnostics are serializable for result-id hashing");
+    let mut hasher = DefaultHasher::new();
+    serialized.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 fn path_not_found_error(path: &Path) -> ResponseError {
