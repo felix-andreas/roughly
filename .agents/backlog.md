@@ -16,10 +16,22 @@ Testing rule (user, standing): **anything that can be tested should use fixtures
 | 6 | **Docs to world-class state** — accuracy + clarity pass across the docs site (contracts). | DX | |
 | 7 | **Website improvement** — adversarial marketing-expert review + improvements. | DX | |
 
+## Resolved (Expert recommendations, 2026-06-28)
+
+**#2 Library typing — APPROACH DECIDED: tiered stdlib-vs-CRAN, both as `#:` decl-only stubs (no bespoke format).**
+- **stdlib (base/stats/utils/methods):** curated in-repo, **compiled into the binary**, selected by detected **R version**; loaded once at `Analysis::new`; the "known" universe for strict mode. First increment: `T`/`F`/`pi` + ~12–50 high-frequency base fns.
+- **CRAN (third-party):** not shipped; discover the project's installed packages (`.libPaths()`/renv/DESCRIPTION), **auto-generate shallow stubs by introspecting real R** (`getNamespaceExports()` + `formals()` → arity + arg names, `Any`/`Incomplete` returns), cached per package version; optional curated overrides (typeshed-third-party model); unstubbed → `Any`, never a hard error. `pkg::name` needs a `NamespaceGet` HIR node (today `Unsupported`).
+- **Isolation (hard gate):** stubs are immutable high-durability inputs — never in `global_bindings`/interface table/fingerprints/reverse-deps/dirty-set; verified by an isolation assertion + a zero-per-edit-cost benchmark.
+- DoD = LT1–LT7 (format+SSOT; incremental isolation; stdlib embedded + R-version-keyed; CRAN per-project introspection; stubtest CI validator diffing curated stubs vs real R; scope discipline incl. optional/default params + the named-arg-lowering gap; type-syntax extensions gated). **Action:** revise `docs/.../stdlib-stubs.md` to add the CRAN tier + introspection-generation + R-version keying (currently stdlib-only).
+
+**Fuzzing — DECIDED (Expert): YES, two `cargo-fuzz` targets (soak alone is insufficient).**
+- **(F1) Differential incremental oracle** — random `add/edit/delete/rename` op-sequences via `arbitrary`; invariant: incremental `Analysis` == full rebuild across all five drift oracles **plus** diagnostics + `global_bindings` + type index. The soak generalized to coverage-guided/auto-minimizing; hunts the silent-stale class and is the cross-check that de-risks the eventual salsa migration. Build now or with the migration.
+- **(F2) Parser + type-syntax + lowering robustness** — raw R + `#:` input; invariants: no panic / termination (S4 guards) / tree-sitter always-a-tree / no OOB on stale ranges (S6). Valuable **regardless** of architecture — build now (independent).
+- Run nightly + time-boxed in CI; commit the corpus and every crash repro as a deterministic regression seed/fixture.
+
 ## Open questions (Director to resolve / ask)
 
-- **Proper fuzz test?** We have a seeded deterministic soak (3000 fixed-seed ops + release-gated drift oracles). Do we also want a true random/continuous fuzzer (cargo-fuzz)? — asking CTO/Expert.
-- **Strict-mode semantics** — confirm the interpretation above with the user (the phrasing was ambiguous).
+- **Strict-mode semantics** — confirm the interpretation above with the user (the phrasing was ambiguous; Director's read: strict ⇒ `Unknown` is an error, default tolerates).
 
 ## Notes
 
