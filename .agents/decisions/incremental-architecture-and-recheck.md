@@ -14,6 +14,17 @@ This is driven **with evidence, not blind**, via a **de-risking SPIKE** (investi
 
 On **go**, proceed to a phased migration (keep tree-sitter parsing + the M2 HM type core; migrate phase-by-phase; run the existing drift oracles as the live cross-check during migration; retire them only once the query path is the source of truth). The full production migration is the point at which any remaining user-gate applies; the spike itself is investigation. On **no-go**, the spike's evidence justifies staying hand-rolled-within-limits and this record is updated with the finding.
 
+## REWRITE EXECUTION (user-directed, 2026-06-28)
+
+The spike returned GO. The user directed the rewrite be done as a **separate crate**, experimentally, and that the Director lead it (trusting the CTO + experts), verifying highest-possible quality at the end. Terms:
+
+- **Separate crate.** Build the new memoized-query engine in its own crate (promote the shelved spike `643d85a`), NOT behind a feature flag in `analysis`. The production `analysis` crate stays untouched and green throughout.
+- **Duplication is allowed and committed.** For experimentation, do not prematurely share code between the new crate and `analysis`; commit the experiment freely.
+- **Substrate is the CTO/architect's call** (salsa crate vs. the in-house red-green engine from the spike), justified in the design.
+- **Pipeline as memoized queries:** parse → lower → local_naming → package_naming → typecheck, with automatic dependency-tracked invalidation (no hand-maintained reverse-dep index / dirty-set / string fingerprints — they dissolve into recorded query dependencies).
+- **Validation = differential cross-check against the old engine** (new-engine output == `analysis` output over a ported fixture subset). This **subsumes the F1 differential fuzzer** — F1's invariant becomes the rewrite's new-vs-old test. Keep tree-sitter + the M2 type core (they become query bodies, not rewrites).
+- **Quality bar (Director + Expert verify before any cutover):** the silent-stale bug class is structurally impossible (no mirrored state ⇒ no drift oracle needed); cancellation + parallelism available; per-edit cost is O(blast-radius) and competitive; the code is cleaner than the hand-rolled model. Production cutover is a separate, later decision made on this evidence.
+
 **Recorded:** 2026-06-28, after two independent expert reviews commissioned with *effort explicitly excluded and engineering quality as the sole criterion* — the persistent RA/LSP expert (full M1–M4 context) and a fresh outside reviewer (no stake in prior work). They agreed on Parts A and C and **split on Part B**; that split is itself the key signal.
 
 ## Why this exists
