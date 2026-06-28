@@ -21,6 +21,9 @@ pub struct LoweringContext {
     arena: HirArena,
     diagnostics: Vec<Diagnostic>,
     interner: Interner,
+    // Current expression-nesting depth, bounded by `LOWER_RECURSION_LIMIT` so a pathologically nested
+    // (but otherwise valid) tree cannot overflow the stack during the recursive lowering walk.
+    depth: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +38,7 @@ impl LoweringContext {
             arena: HirArena::new(),
             diagnostics: Vec::new(),
             interner: Interner::new(),
+            depth: 0,
         }
     }
 
@@ -43,6 +47,7 @@ impl LoweringContext {
             arena: HirArena::new(),
             diagnostics: Vec::new(),
             interner,
+            depth: 0,
         }
     }
 
@@ -130,7 +135,35 @@ pub(crate) fn lower_with_shared_interner(
     lowering_result
 }
 
+// Recursive-descent depth bound for lowering. The walk recurses once per level of expression
+// nesting; a deeply nested but otherwise valid tree (e.g. hundreds of nested `{ }` blocks — which
+// carry no syntax error, so lowering proceeds) would otherwise overflow the stack and abort the
+// process. This sits well below the measured ~325-level overflow on a 2 MB stack and mirrors the
+// type-syntax guard (`TYPE_SYNTAX_RECURSION_LIMIT`); past it, the subtree lowers to `Unsupported`
+// with one diagnostic instead of recursing further.
+const LOWER_RECURSION_LIMIT: usize = 160;
+
 fn lower_node_with_rope(
+    node: Node<'_>,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
+) -> ExpressionId {
+    if lowering_context.depth >= LOWER_RECURSION_LIMIT {
+        lowering_context.diagnostics.push(Diagnostic::syntax_error(
+            node.range(),
+            format!(
+                "This expression is nested too deeply to analyze (more than {LOWER_RECURSION_LIMIT} levels)."
+            ),
+        ));
+        return lowering_context.annotated_expression(node.range(), None, ExpressionKind::Unsupported);
+    }
+    lowering_context.depth += 1;
+    let result = lower_node_inner(node, rope, lowering_context);
+    lowering_context.depth -= 1;
+    result
+}
+
+fn lower_node_inner(
     node: Node<'_>,
     rope: &Rope,
     lowering_context: &mut LoweringContext,

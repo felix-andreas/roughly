@@ -20,11 +20,10 @@
 //!      ranges driven through `Analysis::edit_document` never panic or index out of bounds (the edit
 //!      path validates and returns `Err(AnalysisError::InvalidEditRange)` for malformed ranges).
 //!
-//! KNOWN GAP (reported, not asserted here): `lower` is a recursive tree walk with no depth guard, so
-//! R *source* nesting beyond ~300 (e.g. `{{{...{1}...}}}`) overflows the stack — an uncatchable abort
-//! that no `catch_unwind` can contain. The generators therefore keep R-source bracket nesting well
-//! below that bound; deep nesting is exercised only through the *guarded* type-syntax path. Do not
-//! raise `MAX_SOURCE_NESTING` until `lower` gains its own recursion guard.
+//! `lower` is bounded by `LOWER_RECURSION_LIMIT` (its own depth guard, added after this fuzzer first
+//! found that unguarded R *source* nesting beyond ~300 — e.g. `{{{...{1}...}}}` — overflowed the
+//! stack into an uncatchable abort). The generators now nest *above* that guard so the guard path is
+//! actively exercised, and `deeply_nested_braces_do_not_abort` pins the regression deterministically.
 
 use {
     analysis::{
@@ -49,9 +48,9 @@ const EDIT_SEQUENCES: usize = 350;
 // Soak (`#[ignore]`) budget for manual/nightly deep fuzzing.
 const SOAK_ITERS: usize = 5_000_000;
 
-// R-source bracket nesting is capped far below the unguarded-`lower` overflow boundary (~300). The
-// type-syntax path is guarded and is hammered with `DEEP_TYPE_NESTING` instead.
-const MAX_SOURCE_NESTING: usize = 48;
+// R-source bracket nesting now ranges above `lower`'s recursion guard (160) so the guard path is
+// exercised; it stays below the ~300 stack-overflow boundary that the guard protects against.
+const MAX_SOURCE_NESTING: usize = 240;
 const DEEP_TYPE_NESTING: usize = 6000;
 
 // Deterministic regression corpus: replayed verbatim before any random fuzzing so a fixed reproducer
@@ -398,6 +397,31 @@ fn fuzz_default() {
 #[ignore]
 fn fuzz_soak() {
     run_fuzz(DEFAULT_SEED, SOAK_ITERS, SOAK_ITERS, SOAK_ITERS / 1000);
+}
+
+// Deterministic regression for the `lower` recursion guard. ~400 balanced `{ }` blocks carry no
+// syntax error, so lowering proceeds — and before the guard this overflowed the stack into an
+// uncatchable abort. With the guard, lowering completes (this test returning at all proves no abort)
+// and emits a "nested too deeply" diagnostic instead of recursing further.
+#[test]
+fn deeply_nested_braces_do_not_abort() {
+    let depth = 400;
+    let source = format!("{}1{}", "{".repeat(depth), "}".repeat(depth));
+
+    let mut parser = new_parser().expect("parser");
+    let document = Document::parse(&mut parser, &source).expect("tree for balanced braces");
+
+    let mut context = LoweringContext::new();
+    let _module = lower(&document, &mut context);
+    let diagnostics = context.take_diagnostics();
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("nested too deeply")),
+        "deeply nested braces must lower to a 'nested too deeply' diagnostic, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
 }
 
 // Deterministic regression for the S6 stale-range fix: malformed edit ranges must be rejected with an
