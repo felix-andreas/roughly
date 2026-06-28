@@ -807,6 +807,18 @@ impl InferenceState {
             .collect()
     }
 
+    // Harvests a stub annotation's surface type into a `TypeScheme` without inferring any body, used
+    // by `StubLibrary::load` to turn declaration-only base stubs into schemes through the ordinary
+    // lowering + generalization path.
+    pub fn harvest_annotation_scheme(
+        &mut self,
+        surface_type: &SurfaceType,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<TypeScheme, InferenceError> {
+        let core_type = self.lower_annotation_surface_type(surface_type, type_definitions, None)?;
+        self.generalize(core_type)
+    }
+
     fn infer_module_with_context(
         &mut self,
         module: &Module,
@@ -923,6 +935,16 @@ impl InferenceState {
                                 })
                                 .type_scheme
                                 .clone();
+                            return self.instantiate_type_scheme(&type_scheme);
+                        }
+
+                        // Not a package global, but it may be a seeded stdlib stub bound into the
+                        // base template environment (e.g. `length`, `T`, `pi`). Such a base scheme
+                        // is not a package global, so resolve it directly from the environment;
+                        // only a genuinely unresolved non-local (naming already reported "could not
+                        // resolve") falls through to `Unknown`.
+                        if let Some(binding) = self.lookup_global_name(*symbol) {
+                            let type_scheme = binding.type_scheme.clone();
                             return self.instantiate_type_scheme(&type_scheme);
                         }
 

@@ -7,6 +7,7 @@ use {
             ModuleId,
         },
         interner::{Interner, Symbol},
+        stdlib::StubLibrary,
         types::{Annotation, AttachedAnnotation, NamedTypeRef, SurfaceType},
     },
     std::collections::{BTreeMap, BTreeSet, HashMap},
@@ -76,6 +77,7 @@ pub(crate) fn rebuild_package_naming(
     extra_modules: &[(DocumentId, &Module)],
     locals: &HashMap<DocumentId, NamesLocal>,
     interner: &Interner,
+    stub_library: &StubLibrary,
 ) -> PackageNamingComputation {
     let (types, duplicate_type_names) = build_type_index(package_modules);
     let candidate_order = build_candidate_order(package_modules, locals);
@@ -94,6 +96,7 @@ pub(crate) fn rebuild_package_naming(
             global_bindings: &global_bindings,
             candidate_order: &candidate_order,
             interner,
+            stub_library,
         });
         if !document_diagnostics.is_empty() {
             diagnostics.insert(*document_id, document_diagnostics);
@@ -114,6 +117,7 @@ pub(crate) fn rebuild_package_naming(
             global_bindings: &global_bindings,
             candidate_order: &candidate_order,
             interner,
+            stub_library,
         });
         if !document_diagnostics.is_empty() {
             diagnostics.insert(*document_id, document_diagnostics);
@@ -142,6 +146,10 @@ pub(crate) struct PackageDocumentDiagnosticContext<'a> {
     pub global_bindings: &'a BTreeMap<Symbol, DocumentId>,
     pub candidate_order: &'a BTreeMap<Symbol, Vec<DocumentId>>,
     pub interner: &'a Interner,
+    // The stdlib stub corpus (base-environment names). A reference to a stub name resolves to its
+    // base scheme, so it is neither an unresolved reference nor a shadow-free target; a binding over
+    // one reports the builtin-shadow warning, exactly as for the hardcoded builtins.
+    pub stub_library: &'a StubLibrary,
 }
 
 pub(crate) fn package_document_diagnostics(
@@ -201,7 +209,7 @@ pub(crate) fn package_document_diagnostics(
                     format!("Top-level binding `{name}` shadows an imported namespace symbol."),
                 ));
             }
-            if is_builtin_symbol(interner, target) {
+            if is_builtin_symbol(interner, target) || context.stub_library.contains(target) {
                 let name = interner.resolve(target).unwrap_or("<unknown>");
                 diagnostics.push(Diagnostic::naming_warning(
                     binding.range,
@@ -269,6 +277,7 @@ pub(crate) fn package_document_diagnostics(
         if context.global_bindings.contains_key(symbol)
             || is_namespace_symbol(*symbol, context.document_id)
             || is_builtin_symbol(interner, *symbol)
+            || context.stub_library.contains(*symbol)
         {
             continue;
         }

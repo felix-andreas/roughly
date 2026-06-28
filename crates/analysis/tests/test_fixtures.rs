@@ -14,6 +14,7 @@ use {
         lower::{self, LoweringContext},
         naming::{DocumentKind, resolve_document_locally},
         render_diagnostics, render_hover_markdown, render_type_scheme, resolve_package,
+        stdlib::StubLibrary,
         text::line_character_to_byte_index,
         tree::new_parser,
         type_syntax::{parse_type_syntax, render_type_syntax},
@@ -98,6 +99,11 @@ fn typecheck_unification() {
 #[test]
 fn typecheck_strict() {
     run_fixture_suite("tests/typecheck/strict", run_strict_fixture);
+}
+
+#[test]
+fn typecheck_stdlib() {
+    run_fixture_suite("tests/typecheck/stdlib", run_stdlib_fixture);
 }
 
 fn run_project_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String> {
@@ -425,6 +431,38 @@ fn run_expression_type_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFi
     let mut lowering_context = LoweringContext::new();
     let module = lower::lower(&document, &mut lowering_context);
     let mut inference_state = inference_state_with_builtins(&mut lowering_context);
+    let type_definitions = TypeDefinitionEnvironment::from_module(&module);
+    let inferred_types = match inference_state.infer_module(&module, &type_definitions) {
+        Ok(inferred_types) => inferred_types,
+        Err(error) => {
+            return Ok(vec![vec![FixtureRunFile {
+                path: PathBuf::new(),
+                output: render_expression_error_kind(&error).to_owned(),
+            }]]);
+        }
+    };
+
+    Ok(vec![vec![FixtureRunFile {
+        path: PathBuf::new(),
+        output: render_expression_types(&mut inference_state, &lowering_context, &inferred_types),
+    }]])
+}
+
+// Like the expressions runner, but seeds the embedded stdlib stub schemes into the base environment
+// so calls through base names (`length`, `nchar`, `pi`, `T`, ...) resolve to their stub types. The
+// stub corpus is loaded against the same interner the fixture was lowered into, so a reference and
+// its stub share a symbol.
+fn run_stdlib_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String> {
+    let FixtureKind::Simple(case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+    let mut parser = new_parser().unwrap();
+    let document = Document::parse(&mut parser, &case.input).expect("parse fixture");
+    let mut lowering_context = LoweringContext::new();
+    let module = lower::lower(&document, &mut lowering_context);
+    let mut inference_state = inference_state_with_builtins(&mut lowering_context);
+    let stub_library = StubLibrary::load(lowering_context.interner_mut());
+    stub_library.seed_into(&mut inference_state);
     let type_definitions = TypeDefinitionEnvironment::from_module(&module);
     let inferred_types = match inference_state.infer_module(&module, &type_definitions) {
         Ok(inferred_types) => inferred_types,

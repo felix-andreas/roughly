@@ -12,6 +12,7 @@ use {
             document_package_definitions, document_type_definitions, document_type_references,
             package_document_diagnostics, rebuild_package_naming, resolve_document_locally,
         },
+        stdlib::StubLibrary,
         tree,
         type_syntax::render_surface_type,
         typecheck::{
@@ -36,6 +37,11 @@ pub struct Analysis {
     check_config: CheckConfig,
     parser: Parser,
     interner: Interner,
+    // The standard-library stub corpus, loaded once here and never invalidated by user edits. Its
+    // schemes are seeded into the per-document inference template (see `typecheck`); its symbols are
+    // a base-environment input held strictly out of the incremental graph (LT2, see
+    // `assert_stub_isolation`).
+    stub_library: StubLibrary,
     next_document_id: u32,
     next_version: Version,
     package_version: Version,
@@ -214,12 +220,15 @@ struct PackageOutput<T> {
 
 impl Analysis {
     pub fn new(base_path: PathBuf, lint_config: LintConfig, check_config: CheckConfig) -> Self {
+        let mut interner = Interner::new();
+        let stub_library = StubLibrary::load(&mut interner);
         Self {
             base_path,
             lint_config,
             check_config,
             parser: tree::new_parser().expect("typing parser should initialize"),
-            interner: Interner::new(),
+            interner,
+            stub_library,
             next_document_id: 0,
             next_version: 1,
             package_version: 0,
@@ -717,6 +726,7 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
         analysis_state.assert_package_definitions_consistent();
         analysis_state.assert_type_definitions_consistent();
         analysis_state.assert_package_naming_consistent();
+        analysis_state.assert_stub_isolation();
     }
 }
 
@@ -850,6 +860,7 @@ fn maintain_package_naming(analysis_state: &mut Analysis, re_derived_documents: 
             global_bindings: &output.output.global_bindings,
             candidate_order: &candidate_order,
             interner: analysis_state.interner(),
+            stub_library: &analysis_state.stub_library,
         });
         fresh_diagnostics.push((*document_id, document_diagnostics));
     }
@@ -957,7 +968,11 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
 
     let package_document_ids = analysis_state.package_document_ids();
     let all_document_ids = analysis_state.all_document_ids();
-    let template_state = inference_state_with_builtins_in_interner(analysis_state.interner_mut());
+    let mut template_state = inference_state_with_builtins_in_interner(analysis_state.interner_mut());
+    // Seed the stdlib stub schemes as base globals alongside the builtins, so a document cloned from
+    // this template resolves a bare base name (`length`, `T`, `pi`, ...) to its stub scheme. These
+    // live only in the template environment, never in `global_bindings` or the interface table.
+    analysis_state.stub_library.seed_into(&mut template_state);
     let fallback_range = analysis_state.fallback_range();
 
     let (type_definitions, type_definitions_fingerprint) = {
@@ -1553,6 +1568,50 @@ impl Analysis {
         }
     }
 
+    // LT2 isolation oracle: a stdlib stub is a base-environment *value* input only, seeded into the
+    // per-document inference template. The property that matters is that an *un-shadowed* stub never
+    // becomes a package *value* — never a package-definition, a package global, an interface export,
+    // or a naming dirty-name — because those feed the package interface table and its fingerprints,
+    // where a stub would let one edit spuriously invalidate package-wide. (A user may shadow a base
+    // name with a real top-level binding, after which it is an ordinary package global; the loop skips
+    // shadowed names.) A stub MAY legitimately appear as a
+    // reverse-dependency key (a value reference to a stub is indexed exactly like a reference to an
+    // as-yet-undefined name, so that a later package binding shadowing the stub can revalidate the
+    // referrers via category D) and as a type-namespace key (`type_definitions`/`type_references` are
+    // the *type* namespace; a user type sharing a stub value's name is an unrelated entity). Neither
+    // reaches a fingerprint, because `render_dependency_fingerprint` reads only the interface table,
+    // which never holds a stub. Debug-only. (The dirty-*document* set is keyed by `DocumentId`, not by
+    // symbol, so stubs cannot enter it.)
+    #[cfg(any(debug_assertions, feature = "verify-incremental"))]
+    fn assert_stub_isolation(&self) {
+        for symbol in self.stub_library.symbols() {
+            // A user may shadow a base stub with a real top-level binding (the "shadows a builtin"
+            // warning fires). A shadowed name is then an ordinary package global and legitimately
+            // fills the package-value indexes — only an *un-shadowed* stub must stay isolated, so skip
+            // any stub the user has package-defined.
+            if self.package_definitions.contains_key(&symbol) {
+                continue;
+            }
+            let name = self.interner.resolve(symbol).unwrap_or("<unknown>");
+            assert!(
+                !self.naming_dirty_names.contains(&symbol),
+                "stub symbol `{name}` leaked into the naming dirty-name set"
+            );
+            if let Some(output) = &self.package_naming_output {
+                assert!(
+                    !output.output.global_bindings.contains_key(&symbol),
+                    "stub symbol `{name}` leaked into global_bindings"
+                );
+            }
+            for output in self.document_interface_outputs.values() {
+                assert!(
+                    !output.exports.iter().any(|export| export.symbol == symbol),
+                    "stub symbol `{name}` leaked into a document interface export"
+                );
+            }
+        }
+    }
+
     // Salsa-style verify for the reverse-dependency index: rebuilds it from scratch by folding every
     // current naming output and asserts it equals the incrementally maintained index. Debug-only.
     #[cfg(any(debug_assertions, feature = "verify-incremental"))]
@@ -1676,8 +1735,13 @@ impl Analysis {
             .iter()
             .map(|(document_id, output)| (*document_id, output.output.clone()))
             .collect::<HashMap<_, _>>();
-        let oracle =
-            rebuild_package_naming(&package_modules, &extra_modules, &naming_locals, self.interner());
+        let oracle = rebuild_package_naming(
+            &package_modules,
+            &extra_modules,
+            &naming_locals,
+            self.interner(),
+            &self.stub_library,
+        );
 
         let maintained = self.package_naming_output.as_ref();
         let maintained_bindings = maintained

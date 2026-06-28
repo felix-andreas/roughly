@@ -1,0 +1,90 @@
+#==== values
+#---- T_is_logical
+T
+#++++
+logical
+
+#---- F_is_logical
+F
+#++++
+logical
+
+#---- pi_is_double
+pi
+#++++
+double
+
+#---- pi_arithmetic_promotes_through_operator_kernel
+pi / 2
+#++++
+double
+
+#==== precise_base_calls
+#---- length_of_vector_is_integer
+length(c(1L, 2L, 3L))
+#++++
+integer
+
+#---- nchar_is_integer
+nchar("hello")
+#++++
+integer
+
+#---- is_null_is_logical
+is.null(NULL)
+#++++
+logical
+
+#---- seq_len_is_integer_vector
+seq_len(3L)
+#++++
+integer[]
+
+#---- seq_along_is_integer_vector
+seq_along(c(1L, 2L))
+#++++
+integer[]
+
+#---- toupper_is_character
+toupper("x")
+#++++
+character
+
+#---- tolower_is_character
+tolower("HELLO")
+#++++
+character
+
+#==== composition_with_kernel
+#---- stub_result_feeds_operator_kernel
+length(c(1L, 2L)) + 1L
+#++++
+integer
+
+#---- value_binding_threads_through_assignment
+flag <- T
+flag
+#++++
+logical
+logical
+
+#==== degradation
+#---- shape_polymorphic_rev_degrades_to_any
+rev(c(1L, 2L, 3L))
+#++++
+Any
+
+#---- shape_polymorphic_abs_degrades_to_any
+abs(1L)
+#++++
+Any
+
+#---- variadic_paste_degrades_to_any_no_arity_error
+paste("a", "b", "c")
+#++++
+Any
+
+#---- variadic_sum_degrades_to_any_no_arity_error
+sum(1L, 2L, 3L)
+#++++
+Any
