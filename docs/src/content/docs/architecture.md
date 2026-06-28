@@ -447,106 +447,126 @@ The design targets, and a fixture makes durable, the following:
   documents (`G`'s own document plus its `k` referrers);
 - a body-only edit recomputes exactly `1` document and renders no `O(package)` fingerprint.
 
-### Incremental package naming (M4 — target)
+### Incremental package naming (M4)
 
-This is the design implemented next; it is **not yet in effect**. M3 made the interface fixed-point
-and round-2 typecheck `O(blast-radius)`, but `resolve_package` still calls
-`rebuild_package_naming`, which rebuilds the entire global binding table by scanning every package
-document on each `package_version` bump (~111ms single-file recheck at 500 files). That is the last
+M3 made the interface fixed-point and round-2 typecheck `O(blast-radius)`, but `resolve_package`
+still rebuilt the entire global binding table and all package-naming diagnostics by scanning every
+package document on each `package_version` bump (~111ms single-file recheck at 500 files) — the last
 `O(package)` cost on a body-only edit. M4 makes package naming incremental: when a document's
-exported top-level names change, patch the affected names instead of rebuilding.
+exported top-level names change, patch the affected names and re-diagnose only the affected
+documents instead of rebuilding.
 
 #### Source of truth and derived structures
 
 Same discipline as the M3 reverse-dependency index — a pure fold of per-document naming outputs,
 never a hand-synced mirror:
 
-- **Per-document exported names.** Each document `D` contributes the set of `(Symbol, BindingInfo)`
-  for its top-level assignments — exactly `NamesLocal.bindings` filtered to
-  `kind == BindingKind::TopLevelAssignment`. A pure function of `D`'s local naming.
-- **Per-name candidate index.** For each package-global `Symbol` `N`, the set of documents defining
-  `N`, ordered by the **same** package document order winner selection uses — package
-  path-lexicographic order (`package_document_ids`), **not** `DocumentId` numeric order.
-  `Winner(N)` = the last candidate in path order (last-writer-wins).
-  `global_bindings[N] == Winner(N)`, materialized for `O(1)` lookup.
+- **Per-document exported names.** Each document `D` contributes the symbols of its top-level
+  assignments — `NamesLocal.bindings` filtered to `kind == BindingKind::TopLevelAssignment`. A pure
+  function of `D`'s local naming.
+- **Per-name candidate index** (`package_definitions`, landed in M4.1). For each package-global
+  `Symbol` `N`, the set of package documents defining `N`. `Winner(N)` = the path-last candidate in
+  package path-lexicographic order (`package_path_key`, the single order source shared with
+  `package_document_ids`), **not** `DocumentId` numeric order. `global_bindings[N] == Winner(N)`,
+  materialized for `O(1)` lookup.
 
 #### Maintenance invariant (single source of truth)
 
 ```
-candidate_index == ⋃ over docs D of { (N, D, binding) : N is a top-level binding of D }
-global_bindings[N] == the path-last candidate of N
+package_definitions == ⋃ over package docs D of { (N, D) : N is a top-level binding symbol of D }
+global_bindings[N]  == the path-last candidate of N
 ```
 
-The index is patched per document at the local-naming recompute site and on delete (remove `D`'s own
-entries by contributing `DocumentId`, then insert its new exported set), driven by the M3 dirty set.
-A debug-only full-rebuild drift assertion (as in M3) guards it.
+`package_definitions` is patched per document at the local-naming recompute site and on delete
+(remove `D`'s own entries by contributing `DocumentId`, then insert its new exported set). The
+materialized `global_bindings` is patched only for affected names. Both are guarded by a debug-only
+full-rebuild drift assertion.
 
-#### Incremental update on a document change
+#### Incremental winner update on a document change
 
-- Compute `D`'s new exported set; diff against `D`'s prior contribution (read from the candidate
-  index's current membership of `D`). Affected names = (names `D` drops) ∪ (names `D` adds). A pure
-  body edit that changes no top-level name leaves the exported set identical → zero affected names →
-  no `global_bindings` change, which is the flat-recheck win.
-- For each dropped name, remove `D` from `candidate_index[N]`; for each added name, insert `D` in
-  path order. Recompute `Winner(N)` = path-last candidate for every affected `N` and update
-  `global_bindings` (or remove `N` if it has no candidates left).
+- Compute `D`'s new exported set; diff against `D`'s prior contribution (read from
+  `package_definitions`'s current membership of `D`). Affected names = (names `D` drops) ∪ (names `D`
+  adds). A pure body edit that changes no top-level name leaves the exported set identical → zero
+  affected names → no `global_bindings` change, the flat-recheck win.
+- For each affected `N`, recompute `Winner(N)` = path-last of `package_definitions[N]` and patch
+  `global_bindings` (remove `N` if it has no definers left). A name **flips defined-ness** when its
+  definer count crosses `0 ↔ ≥1`; the set of flipped names drives `D`-diagnostic re-diagnosis below.
 
-#### Diagnostics (correctness-critical)
+#### Diagnostics: four categories, each incrementally bounded (correctness-critical)
 
-Keep overwrite-warning pairs exact.
+`rebuild_package_naming` produces four package-naming diagnostic categories. All four are incremental
+(not just overwrite). They are stored per contributing document and a document's whole contribution
+is recomputed when that document is in the recompute set; `document_diagnostics` reads the stored
+per-document vector unchanged.
 
-- **Overwrite warnings** are a pure function of a name's *ordered* candidate list: every candidate
-  except the last gets "overwritten by a later top-level binding"; every candidate except the first
-  gets "overwrites an earlier top-level binding". So they are name-keyed: when `candidate_index[N]`
-  changes, regenerate `N`'s overwrite diagnostics for exactly the documents in `candidate_index[N]`,
-  replacing the prior set for `N`. Store naming diagnostics so a name's overwrite contributions can
-  be replaced without dropping unrelated diagnostics.
-- **Builtin/namespace-shadow warnings** are per-`(document, binding)` and independent of winner
-  selection; they are regenerated from `D`'s own bindings when `D` changes.
+- **(A) Overwrite warnings** — a pure function of a name's *ordered* candidate list: every candidate
+  except the path-last gets "is overwritten by a later top-level binding"; every candidate except the
+  path-first gets "overwrites an earlier top-level binding". When a name's candidate set changes,
+  every current co-definer's contribution must be regenerated (its first/last position may have
+  moved).
+- **(B) Builtin/namespace-shadow warnings** — per-`(document, binding)`, independent of winner
+  selection; regenerated from `D`'s own bindings when `D` changes.
+- **(C) Type-reference resolution** + **(T) duplicate-type-definition** warnings — depend on the
+  package type index (`build_type_index`), which stays a full rebuild this slice. They are bounded by
+  the type-definition fingerprint: regenerate for **all** documents only when the fingerprint changes;
+  otherwise dirty-only. Never stale.
+- **(D) Unresolved-reference** ("I could not resolve `name`…") warnings — depend on
+  `global_bindings` membership (a reference resolves iff the name is a package global, an import, or a
+  builtin). This is the cross-cutting category: when a name `N` **flips defined-ness**, every document
+  that *references* `N` changes its (D) diagnostics even though it is not itself dirty. Those referrers
+  are exactly `documents_referencing(N)` from the M3 reverse-dependency index — a single reverse hop.
+
+##### Recompute set (which documents are re-diagnosed)
+
+```
+recompute_diag_docs =
+    re-derived-naming docs                                  // own naming changed (A self, B, C self, D self)
+  ∪ ⋃ over affected names N of package_definitions[N]       // (A) co-definers whose ordered position moved
+  ∪ ⋃ over flipped names N of documents_referencing(N)      // (D) referrers gaining/losing "could not resolve N"
+  ∪ (all package + script docs, iff the type fingerprint changed)   // (C)/(T)
+```
+
+A pure body edit yields no affected names and no flips, so `recompute_diag_docs` is just the edited
+document and the type fingerprint is unchanged — the flat-recheck win, with the residual being only
+the still-full `build_type_index` (deferred to M4.3).
+
+#### Non-circular drift assertion (four-category oracle)
+
+The M4.1 assertion compared derived winners to `global_bindings`; now `global_bindings` *is* the
+maintained thing, so that comparison would be circular. The M4.2 debug assertion instead rebuilds a
+fresh oracle from **all** package naming outputs (the existing `rebuild_package_naming` over every
+document, not the patched state) and asserts both (1) the maintained `global_bindings` equals the
+oracle's, and (2) every document's maintained diagnostic set (A+B+C+D) equals the oracle's, compared
+as multisets (order-insensitive). This keeps the verify real across the diagnostics refactor.
+
+#### Driving set and the frozen typecheck baseline
+
+Naming maintenance is driven by the set of documents whose **local naming was re-derived** in
+`resolve_package` (self-contained), not by `dirty_documents`. `dirty_documents` and
+`last_typecheck_global_bindings` belong to the typecheck winner-diff (M3), whose `changed_globals`
+seed must keep comparing against the baseline frozen at the last completed typecheck; a
+package-naming-only refresh must not touch or clear them. Decoupling the naming driver from
+`dirty_documents` preserves that frozen baseline by construction.
 
 #### Correctness premise (contract precondition)
 
-Winner selection is last-writer-wins in package path order, so a name's winner depends **only** on
-the set of documents defining it and their path order — never on document bodies — so patching per
-affected name is complete. The debug full-rebuild assertion enforces equality with a from-scratch
-rebuild.
-
-#### Scope and a deferred piece
-
-M4 targets the value `global_bindings` table plus its naming diagnostics. The type-definition index
-(`build_type_index` over `@type` / `@alias`) is also rebuilt in `rebuild_package_naming` today;
-making it incremental pairs naturally with tightening the still-package-global
-`type_definitions_fingerprint` from M3. This is **deferred**, not done.
-
-#### Trigger change
-
-Replace the monolithic `package_naming_output.version == package_version` full-rebuild guard with
-incremental maintenance driven by the dirty set: `resolve_package` patches the dirty documents'
-contributions and recomputes only affected names, leaving `package_naming_output` as the
-materialized, versioned result.
-
-#### Test plan (focused shadowing fixture suite)
-
-Each case asserts both the resolved winner (via name resolution / a global-naming fixture) **and**
-the exact overwrite-warning set, and that an incremental update matches a full rebuild:
-
-- a document newly defining a name another document also defines (winner flips if the new one is
-  path-later; both gain/lose the paired overwrite warnings);
-- a document dropping a name (winner falls back to the next path-latest; the dropped document's and
-  old winner's overwrite warnings update);
-- the sole definer of a name being deleted (the name leaves `global_bindings`);
-- adding an earlier-path document (it becomes a loser to later definers);
-- rename and re-add.
+Winner selection is last-writer-wins in package path order, so a name's winner depends **only** on the
+set of documents defining it and their path order — never on document bodies — so patching per
+affected name is complete, and a single reverse-dependency hop captures every document whose
+(D) diagnostics can change. The debug four-category oracle enforces equality with a from-scratch
+rebuild on every run.
 
 #### Slice plan
 
-- **M4.1** — add the per-document exported-names + per-name candidate index, maintained incrementally
-  with the drift assertion; `global_bindings` still derived by full rebuild (pure addition, no
-  behavior change).
-- **M4.2** — make `resolve_package` patch `global_bindings` + overwrite diagnostics from the
-  candidate index incrementally (the behavior-changing slice; guarded by the shadowing fixture suite
-  + drift assertion + existing `naming_global` fixtures).
-- **M4.3** (deferred/optional) — incremental type index, paired with per-doc type-def fingerprint.
+- **M4.1** (done) — the per-name `package_definitions` candidate index, maintained incrementally with
+  a drift assertion; `global_bindings` still derived by full rebuild (pure addition, no behavior
+  change).
+- **M4.2** — make `resolve_package` patch `global_bindings` and all four diagnostic categories from
+  the candidate + reverse-dependency indexes incrementally (the behavior-changing slice; guarded by
+  the shadowing fixture suite, the (D) defined-ness-flip-on-non-dirty-referrer fixture, the
+  four-category drift oracle, and the existing `naming_global` fixtures).
+- **M4.3** (deferred/optional) — incremental type index, paired with a per-document type-def
+  fingerprint, to remove the residual full `build_type_index`.
 
 ## Diagnostics
 
