@@ -266,20 +266,38 @@ impl<G: QueryGroup> Engine<G> {
             return changed_at;
         }
 
-        let max_dependency_change = dependencies
-            .iter()
-            .map(|dependency| self.validate(dependency))
-            .max()
-            .unwrap_or(Revision::START);
-        if max_dependency_change <= verified_at {
-            // Early cutoff: nothing we read has changed since we were last verified.
-            if let Some(slot) = self.slots.borrow_mut().get_mut(key) {
-                slot.verified_at = revision;
+        // Validate dependencies in recorded order and **short-circuit**: the moment one is found to have
+        // changed after our last verification, recompute immediately without validating the rest. This is
+        // not merely an optimization — it is required for correct input *removal*. A fold over a file set
+        // records `ProjectFiles` first, then a per-file edge to each member's derived chain
+        // (`ExportedNames(f)` → `Lower(f)` → `Parse(f)` → `SourceText(f)`). When a file is deleted,
+        // `ProjectFiles` changes and its `SourceText` becomes a tombstone. Validating the fold's *stale*
+        // per-file edge would walk into `Lower(f)`/`Parse(f)`, find their `SourceText(f)` tombstone
+        // changed, and **recompute** them — and `Parse(f)`'s body fetches the now-absent `SourceText(f)`,
+        // which panics. Short-circuiting on the already-changed `ProjectFiles` (recorded first) recomputes
+        // the fold before any dead per-file edge is validated; the recompute then folds the smaller file
+        // set and drops the edge. The cutoff decision is unaffected: we recompute iff some dependency
+        // changed after `verified_at`, exactly as taking the max would decide.
+        for dependency in &dependencies {
+            if self.validate(dependency) > verified_at {
+                return self.recompute(key);
             }
-            return changed_at;
         }
+        // Early cutoff: nothing we read has changed since we were last verified.
+        if let Some(slot) = self.slots.borrow_mut().get_mut(key) {
+            slot.verified_at = revision;
+        }
+        changed_at
+    }
 
-        self.recompute(key)
+    /// Whether `key`'s body is currently on the recompute stack. A query body uses this to break a
+    /// genuine *domain* dependency cycle it would otherwise re-enter (the general package-interface
+    /// fixed-point: mutually-referencing globals), bootstrapping the re-entrant edge to a base value
+    /// instead of recursing — the same role the cyclic-query body plays for re-export cycles, but checked
+    /// cooperatively rather than by tripping the accidental-cycle guard. A body that does *not* break the
+    /// cycle still hits the loud [`recompute`] panic, so this never masks an unintended cycle.
+    pub fn is_computing(&self, key: &G::Key) -> bool {
+        self.computing.borrow().contains(key)
     }
 
     fn recompute(&self, key: &G::Key) -> Revision {
