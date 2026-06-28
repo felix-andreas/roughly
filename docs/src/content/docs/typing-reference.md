@@ -1349,3 +1349,81 @@ apply_renderer <- function(render_count, count) { render_count(count) }
 - when the checker encounters a syntactically valid construct that is not yet supported, the construct may infer as `Unknown`
 - this allows checking to continue even when the checker cannot model the construct precisely
 - whether an unsupported construct also produces a diagnostic is a construct-specific decision
+
+## Strict mode
+
+Strict mode is an opt-in check controlled by the `[check] strict` switch (default off). It does not
+change inference or introduce any new typing rules; it only adds diagnostics. The typecheck phase
+already runs to produce the inferred types — strict mode reads those types and reports the places
+where the checker genuinely could not determine a type.
+
+> Note: this is the recorded interpretation of strict mode, pending final user confirmation. The
+> phrasing in the backlog was deliberately broad; this section is the contract strict mode
+> implements unless the user revises it.
+
+### What strict mode flags
+
+In strict mode, an expression or binding whose inferred type is `Unknown` at the point it is
+*introduced* is a diagnostic. Strict mode targets `Unknown` only:
+
+- `Unknown` is the "could-not-determine" type and is what strict mode reports.
+- `Any` is the explicit, intentional escape hatch and is always tolerated — a value typed `Any`
+  never produces a strict diagnostic, even in strict mode.
+
+### Origins, not propagation
+
+`Unknown` is also used internally as an error-recovery value and as a propagation value: a binary
+operator with an `Unknown` operand yields `Unknown`, a call whose callee or return is `Unknown`
+yields `Unknown`, a block whose last expression is `Unknown` yields `Unknown`, and unifying with
+`Unknown` yields the other type. If strict mode flagged every expression that *resolves* to
+`Unknown`, a single root cause would spray a duplicate diagnostic across every downstream use.
+
+Strict mode therefore flags `Unknown` only at its **origin** — the site that first introduces a
+non-error `Unknown` into the type lattice — and never at a site that merely propagated `Unknown`
+from a child, operand, callee, or referenced binding that is already (or will itself be) flagged at
+its own origin.
+
+The origin sites are:
+
+- **an unsupported construct** — a syntactically valid construct the checker does not yet model
+  (`Unknown` enters the lattice here);
+- **a name reference whose resolved type is `Unknown` because the referenced binding has no known
+  type** — for example a base-environment or library binding that has not been given a type yet.
+  This composes with library typing (see below).
+
+The following are explicitly **not** strict origins:
+
+- an `Unknown` that arose from **error recovery**: when an expression fails to type-check, the
+  underlying type error is already reported, and the recovered `Unknown` is not flagged again (no
+  double-report);
+- an `Unknown` that was merely **propagated** into a parent expression (binary operators, calls,
+  blocks, indexing, `if`/`else`, assignments) from a child that is itself an origin or a
+  propagation of one;
+- a reference to a **local binding** or a **package-global binding** whose type is `Unknown`: the
+  origin is the *defining* site of that binding (its own file), so the reference propagates rather
+  than re-originates. This is what keeps a single root `Unknown` from producing a diagnostic in
+  every file that references it;
+- an **unresolved name** reference: naming already reports "could not resolve", so strict mode does
+  not double-report it (an unresolved name is a naming diagnostic, not an `Unknown` origin).
+
+Because every downstream use of a flagged `Unknown` is a propagation site rather than an origin, a
+single origin used in many later expressions produces exactly one strict diagnostic.
+
+### Composition with library typing
+
+Strict mode is defined as a property of the inferred type at origin sites — "a genuine `Unknown`
+origin is an error" — not as an enumerated denylist of today's unsupported constructs. As inference
+and library/stdlib stubs improve, fewer origins exist (an unstubbed library function that today has
+no known type will, once stubbed, resolve to a real type), so strict mode's diagnostics shrink
+automatically without any change to the strict-mode rule itself.
+
+### Diagnostics
+
+Strict diagnostics use a distinct diagnostic category (code `strict`) so they can be filtered
+independently of type errors. Each origin is reported once, at the precise range of the origin
+expression:
+
+- a binding whose value originates an `Unknown` reads
+  `strict mode: could not determine the type of \`x\`; add a type annotation`;
+- a bare expression that originates an `Unknown` reads
+  `strict mode: this expression has an undetermined type (\`Unknown\`)`.
