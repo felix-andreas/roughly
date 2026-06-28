@@ -507,9 +507,12 @@ per-document vector unchanged.
 - **(B) Builtin/namespace-shadow warnings** — per-`(document, binding)`, independent of winner
   selection; regenerated from `D`'s own bindings when `D` changes.
 - **(C) Type-reference resolution** + **(T) duplicate-type-definition** warnings — depend on the
-  package type index (`build_type_index`), which stays a full rebuild this slice. They are bounded by
-  the type-definition fingerprint: regenerate for **all** documents only when the fingerprint changes;
-  otherwise dirty-only. Never stale.
+  package type index. As of M4.3 the type index is maintained incrementally (see below), and these two
+  categories are routed per affected type name exactly like the value categories: when a type name's
+  materialized entry changes (kind, arity, presence, or duplicate status), its **co-definers** (the
+  `type_definitions[N]` documents, whose duplicate diagnostic may move) and its **referrers**
+  (`documents_type_referencing(N)`, whose type-reference diagnostic may move) are re-diagnosed. A
+  body-only edit changes no type name, so neither set grows. Never stale.
 - **(D) Unresolved-reference** ("I could not resolve `name`…") warnings — depend on
   `global_bindings` membership (a reference resolves iff the name is a package global, an import, or a
   builtin). This is the cross-cutting category: when a name `N` **flips defined-ness**, every document
@@ -520,15 +523,16 @@ per-document vector unchanged.
 
 ```
 recompute_diag_docs =
-    re-derived-naming docs                                  // own naming changed (A self, B, C self, D self)
-  ∪ ⋃ over affected names N of package_definitions[N]       // (A) co-definers whose ordered position moved
-  ∪ ⋃ over flipped names N of documents_referencing(N)      // (D) referrers gaining/losing "could not resolve N"
-  ∪ (all package + script docs, iff the type fingerprint changed)   // (C)/(T)
+    re-derived-naming docs                                    // own naming changed (A self, B, C self, D/T self)
+  ∪ ⋃ over affected value names N of package_definitions[N]   // (A) co-definers whose ordered position moved
+  ∪ ⋃ over flipped value names N of documents_referencing(N)  // (D) referrers gaining/losing "could not resolve N"
+  ∪ ⋃ over affected type names N of type_definitions[N].keys  // (T) type co-definers whose duplicate status moved
+  ∪ ⋃ over affected type names N of documents_type_referencing(N)  // (C) type referrers whose kind/arity/presence moved
 ```
 
-A pure body edit yields no affected names and no flips, so `recompute_diag_docs` is just the edited
-document and the type fingerprint is unchanged — the flat-recheck win, with the residual being only
-the still-full `build_type_index` (deferred to M4.3).
+A pure body edit yields no affected value names, no flips, and no affected type names, so
+`recompute_diag_docs` is just the edited document — the flat-recheck win, with no `O(package)` residual:
+the type index is no longer rebuilt across the package (M4.3).
 
 #### Non-circular drift assertion (four-category oracle)
 
@@ -536,8 +540,47 @@ The M4.1 assertion compared derived winners to `global_bindings`; now `global_bi
 maintained thing, so that comparison would be circular. The M4.2 debug assertion instead rebuilds a
 fresh oracle from **all** package naming outputs (the existing `rebuild_package_naming` over every
 document, not the patched state) and asserts both (1) the maintained `global_bindings` equals the
-oracle's, and (2) every document's maintained diagnostic set (A+B+C+D) equals the oracle's, compared
+oracle's, and (2) every document's maintained diagnostic set (A+B+C+D+T) equals the oracle's, compared
 as multisets (order-insensitive). This keeps the verify real across the diagnostics refactor.
+
+M4.3 extends the verify to the type index, all rebuilt from the **primary** inputs (the lowered package
+modules + per-document `NamesLocal`), never the patched state. `assert_type_definitions_consistent`
+rebuilds the type-definition candidate index (folding `document_type_definitions`) and the materialized
+type index + duplicate set (via `build_type_index`) and asserts all three equal the maintained
+structures; `assert_type_references_consistent` folds `document_type_references` and asserts the
+maintained type reverse-dependency index equals it. Because the (C)/(T) oracle in
+`assert_package_naming_consistent` re-derives those diagnostics through the same `build_type_index`, the
+maintained type index *and* its derived diagnostics are proven equal to a from-scratch rebuild on every
+`resolve_package`, non-circularly.
+
+#### Type index: candidate, materialized, reverse-dependency (M4.3)
+
+The type side mirrors the value side structurally. The shared membership predicate is
+`document_type_definitions(module)` → for each `@type`/`@alias` name the `TypeInfo`s (kind, arity) a
+document declares; `build_type_index` (the rebuild oracle) and the incremental patch both fold it, so
+they cannot disagree by construction. The single winner/duplicate rule is
+`apply_type_definition_outcome`: a name with exactly one site across the package resolves to its
+`TypeInfo`, zero sites is absent, two or more is a duplicate (kept out of the resolved index).
+
+- **`type_definitions: Symbol → DocumentId → Vec<TypeInfo>`** — the candidate index (source of truth),
+  the type analog of `package_definitions`, patched per re-derived/deleted document. A `Vec` per
+  document preserves a document that declares the same name twice (which makes the name a duplicate).
+  `patch_type_definitions` marks a name affected when the document's contribution changes by *presence
+  or by `TypeInfo`* (kind/arity), which is what makes a kind/arity flip route to referrers.
+- **`package_type_index: Symbol → TypeInfo`** + **`duplicate_type_names`** — the materialized index
+  (the type analog of `global_bindings`), re-collated only for affected names, materialized for O(1)
+  lookup during type-reference resolution.
+- **`type_references: Symbol → {DocumentId}`** — the type reverse-dependency index, the analog of
+  `reverse_dependencies`, patched against `document_type_references` (the type names a document looks up
+  in its definitions and annotations, the type analog of `non_locals`). Covers all documents (scripts
+  reference package types); the candidate index covers package documents only.
+
+A type-def fingerprint in `typecheck` is still package-global today: a type-definition change forces all
+documents into the typecheck candidate set. Tightening it to a per-document type-dependency fingerprint
+(the rendered definitions of exactly the type names each document references, the type analog of the M3
+value `dependency_fingerprint`, routed through `documents_type_referencing`) is the remaining M4.3
+follow-up; it is independent of the incremental type index above and does not affect package-naming
+diagnostics.
 
 #### Driving set and the frozen typecheck baseline
 
@@ -553,8 +596,10 @@ package-naming-only refresh must not touch or clear them. Decoupling the naming 
 Winner selection is last-writer-wins in package path order, so a name's winner depends **only** on the
 set of documents defining it and their path order — never on document bodies — so patching per
 affected name is complete, and a single reverse-dependency hop captures every document whose
-(D) diagnostics can change. The debug four-category oracle enforces equality with a from-scratch
-rebuild on every run.
+(D) diagnostics can change. The same premise holds for types: a (C)/(T) diagnostic is a pure function
+of the names a document *defines* or *references* crossed with the type index, so routing every affected
+type name to its co-definers and referrers is complete. The debug five-category oracle plus the type
+index/reference oracles enforce equality with a from-scratch rebuild on every run.
 
 #### Slice plan
 
@@ -565,8 +610,17 @@ rebuild on every run.
   the candidate + reverse-dependency indexes incrementally (the behavior-changing slice; guarded by
   the shadowing fixture suite, the (D) defined-ness-flip-on-non-dirty-referrer fixture, the
   four-category drift oracle, and the existing `naming_global` fixtures).
-- **M4.3** (deferred/optional) — incremental type index, paired with a per-document type-def
-  fingerprint, to remove the residual full `build_type_index`.
+- **M4.3** — make the package type index incremental: the `type_definitions` candidate index, the
+  materialized `package_type_index` + `duplicate_type_names`, and the `type_references` reverse-dependency
+  index, all patched per document and collated per affected name (single `document_type_definitions` /
+  `apply_type_definition_outcome` rule, shared with the `build_type_index` oracle). The (C)/(T)
+  diagnostics route per affected type name (co-definers ∪ type referrers); the drift oracle is extended
+  to assert the maintained type index/references equal a from-scratch rebuild from primary inputs.
+  `maintain_package_naming` no longer rebuilds the type index across the package, so a body-only edit
+  pays no `O(package)` type-index cost. Guarded by the `incremental_types` fixtures (added/dropped/
+  duplicate-flip, kind-flip and arity-flip on a non-dirty referrer, forward type reference) and the
+  extended drift assertions. **Remaining follow-up:** the per-document type-def fingerprint in
+  `typecheck` (above), which still falls back to all documents on any type-definition change.
 
 ## Diagnostics
 
