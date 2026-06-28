@@ -1,6 +1,18 @@
 # Decision record: incremental architecture & recheck-trigger model
 
-**Status:** Part A (recheck trigger) — decided. Part B (hand-roll vs. memoized-query framework) — **OPEN, deferred to the user.** Part C (value-interface-table slice) — **paused pending Part B.**
+**Status:** Part A (recheck trigger) — decided. Part B (hand-roll vs. memoized-query framework) — **DIRECTOR-DRIVEN: direction is to pursue the memoized-query framework, validated by a de-risking spike before any production migration** (the user directed, verbatim, that driving this fork forward is the Director's responsibility — it is NOT deferred to the user). Part C (value-interface-table slice) — **paused; subsumed by the framework if the spike confirms.**
+
+## RESOLUTION (2026-06-28) — how Part B is being driven
+
+The Director owns this decision (per the user's explicit directive). Resolved direction, quality-first: **pursue the memoized-query / automatic-invalidation framework**, because the hand-rolled safety net is provably incomplete (debug-only — now also release-gated — AND blind to shared-rule bugs) and the silent-stale bug class keeps recurring; a framework makes that class structurally impossible, and the project's own roadmap (stub framework + namespace edges) trips the adopt-a-framework tripwire regardless.
+
+This is driven **with evidence, not blind**, via a **de-risking SPIKE** (investigation, no production change — within CTO autonomy):
+1. Build a shadow prototype of the query engine (in-house red-green, or salsa) over one phase-chain: `parse(file)` → `lower(file)` → `local_naming(file)`.
+2. Run it alongside the current pipeline and cross-check its outputs against the existing drift oracles on the seeded soak.
+3. Measure overhead (memory + per-edit time) vs. the hand-rolled path.
+4. Report a **go/no-go** with evidence: is the query model clean for R, what is the overhead, does the cross-check stay green.
+
+On **go**, proceed to a phased migration (keep tree-sitter parsing + the M2 HM type core; migrate phase-by-phase; run the existing drift oracles as the live cross-check during migration; retire them only once the query path is the source of truth). The full production migration is the point at which any remaining user-gate applies; the spike itself is investigation. On **no-go**, the spike's evidence justifies staying hand-rolled-within-limits and this record is updated with the finding.
 
 **Recorded:** 2026-06-28, after two independent expert reviews commissioned with *effort explicitly excluded and engineering quality as the sole criterion* — the persistent RA/LSP expert (full M1–M4 context) and a fresh outside reviewer (no stake in prior work). They agreed on Parts A and C and **split on Part B**; that split is itself the key signal.
 
