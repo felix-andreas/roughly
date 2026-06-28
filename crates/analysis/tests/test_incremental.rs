@@ -475,6 +475,134 @@ fn deep_re_export_chain_past_round_cap_is_not_left_stale() {
     );
 }
 
+// Fixed-seed soak test for the incremental package-naming and type-index maintenance. Drives the
+// public `Analysis` API through a long, deterministic stream of add / edit / delete operations over a
+// small pool of paths and names, so the same names overwrite, re-export, and flip winners across the
+// package path order repeatedly, and the type names cycle kind/arity/presence. `resolve_package` after
+// every operation runs (under `debug_assertions`, i.e. the dev profile this test runs in) all five
+// drift assertions — reverse-dependency index, value/type candidate indexes, materialized type index,
+// and the four-category package-naming oracle — each comparing the incrementally maintained state to a
+// from-scratch rebuild. Any drift panics, so this is in-tree, re-runnable coverage of the incremental
+// path equalling the full rebuild across thousands of states. Fixed seed = reproducible.
+#[test]
+fn seeded_soak_incremental_matches_full_rebuild() {
+    const OPERATION_COUNT: usize = 3000;
+    let paths = [
+        "/pkg/R/f0.R",
+        "/pkg/R/f1.R",
+        "/pkg/R/f2.R",
+        "/pkg/R/f3.R",
+        "/pkg/R/f4.R",
+        "/pkg/R/f5.R",
+    ];
+
+    let mut analysis_state = typing_analysis("/pkg");
+    let mut rng = Xorshift(0x9E37_79B9_7F4A_7C15);
+    let mut live_sources: Vec<Option<String>> = vec![None; paths.len()];
+
+    for _ in 0..OPERATION_COUNT {
+        let index = rng.below(paths.len());
+        let path = paths[index];
+        match (&live_sources[index], rng.below(10)) {
+            (Some(_), 0) => {
+                analysis_state
+                    .delete_document(std::path::Path::new(path))
+                    .expect("delete should succeed for a live document");
+                live_sources[index] = None;
+            }
+            (Some(current), 1..=3) => {
+                let range = whole_document_range(current);
+                let new_source = random_source(&mut rng);
+                analysis_state
+                    .edit_document(
+                        std::path::Path::new(path),
+                        &[DocumentChange {
+                            range,
+                            text: new_source.clone(),
+                        }],
+                    )
+                    .expect("whole-document edit should apply");
+                live_sources[index] = Some(new_source);
+            }
+            _ => {
+                let new_source = random_source(&mut rng);
+                analysis_state
+                    .add_document_from_source(PathBuf::from(path), &new_source)
+                    .expect("generated source should parse");
+                live_sources[index] = Some(new_source);
+            }
+        }
+
+        analysis::resolve_package(&mut analysis_state);
+    }
+}
+
+// A deterministic xorshift64 generator: a fixed nonzero seed makes the whole soak run reproducible
+// without pulling in a dependency.
+struct Xorshift(u64);
+
+impl Xorshift {
+    fn next_u64(&mut self) -> u64 {
+        let mut state = self.0;
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        self.0 = state;
+        state
+    }
+
+    fn below(&mut self, bound: usize) -> usize {
+        (self.next_u64() % bound as u64) as usize
+    }
+}
+
+// A short package source built from a small pool of names and type names, mixing the constructs whose
+// incremental maintenance the assertions guard: plain top-level assigns, bare-block globals,
+// conditional (non-global) assigns, cross-file value references / re-exports, `@type` / `@alias`
+// definitions, type-annotation references, and typed-function interfaces. The small pools force
+// repeated overwrites and winner flips across the package path order.
+fn random_source(rng: &mut Xorshift) -> String {
+    let names = ["a", "b", "c", "d"];
+    let types = ["T1", "T2", "T3"];
+    let line_count = 1 + rng.below(3);
+    let mut lines = Vec::new();
+    for _ in 0..line_count {
+        let name = names[rng.below(names.len())];
+        let other = names[rng.below(names.len())];
+        let type_name = types[rng.below(types.len())];
+        lines.push(match rng.below(9) {
+            0 => format!("{name} <- 1L"),
+            1 => format!("{name} <- \"x\""),
+            2 => format!("{{\n  {name} <- 2L\n}}"),
+            3 => format!("if (TRUE) {{\n  {name} <- 3L\n}}"),
+            4 => format!("{name} <- {other}"),
+            5 => format!("#: @type {type_name} {{integer}}"),
+            6 => format!("#: @alias {type_name} {{double}}"),
+            7 => format!("#: {type_name}\n{name} <- 1L"),
+            _ => format!("#: fn(value: integer) -> integer\n{name} <- function(value) value"),
+        });
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+// The text range spanning an entire document, so an edit can replace it wholesale (the generated
+// sources are ASCII, so a character index is the column).
+fn whole_document_range(source: &str) -> TextRange {
+    let line_index = source.matches('\n').count();
+    let character_index = source.rsplit('\n').next().unwrap_or("").chars().count();
+    TextRange {
+        start: TextPosition {
+            line_index: 0,
+            character_index: 0,
+        },
+        end: TextPosition {
+            line_index,
+            character_index,
+        },
+    }
+}
+
 // Run manually with: cargo test -p analysis --release --test test_incremental -- --ignored --nocapture
 #[test]
 #[ignore = "timing benchmark, run manually"]
