@@ -55,6 +55,31 @@ tolower("HELLO")
 #++++
 character
 
+#---- is_na_is_logical
+is.na(1L)
+#++++
+logical
+
+#---- as_integer_is_integer
+as.integer("3")
+#++++
+integer
+
+#---- as_character_is_character
+as.character(3L)
+#++++
+character
+
+#---- as_numeric_is_double
+as.numeric("3.5")
+#++++
+double
+
+#---- substr_is_character
+substr("hello", 1L, 3L)
+#++++
+character
+
 #==== composition_with_kernel
 #---- stub_result_feeds_operator_kernel
 length(c(1L, 2L)) + 1L
@@ -86,5 +111,35 @@ Any
 
 #---- variadic_sum_degrades_to_any_no_arity_error
 sum(1L, 2L, 3L)
+#++++
+Any
+
+#---- variadic_min_degrades_to_any_no_arity_error
+min(1L, 2L, 3L)
+#++++
+Any
+
+#---- variadic_max_degrades_to_any_no_arity_error
+max(1L, 2L, 3L)
+#++++
+Any
+
+#---- mean_degrades_to_any
+mean(c(1L, 2L))
+#++++
+Any
+
+#---- optional_arg_substring_degrades_to_any
+substring("hello", 1L)
+#++++
+Any
+
+#---- optional_arg_gsub_degrades_to_any
+gsub("a", "b", "banana")
+#++++
+Any
+
+#---- optional_arg_sub_degrades_to_any
+sub("a", "b", "banana")
 #++++
 Any

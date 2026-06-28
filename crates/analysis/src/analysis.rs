@@ -220,8 +220,32 @@ struct PackageOutput<T> {
 
 impl Analysis {
     pub fn new(base_path: PathBuf, lint_config: LintConfig, check_config: CheckConfig) -> Self {
+        Self::new_with_stub_library(base_path, lint_config, check_config, StubLibrary::load)
+    }
+
+    // Builds an `Analysis` whose base environment comes from the stub library the `load_stubs` closure
+    // produces against the interner this constructs — so the stub symbols are always interned in the
+    // interner that stores them (no cross-interner mismatch is representable). `new` passes
+    // `StubLibrary::load`; the LT2 zero-cost benchmark passes `|_| StubLibrary::empty()` to measure the
+    // per-edit cost the stubs add.
+    pub fn new_with_stub_library(
+        base_path: PathBuf,
+        lint_config: LintConfig,
+        check_config: CheckConfig,
+        load_stubs: impl FnOnce(&mut Interner) -> StubLibrary,
+    ) -> Self {
         let mut interner = Interner::new();
-        let stub_library = StubLibrary::load(&mut interner);
+        let stub_library = load_stubs(&mut interner);
+        Self::build(base_path, lint_config, check_config, interner, stub_library)
+    }
+
+    fn build(
+        base_path: PathBuf,
+        lint_config: LintConfig,
+        check_config: CheckConfig,
+        interner: Interner,
+        stub_library: StubLibrary,
+    ) -> Self {
         Self {
             base_path,
             lint_config,

@@ -45,3 +45,51 @@ pub fn generate_file(file_index: usize, items_per_file: usize, braced_body: bool
     }
     source
 }
+
+// Like `generate_package`, but every item additionally references embedded base stub names
+// (`length`/`seq_len`/`seq_along`/`nchar`/`toupper`/`T`/`F`/`pi`), so the stub corpus is actually
+// seeded into the inference template and resolved on every recheck. The LT2 zero-per-edit-cost
+// benchmark uses this to compare recheck time with the real stub corpus against an empty one.
+pub fn generate_package_with_base_refs(
+    file_count: usize,
+    items_per_file: usize,
+) -> Vec<(PathBuf, String)> {
+    (0..file_count)
+        .map(|file_index| {
+            (file_path(file_index), generate_file_with_base_refs(file_index, items_per_file, false))
+        })
+        .collect()
+}
+
+pub fn generate_file_with_base_refs(
+    file_index: usize,
+    items_per_file: usize,
+    braced_body: bool,
+) -> String {
+    let dependency_file = file_index.saturating_sub(1);
+    let mut source = String::new();
+    for item_index in 0..items_per_file {
+        // `length(seq_len(count))` resolves two stub schemes and types back to `integer`, so the body
+        // exercises stub resolution while keeping the declared `-> integer` interface honest.
+        let body = if braced_body {
+            "{ count + length(seq_len(count)) }".to_string()
+        } else {
+            "count + length(seq_len(count))".to_string()
+        };
+        source.push_str("#: fn(count: integer) -> integer\n");
+        source.push_str(&format!("fn_{file_index}_{item_index} <- function(count) {body}\n"));
+        source.push_str(&format!("id_{file_index}_{item_index} <- function(value) value\n"));
+        source.push_str(&format!("const_{file_index}_{item_index} <- {item_index}L\n"));
+        source.push_str(&format!(
+            "use_{file_index}_{item_index} <- fn_{dependency_file}_{item_index}(2L)\n"
+        ));
+        source.push_str(&format!(
+            "blen_{file_index}_{item_index} <- length(seq_along(c(1L, 2L)))\n"
+        ));
+        source.push_str(&format!("bchr_{file_index}_{item_index} <- nchar(toupper(\"x\"))\n"));
+        source.push_str(&format!("bflag_{file_index}_{item_index} <- T\n"));
+        source.push_str(&format!("bfalse_{file_index}_{item_index} <- F\n"));
+        source.push_str(&format!("bpi_{file_index}_{item_index} <- pi\n"));
+    }
+    source
+}

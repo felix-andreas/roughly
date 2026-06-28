@@ -1,7 +1,10 @@
 mod common;
 
 use {
-    analysis::{Analysis, CheckConfig, DocumentChange, LintConfig, TextPosition, TextRange},
+    analysis::{
+        Analysis, CheckConfig, DocumentChange, Interner, LintConfig, TextPosition, TextRange,
+        stdlib::StubLibrary,
+    },
     std::path::PathBuf,
 };
 
@@ -806,4 +809,109 @@ fn benchmark_single_file_recheck_in_large_package() {
         recomputed.len()
     );
     assert_eq!(recomputed.len(), 1, "body edit should recheck one document");
+}
+
+// LT2 zero-per-edit-cost gate. The stub corpus is a base-environment input that creates no edges in
+// the incremental graph, so its mere *presence* must add no measurable per-edit recheck cost. This
+// times a single-file body recheck over identical sources with the real `StubLibrary::load` corpus
+// against `StubLibrary::empty()`, in two scenarios:
+//
+//   - plain sources (no base names referenced): isolates the library's *presence* overhead — the
+//     once-per-typecheck template seeding plus the larger template each document clones. This is the
+//     true zero-cost claim and should sit within noise.
+//   - base-referencing sources: the with-stubs recheck actually resolves base names to real schemes,
+//     which the empty baseline skips (it yields Unknown / unresolved). Any delta here is legitimate
+//     inference work — the feature functioning — not graph or bookkeeping overhead.
+//
+// In both scenarios exactly one document is rechecked (asserted), which is the incremental-isolation
+// property; the assertion oracle (`assert_stub_isolation`) proves the stubs touch no value index.
+//
+// Run manually with:
+//   cargo test -p analysis --release --test test_incremental -- --ignored --nocapture
+#[test]
+#[ignore = "timing benchmark, run manually"]
+fn benchmark_stub_library_zero_per_edit_cost() {
+    let items_per_file = 30;
+    let file_count = 500;
+    let edit_file = 250;
+    let rounds = 20;
+
+    for reference_base_names in [false, true] {
+        let scenario = if reference_base_names { "base-referencing sources" } else { "plain sources" };
+        let with_stubs = measure_recheck(
+            StubLibrary::load,
+            reference_base_names,
+            file_count,
+            items_per_file,
+            edit_file,
+            rounds,
+        );
+        let with_empty = measure_recheck(
+            |_| StubLibrary::empty(),
+            reference_base_names,
+            file_count,
+            items_per_file,
+            edit_file,
+            rounds,
+        );
+        let delta = with_stubs.as_secs_f64() - with_empty.as_secs_f64();
+        let percent = if with_empty.as_secs_f64() > 0.0 {
+            delta / with_empty.as_secs_f64() * 100.0
+        } else {
+            0.0
+        };
+        println!("LT2 zero-per-edit-cost — {scenario} (mean of {rounds} single-file rechecks):");
+        println!("  with stubs (StubLibrary::load):  {with_stubs:?}");
+        println!("  with empty (StubLibrary::empty): {with_empty:?}");
+        println!("  delta:                           {delta:+.6}s ({percent:+.2}%)");
+    }
+}
+
+// Builds a large package against `stub_library`, runs a full check, then times the recompute of a
+// single body-only edit, averaged over `rounds` toggling edits. With an empty library the base names
+// (when present) resolve to `Unknown` rather than the stub schemes; the recheck work is otherwise
+// identical, so the time difference isolates the stubs' per-edit cost.
+fn measure_recheck(
+    load_stubs: impl FnOnce(&mut Interner) -> StubLibrary,
+    reference_base_names: bool,
+    file_count: usize,
+    items_per_file: usize,
+    edit_file: usize,
+    rounds: usize,
+) -> std::time::Duration {
+    let mut analysis_state = Analysis::new_with_stub_library(
+        PathBuf::from("/pkg"),
+        LintConfig::default(),
+        CheckConfig { unused: false, typing: true, strict: false },
+        load_stubs,
+    );
+    let package = if reference_base_names {
+        common::generate_package_with_base_refs(file_count, items_per_file)
+    } else {
+        common::generate_package(file_count, items_per_file)
+    };
+    for (path, source) in package {
+        analysis_state
+            .add_document_from_source(path, &source)
+            .expect("document should parse");
+    }
+    analysis::run_full(&mut analysis_state);
+
+    let mut total = std::time::Duration::ZERO;
+    for round in 0..rounds {
+        let braced = round % 2 == 0;
+        let source = if reference_base_names {
+            common::generate_file_with_base_refs(edit_file, items_per_file, braced)
+        } else {
+            common::generate_file(edit_file, items_per_file, braced)
+        };
+        analysis_state
+            .add_document_from_source(common::file_path(edit_file), &source)
+            .expect("document should parse");
+        let start = std::time::Instant::now();
+        let recomputed = analysis::typecheck(&mut analysis_state);
+        total += start.elapsed();
+        assert_eq!(recomputed.len(), 1, "body edit should recheck one document");
+    }
+    total / rounds as u32
 }

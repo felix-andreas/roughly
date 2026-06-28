@@ -44,6 +44,23 @@ toupper <- function(x) ""
 #: fn(x: character) -> character
 tolower <- function(x) ""
 
+#: fn(x: Any) -> logical
+is.na <- function(x) FALSE
+
+#: fn(x: Any) -> integer
+as.integer <- function(x) 0L
+
+#: fn(x: Any) -> character
+as.character <- function(x) ""
+
+#: fn(x: Any) -> double
+as.numeric <- function(x) 0
+
+# --- precise: fixed arity, result atomic type static (substr requires all three positions) ---
+
+#: fn(x: character, start: integer, stop: integer) -> character
+substr <- function(x, start, stop) ""
+
 # --- degrade: shape polymorphism (result shape == argument shape) is not expressible as `T -> T`
 #     yet; declaring a concrete shape would be falsely precise, so the return degrades to `Any` ---
 
@@ -67,3 +84,24 @@ paste <- function(...) ""
 
 #: Any
 sum <- function(...) 0L
+
+#: Any
+min <- function(...) 0L
+
+#: Any
+max <- function(...) 0L
+
+#: Any
+mean <- function(x, ...) 0
+
+# --- degrade: optional/extra arguments (e.g. `ignore.case`, `fixed`, `last`) are not yet expressible,
+#     so a fixed-arity signature would spuriously arity-error real calls; the whole binding is `Any` ---
+
+#: Any
+substring <- function(text, first, last) ""
+
+#: Any
+gsub <- function(pattern, replacement, x) ""
+
+#: Any
+sub <- function(pattern, replacement, x) ""
