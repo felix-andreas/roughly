@@ -5,63 +5,40 @@ description: Installation and basic setup for Roughly
 
 import { Steps } from '@astrojs/starlight/components';
 
+Roughly is a fast, all-in-one toolchain for R, written in Rust: a formatter, a linter, a
+language server, and the first static type checker for R. It works on the code you already
+have — type annotations are written in `#:` comments that every other R tool simply ignores.
 
-This guide will walk you through installing and configuring Roughly for your R projects.
+This guide gets Roughly running in your editor or on the command line.
 
-## Roughly CLI
+## Install
 
-### Installation
-
-<Steps>
-
-1. Download the pre-built binary for your platform from the [GitHub Releases](https://github.com/felix-andreas/roughly/releases) page
-2. Add the binary to your system PATH
-
-</Steps>
-
-### Usage
-
-Roughly provides several commands to format code, check for issues, and run a language server:
-
-```bash
-# Format R files
-roughly fmt                # Format files in current directory
-roughly fmt path/to/files  # Format files at the specific path
-
-# Check for issues
-roughly check              # Lint files in current directory
-
-# Run the language server
-roughly server             # Start the LSP server
-```
-
-## Editor Integrations
-
-### VS Code extension
-
-Roughly can also be used as a VS Code extension.
-
-#### From Marketplace (Recommended)
+### VS Code (recommended)
 
 [![](https://vsmarketplacebadges.dev/version-short/felix-andreas.roughly.svg)](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
 
-Install the extension from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly).
+Install the [Roughly extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
+from the VS Code Marketplace. The extension bundles the Roughly CLI for **Windows and Linux x64**, so
+there is nothing else to set up.
 
-> The VS Code extension from the marketplace includes a bundled version of the Roughly CLI **only for Windows and Linux x64**. If you are using macOS or a different architecture, you will need to install the Roughly CLI manually.
+> On macOS or another architecture, install the [CLI](#command-line) separately and point the
+> extension at it with the `roughly.path` setting (see the [language server](/language-server) page).
 
-#### Manual Installation
+### Zed
 
-Alternatively, build the extension from source (or [download from releases](https://github.com/felix-andreas/roughly/releases)):
+Install the [Roughly extension](https://zed.dev/extensions/roughly) from Zed's extension registry.
 
-```bash
-bun run package
-```
+### Command line
 
-Install the generated VSIX file:
+Prebuilt binaries are available for Linux, macOS, and Windows. Use the CLI directly for formatting and
+linting in CI, with RStudio, or to back an editor extension on a platform without a bundled binary.
 
-```bash
-code --install-extension roughly.vsix
-```
+<Steps>
+
+1. Download the binary for your platform from the [GitHub Releases](https://github.com/felix-andreas/roughly/releases) page.
+2. Add it to your system `PATH`.
+
+</Steps>
 
 ### RStudio (formatter only)
 
@@ -81,10 +58,43 @@ You can configure Roughly as an external formatter in RStudio:
    Options > Code > Saving > Format with an External Tool
    ```
 
-   Check the `Reformat documents on save` option
+   Check the `Reformat documents on save` option.
 
 </Steps>
 
-## Configuration
+## Usage
 
-For detailed configuration options, see the [Configuration](/configuration) documentation.
+The CLI has three commands:
+
+```bash
+# Format R files (rewrites in place)
+roughly fmt                # format files in the current directory
+roughly fmt path/to/files  # format files at a specific path
+roughly fmt --check        # exit non-zero if files would change (for CI)
+roughly fmt --diff         # show the diff without writing
+
+# Lint and type-check
+roughly check              # check files in the current directory
+roughly check path/to/files
+
+# Run the language server (for editors that speak LSP)
+roughly server
+```
+
+`roughly check` runs the linter by default. To also surface **type errors** and **unused-variable**
+warnings, opt in through `roughly.toml`:
+
+```toml
+[check]
+typing = true   # report type errors
+unused = true   # report unused local variables
+```
+
+Type *inference* itself is always on and powers editor features like hover and inlay hints — the
+settings above only control which diagnostics `roughly check` reports.
+
+## Next steps
+
+- [Type Checker](/type-checker) — how inference and `#:` annotations work
+- [Formatter](/formatter), [Linter](/linter), and [Language Server](/language-server) references
+- [Configuration](/configuration) — every `roughly.toml` option
