@@ -923,133 +923,191 @@ fn run_naming_global_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile
     let FixtureKind::MultiFile(case) = &fixture.kind else {
         return Err("unsupported fixture".to_owned());
     };
-    let mut parser = new_parser().unwrap();
     let mut analysis_state = Analysis::new(
         PathBuf::new(),
         LintConfig::default(),
         CheckConfig::default(),
     );
+
     for entry in &case.initial_generation.entries {
-        let FixtureOperation::CreateDocument { path, contents } = &entry.operation else {
-            continue;
-        };
-        let parsed_document =
-            Document::parse(&mut parser, contents).expect("parse fixture document");
-        analysis_state.add_document(path.clone(), parsed_document);
+        apply_naming_operation(&mut analysis_state, &entry.operation)?;
+    }
+    let mut snapshots = vec![render_naming_snapshot(&mut analysis_state)?];
+    for generation in &case.generations {
+        for entry in &generation.entries {
+            apply_naming_operation(&mut analysis_state, &entry.operation)?;
+        }
+        snapshots.push(render_naming_snapshot(&mut analysis_state)?);
     }
 
-    analysis::lower(&mut analysis_state);
-    resolve_package(&mut analysis_state);
+    return Ok(snapshots);
 
-    let mut ordered_document_ids = analysis_state.package_document_ids();
-    let mut non_package_document_ids = case
-        .initial_generation
-        .entries
-        .iter()
-        .filter_map(|entry| {
-            let FixtureOperation::CreateDocument { path, .. } = &entry.operation else {
-                return None;
-            };
-            analysis_state.document_id_for_path(path)
-        })
-        .filter(|document_id| !ordered_document_ids.contains(document_id))
-        .collect::<Vec<_>>();
-    non_package_document_ids.sort_by(|left_document_id, right_document_id| {
-        let left_path = analysis_state
-            .path_for_document_id(*left_document_id)
-            .expect("document path should exist")
-            .to_path_buf();
-        let right_path = analysis_state
-            .path_for_document_id(*right_document_id)
-            .expect("document path should exist")
-            .to_path_buf();
-        left_path.cmp(&right_path)
-    });
-    ordered_document_ids.extend(non_package_document_ids);
-
-    let mut next_display_binding_id = 0u32;
-    let mut binding_display_labels = BTreeMap::new();
-    let all_local_naming = ordered_document_ids
-        .iter()
-        .map(|document_id| {
-            analysis_state
-                .document_naming(*document_id)
-                .cloned()
-                .map(|local_naming| (*document_id, local_naming))
-                .ok_or_else(|| "missing local naming".to_owned())
-        })
-        .collect::<Result<HashMap<_, _>, _>>()?;
-    for document_id in &ordered_document_ids {
-        let local_naming = all_local_naming
-            .get(document_id)
-            .ok_or_else(|| "missing local naming".to_owned())?;
-        let mut binding_ids = local_naming.bindings.keys().copied().collect::<Vec<_>>();
-        binding_ids.sort_by_key(|binding_id| binding_id.0);
-        for binding_id in binding_ids {
-            binding_display_labels.insert(
-                (*document_id, binding_id),
-                format!("b{next_display_binding_id}"),
-            );
-            next_display_binding_id += 1;
+    fn apply_naming_operation(
+        analysis_state: &mut Analysis,
+        operation: &FixtureOperation,
+    ) -> Result<(), String> {
+        match operation {
+            FixtureOperation::CreateDocument { path, contents } => analysis_state
+                .add_document_from_source(path.clone(), contents)
+                .map(|_| ())
+                .map_err(|error| format!("failed to add `{}`: {error:?}", path.display())),
+            FixtureOperation::EditDocument {
+                path,
+                range,
+                replacement_text,
+            } => analysis_state
+                .edit_document(
+                    path,
+                    &[DocumentChange {
+                        range: TextRange {
+                            start: TextPosition {
+                                line_index: range.start.line_number - 1,
+                                character_index: range.start.column_number - 1,
+                            },
+                            end: TextPosition {
+                                line_index: range.end.line_number - 1,
+                                character_index: range.end.column_number - 1,
+                            },
+                        },
+                        text: replacement_text.clone(),
+                    }],
+                )
+                .map_err(|error| format!("failed to edit `{}`: {error:?}", path.display())),
+            FixtureOperation::MoveDocument {
+                source_path,
+                destination_path,
+            } => {
+                let source = analysis_state
+                    .document(source_path)
+                    .ok_or_else(|| format!("missing source document `{}`", source_path.display()))?
+                    .rope()
+                    .to_string();
+                analysis_state
+                    .add_document_from_source(destination_path.clone(), &source)
+                    .map_err(|error| {
+                        format!("failed to move `{}`: {error:?}", destination_path.display())
+                    })?;
+                analysis_state.delete_document(source_path).map_err(|error| {
+                    format!("failed to delete `{}`: {error:?}", source_path.display())
+                })
+            }
+            FixtureOperation::DeleteDocument { path } => analysis_state
+                .delete_document(path)
+                .map_err(|error| format!("failed to delete `{}`: {error:?}", path.display())),
+            FixtureOperation::Action { .. } => Ok(()),
         }
     }
 
-    let mut files = case
-        .initial_generation
-        .entries
-        .iter()
-        .filter_map(|entry| {
-            let FixtureOperation::CreateDocument { path, contents } = &entry.operation else {
-                return None;
-            };
-            Some((path, contents))
-        })
-        .map(|(path, contents)| {
-            let document_id = analysis_state
-                .document_id_for_path(path)
-                .ok_or_else(|| "missing document id".to_owned())?;
-            let module = analysis_state
-                .module(document_id)
-                .ok_or_else(|| "missing module".to_owned())?;
-            let local_naming = analysis_state
-                .document_naming(document_id)
-                .ok_or_else(|| "missing local naming".to_owned())?;
-            let rendered_hir = render_named_hir(
-                &analysis_state,
-                document_id,
-                module,
-                local_naming,
-                &all_local_naming,
+    // Re-runs the incremental naming pipeline and renders every live document as binding-resolved
+    // HIR (the resolved package winner is visible as the `@bN` each `Symbol` binds to) plus that
+    // document's diagnostics. `resolve_package` runs its incremental==full-rebuild drift assertion on
+    // every generation, so each snapshot also proves the incremental package-naming path.
+    fn render_naming_snapshot(
+        analysis_state: &mut Analysis,
+    ) -> Result<Vec<FixtureRunFile>, String> {
+        analysis::lower(analysis_state);
+        resolve_package(analysis_state);
+
+        let mut ordered_document_ids = analysis_state.package_document_ids();
+        let mut non_package_document_ids = analysis_state
+            .all_document_ids()
+            .into_iter()
+            .filter(|document_id| !ordered_document_ids.contains(document_id))
+            .collect::<Vec<_>>();
+        non_package_document_ids.sort_by(|left_document_id, right_document_id| {
+            let left_path = analysis_state
+                .path_for_document_id(*left_document_id)
+                .map(Path::to_path_buf);
+            let right_path = analysis_state
+                .path_for_document_id(*right_document_id)
+                .map(Path::to_path_buf);
+            left_path.cmp(&right_path)
+        });
+        ordered_document_ids.extend(non_package_document_ids);
+
+        let all_local_naming = ordered_document_ids
+            .iter()
+            .map(|document_id| {
                 analysis_state
-                    .package_naming()
-                    .ok_or_else(|| "missing package naming".to_owned())?,
-                &binding_display_labels,
-                analysis_state.interner(),
-            );
-            let diagnostics = analysis_state.document_diagnostics(document_id);
-            let rendered_diagnostics = if diagnostics.is_empty() {
-                String::new()
-            } else {
-                diagnostics
-                    .into_iter()
-                    .map(|diagnostic| diagnostic.render(contents))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            };
-
-            Ok(FixtureRunFile {
-                path: path.clone(),
-                output: [rendered_hir, rendered_diagnostics]
-                    .into_iter()
-                    .filter(|section| !section.is_empty())
-                    .collect::<Vec<_>>()
-                    .join("\n\n"),
+                    .document_naming(*document_id)
+                    .cloned()
+                    .map(|local_naming| (*document_id, local_naming))
+                    .ok_or_else(|| "missing local naming".to_owned())
             })
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    files.sort_by(|left, right| left.path.cmp(&right.path));
+            .collect::<Result<HashMap<_, _>, _>>()?;
 
-    Ok(vec![files])
+        let mut next_display_binding_id = 0u32;
+        let mut binding_display_labels = BTreeMap::new();
+        for document_id in &ordered_document_ids {
+            let local_naming = all_local_naming
+                .get(document_id)
+                .ok_or_else(|| "missing local naming".to_owned())?;
+            let mut binding_ids = local_naming.bindings.keys().copied().collect::<Vec<_>>();
+            binding_ids.sort_by_key(|binding_id| binding_id.0);
+            for binding_id in binding_ids {
+                binding_display_labels.insert(
+                    (*document_id, binding_id),
+                    format!("b{next_display_binding_id}"),
+                );
+                next_display_binding_id += 1;
+            }
+        }
+
+        let mut files = ordered_document_ids
+            .iter()
+            .map(|document_id| {
+                let path = analysis_state
+                    .path_for_document_id(*document_id)
+                    .ok_or_else(|| "missing document path".to_owned())?
+                    .to_path_buf();
+                let contents = analysis_state
+                    .document_by_id(*document_id)
+                    .ok_or_else(|| "missing document".to_owned())?
+                    .rope()
+                    .to_string();
+                let module = analysis_state
+                    .module(*document_id)
+                    .ok_or_else(|| "missing module".to_owned())?;
+                let local_naming = analysis_state
+                    .document_naming(*document_id)
+                    .ok_or_else(|| "missing local naming".to_owned())?;
+                let rendered_hir = render_named_hir(
+                    analysis_state,
+                    *document_id,
+                    module,
+                    local_naming,
+                    &all_local_naming,
+                    analysis_state
+                        .package_naming()
+                        .ok_or_else(|| "missing package naming".to_owned())?,
+                    &binding_display_labels,
+                    analysis_state.interner(),
+                );
+                let diagnostics = analysis_state.document_diagnostics(*document_id);
+                let rendered_diagnostics = if diagnostics.is_empty() {
+                    String::new()
+                } else {
+                    diagnostics
+                        .into_iter()
+                        .map(|diagnostic| diagnostic.render(&contents))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                };
+
+                Ok(FixtureRunFile {
+                    path,
+                    output: [rendered_hir, rendered_diagnostics]
+                        .into_iter()
+                        .filter(|section| !section.is_empty())
+                        .collect::<Vec<_>>()
+                        .join("\n\n"),
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        files.sort_by(|left, right| left.path.cmp(&right.path));
+
+        Ok(files)
+    }
 }
 
 fn run_type_syntax_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String> {
