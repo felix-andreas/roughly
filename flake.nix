@@ -68,6 +68,9 @@
             root = unfilteredRoot;
             fileset = pkgs.lib.fileset.unions [
               (craneLib.fileset.commonCargoSources unfilteredRoot)
+              # Non-Rust files pulled in by `include_str!` / tests that
+              # `commonCargoSources` filters out and must be added explicitly.
+              ./crates/analysis/src/stdlib_base.R
               ./crates/roughly/tests/format
               ./crates/roughly/tests/snapshots
             ];
