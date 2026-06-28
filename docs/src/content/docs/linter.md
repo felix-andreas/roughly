@@ -47,7 +47,7 @@ Semantics checks enforce coding conventions and best practices that won't necess
 - **Parameter naming convention**: Ensures function parameters follow the same naming convention
 - **Assignment operator**: Recommends using `<-` rather than `=` for variable assignment
 - **Trailing commas**: Flags unnecessary trailing commas in function calls
-- **Booleans values**: Use `TRUE` and `FALSE` over `T` and `F`
+- **Boolean values**: Use `TRUE` and `FALSE` over `T` and `F`
 
 Example:
 ```r
@@ -63,23 +63,34 @@ calculate_mean <- function(dataSet) {
 result <- sum(1, 2, 3,)
 ```
 
+### Opt-in Checks
+
+Two further checks are available but off by default; enable them in `roughly.toml`:
+
+```toml
+[check]
+typing = true   # report type errors and function-call argument mismatches
+unused = true   # report unused local variables
+```
+
+- **Unused variables**: Flags local variables and parameters that are assigned but never used.
+- **Type checking**: Reports type errors and argument mismatches from Roughly's static type
+  checker. Type *inference* is always on (it powers editor features); this setting controls whether
+  `roughly check` surfaces type-error diagnostics. See [Type Checker](/type-checker).
+
 ## Configuration
 
 For details on configuring the linter, see the [Configuration](/configuration) page.
 
 ## Roadmap
 
-Static type checking and function-call argument validation are already available as an
-experimental, opt-in feature — see [Type Checker](/type-checker).
+Roughly's static analysis will continue to expand in future versions to include:
 
-Roughly's static analysis capabilities will continue to expand in future versions to include:
-
-- **Unused variables**: Detection of unused variable declarations
 - **Unreachable code**: Identification of code that will never be executed
 - **Control flow analysis**: Detecting potential infinite loops or missing return statements
 - **Package-specific rules**: Special rules for popular packages like dplyr, ggplot2, and data.table
 
-These advanced static analysis features are currently in development and will be added in future releases.
+These features are not yet implemented.
 
 ## Integration
 

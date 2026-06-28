@@ -17,56 +17,61 @@ roughly server
 
 ## Features
 
-Roughly aims to support the following language server features (some are experimental or in progress):
-
-- **Formatting**
-  - Format entire document
-  - Format selected code range *(🧪 experimental)*
+Roughly supports the following language server features. Items marked 🧪 are experimental; items
+marked ⚠️ are planned but not yet available.
 
 - **Navigation**
-  - Index global variables, S4 and R6 classes/methods
-  - Search current document - <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> *in VS Code*
-  - Search global workspace - <kbd>Ctrl</kbd> + <kbd>T</kbd> *in VS Code*
+  - Index of global variables and S4 / R6 classes and methods
+  - Document symbol search — <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> *in VS Code*
+  - Workspace symbol search — <kbd>Ctrl</kbd> + <kbd>T</kbd> *in VS Code*
   - Go to definition
   - Find all references
 
-- **Diagnostics**
-  - Syntax errors - *including missing or trailing commas*
-  - Basic linting rules - *[full list here](https://roughly.felixandreas.me/linter/#semantics-checks)*
-  - Warning for unused variables *(🧪 experimental)*
-  - Error for undefined variable *(⚠️ missing)*
-  - Argument validation for function calls *(🧪 experimental — part of type checking)*
-  - Static type checking — HM-style inference with nominal/structural types, function types, nullable unions, and numeric constraints, via [`#:` typing comments](/type-checker) *(🧪 experimental)*
-
 - **Editing**
-  - Autocomplete local and global variables
-  - Autocomplete variables from other packages *(⚠️ missing)*
-  - Rename local variables
-  - Rename global variables *(⚠️ missing)*
-  - Signature help *(🔨 work in progress)*
+  - Completion for local and global variables
+  - Completion for symbols from other packages *(⚠️ planned)*
+  - Rename variables across the whole workspace
+  - Signature help
+  - Inlay hints for inferred types
 
+- **Formatting**
+  - Format an entire document
+  - Format a selected range *(🧪 experimental — enable with the `range_formatting` flag)*
 
-## Roadmap
+- **Diagnostics**
+  - Syntax errors — including missing or trailing commas
+  - Lint rules — *[full list](/linter#semantics-checks)*
+  - Unused local variables — *opt-in via `[check] unused = true`*
+  - Type errors and function-call argument mismatches — *opt-in via `[check] typing = true`*
+  - Undefined-variable errors *(🧪 experimental)*
 
-Future language server improvements will include:
+Type *inference* runs by default and powers hover and inlay hints with no configuration. The two
+opt-in diagnostics above only control what `roughly check` reports. See the
+[Type Checker](/type-checker) for the inference model — nominal and structural types, function
+types, nullable unions, and numeric constraints, all written in [`#:` comments](/type-checker).
 
-- **Go to Definition**: Navigate to function and variable definitions
-- **Find References**: Find all references to a symbol
-- **Rename Symbol**: Safely rename variables and functions
-- **Type Information**: Show type information in tooltips
-- **Semantic Highlighting**: Enhanced syntax highlighting
-- **Code Actions**: Quick fixes for common issues
+## Planned
+
+Not yet available:
+
+- Completion for symbols from external packages
+- Semantic highlighting
+- Code actions and quick fixes
 
 ## Supported Editors
 
-While Roughly is designed as a standard LSP implementation that should work with any editor supporting LSP:
+Roughly is a standard LSP implementation and works with any editor that speaks LSP:
 
-- **VS Code**: Full support via dedicated extension
-- **Other Editors**: May be configured to use Roughly's LSP implementation directly
+- **VS Code** — full support via the [dedicated extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
+- **Zed** — via the [Zed extension](https://zed.dev/extensions/roughly)
+- **Other editors** — point your LSP client at `roughly server`
 
 ## VS Code Extension
 
 ### Installation
+
+The easiest way to install is from the [VS Code Marketplace](/getting-started#vs-code-recommended). To
+install a specific build manually:
 
 <Steps>
 
@@ -104,8 +109,8 @@ You can customize the Roughly extension in VS Code through the following setting
   "roughly.path": "/path/to/roughly",
   // Pass custom arguments; defaults to ["server"]
   "roughly.args": ["server", "--verbose"],
-  // Enable experimental features
-  "roughly.experimentalFeatures": ["typing", "range_formatting"],
+  // Enable experimental features (currently only range formatting)
+  "roughly.experimentalFeatures": ["range_formatting"],
 }
 ```
 
