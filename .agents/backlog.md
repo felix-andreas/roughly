@@ -15,6 +15,7 @@ Testing rule (user, standing): **anything that can be tested should use fixtures
 | 5 | **Formatter adversarial edge-case review** — an adversarial agent hunts formatter edge cases; failures become fixtures. | DX | |
 | 6 | **Docs to world-class state** — accuracy + clarity pass across the docs site (contracts). | DX | |
 | 7 | **Website improvement** — adversarial marketing-expert review + improvements. | DX | |
+| 8 | **Push-path stale dependents on save (typing-off)** — `run_full` returns an empty affected-set when `check.typing`/`strict` are off (the default; it only returns recomputed docs from `typecheck`), so the LSP **push** path's `did_save` republishes only the saved document, not dependents whose cross-file naming diagnostics (e.g. "could not resolve") moved. Same root cause as the pull-diagnostics refresh conservatism (#4). Fix: make `run_full` return the documents whose diagnostics changed even on the naming-only (`resolve_package`) path, then `did_save` (push) republishes dependents and the refresh (#4) can become precise. Real correctness gap; lower priority — sequence after the lower-recursion crash fix (done). | CTO | Found while implementing #4's refresh. |
 
 ## Resolved (Expert recommendations, 2026-06-28)
 
