@@ -113,7 +113,7 @@ const year = new Date().getFullYear()
         <div class="hero-vignette" aria-hidden="true"></div>
         <div class="hero-copy">
           <p class="eyebrow">the first type checker for R · written in rust</p>
-          <h1>The first type checker for R.</h1>
+          <h1>Modern developer tooling for R.</h1>
           <p class="subhead">
             Roughly is a fast, Rust-built toolchain — a static type checker, a language server, and a
             formatter in one. It catches type errors before you run your code, works in your editor,
@@ -1838,7 +1838,9 @@ roughly check .</code></pre>
         line-height: 1.6;
         -webkit-font-smoothing: antialiased;
         text-rendering: optimizeLegibility;
-        overflow-x: hidden;
+        /* clip (not hidden) avoids turning <body> into its own scroll container,
+           so the page keeps the native root scrollbar. */
+        overflow-x: clip;
       }
       a {
         color: inherit;
@@ -2212,7 +2214,7 @@ roughly check .</code></pre>
         --cap: var(--cap-emerald);
       }
       .col {
-        max-width: var(--prose);
+        max-width: 980px;
         margin: 0 auto;
       }
       .show-col {
