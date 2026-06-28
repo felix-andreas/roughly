@@ -21,6 +21,11 @@ Use ordinary Rust tests only when the behavior is awkward to express as a render
 The current analysis fixture runner lives in `tests/test_fixtures.rs`.
 Fixture parsing itself lives in the separate `fixtures` crate.
 
+The `roughly` crate's formatter tests reuse the same harness: `crates/roughly/tests/test_format.rs`
+runs a `tests/format` suite through the `fixtures` crate, so the `Simple` `#++++` shape,
+`ROUGHLY_BLESS=1`, and `FIXTURE_FILTER` all apply there too. Run it with
+`cargo test -p roughly --test test_format`.
+
 Some suites may include a local `README.md` with more detailed strategy, coverage expectations, or renderer-specific guidance. Use this page for crate-level test contracts and suite-local README files for suite-specific concepts that would otherwise make this page too long.
 
 The shared naming suite README at `tests/naming/README.md` is authoritative for the naming fixture

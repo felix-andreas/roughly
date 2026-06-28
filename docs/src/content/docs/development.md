@@ -3,6 +3,45 @@ title: Development
 description: How to contribute to Roughly
 ---
 
+This page helps you get from a clone to passing tests and explains a few non-obvious corners of the
+codebase.
+
+## Project layout
+
+Roughly is a Rust workspace with three main crates:
+
+- **`crates/roughly`** — the CLI, the LSP server, the formatter, and the linter.
+- **`crates/analysis`** — the analysis engine: parsing, lowering, naming, and type checking. Its
+  intended file layout is documented in [Structure](/structure), and its design in
+  [Architecture](/architecture).
+- **`crates/fixtures`** — the shared fixture-test harness used by the test suites.
+
+The editor extensions live under `editors/` (`code` for VS Code, `zed` for Zed).
+
+## Build and test
+
+```sh
+cargo build                                   # build the workspace (or: just build)
+cargo test                                    # run all tests       (or: just test)
+cargo test -p analysis                        # the analysis engine's tests
+cargo test -p roughly --test test_format      # the formatter's fixture tests
+```
+
+Most behavior is verified with **fixture tests** — human-readable `.test` files rendered to expected
+output. Read [Testing](/testing) for the fixture contract before adding or changing tests. Two
+environment variables matter day to day:
+
+- `ROUGHLY_BLESS=1` rewrites the expected `#++++` blocks in place from the current output (review the
+  diff before committing).
+- `FIXTURE_FILTER=group__case` runs a single fixture case.
+
+```sh
+just test-analysis                            # run the analysis fixture suites (via nextest)
+just test-analysis group__case                # filter to fixtures whose name contains this
+```
+
+To work on this documentation site, run `just docs` (a live preview) or `cd docs && npx astro build`.
+
 ## VS Code Extension Setup
 
 - Run `cd editors/code && bun install`. This installs all necessary npm modules
@@ -23,25 +62,15 @@ The `launch.json` contains a setting:
 For me this led to the issue that the language server wasn't spawned because I had `CodeLLDB` from `nixpkgs` installed.
 
 
-## Roadmap
-
-* static analysis
-  * type checking
-  * name binding
-    * are all names defined
-    * unused names (variables & parameters)
-* variable renaming
-* inlay hints
-
 ## Formatting
 
 ### Comments in expressions
 
-The main challenge in formatting code is handling comments because they can appear at any location. This is particualar hard to handle these expressions:
+The main challenge in formatting code is handling comments, because they can appear at any location. These expressions are particularly hard to handle:
 
 * if expression
 * for expression
-* repeat statment
+* repeat statement
 * while expression
 * binary operator
 * extract operator
@@ -70,7 +99,7 @@ else
 }
 ```
 
-With a structured AST, we might typically could write our code in a concise functional style:
+With a structured AST, we would typically write our code in a concise functional style:
 
 ```rs
 let condition = fmt(field("condition")?);
@@ -79,7 +108,7 @@ let alternative = fmt(field("alternative")?);
 format!("if({condition}) {{ {consequence} }} else {{ {alternative} }}");
 ```
 
-However, due to the arbitrary placement of comments, we must adopt a more imperative style. This approach preserves comments but somewhat harder to comprehend:
+However, due to the arbitrary placement of comments, we must adopt a more imperative style. This approach preserves comments but is somewhat harder to comprehend:
 
 ```rs
 let mut out = String::new();

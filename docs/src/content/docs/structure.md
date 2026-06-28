@@ -39,6 +39,10 @@ Keep it focused on the intended near-term file split and the role of each file.
   - typing-comment and type-declaration parsing
   - surface-type rendering
 
+- `types.rs`
+  - core type representation shared by inference and checking
+  - inference variables, constraints, quantified variables, surface types, and type schemes
+
 - `lower.rs`
   - syntax-to-HIR lowering
 
@@ -51,8 +55,12 @@ Keep it focused on the intended near-term file split and the role of each file.
   - semantic checking
   - inference internals
   - compatibility logic
-  - builtin typing
+  - the irreducible builtin kernel (operators and core constructors)
   - interface extraction
+
+- `stdlib.rs` / `stdlib_base.R`
+  - embedded standard-library type stubs
+  - declaration-only R carrying `#:` annotations, harvested into type schemes by the stub loader
 
 - `diagnostic.rs`
   - structured diagnostics
@@ -84,7 +92,9 @@ Keep it focused on the intended near-term file split and the role of each file.
 
 ## Deferred split
 
-- keep builtin typing, compatibility logic, and interface extraction inside `typecheck.rs` for now
+- the scheme-expressible standard library now lives in `stdlib.rs`; only the irreducible builtin
+  kernel (operators and core constructors) remains in `typecheck.rs`
+- keep compatibility logic and interface extraction inside `typecheck.rs` for now
 - split those out only after the `typecheck` structure stabilizes
 
 ## Role of this document
