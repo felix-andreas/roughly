@@ -446,6 +446,17 @@ The reformat is deliberately non-invasive: it only adjusts whitespace. Token ord
 #: @returns { character }
 ```
 
+When a single annotation wraps across several `#:` lines, the formatter keeps your line breaks but normalizes the continuation indentation: each line is indented by the bracket nesting (`(`, `[`, `{`, generic `<...>`) left open by the earlier lines of the block, and a line that begins by closing a bracket dedents one step so the closer lines up with its opener. A blank line, a non-`#:` comment, or ordinary code ends the block, so unrelated comments never inherit this indentation.
+
+```r
+# type_annotations_multiline : compare
+#: @param {fn(
+#: integer,
+#: character
+#: ) -> double} callback
+#: @return {logical}
+```
+
 Anything that is not a well-formed annotation — prose, or a type containing characters outside the annotation alphabet (for example a dotted name) — is left untouched beyond ensuring the single space after `#:`, so the formatter never corrupts a comment it does not understand.
 
 ### Line Spacing
