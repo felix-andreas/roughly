@@ -62,7 +62,12 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
     hash::Hash,
+    panic::{AssertUnwindSafe, catch_unwind, panic_any, resume_unwind},
     rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 /// Shared-ownership handle for memoized values. Aliased in one place so the future parallel retrofit
@@ -141,7 +146,18 @@ pub struct Engine<G: QueryGroup> {
     // stack overflows. The one *intended* cycle (the package-interface fixed-point) is resolved inside a
     // single body and never re-enters `fetch` on its own key, so it never trips this guard.
     computing: RefCell<HashSet<G::Key>>,
+    // The cancellation token of the in-flight [`Engine::fetch_cancellable`], if any. `None` for the plain
+    // [`Engine::fetch`] path, which is therefore byte-for-byte unchanged: [`Engine::check_cancelled`] is a
+    // no-op without an installed token. Only this `Arc<AtomicBool>` ever crosses a thread (a newer edit
+    // flips it from the request thread); the engine itself stays single-threaded (`Rc`/`RefCell`).
+    cancellation: RefCell<Option<Arc<AtomicBool>>>,
 }
+
+/// The sentinel returned by [`Engine::fetch_cancellable`] when an installed cancellation token was observed
+/// set at a cancellation check point, so the in-flight computation was abandoned. It carries no data: the
+/// caller's response is always "discard and recompute against the newer input" (the latest edit wins).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cancelled;
 
 impl<G: QueryGroup> Engine<G> {
     pub fn new(group: G) -> Engine<G> {
@@ -151,6 +167,7 @@ impl<G: QueryGroup> Engine<G> {
             slots: RefCell::new(HashMap::new()),
             dependency_stack: RefCell::new(Vec::new()),
             computing: RefCell::new(HashSet::new()),
+            cancellation: RefCell::new(None),
         }
     }
 
@@ -231,6 +248,46 @@ impl<G: QueryGroup> Engine<G> {
             .unwrap_or_else(|_| panic!("query value type mismatch on fetch"))
     }
 
+    /// Like [`fetch`](Engine::fetch), but cooperatively cancellable: `token` is installed for the duration
+    /// of this fetch, and every [`recompute`](Engine::recompute) entry (plus any host check point, e.g. the
+    /// interface fixed-point's round boundaries via [`check_cancelled`](Engine::check_cancelled)) observes
+    /// it. If it is set, the in-flight computation is abandoned and `Err(`[`Cancelled`]`)` is returned.
+    ///
+    /// **Why unwind, not a `Result` threaded through every body.** A query body reads through the infallible
+    /// `fetch` and uses the returned value directly; making cancellation a `Result` would force every body
+    /// (and `fetch`'s signature) to thread and `?`-propagate it, the opposite of additive. Instead the check
+    /// raises a [`Cancelled`] panic that unwinds the `fetch` stack — exactly the "sentinel that unwinds"
+    /// shape the design calls for. Because a memo slot is written only at the *end* of `recompute`, an
+    /// abandoned pass commits **no partial memo**; the only transient state to restore is the dependency
+    /// stack and the `computing` set, which this one catch point clears, leaving the engine consistent for
+    /// the next fetch. A non-`Cancelled` panic (e.g. the accidental-cycle guard) is re-raised unchanged, so
+    /// cancellation is strictly additive — it never masks a real bug.
+    ///
+    /// The raised [`Cancelled`] still runs the process panic hook. A host that cancels routinely (per
+    /// keystroke) installs a hook that ignores the [`Cancelled`] payload once at startup; the tests do this
+    /// around the cancellation cases.
+    pub fn fetch_cancellable<T: Any>(
+        &self,
+        key: G::Key,
+        token: Arc<AtomicBool>,
+    ) -> Result<Shared<T>, Cancelled> {
+        let previous = self.cancellation.borrow_mut().replace(token);
+        let outcome = catch_unwind(AssertUnwindSafe(|| self.fetch::<T>(key)));
+        *self.cancellation.borrow_mut() = previous;
+        match outcome {
+            Ok(value) => Ok(value),
+            Err(payload) if payload.is::<Cancelled>() => {
+                // Abandon cleanly: drop the dependency-stack frames and `computing` markers the unwound
+                // ancestor recomputes left behind. No slot was committed (the panic fires before any
+                // recompute reaches its slot write), so the memo table is already consistent.
+                self.dependency_stack.borrow_mut().clear();
+                self.computing.borrow_mut().clear();
+                Err(Cancelled)
+            }
+            Err(payload) => resume_unwind(payload),
+        }
+    }
+
     fn fetch_any(&self, key: &G::Key) -> Shared<dyn Any> {
         if let Some(frame) = self.dependency_stack.borrow_mut().last_mut() {
             frame.push(key.clone());
@@ -249,12 +306,20 @@ impl<G: QueryGroup> Engine<G> {
     fn validate(&self, key: &G::Key) -> Revision {
         let revision = self.revision.get();
         let snapshot = self.slots.borrow().get(key).map(|slot| {
-            (
-                slot.is_input,
-                slot.verified_at,
-                slot.changed_at,
-                slot.dependencies.clone(),
-            )
+            // The dependency list is cloned only when we will actually walk it (a deep-validation,
+            // below). A green-by-revision or input slot returns its `changed_at` without touching its
+            // deps, so cloning them here would be pure waste — and ruinous waste at that: a high
+            // fan-in fold (e.g. an all-files index with O(package) dependencies) is reached on the
+            // validation path of O(package) callers, and cloning its whole dependency vector once per
+            // caller turns a linear revalidation into a quadratic one. Clone lazily to keep validation
+            // proportional to the work actually required.
+            let needs_walk = !slot.is_input && slot.verified_at != revision;
+            let dependencies = if needs_walk {
+                slot.dependencies.clone()
+            } else {
+                Vec::new()
+            };
+            (slot.is_input, slot.verified_at, slot.changed_at, dependencies)
         });
 
         let Some((is_input, verified_at, changed_at, dependencies)) = snapshot else {
@@ -300,7 +365,44 @@ impl<G: QueryGroup> Engine<G> {
         self.computing.borrow().contains(key)
     }
 
+    /// Cooperative cancellation check point. If a token is installed (a [`fetch_cancellable`](Engine::fetch_cancellable)
+    /// is in flight) and observed set, abandon the computation by unwinding with the [`Cancelled`] sentinel,
+    /// which `fetch_cancellable` catches. A no-op when no token is installed, so the plain `fetch` path is
+    /// unaffected. `recompute` calls it at every body entry; a host whose body loops without re-entering
+    /// `recompute` (the package-interface fixed-point's round loop) calls it at its own safe points so a
+    /// long pass still abandons promptly. The token is read and the borrow released *before* unwinding, so
+    /// no `RefCell` borrow is held across the panic.
+    pub fn check_cancelled(&self) {
+        let cancelled = self
+            .cancellation
+            .borrow()
+            .as_ref()
+            .is_some_and(|token| token.load(Ordering::Relaxed));
+        if cancelled {
+            panic_any(Cancelled);
+        }
+    }
+
+    /// Depth of the in-flight dependency-recording stack: one frame per `recompute` body currently on the
+    /// call stack. Zero between top-level fetches — observability for asserting an abandoned
+    /// `fetch_cancellable` left the engine's transient state consistent.
+    pub fn dependency_stack_depth(&self) -> usize {
+        self.dependency_stack.borrow().len()
+    }
+
+    /// Number of keys whose bodies are currently on the `recompute` stack. Zero between top-level fetches;
+    /// the companion to [`dependency_stack_depth`](Engine::dependency_stack_depth) for the same assertion.
+    pub fn computing_count(&self) -> usize {
+        self.computing.borrow().len()
+    }
+
     fn recompute(&self, key: &G::Key) -> Revision {
+        // Cooperative cancellation check point. Placed *before* any transient state is touched, so an
+        // abandoned recompute adds nothing of its own to clean up — only the ancestor recomputes whose
+        // bodies are mid-flight have pushed frames / `computing` entries, and the single
+        // `fetch_cancellable` catch point clears those. With no token installed this is a cheap `None`
+        // check that never unwinds, so the plain `fetch` path is unchanged.
+        self.check_cancelled();
         let revision = self.revision.get();
         if !self.computing.borrow_mut().insert(key.clone()) {
             panic!("query cycle detected: {key:?} is already being computed");

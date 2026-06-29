@@ -35,7 +35,7 @@ verdict. Why in-house wins for Roughly:
 
 | salsa feature | Status here | Plan |
 | --- | --- | --- |
-| Cancellation | not yet | designed in (§6) — single-engine cooperative cancellation: a revision/flag check at query entry |
+| Cancellation | **landed (R3)** | §6 — single-engine cooperative cancellation: an `Arc<AtomicBool>` token checked at `recompute` entry and the interface fixed-point's round boundaries; abandons by unwinding a `Cancelled` sentinel caught at `fetch_cancellable`, which resets the transient stack/computing state and commits no partial memo |
 | Parallelism | **decided against for now** | §6 — single-engine, demand-driven; parallelism is a separable, evidence-driven later slice. A `Shared<T>` / memo-map alias is in place so a future retrofit is localized |
 | Input removal / deletion | **in the core** | `remove_input` leaves a tombstone slot so dependents revalidate without re-executing an absent input (§2, §3) |
 | LRU / memo eviction | not yet | deliberate later slice; `slot_count()` already exposes table size |
@@ -300,15 +300,27 @@ engine.** The three reasons:
    property. With cancellation, a 300k-LoC workspace stays responsive single-threaded because each keystroke
    abandons the stale pass and the next pass recomputes only its blast radius.
 
-**Cancellation (cooperative) — the design.** A long pass (cross-file typecheck, the §5 fixed-point) checks a
-cancellation token at body entry and at fixed-point round boundaries. The token is "the revision this pass
-was launched for `!=` the engine's current revision" (or an explicit flag the off-thread driver flips on a
-new edit). On cancellation the body bails with a sentinel that unwinds the `fetch` stack. Because **nothing
-is committed until a body returns** (the slot is written only at the end of `recompute`), an abandoned pass
-leaves *no* partial memo — the next pass recomputes cleanly from the last committed state. The existing
-`&mut self` (write/`set_input`) vs. `&self` (read/`fetch`) split is the precondition: it already guarantees
-no `fetch` overlaps a `set_input`, so "current revision" is a coherent cancellation signal. This is the one
-§6 capability the cutover bar still requires, and it is single-engine work.
+**Cancellation (cooperative) — landed in R3.** `Engine::fetch_cancellable(key, token)` installs an
+`Arc<AtomicBool>` token for the duration of the fetch; `Engine::check_cancelled()` observes it at every
+`recompute` entry and at the §5 fixed-point's round boundaries (the one loop the per-`recompute` check
+cannot reach, since it owns its whole component in a single body). An explicit flag was chosen over
+"launch-revision `!=` current revision" because the off-thread driver flips the flag the moment a newer
+edit arrives, independent of when the next `set_input` bumps the clock.
+
+On cancellation the check **unwinds a `Cancelled` sentinel** (a typed panic) rather than threading a
+`Result` through every query body: a body reads through the infallible `fetch` and uses the value directly,
+so a `Result` would force every body and `fetch`'s signature to change — the opposite of additive. The
+unwind is exactly the "sentinel that unwinds the `fetch` stack" this section always called for. Because
+**nothing is committed until a body returns** (the slot is written only at the end of `recompute`), an
+abandoned pass leaves *no* partial memo; the single `fetch_cancellable` catch point clears the only
+transient state the unwound ancestors left — the dependency stack and the `computing` set — so the engine
+is consistent for the next fetch. A non-`Cancelled` panic (the accidental-cycle guard) is re-raised
+unchanged, so cancellation is strictly additive: with no token installed `check_cancelled` is a no-op and
+the plain `fetch` path is byte-for-byte unchanged. (The raised `Cancelled` runs the process panic hook; a
+host that cancels per keystroke installs a hook that ignores the `Cancelled` payload once at startup.) The
+`&mut self`/`&self` split is still the precondition that no `fetch` overlaps a `set_input`. Covered by
+`tests/test_cancellation.rs` (latest-edit-wins from another thread, consistent state, correct post-edit
+result, cycle-guard-still-fires, no-token-unchanged).
 
 **The `Shared<T>` hedge (implemented now).** So that a future parallel retrofit is a localized change rather
 than a pervasive rewrite, the shared-pointer type and the memo table are kept behind thin aliases — today
@@ -362,8 +374,26 @@ once this randomized full-rebuild cross-check is the source of truth.
 - **R2 — differential validation (§7).** Done means: new-engine output == `analysis` *full from-scratch
   rebuild* over randomized edit streams across the whole corpus (incl. the adversarial interleavings); the
   cross-check is green and is the new correctness gate.
-- **R3 — cancellation (§6) and eviction.** Done means: cooperative cancellation available (latest edit
-  wins); per-edit cost measured O(blast-radius) and competitive with (better than) the hand-rolled path;
-  the quality bar in the decision record is met. **Parallelism is reclassified** out of the cutover bar to
-  an evidence-driven later optimization for workspace-wide batch ops (§6), localized behind the `Shared<T>`
-  / memo-table aliases. Production cutover is a separate, later decision made on this evidence.
+- **R3 — cancellation (§6) and the per-edit cost measurement.** **Done:** cooperative cancellation is
+  available and latest-edit-wins (§6, `tests/test_cancellation.rs`). Per-edit cost is measured by
+  `tests/test_benchmark.rs` (committed, `#[ignore]` for the heavy sizes) over a synthetic cross-file package
+  at 10k / 100k / 300k LoC, against `analysis`'s incremental path. **Findings, recorded honestly:**
+  - *Recompute is O(blast-radius), flat in N* (the headline, proven by exec counters): a body edit re-runs
+    exactly the edited file + its referrer's HM inference and triggers **zero** O(package) recomputation —
+    `PackageSymbolIndex` does not re-fold (names-only cutoff) and `PackageTypeDefinitions` does not re-fold
+    (a new declarations-only `TypeDefinitionsModule` view cutoff, the type-side analog of `ExportedNames`;
+    it previously folded `Lower` directly and re-ran on every keystroke).
+  - *Wall time is ~10–13× lower than the hand-rolled path at every size, but both scale ~linearly in N.*
+    The engine is not flat in wall time: confirming the all-files folds are unchanged is an O(package)
+    **validation walk** (one cheap hash-lookup + early-cutoff bump per file, no inference). A core fix
+    landed here — `validate` now clones a memo's dependency list only when it will actually walk it, not on
+    the green-by-revision/​input fast path, removing an O(fan-in × N) quadratic when a high-fan-in fold is
+    revalidated from many callers. Driving the residual O(N) validation **sub-linear** is the remaining
+    work: the durability / changed-input-tracking slice (§1) or sharded per-module def-maps. Production's
+    O(package) term is HM re-inference + a per-round interface-table rebuild, far costlier per unit N, which
+    is why the engine wins by an order of magnitude despite both growing.
+  - **Eviction** remains a later slice (`slot_count()` exposes table size).
+
+  **Parallelism is reclassified** out of the cutover bar to an evidence-driven later optimization for
+  workspace-wide batch ops (§6), localized behind the `Shared<T>` / memo-table aliases. Production cutover
+  is a separate, later decision made on this evidence.

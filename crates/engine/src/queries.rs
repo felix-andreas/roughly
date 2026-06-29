@@ -23,7 +23,7 @@
 //! files: every body interns through it, so a memoized value compares equal to a fresh recompute.
 
 use {
-    crate::{Engine, QueryGroup, Stored},
+    crate::{Engine, QueryGroup, Shared, Stored},
     analysis::{
         document::{Document, DocumentId},
         hir::{DefinitionKind, ExpressionId, ExpressionKind, Module},
@@ -79,12 +79,20 @@ pub enum Key {
     /// The lone all-files fold: `name → winning file`, names only. Recomputes only on *structural* export
     /// edits (add/remove/rename a top-level binding, add/remove/reclassify a file), not on body edits.
     PackageSymbolIndex,
+    /// **Declarations-only** view of one file's module for the type environment fold: the file's lowered
+    /// [`Module`] held by shared pointer but compared by its `@type`/`@alias` declarations only (see
+    /// [`TypeDefinitionsModule`]). The cutoff seam that keeps a body edit from re-folding
+    /// [`Key::PackageTypeDefinitions`], the type-checking analog of [`Key::FileTypeDefinitions`] for the
+    /// naming index.
+    TypeDefinitionsModule(FileId),
     /// The package-global type-definition environment: a fold of every package module's top-level
     /// `@type`/`@alias` declarations, the analog of production's `TypeDefinitionEnvironment::from_modules`
-    /// over all package modules. The value is `TypeDefinitionEnvironment` (value-eq), so a non-type edit
-    /// (a body change that leaves every package module's type declarations identical) recomputes to an
-    /// equal value and cuts off before `Typecheck`/`GlobalScheme` re-run. Scripts fold this plus their own
-    /// module (script-local declarations shadow package ones) directly in `infer_file`.
+    /// over all package modules. Folds the per-file [`Key::TypeDefinitionsModule`] views (not `Lower`
+    /// directly) so a non-type edit (a body change that leaves every package module's type declarations
+    /// identical) cuts off at the view and **never re-folds here**; the value is also `TypeDefinitionEnvironment`
+    /// (value-eq), so even a structural edit that leaves the declarations equal cuts off before
+    /// `Typecheck`/`GlobalScheme` re-run. Scripts fold this plus their own module (script-local
+    /// declarations shadow package ones) directly in `infer_file`.
     PackageTypeDefinitions,
     /// The package-wide fallback diagnostic range: byte `0..len` of the first package file's first line,
     /// matching `Analysis::fallback_range`. `Diagnostic::from_inference_error` uses it for the handful of
@@ -177,6 +185,23 @@ pub struct ParsedDocument(pub Document);
 impl PartialEq for ParsedDocument {
     fn eq(&self, other: &Self) -> bool {
         self.0.rope() == other.0.rope()
+    }
+}
+
+/// The `TypeDefinitionsModule` value: a file's lowered [`Module`] held by shared pointer (no copy) but
+/// compared **by its `@type`/`@alias` declarations only**. This is the type-checking analog of
+/// [`Key::FileTypeDefinitions`] (the naming-level declarations-only cutoff): the lone all-files type
+/// environment [`Key::PackageTypeDefinitions`] folds these views, and `TypeDefinitionEnvironment::from_modules`
+/// reads nothing but `module.definitions`, so a body-only edit recomputes the view (its `Lower` changed)
+/// to a value that compares equal and **cuts off before the package type environment re-folds**. Without
+/// this the environment folded `Lower(f)` directly and re-folded on every keystroke (an O(package) recompute
+/// for a body edit that changed no type), exactly the regression the names-only `ExportedNames` cutoff
+/// avoids for the symbol index.
+pub struct TypeDefinitionsModule(pub Shared<Module>);
+
+impl PartialEq for TypeDefinitionsModule {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.definitions == other.0.definitions
     }
 }
 
@@ -275,6 +300,10 @@ impl RoughlyQueries {
 
     pub fn package_type_definitions_runs(&self) -> u64 {
         self.counters.package_type_definitions.get()
+    }
+
+    pub fn type_definitions_module_runs(&self, file: FileId) -> u64 {
+        per_key(&self.counters.type_definitions_module, file)
     }
 
     pub fn fallback_range_runs(&self) -> u64 {
@@ -433,6 +462,12 @@ impl QueryGroup for RoughlyQueries {
                 Stored::new(winners)
             }
 
+            Key::TypeDefinitionsModule(file) => {
+                bump(&self.counters.type_definitions_module, *file);
+                let module = engine.fetch::<Module>(Key::Lower(*file));
+                Stored::new(TypeDefinitionsModule(module))
+            }
+
             Key::PackageTypeDefinitions => {
                 self.counters
                     .package_type_definitions
@@ -440,18 +475,20 @@ impl QueryGroup for RoughlyQueries {
                 // Fold every package module's top-level `@type`/`@alias` declarations, exactly as
                 // production's `TypeDefinitionEnvironment::from_modules` over `package_document_ids`. A
                 // file contributes only when its `DocumentKind` is `Package`, matching the index fold and
-                // the package document set. The value is value-eq, so a body-only edit (no change to any
-                // module's declarations) cuts off before any consumer re-runs.
+                // the package document set. Folds the per-file `TypeDefinitionsModule` *views* rather than
+                // `Lower` directly: a body edit recomputes the view but it compares equal on declarations
+                // and cuts off, so this fold does not re-run on a keystroke that changes no type — the
+                // O(package) recompute the names-only `ExportedNames` cutoff likewise spares the symbol index.
                 let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
                 let mut modules = Vec::new();
                 for file in files.iter() {
                     let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
                     if *kind == DocumentKind::Package {
-                        modules.push(engine.fetch::<Module>(Key::Lower(*file)));
+                        modules.push(engine.fetch::<TypeDefinitionsModule>(Key::TypeDefinitionsModule(*file)));
                     }
                 }
                 Stored::new(TypeDefinitionEnvironment::from_modules(
-                    modules.iter().map(|module| &**module),
+                    modules.iter().map(|view| &*view.0),
                 ))
             }
 
@@ -705,13 +742,16 @@ fn infer_file(
         for other in files.iter() {
             let other_kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*other));
             if *other_kind == DocumentKind::Package {
-                package_modules.push(engine.fetch::<Module>(Key::Lower(*other)));
+                // The declarations-only view, like `PackageTypeDefinitions`: a body edit to a package
+                // file does not re-fold this script's type environment.
+                package_modules
+                    .push(engine.fetch::<TypeDefinitionsModule>(Key::TypeDefinitionsModule(*other)));
             }
         }
         TypeDefinitionEnvironment::from_modules(
             package_modules
                 .iter()
-                .map(|package_module| &**package_module)
+                .map(|view| &*view.0)
                 .chain([&*module]),
         )
     };
@@ -916,6 +956,10 @@ fn resolve_interface_scc(
     // a round makes no change.
     let round_cap = members.len().saturating_add(SCC_ROUND_SLACK);
     for _round in 0..round_cap {
+        // The one host check point the core's per-`recompute` check cannot reach: this fixed-point owns its
+        // whole component in a single `recompute` body and loops internally, so a newer edit must be able to
+        // abandon it between rounds rather than waiting out the round cap. A no-op without an installed token.
+        engine.check_cancelled();
         // Re-infer each member file once with the current table bound for in-SCC references, collecting the
         // fresh exported scheme of every member.
         let mut fresh: BTreeMap<Symbol, TypeScheme> = BTreeMap::new();
@@ -1704,6 +1748,7 @@ struct Counters {
     local_naming: RefCell<HashMap<FileId, u64>>,
     exported_names: RefCell<HashMap<FileId, u64>>,
     package_symbol_index: Cell<u64>,
+    type_definitions_module: RefCell<HashMap<FileId, u64>>,
     package_type_definitions: Cell<u64>,
     fallback_range: Cell<u64>,
     defining_item: RefCell<HashMap<Symbol, u64>>,
