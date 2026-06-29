@@ -26,20 +26,21 @@ use {
     crate::{Engine, QueryGroup, Stored},
     analysis::{
         document::{Document, DocumentId},
-        hir::{ExpressionId, ExpressionKind, Module},
+        hir::{DefinitionKind, ExpressionId, ExpressionKind, Module},
         interner::{Interner, Symbol},
         lower::{LoweringContext, lower},
         naming::{
-            DocumentKind, DocumentNamingComputation, NamesGlobal, NamesLocal,
+            BindingInfo, DocumentKind, DocumentNamingComputation, NamesGlobal, NamesLocal,
             resolve_document_locally,
         },
         stdlib::StubLibrary,
         tree::new_parser,
         typecheck::{
-            ExportedValue, InferenceError, ModuleCheck, StrictOriginKind, StrictUnknownOrigin,
-            TypeDefinitionEnvironment, inference_state_with_builtins_in_interner,
+            BUILTINS, ExportedValue, InferenceError, ModuleCheck, StrictOriginKind,
+            StrictUnknownOrigin, TypeDefinitionEnvironment,
+            inference_state_with_builtins_in_interner,
         },
-        types::{CoreType, TypeScheme},
+        types::{Annotation, CoreType, NamedTypeRef, SurfaceType, TypeScheme},
     },
     analysis::diagnostic::{Diagnostic, render_type_scheme},
     std::{
@@ -118,6 +119,44 @@ pub enum Key {
     /// member to `Unknown`. Owning the whole component in one body is what keeps the core's accidental-cycle
     /// guard intact: no `GlobalScheme`/`InterfaceScc`/`SymbolScc` key ever re-enters itself.
     InterfaceScc(Vec<Symbol>),
+
+    // --- Package-naming interface (R2 gap 1) ------------------------------------------------------
+    // The cross-file naming diagnostics `analysis` computes in its `pub(crate)` package-naming
+    // subsystem (`package_document_diagnostics`), reproduced here as fine-grained queries. The
+    // rewrite decision allows the duplication: the production logic is unreachable across the crate
+    // boundary, so the engine re-derives the same facts with the same value-eq / per-symbol cutoff
+    // discipline as the type interface above.
+    /// **Type-declarations-only** projection of one file: its top-level `@type`/`@alias` names mapped
+    /// to their `(kind, arity)` sites, in declaration order. The type analog of [`Key::ExportedNames`]:
+    /// a body edit that touches no type declaration recomputes to an equal value and cuts off before
+    /// [`Key::PackageTypeIndex`] re-folds. (`analysis::naming::document_type_definitions`.)
+    FileTypeDefinitions(FileId),
+    /// The package-wide naming-level type index: each uniquely-defined `@type`/`@alias` name mapped to
+    /// its info, plus the set of names defined by more than one package site (kept *out* of the
+    /// resolved map and flagged as duplicates). The naming analog of [`Key::PackageSymbolIndex`],
+    /// folded from [`Key::FileTypeDefinitions`] over package files. Value-eq, so a non-type edit cuts
+    /// off. (`analysis::naming::build_type_index`.)
+    PackageTypeIndex,
+    /// The firewall projecting one type name's status (undefined / defined / duplicate) out of
+    /// [`Key::PackageTypeIndex`]. Value-eq per name, so changing type `X` re-runs only the files that
+    /// reference or define `X`, mirroring production's type reverse-dependency hop.
+    TypeNameStatus(Symbol),
+    /// The package-wide ordered definer lists: each package-global name mapped to the files whose
+    /// top-level bindings define it, in `ProjectFiles` (path) order — the full candidate list that
+    /// [`Key::PackageSymbolIndex`] reduces to a last-writer winner. Folded from [`Key::ExportedNames`]
+    /// over package files. Value-eq. (`analysis::naming::build_candidate_order`.)
+    PackageCandidateOrder,
+    /// The firewall projecting one name's ordered definer list out of [`Key::PackageCandidateOrder`].
+    /// Value-eq per name (the overwrite analog of [`Key::DefiningItem`]): adding or removing a definer
+    /// of `X` re-runs only `X`'s co-definers' overwrite diagnostics.
+    DefinerOrder(Symbol),
+    /// One file's package-naming diagnostics: could-not-resolve, builtin shadow, overwrite pairs,
+    /// duplicate-type, and type-reference. Reproduces `analysis::naming::package_document_diagnostics`
+    /// byte-for-byte (same wording, ranges, severities, codes). Depends on the file's own naming plus
+    /// only the per-symbol interface facts it reads ([`Key::DefiningItem`], [`Key::DefinerOrder`],
+    /// [`Key::TypeNameStatus`]), so a body edit elsewhere cuts off unless this file's resolution moved.
+    PackageNamingDiagnostics(FileId),
+
     Typecheck(FileId),
     Diagnostics(FileId),
 }
@@ -142,18 +181,49 @@ impl PartialEq for ParsedDocument {
 }
 
 /// The `Diagnostics` value for one file. Holds the diagnostic classes the engine reproduces from
-/// production's per-file pipeline: the local-naming diagnostics (`resolve_document_locally`), the raw
-/// type-inference errors, and the rendered strict-mode `Unknown`-origin diagnostics. The differential
-/// harness renders `type_errors` against the interner + fallback range and compares the type + strict
-/// classes against production (`docs`: lint is unmodeled, and the cross-file *package*-naming diagnostics
-/// live in `analysis`'s `pub(crate)` package-naming subsystem, unreachable here — both are excluded from
-/// the differential and characterized in the R2 report). `type_errors` stays the raw `InferenceError`
-/// list rather than a second rendered copy so there is one source of truth for the type-error set.
+/// production's per-file pipeline: the local-naming diagnostics (`resolve_document_locally`), the
+/// cross-file *package*-naming diagnostics (`package_document_diagnostics`, re-derived as queries), the
+/// raw type-inference errors, and the rendered strict-mode `Unknown`-origin diagnostics. The
+/// differential harness renders `type_errors` against the interner + fallback range and compares every
+/// class except lint against production: `naming` (local) is identical by construction, `package_naming`
+/// reproduces production's wording/ranges, and the type + strict classes are the novel interface layer.
+/// `type_errors` stays the raw `InferenceError` list rather than a second rendered copy so there is one
+/// source of truth for the type-error set. The lowering-phase classes (`AnnotationError` and
+/// lowering-originated `SyntaxError`) are unreachable: the public `lower` returns only the `Module` and
+/// drops its diagnostics, so they live outside this value and the comparison (see the harness module doc).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileDiagnostics {
     pub naming: Vec<Diagnostic>,
+    pub package_naming: Vec<Diagnostic>,
     pub type_errors: Vec<InferenceError>,
     pub strict_diagnostics: Vec<Diagnostic>,
+}
+
+/// One package-global type name's resolved shape: the kind it was declared with and its type-parameter
+/// arity. The engine's stand-in for `analysis::naming::TypeInfo` (which is `pub(crate)`), reusing the
+/// public [`DefinitionKind`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EngineTypeInfo {
+    pub kind: DefinitionKind,
+    pub arity: usize,
+}
+
+/// The package-wide naming-level type index ([`Key::PackageTypeIndex`]): the resolved unique-name map and
+/// the duplicate set. A name defined by exactly one package site is in `resolved`; a name defined by two
+/// or more sites is in `duplicates` and absent from `resolved` (references to it stay unresolved), exactly
+/// as `analysis::naming::build_type_index` collates.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TypeIndex {
+    pub resolved: BTreeMap<Symbol, EngineTypeInfo>,
+    pub duplicates: BTreeSet<Symbol>,
+}
+
+/// One type name's status projected out of [`TypeIndex`] by the [`Key::TypeNameStatus`] firewall.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TypeNameStatus {
+    Undefined,
+    Defined(EngineTypeInfo),
+    Duplicate,
 }
 
 /// The R query group. Ambient host state (interner/parser/stubs) lives here behind `RefCell`; the engine
@@ -261,6 +331,30 @@ impl RoughlyQueries {
 
     pub fn diagnostics_runs(&self, file: FileId) -> u64 {
         per_key(&self.counters.diagnostics, file)
+    }
+
+    pub fn file_type_definitions_runs(&self, file: FileId) -> u64 {
+        per_key(&self.counters.file_type_definitions, file)
+    }
+
+    pub fn package_type_index_runs(&self) -> u64 {
+        self.counters.package_type_index.get()
+    }
+
+    pub fn type_name_status_runs(&self, name: Symbol) -> u64 {
+        per_key(&self.counters.type_name_status, name)
+    }
+
+    pub fn package_candidate_order_runs(&self) -> u64 {
+        self.counters.package_candidate_order.get()
+    }
+
+    pub fn definer_order_runs(&self, name: Symbol) -> u64 {
+        per_key(&self.counters.definer_order, name)
+    }
+
+    pub fn package_naming_diagnostics_runs(&self, file: FileId) -> u64 {
+        per_key(&self.counters.package_naming_diagnostics, file)
     }
 }
 
@@ -424,6 +518,98 @@ impl QueryGroup for RoughlyQueries {
                 Stored::new(resolve_interface_scc(self, engine, members))
             }
 
+            Key::FileTypeDefinitions(file) => {
+                bump(&self.counters.file_type_definitions, *file);
+                let module = engine.fetch::<Module>(Key::Lower(*file));
+                Stored::new(file_type_definitions(&module))
+            }
+
+            Key::PackageTypeIndex => {
+                self.counters
+                    .package_type_index
+                    .set(self.counters.package_type_index.get() + 1);
+                // Fold every package module's type declarations into the naming-level index, exactly as
+                // `build_type_index` folds `document_type_definitions`: one site resolves the name, two or
+                // more mark it a duplicate (and keep it unresolved). Reads `FileTypeDefinitions` (the
+                // declarations-only cutoff) so a body edit that changes no declaration cuts off here.
+                let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
+                let mut sites: BTreeMap<Symbol, Vec<EngineTypeInfo>> = BTreeMap::new();
+                for file in files.iter() {
+                    let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
+                    if *kind != DocumentKind::Package {
+                        continue;
+                    }
+                    let definitions = engine
+                        .fetch::<BTreeMap<Symbol, Vec<EngineTypeInfo>>>(Key::FileTypeDefinitions(*file));
+                    for (name, infos) in definitions.iter() {
+                        sites.entry(*name).or_default().extend(infos.iter().copied());
+                    }
+                }
+                let mut resolved = BTreeMap::new();
+                let mut duplicates = BTreeSet::new();
+                for (name, site_list) in &sites {
+                    match site_list.as_slice() {
+                        [single] => {
+                            resolved.insert(*name, *single);
+                        }
+                        [] => {}
+                        _ => {
+                            duplicates.insert(*name);
+                        }
+                    }
+                }
+                Stored::new(TypeIndex {
+                    resolved,
+                    duplicates,
+                })
+            }
+
+            Key::TypeNameStatus(name) => {
+                bump(&self.counters.type_name_status, *name);
+                let index = engine.fetch::<TypeIndex>(Key::PackageTypeIndex);
+                let status = if index.duplicates.contains(name) {
+                    TypeNameStatus::Duplicate
+                } else if let Some(info) = index.resolved.get(name) {
+                    TypeNameStatus::Defined(*info)
+                } else {
+                    TypeNameStatus::Undefined
+                };
+                Stored::new(status)
+            }
+
+            Key::PackageCandidateOrder => {
+                self.counters
+                    .package_candidate_order
+                    .set(self.counters.package_candidate_order.get() + 1);
+                // Path-ordered definer lists: append each package file (in `ProjectFiles` order) onto the
+                // candidate list of every name it defines. Reads the same `ExportedNames` cutoff as the
+                // symbol index, so a body edit cuts off here too. (`build_candidate_order`.)
+                let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
+                let mut order: BTreeMap<Symbol, Vec<FileId>> = BTreeMap::new();
+                for file in files.iter() {
+                    let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
+                    if *kind != DocumentKind::Package {
+                        continue;
+                    }
+                    let names = engine.fetch::<Vec<Symbol>>(Key::ExportedNames(*file));
+                    for name in names.iter() {
+                        order.entry(*name).or_default().push(*file);
+                    }
+                }
+                Stored::new(order)
+            }
+
+            Key::DefinerOrder(name) => {
+                bump(&self.counters.definer_order, *name);
+                let order = engine.fetch::<BTreeMap<Symbol, Vec<FileId>>>(Key::PackageCandidateOrder);
+                Stored::new(order.get(name).cloned().unwrap_or_default())
+            }
+
+            Key::PackageNamingDiagnostics(file) => {
+                bump(&self.counters.package_naming_diagnostics, *file);
+                Stored::new(package_naming_diagnostics(self, engine, *file))
+            }
+
             Key::Typecheck(file) => {
                 bump(&self.counters.typecheck, *file);
                 // Recorded so a config change re-checks the file; the value is unused in R1a check logic.
@@ -437,6 +623,9 @@ impl QueryGroup for RoughlyQueries {
                 let check = engine.fetch::<ModuleCheck>(Key::Typecheck(*file));
                 let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(*file));
                 let module = engine.fetch::<Module>(Key::Lower(*file));
+                // Fetched before the `lowering` borrow below: its body borrows the interner too, so
+                // re-entering it while holding the borrow would double-borrow the `RefCell`.
+                let package_naming = engine.fetch::<Vec<Diagnostic>>(Key::PackageNamingDiagnostics(*file));
                 // Strict-mode diagnostics are rendered here (production renders them in `typecheck`'s
                 // round 2 via the private `strict_origin_diagnostics`, ported verbatim below). Type errors
                 // stay raw `InferenceError`s; the harness renders them against the interner + fallback
@@ -446,6 +635,7 @@ impl QueryGroup for RoughlyQueries {
                     strict_origin_diagnostics(&module, &check.strict_origins, lowering.interner());
                 Stored::new(FileDiagnostics {
                     naming: naming.diagnostics.clone(),
+                    package_naming: (*package_naming).clone(),
                     type_errors: check.errors.clone(),
                     strict_diagnostics,
                 })
@@ -805,12 +995,7 @@ fn collect_package_definition_names(
     for expression_id in expressions {
         match &module.arena.get(*expression_id).kind {
             ExpressionKind::Assign { target, .. } => {
-                let resolves_to_binding = local_naming
-                    .expression_resolutions
-                    .get(expression_id)
-                    .and_then(|binding_id| local_naming.bindings.get(binding_id))
-                    .is_some();
-                if resolves_to_binding {
+                if top_level_binding(local_naming, *expression_id).is_some() {
                     names.insert(*target);
                 }
             }
@@ -820,6 +1005,619 @@ fn collect_package_definition_names(
             _ => {}
         }
     }
+}
+
+// One file's package-naming diagnostics, reproducing `analysis::naming::package_document_diagnostics`
+// byte-for-byte. All cross-file facts are fetched up front: a fetch may recompute a query whose body
+// borrows the shared interner, so none can happen while this body holds that borrow. The diagnostics are
+// then built against the interner. The differential harness normalizes (sorts) the result, so the
+// category emission order is immaterial — only the rendered (range, code, severity, message) multiset is.
+fn package_naming_diagnostics(
+    group: &RoughlyQueries,
+    engine: &Engine<RoughlyQueries>,
+    file: FileId,
+) -> Vec<Diagnostic> {
+    let module = engine.fetch::<Module>(Key::Lower(file));
+    let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(file));
+    let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(file));
+    let local_naming = &naming.naming;
+    let is_script = *kind == DocumentKind::Script;
+
+    // (D) inputs: the winning file (if any) of every referenced non-local symbol. A change to a symbol's
+    // defined-ness flips this and re-runs the file, reproducing production's defined-ness reverse-dep hop.
+    let mut defining: BTreeMap<Symbol, Option<FileId>> = BTreeMap::new();
+    for symbol in local_naming.non_locals.values() {
+        defining
+            .entry(*symbol)
+            .or_insert_with(|| *engine.fetch::<Option<FileId>>(Key::DefiningItem(*symbol)));
+    }
+
+    // (A) inputs (package only): the ordered definer list of every name this file *top-level*-assigns.
+    // Block-nested definitions contribute to the index but never emit an overwrite diagnostic, so only
+    // direct top-level assigns drive — and depend on — the candidate order (the precise reverse-dep edge).
+    let mut top_level_targets: BTreeSet<Symbol> = BTreeSet::new();
+    for expression_id in &module.expressions {
+        if let ExpressionKind::Assign { target, .. } = &module.arena.get(*expression_id).kind
+            && top_level_binding(local_naming, *expression_id).is_some()
+        {
+            top_level_targets.insert(*target);
+        }
+    }
+    let mut definer_order: BTreeMap<Symbol, Vec<FileId>> = BTreeMap::new();
+    if !is_script {
+        for name in &top_level_targets {
+            definer_order.insert(
+                *name,
+                (*engine.fetch::<Vec<FileId>>(Key::DefinerOrder(*name))).clone(),
+            );
+        }
+    }
+
+    // (T)/(C) inputs: the status of every type name this file references, plus — for the duplicate-type
+    // diagnostic, package only — every type name it declares. A script's own declarations shadow package
+    // ones of the same name, so they are overlaid here and the package status is not consulted for them.
+    let script_own: BTreeMap<Symbol, EngineTypeInfo> = if is_script {
+        module
+            .definitions
+            .iter()
+            .map(|definition| {
+                (
+                    definition.definition.name,
+                    EngineTypeInfo {
+                        kind: definition.definition.kind,
+                        arity: definition.definition.type_parameters.len(),
+                    },
+                )
+            })
+            .collect()
+    } else {
+        BTreeMap::new()
+    };
+    let referenced_types = document_type_references(&module, local_naming);
+    let mut resolved_types: BTreeMap<Symbol, EngineTypeInfo> = BTreeMap::new();
+    for name in &referenced_types {
+        if let Some(info) = script_own.get(name) {
+            resolved_types.insert(*name, *info);
+            continue;
+        }
+        if let TypeNameStatus::Defined(info) =
+            *engine.fetch::<TypeNameStatus>(Key::TypeNameStatus(*name))
+        {
+            resolved_types.insert(*name, info);
+        }
+    }
+    let mut duplicate_type_names: BTreeSet<Symbol> = BTreeSet::new();
+    if !is_script {
+        for definition in &module.definitions {
+            let name = definition.definition.name;
+            if matches!(
+                *engine.fetch::<TypeNameStatus>(Key::TypeNameStatus(name)),
+                TypeNameStatus::Duplicate
+            ) {
+                duplicate_type_names.insert(name);
+            }
+        }
+    }
+
+    // All cross-file fetches are done; hold the interner and build the rendered diagnostics.
+    let lowering = group.lowering.borrow();
+    let interner = lowering.interner();
+    let mut diagnostics = Vec::new();
+
+    // (T)/(B)/(A) apply only to package documents: scripts define no package globals and their type
+    // declarations are local.
+    if !is_script {
+        // (T) duplicate-type: one per declaration whose name is defined by more than one package site.
+        for definition in &module.definitions {
+            if duplicate_type_names.contains(&definition.definition.name) {
+                let name = interner
+                    .resolve(definition.definition.name)
+                    .unwrap_or("<unknown>");
+                diagnostics.push(Diagnostic::syntax_error(
+                    definition.range,
+                    format!(
+                        "invalid semantics: type name `{name}` is already defined by another top-level @type or @alias declaration in this package."
+                    ),
+                ));
+            }
+        }
+
+        // (B) builtin shadow + (A) overwrite pairs, per top-level assignment. Overwrite combines the
+        // file's position in the path-ordered candidate list with repeated assignments within the file.
+        let mut occurrence_totals: BTreeMap<Symbol, usize> = BTreeMap::new();
+        for expression_id in &module.expressions {
+            if let ExpressionKind::Assign { target, .. } = &module.arena.get(*expression_id).kind
+                && top_level_binding(local_naming, *expression_id).is_some()
+            {
+                *occurrence_totals.entry(*target).or_default() += 1;
+            }
+        }
+        let mut occurrences_seen: BTreeMap<Symbol, usize> = BTreeMap::new();
+        for expression_id in &module.expressions {
+            let ExpressionKind::Assign { target, .. } = &module.arena.get(*expression_id).kind
+            else {
+                continue;
+            };
+            let target = *target;
+            let Some(binding) = top_level_binding(local_naming, *expression_id) else {
+                continue;
+            };
+
+            // (B) The namespace-symbol shadow is dead in production (`is_namespace_symbol` is the constant
+            // `false`), so only the builtin/stub shadow remains.
+            if is_builtin(interner, target) || group.stubs.contains(target) {
+                let name = interner.resolve(target).unwrap_or("<unknown>");
+                diagnostics.push(Diagnostic::naming_warning(
+                    binding.range,
+                    format!("Top-level binding `{name}` shadows a builtin."),
+                ));
+            }
+
+            let (document_position, candidate_count) = match definer_order.get(&target) {
+                Some(candidates) => (
+                    candidates
+                        .iter()
+                        .position(|candidate| *candidate == file)
+                        .unwrap_or(0),
+                    candidates.len(),
+                ),
+                None => (0, 1),
+            };
+            let occurrence_index = *occurrences_seen.entry(target).or_default();
+            *occurrences_seen
+                .get_mut(&target)
+                .expect("occurrence counter exists") += 1;
+            let occurrences_in_document = occurrence_totals.get(&target).copied().unwrap_or(1);
+            let has_earlier = document_position > 0 || occurrence_index > 0;
+            let has_later = document_position + 1 < candidate_count
+                || occurrence_index + 1 < occurrences_in_document;
+
+            if has_earlier {
+                let name = interner.resolve(target).unwrap_or("<unknown>");
+                diagnostics.push(Diagnostic::naming_warning(
+                    binding.range,
+                    format!(
+                        "Top-level binding `{name}` overwrites an earlier top-level binding in this package."
+                    ),
+                ));
+            }
+            if has_later {
+                let name = interner.resolve(target).unwrap_or("<unknown>");
+                diagnostics.push(Diagnostic::naming_warning(
+                    binding.range,
+                    format!(
+                        "Top-level binding `{name}` is overwritten by a later top-level binding in this package."
+                    ),
+                ));
+            }
+        }
+    }
+
+    // (C) type references — every document. Resolved names check arity / `@new`-on-alias; unresolved
+    // names (undefined or package-duplicate, unless a script shadows them) raise the unknown-type error.
+    resolve_module_type_references(
+        &module,
+        local_naming,
+        &resolved_types,
+        interner,
+        &mut diagnostics,
+    );
+
+    // (D) could-not-resolve — every document. One per reference occurrence that resolves to neither a
+    // package global nor a builtin nor a stub.
+    for (expression_id, symbol) in &local_naming.non_locals {
+        let resolves = defining.get(symbol).copied().flatten().is_some()
+            || is_builtin(interner, *symbol)
+            || group.stubs.contains(*symbol);
+        if resolves {
+            continue;
+        }
+        let name = interner.resolve(*symbol).unwrap_or("<unknown>");
+        let range = module.arena.get(*expression_id).range;
+        diagnostics.push(Diagnostic::naming_warning(
+            range,
+            format!("I could not resolve `{name}` in this package, its imports, or builtins."),
+        ));
+    }
+
+    diagnostics
+}
+
+// Ported from `analysis::naming`'s `resolve_module_type_references` + `TypeResolver`: walk a document's
+// `@type`/`@alias` representation types and inline annotations, diagnosing unresolved type names,
+// type-argument arity mismatches, and `@new` applied to an alias. `resolved` is the effective resolved-type
+// lookup (the package index, with a script's own declarations overlaid); every range and message matches
+// production exactly.
+fn resolve_module_type_references(
+    module: &Module,
+    local_naming: &NamesLocal,
+    resolved: &BTreeMap<Symbol, EngineTypeInfo>,
+    interner: &Interner,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for definition in &module.definitions {
+        let local_type_parameters: BTreeSet<Symbol> = definition
+            .definition
+            .type_parameters
+            .iter()
+            .copied()
+            .collect();
+        resolve_surface_type(
+            &definition.definition.surface_type,
+            &local_type_parameters,
+            definition.range,
+            resolved,
+            interner,
+            diagnostics,
+        );
+    }
+    for expression_id in &local_naming.named_type_annotations {
+        let Some(annotation) = module.arena.get(*expression_id).annotation.as_ref() else {
+            continue;
+        };
+        match annotation.annotation() {
+            Annotation::Type { surface_type, .. } => resolve_surface_type(
+                surface_type,
+                &BTreeSet::new(),
+                annotation.range(),
+                resolved,
+                interner,
+                diagnostics,
+            ),
+            Annotation::New { nominal_type } => resolve_nominal_type_reference(
+                nominal_type,
+                annotation.range(),
+                resolved,
+                interner,
+                diagnostics,
+            ),
+        }
+    }
+}
+
+fn resolve_nominal_type_reference(
+    nominal_type: &NamedTypeRef,
+    range: Range,
+    resolved: &BTreeMap<Symbol, EngineTypeInfo>,
+    interner: &Interner,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match resolved.get(&nominal_type.name) {
+        Some(type_info) => {
+            push_arity_diagnostic(
+                nominal_type.name,
+                type_info.arity,
+                nominal_type.type_arguments.len(),
+                range,
+                interner,
+                diagnostics,
+            );
+            if type_info.kind == DefinitionKind::Type {
+                for type_argument in &nominal_type.type_arguments {
+                    resolve_surface_type(
+                        type_argument,
+                        &BTreeSet::new(),
+                        range,
+                        resolved,
+                        interner,
+                        diagnostics,
+                    );
+                }
+                return;
+            }
+            let name = interner
+                .resolve(nominal_type.name)
+                .unwrap_or("<unknown>")
+                .to_owned();
+            diagnostics.push(Diagnostic::syntax_error(
+                range,
+                format!(
+                    "invalid semantics: `@new` requires a nominal type declared with `@type`, but `{name}` is an alias."
+                ),
+            ));
+        }
+        None => push_unknown_type_diagnostic(nominal_type.name, range, interner, diagnostics),
+    }
+
+    for type_argument in &nominal_type.type_arguments {
+        resolve_surface_type(
+            type_argument,
+            &BTreeSet::new(),
+            range,
+            resolved,
+            interner,
+            diagnostics,
+        );
+    }
+}
+
+fn resolve_surface_type(
+    surface_type: &SurfaceType,
+    local_type_parameters: &BTreeSet<Symbol>,
+    range: Range,
+    resolved: &BTreeMap<Symbol, EngineTypeInfo>,
+    interner: &Interner,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match surface_type {
+        SurfaceType::Named(name, arguments) => {
+            if local_type_parameters.contains(name) {
+                return;
+            }
+            if let Some(type_info) = resolved.get(name) {
+                push_arity_diagnostic(
+                    *name,
+                    type_info.arity,
+                    arguments.len(),
+                    range,
+                    interner,
+                    diagnostics,
+                );
+            } else {
+                push_unknown_type_diagnostic(*name, range, interner, diagnostics);
+            }
+            for argument in arguments {
+                resolve_surface_type(
+                    argument,
+                    local_type_parameters,
+                    range,
+                    resolved,
+                    interner,
+                    diagnostics,
+                );
+            }
+        }
+        SurfaceType::Nullable(inner_type)
+        | SurfaceType::Vector(inner_type)
+        | SurfaceType::NamedVector(inner_type)
+        | SurfaceType::List(inner_type)
+        | SurfaceType::NamedList(inner_type) => resolve_surface_type(
+            inner_type,
+            local_type_parameters,
+            range,
+            resolved,
+            interner,
+            diagnostics,
+        ),
+        SurfaceType::Record(fields) => {
+            for field in fields {
+                resolve_surface_type(
+                    &field.value,
+                    local_type_parameters,
+                    range,
+                    resolved,
+                    interner,
+                    diagnostics,
+                );
+            }
+        }
+        SurfaceType::Tuple(items) => {
+            for item in items {
+                resolve_surface_type(
+                    item,
+                    local_type_parameters,
+                    range,
+                    resolved,
+                    interner,
+                    diagnostics,
+                );
+            }
+        }
+        SurfaceType::Function(function_type) => {
+            for parameter in &function_type.parameters {
+                resolve_surface_type(
+                    parameter,
+                    local_type_parameters,
+                    range,
+                    resolved,
+                    interner,
+                    diagnostics,
+                );
+            }
+            for parameter in &function_type.named_parameters {
+                resolve_surface_type(
+                    &parameter.value,
+                    local_type_parameters,
+                    range,
+                    resolved,
+                    interner,
+                    diagnostics,
+                );
+            }
+            resolve_surface_type(
+                &function_type.return_type,
+                local_type_parameters,
+                range,
+                resolved,
+                interner,
+                diagnostics,
+            );
+        }
+        SurfaceType::Binders(type_parameters, inner_type) => {
+            if type_parameters.is_empty() {
+                resolve_surface_type(
+                    inner_type,
+                    local_type_parameters,
+                    range,
+                    resolved,
+                    interner,
+                    diagnostics,
+                );
+                return;
+            }
+            let mut nested = local_type_parameters.clone();
+            nested.extend(type_parameters.iter().copied());
+            resolve_surface_type(inner_type, &nested, range, resolved, interner, diagnostics);
+        }
+        SurfaceType::Any | SurfaceType::Unknown | SurfaceType::Null | SurfaceType::Scalar(_) => {}
+    }
+}
+
+fn push_unknown_type_diagnostic(
+    symbol: Symbol,
+    range: Range,
+    interner: &Interner,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let name = interner.resolve(symbol).unwrap_or("<unknown>").to_owned();
+    diagnostics.push(Diagnostic::naming_error(
+        range,
+        format!("I could not resolve type `{name}`."),
+    ));
+}
+
+fn push_arity_diagnostic(
+    symbol: Symbol,
+    expected: usize,
+    found: usize,
+    range: Range,
+    interner: &Interner,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if expected == found {
+        return;
+    }
+    let name = interner.resolve(symbol).unwrap_or("<unknown>").to_owned();
+    let message = if expected == 0 {
+        format!("type `{name}` does not take type arguments, but found {found}.")
+    } else {
+        format!("generic type `{name}` expects {expected} type argument(s), but found {found}.")
+    };
+    diagnostics.push(Diagnostic::syntax_error(range, message));
+}
+
+// The named type references a document makes (`analysis::naming::document_type_references`): the set of
+// type names looked up while resolving its `@type`/`@alias` representation types and inline annotations,
+// excluding names bound as local type parameters at the reference site. Exactly the set whose
+// `TypeNameStatus` the document's type-reference diagnostics depend on.
+fn document_type_references(module: &Module, local_naming: &NamesLocal) -> BTreeSet<Symbol> {
+    let mut references = BTreeSet::new();
+    for definition in &module.definitions {
+        let local_type_parameters: BTreeSet<Symbol> = definition
+            .definition
+            .type_parameters
+            .iter()
+            .copied()
+            .collect();
+        collect_surface_type_references(
+            &definition.definition.surface_type,
+            &local_type_parameters,
+            &mut references,
+        );
+    }
+    for expression_id in &local_naming.named_type_annotations {
+        let Some(annotation) = module.arena.get(*expression_id).annotation.as_ref() else {
+            continue;
+        };
+        match annotation.annotation() {
+            Annotation::Type { surface_type, .. } => {
+                collect_surface_type_references(surface_type, &BTreeSet::new(), &mut references);
+            }
+            Annotation::New { nominal_type } => {
+                references.insert(nominal_type.name);
+                for type_argument in &nominal_type.type_arguments {
+                    collect_surface_type_references(
+                        type_argument,
+                        &BTreeSet::new(),
+                        &mut references,
+                    );
+                }
+            }
+        }
+    }
+    references
+}
+
+fn collect_surface_type_references(
+    surface_type: &SurfaceType,
+    local_type_parameters: &BTreeSet<Symbol>,
+    references: &mut BTreeSet<Symbol>,
+) {
+    match surface_type {
+        SurfaceType::Named(name, arguments) => {
+            if !local_type_parameters.contains(name) {
+                references.insert(*name);
+            }
+            for argument in arguments {
+                collect_surface_type_references(argument, local_type_parameters, references);
+            }
+        }
+        SurfaceType::Nullable(inner_type)
+        | SurfaceType::Vector(inner_type)
+        | SurfaceType::NamedVector(inner_type)
+        | SurfaceType::List(inner_type)
+        | SurfaceType::NamedList(inner_type) => {
+            collect_surface_type_references(inner_type, local_type_parameters, references);
+        }
+        SurfaceType::Record(fields) => {
+            for field in fields {
+                collect_surface_type_references(&field.value, local_type_parameters, references);
+            }
+        }
+        SurfaceType::Tuple(items) => {
+            for item in items {
+                collect_surface_type_references(item, local_type_parameters, references);
+            }
+        }
+        SurfaceType::Function(function_type) => {
+            for parameter in &function_type.parameters {
+                collect_surface_type_references(parameter, local_type_parameters, references);
+            }
+            for parameter in &function_type.named_parameters {
+                collect_surface_type_references(&parameter.value, local_type_parameters, references);
+            }
+            collect_surface_type_references(
+                &function_type.return_type,
+                local_type_parameters,
+                references,
+            );
+        }
+        SurfaceType::Binders(type_parameters, inner_type) => {
+            if type_parameters.is_empty() {
+                collect_surface_type_references(inner_type, local_type_parameters, references);
+                return;
+            }
+            let mut nested = local_type_parameters.clone();
+            nested.extend(type_parameters.iter().copied());
+            collect_surface_type_references(inner_type, &nested, references);
+        }
+        SurfaceType::Any | SurfaceType::Unknown | SurfaceType::Null | SurfaceType::Scalar(_) => {}
+    }
+}
+
+// One file's type declarations as `name -> [(kind, arity)] site list`, in declaration order
+// (`analysis::naming::document_type_definitions`). A document declaring the same name twice yields two
+// sites, which makes the name a package duplicate.
+fn file_type_definitions(module: &Module) -> BTreeMap<Symbol, Vec<EngineTypeInfo>> {
+    let mut definitions: BTreeMap<Symbol, Vec<EngineTypeInfo>> = BTreeMap::new();
+    for definition in &module.definitions {
+        definitions
+            .entry(definition.definition.name)
+            .or_default()
+            .push(EngineTypeInfo {
+                kind: definition.definition.kind,
+                arity: definition.definition.type_parameters.len(),
+            });
+    }
+    definitions
+}
+
+// The binding a top-level assignment resolves to, if any (`analysis::naming`'s `top_level_binding`):
+// shared by the package-definition membership rule and the overwrite/shadow loop.
+fn top_level_binding(local_naming: &NamesLocal, expression_id: ExpressionId) -> Option<&BindingInfo> {
+    let binding_id = local_naming
+        .expression_resolutions
+        .get(&expression_id)
+        .copied()?;
+    local_naming.bindings.get(&binding_id)
+}
+
+// Whether a symbol names one of the type checker's hardcoded builtins (`analysis::naming`'s
+// `is_builtin_symbol`). Stub-corpus names are checked separately against the live `StubLibrary`.
+fn is_builtin(interner: &Interner, symbol: Symbol) -> bool {
+    interner
+        .resolve(symbol)
+        .is_some_and(|name| BUILTINS.iter().any(|(builtin_name, _)| *builtin_name == name))
 }
 
 // Renders each strict `Unknown` origin into a diagnostic, ported verbatim from `analysis.rs`'s private
@@ -913,6 +1711,12 @@ struct Counters {
     interface_deps: RefCell<HashMap<Symbol, u64>>,
     symbol_scc: RefCell<HashMap<Symbol, u64>>,
     interface_scc: RefCell<HashMap<Vec<Symbol>, u64>>,
+    file_type_definitions: RefCell<HashMap<FileId, u64>>,
+    package_type_index: Cell<u64>,
+    type_name_status: RefCell<HashMap<Symbol, u64>>,
+    package_candidate_order: Cell<u64>,
+    definer_order: RefCell<HashMap<Symbol, u64>>,
+    package_naming_diagnostics: RefCell<HashMap<FileId, u64>>,
     typecheck: RefCell<HashMap<FileId, u64>>,
     diagnostics: RefCell<HashMap<FileId, u64>>,
 }

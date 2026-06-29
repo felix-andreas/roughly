@@ -170,7 +170,6 @@ fn structural_edit_refolds_index_once_but_firewall_confines_propagation() {
     ]);
     realize_all(&engine);
 
-    let x = engine.group().intern("x");
     let index_before = engine.group().package_symbol_index_runs();
     let typecheck_b_before = engine.group().typecheck_runs(B);
     let typecheck_c_before = engine.group().typecheck_runs(C);
@@ -204,4 +203,69 @@ fn structural_edit_refolds_index_once_but_firewall_confines_propagation() {
     let y = group.intern("y");
     let defining_y = engine.fetch::<Option<FileId>>(Key::DefiningItem(y));
     assert_eq!(*defining_y, Some(A), "the newly added binding y wins in a.R");
+}
+
+// PACKAGE-NAMING INCREMENTALITY (R2 gap 1). The per-file `PackageNamingDiagnostics` query is fine-grained
+// at the same per-symbol grain as the type interface: a body edit elsewhere re-runs no unaffected file's
+// package-naming, and the could-not-resolve firewall (`DefiningItem`) re-runs exactly the referrers when a
+// referenced name's defined-ness flips. Diagnostics fetch `PackageNamingDiagnostics` regardless of config,
+// so this holds under `Config::default()` (typing off).
+#[test]
+fn package_naming_diagnostics_are_incremental() {
+    let mut engine = setup(&[
+        (A, "x <- function() 1"), // defines x
+        (B, "z <- x()"),          // references x
+        (C, "w <- 5"),            // references nothing external
+    ]);
+    realize_all(&engine);
+
+    let package_naming_b_before = engine.group().package_naming_diagnostics_runs(B);
+    let package_naming_c_before = engine.group().package_naming_diagnostics_runs(C);
+
+    // Body-only edit to a.R: same exported name `x`, body literal changes. b and c reference nothing
+    // whose resolution moved, so neither re-runs its package-naming diagnostics.
+    engine.set_input(Key::SourceText(A), "x <- function() 2".to_owned());
+    realize_all(&engine);
+    assert_eq!(
+        engine.group().package_naming_diagnostics_runs(B),
+        package_naming_b_before,
+        "a body edit to a.R does not re-run b's package-naming diagnostics"
+    );
+    assert_eq!(
+        engine.group().package_naming_diagnostics_runs(C),
+        package_naming_c_before,
+        "a body edit to a.R does not re-run c's package-naming diagnostics"
+    );
+
+    // Delete a.R: `x`'s defined-ness flips Some -> None. Only its referrer b re-evaluates (its
+    // could-not-resolve diagnostic now appears); the unrelated c does not.
+    let package_naming_b_pre_delete = engine.group().package_naming_diagnostics_runs(B);
+    let package_naming_c_pre_delete = engine.group().package_naming_diagnostics_runs(C);
+    engine.remove_input(&Key::SourceText(A));
+    engine.remove_input(&Key::DocumentKind(A));
+    engine.set_input(Key::ProjectFiles, vec![B, C]);
+    let _ = engine.fetch::<engine::queries::FileDiagnostics>(Key::Diagnostics(B));
+    let _ = engine.fetch::<engine::queries::FileDiagnostics>(Key::Diagnostics(C));
+
+    assert_eq!(
+        engine.group().package_naming_diagnostics_runs(B),
+        package_naming_b_pre_delete + 1,
+        "deleting x's definer re-runs b's package-naming (its could-not-resolve diagnostic appears)"
+    );
+    assert_eq!(
+        engine.group().package_naming_diagnostics_runs(C),
+        package_naming_c_pre_delete,
+        "c references nothing x-related, so the defined-ness flip does not re-run its package-naming"
+    );
+
+    // The firewall re-run produced the expected diagnostic: b can no longer resolve `x`.
+    let diagnostics_b = engine.fetch::<engine::queries::FileDiagnostics>(Key::Diagnostics(B));
+    assert!(
+        diagnostics_b
+            .package_naming
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("I could not resolve `x`")),
+        "b reports the could-not-resolve diagnostic for the now-undefined x: {:?}",
+        diagnostics_b.package_naming
+    );
 }

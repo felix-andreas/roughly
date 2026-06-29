@@ -16,37 +16,42 @@
 //! message). The two engines use independent interners, so the comparison is over *rendered* facts (byte
 //! range + code + severity + message), which are interner-independent.
 //!
-//! We compare the **type-error and strict-mode** diagnostic classes (`DiagnosticCode::TypeError` and
-//! `DiagnosticCode::Strict`). These are exactly the classes the engine's novel per-symbol type-interface
-//! layer and ported strict-origin rendering produce, and the three R1a deferrals (real stub library,
-//! package-global type definitions, cross-file ranges) all manifest as differences in *these* classes.
-//! The other classes are excluded from **both** sides, for reasons that are representation facts, not hidden
-//! divergences:
+//! We compare **every diagnostic class the engine can produce**: local naming, package naming, type
+//! errors, and strict mode (`DiagnosticCode::Naming`, `SyntaxError`, `TypeError`, and `Strict`). The two
+//! classes that remain excluded from **both** sides are excluded because the engine *structurally* cannot
+//! produce them — representation facts, not hidden divergences:
 //!
-//! - **Lint** (`DiagnosticCode::Lint`): the engine does not model lint at all.
-//! - **Local naming** (`DiagnosticCode::Naming` from `resolve_document_locally`): produced by the engine
-//!   by calling the *same* `analysis` function verbatim with the *same* inputs, so it is identical by
-//!   construction and exercises no engine-specific logic.
-//! - **Package naming** (`DiagnosticCode::Naming`/`SyntaxError` from `package_document_diagnostics`: the
-//!   "could not resolve", builtin/namespace-shadow, overwrite, duplicate-type, and type-reference
-//!   diagnostics): this is `analysis`'s cross-file package-naming subsystem, which is **`pub(crate)`** and
-//!   therefore unreachable from the engine crate via the existing public API. The engine does not yet port
-//!   a package-naming *query*, so this class is an acknowledged, characterized representation gap — not a
-//!   bug in ported logic. (`DESIGN.md` §3's `PackageSymbolIndex` is names-only and emits no diagnostics.)
-//! - **Annotation errors** (`DiagnosticCode::AnnotationError`): a lowering/naming-phase class;
-//!   `Diagnostic::from_inference_error` never emits this code, so it is outside the engine's type-error
-//!   surface. The generators below emit only well-formed annotations, so this class does not arise anyway.
+//! - **Lint** (`DiagnosticCode::Lint`): the engine models no lint.
+//! - **Lowering diagnostics** (`DiagnosticCode::AnnotationError`, and the lowering-originated subset of
+//!   `SyntaxError`): the public `analysis::lower::lower` returns only the `Module` and **drops** its
+//!   diagnostics (only the `pub(crate)` `lower_with_shared_interner` returns them), so they are unreachable
+//!   from the engine. `AnnotationError` is excluded by code; the lowering `SyntaxError`s are kept out by
+//!   keeping the generators well-formed (a malformed-block lowering error would otherwise be the *only*
+//!   thing it surfaces, and naming/type/strict on the same malformed module are identical either way, since
+//!   both engines lower it through the same `lower`). `AnnotationError` does not arise anyway — its
+//!   constructors are dead in `analysis` and `Diagnostic::from_inference_error` never emits it.
+//!
+//! What changed at R2 gap 1: **package naming** (`package_document_diagnostics` — could-not-resolve,
+//! builtin shadow, overwrite pairs, duplicate-type, and type-reference) is `analysis`'s cross-file
+//! subsystem, which is `pub(crate)` and unreachable across the crate boundary. The engine now **re-derives**
+//! it as fine-grained queries (`PackageNamingDiagnostics(f)` over `DefiningItem`/`DefinerOrder`/
+//! `TypeNameStatus` firewalls), reproducing production's wording and ranges byte-for-byte, so the class is
+//! compared rather than excluded. **Local naming** is produced by calling the *same* `resolve_document_locally`
+//! verbatim with the same inputs, so it is identical by construction; the comparison now asserts that too.
 //!
 //! Excluding a class is done **symmetrically** (the same filter on both sides) and by **code**, never by
-//! message, so it cannot mask a divergence inside the compared classes: any type/strict diagnostic the
-//! engine produces that the oracle does not (or vice versa) fails the assertion immediately.
+//! message, so it cannot mask a divergence inside the compared classes: any compared diagnostic the engine
+//! produces that the oracle does not (or vice versa) fails the assertion immediately.
 //!
 //! # Drivers
 //!
 //! 1. A curated set of deterministic scenarios mirroring the `analysis` cross-file fixtures (cross-file
 //!    function/value use and mismatch, cross-file `@alias`/`@type`, stdlib base-name use, re-export chains
 //!    and a period-2 cycle, an interface-change-creates-error incremental edit, add→delete→re-add of the
-//!    same path, package↔script reclassification, and a global rename).
+//!    same path, package↔script reclassification, and a global rename), plus a dedicated package-naming
+//!    scenario exercising every `package_document_diagnostics` category (the builtin/stub shadow, the
+//!    type-reference arity / `@new`-on-alias sub-cases, and the script-local type overlay the generator
+//!    never emits).
 //! 2. A randomized, fixed-seed generator over a small realistic R alphabet producing multi-file
 //!    package+script workspaces and adversarial edit streams (edit→fetch→edit, add/delete/re-add the same
 //!    slot, reclassification, cross-file errors introduced and resolved, strict toggling). Parity is
@@ -201,6 +206,12 @@ fn engine_diagnostics(engine: &Engine<RoughlyQueries>, id: FileId, config: &Conf
     let file_diagnostics = engine.fetch::<FileDiagnostics>(Key::Diagnostics(id));
     let fallback = *engine.fetch::<Range>(Key::FallbackRange);
     let mut rendered = Vec::new();
+    // Local-naming and package-naming diagnostics are not config-gated in production's
+    // `document_diagnostics` (they come from `resolve_package`, which `typecheck` always runs), so they
+    // are emitted unconditionally here too. `naming` is the verbatim `resolve_document_locally` output;
+    // `package_naming` reproduces `package_document_diagnostics`.
+    rendered.extend(file_diagnostics.naming.iter().cloned());
+    rendered.extend(file_diagnostics.package_naming.iter().cloned());
     if config.typing {
         // Render the raw inference errors against the engine's own interner + fallback range, exactly as
         // production's `typecheck` renders them.
@@ -220,12 +231,16 @@ fn engine_diagnostics(engine: &Engine<RoughlyQueries>, id: FileId, config: &Conf
 // Normalization + the parity assertion
 // ----------------------------------------------------------------------------------------------------
 
-// The compared classes: the type-error and strict-mode diagnostics. See the module doc for why the other
-// classes are excluded symmetrically from both sides.
+// The compared classes: everything except the two the engine structurally cannot produce — `Lint` (the
+// engine models no lint) and `AnnotationError` (a lowering-phase class; the public `lower` returns only
+// the `Module` and drops its diagnostics, so they are unreachable from the engine). Both are excluded
+// symmetrically and by *code*, never by message, so the exclusion cannot mask a divergence inside the
+// compared classes. See the module doc for the full rationale. This now covers local naming, package
+// naming (`Naming` + `SyntaxError`), type errors, and strict mode.
 fn is_compared(diagnostic: &Diagnostic) -> bool {
-    matches!(
+    !matches!(
         diagnostic.code,
-        DiagnosticCode::TypeError | DiagnosticCode::Strict
+        DiagnosticCode::Lint | DiagnosticCode::AnnotationError
     )
 }
 
@@ -353,6 +368,17 @@ fn typing_strict_config() -> Config {
     Config {
         typing: true,
         strict: true,
+        unused: false,
+    }
+}
+
+// Typing and strict both off: production's `run_full` takes the `resolve_package`-only branch (it does not
+// call `typecheck`), yet still publishes package-naming diagnostics. Used to assert package-naming parity
+// in that distinct oracle code path, since the randomized stream always keeps typing on.
+fn naming_only_config() -> Config {
+    Config {
+        typing: false,
+        strict: false,
         unused: false,
     }
 }
@@ -504,6 +530,80 @@ fn rename_a_global_breaks_referrer() {
     driver.set_package("use-renamed-bad", 1, "result <- helper_renamed(\"two\")");
 }
 
+// Curated package-naming regression scenarios — one per `package_document_diagnostics` category, plus the
+// type-reference sub-cases (arity, `@new`-on-alias) and the script-local type overlay that the randomized
+// generator never emits. The builtin/stub-shadow category in particular is exercised nowhere else: the
+// generator draws names from a pool disjoint from the builtins and stubs. Parity is asserted after each
+// step, so every category must match the full-rebuild oracle exactly — wording, range, severity, and code.
+#[test]
+fn package_naming_diagnostics_match_production() {
+    let mut driver = Driver::new(typing_config());
+
+    // (D) could-not-resolve: a reference to a value name no package file defines.
+    driver.set_package("could-not-resolve", 0, "result <- mystery(1L)");
+
+    // (B) builtin/stub shadow: top-level bindings named like a stdlib stub (`pi`) and a hardcoded
+    // builtin (`c`) — one per shadow branch.
+    driver.set_package("shadow-builtin-and-stub", 1, "pi <- 3L\nc <- 1L");
+
+    // (A) overwrite pair across files: file 2 (path-earlier) and file 3 (path-later) both define `shared`.
+    driver.set_package("overwrite-earlier", 2, "shared <- 1L");
+    driver.set_package("overwrite-later", 3, "shared <- 2L");
+
+    // (A) within-file overwrite: two top-level assignments to the same name in one file.
+    driver.set_package("overwrite-within-file", 4, "dup <- 1L\ndup <- 2L");
+
+    // (T) duplicate-type + (C) reference-to-duplicate: `Count` declared in two package files becomes a
+    // duplicate (each declaration site flagged) and stays unresolved at its references.
+    driver.set_package("dup-type-first", 5, "#: @alias Count {integer}");
+    driver.set_package("dup-type-second", 6, "#: @alias Count {integer}\n\n#: Count\nlabel <- 1L");
+
+    // (C) unknown type: a reference to a type no package file defines.
+    driver.set_package("unknown-type", 7, "#: Mystery\nvalue <- 1L");
+
+    // (C) arity mismatch: a generic `@type` referenced with the wrong number of type arguments.
+    driver.set_package(
+        "arity-mismatch",
+        8,
+        "#: @type Box<T> {list{value: T}}\n\n#: Box\nboxed <- 1L",
+    );
+
+    // (C) `@new` on an alias: `@new` requires a nominal `@type`, not an `@alias`.
+    driver.set_package(
+        "new-on-alias",
+        9,
+        "#: @alias Tag {integer}\n\n#: @new Tag\ntagged <- 1L",
+    );
+
+    // A script contributes only (C) and (D); its own `@type` shadows package ones, so `@new Local`
+    // resolves locally and raises no diagnostic — guarding the script-local type overlay against a
+    // spurious unknown-type error.
+    driver.set_script(
+        "script-local-type",
+        10,
+        "#: @type Local {list{x: integer}}\n\n#: @new Local\nlocal_value <- list(x = 1L)",
+    );
+
+    // Resolve the cross-file duplicate so the duplicate-type and reference-to-duplicate diagnostics clear
+    // together (the type-name reverse-dependency hop), proving they appear and disappear at parity.
+    driver.delete("dup-type-resolve", 5);
+}
+
+// Package-naming parity in the typing-off oracle path: with typing and strict both off, production's
+// `run_full` resolves the package without typechecking, so this asserts the package-naming diagnostics are
+// published (and match) independently of the type/strict gates — the path the randomized stream never takes.
+#[test]
+fn package_naming_diagnostics_match_production_without_typing() {
+    let mut driver = Driver::new(naming_only_config());
+    driver.set_package("shadow", 0, "pi <- 3L\nc <- 1L");
+    driver.set_package("could-not-resolve", 1, "result <- mystery(1L)");
+    driver.set_package("overwrite-earlier", 2, "shared <- 1L");
+    driver.set_package("overwrite-later", 3, "shared <- 2L");
+    driver.set_package("dup-type-first", 4, "#: @alias Count {integer}");
+    driver.set_package("dup-type-and-ref", 5, "#: @alias Count {integer}\n\n#: Count\nlabel <- 1L");
+    driver.set_package("new-on-alias", 6, "#: @alias Tag {integer}\n\n#: @new Tag\ntagged <- 1L");
+}
+
 // ----------------------------------------------------------------------------------------------------
 // Randomized, fixed-seed generator + adversarial edit stream
 // ----------------------------------------------------------------------------------------------------
@@ -613,9 +713,14 @@ const NAMES: [&str; 4] = ["alpha", "beta", "gamma", "delta"];
 fn generate_source(rng: &mut SplitMix64) -> String {
     let item_count = 1 + rng.below(3);
     let mut lines = Vec::new();
-    // Optionally declare the package alias `Count` (resolves cross-file uses of `#: Count`).
+    // Optionally declare the package alias `Count` (resolves cross-file uses of `#: Count`). The blank
+    // line keeps this `@alias` *definition* directive from merging with a following `#:` annotation into
+    // one block, which lowering rejects ("cannot mix definition and annotation directives"). That is a
+    // lowering-phase `SyntaxError`, and lowering diagnostics are outside the engine's reproducible scope
+    // (the public `lower` drops them), so the generator must stay well-formed to keep the stream in scope.
     if rng.chance(1, 4) {
         lines.push("#: @alias Count {integer}".to_owned());
+        lines.push(String::new());
     }
     let define = |rng: &mut SplitMix64| NAMES[rng.below(NAMES.len() as u64) as usize];
     for _ in 0..item_count {
