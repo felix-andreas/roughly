@@ -40,8 +40,9 @@ Before any production cutover (a separate, later, user-gated decision), these mu
 
 1. **Lowering / syntax-error diagnostics** — the engine's `Lower` uses pub `analysis::lower::lower`, which drops lowering diagnostics; surfacing them needs either an `analysis` change (expose the `lower_with_diagnostics` output) or duplicating `collect_syntax_errors`. Currently a documented, symmetric harness exclusion. (`AnnotationError` is confirmed **dead** in `analysis` — genuinely closed.)
 2. **Lint diagnostics** — the engine models no linter (trivially addable via the pub lint entry; orthogonal, per-file).
-3. **LSP/CLI integration** — the engine is not wired into the shipped binary; that integration (and running it off-thread with the cancellation token) is its own slice.
-4. **Sub-linear validation walk** — the residual O(N) per-edit (perf, not correctness): a durability / changed-input-tracking or sharded-def-map slice.
+3. **IDE feature queries** *(added by Director verification 2026-06-29 — omitted from the CTO's original list; the single largest unmodeled surface).* The engine models only the **diagnostic** pipeline (parse→lower→naming→typecheck→diagnostics). The interactive query layer production's `analysis` serves — **hover, completion, goto-definition, references, rename, inlay hints, signature help** — is not modeled at all (the engine's query keys are all diagnostic-pipeline). A clean cutover that retires the old incremental path must port these to the engine (a large slice — they re-expose the engine's naming/type facts as IDE queries) **or** accept a hybrid (diagnostics on the new engine, IDE queries staying on the old `analysis` path, two engines coexisting). This dominates the cutover cost and is the main input to the cutover-scope decision.
+4. **LSP/CLI integration** — the engine is not wired into the shipped binary; that integration (and running it off-thread with the cancellation token) is its own slice.
+5. **Sub-linear validation walk** — the residual O(N) per-edit (perf, not correctness): a durability / changed-input-tracking or sharded-def-map slice.
 
 ## Why this exists
 
