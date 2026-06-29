@@ -20,7 +20,20 @@ fn run_format_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, Str
         return Err("format fixtures must use the `Simple` shape".to_owned());
     };
     let output = match format_str(&case.input) {
-        Ok(formatted) => formatted,
+        Ok(formatted) => {
+            // Idempotence: re-formatting the formatted output must be a fixed point. This holds the
+            // whole suite to `format(format(x)) == format(x)`, which matters most for the
+            // continuation indentation of multi-line `#:` annotations.
+            match format_str(&formatted) {
+                Ok(second) if second != formatted => {
+                    return Err(format!(
+                        "format is not idempotent\n--- first pass ---\n{formatted}\n--- second pass ---\n{second}"
+                    ));
+                }
+                Ok(_) => formatted,
+                Err(error) => return Err(format!("re-format failed: {error:?}")),
+            }
+        }
         Err(error) => format!("error: {error:?}"),
     };
 

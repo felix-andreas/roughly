@@ -236,7 +236,7 @@ fn traverse(
             // reformat comments like #foo to # foo but keep #' foo
             match chars.next() {
                 // `#:` introduces a Roughly type annotation; reformat its body to canonical spacing.
-                Some(':') => format_type_annotation_comment(out, raw),
+                Some(':') => format_type_annotation_comment(out, raw, node, context),
                 Some(char @ ('\'' | '*')) => {
                     match chars.next() {
                         Some(' ') | None => out.push_str(raw),
@@ -1190,18 +1190,27 @@ fn parse_directive(text: &str) -> Option<Directive> {
 
 // Reformats a `#:` type-annotation comment in place. The body is tokenized over the surface-type
 // alphabet and re-emitted with the canonical spacing of the typing reference (the same spacing
-// `analysis::type_syntax::render_surface_type` produces). Formatting is line-local and only adjusts
-// whitespace, so token order, identifier casing, and the user's line breaks across a multi-line `#:`
-// block are all preserved; in particular expanded `@param`/`@return` blocks are never collapsed into
-// a compact `fn(...)`. If the body contains anything outside the annotation alphabet the comment is
-// left untouched (beyond ensuring a single space after `#:`), so prose and malformed annotations are
-// never corrupted.
-fn format_type_annotation_comment(out: &mut String, raw: &str) {
+// `analysis::type_syntax::render_surface_type` produces). Only whitespace is adjusted, so token
+// order, identifier casing, and the user's line breaks are all preserved; in particular expanded
+// `@param`/`@return` blocks are never collapsed into a compact `fn(...)`. When a single annotation
+// wraps across several `#:` lines, continuation lines are indented by the bracket nesting carried in
+// from the earlier lines of the block (see `annotation_continuation_indent`), so the only cross-line
+// input is the leading whitespace of preceding sibling `#:` comments. If the body contains anything
+// outside the annotation alphabet the comment is left untouched (beyond ensuring a single space after
+// `#:`), so prose and malformed annotations are never corrupted.
+fn format_type_annotation_comment(out: &mut String, raw: &str, node: Node, context: Context) {
     let body = &raw[2..];
     match normalize_annotation_body(body) {
         Some(normalized) if normalized.is_empty() => out.push_str("#:"),
         Some(normalized) => {
             out.push_str("#: ");
+            // Block-aware continuation indent: when one type expression wraps across several `#:`
+            // lines, indent each line by the bracket nesting carried in from the earlier lines of
+            // the same annotation block, so wrapped `fn(...)`, `list{...}`, and `@param` bodies read
+            // as a nested structure instead of every line flattening to one space after `#:`.
+            for _ in 0..annotation_continuation_indent(node, context.rope, body) {
+                out.push_str(context.indent);
+            }
             out.push_str(&normalized);
         }
         None => match body.chars().next() {
@@ -1212,6 +1221,69 @@ fn format_type_annotation_comment(out: &mut String, raw: &str) {
             }
         },
     }
+}
+
+// Indent steps for a `#:` line inside a multi-line annotation block: the net bracket depth left open
+// by the earlier lines of its block, minus one step when this line itself begins by closing a
+// bracket so the closer aligns with its opener's line.
+fn annotation_continuation_indent(node: Node, rope: &Rope, body: &str) -> usize {
+    let carried = carried_annotation_depth(node, rope);
+    if carried <= 0 {
+        return 0;
+    }
+    (carried - i32::from(annotation_first_is_closer(body))).max(0) as usize
+}
+
+// Net bracket depth opened by the consecutive `#:` annotation lines immediately preceding `node`
+// (the same block: comment siblings on adjacent rows). Walking stops at a blank line, a non-comment,
+// a non-`#:` comment, or a line that does not tokenize as an annotation, so unrelated comments never
+// bleed indentation into a following annotation.
+fn carried_annotation_depth(node: Node, rope: &Rope) -> i32 {
+    let mut depth = 0;
+    let mut current = node;
+    while let Some(previous) = current.prev_sibling() {
+        if previous.kind_id() != kind::COMMENT
+            || previous.start_position().row + 1 != current.start_position().row
+        {
+            break;
+        }
+        let raw = get_raw(previous, rope);
+        let Some(previous_body) = raw.trim_end().strip_prefix("#:") else {
+            break;
+        };
+        match annotation_net_delta(previous_body) {
+            Some(delta) => depth += delta,
+            None => break,
+        }
+        current = previous;
+    }
+    depth
+}
+
+// The net bracket balance of an annotation line (openers minus closers), or `None` when the body is
+// not a well-formed annotation.
+fn annotation_net_delta(body: &str) -> Option<i32> {
+    use AnnotationTokenKind::*;
+    let mut depth = 0;
+    for token in tokenize_annotation(body)? {
+        match token.kind {
+            OpenParen | OpenBracket | OpenBrace | GenericOpen | BinderOpen => depth += 1,
+            CloseParen | CloseBracket | CloseBrace | AngleClose => depth -= 1,
+            _ => {}
+        }
+    }
+    Some(depth)
+}
+
+fn annotation_first_is_closer(body: &str) -> bool {
+    use AnnotationTokenKind::*;
+    let Some(tokens) = tokenize_annotation(body) else {
+        return false;
+    };
+    matches!(
+        tokens.first().map(|token| &token.kind),
+        Some(CloseParen | CloseBracket | CloseBrace | AngleClose)
+    )
 }
 
 fn normalize_annotation_body(body: &str) -> Option<String> {

@@ -180,20 +180,147 @@
 #: )->logical
 #++++
 #: fn(
-#: a: integer,
-#: b: double
+#:   a: integer,
+#:   b: double
 #: ) -> logical
 
-#---- indented_continuation_is_left_aligned
+#---- overindented_continuation_normalized
 #: fn(
 #:     a: integer,
 #:     b: double
 #: ) -> logical
 #++++
 #: fn(
-#: a: integer,
-#: b: double
+#:   a: integer,
+#:   b: double
 #: ) -> logical
+
+#---- already_indented_is_stable
+#: fn(
+#:   a: integer,
+#:   b: double
+#: ) -> logical
+#++++
+#: fn(
+#:   a: integer,
+#:   b: double
+#: ) -> logical
+
+#==== annotation_multiline_nested
+#---- record_across_lines
+#: list{
+#: name : character ,
+#: age : double
+#: }
+#++++
+#: list{
+#:   name: character,
+#:   age: double
+#: }
+
+#---- nested_record_two_levels
+#: list{
+#: user: list{
+#: name: character,
+#: age: double
+#: },
+#: active: logical
+#: }
+#++++
+#: list{
+#:   user: list{
+#:     name: character,
+#:     age: double
+#:   },
+#:   active: logical
+#: }
+
+#---- nullable_union_inside_record
+#: list{
+#: value: integer |
+#: NULL,
+#: flag: logical
+#: }
+#++++
+#: list{
+#:   value: integer |
+#:   NULL,
+#:   flag: logical
+#: }
+
+#---- array_of_records_across_lines
+#: list[ list{
+#: id : integer ,
+#: name : character
+#: } ]
+#++++
+#: list[list{
+#:     id: integer,
+#:     name: character
+#:   }]
+
+#==== annotation_multiline_expanded
+#---- param_type_wraps_across_lines
+#: @param {fn(
+#: integer,
+#: character
+#: ) -> double} callback
+#: @return {logical}
+#++++
+#: @param {fn(
+#:     integer,
+#:     character
+#:   ) -> double} callback
+#: @return {logical}
+
+#---- forall_then_wrapped_param
+#: @forall T
+#: @param {list{
+#: value: T
+#: }} box
+#: @return {T}
+#++++
+#: @forall T
+#: @param {list{
+#:     value: T
+#:   }} box
+#: @return {T}
+
+#---- balanced_params_stay_flat
+#: @param {integer} count
+#: @param {character} label
+#: @return {integer}
+#++++
+#: @param {integer} count
+#: @param {character} label
+#: @return {integer}
+
+#==== annotation_multiline_definitions
+#---- type_definition_across_lines
+#: @type Person {
+#: name : character ,
+#: age : double
+#: }
+#++++
+#: @type Person {
+#:   name: character,
+#:   age: double
+#: }
+
+#---- generic_alias_across_lines
+#: @alias Pair<A, B> {
+#: list{
+#: first: A,
+#: second: B
+#: }
+#: }
+#++++
+#: @alias Pair<A, B> {
+#:   list{
+#:     first: A,
+#:     second: B
+#:   }
+#: }
 
 #==== annotation_preserve
 #---- empty
