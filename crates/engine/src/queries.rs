@@ -26,7 +26,7 @@ use {
     crate::{Engine, QueryGroup, Shared, Stored},
     analysis::{
         document::{Document, DocumentId},
-        hir::{DefinitionKind, ExpressionId, ExpressionKind, Module},
+        hir::{DefinitionKind, ExpressionId, ExpressionKind, HirArena, Module},
         interner::{Interner, Symbol},
         lower::{LoweringContext, lower},
         naming::{
@@ -216,12 +216,17 @@ impl PartialEq for TypeDefinitionsModule {
 /// source of truth for the type-error set. The lowering-phase classes (`AnnotationError` and
 /// lowering-originated `SyntaxError`) are unreachable: the public `lower` returns only the `Module` and
 /// drops its diagnostics, so they live outside this value and the comparison (see the harness module doc).
+/// `unused` holds the local-naming "assigned but never used" warnings (`DiagnosticCode::Naming`),
+/// synthesized from `NamesLocal::unused_bindings`. Like `strict_diagnostics` and `type_errors` it is
+/// computed unconditionally and gated by the consumer (production's `check_config.unused`), so it is kept
+/// out of the always-emitted `naming` field — which stays the verbatim `resolve_document_locally` output.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileDiagnostics {
     pub naming: Vec<Diagnostic>,
     pub package_naming: Vec<Diagnostic>,
     pub type_errors: Vec<InferenceError>,
     pub strict_diagnostics: Vec<Diagnostic>,
+    pub unused: Vec<Diagnostic>,
 }
 
 /// One package-global type name's resolved shape: the kind it was declared with and its type-parameter
@@ -404,18 +409,37 @@ impl QueryGroup for RoughlyQueries {
 
             Key::Parse(file) => {
                 bump(&self.counters.parse, *file);
-                let text = engine.fetch::<String>(Key::SourceText(*file));
+                // Read the source through `fetch_optional`: a removed `SourceText` (a tombstone) degrades to
+                // an empty document instead of panicking, so a stale dependency edge walked into `Parse(f)`
+                // after a deletion yields an empty parse rather than resurrecting the removed input (tombstone
+                // hardening; see `Engine::fetch_optional`).
+                let source = engine.fetch_optional::<String>(Key::SourceText(*file));
+                let text = source.as_deref().map(String::as_str).unwrap_or("");
                 let mut parser = self.parser.borrow_mut();
-                let document = Document::parse(&mut parser, &text)
+                let document = Document::parse(&mut parser, text)
                     .expect("engine query: open document source should parse");
                 Stored::new(ParsedDocument(document))
             }
 
             Key::Lower(file) => {
                 bump(&self.counters.lower, *file);
-                let parsed = engine.fetch::<ParsedDocument>(Key::Parse(*file));
-                let mut lowering = self.lowering.borrow_mut();
-                Stored::new(lower(&parsed.0, &mut lowering))
+                // Replicate production's `lower_with_diagnostics` short-circuit (`analysis::lower`): a parse
+                // whose tree-sitter tree carries any error node lowers to an *empty* `Module`, not the partial
+                // error-recovery HIR the public `lower` would build. Production suppresses naming/type/strict
+                // diagnostics on malformed input this way (only lowering syntax diagnostics, which the engine
+                // structurally cannot reach, survive), so without this the engine would emit downstream
+                // diagnostics off a partial tree that production drops — a real live-editing divergence, since
+                // most keystrokes are transiently malformed. The same empty module is the tombstone-hardening
+                // degradation: a removed parse (`fetch_optional` -> `None`, not reachable on today's graph
+                // since `Parse` is derived, but defensive against a future fetch reorder) is treated like a
+                // malformed one rather than panicking.
+                match engine.fetch_optional::<ParsedDocument>(Key::Parse(*file)) {
+                    Some(parsed) if !parsed.0.tree().root_node().has_error() => {
+                        let mut lowering = self.lowering.borrow_mut();
+                        Stored::new(lower(&parsed.0, &mut lowering))
+                    }
+                    _ => Stored::new(Module::new(HirArena::new(), Vec::new(), Vec::new())),
+                }
             }
 
             Key::LocalNaming(file) => {
@@ -670,11 +694,15 @@ impl QueryGroup for RoughlyQueries {
                 let lowering = self.lowering.borrow();
                 let strict_diagnostics =
                     strict_origin_diagnostics(&module, &check.strict_origins, lowering.interner());
+                // Computed unconditionally (like `strict_diagnostics`); the consumer gates it on the `unused`
+                // check, matching production's `check_config.unused` in `Analysis::document_diagnostics`.
+                let unused = unused_diagnostics(&naming.naming, lowering.interner());
                 Stored::new(FileDiagnostics {
                     naming: naming.diagnostics.clone(),
                     package_naming: (*package_naming).clone(),
                     type_errors: check.errors.clone(),
                     strict_diagnostics,
+                    unused,
                 })
             }
         }
@@ -1702,6 +1730,24 @@ fn strict_origin_diagnostics(
                 }
             };
             Diagnostic::strict(origin.range, message)
+        })
+        .collect()
+}
+
+// The local-naming "unused binding" warnings, ported verbatim from `analysis.rs`'s `document_diagnostics`:
+// one warning per `unused_bindings` entry, phrased against the bound name. All the eligibility rules
+// (only `LocalAssignment`, never a read binding, and `.`/`_`-prefixed throwaways skipped) already ran in
+// `resolve_document_locally` when it populated `unused_bindings`, so this only resolves the name and renders.
+// The message string is mirrored from `analysis.rs` (the analysis subsystem is unreachable across the crate
+// boundary) and must stay byte-identical for the differential comparison.
+fn unused_diagnostics(local_naming: &NamesLocal, interner: &Interner) -> Vec<Diagnostic> {
+    local_naming
+        .unused_bindings
+        .iter()
+        .filter_map(|binding_id| local_naming.bindings.get(binding_id))
+        .map(|binding| {
+            let name = interner.resolve(binding.symbol).unwrap_or("<unknown>");
+            Diagnostic::naming_warning(binding.range, format!("`{name}` is assigned but never used."))
         })
         .collect()
 }

@@ -269,3 +269,28 @@ fn package_naming_diagnostics_are_incremental() {
         diagnostics_b.package_naming
     );
 }
+
+// TOMBSTONE HARDENING (defense-in-depth). The `validate` short-circuit normally recomputes a file-set fold
+// before any stale per-file edge is walked, so a removed `SourceText` tombstone is never reached on the live
+// path. This test deliberately removes the source *without* updating any fold, leaving the recorded
+// `Lower(f) -> Parse(f) -> SourceText(f)` chain stale, then fetches `Lower(f)` directly. Validating the stale
+// chain walks `Parse(f)` into the `SourceText(f)` tombstone; because `Parse`/`Lower` read through
+// `fetch_optional`, the chain degrades to an empty module (a cutoff) instead of the input-resurrection panic
+// a naive `fetch` would raise. A future fetch reorder that re-exposed this walk thus degrades, not crashes.
+#[test]
+fn fetching_through_a_tombstoned_source_yields_empty_without_panic() {
+    let mut engine = Engine::new(RoughlyQueries::new());
+    engine.set_input(Key::SourceText(A), "x <- 1L".to_owned());
+    // Record the `Lower(A) -> Parse(A) -> SourceText(A)` chain.
+    let module = engine.fetch::<analysis::hir::Module>(Key::Lower(A));
+    assert!(!module.expressions.is_empty());
+
+    // Remove the source, leaving the recorded chain stale (no fold recompute dropped the per-file edges).
+    engine.remove_input(&Key::SourceText(A));
+
+    // Validating the stale chain walks `Parse(A)` into the `SourceText(A)` tombstone; the optional fetch
+    // degrades it to an empty parse instead of panicking, so `Lower(A)` recomputes to an empty module.
+    let module = engine.fetch::<analysis::hir::Module>(Key::Lower(A));
+    assert!(module.expressions.is_empty());
+    assert!(module.definitions.is_empty());
+}

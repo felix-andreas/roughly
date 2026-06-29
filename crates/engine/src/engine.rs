@@ -248,6 +248,26 @@ impl<G: QueryGroup> Engine<G> {
             .unwrap_or_else(|_| panic!("query value type mismatch on fetch"))
     }
 
+    /// Like [`fetch`](Engine::fetch), but returns `None` instead of panicking when `key` resolves to a
+    /// removed input (a tombstone left by [`remove_input`](Engine::remove_input)). The read is still
+    /// recorded as a dependency and still validated, so a dependent that reads an input which is later
+    /// removed revalidates and observes it changed exactly as with [`fetch`]; it merely degrades a removed
+    /// input to `None` rather than an unrecoverable panic.
+    ///
+    /// This is the robustness primitive behind the parse/lower boundary. The fold short-circuit in
+    /// [`validate`](Engine::validate) already recomputes a file-set fold *before* any stale per-file edge is
+    /// walked, so on the normal path a removed `SourceText(f)` tombstone is never reached. But that relies on
+    /// an unenforced fetch *order* invariant — a future reorder that validated a stale `Lower(f)`/`Parse(f)`
+    /// edge first would walk into the tombstone and panic. Reading the source through `fetch_optional` makes
+    /// that walk degrade to an empty parse/module (a cutoff), not a crash.
+    pub fn fetch_optional<T: Any>(&self, key: G::Key) -> Option<Shared<T>> {
+        self.fetch_any_optional(&key).map(|value| {
+            value
+                .downcast::<T>()
+                .unwrap_or_else(|_| panic!("query value type mismatch on fetch"))
+        })
+    }
+
     /// Like [`fetch`](Engine::fetch), but cooperatively cancellable: `token` is installed for the duration
     /// of this fetch, and every [`recompute`](Engine::recompute) entry (plus any host check point, e.g. the
     /// interface fixed-point's round boundaries via [`check_cancelled`](Engine::check_cancelled)) observes
@@ -289,6 +309,13 @@ impl<G: QueryGroup> Engine<G> {
     }
 
     fn fetch_any(&self, key: &G::Key) -> Shared<dyn Any> {
+        self.fetch_any_optional(key)
+            .unwrap_or_else(|| panic!("fetched query {key:?} has no value (a removed input?)"))
+    }
+
+    // Record the read, validate, and return the stored value — or `None` when the slot is a tombstone (a
+    // removed input). Shared by the panicking [`fetch_any`] and the tombstone-tolerant [`fetch_optional`].
+    fn fetch_any_optional(&self, key: &G::Key) -> Option<Shared<dyn Any>> {
         if let Some(frame) = self.dependency_stack.borrow_mut().last_mut() {
             frame.push(key.clone());
         }
@@ -297,7 +324,6 @@ impl<G: QueryGroup> Engine<G> {
             .borrow()
             .get(key)
             .and_then(|slot| slot.value.as_ref().map(Shared::clone))
-            .unwrap_or_else(|| panic!("fetched query {key:?} has no value (a removed input?)"))
     }
 
     /// Validate one query against the current revision and return its `changed_at`. This is the red-green

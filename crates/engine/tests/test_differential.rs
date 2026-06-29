@@ -60,7 +60,7 @@
 use {
     analysis::{
         Analysis, CheckConfig, Diagnostic, DiagnosticCode, LintConfig, Severity,
-        naming::DocumentKind, run_full,
+        document::Document, naming::DocumentKind, run_full, tree::new_parser,
     },
     engine::{
         Engine,
@@ -212,6 +212,12 @@ fn engine_diagnostics(engine: &Engine<RoughlyQueries>, id: FileId, config: &Conf
     // `package_naming` reproduces `package_document_diagnostics`.
     rendered.extend(file_diagnostics.naming.iter().cloned());
     rendered.extend(file_diagnostics.package_naming.iter().cloned());
+    // Unused-local warnings (`DiagnosticCode::Naming`) are config-gated in production's
+    // `document_diagnostics` (`check_config.unused`), so the engine computes them unconditionally and the
+    // consumer gates them here — the same shape as the type/strict classes below.
+    if config.unused {
+        rendered.extend(file_diagnostics.unused.iter().cloned());
+    }
     if config.typing {
         // Render the raw inference errors against the engine's own interner + fallback range, exactly as
         // production's `typecheck` renders them.
@@ -284,8 +290,31 @@ fn normalize(diagnostics: Vec<Diagnostic>) -> Vec<NormalizedDiagnostic> {
 fn assert_parity(label: &str, engine: &Engine<RoughlyQueries>, workspace: &Workspace) {
     let oracle = build_oracle(workspace);
     for (id, state) in &workspace.files {
-        let engine_set = normalize(engine_diagnostics(engine, *id, &workspace.config));
-        let oracle_set = normalize(oracle_diagnostics(&oracle, *id, state.package));
+        // On malformed input both engines lower to an *empty* module (production's `lower_with_diagnostics`
+        // short-circuit and the engine's `Lower`), so every compared class is empty — except production
+        // additionally surfaces lowering *syntax* diagnostics (`collect_syntax_errors`), which the engine
+        // structurally cannot produce (the public `lower` drops them). Those are the only residual divergence
+        // on a malformed file, and they never collide with package-naming `SyntaxError`s (those require a
+        // non-empty module with type declarations), so excluding `SyntaxError` for malformed files compares
+        // the remaining classes (all empty) while keeping full `SyntaxError` parity on every well-formed file.
+        // A malformed file still drops its definitions package-wide on both sides, so its referrers' cross-file
+        // diagnostics — which are fully compared on their own (well-formed) files — must still match.
+        let malformed = is_malformed(&state.source);
+        let keep = |diagnostic: &Diagnostic| {
+            !(malformed && diagnostic.code == DiagnosticCode::SyntaxError)
+        };
+        let engine_set = normalize(
+            engine_diagnostics(engine, *id, &workspace.config)
+                .into_iter()
+                .filter(|diagnostic| keep(diagnostic))
+                .collect(),
+        );
+        let oracle_set = normalize(
+            oracle_diagnostics(&oracle, *id, state.package)
+                .into_iter()
+                .filter(|diagnostic| keep(diagnostic))
+                .collect(),
+        );
         assert_eq!(
             engine_set, oracle_set,
             "parity divergence at step `{label}` for file {id} (path {:?})\n\
@@ -294,6 +323,16 @@ fn assert_parity(label: &str, engine: &Engine<RoughlyQueries>, workspace: &Works
             state.source,
         );
     }
+}
+
+// Whether a source is malformed at the tree-sitter level (`root.has_error()`). Such a file lowers to an
+// empty module on *both* sides, so its only divergence is production's lowering syntax diagnostics, which
+// `assert_parity` excludes per malformed file. Re-parsing here (rather than reading engine state) keeps the
+// discriminator independent: an empty module from an empty-but-well-formed source is *not* treated this way.
+fn is_malformed(source: &str) -> bool {
+    let mut parser = new_parser().expect("harness: R grammar should load");
+    let document = Document::parse(&mut parser, source).expect("harness: source should parse");
+    document.tree().root_node().has_error()
 }
 
 // A driver that owns the long-lived engine and the current workspace, asserting parity after each step.
@@ -369,6 +408,26 @@ fn typing_strict_config() -> Config {
         typing: true,
         strict: true,
         unused: false,
+    }
+}
+
+// Everything on, including the `unused` check. The randomized stream uses this so the unused-local class is
+// asserted continuously (the generator emits no unused locals, so the engine must likewise emit none — a
+// guard that the gate never fires spuriously), and the curated `unused` scenario uses the typing+unused
+// variant for the reported-warning cases.
+fn typing_strict_unused_config() -> Config {
+    Config {
+        typing: true,
+        strict: true,
+        unused: true,
+    }
+}
+
+fn typing_unused_config() -> Config {
+    Config {
+        typing: true,
+        strict: false,
+        unused: true,
     }
 }
 
@@ -604,6 +663,62 @@ fn package_naming_diagnostics_match_production_without_typing() {
     driver.set_package("new-on-alias", 6, "#: @alias Tag {integer}\n\n#: @new Tag\ntagged <- 1L");
 }
 
+// GAP #3: malformed input. A tree-sitter parse error lowers to an empty module on both sides (production's
+// `lower_with_diagnostics` short-circuit and the engine's `Lower`), so the engine emits no downstream
+// diagnostics off the partial error-recovery tree — matching production, whose only residual output is the
+// lowering syntax diagnostics the harness excludes per malformed file. This first asserts every malformed
+// template is genuinely `has_error()`, then drives a malformed-edit cycle: making a definer malformed drops
+// its global package-wide, so a referrer's cross-file diagnostics shift identically on both sides.
+#[test]
+fn malformed_sources_are_detected_and_reach_parity() {
+    for source in MALFORMED_SOURCES {
+        assert!(
+            is_malformed(source),
+            "template must be tree-sitter malformed (has_error): {source:?}"
+        );
+    }
+
+    let mut driver = Driver::new(typing_strict_config());
+    driver.set_package("def", 0, "#: fn(x: integer) -> integer\nhelper <- function(x) x + x");
+    driver.set_package("use", 1, "result <- helper(2L)");
+    // Make the definer malformed (incomplete `function` head): `helper` disappears from the package, so the
+    // referrer can no longer resolve it — and the definer itself emits nothing but the excluded syntax error.
+    driver.set_package("def-malformed", 0, "helper <- function(x");
+    // Repair it: parity returns to the clean cross-file state.
+    driver.set_package("def-repaired", 0, "#: fn(x: integer) -> integer\nhelper <- function(x) x + x");
+}
+
+// GAP #4: unused-local warnings (`DiagnosticCode::Naming`, "`{name}` is assigned but never used."),
+// synthesized from `NamesLocal::unused_bindings` and gated by the `unused` check. The randomized stream
+// emits no unused locals, so this curated `unused: true` pass is the only coverage of the reported case. It
+// exercises the eligibility rules from production's `compute_unused_bindings`: a reported local, a used
+// local, a `.`-prefixed throwaway, a parameter, a `for` variable, and a top-level binding (only the first
+// reported). The final step toggles the check off, asserting the warnings clear at parity.
+#[test]
+fn unused_local_warnings_match_production() {
+    let mut driver = Driver::new(typing_unused_config());
+    // `unused_value` is a function-local assignment never read -> reported; `used_value` is read -> not.
+    driver.set_package(
+        "unused-and-used-locals",
+        0,
+        "f <- function() {\n  unused_value <- 1L\n  used_value <- 2L\n  used_value\n}",
+    );
+    // A `.`-prefixed local is an intentional throwaway -> never reported.
+    driver.set_package(
+        "throwaway-local",
+        1,
+        "g <- function() {\n  .ignored <- 1L\n  used <- 2L\n  used\n}",
+    );
+    // Parameters, `for` variables, and top-level bindings are never reported even when unused.
+    driver.set_package(
+        "params-for-and-top-level",
+        2,
+        "top_level <- 1L\nh <- function(unused_param) {\n  for (item in 1:3) 1L\n}",
+    );
+    // Toggling the check off clears the warnings on both sides (the unused-off oracle path).
+    driver.step("unused-off", |workspace| workspace.config.unused = false);
+}
+
 // ----------------------------------------------------------------------------------------------------
 // Randomized, fixed-seed generator + adversarial edit stream
 // ----------------------------------------------------------------------------------------------------
@@ -699,6 +814,20 @@ impl SplitMix64 {
 // dangles as files defining the name come and go — generating and resolving cross-file errors organically.
 const NAMES: [&str; 4] = ["alpha", "beta", "gamma", "delta"];
 
+// Structurally malformed R — each makes `root.has_error()` true: unbalanced brackets, dangling operators,
+// and incomplete `function`/`if`/block heads, the canonical live-editing intermediate states. Deliberately
+// *not* malformed `#:` annotations: those parse cleanly (tree-sitter treats `#:` as a comment) and fail only
+// in lowering, a diagnostic class the engine cannot reproduce on a non-empty module, so the generator still
+// avoids them. `malformed_sources_are_detected_and_reach_parity` asserts every entry is actually malformed.
+const MALFORMED_SOURCES: [&str; 6] = [
+    "alpha <-",
+    "beta <- (1L +",
+    "gamma <- function(x",
+    "if (alpha",
+    "{ delta <- 1L",
+    "result <- alpha(1L",
+];
+
 // Generate one file's source from a handful of items. Items deliberately produce the cross-file and
 // stdlib interactions the deferrals target: typed function/value definitions, well- and mis-typed calls
 // of pooled names and stdlib stubs, re-exports, an `@alias` definition and use, and plain bindings.
@@ -711,6 +840,15 @@ const NAMES: [&str; 4] = ["alpha", "beta", "gamma", "delta"];
 // fixed-point's convergence (un-annotated cycle → `Unknown`, annotated member → breaks the cycle) is
 // exercised continuously rather than only by the curated cases above.
 fn generate_source(rng: &mut SplitMix64) -> String {
+    // Occasionally emit a structurally *malformed* file (a tree-sitter parse error). On most keystrokes a
+    // live buffer is transiently malformed, and production lowers such input to an empty module (the
+    // `lower_with_diagnostics` short-circuit), suppressing every downstream diagnostic class; the engine's
+    // `Lower` replicates that short-circuit, so parity must hold here too. `assert_parity` excludes the
+    // residual lowering syntax diagnostics per malformed file. A malformed file also drops its definitions
+    // package-wide, so its referrers' cross-file diagnostics shift identically on both sides.
+    if rng.chance(1, 7) {
+        return MALFORMED_SOURCES[rng.below(MALFORMED_SOURCES.len() as u64) as usize].to_owned();
+    }
     let item_count = 1 + rng.below(3);
     let mut lines = Vec::new();
     // Optionally declare the package alias `Count` (resolves cross-file uses of `#: Count`). The blank
@@ -775,7 +913,7 @@ fn randomized_adversarial_edit_stream() {
 
 fn run_randomized_stream(seed: u64, steps: usize) {
     let mut rng = SplitMix64::new(seed);
-    let mut driver = Driver::new(typing_strict_config());
+    let mut driver = Driver::new(typing_strict_unused_config());
 
     for step in 0..steps {
         let label = format!("seed={seed:#x} step={step}");
