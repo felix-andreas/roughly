@@ -95,22 +95,29 @@ pub enum Key {
     DefiningItem(Symbol),
     /// The per-symbol exported scheme. Editing a function body recomputes only *its* `GlobalScheme`.
     GlobalScheme(Symbol),
-    /// The single out-edge of the re-export graph: `Some(b)` iff `symbol`'s winning definition is a pure
-    /// re-export `a <- b` of another package global `b`, else `None`. A global re-exports at most one
-    /// other, so the graph is *functional* (out-degree ≤ 1) — which is what makes SCC detection a chain
-    /// walk (see [`Key::ReexportScc`]).
-    ReexportTarget(Symbol),
-    /// The strongly-connected component of the re-export graph containing `symbol`, as the **canonical
-    /// (sorted)** member list. Empty means a trivial, non-self-looping SCC (acyclic — keep the R1a
-    /// `GlobalScheme` fetch-recursion path); a non-empty list is a pure re-export cycle through `symbol`
-    /// (route `GlobalScheme` through [`Key::ReexportInterface`]). Every cycle member projects the *same*
-    /// sorted list, so they share one `ReexportInterface` memo.
-    ReexportScc(Symbol),
-    /// The converged exported-scheme sub-table for one cyclic re-export SCC, computed by a single bounded
-    /// synchronous fixed-point body (`DESIGN.md` §5). Keyed by the canonical SCC member list. Owning the
-    /// whole component in one body is what keeps the core's accidental-cycle guard intact: no
-    /// `GlobalScheme`/`ReexportInterface` key ever re-enters itself.
-    ReexportInterface(Vec<Symbol>),
+    /// The interface-dependency out-edges of one package global: the **other** package globals that
+    /// computing `GlobalScheme(symbol)` reads. Computing a global's scheme infers its whole winning file,
+    /// which binds *every* package global that file references (`infer_file`); so the edge set is exactly
+    /// the referenced non-local names of `symbol`'s defining file that themselves resolve to package
+    /// globals (have a [`Key::DefiningItem`]). Out-degree is *arbitrary* (a file may reference many
+    /// globals), so this is a general directed graph — re-exports (`a <- b`, a single edge) are just the
+    /// degenerate case. SCC detection over it is Tarjan, not a chain walk (see [`Key::SymbolScc`]).
+    InterfaceDeps(Symbol),
+    /// The strongly-connected component of the [`Key::InterfaceDeps`] graph containing `symbol`, as the
+    /// **canonical (sorted)** member list. Empty means a trivial, non-self-looping SCC (acyclic — keep the
+    /// R1a `GlobalScheme` fetch-recursion path); a non-empty list (size ≥ 2) is a cycle of mutually
+    /// interface-dependent globals through `symbol` — a mutual re-export *or* a mutual value reference —
+    /// (route `GlobalScheme` through [`Key::InterfaceScc`]). Every cycle member computes the *same* sorted
+    /// list, so they share one `InterfaceScc` memo. Computed by Tarjan over the lazily-fetched edge graph.
+    SymbolScc(Symbol),
+    /// The converged exported-scheme sub-table for one cyclic interface SCC, computed by a single bounded
+    /// synchronous fixed-point body porting production's package-interface loop (`analysis.rs::typecheck`).
+    /// Keyed by the canonical SCC member list. Each round re-infers the members' winning files with the
+    /// current SCC schemes bound for in-SCC references (and ordinary `GlobalScheme` fetches for out-of-SCC
+    /// references, which are acyclic), bootstrapping every member to `Unknown` and pinning an oscillating
+    /// member to `Unknown`. Owning the whole component in one body is what keeps the core's accidental-cycle
+    /// guard intact: no `GlobalScheme`/`InterfaceScc`/`SymbolScc` key ever re-enters itself.
+    InterfaceScc(Vec<Symbol>),
     Typecheck(FileId),
     Diagnostics(FileId),
 }
@@ -228,20 +235,20 @@ impl RoughlyQueries {
         per_key(&self.counters.global_scheme, symbol)
     }
 
-    pub fn reexport_target_runs(&self, symbol: Symbol) -> u64 {
-        per_key(&self.counters.reexport_target, symbol)
+    pub fn interface_deps_runs(&self, symbol: Symbol) -> u64 {
+        per_key(&self.counters.interface_deps, symbol)
     }
 
-    pub fn reexport_scc_runs(&self, symbol: Symbol) -> u64 {
-        per_key(&self.counters.reexport_scc, symbol)
+    pub fn symbol_scc_runs(&self, symbol: Symbol) -> u64 {
+        per_key(&self.counters.symbol_scc, symbol)
     }
 
     /// How many times the SCC fixed-point body ran for one canonical member list — the convergence
     /// witness: a cyclic interface is computed once and shared by every member, so this stays small (it
     /// never spins the round cap).
-    pub fn reexport_interface_runs(&self, members: &[Symbol]) -> u64 {
+    pub fn interface_scc_runs(&self, members: &[Symbol]) -> u64 {
         self.counters
-            .reexport_interface
+            .interface_scc
             .borrow()
             .get(members)
             .copied()
@@ -369,41 +376,31 @@ impl QueryGroup for RoughlyQueries {
                 Stored::new(index.get(symbol).copied())
             }
 
-            Key::ReexportTarget(symbol) => {
-                bump(&self.counters.reexport_target, *symbol);
-                let defining = engine.fetch::<Option<FileId>>(Key::DefiningItem(*symbol));
-                let target = match *defining {
-                    Some(file) => {
-                        let module = engine.fetch::<Module>(Key::Lower(file));
-                        let naming =
-                            engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(file));
-                        reexport_target_of(&module, &naming.naming, *symbol)
-                    }
-                    None => None,
-                };
-                Stored::new(target)
+            Key::InterfaceDeps(symbol) => {
+                bump(&self.counters.interface_deps, *symbol);
+                Stored::new(interface_deps(engine, *symbol))
             }
 
-            Key::ReexportScc(symbol) => {
-                bump(&self.counters.reexport_scc, *symbol);
-                // Functional graph: follow the single re-export out-edge from `symbol`. If the walk returns
-                // to `symbol`, it is on a cycle (the visited chain is the SCC); if it dead-ends or meets a
-                // cycle that does *not* include `symbol`, `symbol` sits on an acyclic tail (trivial SCC).
-                Stored::new(reexport_scc_members(engine, *symbol))
+            Key::SymbolScc(symbol) => {
+                bump(&self.counters.symbol_scc, *symbol);
+                // Tarjan over the lazily-fetched `InterfaceDeps` graph: explore the subgraph reachable from
+                // `symbol` and return the SCC containing it (sorted), or empty when `symbol` is a trivial,
+                // non-self-looping SCC (acyclic — keep the fetch-recursion fast path in `GlobalScheme`).
+                Stored::new(symbol_scc(engine, *symbol))
             }
 
             Key::GlobalScheme(symbol) => {
                 bump(&self.counters.global_scheme, *symbol);
-                let scc = engine.fetch::<Vec<Symbol>>(Key::ReexportScc(*symbol));
+                let scc = engine.fetch::<Vec<Symbol>>(Key::SymbolScc(*symbol));
                 if scc.is_empty() {
-                    // Acyclic: a direct definition or an acyclic re-export chain `a <- b <- …`. Inferring
-                    // the winning file binds referenced globals via *their* `GlobalScheme` (recorded as a
-                    // dependency), so a chain resolves by plain fetch recursion — unbounded depth, no round
-                    // cap to truncate it — and the export falls out of `exported_value_schemes`.
+                    // Acyclic: a direct definition or an acyclic chain. Inferring the winning file binds
+                    // referenced globals via *their* `GlobalScheme` (recorded as a dependency), so a chain
+                    // resolves by plain fetch recursion — unbounded depth, no round cap to truncate it — and
+                    // the export falls out of `exported_value_schemes`.
                     let defining = engine.fetch::<Option<FileId>>(Key::DefiningItem(*symbol));
                     let scheme = match *defining {
                         Some(defining_file) => {
-                            let (_check, exports) = infer_file(self, engine, defining_file);
+                            let (_check, exports) = infer_file(self, engine, defining_file, &no_overrides());
                             exports
                                 .into_iter()
                                 .find(|export| export.symbol == *symbol)
@@ -414,24 +411,24 @@ impl QueryGroup for RoughlyQueries {
                     Stored::new(scheme)
                 } else {
                     // Cyclic: route through the SCC fixed-point body, which owns the whole component and
-                    // never re-enters `fetch` on a `GlobalScheme`/`ReexportInterface` key — so the core's
-                    // accidental-cycle guard stays intact for *real* graph bugs. Project this member out.
-                    let interface = engine
-                        .fetch::<BTreeMap<Symbol, TypeScheme>>(Key::ReexportInterface((*scc).clone()));
+                    // never re-enters `fetch` on a `GlobalScheme`/`InterfaceScc`/`SymbolScc` key — so the
+                    // core's accidental-cycle guard stays intact for *real* graph bugs. Project this member.
+                    let interface =
+                        engine.fetch::<BTreeMap<Symbol, TypeScheme>>(Key::InterfaceScc((*scc).clone()));
                     Stored::new(interface.get(symbol).cloned())
                 }
             }
 
-            Key::ReexportInterface(members) => {
-                bump(&self.counters.reexport_interface, members.clone());
-                Stored::new(resolve_reexport_interface(self, engine, members))
+            Key::InterfaceScc(members) => {
+                bump(&self.counters.interface_scc, members.clone());
+                Stored::new(resolve_interface_scc(self, engine, members))
             }
 
             Key::Typecheck(file) => {
                 bump(&self.counters.typecheck, *file);
                 // Recorded so a config change re-checks the file; the value is unused in R1a check logic.
                 let _config = engine.fetch::<Config>(Key::Config);
-                let (check, _exports) = infer_file(self, engine, *file);
+                let (check, _exports) = infer_file(self, engine, *file, &no_overrides());
                 Stored::new(check)
             }
 
@@ -462,10 +459,17 @@ impl QueryGroup for RoughlyQueries {
 // `file` references, so both callers record dependencies on precisely the interface symbols they read —
 // the per-symbol granularity `DESIGN.md` §3 requires. All fetches happen *before* the `lowering` borrow so
 // no borrow is held across a recursive `fetch`.
+//
+// `scc_overrides` carries the in-SCC schemes when this runs inside the [`Key::InterfaceScc`] fixed-point:
+// a referenced global that is a member of the SCC under resolution is bound to its *current* round scheme
+// from the table (never fetched, since its `GlobalScheme` is the cyclic edge), while an out-of-SCC global
+// is fetched through its `GlobalScheme` as usual (an acyclic dependency). For the ordinary callers it is
+// empty, so every referenced global is fetched — the plain fetch-recursion path.
 fn infer_file(
     group: &RoughlyQueries,
     engine: &Engine<RoughlyQueries>,
     file: FileId,
+    scc_overrides: &BTreeMap<Symbol, TypeScheme>,
 ) -> (ModuleCheck, Vec<ExportedValue>) {
     let module = engine.fetch::<Module>(Key::Lower(file));
     let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(file));
@@ -480,26 +484,19 @@ fn infer_file(
             global_bindings.insert(*symbol, DocumentId(defining_file));
             // Every referenced package global is bound, matching production: a global whose winning file
             // produced no concrete export resolves to `Unknown` (production's interface-table fallback),
-            // not to an unbound name — so the referrer's check sees the same environment either way.
-            //
-            // Mutual cross-file *value* references (e.g. file A's `a <- b(…)` and file B's `c <- a`) form a
-            // cycle in the `GlobalScheme` graph that is *not* a re-export cycle (so `ReexportScc` does not
-            // collapse it): resolving `GlobalScheme(a)` infers A, which needs `GlobalScheme(b)`, which
-            // infers B, which needs `GlobalScheme(a)` again. We break the back-edge the way production's
-            // interface fixed-point bootstraps an as-yet-unresolved global — to `Unknown` — by detecting
-            // that the symbol's `GlobalScheme` is already on the recompute stack and not re-entering it.
-            // For the common case (the cyclically-referenced exports carry annotations, so their schemes
-            // are annotation-determined and independent of the bootstrap) this yields production's
-            // converged scheme. (Where an *unannotated* mutual value cycle would need true iteration to
-            // converge, a single bootstrap can differ; that residue is the documented remaining gap — see
-            // `test_differential.rs`. Without this guard the engine *panics* on such input instead.)
-            let scheme = if engine.is_computing(&Key::GlobalScheme(*symbol)) {
-                TypeScheme::monomorphic(CoreType::Unknown)
-            } else {
-                let scheme = engine.fetch::<Option<TypeScheme>>(Key::GlobalScheme(*symbol));
-                (*scheme)
-                    .clone()
-                    .unwrap_or_else(|| TypeScheme::monomorphic(CoreType::Unknown))
+            // not to an unbound name — so the referrer's check sees the same environment either way. An
+            // in-SCC reference (mutual re-export or mutual value reference) takes its current round scheme
+            // from `scc_overrides` instead of fetching `GlobalScheme` — that fetch is the cyclic back-edge
+            // the SCC fixed-point owns, so re-entering it is exactly what would trip the accidental-cycle
+            // guard. Out-of-SCC references fetch `GlobalScheme` normally (an acyclic dependency).
+            let scheme = match scc_overrides.get(symbol) {
+                Some(override_scheme) => override_scheme.clone(),
+                None => {
+                    let scheme = engine.fetch::<Option<TypeScheme>>(Key::GlobalScheme(*symbol));
+                    (*scheme)
+                        .clone()
+                        .unwrap_or_else(|| TypeScheme::monomorphic(CoreType::Unknown))
+                }
             };
             imported_schemes.push((*symbol, scheme));
         }
@@ -554,110 +551,167 @@ fn infer_file(
     (check, exports)
 }
 
-// The re-export out-edge of one package global: `Some(b)` iff `symbol`'s winning definition is a bare
-// reference to another package global `b` (`a <- b`). The winner is the *last* top-level assignment of
-// `symbol` that resolves to a package binding (last-writer-wins within the file), mirroring how
-// `exported_value_schemes` picks the exported definition. A value that is anything but a free-symbol
-// reference (a function, a literal, a call, or a reference resolving to a *local* binding) is not a
-// re-export, so it has no out-edge and cannot lie on a re-export cycle.
-fn reexport_target_of(
-    module: &Module,
-    local_naming: &NamesLocal,
-    symbol: Symbol,
-) -> Option<Symbol> {
-    let mut winning_value: Option<ExpressionId> = None;
-    collect_winning_assignment_value(
-        module,
-        local_naming,
-        &module.expressions,
-        symbol,
-        &mut winning_value,
-    );
-    let value = winning_value?;
-    match module.arena.get(value).kind {
-        // A bare `Symbol` value that names dropped into `non_locals` resolves to a package global, not a
-        // file-local binding — that, and only that, is a cross-file re-export edge.
-        ExpressionKind::Symbol(_) => local_naming.non_locals.get(&value).copied(),
-        _ => None,
-    }
+// The empty override map for the ordinary `infer_file` callers (`GlobalScheme`'s acyclic path and
+// `Typecheck`): with no in-SCC bindings, every referenced global is fetched through its `GlobalScheme`.
+fn no_overrides() -> BTreeMap<Symbol, TypeScheme> {
+    BTreeMap::new()
 }
 
-fn collect_winning_assignment_value(
-    module: &Module,
-    local_naming: &NamesLocal,
-    expressions: &[ExpressionId],
-    symbol: Symbol,
-    winning_value: &mut Option<ExpressionId>,
-) {
-    for expression_id in expressions {
-        match &module.arena.get(*expression_id).kind {
-            ExpressionKind::Assign { target, value } if *target == symbol => {
-                let resolves_to_binding = local_naming
-                    .expression_resolutions
-                    .get(expression_id)
-                    .and_then(|binding_id| local_naming.bindings.get(binding_id))
-                    .is_some();
-                if resolves_to_binding {
-                    *winning_value = Some(*value);
+// The interface-dependency out-edges of one package global: the package globals that computing
+// `GlobalScheme(symbol)` reads. `GlobalScheme(symbol)` infers `symbol`'s whole winning file (`infer_file`),
+// which binds every package global that file references; so the edge set is exactly the file's referenced
+// non-local names that themselves resolve to package globals (have a `DefiningItem`). This is the precise
+// graph the real `GlobalScheme` fetches induce, so the SCC built from it captures every cyclic fetch —
+// nothing slips past to trip the accidental-cycle guard.
+//
+// A **self-edge** (`symbol` in its own dep set) is real and kept: it arises when the winning file
+// *forward-references* the global it defines (`beta <- alpha(1L)` above `alpha <- 1L`, where the same file
+// is `alpha`'s winner), so the forward reference resolves to the package global `alpha` whose winner is
+// this very file — `infer_file` then fetches `GlobalScheme(alpha)` while computing it. `symbol_scc` reads
+// the self-edge as a self-referential singleton SCC and routes it through the fixed-point. Returned
+// sorted/deduped (a `BTreeSet`) for an order-stable, cutoff-friendly value.
+fn interface_deps(engine: &Engine<RoughlyQueries>, symbol: Symbol) -> Vec<Symbol> {
+    let defining = engine.fetch::<Option<FileId>>(Key::DefiningItem(symbol));
+    let Some(file) = *defining else {
+        return Vec::new();
+    };
+    let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(file));
+    let referenced: BTreeSet<Symbol> = naming.naming.non_locals.values().copied().collect();
+    let mut deps = BTreeSet::new();
+    for candidate in referenced {
+        if engine.fetch::<Option<FileId>>(Key::DefiningItem(candidate)).is_some() {
+            deps.insert(candidate);
+        }
+    }
+    deps.into_iter().collect()
+}
+
+// The SCC of `symbol` over the (arbitrary out-degree) `InterfaceDeps` graph, as the canonical (sorted)
+// member list (empty = a trivial, non-self-looping SCC, i.e. acyclic). A non-trivial SCC is either size ≥ 2
+// *or* a single symbol with a self-edge (`symbol` forward-references its own definition) — both route
+// through the `InterfaceScc` fixed-point. Tarjan's algorithm, iterative (the graph depth is unbounded, so a
+// recursive DFS could overflow the stack): explore the subgraph reachable from `symbol`, recording each
+// `InterfaceDeps` read as a dependency so the SCC re-derives incrementally when an edge changes, and return
+// the one SCC that contains `symbol`. Every member of that SCC computes the identical sorted list (Tarjan
+// from any member finds the same component), so all members share one `InterfaceScc` memo.
+fn symbol_scc(engine: &Engine<RoughlyQueries>, symbol: Symbol) -> Vec<Symbol> {
+    let deps_of =
+        |node: Symbol| (*engine.fetch::<Vec<Symbol>>(Key::InterfaceDeps(node))).clone();
+
+    // A self-referential singleton: `symbol`'s own winning file forward-references `symbol`, so the SCC is
+    // the non-trivial `{symbol}` even though Tarjan reports a size-1 component (a self-edge does not lower a
+    // node's own lowlink). Detected from `symbol`'s direct edges and folded into the result below.
+    let start_edges = deps_of(symbol);
+    let start_self_loop = start_edges.contains(&symbol);
+
+    let mut next_index = 0usize;
+    let mut index: BTreeMap<Symbol, usize> = BTreeMap::new();
+    let mut low: BTreeMap<Symbol, usize> = BTreeMap::new();
+    let mut on_stack: BTreeSet<Symbol> = BTreeSet::new();
+    let mut component_stack: Vec<Symbol> = Vec::new();
+    let mut start_scc: Vec<Symbol> = Vec::new();
+
+    struct Frame {
+        node: Symbol,
+        edges: Vec<Symbol>,
+        next_edge: usize,
+    }
+    let mut frames: Vec<Frame> = Vec::new();
+
+    index.insert(symbol, next_index);
+    low.insert(symbol, next_index);
+    next_index += 1;
+    component_stack.push(symbol);
+    on_stack.insert(symbol);
+    frames.push(Frame {
+        node: symbol,
+        edges: start_edges,
+        next_edge: 0,
+    });
+
+    while let Some(frame) = frames.last_mut() {
+        let node = frame.node;
+        if frame.next_edge < frame.edges.len() {
+            let target = frame.edges[frame.next_edge];
+            frame.next_edge += 1;
+            if !index.contains_key(&target) {
+                index.insert(target, next_index);
+                low.insert(target, next_index);
+                next_index += 1;
+                component_stack.push(target);
+                on_stack.insert(target);
+                let edges = deps_of(target);
+                frames.push(Frame {
+                    node: target,
+                    edges,
+                    next_edge: 0,
+                });
+            } else if on_stack.contains(&target) {
+                let target_index = index[&target];
+                let updated = low[&node].min(target_index);
+                low.insert(node, updated);
+            }
+        } else {
+            // All of `node`'s edges are walked; if it is an SCC root, pop its component off the stack.
+            if low[&node] == index[&node] {
+                let mut component = Vec::new();
+                loop {
+                    let member = component_stack.pop().expect("component stack is non-empty at a root");
+                    on_stack.remove(&member);
+                    component.push(member);
+                    if member == node {
+                        break;
+                    }
+                }
+                if component.contains(&symbol) {
+                    component.sort();
+                    start_scc = component;
                 }
             }
-            ExpressionKind::Block { expressions, .. } => {
-                collect_winning_assignment_value(
-                    module,
-                    local_naming,
-                    expressions,
-                    symbol,
-                    winning_value,
-                );
-            }
-            _ => {}
-        }
-    }
-}
-
-// The SCC of `symbol` over the functional re-export graph, as the canonical (sorted) member list (empty =
-// acyclic). Each global has out-degree ≤ 1, so SCC detection is a chain walk: follow `ReexportTarget`
-// (recording each edge as a dependency, so the SCC re-derives incrementally when an edge changes). The
-// walk closes back to `symbol` only when `symbol` lies on the cycle; reaching a dead end or an interior
-// repeat means `symbol` is on an acyclic tail.
-fn reexport_scc_members(engine: &Engine<RoughlyQueries>, symbol: Symbol) -> Vec<Symbol> {
-    let mut chain = vec![symbol];
-    let mut seen = BTreeSet::from([symbol]);
-    loop {
-        let current = *chain.last().expect("re-export chain is never empty");
-        let target = engine.fetch::<Option<Symbol>>(Key::ReexportTarget(current));
-        match *target {
-            None => return Vec::new(),
-            Some(next) if next == symbol => {
-                chain.sort();
-                return chain;
-            }
-            Some(next) if seen.contains(&next) => return Vec::new(),
-            Some(next) => {
-                seen.insert(next);
-                chain.push(next);
+            frames.pop();
+            // Propagate this node's lowlink into its DFS parent (the tree-edge relaxation).
+            if let Some(parent) = frames.last() {
+                let parent_node = parent.node;
+                let updated = low[&parent_node].min(low[&node]);
+                low.insert(parent_node, updated);
             }
         }
     }
+
+    match start_scc.len() {
+        0 => Vec::new(),
+        // A lone `symbol` is cyclic only when it forward-references its own definition (a self-edge);
+        // otherwise it is a trivial, acyclic SCC.
+        1 if start_self_loop => start_scc,
+        1 => Vec::new(),
+        _ => start_scc,
+    }
 }
 
-// The bounded synchronous fixed-point for one cyclic re-export SCC (`DESIGN.md` §5), ported from
-// `analysis.rs`'s `typecheck` package-interface loop. Every cycle member is a re-export whose target is
-// another member, so the framework carries no concrete base and the fixed point is all-`Unknown` — the
-// correct answer (a pure mutual re-export cycle holds no information). The iteration, the
-// `#members + slack` round cap, and the oscillation guard are ported faithfully as the convergence
-// machinery and the safety net for any non-monotone history. The body fetches only `ReexportTarget` for
-// its members, so it is self-contained and never re-enters `GlobalScheme`/`ReexportInterface`.
-fn resolve_reexport_interface(
+// The bounded synchronous fixed-point for one cyclic interface SCC, ported from `analysis.rs`'s `typecheck`
+// package-interface loop. Each round re-infers every member's winning file with the *current* round's SCC
+// schemes bound for in-SCC references (via `infer_file`'s `scc_overrides`) and ordinary `GlobalScheme`
+// fetches for out-of-SCC references (acyclic dependencies the engine memoizes), bootstrapping every member
+// to `Unknown`. A pure mutual cycle (re-export or value reference) carries no concrete base, so it
+// converges to `Unknown`; a member with its own annotation re-infers to that annotation independent of the
+// others, breaking the cycle there — exactly production's behaviour. The `#members + slack` round cap and
+// the oscillation guard are ported faithfully as the convergence machinery and the safety net for any
+// non-monotone history. The body fetches only `DefiningItem`/`Lower`/`LocalNaming`/out-of-SCC
+// `GlobalScheme` for its members' files, so it never re-enters `GlobalScheme`/`InterfaceScc`/`SymbolScc` on
+// an in-SCC key — the core's accidental-cycle guard stays intact for genuine engine cycles.
+fn resolve_interface_scc(
     group: &RoughlyQueries,
     engine: &Engine<RoughlyQueries>,
     members: &[Symbol],
 ) -> BTreeMap<Symbol, TypeScheme> {
     let member_set: BTreeSet<Symbol> = members.iter().copied().collect();
-    let mut targets: BTreeMap<Symbol, Option<Symbol>> = BTreeMap::new();
+    // The distinct winning files of the members. Inferring one file yields every member it defines at once
+    // (`exported_value_schemes` returns the whole file), so group by file to infer each once per round.
+    let mut member_files: BTreeSet<FileId> = BTreeSet::new();
     for member in members {
-        let target = engine.fetch::<Option<Symbol>>(Key::ReexportTarget(*member));
-        targets.insert(*member, *target);
+        if let Some(file) = *engine.fetch::<Option<FileId>>(Key::DefiningItem(*member)) {
+            member_files.insert(file);
+        }
     }
 
     let unknown = TypeScheme::monomorphic(CoreType::Unknown);
@@ -666,41 +720,49 @@ fn resolve_reexport_interface(
     let mut pinned: BTreeSet<Symbol> = BTreeSet::new();
     let mut history: HashMap<Symbol, Vec<String>> = HashMap::new();
 
-    // Round cap = `#members-in-scc + slack`, proportional to the SCC (not a fixed cap like M3's 32), so a
-    // large cycle whose oscillation needs several rounds to detect still converges; the common case breaks
-    // out the moment a round makes no change.
-    let round_cap = members.len().saturating_add(2);
+    // Round cap = `#members-in-scc + slack`, proportional to the SCC (not a fixed cap), matching production:
+    // synchronous iteration over a monotone framework converges in `#members + 1` rounds, the slack covers
+    // the extra rounds an oscillation needs to be detected and pinned; the common case breaks out the moment
+    // a round makes no change.
+    let round_cap = members.len().saturating_add(SCC_ROUND_SLACK);
     for _round in 0..round_cap {
+        // Re-infer each member file once with the current table bound for in-SCC references, collecting the
+        // fresh exported scheme of every member.
+        let mut fresh: BTreeMap<Symbol, TypeScheme> = BTreeMap::new();
+        for file in &member_files {
+            let (_check, exports) = infer_file(group, engine, *file, &table);
+            for export in exports {
+                if member_set.contains(&export.symbol) {
+                    fresh.insert(export.symbol, export.type_scheme);
+                }
+            }
+        }
+
         let mut next = table.clone();
         for member in members {
             if pinned.contains(member) {
                 next.insert(*member, unknown.clone());
-                continue;
+            } else {
+                next.insert(
+                    *member,
+                    fresh.get(member).cloned().unwrap_or_else(|| unknown.clone()),
+                );
             }
-            // A re-export member takes its target's current scheme; an out-of-set target cannot occur for
-            // a genuine functional cycle and is treated as `Unknown` (defensive).
-            let scheme = match targets.get(member).copied().flatten() {
-                Some(target) if member_set.contains(&target) => table.get(&target).cloned(),
-                _ => None,
-            };
-            next.insert(*member, scheme.unwrap_or_else(|| unknown.clone()));
         }
 
         // Oscillation guard: a member whose rendering returns to an earlier value while differing from the
-        // previous round is swapping on a cycle, not progressing monotonically — pin it to `Unknown`,
-        // which collapses the cycle and restores convergence. A pure re-export cycle never carries a
-        // concrete value here, so this is the defensive net; the all-`Unknown` fixed point is reached
-        // directly. Rendering reuses the shared interner (no `fetch` held across this borrow).
+        // previous round is swapping on a cycle, not progressing monotonically — pin it to `Unknown`, which
+        // collapses the cycle and restores convergence. A pure cycle reaches the all-`Unknown` fixed point
+        // directly, so this is the defensive net. Rendering reuses the shared interner (no `fetch` held
+        // across this borrow, and `infer_file`'s own `lowering` borrow has been released above).
         {
             let lowering = group.lowering.borrow();
             for member in members {
                 if pinned.contains(member) {
                     continue;
                 }
-                let rendered = render_type_scheme(
-                    lowering.interner(),
-                    next.get(member).unwrap_or(&unknown),
-                );
+                let rendered =
+                    render_type_scheme(lowering.interner(), next.get(member).unwrap_or(&unknown));
                 let entry = history.entry(*member).or_default();
                 if entry.last().is_some_and(|last| *last != rendered) && entry.contains(&rendered) {
                     pinned.insert(*member);
@@ -718,6 +780,10 @@ fn resolve_reexport_interface(
     }
     table
 }
+
+// Slack added to `#members` for the SCC fixed-point round cap (see `resolve_interface_scc`). Sized like
+// production's package-interface loop so a legitimate cycle always converges within the bound.
+const SCC_ROUND_SLACK: usize = 8;
 
 // The file's package-global definition names. Mirrors `analysis::naming::document_package_definitions`
 // (which is `pub(crate)`, so it cannot be called from here) using only the public `NamesLocal` fields: a
@@ -844,9 +910,9 @@ struct Counters {
     fallback_range: Cell<u64>,
     defining_item: RefCell<HashMap<Symbol, u64>>,
     global_scheme: RefCell<HashMap<Symbol, u64>>,
-    reexport_target: RefCell<HashMap<Symbol, u64>>,
-    reexport_scc: RefCell<HashMap<Symbol, u64>>,
-    reexport_interface: RefCell<HashMap<Vec<Symbol>, u64>>,
+    interface_deps: RefCell<HashMap<Symbol, u64>>,
+    symbol_scc: RefCell<HashMap<Symbol, u64>>,
+    interface_scc: RefCell<HashMap<Vec<Symbol>, u64>>,
     typecheck: RefCell<HashMap<FileId, u64>>,
     diagnostics: RefCell<HashMap<FileId, u64>>,
 }

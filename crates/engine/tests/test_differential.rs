@@ -508,70 +508,65 @@ fn rename_a_global_breaks_referrer() {
 // Randomized, fixed-seed generator + adversarial edit stream
 // ----------------------------------------------------------------------------------------------------
 
-// The one characterized remaining engine gap, pinned as a deterministic repro.
+// Mutual cross-file *value* references — the cycle class that used to be the documented engine gap, now
+// resolved by the general interface SCC fixed-point and asserted at full parity with production.
 //
 // Two package files that reference each other's *values* (not re-exports) form a cycle in the
-// `GlobalScheme` dependency graph. `ReexportScc` collapses only *re-export* cycles (`a <- b`; `b <- a`),
-// so this value-reference cycle is not routed through the SCC fixed-point body. On a fresh build the
-// `is_computing` guard breaks the back-edge to `Unknown` (matching production's bootstrap), so the *first*
-// compute does not cycle. But once an edit makes both directions' last compute record the opposite edge,
-// the *recorded* memo graph has `GlobalScheme(a) → GlobalScheme(b)` and `GlobalScheme(b) → GlobalScheme(a)`
-// at once; validation then re-enters `recompute` on a key already on the stack and trips the core's
-// accidental-cycle guard. Production has no such trouble: its package-interface fixed-point owns all
-// globals in one body and iterates to convergence.
-//
-// Root cause: the general package-interface fixed-point (`DESIGN.md` §5, but for *arbitrary* mutual
-// value references, not just re-exports) is not yet ported into the per-symbol layer. The fix is to
-// generalize `ReexportScc`/`ReexportInterface` to an SCC over the full symbol-reference graph with an
-// iterative inference body — its own slice. This test asserts the *current* behavior (a panic) so the day
-// the fixed-point lands, it fails and is updated to assert parity.
+// `GlobalScheme` dependency graph: `GlobalScheme(alpha)` infers file 0, which reads `GlobalScheme(beta)`,
+// which infers file 1, which reads `GlobalScheme(alpha)` again. `SymbolScc` detects this cycle over the
+// general `InterfaceDeps` graph (not just re-exports) and routes both members through one `InterfaceScc`
+// fixed-point that bootstraps to `Unknown` and iterates to convergence — exactly as production's
+// package-interface loop owns all globals in one body. Previously the *recorded* memo graph closed the
+// back-edge and tripped the core's accidental-cycle guard; now no in-SCC `GlobalScheme` key re-enters
+// itself, so the guard stays reserved for genuine engine bugs. This drives the same build→edit sequence
+// through the parity harness, asserting the engine matches the full-rebuild oracle at every step.
 #[test]
-fn mutual_value_reference_cycle_is_the_documented_gap() {
-    let result = std::panic::catch_unwind(|| {
-        let mut engine = Engine::new(RoughlyQueries::new());
-        let set = |engine: &mut Engine<RoughlyQueries>, files: &[(FileId, &str)]| {
-            let ids = files.iter().map(|(id, _)| *id).collect::<Vec<_>>();
-            engine.set_input(Key::ProjectFiles, ids);
-            engine.set_input(Key::Config, typing_config());
-            for (id, source) in files {
-                engine.set_input(Key::SourceText(*id), (*source).to_owned());
-                engine.set_input(Key::DocumentKind(*id), DocumentKind::Package);
-            }
-        };
-        // Build with `beta` a leaf. `gamma <- alpha(...)` forces `GlobalScheme(alpha)` to be computed,
-        // which records a (one-directional) recorded edge `GlobalScheme(alpha) → GlobalScheme(beta)`.
-        let fetch_all = |engine: &Engine<RoughlyQueries>, ids: &[FileId]| {
-            for id in ids {
-                let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(*id));
-            }
-        };
-        set(
-            &mut engine,
-            &[
-                (0, "alpha <- beta(1L)"),
-                (1, "beta <- 1L"),
-                (2, "gamma <- alpha(1L)"),
-            ],
-        );
-        fetch_all(&engine, &[0, 1, 2]);
-        // Edit `beta` to reference `alpha`, closing the value-reference cycle: now `GlobalScheme(beta)`
-        // records `→ GlobalScheme(alpha)` while `alpha`'s memo still holds `→ GlobalScheme(beta)`.
-        set(
-            &mut engine,
-            &[
-                (0, "alpha <- beta(1L)"),
-                (1, "beta <- alpha(1L)"),
-                (2, "gamma <- alpha(1L)"),
-            ],
-        );
-        fetch_all(&engine, &[0, 1, 2]);
-    });
-    assert!(
-        result.is_err(),
-        "EXPECTED the mutual value-reference cycle to still trip the cycle guard (the documented engine \
-         gap). If this now succeeds, the general package-interface fixed-point has been implemented — \
-         replace this test with a parity assertion."
-    );
+fn mutual_value_reference_cycle_matches_production() {
+    let mut driver = Driver::new(typing_config());
+    // Build with `beta` a leaf; `gamma <- alpha(...)` forces `GlobalScheme(alpha)`, recording the
+    // one-directional edge `GlobalScheme(alpha) → GlobalScheme(beta)`.
+    driver.set_package("alpha-calls-beta", 0, "alpha <- beta(1L)");
+    driver.set_package("beta-leaf", 1, "beta <- 1L");
+    driver.set_package("gamma-calls-alpha", 2, "gamma <- alpha(1L)");
+    // Edit `beta` to reference `alpha`, closing the value-reference cycle (alpha ↔ beta). The engine now
+    // routes both through the interface SCC fixed-point instead of re-entering a key on the compute stack.
+    driver.set_package("beta-calls-alpha", 1, "beta <- alpha(1L)");
+    // Re-open the cycle: `beta` becomes a leaf again, so the SCC dissolves back to two trivial nodes.
+    driver.set_package("beta-leaf-again", 1, "beta <- 2L");
+}
+
+// A pure un-annotated 2-cycle of mutual value references converges to `Unknown` on both sides (no concrete
+// base), so a downstream consumer sees no concrete scheme — matching production exactly.
+#[test]
+fn unannotated_two_cycle_converges_to_unknown() {
+    let mut driver = Driver::new(typing_strict_config());
+    driver.set_package("a", 0, "a <- function() b()");
+    driver.set_package("b", 1, "b <- function() a()");
+    driver.set_package("use", 2, "result <- a()");
+}
+
+// A 3-cycle of mutual value references (a → b → c → a) likewise converges; the SCC fixed-point owns all
+// three members in one body.
+#[test]
+fn unannotated_three_cycle_converges() {
+    let mut driver = Driver::new(typing_strict_config());
+    driver.set_package("a", 0, "a <- function() b()");
+    driver.set_package("b", 1, "b <- function() c()");
+    driver.set_package("c", 2, "c <- function() a()");
+    driver.set_package("use", 3, "result <- a()");
+}
+
+// An annotated member breaks the cycle: `a` carries an explicit signature, so its exported scheme is its
+// annotation independent of the others, and the rest of the cycle resolves against it. Both the annotated
+// and unannotated members must match production.
+#[test]
+fn annotated_member_breaks_the_cycle() {
+    let mut driver = Driver::new(typing_config());
+    driver.set_package("a-annotated", 0, "#: fn() -> integer\na <- function() b()");
+    driver.set_package("b", 1, "b <- function() a()");
+    // A consumer of the annotated member calls it well- then ill-typed; the annotation drives both checks.
+    driver.set_package("use-ok", 2, "result <- a()");
+    driver.set_package("use-bad", 2, "#: character\nresult <- a()");
 }
 
 struct SplitMix64 {
@@ -608,44 +603,27 @@ const NAMES: [&str; 4] = ["alpha", "beta", "gamma", "delta"];
 // stdlib interactions the deferrals target: typed function/value definitions, well- and mis-typed calls
 // of pooled names and stdlib stubs, re-exports, an `@alias` definition and use, and plain bindings.
 //
-// Each file is given a random **rank floor** `r`: every pool name it *defines* has rank ≥ `r`, and every
-// pool name it *references* has rank < `r` (rank = index in `NAMES`). Because `GlobalScheme(g)` infers
-// `g`'s whole defining file — depending on *every* pool global that file references (co-resident bindings
-// included, which is exactly what a per-*item* rank constraint missed) — this floor makes every edge of
-// the package-global `GlobalScheme` graph strictly rank-decreasing, so it is a DAG: the stream never
-// constructs a *mutual* value-reference cycle. That one input class is the characterized remaining engine
-// gap (the general package-interface fixed-point for non-re-export cycles is unimplemented — only
-// re-export cycles are handled, via `ReexportScc`/`ReexportInterface`); it is pinned separately by
-// `mutual_value_reference_cycle_is_the_documented_gap`, not swept under the rug here.
+// References draw *freely* from the whole name pool, with no rank ordering — so the package-global
+// `GlobalScheme` graph is an arbitrary directed graph that routinely contains mutual value-reference
+// cycles (`a` references `b` while `b` references `a`, across files, neither a re-export). These are
+// exactly the cycles the general interface SCC fixed-point (`SymbolScc`/`InterfaceScc`) resolves; the
+// stream asserts full parity with the production package-interface loop over that cyclic space, so the
+// fixed-point's convergence (un-annotated cycle → `Unknown`, annotated member → breaks the cycle) is
+// exercised continuously rather than only by the curated cases above.
 fn generate_source(rng: &mut SplitMix64) -> String {
     let item_count = 1 + rng.below(3);
     let mut lines = Vec::new();
-    // The file's rank floor: names it defines are ranked ≥ floor; names it references are ranked < floor.
-    let floor = rng.below(NAMES.len() as u64) as usize;
-    // Optionally declare the package alias `Count` (resolves cross-file uses of `#: Count`). Type
-    // definitions are not part of the value `GlobalScheme` graph, so they are floor-independent.
+    // Optionally declare the package alias `Count` (resolves cross-file uses of `#: Count`).
     if rng.chance(1, 4) {
         lines.push("#: @alias Count {integer}".to_owned());
     }
-    // A defined pool name (rank ≥ floor). Every file has at least `delta`, so this never underflows.
-    let define = |rng: &mut SplitMix64| NAMES[floor + rng.below((NAMES.len() - floor) as u64) as usize];
+    let define = |rng: &mut SplitMix64| NAMES[rng.below(NAMES.len() as u64) as usize];
     for _ in 0..item_count {
         let name = define(rng);
-        // A pool reference is only possible when the floor leaves a strictly-lower-rank target available.
-        let reference_target = if floor == 0 {
-            None
-        } else {
-            Some(NAMES[rng.below(floor as u64) as usize])
-        };
-        // Choose an item kind; pool-referencing kinds are only used when a reference target exists, so a
-        // floor-0 file degrades them to a plain definition (still varied via the stdlib/alias kinds).
+        // A reference target drawn freely from the pool — any name, including one that references back into
+        // this file's definitions, which is how the stream constructs mutual cross-file value cycles.
+        let target = NAMES[rng.below(NAMES.len() as u64) as usize];
         let kind = rng.below(9);
-        let kind = if reference_target.is_none() && matches!(kind, 2 | 3 | 4) {
-            8
-        } else {
-            kind
-        };
-        let target = reference_target.unwrap_or("alpha");
         match kind {
             0 => {
                 lines.push("#: integer".to_owned());
@@ -731,3 +709,4 @@ fn run_randomized_stream(seed: u64, steps: usize) {
         }
     }
 }
+

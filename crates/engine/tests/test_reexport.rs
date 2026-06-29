@@ -3,7 +3,7 @@
 //
 //   - a TRIVIAL SCC (acyclic chain) keeps the R1a path: `GlobalScheme(a)` resolves an acyclic re-export
 //     `a <- b <- … <- concrete` by plain fetch recursion (no round cap to truncate it);
-//   - a NON-TRIVIAL SCC (a genuine cycle) routes `GlobalScheme` through `ReexportInterface(scc)`, a single
+//   - a NON-TRIVIAL SCC (a genuine cycle) routes `GlobalScheme` through `InterfaceScc(scc)`, a single
 //     bounded fixed-point body that pins a pure mutual cycle to `Unknown` and converges.
 //
 // The re-export graph is functional (a global re-exports at most one other), so every non-trivial SCC is a
@@ -62,8 +62,8 @@ fn monotone_reexport_chain_converges_to_concrete() {
     let c = engine.group().intern("c");
 
     // Each link is a trivial (acyclic) SCC: no fixed-point body is involved at all.
-    assert!(engine.fetch::<Vec<Symbol>>(Key::ReexportScc(a)).is_empty());
-    assert!(engine.fetch::<Vec<Symbol>>(Key::ReexportScc(b)).is_empty());
+    assert!(engine.fetch::<Vec<Symbol>>(Key::SymbolScc(a)).is_empty());
+    assert!(engine.fetch::<Vec<Symbol>>(Key::SymbolScc(b)).is_empty());
 
     let scheme_a = global_scheme(&engine, a);
     let scheme_c = global_scheme(&engine, c);
@@ -96,7 +96,7 @@ fn monotone_reexport_chain_converges_to_concrete() {
 }
 
 // GENUINE PERIOD-2 CYCLE: `a <- b; b <- a` with no concrete base. Both members route through one shared
-// `ReexportInterface` memo, the fixed-point pins them to `Unknown` and converges (it does NOT spin the
+// `InterfaceScc` memo, the fixed-point pins them to `Unknown` and converges (it does NOT spin the
 // round cap and does NOT trip the accidental-cycle guard). A consumer sees `Unknown`, not a crash.
 #[test]
 fn period_two_cycle_pins_to_unknown_and_converges() {
@@ -109,8 +109,8 @@ fn period_two_cycle_pins_to_unknown_and_converges() {
     let b = engine.group().intern("b");
 
     // Both members are in the same non-trivial SCC, reported as the identical canonical (sorted) list.
-    let scc_a = (*engine.fetch::<Vec<Symbol>>(Key::ReexportScc(a))).clone();
-    let scc_b = (*engine.fetch::<Vec<Symbol>>(Key::ReexportScc(b))).clone();
+    let scc_a = (*engine.fetch::<Vec<Symbol>>(Key::SymbolScc(a))).clone();
+    let scc_b = (*engine.fetch::<Vec<Symbol>>(Key::SymbolScc(b))).clone();
     assert_eq!(scc_a.len(), 2, "a and b form a 2-cycle");
     assert_eq!(scc_a, scc_b, "every member projects the same canonical SCC, sharing one memo");
 
@@ -121,7 +121,7 @@ fn period_two_cycle_pins_to_unknown_and_converges() {
     // Convergence witness: the SCC fixed-point body ran exactly once for the shared member list (it did
     // not panic and did not spin) — every member projected from the one converged sub-table.
     assert_eq!(
-        engine.group().reexport_interface_runs(&scc_a),
+        engine.group().interface_scc_runs(&scc_a),
         1,
         "the SCC interface is computed once and shared, proving convergence (no spin / no panic)"
     );
@@ -157,7 +157,7 @@ fn deep_chain_is_not_truncated() {
     let base = engine.group().intern(&format!("s{}", LINKS - 1));
 
     // The whole chain is acyclic: the head is a trivial SCC.
-    assert!(engine.fetch::<Vec<Symbol>>(Key::ReexportScc(head)).is_empty());
+    assert!(engine.fetch::<Vec<Symbol>>(Key::SymbolScc(head)).is_empty());
 
     let scheme_head = global_scheme(&engine, head);
     assert!(scheme_head.is_some(), "the deep chain head resolves");
