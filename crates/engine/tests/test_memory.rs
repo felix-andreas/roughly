@@ -96,6 +96,7 @@ fn build_and_warm_new_engine(file_count: usize) -> Engine<RoughlyQueries> {
             typing: true,
             strict: false,
             unused: false,
+            lint: LintConfig::default(),
         },
     );
     for index in 0..file_count {

@@ -16,32 +16,27 @@
 //! message). The two engines use independent interners, so the comparison is over *rendered* facts (byte
 //! range + code + severity + message), which are interner-independent.
 //!
-//! We compare **every diagnostic class the engine can produce**: local naming, package naming, type
-//! errors, and strict mode (`DiagnosticCode::Naming`, `SyntaxError`, `TypeError`, and `Strict`). The two
-//! classes that remain excluded from **both** sides are excluded because the engine *structurally* cannot
-//! produce them — representation facts, not hidden divergences:
+//! We compare **every diagnostic class production emits** with **zero exclusions** — local naming, package
+//! naming, type errors, strict mode, lowering (syntax) errors, and lint (`DiagnosticCode::Naming`,
+//! `SyntaxError`, `TypeError`, `Strict`, and `Lint`):
 //!
-//! - **Lint** (`DiagnosticCode::Lint`): the engine models no lint.
-//! - **Lowering diagnostics** (`DiagnosticCode::AnnotationError`, and the lowering-originated subset of
-//!   `SyntaxError`): the public `analysis::lower::lower` returns only the `Module` and **drops** its
-//!   diagnostics (only the `pub(crate)` `lower_with_shared_interner` returns them), so they are unreachable
-//!   from the engine. `AnnotationError` is excluded by code; the lowering `SyntaxError`s are kept out by
-//!   keeping the generators well-formed (a malformed-block lowering error would otherwise be the *only*
-//!   thing it surfaces, and naming/type/strict on the same malformed module are identical either way, since
-//!   both engines lower it through the same `lower`). `AnnotationError` does not arise anyway — its
-//!   constructors are dead in `analysis` and `Diagnostic::from_inference_error` never emits it.
+//! - **Lowering diagnostics** (the lowering-originated `SyntaxError`s, and `AnnotationError`): the engine's
+//!   `LoweringDiagnostics(f)` query calls the now-public `analysis::lower::lower_with_diagnostics` — the
+//!   *same* function production lowers through — which short-circuits to `collect_syntax_errors` on a
+//!   malformed tree and otherwise returns the lowering-pass diagnostics, so they are byte-identical on both
+//!   sides. (`AnnotationError` does not arise anyway — its constructors are dead in `analysis` — but the
+//!   class is compared rather than excluded, so if it ever did, both sides would have to agree.)
+//! - **Lint** (`DiagnosticCode::Lint`): the engine's `Lint(f)` query calls the *same* `analysis::lint::analyze`
+//!   with the same `[lint]` config, so lint diagnostics are identical by construction.
 //!
-//! What changed at R2 gap 1: **package naming** (`package_document_diagnostics` — could-not-resolve,
-//! builtin shadow, overwrite pairs, duplicate-type, and type-reference) is `analysis`'s cross-file
-//! subsystem, which is `pub(crate)` and unreachable across the crate boundary. The engine now **re-derives**
-//! it as fine-grained queries (`PackageNamingDiagnostics(f)` over `DefiningItem`/`DefinerOrder`/
-//! `TypeNameStatus` firewalls), reproducing production's wording and ranges byte-for-byte, so the class is
-//! compared rather than excluded. **Local naming** is produced by calling the *same* `resolve_document_locally`
-//! verbatim with the same inputs, so it is identical by construction; the comparison now asserts that too.
+//! **Package naming** (`package_document_diagnostics` — could-not-resolve, builtin shadow, overwrite pairs,
+//! duplicate-type, and type-reference) is `analysis`'s cross-file subsystem, `pub(crate)` and unreachable
+//! across the crate boundary; the engine **re-derives** it as fine-grained queries (`PackageNamingDiagnostics(f)`
+//! over `DefiningItem`/`DefinerOrder`/`TypeNameStatus` firewalls), reproducing production's wording and ranges
+//! byte-for-byte. **Local naming** is the *same* `resolve_document_locally` verbatim, identical by construction.
 //!
-//! Excluding a class is done **symmetrically** (the same filter on both sides) and by **code**, never by
-//! message, so it cannot mask a divergence inside the compared classes: any compared diagnostic the engine
-//! produces that the oracle does not (or vice versa) fails the assertion immediately.
+//! So there is no exclusion to mask a divergence: any diagnostic in any class the engine produces that the
+//! oracle does not (or vice versa) fails the normalized-set assertion immediately, on every file.
 //!
 //! # Drivers
 //!
@@ -164,11 +159,7 @@ fn oracle_diagnostics(analysis: &Analysis, id: FileId, package: bool) -> Vec<Dia
     let document_id = analysis
         .document_id_for_path(Path::new(&path))
         .expect("oracle: document for current file should exist");
-    analysis
-        .document_diagnostics(document_id)
-        .into_iter()
-        .filter(is_compared)
-        .collect()
+    analysis.document_diagnostics(document_id)
 }
 
 // ----------------------------------------------------------------------------------------------------
@@ -212,6 +203,10 @@ fn engine_diagnostics(engine: &Engine<RoughlyQueries>, id: FileId, config: &Conf
     // `package_naming` reproduces `package_document_diagnostics`.
     rendered.extend(file_diagnostics.naming.iter().cloned());
     rendered.extend(file_diagnostics.package_naming.iter().cloned());
+    // Lowering (syntax) and lint diagnostics are emitted unconditionally in production's
+    // `document_diagnostics` (not config-gated), so they are rendered here the same way.
+    rendered.extend(file_diagnostics.lowering.iter().cloned());
+    rendered.extend(file_diagnostics.lint.iter().cloned());
     // Unused-local warnings (`DiagnosticCode::Naming`) are config-gated in production's
     // `document_diagnostics` (`check_config.unused`), so the engine computes them unconditionally and the
     // consumer gates them here — the same shape as the type/strict classes below.
@@ -230,25 +225,12 @@ fn engine_diagnostics(engine: &Engine<RoughlyQueries>, id: FileId, config: &Conf
     if config.strict {
         rendered.extend(file_diagnostics.strict_diagnostics.iter().cloned());
     }
-    rendered.into_iter().filter(is_compared).collect()
+    rendered
 }
 
 // ----------------------------------------------------------------------------------------------------
 // Normalization + the parity assertion
 // ----------------------------------------------------------------------------------------------------
-
-// The compared classes: everything except the two the engine structurally cannot produce — `Lint` (the
-// engine models no lint) and `AnnotationError` (a lowering-phase class; the public `lower` returns only
-// the `Module` and drops its diagnostics, so they are unreachable from the engine). Both are excluded
-// symmetrically and by *code*, never by message, so the exclusion cannot mask a divergence inside the
-// compared classes. See the module doc for the full rationale. This now covers local naming, package
-// naming (`Naming` + `SyntaxError`), type errors, and strict mode.
-fn is_compared(diagnostic: &Diagnostic) -> bool {
-    !matches!(
-        diagnostic.code,
-        DiagnosticCode::Lint | DiagnosticCode::AnnotationError
-    )
-}
 
 type NormalizedDiagnostic = (usize, usize, u8, u8, String);
 
@@ -291,30 +273,12 @@ fn assert_parity(label: &str, engine: &Engine<RoughlyQueries>, workspace: &Works
     let oracle = build_oracle(workspace);
     for (id, state) in &workspace.files {
         // On malformed input both engines lower to an *empty* module (production's `lower_with_diagnostics`
-        // short-circuit and the engine's `Lower`), so every compared class is empty — except production
-        // additionally surfaces lowering *syntax* diagnostics (`collect_syntax_errors`), which the engine
-        // structurally cannot produce (the public `lower` drops them). Those are the only residual divergence
-        // on a malformed file, and they never collide with package-naming `SyntaxError`s (those require a
-        // non-empty module with type declarations), so excluding `SyntaxError` for malformed files compares
-        // the remaining classes (all empty) while keeping full `SyntaxError` parity on every well-formed file.
-        // A malformed file still drops its definitions package-wide on both sides, so its referrers' cross-file
-        // diagnostics — which are fully compared on their own (well-formed) files — must still match.
-        let malformed = is_malformed(&state.source);
-        let keep = |diagnostic: &Diagnostic| {
-            !(malformed && diagnostic.code == DiagnosticCode::SyntaxError)
-        };
-        let engine_set = normalize(
-            engine_diagnostics(engine, *id, &workspace.config)
-                .into_iter()
-                .filter(|diagnostic| keep(diagnostic))
-                .collect(),
-        );
-        let oracle_set = normalize(
-            oracle_diagnostics(&oracle, *id, state.package)
-                .into_iter()
-                .filter(|diagnostic| keep(diagnostic))
-                .collect(),
-        );
+        // short-circuit and the engine's `Lower`), so every downstream class is empty; the only diagnostics
+        // are the lowering *syntax* errors (`collect_syntax_errors`), which the engine now reproduces via its
+        // `LoweringDiagnostics` query through the *same* `lower_with_diagnostics`. So a malformed file reaches
+        // full parity with no per-file exclusion — every diagnostic class is compared on every file.
+        let engine_set = normalize(engine_diagnostics(engine, *id, &workspace.config));
+        let oracle_set = normalize(oracle_diagnostics(&oracle, *id, state.package));
         assert_eq!(
             engine_set, oracle_set,
             "parity divergence at step `{label}` for file {id} (path {:?})\n\
@@ -400,6 +364,7 @@ fn typing_config() -> Config {
         typing: true,
         strict: false,
         unused: false,
+        lint: LintConfig::default(),
     }
 }
 
@@ -408,6 +373,7 @@ fn typing_strict_config() -> Config {
         typing: true,
         strict: true,
         unused: false,
+        lint: LintConfig::default(),
     }
 }
 
@@ -420,6 +386,7 @@ fn typing_strict_unused_config() -> Config {
         typing: true,
         strict: true,
         unused: true,
+        lint: LintConfig::default(),
     }
 }
 
@@ -428,6 +395,7 @@ fn typing_unused_config() -> Config {
         typing: true,
         strict: false,
         unused: true,
+        lint: LintConfig::default(),
     }
 }
 
@@ -439,6 +407,7 @@ fn naming_only_config() -> Config {
         typing: false,
         strict: false,
         unused: false,
+        lint: LintConfig::default(),
     }
 }
 
@@ -682,10 +651,47 @@ fn malformed_sources_are_detected_and_reach_parity() {
     driver.set_package("def", 0, "#: fn(x: integer) -> integer\nhelper <- function(x) x + x");
     driver.set_package("use", 1, "result <- helper(2L)");
     // Make the definer malformed (incomplete `function` head): `helper` disappears from the package, so the
-    // referrer can no longer resolve it — and the definer itself emits nothing but the excluded syntax error.
+    // referrer can no longer resolve it — and the definer itself emits only its lowering syntax errors, which
+    // the engine now reproduces (via `LoweringDiagnostics`) and the harness compares at full parity.
     driver.set_package("def-malformed", 0, "helper <- function(x");
     // Repair it: parity returns to the clean cross-file state.
     driver.set_package("def-repaired", 0, "#: fn(x: integer) -> integer\nhelper <- function(x) x + x");
+}
+
+// A *well-formed* tree (no `root.has_error()`) whose lowering pass rejects a directive mix ("cannot mix
+// definition and annotation directives") — the other branch of `lower_with_diagnostics`, where production
+// lowers and returns the lowering-pass diagnostics rather than `collect_syntax_errors`. The engine's
+// `LoweringDiagnostics` runs the same function, so this lowering `SyntaxError` matches at full parity; it is
+// the curated coverage of the well-formed lowering-error path the randomized generator deliberately avoids.
+#[test]
+fn directive_mix_lowering_error_matches_production() {
+    // `@alias Count` (a *definition* directive) merged with `#: integer` (an *annotation* directive) into one
+    // `#:` block, which lowering rejects. Non-vacuity: assert the oracle really emits the lowering SyntaxError.
+    let source = "#: @alias Count {integer}\n#: integer\nvalue <- 1L";
+    let mut workspace = Workspace::new(typing_strict_config());
+    workspace.files.insert(
+        0,
+        FileState {
+            source: source.to_owned(),
+            package: true,
+        },
+    );
+    let oracle = build_oracle(&workspace);
+    assert!(
+        oracle_diagnostics(&oracle, 0, true)
+            .iter()
+            .any(|diagnostic| diagnostic.code == DiagnosticCode::SyntaxError),
+        "the directive-mix scenario must produce a lowering SyntaxError on the oracle"
+    );
+
+    let mut driver = Driver::new(typing_strict_config());
+    driver.set_package("directive-mix", 0, source);
+    // Separating the directives with a blank line clears the lowering error; parity holds across the fix.
+    driver.set_package(
+        "directive-mix-fixed",
+        0,
+        "#: @alias Count {integer}\n\n#: integer\nvalue <- 1L",
+    );
 }
 
 // GAP #4: unused-local warnings (`DiagnosticCode::Naming`, "`{name}` is assigned but never used."),
@@ -815,10 +821,11 @@ impl SplitMix64 {
 const NAMES: [&str; 4] = ["alpha", "beta", "gamma", "delta"];
 
 // Structurally malformed R — each makes `root.has_error()` true: unbalanced brackets, dangling operators,
-// and incomplete `function`/`if`/block heads, the canonical live-editing intermediate states. Deliberately
-// *not* malformed `#:` annotations: those parse cleanly (tree-sitter treats `#:` as a comment) and fail only
-// in lowering, a diagnostic class the engine cannot reproduce on a non-empty module, so the generator still
-// avoids them. `malformed_sources_are_detected_and_reach_parity` asserts every entry is actually malformed.
+// and incomplete `function`/`if`/block heads, the canonical live-editing intermediate states. The engine
+// reproduces their lowering syntax diagnostics (`collect_syntax_errors`) via `LoweringDiagnostics`, so they
+// are compared at full parity like every other class. The *well-formed*-tree lowering error (directive mix)
+// is exercised separately by `directive_mix_lowering_error_matches_production`.
+// `malformed_sources_are_detected_and_reach_parity` asserts every entry here is actually malformed.
 const MALFORMED_SOURCES: [&str; 6] = [
     "alpha <-",
     "beta <- (1L +",
@@ -841,10 +848,10 @@ const MALFORMED_SOURCES: [&str; 6] = [
 // exercised continuously rather than only by the curated cases above.
 fn generate_source(rng: &mut SplitMix64) -> String {
     // Occasionally emit a structurally *malformed* file (a tree-sitter parse error). On most keystrokes a
-    // live buffer is transiently malformed, and production lowers such input to an empty module (the
-    // `lower_with_diagnostics` short-circuit), suppressing every downstream diagnostic class; the engine's
-    // `Lower` replicates that short-circuit, so parity must hold here too. `assert_parity` excludes the
-    // residual lowering syntax diagnostics per malformed file. A malformed file also drops its definitions
+    // live buffer is transiently malformed; production lowers such input to an empty module (the
+    // `lower_with_diagnostics` short-circuit) and emits only its `collect_syntax_errors`, both of which the
+    // engine reproduces (`Lower`'s short-circuit + `LoweringDiagnostics`), so parity — now including the
+    // syntax-error class — holds with no per-file exclusion. A malformed file also drops its definitions
     // package-wide, so its referrers' cross-file diagnostics shift identically on both sides.
     if rng.chance(1, 7) {
         return MALFORMED_SOURCES[rng.below(MALFORMED_SOURCES.len() as u64) as usize].to_owned();
@@ -852,10 +859,11 @@ fn generate_source(rng: &mut SplitMix64) -> String {
     let item_count = 1 + rng.below(3);
     let mut lines = Vec::new();
     // Optionally declare the package alias `Count` (resolves cross-file uses of `#: Count`). The blank
-    // line keeps this `@alias` *definition* directive from merging with a following `#:` annotation into
-    // one block, which lowering rejects ("cannot mix definition and annotation directives"). That is a
-    // lowering-phase `SyntaxError`, and lowering diagnostics are outside the engine's reproducible scope
-    // (the public `lower` drops them), so the generator must stay well-formed to keep the stream in scope.
+    // line keeps this `@alias` *definition* directive from merging with a following `#:` annotation into one
+    // block, which lowering rejects ("cannot mix definition and annotation directives") — a lowering-phase
+    // `SyntaxError` the engine now does reproduce, but the randomized stream keeps `Count` well-formed so its
+    // focus stays on the cross-file / type-cycle space; the directive-mix error is covered by the curated
+    // `directive_mix_lowering_error_matches_production` case instead.
     if rng.chance(1, 4) {
         lines.push("#: @alias Count {integer}".to_owned());
         lines.push(String::new());

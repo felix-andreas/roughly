@@ -27,7 +27,7 @@ pub struct LoweringContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct LoweringResult {
+pub struct LoweringResult {
     pub module: Module,
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -103,7 +103,7 @@ pub fn lower(document: &Document, lowering_context: &mut LoweringContext) -> Mod
     Module::new(arena, definitions, expressions)
 }
 
-pub(crate) fn lower_with_diagnostics(
+pub fn lower_with_diagnostics(
     document: &Document,
     lowering_context: &mut LoweringContext,
 ) -> LoweringResult {

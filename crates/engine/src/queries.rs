@@ -25,10 +25,12 @@
 use {
     crate::{Engine, QueryGroup, Shared, Stored},
     analysis::{
+        LintConfig,
         document::{Document, DocumentId},
         hir::{DefinitionKind, ExpressionId, ExpressionKind, HirArena, Module},
         interner::{Interner, Symbol},
-        lower::{LoweringContext, lower},
+        lint::analyze as lint_analyze,
+        lower::{LoweringContext, lower, lower_with_diagnostics},
         naming::{
             BindingInfo, DocumentKind, DocumentNamingComputation, NamesGlobal, NamesLocal,
             resolve_document_locally,
@@ -165,17 +167,29 @@ pub enum Key {
     /// [`Key::TypeNameStatus`]), so a body edit elsewhere cuts off unless this file's resolution moved.
     PackageNamingDiagnostics(FileId),
 
+    /// One file's lowering-phase diagnostics (`analysis::lower::lower_with_diagnostics`): tree-sitter
+    /// syntax errors on a malformed file (`collect_syntax_errors`), or the lowering-pass diagnostics
+    /// (deep-nesting, directive-mix) on a well-formed one. A pure function of the file's `Parse`, so it
+    /// is file-local with no cross-file edge. Surfacing these is what lets the differential harness
+    /// compare the lowering `SyntaxError` class instead of excluding it.
+    LoweringDiagnostics(FileId),
+    /// One file's lint diagnostics (`analysis::lint::analyze`): a pure function of the file's `Parse`
+    /// and the `[lint]` config. File-local; the engine models the linter here so the differential can
+    /// compare the `Lint` class with zero exclusions.
+    Lint(FileId),
     Typecheck(FileId),
     Diagnostics(FileId),
 }
 
-/// Project check configuration carried as the `Config` input. Minimal for R1a; the real `roughly.toml`
-/// `[check]` surface plugs in here.
+/// Project configuration carried as the `Config` input: the `[check]` flags plus the `[lint]` settings.
+/// Low churn (a `roughly.toml` edit), so folding lint here rather than into a separate input is the right
+/// trade — a config change is rare, and keystroke edits touch `SourceText`, never this.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Config {
     pub typing: bool,
     pub strict: bool,
     pub unused: bool,
+    pub lint: LintConfig,
 }
 
 /// The `Parse` value. [`Document`] is not `PartialEq`, but its tree is a pure function of the source, so
@@ -227,6 +241,10 @@ pub struct FileDiagnostics {
     pub type_errors: Vec<InferenceError>,
     pub strict_diagnostics: Vec<Diagnostic>,
     pub unused: Vec<Diagnostic>,
+    // Lowering-phase (syntax) and lint diagnostics: like production's `document_diagnostics`, both are
+    // emitted *unconditionally* (not config-gated), so the consumer renders them directly.
+    pub lowering: Vec<Diagnostic>,
+    pub lint: Vec<Diagnostic>,
 }
 
 /// One package-global type name's resolved shape: the kind it was declared with and its type-parameter
@@ -389,6 +407,14 @@ impl RoughlyQueries {
 
     pub fn package_naming_diagnostics_runs(&self, file: FileId) -> u64 {
         per_key(&self.counters.package_naming_diagnostics, file)
+    }
+
+    pub fn lowering_diagnostics_runs(&self, file: FileId) -> u64 {
+        per_key(&self.counters.lowering_diagnostics, file)
+    }
+
+    pub fn lint_runs(&self, file: FileId) -> u64 {
+        per_key(&self.counters.lint, file)
     }
 }
 
@@ -671,6 +697,32 @@ impl QueryGroup for RoughlyQueries {
                 Stored::new(package_naming_diagnostics(self, engine, *file))
             }
 
+            Key::LoweringDiagnostics(file) => {
+                bump(&self.counters.lowering_diagnostics, *file);
+                // The lowering-phase diagnostics: the same `lower_with_diagnostics` production runs, which
+                // short-circuits to `collect_syntax_errors` on a malformed tree and otherwise returns the
+                // lowering-pass diagnostics. The re-lowered module is discarded — `Lower` owns the module
+                // (its type-only cutoff stays pristine for the granularity proofs), so this query owns only
+                // the diagnostics. A removed source degrades to none (tombstone hardening, like `Lower`).
+                match engine.fetch_optional::<ParsedDocument>(Key::Parse(*file)) {
+                    Some(parsed) => {
+                        let mut lowering = self.lowering.borrow_mut();
+                        Stored::new(lower_with_diagnostics(&parsed.0, &mut lowering).diagnostics)
+                    }
+                    None => Stored::new(Vec::<Diagnostic>::new()),
+                }
+            }
+
+            Key::Lint(file) => {
+                bump(&self.counters.lint, *file);
+                // Lint is a pure function of the parse tree and the `[lint]` config; it needs no interner.
+                let config = engine.fetch::<Config>(Key::Config);
+                match engine.fetch_optional::<ParsedDocument>(Key::Parse(*file)) {
+                    Some(parsed) => Stored::new(lint_analyze(&parsed.0, config.lint)),
+                    None => Stored::new(Vec::<Diagnostic>::new()),
+                }
+            }
+
             Key::Typecheck(file) => {
                 bump(&self.counters.typecheck, *file);
                 // Recorded so a config change re-checks the file; the value is unused in R1a check logic.
@@ -684,9 +736,12 @@ impl QueryGroup for RoughlyQueries {
                 let check = engine.fetch::<ModuleCheck>(Key::Typecheck(*file));
                 let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(*file));
                 let module = engine.fetch::<Module>(Key::Lower(*file));
-                // Fetched before the `lowering` borrow below: its body borrows the interner too, so
-                // re-entering it while holding the borrow would double-borrow the `RefCell`.
+                // Fetched before the `lowering` borrow below: their bodies borrow the interner/parser too,
+                // so re-entering them while holding the borrow would double-borrow the `RefCell`.
                 let package_naming = engine.fetch::<Vec<Diagnostic>>(Key::PackageNamingDiagnostics(*file));
+                let lowering_diagnostics =
+                    engine.fetch::<Vec<Diagnostic>>(Key::LoweringDiagnostics(*file));
+                let lint = engine.fetch::<Vec<Diagnostic>>(Key::Lint(*file));
                 // Strict-mode diagnostics are rendered here (production renders them in `typecheck`'s
                 // round 2 via the private `strict_origin_diagnostics`, ported verbatim below). Type errors
                 // stay raw `InferenceError`s; the harness renders them against the interner + fallback
@@ -703,6 +758,8 @@ impl QueryGroup for RoughlyQueries {
                     type_errors: check.errors.clone(),
                     strict_diagnostics,
                     unused,
+                    lowering: (*lowering_diagnostics).clone(),
+                    lint: (*lint).clone(),
                 })
             }
         }
@@ -1808,6 +1865,8 @@ struct Counters {
     package_candidate_order: Cell<u64>,
     definer_order: RefCell<HashMap<Symbol, u64>>,
     package_naming_diagnostics: RefCell<HashMap<FileId, u64>>,
+    lowering_diagnostics: RefCell<HashMap<FileId, u64>>,
+    lint: RefCell<HashMap<FileId, u64>>,
     typecheck: RefCell<HashMap<FileId, u64>>,
     diagnostics: RefCell<HashMap<FileId, u64>>,
 }
