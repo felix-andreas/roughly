@@ -56,7 +56,7 @@ fn field_ids() {
     }
 }
 
-const KIND_MAPPING: [(u16, &str); 96] = [
+const KIND_MAPPING: [(u16, &str); 95] = [
     // SPECIAL (NAMED)
     (kind::IDENTIFIER, "identifier"),
     (kind::COMMENT, "comment"),
@@ -72,7 +72,9 @@ const KIND_MAPPING: [(u16, &str); 96] = [
     (kind::FLOAT, "float"),
     (kind::STRING, "string"),
     (kind::NA, "na"),
+    (kind::STRING_OPEN, "string_open"),
     (kind::STRING_CONTENT, "string_content"),
+    (kind::STRING_CLOSE, "string_close"),
     (kind::ESCAPE_SEQUENCE, "escape_sequence"),
     // LITERALS (UNNAMED)
     (kind::NA_LITERAL, "NA"),
@@ -83,7 +85,6 @@ const KIND_MAPPING: [(u16, &str); 96] = [
     // KEYWORDS (NAMED)
     (kind::DOTS, "dots"),
     (kind::DOT_DOT_I, "dot_dot_i"),
-    (kind::RETURN, "return"),
     (kind::NEXT, "next"),
     (kind::BREAK, "break"),
     // KEYWORDS (UNAMED)
@@ -117,8 +118,6 @@ const KIND_MAPPING: [(u16, &str); 96] = [
     (kind::EXTRACT_OPERATOR, "extract_operator"),
     (kind::NAMESPACE_OPERATOR, "namespace_operator"),
     // PUNCTUATION (UNAMED)
-    (kind::SINGLE_QUOTE, "'"),
-    (kind::DOUBLE_QUOTE, "\""),
     (kind::LPAREN, "("),
     (kind::RPAREN, ")"),
     (kind::LBRACE, "{"),

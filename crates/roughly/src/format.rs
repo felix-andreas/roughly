@@ -173,9 +173,7 @@ fn traverse(
         Ok(())
     };
     let fmt_raw = |out: &mut String, node: Node| {
-        // note: for CRLF documents, byte_range of comment node includes \r
-        // see here: https://github.com/r-lib/tree-sitter-r/pull/184
-        out.push_str(get_raw(node, context.rope).trim_end_matches('\r'));
+        out.push_str(&get_raw(node, context.rope));
         Ok(())
     };
 
@@ -304,7 +302,6 @@ fn traverse(
         // KEYWORDS
         kind::DOTS => out.push_str("..."),
         kind::DOT_DOT_I => fmt_raw(out, node)?,
-        kind::RETURN => out.push_str("return"),
         kind::NEXT => out.push_str("next"),
         kind::BREAK => out.push_str("break"),
         // COMPOUND EXPRESSIONS

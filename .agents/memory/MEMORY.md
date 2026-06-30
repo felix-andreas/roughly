@@ -63,6 +63,7 @@ The ignored perf/memory/fuzz benches must be gated to *these* budgets in CI, not
 - `Pair` is a reserved builtin type name — do not use it in type fixtures.
 - tree-sitter parses `#:` annotation comments as ordinary comments, so annotation-*syntax* errors surface only in lowering (not in the parse tree).
 - The formatter emits raw string literals (`r"(...)"` / `R"[...]"`) byte-for-byte; a string node starting with `r`/`R` must not be reconstructed as `"`+content+`"`.
+- Node-kind / field ids are hardcoded integer constants in `crates/analysis/src/tree.rs` (re-exported as `roughly::tree`). They are grammar-version-specific: bumping `tree-sitter-r` renumbers them, so every constant must be regenerated and the `node_ids`/`field_ids` pinning tests in `crates/analysis/tests/test_tree.rs` updated. Those tests guard the renumbering; a mismatch panics at runtime with "shipped stub corpus yielded no schemes" rather than mis-indexing silently.
 
 ## Open soundness / quality gaps
 
