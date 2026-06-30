@@ -56,14 +56,34 @@ impl Host {
         self.engine.set_input(Key::SourceText(id), source.to_owned());
     }
 
+    // Each feature drives the genuine `EngineIde` priming path; the result is discarded because the
+    // exec counters (not the output) are what these tests observe.
     fn hover(&self, id: FileId, position: TextPosition) {
-        // The result itself is irrelevant here — the priming (which fetches `Typecheck(id)`) is what the
-        // counters observe — but hover is the genuine Class-1 surface, so this drives the real path.
         let _ = EngineIde::new(&self.engine, &self.paths).hover(&package_path(id), position);
+    }
+
+    fn inlay_hints(&self, id: FileId) {
+        let _ = EngineIde::new(&self.engine, &self.paths).inlay_hints(&package_path(id), None);
+    }
+
+    fn signature_help(&self, id: FileId, position: TextPosition) {
+        let _ = EngineIde::new(&self.engine, &self.paths).signature_help(&package_path(id), position);
+    }
+
+    fn completion(&self, id: FileId, position: TextPosition) {
+        let _ = EngineIde::new(&self.engine, &self.paths).completion(&package_path(id), position);
+    }
+
+    fn definition(&self, id: FileId, position: TextPosition) {
+        let _ = EngineIde::new(&self.engine, &self.paths).definition(&package_path(id), position);
     }
 
     fn typecheck_runs(&self, id: FileId) -> u64 {
         self.engine.group().typecheck_runs(id)
+    }
+
+    fn package_symbol_index_runs(&self) -> u64 {
+        self.engine.group().package_symbol_index_runs()
     }
 }
 
@@ -92,6 +112,65 @@ fn repeated_point_query_reruns_no_typecheck() {
         host.typecheck_runs(0),
         baseline,
         "a repeated point query on an unchanged file must re-run zero Typecheck bodies",
+    );
+}
+
+// Warm a feature, then repeat it on the unchanged workspace; assert the target's `Typecheck` body re-runs
+// zero times. Holds for both the features that prime `Typecheck(target)` (hover/signature/inlay — cached
+// after warming) and those that never prime it (definition/completion — never touch it).
+fn assert_no_typecheck_rerun(host: &Host, name: &str, run: impl Fn(&Host)) {
+    run(host); // warm
+    let before = host.typecheck_runs(0);
+    for _ in 0..3 {
+        run(host);
+    }
+    assert_eq!(
+        host.typecheck_runs(0),
+        before,
+        "{name} re-ran Typecheck on an unchanged file",
+    );
+}
+
+#[test]
+fn all_class1_features_rerun_no_typecheck_on_unchanged_file() {
+    // A referrer (file 0) with a call (`shared_fn(2L)` — signature target), a local binding (`local_value`
+    // — inlay target), and a cross-file global use (`shared_fn` — hover/definition/completion target),
+    // defined in file 1.
+    let host = Host::new(&[
+        (0, "result <- shared_fn(2L)\nlocal_value <- 1L"),
+        (1, "#: fn(x: integer) -> integer\nshared_fn <- function(x) x + x"),
+    ]);
+
+    let on_use = TextPosition {
+        line_index: 0,
+        character_index: 12,
+    }; // inside the `shared_fn` use
+    let in_args = TextPosition {
+        line_index: 0,
+        character_index: 20,
+    }; // inside the call arguments
+    let after_local = TextPosition {
+        line_index: 1,
+        character_index: 11,
+    }; // a completion context
+
+    assert_no_typecheck_rerun(&host, "hover", |host| host.hover(0, on_use));
+    assert_no_typecheck_rerun(&host, "signature_help", |host| host.signature_help(0, in_args));
+    assert_no_typecheck_rerun(&host, "inlay_hints", |host| host.inlay_hints(0));
+    assert_no_typecheck_rerun(&host, "definition", |host| host.definition(0, on_use));
+    assert_no_typecheck_rerun(&host, "completion", |host| host.completion(0, after_local));
+
+    // Completion additionally fetches PackageSymbolIndex (the lone all-files fold). A repeat on an unchanged
+    // workspace must NOT re-fold it — the names-only cutoff keeps the point query off the O(package) path.
+    host.completion(0, after_local);
+    let index_before = host.package_symbol_index_runs();
+    for _ in 0..3 {
+        host.completion(0, after_local);
+    }
+    assert_eq!(
+        host.package_symbol_index_runs(),
+        index_before,
+        "completion re-folded PackageSymbolIndex on an unchanged workspace",
     );
 }
 
