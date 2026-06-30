@@ -22,6 +22,7 @@ tree-sitter.workspace = true
 tree-sitter-r.workspace = true
 serde_json.workspace = true
 analysis = { path = "../analysis" }
+engine = { path = "../engine" }
 
 # async-lsp
 async-lsp.workspace = true

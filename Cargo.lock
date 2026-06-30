@@ -1229,6 +1229,7 @@ dependencies = [
  "async-lsp",
  "clap",
  "console 0.16.1",
+ "engine",
  "fixtures",
  "futures",
  "ignore",
