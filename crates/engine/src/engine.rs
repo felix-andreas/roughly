@@ -295,8 +295,23 @@ impl<G: QueryGroup> Engine<G> {
         key: G::Key,
         token: Arc<AtomicBool>,
     ) -> Result<Shared<T>, Cancelled> {
+        self.with_cancellation(token, || self.fetch::<T>(key))
+    }
+
+    /// Run `body` with `token` installed as the cancellation token, so every `fetch` it performs is
+    /// cooperatively cancellable: a token observed set at a [`check_cancelled`](Engine::check_cancelled)
+    /// point abandons the in-flight computation by unwinding the [`Cancelled`] sentinel, caught here.
+    /// Generalizes [`fetch_cancellable`](Engine::fetch_cancellable) from one query to a whole multi-fetch
+    /// operation (e.g. an IDE feature that primes several queries), so a host can make an entire read
+    /// cancellable rather than just a single query. `Err(`[`Cancelled`]`)` means the token was observed
+    /// set; a non-`Cancelled` panic is re-raised unchanged.
+    pub fn with_cancellation<R>(
+        &self,
+        token: Arc<AtomicBool>,
+        body: impl FnOnce() -> R,
+    ) -> Result<R, Cancelled> {
         let previous = self.cancellation.borrow_mut().replace(token);
-        let outcome = catch_unwind(AssertUnwindSafe(|| self.fetch::<T>(key)));
+        let outcome = catch_unwind(AssertUnwindSafe(body));
         *self.cancellation.borrow_mut() = previous;
         match outcome {
             Ok(value) => Ok(value),
