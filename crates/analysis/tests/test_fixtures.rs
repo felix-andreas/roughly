@@ -7,7 +7,7 @@ mod fixture_renderers;
 use {
     analysis::{
         Analysis, CheckConfig, Document, DocumentChange, DocumentId, Interner, LintConfig,
-        RecomputeReason, TextPosition, TextRange,
+        TextPosition, TextRange,
         hir::ExpressionKind,
         ide,
         lint::{self, NameStyle},
@@ -143,15 +143,12 @@ fn run_multifile_diagnostics_fixture(
     for entry in &case.initial_generation.entries {
         apply_project_operation(&mut analysis_state, &entry.operation)?;
     }
-    let mut snapshots = vec![render_project_snapshot(
-        &mut analysis_state,
-        &case.initial_generation.entries,
-    )?];
+    let mut snapshots = vec![render_project_snapshot(&mut analysis_state)?];
     for generation in &case.generations {
         for entry in &generation.entries {
             apply_project_operation(&mut analysis_state, &entry.operation)?;
         }
-        snapshots.push(render_project_snapshot(&mut analysis_state, &generation.entries)?);
+        snapshots.push(render_project_snapshot(&mut analysis_state)?);
     }
 
     return Ok(snapshots);
@@ -207,12 +204,8 @@ fn run_multifile_diagnostics_fixture(
 
     fn render_project_snapshot(
         analysis_state: &mut Analysis,
-        entries: &[fixtures::FixtureGenerationEntry],
     ) -> Result<Vec<FixtureRunFile>, String> {
         analysis::run_full(analysis_state);
-        // Captured straight after the typecheck inside `run_full`, before any later query can reset
-        // the memo, so a `recompute` action reports this generation's recompute scope.
-        let recompute_scope = render_recompute_scope(analysis_state);
 
         let mut files = analysis_state
             .all_document_ids()
@@ -237,55 +230,8 @@ fn run_multifile_diagnostics_fixture(
             })
             .collect::<Result<Vec<_>, String>>()?;
 
-        for entry in entries {
-            let FixtureOperation::Action { action, path, .. } = &entry.operation else {
-                continue;
-            };
-            let output = match action.as_str() {
-                "recompute" => recompute_scope.clone(),
-                _ => return Err(format!("project fixtures do not support `{action}` actions")),
-            };
-            files.push(FixtureRunFile {
-                path: path.clone(),
-                output,
-            });
-        }
-
         files.sort_by(|left, right| left.path.cmp(&right.path));
         Ok(files)
-    }
-
-    fn render_recompute_scope(analysis_state: &Analysis) -> String {
-        let mut lines = analysis_state
-            .last_recompute_reasons()
-            .iter()
-            .map(|(document_id, reason)| {
-                let path = analysis_state
-                    .path_for_document_id(*document_id)
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(|| format!("{document_id:?}"));
-                let reason = match reason {
-                    RecomputeReason::BodyEdit => "body-edit".to_owned(),
-                    RecomputeReason::InterfaceChange(symbols) => {
-                        let mut names = symbols
-                            .iter()
-                            .map(|symbol| {
-                                analysis_state
-                                    .interner()
-                                    .resolve(*symbol)
-                                    .unwrap_or("<unknown>")
-                                    .to_owned()
-                            })
-                            .collect::<Vec<_>>();
-                        names.sort();
-                        format!("interface-change({})", names.join(", "))
-                    }
-                };
-                format!("{path}: {reason}")
-            })
-            .collect::<Vec<_>>();
-        lines.sort();
-        lines.join("\n")
     }
 
     fn fixture_text_range(range: fixtures::FixtureRange) -> TextRange {

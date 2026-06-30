@@ -7,14 +7,11 @@ use {
         lint::{self as lint_phase, NameStyle},
         lower::lower_with_shared_interner,
         naming::{
-            DocumentKind, NamesGlobal, NamesLocal, PackageDocumentDiagnosticContext, TypeInfo,
-            apply_type_definition_outcome, build_script_local_type_index, build_type_index,
-            document_package_definitions, document_type_definitions, document_type_references,
-            package_document_diagnostics, rebuild_package_naming, resolve_document_locally,
+            DocumentKind, NamesGlobal, NamesLocal, TypeInfo, build_type_index, rebuild_package_naming,
+            resolve_document_locally,
         },
         stdlib::StubLibrary,
         tree,
-        type_syntax::render_surface_type,
         typecheck::{
             ExportedValue, StrictOriginKind, StrictUnknownOrigin, TypeDefinitionEnvironment,
             inference_state_with_builtins_in_interner,
@@ -53,89 +50,21 @@ pub struct Analysis {
     lint_outputs: HashMap<DocumentId, LintOutput>,
     lowering_outputs: HashMap<DocumentId, DocumentOutput<Module>>,
     document_naming_outputs: HashMap<DocumentId, DocumentOutput<NamesLocal>>,
-    // Reverse-dependency index (M3): for each package-global `Symbol`, the set of documents whose
-    // local naming references it. Derived from and patched per document against each document's
-    // `NamesLocal.non_locals`; see `patch_reverse_dependencies` and the maintenance invariant on the
-    // architecture page. Used by invalidation routing to pick recompute candidates.
-    reverse_dependencies: BTreeMap<Symbol, BTreeSet<DocumentId>>,
-    // Package-definition candidate index (M4): for each package-global `Symbol`, the set of package
-    // documents that define it as a top-level binding (the definition-side analog of
-    // `reverse_dependencies`). Derived from and patched per document against each document's
-    // top-level `NamesLocal.bindings`; see `patch_package_definitions`. The path-last candidate per
-    // name is the winner, which must equal `global_bindings`. Not yet load-bearing: `global_bindings`
-    // still comes from `rebuild_package_naming`; this index runs in parallel and is asserted
-    // consistent, de-risking the M4.2 switch to incremental winner maintenance.
-    package_definitions: BTreeMap<Symbol, BTreeSet<DocumentId>>,
-    // Package-global names whose candidate set changed since the last package-naming maintenance —
-    // the affected names whose winner is repatched and whose co-definers/referrers are re-diagnosed.
-    // Accumulated by `patch_package_definitions` (the single choke point for `package_definitions`
-    // edits, so it captures both document edits and deletes) and consumed by `maintain_package_naming`.
-    naming_dirty_names: BTreeSet<Symbol>,
-    // Type-definition candidate index (M4.3): for each `@type`/`@alias` name, per contributing package
-    // document the `TypeInfo`s it declares (the type-side analog of `package_definitions`). The source
-    // of truth for the materialized type index; patched per document at the naming recompute site and on
-    // delete via `patch_type_definitions`. A name is resolved iff it has exactly one site across the
-    // whole package, so a `Vec` per document preserves a document that declares the same name twice.
-    type_definitions: BTreeMap<Symbol, BTreeMap<DocumentId, Vec<TypeInfo>>>,
     // Materialized package type index: each uniquely-defined type name's `TypeInfo`, plus the set of
     // names defined more than once (kept out of the resolved index, diagnosed as duplicates). Derived
     // from `type_definitions` by collating each affected name, the type-side analog of `global_bindings`;
     // materialized for O(1) lookup during type-reference resolution. Guarded by a debug drift assertion.
     package_type_index: BTreeMap<Symbol, TypeInfo>,
     duplicate_type_names: BTreeSet<Symbol>,
-    // Type reverse-dependency index (M4.3): for each type name, the documents whose definitions or
-    // annotations reference it (the type-side analog of `reverse_dependencies`). Patched per document
-    // against `document_type_references`. A type name whose materialized entry changes re-diagnoses its
-    // referrers here, even when they are not themselves dirty — a single reverse hop.
-    type_references: BTreeMap<Symbol, BTreeSet<DocumentId>>,
-    // Type names whose candidate contribution changed since the last package-naming maintenance — the
-    // affected names whose materialized entry is re-collated and whose co-definers (their duplicate
-    // diagnostic) and referrers (their type-reference diagnostic) are re-diagnosed. The type-side analog
-    // of `naming_dirty_names`, accumulated by `patch_type_definitions` and consumed by maintenance.
-    naming_dirty_type_names: BTreeSet<Symbol>,
-    // The documents changed since the last completed `typecheck`, accumulated in `invalidate_document`
-    // (the single funnel every add/edit/delete passes through) and cleared at the end of `typecheck`.
-    // It seeds the M3 recompute candidate set: combined with the reverse-dependency index it bounds the
-    // package-scoped phases to `dirty docs ∪ reverse-deps of changed exports` instead of every document.
-    dirty_documents: BTreeSet<DocumentId>,
     package_naming_output: Option<PackageOutput<NamesGlobal>>,
     document_interface_outputs: HashMap<DocumentId, InterfaceOutput>,
     document_typecheck_outputs: HashMap<DocumentId, TypecheckDocumentOutput>,
-    // The package version at which `typecheck` last completed. Since the package version bumps on
-    // every document or config change, an unchanged version means every typecheck output is already
-    // current, so a repeated call (e.g. successive hover or inlay-hint requests) returns at once.
-    last_typecheck_package_version: Option<Version>,
-    // The package-global type-definition fingerprint at the last completed `typecheck`. The fingerprint
-    // is package-global today, so when it changes every document must be reconsidered; comparing against
-    // this memo is how `typecheck` decides whether to fall back to the full document set as candidates.
-    last_type_definitions_fingerprint: Option<String>,
-    // The package-global bindings (each global's winning document) at the last completed `typecheck`.
-    // The winner-diff that seeds `changed_globals` must compare against *this* frozen baseline, not the
-    // live `package_naming_output`: intervening `resolve_package` calls (completion, references, rename,
-    // `run_full` with typing off) refresh `package_naming_output` without clearing `dirty_documents`, so
-    // a live baseline would already be post-edit and a winner flip would diff to nothing — leaving its
-    // referrers stale. Frozen at the last typecheck, the delta survives those intervening refreshes.
-    last_typecheck_global_bindings: Option<BTreeMap<Symbol, DocumentId>>,
-    // Number of documents the last `typecheck` examined in round 2 (the candidate set size, before the
-    // per-document cache check decides actual recompute). Exposed for tests that prove the scan is
-    // bounded — a body-only edit must examine O(1) documents, not O(package).
-    last_candidate_count: usize,
-    // Why each document recomputed in the last `typecheck`, in recompute order. The proximate cause is
-    // either the document's own edit (`BodyEdit`) or a changed package-global it references
-    // (`InterfaceChange`). Exposed so fixtures can assert the recompute scope and reason, not just the
-    // count; see the M3 reverse-dependency invalidation design.
-    last_recompute_reasons: Vec<(DocumentId, RecomputeReason)>,
 }
 
 // Why a document was rechecked by `typecheck`. A document is attributed to its proximate cause: a
 // document whose own version changed is a `BodyEdit` even if it also references a changed global,
 // because its own edit, not the interface, is what forced the recheck. `InterfaceChange` carries the
 // changed package-globals the document references that triggered the recheck.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RecomputeReason {
-    BodyEdit,
-    InterfaceChange(Vec<Symbol>),
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnalysisError {
@@ -186,24 +115,15 @@ struct LintOutput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct InterfaceOutput {
     version: Version,
-    type_definitions_fingerprint: String,
-    // Fingerprint of the package-global schemes this document references. A document's exported
-    // interface is recomputed when its own version, the type definitions, or any scheme it depends
-    // on changes, so an edit only re-derives the affected documents.
-    dependency_fingerprint: String,
     exports: Vec<ExportedValue>,
+    // Fingerprint of this document's exported schemes; the interface fixed-point converges when a round
+    // changes no document's fingerprint.
     fingerprint: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TypecheckDocumentOutput {
     version: Version,
-    type_definitions_fingerprint: String,
-    // Fingerprint of exactly the package-global schemes this document references, rendered against
-    // the converged interface table. The round-2 check is recomputed only when its own version, the
-    // type definitions, or one of the schemes it actually depends on changes, so a value-interface
-    // change rechecks only the documents that reference the changed name.
-    dependency_fingerprint: String,
     diagnostics: Vec<Diagnostic>,
     // Strict-mode `Unknown`-origin diagnostics, computed alongside the type errors from the same
     // inputs and cached on the same keys. Published only when `[check] strict` is on, exactly as
@@ -265,23 +185,11 @@ impl Analysis {
             lint_outputs: HashMap::new(),
             lowering_outputs: HashMap::new(),
             document_naming_outputs: HashMap::new(),
-            reverse_dependencies: BTreeMap::new(),
-            package_definitions: BTreeMap::new(),
-            naming_dirty_names: BTreeSet::new(),
-            type_definitions: BTreeMap::new(),
             package_type_index: BTreeMap::new(),
             duplicate_type_names: BTreeSet::new(),
-            type_references: BTreeMap::new(),
-            naming_dirty_type_names: BTreeSet::new(),
-            dirty_documents: BTreeSet::new(),
             package_naming_output: None,
             document_interface_outputs: HashMap::new(),
             document_typecheck_outputs: HashMap::new(),
-            last_typecheck_package_version: None,
-            last_type_definitions_fingerprint: None,
-            last_typecheck_global_bindings: None,
-            last_candidate_count: 0,
-            last_recompute_reasons: Vec::new(),
         }
     }
 
@@ -417,13 +325,6 @@ impl Analysis {
         self.document_versions.remove(&document_id);
         self.document_paths.remove(&document_id);
         self.non_package_documents.remove(&document_id);
-        // The document is gone for good, so it contributes nothing to the reverse-dependency,
-        // package-definition, or type indexes. Unlike an edit, no recompute will re-patch it, so retract
-        // its entries from all of them here.
-        self.patch_reverse_dependencies(document_id, &BTreeSet::new());
-        self.patch_package_definitions(document_id, &BTreeSet::new());
-        self.patch_type_references(document_id, &BTreeSet::new());
-        self.patch_type_definitions(document_id, &BTreeMap::new());
         self.invalidate_document(document_id);
         self.bump_package_version();
         Ok(())
@@ -463,42 +364,6 @@ impl Analysis {
         self.package_naming_output
             .as_ref()
             .map(|output| &output.output)
-    }
-
-    // The documents whose local naming references `symbol` as a package global (the reverse of
-    // `NamesLocal.non_locals`). Empty when no document references it. Consumed by M3 invalidation
-    // routing to pick the documents to recheck when a package-global interface changes.
-    pub fn documents_referencing(&self, symbol: Symbol) -> impl Iterator<Item = DocumentId> + '_ {
-        self.reverse_dependencies
-            .get(&symbol)
-            .into_iter()
-            .flatten()
-            .copied()
-    }
-
-    // The documents whose definitions or annotations reference the type name `symbol` (the reverse of
-    // `document_type_references`). Empty when no document references it. Drives M4.3 type-index
-    // invalidation routing: a document re-evaluates its type-reference diagnostics when a type it
-    // references changes, even when it is not itself dirty.
-    fn documents_type_referencing(&self, symbol: Symbol) -> impl Iterator<Item = DocumentId> + '_ {
-        self.type_references
-            .get(&symbol)
-            .into_iter()
-            .flatten()
-            .copied()
-    }
-
-    // Documents examined by the last `typecheck` round 2 (the candidate-set size before the
-    // per-document cache check). A bounded value proves the package-scoped scan did not walk every
-    // document; see the M3 reverse-dependency invalidation design.
-    pub fn last_candidate_count(&self) -> usize {
-        self.last_candidate_count
-    }
-
-    // The documents the last `typecheck` recomputed, each with the proximate reason it recomputed
-    // (its own edit versus a changed package-global it references). Empty when nothing recomputed.
-    pub fn last_recompute_reasons(&self) -> &[(DocumentId, RecomputeReason)] {
-        &self.last_recompute_reasons
     }
 
     pub fn package_document_ids(&self) -> Vec<DocumentId> {
@@ -602,11 +467,6 @@ pub fn run_full(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     }
 }
 
-pub fn run_fast(analysis_state: &mut Analysis) {
-    lint(analysis_state);
-    lower(analysis_state);
-}
-
 pub fn lint(analysis_state: &mut Analysis) {
     let document_ids = analysis_state.all_document_ids();
     let config = analysis_state.lint_config;
@@ -671,7 +531,6 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
     lower(analysis_state);
 
     let document_ids = analysis_state.all_document_ids();
-    let mut re_derived_documents = Vec::new();
     for document_id in &document_ids {
         let Some(document_version) = analysis_state.document_version(*document_id) else {
             continue;
@@ -694,36 +553,6 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
         };
         let local_naming =
             resolve_document_locally(*document_id, module, analysis_state.interner(), document_kind);
-        let referenced_symbols = local_naming
-            .naming
-            .non_locals
-            .values()
-            .copied()
-            .collect::<BTreeSet<_>>();
-        // Only package documents define package globals (scripts/extra modules do not), matching the
-        // candidate order, which folds only package documents. A script contributes the empty set,
-        // which also retracts any prior entries if a document changed from package to script. Derived
-        // from `module.expressions` (not the binding-kind map) so a conditionally-executed assignment —
-        // whose binding still carries the `TopLevelAssignment` kind — is excluded, exactly as the rebuild
-        // oracle's candidate order is. Computed before the patches end the immutable `module` borrow.
-        let defined_symbols = if matches!(document_kind, DocumentKind::Package) {
-            document_package_definitions(module, &local_naming.naming)
-        } else {
-            BTreeSet::new()
-        };
-        // Scripts define no package-global types, but they do reference them (their annotations resolve
-        // against the package index), so the type reverse-dependency index covers all documents while the
-        // type-definition candidate index covers package documents only — mirroring the value side.
-        let defined_types = if matches!(document_kind, DocumentKind::Package) {
-            document_type_definitions(module)
-        } else {
-            BTreeMap::new()
-        };
-        let referenced_types = document_type_references(module, &local_naming.naming);
-        analysis_state.patch_reverse_dependencies(*document_id, &referenced_symbols);
-        analysis_state.patch_package_definitions(*document_id, &defined_symbols);
-        analysis_state.patch_type_references(*document_id, &referenced_types);
-        analysis_state.patch_type_definitions(*document_id, &defined_types);
         analysis_state.document_naming_outputs.insert(
             *document_id,
             DocumentOutput {
@@ -732,179 +561,55 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
                 diagnostics: local_naming.diagnostics,
             },
         );
-        re_derived_documents.push(*document_id);
     }
 
-    #[cfg(any(debug_assertions, feature = "verify-incremental"))]
-    {
-        analysis_state.assert_reverse_dependencies_consistent();
-        analysis_state.assert_type_references_consistent();
-    }
-
+    // From-scratch package naming + materialized type index. This is the former drift-oracle rebuild,
+    // now the production path: there is no incremental mirror to maintain or to assert against.
     let package_naming_current = analysis_state
         .package_naming_output
         .as_ref()
         .is_some_and(|output| output.version == analysis_state.package_version);
-    if !package_naming_current {
-        maintain_package_naming(analysis_state, &re_derived_documents);
+    if package_naming_current {
+        return;
     }
 
-    #[cfg(any(debug_assertions, feature = "verify-incremental"))]
-    {
-        analysis_state.assert_package_definitions_consistent();
-        analysis_state.assert_type_definitions_consistent();
-        analysis_state.assert_package_naming_consistent();
-        analysis_state.assert_stub_isolation();
-    }
-}
+    let package_document_ids = analysis_state.package_document_ids();
+    let package_modules = package_document_ids
+        .iter()
+        .filter_map(|document_id| analysis_state.module(*document_id).map(|module| (*document_id, module)))
+        .collect::<Vec<_>>();
+    let extra_modules = analysis_state
+        .all_document_ids()
+        .into_iter()
+        .filter(|document_id| !package_document_ids.contains(document_id))
+        .filter_map(|document_id| analysis_state.module(document_id).map(|module| (document_id, module)))
+        .collect::<Vec<_>>();
+    let naming_locals = analysis_state
+        .document_naming_outputs
+        .iter()
+        .map(|(document_id, output)| (*document_id, output.output.clone()))
+        .collect::<HashMap<_, _>>();
 
-// Incremental package-naming maintenance (M4.2/M4.3). Patches the materialized `global_bindings` and
-// the materialized type index for the names whose candidate set changed (`naming_dirty_names` /
-// `naming_dirty_type_names`) and regenerates package-naming diagnostics for exactly the affected
-// documents:
-//   - the re-derived documents (their own naming changed);
-//   - the co-definers of every affected value name (their overwrite position may have moved);
-//   - the referrers of every value name that flipped defined-ness (their "could not resolve"
-//     diagnostic appears or disappears) — a single value reverse-dependency hop;
-//   - the co-definers of every affected type name (their duplicate-type diagnostic may appear or
-//     disappear) and the referrers of every affected type name (their type-reference diagnostic may
-//     change as the name's kind/arity/presence/duplicate status moves) — a single type reverse hop.
-// Neither the value nor the type index is rebuilt across the package: a body-only edit changes no
-// candidate set, so both `affected` sets are empty and the type index is untouched. The result equals
-// a from-scratch `rebuild_package_naming`, which the debug oracle asserts.
-fn maintain_package_naming(analysis_state: &mut Analysis, re_derived_documents: &[DocumentId]) {
-    // Re-collate only the type names whose contribution changed into the materialized type index and
-    // duplicate set; both persist across edits, so an unchanged type definition is never re-collated.
-    let affected_type_names = std::mem::take(&mut analysis_state.naming_dirty_type_names);
-    for name in &affected_type_names {
-        let sites = analysis_state
-            .type_definitions
-            .get(name)
-            .into_iter()
-            .flat_map(|documents| documents.values().flatten().copied())
-            .collect::<Vec<_>>();
-        apply_type_definition_outcome(
-            *name,
-            &sites,
-            &mut analysis_state.package_type_index,
-            &mut analysis_state.duplicate_type_names,
-        );
-    }
+    let (package_type_index, duplicate_type_names) = build_type_index(&package_modules);
+    let computation = rebuild_package_naming(
+        &package_modules,
+        &extra_modules,
+        &naming_locals,
+        analysis_state.interner(),
+        &analysis_state.stub_library,
+    );
+    // The module borrows are released before mutating the owning state.
+    drop(package_modules);
+    drop(extra_modules);
 
-    let affected_names = std::mem::take(&mut analysis_state.naming_dirty_names);
-    let mut output = analysis_state
-        .package_naming_output
-        .take()
-        .unwrap_or_else(|| PackageOutput {
-            version: 0,
-            output: NamesGlobal::default(),
-            diagnostics: HashMap::new(),
-        });
-
-    // Patch the materialized winner for each affected name and record which ones flipped defined-ness.
-    let mut flipped_names = BTreeSet::new();
-    for name in &affected_names {
-        let winner = analysis_state
-            .package_definitions
-            .get(name)
-            .and_then(|documents| {
-                documents
-                    .iter()
-                    .max_by_key(|document_id| analysis_state.package_path_key(**document_id))
-                    .copied()
-            });
-        let was_defined = output.output.global_bindings.contains_key(name);
-        match winner {
-            Some(winner) => {
-                output.output.global_bindings.insert(*name, winner);
-            }
-            None => {
-                output.output.global_bindings.remove(name);
-            }
-        }
-        if was_defined != winner.is_some() {
-            flipped_names.insert(*name);
-        }
-    }
-
-    // Path-ordered candidate lists, needed only for names with more than one definer (the only names
-    // that carry overwrite warnings).
-    let mut candidate_order = BTreeMap::<Symbol, Vec<DocumentId>>::new();
-    for (symbol, documents) in &analysis_state.package_definitions {
-        if documents.len() < 2 {
-            continue;
-        }
-        let mut ordered = documents.iter().copied().collect::<Vec<_>>();
-        ordered.sort_by_key(|document_id| analysis_state.package_path_key(*document_id));
-        candidate_order.insert(*symbol, ordered);
-    }
-
-    let mut recompute_documents = BTreeSet::<DocumentId>::new();
-    recompute_documents.extend(re_derived_documents.iter().copied());
-    for name in &affected_names {
-        if let Some(definers) = analysis_state.package_definitions.get(name) {
-            recompute_documents.extend(definers.iter().copied());
-        }
-    }
-    for name in &flipped_names {
-        recompute_documents.extend(analysis_state.documents_referencing(*name));
-    }
-    // A changed type name re-diagnoses both its co-definers (their duplicate-type diagnostic, which
-    // depends on the multiplicity that just moved) and its referrers (their type-reference diagnostic,
-    // which depends on the materialized kind/arity/presence). The referrer hop is the type analog of
-    // the value defined-ness flip: a non-dirty document referencing the type re-evaluates without an
-    // edit to itself.
-    for name in &affected_type_names {
-        if let Some(definers) = analysis_state.type_definitions.get(name) {
-            recompute_documents.extend(definers.keys().copied());
-        }
-        recompute_documents.extend(analysis_state.documents_type_referencing(*name));
-    }
-
-    let mut fresh_diagnostics = Vec::new();
-    for document_id in &recompute_documents {
-        let Some(module) = analysis_state.module(*document_id) else {
-            continue;
-        };
-        let Some(local_naming) = analysis_state.document_naming(*document_id) else {
-            continue;
-        };
-        let is_script = analysis_state.non_package_documents.contains(document_id);
-        let script_types;
-        let document_types: &BTreeMap<Symbol, TypeInfo> = if is_script {
-            script_types =
-                build_script_local_type_index(&analysis_state.package_type_index, module);
-            &script_types
-        } else {
-            &analysis_state.package_type_index
-        };
-        let document_diagnostics = package_document_diagnostics(&PackageDocumentDiagnosticContext {
-            document_id: *document_id,
-            module,
-            local_naming,
-            is_script,
-            types: document_types,
-            duplicate_type_names: &analysis_state.duplicate_type_names,
-            global_bindings: &output.output.global_bindings,
-            candidate_order: &candidate_order,
-            interner: analysis_state.interner(),
-            stub_library: &analysis_state.stub_library,
-        });
-        fresh_diagnostics.push((*document_id, document_diagnostics));
-    }
-    for (document_id, document_diagnostics) in fresh_diagnostics {
-        if document_diagnostics.is_empty() {
-            output.diagnostics.remove(&document_id);
-        } else {
-            output.diagnostics.insert(document_id, document_diagnostics);
-        }
-    }
-    output
-        .diagnostics
-        .retain(|document_id, _| analysis_state.documents.contains_key(document_id));
-    output.version = analysis_state.package_version;
-
-    analysis_state.package_naming_output = Some(output);
+    let package_version = analysis_state.package_version;
+    analysis_state.package_type_index = package_type_index;
+    analysis_state.duplicate_type_names = duplicate_type_names;
+    analysis_state.package_naming_output = Some(PackageOutput {
+        version: package_version,
+        output: computation.naming,
+        diagnostics: computation.diagnostics,
+    });
 }
 
 fn render_interface_fingerprint(exports: &[ExportedValue], interner: &Interner) -> String {
@@ -950,27 +655,6 @@ fn build_package_interface_table(
     table
 }
 
-// Fingerprint of exactly the package-global schemes a document references, used as part of its
-// interface cache key so a document recomputes only when a dependency's scheme changes.
-fn render_dependency_fingerprint(
-    referenced: &std::collections::BTreeSet<crate::Symbol>,
-    table: &std::collections::BTreeMap<crate::Symbol, ExportedValue>,
-    interner: &Interner,
-) -> String {
-    referenced
-        .iter()
-        .filter_map(|symbol| table.get(symbol).map(|export| (symbol, export)))
-        .map(|(symbol, export)| {
-            format!(
-                "{}: {}",
-                interner.resolve(*symbol).unwrap_or("<unknown>"),
-                crate::diagnostic::render_type_scheme(interner, &export.type_scheme)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(";")
-}
-
 // Typechecking is incremental at document grain. Round 1 computes each package document's
 // exported value schemes in isolation (cross-file references check as `Unknown`), cached by
 // document version plus the package type-definition fingerprint. Round 2 checks every
@@ -980,30 +664,18 @@ fn render_dependency_fingerprint(
 // rechecks only the documents that reference the changed name. Returns the documents whose
 // typecheck output was recomputed, so callers can republish exactly those diagnostics.
 pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
-    // Cleared up front so the recompute-reason memo always reflects this call: an early return below
-    // (nothing changed) correctly leaves it empty, and the normal path overwrites it at the end.
-    analysis_state.last_recompute_reasons.clear();
-
-    // Nothing has changed since the last completed typecheck, so every cached output is current and
-    // no document needs rechecking. This keeps repeated IDE requests on an unchanged package cheap.
-    if analysis_state.last_typecheck_package_version == Some(analysis_state.package_version) {
-        return Vec::new();
-    }
-
-    let dirty_documents = analysis_state.dirty_documents.clone();
-
     resolve_package(analysis_state);
 
     let package_document_ids = analysis_state.package_document_ids();
     let all_document_ids = analysis_state.all_document_ids();
     let mut template_state = inference_state_with_builtins_in_interner(analysis_state.interner_mut());
     // Seed the stdlib stub schemes as base globals alongside the builtins, so a document cloned from
-    // this template resolves a bare base name (`length`, `T`, `pi`, ...) to its stub scheme. These
-    // live only in the template environment, never in `global_bindings` or the interface table.
+    // this template resolves a bare base name (`length`, `T`, `pi`, ...) to its stub scheme. These live
+    // only in the template environment, never in `global_bindings` or the interface table.
     analysis_state.stub_library.seed_into(&mut template_state);
     let fallback_range = analysis_state.fallback_range();
 
-    let (type_definitions, type_definitions_fingerprint) = {
+    let type_definitions = {
         let package_modules = package_document_ids
             .iter()
             .map(|document_id| {
@@ -1012,35 +684,7 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 })
             })
             .collect::<Vec<_>>();
-        let type_definitions =
-            TypeDefinitionEnvironment::from_modules(package_modules.iter().copied());
-        let mut rendered_definitions = Vec::new();
-        for module in &package_modules {
-            for definition_item in &module.definitions {
-                let definition = &definition_item.definition;
-                let name = analysis_state
-                    .interner()
-                    .resolve(definition.name)
-                    .unwrap_or("<unknown>");
-                let parameters = definition
-                    .type_parameters
-                    .iter()
-                    .map(|parameter| {
-                        analysis_state
-                            .interner()
-                            .resolve(*parameter)
-                            .unwrap_or("<unknown>")
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                rendered_definitions.push(format!(
-                    "{:?} {name}<{parameters}> = {}",
-                    definition.kind,
-                    render_surface_type(&definition.surface_type, analysis_state.interner())
-                ));
-            }
-        }
-        (type_definitions, rendered_definitions.join(";"))
+        TypeDefinitionEnvironment::from_modules(package_modules.iter().copied())
     };
 
     let package_naming = analysis_state
@@ -1050,96 +694,21 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         .output
         .clone();
 
-    let package_document_set = package_document_ids
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
+    let package_document_set = package_document_ids.iter().copied().collect::<BTreeSet<_>>();
 
-    // A type-definition change is package-global today: it can alter any document's check, so it is not
-    // captured by the per-document dependency fingerprint and forces every document into the candidate
-    // set. Tightening to per-document type dependencies is a later slice.
-    let type_definitions_changed = analysis_state
-        .last_type_definitions_fingerprint
-        .as_deref()
-        != Some(type_definitions_fingerprint.as_str());
-
-    // `changed_globals` accumulates every package-global symbol whose exported scheme may have changed.
-    // It seeds the recompute candidate set (via the reverse-dependency index) for both rounds and grows
-    // as the round-1 worklist discovers transitively affected exports (re-exports). It is a superset:
-    // membership only means a referrer must be *examined*; the per-document cache check still decides
-    // whether it actually recomputes.
-    // Winner-diff against the bindings frozen at the last completed typecheck (not the live, possibly
-    // post-edit `package_naming_output`). This catches a global whose winning document changed, was
-    // added, or was removed since the last typecheck, even when the new winner is itself unchanged — the
-    // case the worklist's fingerprint-change propagation cannot see, because a dirty document's old
-    // interface output (and thus its old exported names) was already dropped by `invalidate_document`.
-    let mut changed_globals = BTreeSet::<Symbol>::new();
-    if let Some(previous) = &analysis_state.last_typecheck_global_bindings {
-        let current = &package_naming.global_bindings;
-        for symbol in previous.keys().chain(current.keys()) {
-            if previous.get(symbol) != current.get(symbol) {
-                changed_globals.insert(*symbol);
-            }
-        }
-    }
-
-    // Package interface fixed-point, bounded by a worklist. Round 0 examines the dirty package documents
-    // plus the referrers of any winner-changed global; each round recomputes the candidates whose cache
-    // key moved, and when a recomputed document's exported interface fingerprint actually changes, the
-    // referrers of its (old and new) exported names are enqueued for the next round. This converges
-    // exactly like a full scan would — re-exports and forward references propagate hop by hop — while
-    // touching only documents that can be affected. A type-definition change considers every package
-    // document.
-    //
-    // Bound the loop so it can never truncate legitimate propagation (a fixed cap like 32 silently left
-    // chains deeper than it unresolved, and the round-2 candidate widening below could not repair that
-    // because it reads the same unconverged table). Each round's table is the previous round's output,
-    // so propagation advances one hop per round. An acyclic chain progresses monotonically: every
-    // package-global name's exported rendering transitions at most once (from `Unknown` to a concrete
-    // scheme) as the wavefront reaches it, because the leaves are stable annotations and literals.
-    // A genuine re-export cycle (file a: `a <- b`, file b: `b <- a`) is *not* monotone — its members'
-    // schemes swap every round and never settle — so the oscillation guard inside the loop pins such a
-    // name to `Unknown` (see below), after which the cycle collapses and the framework is monotone
-    // again. Synchronous iteration over a monotone framework reaches the fixed point in at most
-    // `#package-globals + 1` rounds (every name is final once its longest dependency path — bounded by
-    // the number of distinct names on it — has been walked, then one confirmation round empties the
-    // worklist). The `+ 8` is slack so the `debug_assert` on non-convergence below cannot false-fire on
-    // legitimate input; the common case still breaks out the moment the worklist empties, so the bound
-    // only ceilings the pathological worst case. Bounding by document count instead would be wrong:
-    // measured, a 2-document package with 3 globals needs 4 rounds.
+    // Package interface fixed-point. Every package document is re-inferred each round against the current
+    // interface table; the loop converges when a round changes no document's exported interface. Each
+    // round's table is the previous round's output, so an acyclic re-export/forward-reference chain
+    // progresses monotonically (each name's exported scheme transitions at most once, `Unknown` →
+    // concrete), reaching the fixed point in at most `#package-globals + 1` rounds. A genuine re-export
+    // cycle (`a <- b`, `b <- a`) is non-monotone — its members' schemes swap every round — so the
+    // oscillation guard pins such a name to `Unknown`, collapsing the cycle and restoring monotonicity.
+    // The `+ 8` is slack so the convergence `debug_assert` cannot false-fire on legitimate input.
     let max_package_interface_rounds = package_naming.global_bindings.len().saturating_add(8);
-    let mut round1_candidates = if type_definitions_changed {
-        package_document_set.clone()
-    } else {
-        let mut candidates = dirty_documents
-            .iter()
-            .copied()
-            .filter(|document_id| package_document_set.contains(document_id))
-            .collect::<BTreeSet<_>>();
-        for symbol in &changed_globals {
-            for referrer in analysis_state.documents_referencing(*symbol) {
-                if package_document_set.contains(&referrer) {
-                    candidates.insert(referrer);
-                }
-            }
-        }
-        candidates
-    };
-
-    // A package global on a genuine re-export cycle has no fixed point under this synchronous
-    // iteration: its exported scheme swaps between the cycle members' values every round instead of
-    // settling, so the raw worklist spins the full round bound and the convergence assert below fires
-    // on legitimate input. `pinned_unknown` records the names found to be cyclic, which are forced to
-    // `Unknown` in every table from then on; `symbol_value_history` keeps the per-name sequence of
-    // table renderings used to detect the oscillation.
     let mut pinned_unknown = BTreeSet::<Symbol>::new();
     let mut symbol_value_history = HashMap::<Symbol, Vec<String>>::new();
     let mut converged = false;
     for _round in 0..max_package_interface_rounds {
-        if round1_candidates.is_empty() {
-            converged = true;
-            break;
-        }
         let mut table = build_package_interface_table(
             &package_naming,
             &analysis_state.document_interface_outputs,
@@ -1151,25 +720,20 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
             }
         }
 
-        // Oscillation guard, over exactly the names being recomputed this round (their winning
-        // document is a candidate). A name whose table rendering returns to a value it already had in
-        // an earlier round while differing from the previous round is swapping on a re-export cycle,
-        // not progressing monotonically: pin it to the conservative `Unknown` and force its referrers
-        // to recompute against the pinned value. An acyclic name's rendering only ever transitions
-        // away from `Unknown` and never returns, so it is never pinned — the assert below still
-        // catches a genuine truncated-propagation bug.
+        // Oscillation guard: a name whose table rendering returns to a value it already had in an earlier
+        // round while differing from the previous round is swapping on a re-export cycle, not progressing
+        // monotonically; pin it to the conservative `Unknown`. An acyclic name's rendering only ever
+        // transitions away from `Unknown` and never returns, so it is never pinned.
         let mut newly_pinned = Vec::new();
-        for (symbol, winner_document_id) in &package_naming.global_bindings {
-            if pinned_unknown.contains(symbol) || !round1_candidates.contains(winner_document_id) {
+        for symbol in package_naming.global_bindings.keys() {
+            if pinned_unknown.contains(symbol) {
                 continue;
             }
             let Some(export) = table.get(symbol) else {
                 continue;
             };
-            let rendered = crate::diagnostic::render_type_scheme(
-                analysis_state.interner(),
-                &export.type_scheme,
-            );
+            let rendered =
+                crate::diagnostic::render_type_scheme(analysis_state.interner(), &export.type_scheme);
             let history = symbol_value_history.entry(*symbol).or_default();
             if history.last().is_some_and(|last| *last != rendered) && history.contains(&rendered) {
                 newly_pinned.push(*symbol);
@@ -1177,22 +741,17 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 history.push(rendered);
             }
         }
-        let mut forced_candidates = BTreeSet::<DocumentId>::new();
+        let pinned_this_round = !newly_pinned.is_empty();
         for symbol in newly_pinned {
             pinned_unknown.insert(symbol);
             if let Some(export) = table.get_mut(&symbol) {
                 export.type_scheme = TypeScheme::monomorphic(CoreType::Unknown);
             }
-            for referrer in analysis_state.documents_referencing(symbol) {
-                if package_document_set.contains(&referrer) {
-                    forced_candidates.insert(referrer);
-                }
-            }
         }
 
+        let mut any_interface_changed = false;
         let mut fresh_interfaces = Vec::new();
-        let mut next_candidates = BTreeSet::<DocumentId>::new();
-        for document_id in &round1_candidates {
+        for document_id in &package_document_set {
             let Some(document_version) = analysis_state.document_version(*document_id) else {
                 continue;
             };
@@ -1203,28 +762,11 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 .non_locals
                 .values()
                 .copied()
-                .collect::<std::collections::BTreeSet<_>>();
-            let dependency_fingerprint =
-                render_dependency_fingerprint(&referenced, &table, analysis_state.interner());
-
-            let previous_interface = analysis_state.document_interface_outputs.get(document_id);
-            if previous_interface.is_some_and(|output| {
-                output.version == document_version
-                    && output.type_definitions_fingerprint == type_definitions_fingerprint
-                    && output.dependency_fingerprint == dependency_fingerprint
-            }) {
-                continue;
-            }
-            let previous_fingerprint = previous_interface.map(|output| output.fingerprint.clone());
-            let previous_export_symbols = previous_interface
-                .map(|output| {
-                    output
-                        .exports
-                        .iter()
-                        .map(|export| export.symbol)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
+                .collect::<BTreeSet<_>>();
+            let previous_fingerprint = analysis_state
+                .document_interface_outputs
+                .get(document_id)
+                .map(|output| output.fingerprint.clone());
 
             let module = analysis_state.module(*document_id).unwrap_or_else(|| {
                 panic!("missing lowered module for typecheck {document_id:?}")
@@ -1245,50 +787,40 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
             );
             let exports = inference_state.exported_value_schemes(module, local_naming);
             let fingerprint = render_interface_fingerprint(&exports, analysis_state.interner());
-
-            // The interface actually moved, so referrers of its exported names (old and new, to cover a
-            // dropped export) may now see a different scheme: mark those names changed and enqueue their
-            // package referrers for the next round.
             if previous_fingerprint.as_deref() != Some(fingerprint.as_str()) {
-                let affected_symbols = exports
-                    .iter()
-                    .map(|export| export.symbol)
-                    .chain(previous_export_symbols.iter().copied());
-                for symbol in affected_symbols {
-                    changed_globals.insert(symbol);
-                    for referrer in analysis_state.documents_referencing(symbol) {
-                        if package_document_set.contains(&referrer) {
-                            next_candidates.insert(referrer);
-                        }
-                    }
-                }
+                any_interface_changed = true;
             }
-
             fresh_interfaces.push((
                 *document_id,
                 InterfaceOutput {
                     version: document_version,
-                    type_definitions_fingerprint: type_definitions_fingerprint.clone(),
-                    dependency_fingerprint,
                     exports,
                     fingerprint,
                 },
             ));
         }
-
         for (document_id, output) in fresh_interfaces {
             analysis_state
                 .document_interface_outputs
                 .insert(document_id, output);
         }
-        next_candidates.extend(forced_candidates);
-        round1_candidates = next_candidates;
-    }
 
-    // The converged package interface table. It both keys each document's round-2 cache (via the
-    // per-document dependency fingerprint rendered against it) and supplies the schemes bound when a
-    // document actually runs inference. Names pinned during the fixed-point are forced to `Unknown`
-    // here too, so the round-2 checks see the same cycle-resolved interface the iteration converged on.
+        if !any_interface_changed && !pinned_this_round {
+            converged = true;
+            break;
+        }
+    }
+    // The bound is sized so every legitimate package converges, so non-convergence is a genuine
+    // fixed-point defect (e.g. a non-monotone exported scheme), not a deep chain: fail loudly in
+    // debug/test builds.
+    debug_assert!(
+        converged,
+        "package interface fixed-point did not converge within {max_package_interface_rounds} rounds; \
+         this indicates a fixed-point defect (e.g. a non-monotone exported scheme), not a deep chain"
+    );
+
+    // The converged package interface table. It supplies the schemes bound when each document runs its
+    // authoritative round-2 check; names pinned during the fixed-point are forced to `Unknown` here too.
     let mut final_table = build_package_interface_table(
         &package_naming,
         &analysis_state.document_interface_outputs,
@@ -1300,86 +832,32 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         }
     }
 
-    // Round-2 candidate set: the dirty documents plus every referrer of a changed global. A
-    // type-definition change forces the full document set (it can affect any check, see above). This is
-    // a superset of every document a full scan would recompute — the per-document cache check below
-    // still decides actual recompute — so no document that needs rechecking is ever skipped.
-    //
-    // Defensive net for the (now unreachable in practice) case where round 1 exhausts its bound without
-    // converging: `changed_globals` would be incomplete, so narrowing the candidate set could silently
-    // leave the deepest referrers stale. Fall back to considering every document. This only widens the
-    // *candidate* set — the per-document dependency-fingerprint cache check below still skips documents
-    // that genuinely did not change — so it is conservative (never stale) and never forces extra
-    // recompute. The bound above is sized so legitimate acyclic and cyclic structures always converge,
-    // so reaching this path signals a real fixed-point bug rather than a deep chain.
-    let round2_candidates = if type_definitions_changed || !converged {
-        all_document_ids.iter().copied().collect::<BTreeSet<_>>()
-    } else {
-        let mut candidates = dirty_documents.clone();
-        for symbol in &changed_globals {
-            for referrer in analysis_state.documents_referencing(*symbol) {
-                candidates.insert(referrer);
-            }
-        }
-        candidates
-    };
-    // The bound is sized so every legitimate package converges, so non-convergence is a genuine
-    // fixed-point defect (e.g. a non-monotone scheme), not a deep chain: fail loudly in debug/test
-    // builds. Release builds stay correct via the all-docs round-2 fallback above (graceful, never
-    // stale) even if such a defect ever slips through.
-    debug_assert!(
-        converged,
-        "package interface fixed-point did not converge within {max_package_interface_rounds} rounds; \
-         this indicates a fixed-point defect (e.g. a non-monotone exported scheme), not a deep chain"
-    );
-    analysis_state.last_candidate_count = round2_candidates.len();
-
-    let mut recomputed_document_ids = Vec::new();
-    let mut recompute_reasons = Vec::new();
+    // Round 2: the authoritative per-document check over every document, recording expression types for
+    // hover and inlay hints.
+    let mut checked_document_ids = Vec::new();
     let mut fresh_outputs = Vec::new();
-    for document_id in &round2_candidates {
+    for document_id in &all_document_ids {
         let Some(document_version) = analysis_state.document_version(*document_id) else {
             continue;
         };
         let local_naming = analysis_state
             .document_naming(*document_id)
             .unwrap_or_else(|| panic!("missing local naming for typecheck {document_id:?}"));
-        // Only the names this document actually references need to be in scope; binding the
-        // whole package interface would make every check linear in package size. The same set keys
-        // the cache: a document rechecks only when its version or one of these schemes changes.
         let referenced_symbols = local_naming
             .non_locals
             .values()
             .copied()
-            .collect::<std::collections::BTreeSet<_>>();
-        let per_doc_dependency_fingerprint = render_dependency_fingerprint(
-            &referenced_symbols,
-            &final_table,
-            analysis_state.interner(),
-        );
-
-        if analysis_state
-            .document_typecheck_outputs
-            .get(document_id)
-            .is_some_and(|output| {
-                output.version == document_version
-                    && output.type_definitions_fingerprint == type_definitions_fingerprint
-                    && output.dependency_fingerprint == per_doc_dependency_fingerprint
-            })
-        {
-            continue;
-        }
-
+            .collect::<BTreeSet<_>>();
         let module = analysis_state
             .module(*document_id)
             .unwrap_or_else(|| panic!("missing lowered module for typecheck {document_id:?}"));
-        // Script-local type declarations are visible only inside the script itself and
-        // shadow package definitions of the same name.
+        // Script-local type declarations are visible only inside the script itself and shadow package
+        // definitions of the same name.
         let document_type_definitions =
             if analysis_state.non_package_documents.contains(document_id) {
-                let package_modules = package_document_ids.iter().filter_map(|package_document_id| {
-                    analysis_state.module(*package_document_id)
-                });
+                let package_modules = package_document_ids
+                    .iter()
+                    .filter_map(|package_document_id| analysis_state.module(*package_document_id));
                 TypeDefinitionEnvironment::from_modules(package_modules.chain([module]))
             } else {
                 type_definitions.clone()
@@ -1391,8 +869,6 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 inference_state.bind_global_scheme(*symbol, imported_scheme, export.range);
             }
         }
-        // Round 2 is the authoritative per-document check, so it records expression types for
-        // hover and inlay hints.
         inference_state.enable_expression_type_recording();
         let module_check = inference_state.check_module_with_naming(
             *document_id,
@@ -1418,28 +894,12 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
             *document_id,
             TypecheckDocumentOutput {
                 version: document_version,
-                type_definitions_fingerprint: type_definitions_fingerprint.clone(),
-                dependency_fingerprint: per_doc_dependency_fingerprint,
                 diagnostics,
                 strict_diagnostics,
                 expression_types,
             },
         ));
-        // The proximate cause: a document whose own version changed is a body edit even if it also
-        // references a changed global; otherwise it recomputed because a package-global it references
-        // moved, so name the responsible globals (the changed globals it actually references).
-        let reason = if dirty_documents.contains(document_id) {
-            RecomputeReason::BodyEdit
-        } else {
-            RecomputeReason::InterfaceChange(
-                changed_globals
-                    .intersection(&referenced_symbols)
-                    .copied()
-                    .collect(),
-            )
-        };
-        recompute_reasons.push((*document_id, reason));
-        recomputed_document_ids.push(*document_id);
+        checked_document_ids.push(*document_id);
     }
     for (document_id, output) in fresh_outputs {
         analysis_state
@@ -1447,12 +907,7 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
             .insert(document_id, output);
     }
 
-    analysis_state.last_typecheck_package_version = Some(analysis_state.package_version);
-    analysis_state.last_type_definitions_fingerprint = Some(type_definitions_fingerprint);
-    analysis_state.last_typecheck_global_bindings = Some(package_naming.global_bindings.clone());
-    analysis_state.dirty_documents.clear();
-    analysis_state.last_recompute_reasons = recompute_reasons;
-    recomputed_document_ids
+    checked_document_ids
 }
 
 // Renders each strict `Unknown` origin into a diagnostic. An origin that is the value of an
@@ -1512,302 +967,13 @@ impl Analysis {
     }
 
     fn invalidate_document(&mut self, document_id: DocumentId) {
-        // Every add/edit/delete funnels through here, so this is the single place that records which
-        // documents changed since the last typecheck. `typecheck` consumes and clears the set.
-        self.dirty_documents.insert(document_id);
-        // Drops only the version-keyed caches. The reverse-dependency index is intentionally left
-        // untouched: a document re-patches its own edges when its naming is recomputed (see
-        // `patch_reverse_dependencies`), and that patch derives the document's *old* edges from the
-        // index itself, so it stays correct even though the previous naming output is gone here.
+        // Drops the document's version-keyed phase caches so the next `run_full` re-derives it from
+        // scratch. Every add/edit/delete funnels through here.
         self.lint_outputs.remove(&document_id);
         self.lowering_outputs.remove(&document_id);
         self.document_naming_outputs.remove(&document_id);
         self.document_interface_outputs.remove(&document_id);
         self.document_typecheck_outputs.remove(&document_id);
-    }
-
-    // Re-derives `document_id`'s edges in the reverse-dependency index (the package globals it
-    // references, from `NamesLocal.non_locals`) to exactly `new_refs`. Empty `new_refs` retracts the
-    // document (used on delete).
-    fn patch_reverse_dependencies(&mut self, document_id: DocumentId, new_refs: &BTreeSet<Symbol>) {
-        patch_document_symbol_index(&mut self.reverse_dependencies, document_id, new_refs);
-    }
-
-    // Re-derives `document_id`'s entries in the package-definition candidate index (the package
-    // globals it defines as top-level bindings) to exactly `new_definitions`. Empty `new_definitions`
-    // retracts the document (used on delete, and for scripts, which define no package globals).
-    fn patch_package_definitions(
-        &mut self,
-        document_id: DocumentId,
-        new_definitions: &BTreeSet<Symbol>,
-    ) {
-        let affected =
-            patch_document_symbol_index(&mut self.package_definitions, document_id, new_definitions);
-        // Every name whose candidate set changed feeds the next package-naming maintenance, which
-        // repatches its winner and re-diagnoses its co-definers and (on a defined-ness flip) referrers.
-        self.naming_dirty_names.extend(affected);
-    }
-
-    // Re-derives `document_id`'s edges in the type reverse-dependency index (the type names it
-    // references, from `document_type_references`) to exactly `new_refs`. Empty `new_refs` retracts the
-    // document (used on delete).
-    fn patch_type_references(&mut self, document_id: DocumentId, new_refs: &BTreeSet<Symbol>) {
-        patch_document_symbol_index(&mut self.type_references, document_id, new_refs);
-    }
-
-    // Re-derives `document_id`'s entries in the type-definition candidate index to exactly
-    // `new_definitions` (its `@type`/`@alias` declarations and their `TypeInfo`s). Empty
-    // `new_definitions` retracts the document (used on delete, and for scripts, which define no package
-    // types). Unlike the value-side candidate index this carries a per-document value (the declared
-    // `TypeInfo`s), so a name whose membership is unchanged but whose kind or arity moved still counts
-    // as affected — that is what makes a referrer of a kind/arity-flipped type re-evaluate.
-    fn patch_type_definitions(
-        &mut self,
-        document_id: DocumentId,
-        new_definitions: &BTreeMap<Symbol, Vec<TypeInfo>>,
-    ) {
-        let old_names = self
-            .type_definitions
-            .iter()
-            .filter(|(_, documents)| documents.contains_key(&document_id))
-            .map(|(name, _)| *name)
-            .collect::<BTreeSet<_>>();
-        for name in &old_names {
-            if new_definitions.contains_key(name) {
-                continue;
-            }
-            if let Some(documents) = self.type_definitions.get_mut(name) {
-                documents.remove(&document_id);
-                if documents.is_empty() {
-                    self.type_definitions.remove(name);
-                }
-            }
-            self.naming_dirty_type_names.insert(*name);
-        }
-        for (name, sites) in new_definitions {
-            let previous = self
-                .type_definitions
-                .entry(*name)
-                .or_default()
-                .insert(document_id, sites.clone());
-            if previous.as_ref() != Some(sites) {
-                self.naming_dirty_type_names.insert(*name);
-            }
-        }
-    }
-
-    // LT2 isolation oracle: a stdlib stub is a base-environment *value* input only, seeded into the
-    // per-document inference template. The property that matters is that an *un-shadowed* stub never
-    // becomes a package *value* — never a package-definition, a package global, an interface export,
-    // or a naming dirty-name — because those feed the package interface table and its fingerprints,
-    // where a stub would let one edit spuriously invalidate package-wide. (A user may shadow a base
-    // name with a real top-level binding, after which it is an ordinary package global; the loop skips
-    // shadowed names.) A stub MAY legitimately appear as a
-    // reverse-dependency key (a value reference to a stub is indexed exactly like a reference to an
-    // as-yet-undefined name, so that a later package binding shadowing the stub can revalidate the
-    // referrers via category D) and as a type-namespace key (`type_definitions`/`type_references` are
-    // the *type* namespace; a user type sharing a stub value's name is an unrelated entity). Neither
-    // reaches a fingerprint, because `render_dependency_fingerprint` reads only the interface table,
-    // which never holds a stub. Debug-only. (The dirty-*document* set is keyed by `DocumentId`, not by
-    // symbol, so stubs cannot enter it.)
-    #[cfg(any(debug_assertions, feature = "verify-incremental"))]
-    fn assert_stub_isolation(&self) {
-        for symbol in self.stub_library.symbols() {
-            // A user may shadow a base stub with a real top-level binding (the "shadows a builtin"
-            // warning fires). A shadowed name is then an ordinary package global and legitimately
-            // fills the package-value indexes — only an *un-shadowed* stub must stay isolated, so skip
-            // any stub the user has package-defined.
-            if self.package_definitions.contains_key(&symbol) {
-                continue;
-            }
-            let name = self.interner.resolve(symbol).unwrap_or("<unknown>");
-            assert!(
-                !self.naming_dirty_names.contains(&symbol),
-                "stub symbol `{name}` leaked into the naming dirty-name set"
-            );
-            if let Some(output) = &self.package_naming_output {
-                assert!(
-                    !output.output.global_bindings.contains_key(&symbol),
-                    "stub symbol `{name}` leaked into global_bindings"
-                );
-            }
-            for output in self.document_interface_outputs.values() {
-                assert!(
-                    !output.exports.iter().any(|export| export.symbol == symbol),
-                    "stub symbol `{name}` leaked into a document interface export"
-                );
-            }
-        }
-    }
-
-    // Salsa-style verify for the reverse-dependency index: rebuilds it from scratch by folding every
-    // current naming output and asserts it equals the incrementally maintained index. Debug-only.
-    #[cfg(any(debug_assertions, feature = "verify-incremental"))]
-    fn assert_reverse_dependencies_consistent(&self) {
-        let mut rebuilt: BTreeMap<Symbol, BTreeSet<DocumentId>> = BTreeMap::new();
-        for (document_id, output) in &self.document_naming_outputs {
-            for symbol in output.output.non_locals.values() {
-                rebuilt.entry(*symbol).or_default().insert(*document_id);
-            }
-        }
-        assert_eq!(
-            rebuilt, self.reverse_dependencies,
-            "reverse-dependency index drifted from the per-document naming outputs"
-        );
-    }
-
-    // Salsa-style verify for the package-definition candidate index: the maintained index equals a
-    // full rebuild folding every package document's top-level bindings. Debug-only.
-    #[cfg(any(debug_assertions, feature = "verify-incremental"))]
-    fn assert_package_definitions_consistent(&self) {
-        let mut rebuilt: BTreeMap<Symbol, BTreeSet<DocumentId>> = BTreeMap::new();
-        for (document_id, output) in &self.document_naming_outputs {
-            if self.non_package_documents.contains(document_id) {
-                continue;
-            }
-            let Some(module) = self.module(*document_id) else {
-                continue;
-            };
-            for symbol in document_package_definitions(module, &output.output) {
-                rebuilt.entry(symbol).or_default().insert(*document_id);
-            }
-        }
-        assert_eq!(
-            rebuilt, self.package_definitions,
-            "package-definition candidate index drifted from the per-document naming outputs"
-        );
-    }
-
-    // Salsa-style verify for the type reverse-dependency index: rebuilds it from scratch by folding
-    // every current document's `document_type_references` and asserts it equals the maintained index.
-    #[cfg(any(debug_assertions, feature = "verify-incremental"))]
-    fn assert_type_references_consistent(&self) {
-        let mut rebuilt: BTreeMap<Symbol, BTreeSet<DocumentId>> = BTreeMap::new();
-        for (document_id, output) in &self.document_naming_outputs {
-            let Some(module) = self.module(*document_id) else {
-                continue;
-            };
-            for symbol in document_type_references(module, &output.output) {
-                rebuilt.entry(symbol).or_default().insert(*document_id);
-            }
-        }
-        assert_eq!(
-            rebuilt, self.type_references,
-            "type reverse-dependency index drifted from the per-document naming outputs"
-        );
-    }
-
-    // Non-circular drift oracle for the incrementally maintained type index. Rebuilds the candidate
-    // index and the materialized type index + duplicate set from PRIMARY inputs (the lowered package
-    // modules, via `document_type_definitions` and `build_type_index`), never from the patched state,
-    // and asserts all three equal the maintained structures. Together with `assert_package_naming_consistent`
-    // (which re-derives type-reference and duplicate diagnostics through the same `build_type_index`),
-    // this proves the incremental type index and its derived diagnostics match a from-scratch rebuild.
-    #[cfg(any(debug_assertions, feature = "verify-incremental"))]
-    fn assert_type_definitions_consistent(&self) {
-        let mut rebuilt_candidates: BTreeMap<Symbol, BTreeMap<DocumentId, Vec<TypeInfo>>> =
-            BTreeMap::new();
-        for document_id in self.package_document_ids() {
-            let Some(module) = self.module(document_id) else {
-                continue;
-            };
-            for (symbol, sites) in document_type_definitions(module) {
-                rebuilt_candidates
-                    .entry(symbol)
-                    .or_default()
-                    .insert(document_id, sites);
-            }
-        }
-        assert_eq!(
-            rebuilt_candidates, self.type_definitions,
-            "type-definition candidate index drifted from the per-document modules"
-        );
-
-        let package_modules = self
-            .package_document_ids()
-            .into_iter()
-            .filter_map(|document_id| self.module(document_id).map(|module| (document_id, module)))
-            .collect::<Vec<_>>();
-        let (rebuilt_types, rebuilt_duplicates) = build_type_index(&package_modules);
-        assert_eq!(
-            rebuilt_types, self.package_type_index,
-            "materialized package type index drifted from the full rebuild"
-        );
-        assert_eq!(
-            rebuilt_duplicates, self.duplicate_type_names,
-            "materialized duplicate-type-name set drifted from the full rebuild"
-        );
-    }
-
-    // Non-circular four-category drift oracle for the incrementally maintained package naming. Rebuilds
-    // a fresh oracle from ALL package naming outputs (not the patched state) via `rebuild_package_naming`
-    // and asserts (1) the maintained `global_bindings` equals the oracle's, and (2) every document's
-    // maintained diagnostic set (overwrite + shadow + type-reference + unresolved-reference) equals the
-    // oracle's, compared order-insensitively. This is the safety net for the diagnostics refactor: it
-    // verifies the incremental routing re-diagnosed exactly the documents a full rebuild would. Debug-only.
-    #[cfg(any(debug_assertions, feature = "verify-incremental"))]
-    fn assert_package_naming_consistent(&self) {
-        let package_document_ids = self.package_document_ids();
-        let package_modules = package_document_ids
-            .iter()
-            .filter_map(|document_id| self.module(*document_id).map(|module| (*document_id, module)))
-            .collect::<Vec<_>>();
-        let extra_modules = self
-            .all_document_ids()
-            .into_iter()
-            .filter(|document_id| !package_document_ids.contains(document_id))
-            .filter_map(|document_id| self.module(document_id).map(|module| (document_id, module)))
-            .collect::<Vec<_>>();
-        let naming_locals = self
-            .document_naming_outputs
-            .iter()
-            .map(|(document_id, output)| (*document_id, output.output.clone()))
-            .collect::<HashMap<_, _>>();
-        let oracle = rebuild_package_naming(
-            &package_modules,
-            &extra_modules,
-            &naming_locals,
-            self.interner(),
-            &self.stub_library,
-        );
-
-        let maintained = self.package_naming_output.as_ref();
-        let maintained_bindings = maintained
-            .map(|output| output.output.global_bindings.clone())
-            .unwrap_or_default();
-        assert_eq!(
-            maintained_bindings, oracle.naming.global_bindings,
-            "maintained global_bindings drifted from the full rebuild"
-        );
-
-        let empty_diagnostics = HashMap::new();
-        let maintained_diagnostics = maintained.map(|output| &output.diagnostics).unwrap_or(&empty_diagnostics);
-        for document_id in maintained_diagnostics.keys() {
-            assert!(
-                self.documents.contains_key(document_id),
-                "package-naming diagnostics retained for deleted {document_id:?}"
-            );
-        }
-        let sort_key = |diagnostic: &Diagnostic| {
-            (
-                diagnostic.range.start_byte,
-                diagnostic.range.end_byte,
-                diagnostic.message.clone(),
-            )
-        };
-        for document_id in self.documents.keys() {
-            let mut maintained_document = maintained_diagnostics
-                .get(document_id)
-                .cloned()
-                .unwrap_or_default();
-            let mut oracle_document = oracle.diagnostics.get(document_id).cloned().unwrap_or_default();
-            maintained_document.sort_by_key(sort_key);
-            oracle_document.sort_by_key(sort_key);
-            assert_eq!(
-                maintained_document, oracle_document,
-                "package-naming diagnostics for {document_id:?} drifted from the full rebuild"
-            );
-        }
     }
 
     fn bump_version(&mut self) -> Version {
@@ -1850,38 +1016,6 @@ impl Analysis {
     }
 }
 
-// Re-derives `document_id`'s membership in a per-document symbol index (`Symbol -> documents`) to
-// exactly `new_symbols`, patching only the delta. The document's *old* symbols are read back from the
-// index itself (the symbols where it is currently a member), not from its previous naming output,
-// which the invalidate→recompute path may already have dropped; this keeps the patch correct across
-// invalidate→recompute and delete. Shared by the reverse-dependency and package-definition indexes,
-// which maintain the identical "remove own entries by contributing `DocumentId`, then insert" shape.
-// Returns the symbols whose membership for `document_id` changed (the symmetric difference of its old
-// and new symbol sets) — the affected names a caller patches downstream.
-fn patch_document_symbol_index(
-    index: &mut BTreeMap<Symbol, BTreeSet<DocumentId>>,
-    document_id: DocumentId,
-    new_symbols: &BTreeSet<Symbol>,
-) -> BTreeSet<Symbol> {
-    let old_symbols = index
-        .iter()
-        .filter(|(_, documents)| documents.contains(&document_id))
-        .map(|(symbol, _)| *symbol)
-        .collect::<BTreeSet<_>>();
-    for symbol in old_symbols.difference(new_symbols) {
-        if let Some(documents) = index.get_mut(symbol) {
-            documents.remove(&document_id);
-            if documents.is_empty() {
-                index.remove(symbol);
-            }
-        }
-    }
-    for symbol in new_symbols.difference(&old_symbols) {
-        index.entry(*symbol).or_default().insert(document_id);
-    }
-    old_symbols.symmetric_difference(new_symbols).copied().collect()
-}
-
 #[cfg(test)]
 mod tests {
     use {
@@ -1892,7 +1026,6 @@ mod tests {
         crate::{
             Diagnostic, Severity,
             lint::NameStyle,
-            naming::document_package_definitions,
             text::{TextPosition, TextRange},
         },
         std::{
@@ -1903,431 +1036,6 @@ mod tests {
             time::{SystemTime, UNIX_EPOCH},
         },
     };
-
-    // Folds every current per-document naming output into a reverse-dependency index from scratch.
-    // The maintained `Analysis::reverse_dependencies` must equal this after every operation.
-    fn rebuild_reverse_dependencies(
-        analysis: &Analysis,
-    ) -> BTreeMap<Symbol, BTreeSet<DocumentId>> {
-        let mut rebuilt: BTreeMap<Symbol, BTreeSet<DocumentId>> = BTreeMap::new();
-        for (document_id, output) in &analysis.document_naming_outputs {
-            for symbol in output.output.non_locals.values() {
-                rebuilt.entry(*symbol).or_default().insert(*document_id);
-            }
-        }
-        rebuilt
-    }
-
-    #[test]
-    fn reverse_dependencies_register_cross_and_forward_references() {
-        // `b` references the defined global `g`; `c` references `not_defined`, a global no document
-        // defines. Both must register as referrers — the index keys on the name a reference attempts
-        // to resolve, so a forward reference to a not-yet-defined global still counts.
-        let mut analysis = Analysis::new(
-            PathBuf::from("/workspace"),
-            LintConfig::default(),
-            CheckConfig::default(),
-        );
-        analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "g <- function(x) x")
-            .expect("document should parse");
-        let b_id = analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/b.R"), "r <- g(1L)")
-            .expect("document should parse");
-        let c_id = analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/c.R"), "z <- not_defined(2L)")
-            .expect("document should parse");
-        resolve_package(&mut analysis);
-
-        let g_symbol = analysis.interner_mut().intern("g");
-        let not_defined_symbol = analysis.interner_mut().intern("not_defined");
-        assert_eq!(
-            analysis.documents_referencing(g_symbol).collect::<Vec<_>>(),
-            vec![b_id]
-        );
-        assert_eq!(
-            analysis
-                .documents_referencing(not_defined_symbol)
-                .collect::<Vec<_>>(),
-            vec![c_id],
-            "a forward reference to a not-yet-defined global registers as a referrer"
-        );
-        assert_eq!(
-            rebuild_reverse_dependencies(&analysis),
-            analysis.reverse_dependencies
-        );
-    }
-
-    #[test]
-    fn reverse_dependencies_follow_edited_reference_set() {
-        // Editing `b` to reference a different global must move its edge: the old global loses `b`,
-        // the new global gains it, and the index equals a full rebuild.
-        let mut analysis = Analysis::new(
-            PathBuf::from("/workspace"),
-            LintConfig::default(),
-            CheckConfig::default(),
-        );
-        analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "g <- 1L\nh <- 2L")
-            .expect("document should parse");
-        let b_id = analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/b.R"), "r <- g")
-            .expect("document should parse");
-        resolve_package(&mut analysis);
-
-        let g_symbol = analysis.interner_mut().intern("g");
-        let h_symbol = analysis.interner_mut().intern("h");
-        assert_eq!(
-            analysis.documents_referencing(g_symbol).collect::<Vec<_>>(),
-            vec![b_id]
-        );
-
-        analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/b.R"), "r <- h")
-            .expect("document should parse");
-        resolve_package(&mut analysis);
-
-        assert!(
-            analysis.documents_referencing(g_symbol).next().is_none(),
-            "the old reference is dropped"
-        );
-        assert_eq!(
-            analysis.documents_referencing(h_symbol).collect::<Vec<_>>(),
-            vec![b_id],
-            "the new reference is registered"
-        );
-        assert_eq!(
-            rebuild_reverse_dependencies(&analysis),
-            analysis.reverse_dependencies
-        );
-    }
-
-    #[test]
-    fn reverse_dependencies_drop_deleted_referrer_and_keep_others() {
-        // `b` and `c` both reference `g`. Deleting `b` removes only its edge; `c` survives.
-        let mut analysis = Analysis::new(
-            PathBuf::from("/workspace"),
-            LintConfig::default(),
-            CheckConfig::default(),
-        );
-        analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "g <- 1L")
-            .expect("document should parse");
-        analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/b.R"), "r <- g")
-            .expect("document should parse");
-        let c_id = analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/c.R"), "s <- g")
-            .expect("document should parse");
-        resolve_package(&mut analysis);
-
-        analysis
-            .delete_document(Path::new("/workspace/R/b.R"))
-            .expect("delete should succeed");
-        resolve_package(&mut analysis);
-
-        let g_symbol = analysis.interner_mut().intern("g");
-        assert_eq!(
-            analysis.documents_referencing(g_symbol).collect::<Vec<_>>(),
-            vec![c_id],
-            "the deleted document's edge vanishes; the other referrer remains"
-        );
-        assert_eq!(
-            rebuild_reverse_dependencies(&analysis),
-            analysis.reverse_dependencies
-        );
-    }
-
-    #[test]
-    fn reverse_dependencies_keep_referrer_when_global_is_later_defined() {
-        // `b` references `late` before any document defines it. The edge is registered up front and
-        // persists once `late` gains a defining document, since the reference still attempts the same
-        // package global.
-        let mut analysis = Analysis::new(
-            PathBuf::from("/workspace"),
-            LintConfig::default(),
-            CheckConfig::default(),
-        );
-        let b_id = analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/b.R"), "r <- late")
-            .expect("document should parse");
-        resolve_package(&mut analysis);
-
-        let late_symbol = analysis.interner_mut().intern("late");
-        assert_eq!(
-            analysis
-                .documents_referencing(late_symbol)
-                .collect::<Vec<_>>(),
-            vec![b_id],
-            "the referrer is registered before the definition exists"
-        );
-
-        analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "late <- 1L")
-            .expect("document should parse");
-        resolve_package(&mut analysis);
-
-        assert_eq!(
-            analysis
-                .documents_referencing(late_symbol)
-                .collect::<Vec<_>>(),
-            vec![b_id],
-            "the referrer survives the definition appearing"
-        );
-        assert_eq!(
-            rebuild_reverse_dependencies(&analysis),
-            analysis.reverse_dependencies
-        );
-    }
-
-    // Folds every current package document's top-level bindings into a candidate index from scratch.
-    // The maintained `Analysis::package_definitions` must equal this after every operation. Mirrors
-    // the debug `assert_package_definitions_consistent` fold; scripts contribute nothing.
-    fn rebuild_package_definitions(analysis: &Analysis) -> BTreeMap<Symbol, BTreeSet<DocumentId>> {
-        let mut rebuilt: BTreeMap<Symbol, BTreeSet<DocumentId>> = BTreeMap::new();
-        for (document_id, output) in &analysis.document_naming_outputs {
-            if analysis.non_package_documents.contains(document_id) {
-                continue;
-            }
-            let Some(module) = analysis.module(*document_id) else {
-                continue;
-            };
-            for symbol in document_package_definitions(module, &output.output) {
-                rebuilt.entry(symbol).or_default().insert(*document_id);
-            }
-        }
-        rebuilt
-    }
-
-    fn global_winner(analysis: &Analysis, symbol: Symbol) -> Option<DocumentId> {
-        analysis
-            .package_naming()
-            .and_then(|naming| naming.global_bindings.get(&symbol).copied())
-    }
-
-    #[test]
-    fn package_definitions_register_overlapping_definitions_and_exclude_scripts() {
-        // `a` and `m` both define `shared` (overlap); a script defines `script_local`, which must not
-        // enter the index. The winner of `shared` is the path-last definer `m`.
-        let mut analysis = Analysis::new(
-            PathBuf::from("/workspace"),
-            LintConfig::default(),
-            CheckConfig::default(),
-        );
-        let a_id = analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "g <- 1L\nshared <- 1L")
-            .expect("document should parse");
-        let m_id = analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/m.R"), "shared <- 2L\nh <- 3L")
-            .expect("document should parse");
-        analysis
-            .add_document_from_source(
-                PathBuf::from("/workspace/scripts/use.R"),
-                "script_local <- 5L",
-            )
-            .expect("document should parse");
-        resolve_package(&mut analysis);
-
-        let shared_symbol = analysis.interner_mut().intern("shared");
-        let g_symbol = analysis.interner_mut().intern("g");
-        let h_symbol = analysis.interner_mut().intern("h");
-        let script_local_symbol = analysis.interner_mut().intern("script_local");
-
-        assert_eq!(
-            analysis.package_definitions.get(&shared_symbol),
-            Some(&BTreeSet::from([a_id, m_id])),
-            "both definers of an overlapping name are candidates"
-        );
-        assert!(
-            !analysis.package_definitions.contains_key(&script_local_symbol),
-            "a script does not define package globals"
-        );
-        assert_eq!(global_winner(&analysis, shared_symbol), Some(m_id));
-        assert_eq!(global_winner(&analysis, g_symbol), Some(a_id));
-        assert_eq!(global_winner(&analysis, h_symbol), Some(m_id));
-        assert_eq!(
-            rebuild_package_definitions(&analysis),
-            analysis.package_definitions
-        );
-    }
-
-    #[test]
-    fn package_definitions_exclude_conditionally_executed_assignments() {
-        // `x <- 1` nested in `if (TRUE) { ... }` is rolled out of the top-level scope and marked
-        // maybe-defined, yet its binding keeps the `TopLevelAssignment` kind. The candidate index must
-        // follow the package path order (top-level `Assign` expressions only), excluding `x`, so the
-        // maintained `global_bindings` stays empty and the drift oracle agrees with the full rebuild.
-        let mut analysis = Analysis::new(
-            PathBuf::from("/workspace"),
-            LintConfig::default(),
-            CheckConfig::default(),
-        );
-        analysis
-            .add_document_from_source(
-                PathBuf::from("/workspace/R/conditional.R"),
-                "if (TRUE) {\n  x <- 1\n}\n",
-            )
-            .expect("document should parse");
-        resolve_package(&mut analysis);
-
-        let x_symbol = analysis.interner_mut().intern("x");
-        assert!(
-            !analysis.package_definitions.contains_key(&x_symbol),
-            "a conditionally-executed assignment is not a package definition"
-        );
-        assert_eq!(global_winner(&analysis, x_symbol), None);
-        assert!(
-            analysis
-                .package_naming()
-                .is_none_or(|naming| naming.global_bindings.is_empty()),
-            "no package globals are materialized for a conditionally-executed assignment"
-        );
-        assert_eq!(
-            rebuild_package_definitions(&analysis),
-            analysis.package_definitions
-        );
-    }
-
-    #[test]
-    fn package_definitions_follow_edited_top_level_bindings() {
-        // Editing `a` from defining `g` to defining `h` drops `g` (its sole definer) and adds `h`.
-        let mut analysis = Analysis::new(
-            PathBuf::from("/workspace"),
-            LintConfig::default(),
-            CheckConfig::default(),
-        );
-        let a_id = analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "g <- 1L")
-            .expect("document should parse");
-        resolve_package(&mut analysis);
-
-        let g_symbol = analysis.interner_mut().intern("g");
-        assert_eq!(
-            analysis.package_definitions.get(&g_symbol),
-            Some(&BTreeSet::from([a_id]))
-        );
-
-        analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "h <- 2L")
-            .expect("document should parse");
-        resolve_package(&mut analysis);
-
-        let h_symbol = analysis.interner_mut().intern("h");
-        assert!(
-            !analysis.package_definitions.contains_key(&g_symbol),
-            "the dropped top-level binding leaves the index"
-        );
-        assert_eq!(global_winner(&analysis, g_symbol), None);
-        assert_eq!(
-            analysis.package_definitions.get(&h_symbol),
-            Some(&BTreeSet::from([a_id]))
-        );
-        assert_eq!(global_winner(&analysis, h_symbol), Some(a_id));
-        assert_eq!(
-            rebuild_package_definitions(&analysis),
-            analysis.package_definitions
-        );
-    }
-
-    #[test]
-    fn package_definitions_drop_deleted_definer_and_winner_falls_back() {
-        // `a` and `m` both define `g`; the winner is `m`. Deleting `m` retracts its candidate and the
-        // winner falls back to the remaining path-latest definer `a`.
-        let mut analysis = Analysis::new(
-            PathBuf::from("/workspace"),
-            LintConfig::default(),
-            CheckConfig::default(),
-        );
-        let a_id = analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "g <- 1L")
-            .expect("document should parse");
-        let m_id = analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/m.R"), "g <- 2L")
-            .expect("document should parse");
-        resolve_package(&mut analysis);
-
-        let g_symbol = analysis.interner_mut().intern("g");
-        assert_eq!(
-            analysis.package_definitions.get(&g_symbol),
-            Some(&BTreeSet::from([a_id, m_id]))
-        );
-        assert_eq!(global_winner(&analysis, g_symbol), Some(m_id));
-
-        analysis
-            .delete_document(Path::new("/workspace/R/m.R"))
-            .expect("delete should succeed");
-        resolve_package(&mut analysis);
-
-        assert_eq!(
-            analysis.package_definitions.get(&g_symbol),
-            Some(&BTreeSet::from([a_id])),
-            "the deleted definer's candidate vanishes; the other remains"
-        );
-        assert_eq!(
-            global_winner(&analysis, g_symbol),
-            Some(a_id),
-            "the winner falls back to the path-latest surviving definer"
-        );
-        assert_eq!(
-            rebuild_package_definitions(&analysis),
-            analysis.package_definitions
-        );
-    }
-
-    #[test]
-    fn package_definitions_winner_is_path_last_and_flips_on_definer_changes() {
-        // `g` defined across documents; the winner is always the path-last definer, never the
-        // numerically-newest `DocumentId`. Adding a later-path definer flips the winner; deleting it
-        // flips back; adding an earlier-path definer leaves the winner unchanged.
-        let mut analysis = Analysis::new(
-            PathBuf::from("/workspace"),
-            LintConfig::default(),
-            CheckConfig::default(),
-        );
-        analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/a.R"), "g <- 1L")
-            .expect("document should parse");
-        let m_id = analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/m.R"), "g <- 2L")
-            .expect("document should parse");
-        resolve_package(&mut analysis);
-        let g_symbol = analysis.interner_mut().intern("g");
-        assert_eq!(
-            global_winner(&analysis, g_symbol),
-            Some(m_id),
-            "path-last of {{a, m}} is m"
-        );
-
-        // A later-path definer (z > m) becomes the new winner.
-        let z_id = analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/z.R"), "g <- 3L")
-            .expect("document should parse");
-        resolve_package(&mut analysis);
-        assert_eq!(global_winner(&analysis, g_symbol), Some(z_id));
-
-        // Deleting the later-path definer flips the winner back to m.
-        analysis
-            .delete_document(Path::new("/workspace/R/z.R"))
-            .expect("delete should succeed");
-        resolve_package(&mut analysis);
-        assert_eq!(global_winner(&analysis, g_symbol), Some(m_id));
-
-        // An earlier-path definer (a < b < m) is a loser; the winner stays m even though b has the
-        // newest DocumentId.
-        analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/b.R"), "g <- 4L")
-            .expect("document should parse");
-        resolve_package(&mut analysis);
-        assert_eq!(
-            global_winner(&analysis, g_symbol),
-            Some(m_id),
-            "the newest DocumentId is an earlier-path loser; the path-last winner is unchanged"
-        );
-        assert_eq!(
-            rebuild_package_definitions(&analysis),
-            analysis.package_definitions
-        );
-    }
 
     #[test]
     fn package_document_ids_exclude_non_package_paths() {
@@ -2595,45 +1303,6 @@ mod tests {
             !analysis.document_diagnostics(document_id).is_empty(),
             "type errors must be surfaced when `[check] typing` is on"
         );
-    }
-
-    #[test]
-    fn typecheck_reuses_cached_document_output_when_nothing_changed() {
-        let mut analysis = Analysis::new(
-            PathBuf::from("/workspace"),
-            LintConfig::default(),
-            CheckConfig::default(),
-        );
-        let document_id = analysis
-            .add_document_from_source(PathBuf::from("/workspace/R/main.R"), "1L + \"text\"")
-            .expect("document should parse");
-
-        let first_run = super::typecheck(&mut analysis);
-        assert_eq!(first_run, vec![document_id]);
-        let initial_diagnostics = analysis
-            .document_typecheck_outputs
-            .get(&document_id)
-            .map(|output| output.diagnostics.clone())
-            .unwrap_or_default();
-        assert!(!initial_diagnostics.is_empty());
-
-        let sentinel =
-            Diagnostic::type_error(initial_diagnostics[0].range, "cached typecheck sentinel");
-        analysis
-            .document_typecheck_outputs
-            .get_mut(&document_id)
-            .expect("typecheck output should exist")
-            .diagnostics = vec![sentinel.clone()];
-
-        let second_run = super::typecheck(&mut analysis);
-        assert!(second_run.is_empty());
-        let cached_diagnostics = analysis
-            .document_typecheck_outputs
-            .get(&document_id)
-            .map(|output| output.diagnostics.clone())
-            .unwrap_or_default();
-
-        assert_eq!(cached_diagnostics, vec![sentinel]);
     }
 
     #[test]

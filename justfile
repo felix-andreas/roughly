@@ -23,11 +23,6 @@ test-analysis filter="" *args:
 bench *args:
     cargo test --release -p analysis --test test_benchmark -- --ignored --nocapture {{ args }}
 
-# Run the seeded incremental soak in a RELEASE build with the drift assertions compiled in
-# (the `verify-incremental` feature), verifying the optimized incremental path matches a full rebuild.
-verify-incremental:
-    cargo test -p analysis --release --features verify-incremental --test test_incremental -- --nocapture
-
 snapshot *args:
     cargo insta test --review -- --nocapture {{ args }}
 

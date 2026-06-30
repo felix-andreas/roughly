@@ -7,10 +7,6 @@ version.workspace = true
 path = "src/lib.rs"
 
 [features]
-# Additive, empty: only enables the incremental-drift runtime assertions (and the seeded
-# soak's internal oracles) in release builds. No API or behavior change otherwise.
-verify-incremental = []
-
 # Additive, off by default: compiles the `query_spike` shadow memo-engine prototype and its
 # cross-check/measurement tests. A de-risking investigation only; never part of normal/release builds
 # and it changes no production code path.
