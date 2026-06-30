@@ -33,7 +33,7 @@ use {
         },
         symbols,
     },
-    analysis::{self, Analysis, Document, DocumentChange, TextPosition, TextRange, ide, naming::DocumentKind},
+    analysis::{self, Document, DocumentChange, TextPosition, TextRange, ide, naming::DocumentKind},
     engine::{
         Engine, Shared,
         ide_view::{EngineIde, PathTable},
@@ -109,11 +109,10 @@ struct ServerState {
     experimental_features: ExperimentalFeatures,
     workspace_root: PathBuf,
     open_documents: HashSet<PathBuf>,
-    analysis_state: Analysis,
-    // The memoized query engine, fed in lockstep with `analysis_state` during the cutover (Phase 3): the
-    // engine mirrors the document text as inputs so reads can flip to it one subsystem at a time, with
-    // `analysis_state` staying the frozen oracle until the final slice removes it. `paths`/`file_ids` are
-    // the host-owned path↔FileId bijection the engine keys on (the engine never sees paths).
+    // The memoized query engine: the single analysis backend (Phase 3 cutover complete). Document text is
+    // fed in as `SourceText` inputs from the open-document buffers (`documents`) and from disk for closed
+    // package files. `paths`/`file_ids` are the host-owned path↔FileId bijection the engine keys on (the
+    // engine itself never sees paths).
     engine: Engine<RoughlyQueries>,
     paths: PathTable,
     file_ids: HashMap<PathBuf, FileId>,
@@ -148,7 +147,6 @@ impl ServerState {
             experimental_features,
             workspace_root: workspace_root.clone(),
             open_documents: HashSet::new(),
-            analysis_state: Analysis::new(workspace_root.clone(), config.lint, config.check),
             engine: Engine::new(RoughlyQueries::new()),
             paths: PathTable::new(workspace_root.clone()),
             file_ids: HashMap::new(),
@@ -319,67 +317,58 @@ impl ServerState {
         file
     }
 
-    // Mirror the current `analysis_state` document set into the engine inputs (Phase 3 transition).
-    // `analysis_state` owns the text and the incremental edit logic; this re-derives every engine input
-    // from it after each mutation so the engine stays a faithful shadow until reads cut over. `ProjectFiles`
-    // is ordered package-documents-first in `package_document_ids` (package-path-key) order so the engine's
-    // last-writer-wins symbol index selects the same winner production does; scripts follow (they export
-    // nothing, so their order does not affect winner selection).
-    fn sync_engine_from_analysis(&mut self) {
-        let package_ids = self.analysis_state.package_document_ids();
-        let package_set: HashSet<analysis::DocumentId> = package_ids.iter().copied().collect();
-        let mut ordered_paths = Vec::new();
-        for document_id in package_ids.iter().copied().chain(
-            self.analysis_state
-                .all_document_ids()
-                .into_iter()
-                .filter(|document_id| !package_set.contains(document_id)),
-        ) {
-            let Some(path) = self
-                .analysis_state
-                .path_for_document_id(document_id)
-                .map(Path::to_path_buf)
-            else {
-                continue;
-            };
-            let Some(document) = self.analysis_state.document_by_id(document_id) else {
-                continue;
-            };
-            ordered_paths.push((path, document.rope().to_string()));
-        }
+    fn is_package_path(&self, path: &Path) -> bool {
+        path.starts_with(self.workspace_r_path())
+    }
 
-        let r_path = self.workspace_r_path();
-        let mut project = Vec::new();
-        let mut live = HashSet::new();
-        for (path, text) in ordered_paths {
-            let file = self.file_id_for(&path);
-            let kind = if path.starts_with(&r_path) {
+    // Set (or update) a file's engine source inputs. Does not touch `ProjectFiles`; the caller invokes
+    // `rebuild_project_files` when the file SET changes (add/remove), not on a text-only edit.
+    fn set_source_input(&mut self, path: &Path, text: String, is_package: bool) {
+        let file = self.file_id_for(path);
+        self.engine.set_input(Key::SourceText(file), text);
+        self.engine.set_input(
+            Key::DocumentKind(file),
+            if is_package {
                 DocumentKind::Package
             } else {
                 DocumentKind::Script
-            };
-            self.engine.set_input(Key::SourceText(file), text);
-            self.engine.set_input(Key::DocumentKind(file), kind);
-            self.paths.insert(file, path);
-            project.push(file);
-            live.insert(file);
-        }
-        // Retract files that left the analysis set (a delete or a closed non-package document).
-        let stale = self
-            .file_ids
-            .iter()
-            .filter(|(_, file)| !live.contains(*file))
-            .map(|(path, file)| (path.clone(), *file))
-            .collect::<Vec<_>>();
-        for (path, file) in stale {
+            },
+        );
+        self.paths.insert(file, path.to_path_buf());
+    }
+
+    // Drop a file from the engine (deletion or a closed, no-longer-tracked document): tombstone its source
+    // input so dependents revalidate against the smaller set, and remove it from the host tables.
+    fn retract_source_input(&mut self, path: &Path) {
+        if let Some(file) = self.file_ids.remove(path) {
             self.engine.remove_input(&Key::SourceText(file));
             self.engine.remove_input(&Key::DocumentKind(file));
             self.paths.remove(file);
-            self.file_ids.remove(&path);
         }
+    }
 
+    // Recompute the `ProjectFiles` input. Package documents come first, ascending by package-relative path
+    // key, so the engine's last-writer-wins symbol index selects the same winner production's
+    // `max_by_key(package_path_key)` does; scripts follow (they export nothing, so their order is irrelevant).
+    fn rebuild_project_files(&mut self) {
+        let r_path = self.workspace_r_path();
+        let workspace_root = self.workspace_root.clone();
+        let mut entries = self
+            .file_ids
+            .iter()
+            .map(|(path, file)| {
+                let is_package = path.starts_with(&r_path);
+                let key = path
+                    .strip_prefix(&workspace_root)
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                (is_package, key, *file)
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+        let project = entries.into_iter().map(|(_, _, file)| file).collect::<Vec<_>>();
         self.engine.set_input(Key::ProjectFiles, project);
-        self.engine.set_input(Key::Config, self.engine_config());
     }
 
     fn continue_with_error(&mut self, message: String) -> ControlFlow<async_lsp::Result<()>> {
@@ -436,12 +425,10 @@ impl LanguageServer for ServerState {
             match index::source_file_paths(&workspace_r_path) {
                 Ok(paths) => {
                     for path in paths {
-                        self.analysis_state
-                            .add_document_from_disk(path.clone())
-                            .expect(&format!(
-                                "failed to preload analysis document {}",
-                                path.display()
-                            ));
+                        let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+                            panic!("failed to read package source {}: {error}", path.display())
+                        });
+                        self.set_source_input(&path, text, true);
                     }
                 }
                 Err(IndexError) => {
@@ -453,7 +440,8 @@ impl LanguageServer for ServerState {
             }
         }
 
-        self.sync_engine_from_analysis();
+        self.rebuild_project_files();
+        self.engine.set_input(Key::Config, self.engine_config());
 
         box_future(Ok(InitializeResult {
             capabilities: ServerCapabilities {
@@ -569,17 +557,13 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(?path, "did open");
 
-        self.analysis_state
-            .add_document_from_source(path.clone(), text)
-            .expect(&format!(
-                "failed to sync analysis document from source {}",
-                path.display()
-            ));
         let document = Document::parse(&mut self.parser, text)
             .unwrap_or_else(|_| panic!("failed to parse open document buffer {}", path.display()));
         self.documents.insert(path.clone(), document);
         self.open_documents.insert(path.clone());
-        self.sync_engine_from_analysis();
+        let is_package = self.is_package_path(&path);
+        self.set_source_input(&path, text.clone(), is_package);
+        self.rebuild_project_files();
 
         if !self.client_supports_pull_diagnostics {
             let diagnostics = self.convert_document_diagnostics(&path);
@@ -609,28 +593,18 @@ impl LanguageServer for ServerState {
 
         self.open_documents.remove(&path);
         self.documents.remove(&path);
-        if path.starts_with(self.workspace_r_path()) {
-            if path.exists() {
-                self.analysis_state
-                    .add_document_from_disk(path.clone())
-                    .unwrap_or_else(|error| {
-                        panic!(
-                            "failed to reload analysis document from disk on close {}: {error:?}",
-                            path.display()
-                        )
-                    });
-            } else {
-                self.analysis_state
-                    .delete_document(&path)
-                    .unwrap_or_else(|error| {
-                        panic!(
-                            "failed to delete analysis document on close {}: {error:?}",
-                            path.display()
-                        )
-                    });
-            }
+        if self.is_package_path(&path) && path.exists() {
+            // A closed package file still on disk reverts to its on-disk text (discarding unsaved buffer
+            // edits); the file set is unchanged, so no `rebuild_project_files`.
+            let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+                panic!("failed to reload package source on close {}: {error}", path.display())
+            });
+            self.set_source_input(&path, text, true);
+        } else {
+            // A deleted package file, or a closed script: it is no longer tracked.
+            self.retract_source_input(&path);
+            self.rebuild_project_files();
         }
-        self.sync_engine_from_analysis();
 
         ControlFlow::Continue(())
     }
@@ -679,8 +653,8 @@ impl LanguageServer for ServerState {
                 range: internal_range,
                 text: change.text,
             };
-            // Apply to the evolving open buffer first: the NEXT change's range is resolved against the
-            // buffer after this one (via `to_internal_range` -> `document()` -> `documents`).
+            // Each change's range is resolved against the buffer AFTER the previous changes (via
+            // `to_internal_range` -> `document()` -> `documents`), so apply it before the next iteration.
             self.documents
                 .get_mut(&path)
                 .expect("open document buffer present for did_change")
@@ -691,16 +665,17 @@ impl LanguageServer for ServerState {
                         path.display()
                     )
                 });
-            self.analysis_state
-                .edit_document(&path, std::slice::from_ref(&document_change))
-                .unwrap_or_else(|error| {
-                    panic!(
-                        "failed to edit analysis document {} incrementally: {error:?}",
-                        path.display()
-                    )
-                });
         }
-        self.sync_engine_from_analysis();
+        // A text-only edit leaves the file SET unchanged, so only the file's `SourceText` is re-set (no
+        // `rebuild_project_files`); the buffer is the source of truth for the new text.
+        let text = self
+            .documents
+            .get(&path)
+            .expect("open document buffer present after did_change")
+            .rope()
+            .to_string();
+        let is_package = self.is_package_path(&path);
+        self.set_source_input(&path, text, is_package);
 
         if !self.client_supports_pull_diagnostics {
             let diagnostics = self.convert_document_diagnostics(&path);
@@ -737,15 +712,12 @@ impl LanguageServer for ServerState {
             ));
         }
 
-        // Coherence: a saved document is open, so it must be tracked.
-        self.analysis_state
-            .document_id_for_path(&path)
-            .unwrap_or_else(|| {
-                panic!(
-                    "analysis document not found after did_save sync {}",
-                    path.display()
-                )
-            });
+        // Coherence: a saved document is open, so it must be a tracked engine file.
+        assert!(
+            self.file_ids.contains_key(&path),
+            "saved document not tracked {}",
+            path.display()
+        );
 
         // Pull clients re-request the saved (visible) document on their own cadence, so the server
         // does not push. But push is suppressed for them, so a save that moved diagnostics in OTHER
@@ -812,7 +784,6 @@ impl LanguageServer for ServerState {
             if path == config_path {
                 match Config::from_path(&config_path) {
                     Ok(config) => {
-                        self.analysis_state.set_configs(config.lint, config.check);
                         self.config = config;
                     }
                     Err(error) => {
@@ -827,31 +798,26 @@ impl LanguageServer for ServerState {
                 continue;
             }
 
-            if path.starts_with(&workspace_r_path) {
+            // An open document's text comes from the editor (its buffer), not the watcher, so on-disk
+            // changes to open files are ignored here.
+            if path.starts_with(&workspace_r_path) && !self.open_documents.contains(&path) {
                 match change.typ {
                     FileChangeType::CREATED | FileChangeType::CHANGED => {
-                        if !self.open_documents.contains(&path) {
-                            self.analysis_state
-                                .add_document_from_disk(path.clone())
-                                .expect(&format!(
-                                    "failed to update analysis document from disk {}",
-                                    path.display()
-                                ));
-                        }
+                        let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+                            panic!("failed to read package source {}: {error}", path.display())
+                        });
+                        self.set_source_input(&path, text, true);
                     }
                     FileChangeType::DELETED => {
-                        if !self.open_documents.contains(&path) {
-                            self.analysis_state.delete_document(&path).expect(&format!(
-                                "failed to delete analysis document {}",
-                                path.display()
-                            ));
-                        }
+                        self.retract_source_input(&path);
                     }
                     _ => unreachable!(),
                 }
             }
         }
-        self.sync_engine_from_analysis();
+        // The file set and/or config may have changed across the batch.
+        self.rebuild_project_files();
+        self.engine.set_input(Key::Config, self.engine_config());
 
         ControlFlow::Continue(())
     }
