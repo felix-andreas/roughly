@@ -2,6 +2,7 @@
 name = "fixtures"
 edition = "2024"
 version.workspace = true
+publish = false
 
 [lib]
 path = "src/fixtures.rs"

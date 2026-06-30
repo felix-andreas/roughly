@@ -2,6 +2,7 @@
 name = "rofy"
 edition = "2024"
 version.workspace = true
+publish = false
 
 [dependencies]
 clap.workspace = true

@@ -2,6 +2,7 @@
 name = "analysis"
 edition = "2024"
 version.workspace = true
+publish = false
 
 [lib]
 path = "src/lib.rs"

@@ -2,6 +2,9 @@
 name = "roughly"
 edition = "2024"
 version.workspace = true
+description = "A language tool for R: a language server and CLI providing a static type checker, formatter, and linter."
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 clap.workspace = true

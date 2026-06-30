@@ -2,6 +2,7 @@
 name = "engine"
 edition = "2024"
 version.workspace = true
+publish = false
 
 # Descriptive lib root per the repo guideline (no default lib.rs).
 [lib]
