@@ -310,7 +310,7 @@ const year = new Date().getFullYear()
                 <div class="ed">
                   <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">model.R</span></div>
                   <div class="ed-body">
-                    <div class="ln"><span class="c-fn">add</span> {'<- '}<span class="c-kw">function</span>(a, b) a + b <span class="inlay-pill">{'<T: numeric>'} fn(a: T, b: T) {'-> '}T</span></div>
+                    <div class="ln"><span class="c-fn">identity</span> {'<- '}<span class="c-kw">function</span>(x) x <span class="inlay-pill">{'<T>'} fn(x: T) {'-> '}T</span></div>
                     <div class="ln"><span class="c-fn">score</span>(<span class="inlay-arg">x:</span> data)</div>
                   </div>
                 </div>
@@ -2328,12 +2328,18 @@ roughly check .</code></pre>
         display: grid;
         min-width: 0;
       }
+      /* Every panel occupies the same grid cell, so the cell is always as tall as
+         the tallest panel. Inactive panels are hidden with `visibility` rather than
+         `display:none`, so they keep reserving that space and switching tabs never
+         shifts the layout. */
       .tab-panels > [role='tabpanel'] {
         grid-area: 1 / 1;
         min-width: 0;
       }
       [role='tabpanel'][hidden] {
-        display: none;
+        display: block;
+        visibility: hidden;
+        pointer-events: none;
       }
       [role='tabpanel']:focus-visible {
         outline: 2px solid color-mix(in oklch, var(--cap) 45%, transparent);
@@ -2406,7 +2412,9 @@ roughly check .</code></pre>
         padding: 16px 18px;
         font-size: clamp(0.8rem, 1.5vw, 0.92rem);
         line-height: 1.95;
-        overflow-x: auto;
+        /* Fixed mock-ups with short lines: clip rather than scroll, so a stray pixel
+           never raises a scrollbar inside the editor card. */
+        overflow: hidden;
       }
       .ln {
         white-space: pre;
@@ -2510,7 +2518,7 @@ roughly check .</code></pre>
 
       /* hover */
       .hover-wrap {
-        padding-top: 5.4em;
+        padding-top: 6.8em;
       }
       .hover-tok {
         position: relative;
