@@ -275,20 +275,23 @@ impl ServerState {
         }
     }
 
-    fn package_items_map(&mut self) -> HashMap<PathBuf, Vec<Item>> {
-        self.analysis_state
-            .package_document_ids()
+    // Workspace symbols index every package document's tree (the `R/` files). The host already knows which
+    // `FileId`s are package documents (path under `R/`); each tree comes from the engine's `Parse` query.
+    fn package_items_map(&self) -> HashMap<PathBuf, Vec<Item>> {
+        let r_path = self.workspace_r_path();
+        let package = self
+            .file_ids
+            .iter()
+            .filter(|(path, _)| path.starts_with(&r_path))
+            .map(|(path, file)| (path.clone(), *file))
+            .collect::<Vec<_>>();
+        package
             .into_iter()
-            .filter_map(|document_id| {
-                let path = self
-                    .analysis_state
-                    .path_for_document_id(document_id)?
-                    .to_path_buf();
-                let document = self.analysis_state.document_by_id(document_id)?;
-                Some((
-                    path,
-                    index::index(document.tree().root_node(), document.rope(), false, false),
-                ))
+            .map(|(path, file)| {
+                let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(file));
+                let items =
+                    index::index(parsed.0.tree().root_node(), parsed.0.rope(), false, false);
+                (path, items)
             })
             .collect()
     }
@@ -1352,14 +1355,14 @@ impl LanguageServer for ServerState {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
-        let Some(document) = self.document(&path) else {
+        let Some(file) = self.file_ids.get(&path).copied() else {
             tracing::error!(?path, "symbols not found");
             return box_future(Err(path_not_found_error(&path)));
         };
         // Document symbols are requested on every keystroke and only need top-level symbols, so
-        // they intentionally read the parsed tree directly instead of running the analysis
-        // pipeline.
-        let items = index::index(document.tree().root_node(), document.rope(), false, false);
+        // they read the engine's parsed tree directly rather than running any analysis phase.
+        let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(file));
+        let items = index::index(parsed.0.tree().root_node(), parsed.0.rope(), false, false);
         let symbols: Vec<DocumentSymbol> =
             symbols::document(&items, &|range| self.to_lsp_range_in(&path, range));
 
