@@ -588,39 +588,35 @@ roughly check .</code></pre>
 
     <script>
       // ======================================================================
-      // Hero particle field: a continuous loop. The same immortal particle
-      // population assembles the R logo, flows through three canonical code
-      // snippets (the #: annotation, an inferred signature, a type error), then
-      // streams back into the logo and repeats. Nothing is created or destroyed
-      // between phases — the field just keeps re-forming.
+      // Hero particle field, scroll-driven. The same particle population forms
+      // the R logo at the top of the page and, as you scroll the hero, morphs
+      // into the headline "Modern developer tooling for R." — at which point the
+      // real (crisp, selectable) headline and copy crossfade in over it. Each
+      // particle interpolates between a logo point and a headline point, so the
+      // whole field is a pure function of scroll progress.
       // ======================================================================
       type Particle = {
         x: number
         y: number
-        vx: number
-        vy: number
-        tx: number
-        ty: number
+        // Two resting shapes the particle interpolates between as you scroll: the
+        // logo (progress 0) and the headline (progress 1).
+        lx: number
+        ly: number
+        hx: number
+        hy: number
         depth: number
-        target: boolean
-        bonded: boolean
+        seed: number
       }
       type Target = { x: number; y: number }
-      type Phase = { targets: Target[]; morph: number; hold: number }
 
       const heroCanvas = document.getElementById('hero-canvas') as HTMLCanvasElement | null
       // The particle field fills the sticky viewport pin (100svh), not the tall
       // scroll stage (#hero) that drives the reveal choreography.
       const heroEl = document.getElementById('hero-viewport') as HTMLElement | null
 
-      // Canonical product strings, one per pillar: name a type (#: annotation),
-      // rarely need to (inferred polymorphic signature), catch the bug (type
-      // error). They double as accurate documentation of the tool.
-      const HERO_SNIPPETS: string[][] = [
-        ['#: fn(count: integer) -> integer'],
-        ['add <- function(a, b) a + b', '# <T: numeric> fn(a, b) -> T'],
-        ['double_count("two")', 'error: expected integer, found character'],
-      ]
+      // The headline the particles resolve into as you scroll, wrapped to two
+      // lines so the particle text roughly matches the rendered <h1>.
+      const HEADING_LINES = ['Modern developer', 'tooling for R.']
 
       function initHero() {
         if (!heroCanvas || !heroEl) return
@@ -629,23 +625,20 @@ roughly check .</code></pre>
         const context = ctx
         const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-        const INTRO_DELAY = 0.25
-
-        // Pre-rendered round particle sprite. Each dot is blitted from this
-        // instead of fillRect, so particles read as organic discs (with a soft
-        // edge) rather than hard square pixels — most visible when they condense
-        // into the logo. Sprite softness/size are the taste knobs here.
+        // Pre-rendered round particle sprite. Each dot is blitted from this instead
+        // of a square fillRect, so particles read as soft organic discs. A wide soft
+        // falloff keeps the field looking like light rather than pixels.
         const DOT = document.createElement('canvas')
-        DOT.width = DOT.height = 12
+        DOT.width = DOT.height = 16
         const dotCtx = DOT.getContext('2d')
         if (dotCtx) {
-          const grad = dotCtx.createRadialGradient(6, 6, 0, 6, 6, 6)
+          const grad = dotCtx.createRadialGradient(8, 8, 0, 8, 8, 8)
           grad.addColorStop(0, 'rgba(255,255,255,1)')
-          grad.addColorStop(0.55, 'rgba(255,255,255,0.92)')
+          grad.addColorStop(0.4, 'rgba(255,255,255,0.9)')
           grad.addColorStop(1, 'rgba(255,255,255,0)')
           dotCtx.fillStyle = grad
           dotCtx.beginPath()
-          dotCtx.arc(6, 6, 6, 0, Math.PI * 2)
+          dotCtx.arc(8, 8, 8, 0, Math.PI * 2)
           dotCtx.fill()
         }
         function blit(x: number, y: number, d: number) {
@@ -657,14 +650,10 @@ roughly check .</code></pre>
         let cssH = 0
         let particles: Particle[] = []
         let logoTargets: Target[] = []
-        let snippetTargets: Target[][] = []
-        let phases: Phase[] = []
-        let phaseIndex = 0
-        let phaseClock = 0
+        let headingTargets: Target[] = []
         let running = false
         let rafId = 0
-        let lastTime = 0
-        let clock = 0
+        let progress = 0
         let centroidX = 0
         let centroidY = 0
         const mouse = { x: -9999, y: -9999, active: false }
@@ -745,12 +734,10 @@ roughly check .</code></pre>
         // sample its alpha. Also fixes the shared centroid the whole loop reuses.
         function buildLogoTarget(): Target[] {
           const SS = 2
-          const logoH = Math.min(cssH * 0.46, 360)
+          const logoH = Math.min(cssH * 0.42, 320)
           const logoW = logoH * 0.75
-          const left = (cssW - logoW) / 2
-          const top = ((cssH - logoH) / 2) * 0.92
-          centroidX = left + logoW / 2
-          centroidY = top + logoH / 2
+          const left = centroidX - logoW / 2
+          const top = centroidY - logoH / 2
           if (!logoImg.width || !logoImg.height) return []
           const off = document.createElement('canvas')
           off.width = Math.max(2, Math.round(logoW * SS))
@@ -766,28 +753,29 @@ roughly check .</code></pre>
             return []
           }
           return sampleAlpha(data, off.width, off.height, SS, (sx, sy) => ({
-            x: left + sx / SS + (Math.random() - 0.5),
-            y: top + sy / SS + (Math.random() - 0.5),
+            x: left + sx / SS + (Math.random() - 0.5) * 2.4,
+            y: top + sy / SS + (Math.random() - 0.5) * 2.4,
           }))
         }
 
-        // Code target: render monospace lines into the same kind of offscreen
-        // canvas, auto-fitting the widest line to ~0.88*cssW, then run the
-        // IDENTICAL alpha sampler. Centered on the logo centroid.
+        // Headline target: render the wrapped headline (matching the <h1>'s sans
+        // font and weight) into an offscreen canvas, then run the same alpha
+        // sampler. Centered on the shared centroid so it lines up with the DOM copy.
         function buildTextTarget(lines: string[]): Target[] {
           const SS = 2
+          const fontFamily = `'Geist Sans', system-ui, sans-serif`
           const probe = document.createElement('canvas').getContext('2d')
           if (!probe) return []
           const basePx = 100
-          probe.font = `500 ${basePx}px 'Geist Mono', monospace`
+          probe.font = `600 ${basePx}px ${fontFamily}`
           let maxW = 1
           for (const line of lines) maxW = Math.max(maxW, probe.measureText(line).width)
-          const targetW = cssW * 0.88
+          const targetW = Math.min(cssW * 0.8, 760)
           let fontPx = (basePx * targetW) / maxW
-          const maxFont = Math.min(cssW * 0.085, cssH * 0.16)
+          const maxFont = Math.min(cssW * 0.1, cssH * 0.16)
           if (fontPx > maxFont) fontPx = maxFont
           if (fontPx < 12) fontPx = 12
-          const leading = fontPx * 1.35
+          const leading = fontPx * 1.04
           const blockW = Math.ceil((maxW * fontPx) / basePx) + Math.ceil(fontPx)
           const blockH = Math.ceil(leading * lines.length + fontPx)
           const off = document.createElement('canvas')
@@ -798,7 +786,7 @@ roughly check .</code></pre>
           octx.clearRect(0, 0, off.width, off.height)
           octx.scale(SS, SS)
           octx.fillStyle = '#fff'
-          octx.font = `500 ${fontPx}px 'Geist Mono', monospace`
+          octx.font = `600 ${fontPx}px ${fontFamily}`
           octx.textBaseline = 'middle'
           octx.textAlign = 'center'
           const midX = blockW / 2
@@ -813,23 +801,9 @@ roughly check .</code></pre>
           const left = centroidX - blockW / 2
           const top = centroidY - blockH / 2
           return sampleAlpha(data, off.width, off.height, SS, (sx, sy) => ({
-            x: left + sx / SS + (Math.random() - 0.5),
-            y: top + sy / SS + (Math.random() - 0.5),
+            x: left + sx / SS + (Math.random() - 0.5) * 1.8,
+            y: top + sy / SS + (Math.random() - 0.5) * 1.8,
           }))
-        }
-
-        function buildPhases() {
-          const small = cssW < 720
-          const snippets = small ? snippetTargets.slice(0, 2) : snippetTargets
-          phases = [{ targets: logoTargets, morph: 1.3, hold: small ? 1.6 : 2.2 }]
-          snippets.forEach((targets, i) => {
-            const climax = !small && i === snippets.length - 1
-            phases.push({
-              targets,
-              morph: small ? 1.0 : 1.1,
-              hold: small ? 1.4 : climax ? 1.9 : 1.7,
-            })
-          })
         }
 
         function spawnParticles() {
@@ -839,65 +813,36 @@ roughly check .</code></pre>
             particles.push({
               x: Math.random() * cssW,
               y: Math.random() * cssH,
-              vx: 0,
-              vy: 0,
-              tx: 0,
-              ty: 0,
+              lx: 0,
+              ly: 0,
+              hx: 0,
+              hy: 0,
               depth: 0.35 + Math.random() * 0.65,
-              target: false,
-              bonded: false,
+              seed: Math.random() * Math.PI * 2,
             })
           }
         }
 
-        // Continuity-preserving assignment: bucket both the current particle
-        // positions and the incoming targets into vertical columns by x, then
-        // match within a column ordered by y, so particles flow to the nearest
-        // region instead of swirling. Surplus particles fall back to ambient
-        // drift (target=false); leftover targets are filled from spare particles
-        // so dense glyph columns don't develop holes.
-        const BUCKETS = 24
-        function columnOf(x: number) {
-          let c = Math.floor((x / Math.max(1, cssW)) * BUCKETS)
-          if (c < 0) c = 0
-          else if (c >= BUCKETS) c = BUCKETS - 1
-          return c
-        }
-        function assignTargets(points: Target[]) {
-          for (const p of particles) p.target = false
-          const pBuckets: number[][] = []
-          const tBuckets: Target[][] = []
-          for (let c = 0; c < BUCKETS; c++) {
-            pBuckets.push([])
-            tBuckets.push([])
-          }
-          for (let i = 0; i < particles.length; i++) pBuckets[columnOf(particles[i].x)].push(i)
-          for (const t of points) tBuckets[columnOf(t.x)].push(t)
-          const freeParticles: number[] = []
-          const freeTargets: Target[] = []
-          for (let c = 0; c < BUCKETS; c++) {
-            const pb = pBuckets[c]
-            const tb = tBuckets[c]
-            pb.sort((a, b) => particles[a].y - particles[b].y)
-            tb.sort((a, b) => a.y - b.y)
-            const m = Math.min(pb.length, tb.length)
-            for (let j = 0; j < m; j++) {
-              const p = particles[pb[j]]
-              p.tx = tb[j].x
-              p.ty = tb[j].y
-              p.target = true
-              p.bonded = false
-            }
-            for (let j = m; j < pb.length; j++) freeParticles.push(pb[j])
-            for (let j = m; j < tb.length; j++) freeTargets.push(tb[j])
-          }
-          const fill = Math.min(freeParticles.length, freeTargets.length)
-          for (let j = 0; j < fill; j++) {
-            const p = particles[freeParticles[j]]
-            p.tx = freeTargets[j].x
-            p.ty = freeTargets[j].y
-            p.target = true
-            p.bonded = false
+        // Give every particle a logo point and a headline point. Both target sets
+        // are ordered left-to-right and paired by fractional index, so particles
+        // flow horizontally between the two shapes rather than crossing over each
+        // other. The point counts differ from the particle count, so a few points
+        // are shared — the soft dots and drift hide the slight overlap.
+        function pairTargets() {
+          if (!logoTargets.length || !headingTargets.length) return
+          const byX = (a: Target, b: Target) => a.x - b.x || a.y - b.y
+          const logo = logoTargets.slice().sort(byX)
+          const head = headingTargets.slice().sort(byX)
+          const total = particles.length
+          for (let i = 0; i < total; i++) {
+            const f = total > 1 ? i / (total - 1) : 0
+            const l = logo[Math.min(logo.length - 1, Math.floor(f * logo.length))]
+            const h = head[Math.min(head.length - 1, Math.floor(f * head.length))]
+            const p = particles[i]
+            p.lx = l.x
+            p.ly = l.y
+            p.hx = h.x
+            p.hy = h.y
           }
         }
 
@@ -911,143 +856,96 @@ roughly check .</code></pre>
           heroCanvas!.style.width = cssW + 'px'
           heroCanvas!.style.height = cssH + 'px'
           context.setTransform(dpr, 0, 0, dpr, 0, 0)
+          // Anchor the morph on the real headline's centre so the particle text
+          // lines up with the <h1> that crossfades in. The copy only fades (it is
+          // never transformed), so its laid-out position is already its final one.
+          const headline = heroEl!.querySelector('.hero-copy h1') as HTMLElement | null
+          if (headline) {
+            const hr = headline.getBoundingClientRect()
+            centroidX = hr.left - r.left + hr.width / 2
+            centroidY = hr.top - r.top + hr.height / 2
+          } else {
+            centroidX = cssW / 2
+            centroidY = cssH * 0.42
+          }
           logoTargets = buildLogoTarget()
-          snippetTargets = HERO_SNIPPETS.map(buildTextTarget)
-          buildPhases()
+          headingTargets = buildTextTarget(HEADING_LINES)
           spawnParticles()
-          phaseIndex = 0
-          phaseClock = -INTRO_DELAY
-          assignTargets(phases[0].targets)
+          pairTargets()
         }
 
-        function drawStatic() {
+        // One frame: each particle sits between its logo point and its headline
+        // point, interpolated by the eased scroll progress, with a flow-field drift
+        // so the field stays alive. Particles are loosest mid-morph and settle
+        // crisply onto each shape at the two ends.
+        function render(time: number) {
           context.clearRect(0, 0, cssW, cssH)
           context.fillStyle = '#fff'
+          const morph = smooth01(progress)
+          const flux = Math.sin(Math.PI * clamp01(progress)) // 0 at the ends, 1 mid-morph
+          const t = time * 0.0006
+          const wander = 1 + flux * 7
           for (let i = 0; i < particles.length; i++) {
             const p = particles[i]
-            if (p.target) {
-              const s = p.depth > 0.66 ? 2 : 1
-              context.globalAlpha = Math.min(1, 0.18 + p.depth * 0.34 + 0.22)
-              blit(p.tx, p.ty, s + 1.4)
-            } else if (i % 7 === 0) {
-              context.globalAlpha = 0.12
-              blit(p.x, p.y, 1.8)
+            const baseX = p.lx + (p.hx - p.lx) * morph
+            const baseY = p.ly + (p.hy - p.ly) * morph
+            const angle = flowAngle(baseX, baseY, t) + p.seed
+            let x = baseX + Math.cos(angle) * wander
+            let y = baseY + Math.sin(angle) * wander
+            if (mouse.active) {
+              const mdx = x - mouse.x
+              const mdy = y - mouse.y
+              const d2 = mdx * mdx + mdy * mdy
+              if (d2 < 11000 && d2 > 0.01) {
+                const push = (1 - d2 / 11000) * 13
+                const inv = 1 / Math.sqrt(d2)
+                x += mdx * inv * push
+                y += mdy * inv * push
+              }
             }
+            p.x = x
+            p.y = y
+            const size = (p.depth > 0.6 ? 2.9 : 2.1) + flux * 0.7
+            const alpha = (0.5 + p.depth * 0.5) * (1 - flux * 0.42)
+            context.globalAlpha = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha
+            blit(x, y, size)
           }
           context.globalAlpha = 1
         }
 
-        function advancePhase() {
-          // Dissolve kick: a brief outward impulse on the old bonded particles so
-          // the previous shape visibly comes apart a frame before the next pulls in.
-          for (const p of particles) {
-            if (!p.bonded) continue
-            p.vx += (p.x - centroidX) * 0.006 + (Math.random() - 0.5) * 0.2
-            p.vy += (p.y - centroidY) * 0.006 + (Math.random() - 0.5) * 0.2
-          }
-          phaseIndex = (phaseIndex + 1) % phases.length
-          assignTargets(phases[phaseIndex].targets)
+        // Scroll progress drives the morph and the copy/nav crossfade. We repaint
+        // straight from the scroll handler (not only from rAF) so the morph tracks
+        // the scrollbar exactly. The rAF loop only adds the idle drift on top.
+        const stage = document.getElementById('hero')
+        const nav = document.getElementById('nav')
+        const copy = heroEl!.querySelector('.hero-copy') as HTMLElement | null
+        const hint = heroEl!.querySelector('.scroll-hint') as HTMLElement | null
+
+        function syncScroll() {
+          const vh = window.innerHeight || 1
+          const y = window.scrollY || window.pageYOffset || 0
+          const scrollable = Math.max(1, (stage ? stage.offsetHeight : vh) - vh)
+          progress = clamp01(y / scrollable)
+          if (nav) nav.style.setProperty('--reveal', String(clamp01((y - vh * 0.12) / (vh * 0.16))))
+          // The real, selectable copy fades in over the back half of the morph, as
+          // the particles finish forming the headline.
+          const copyP = smooth01(clamp01((progress - 0.58) / 0.34))
+          if (copy) copy.style.setProperty('--copy-op', String(copyP))
+          // Particles dim out as the crisp copy takes over, leaving a faint field.
+          heroCanvas!.style.setProperty('--canvas-dim', String(1 - copyP * 0.82))
+          if (hint) hint.style.setProperty('--hint-op', String(clamp01(1 - y / (vh * 0.14))))
+          render(performance.now())
         }
 
-        function step(now: number) {
+        function loop(now: number) {
           if (!running) return
-          if (lastTime === 0) lastTime = now
-          let dt = (now - lastTime) / 1000
-          lastTime = now
-          if (dt > 0.05) dt = 0.05
-          clock += dt
-          phaseClock += dt
-
-          let phase = phases[phaseIndex]
-          if (phase && phaseClock >= phase.morph + phase.hold) {
-            phaseClock -= phase.morph + phase.hold
-            advancePhase()
-            phase = phases[phaseIndex]
-          }
-          if (!phase) {
-            rafId = requestAnimationFrame(step)
-            return
-          }
-
-          // Per-phase clock: ramp focus 0->1 across the morph, hold at 1.
-          const morphP = clamp01(phaseClock / phase.morph)
-          const inHold = phaseClock >= phase.morph
-          const focus = inHold ? 1 : smooth01(morphP)
-          const holdP = inHold ? clamp01((phaseClock - phase.morph) / phase.hold) : 0
-
-          context.fillStyle = 'rgba(0,0,0,0.14)'
-          context.fillRect(0, 0, cssW, cssH)
-          context.fillStyle = '#fff'
-
-          const k = 0.035 * (0.3 + 0.7 * focus)
-
-          for (let i = 0; i < particles.length; i++) {
-            const p = particles[i]
-            if (p.target) {
-              p.vx += (p.tx - p.x) * k
-              p.vy += (p.ty - p.y) * k
-              // Held text breathes instead of freezing: a tiny flow jitter.
-              if (inHold) {
-                const ang = flowAngle(p.x, p.y, clock)
-                p.vx += Math.cos(ang) * 0.015
-                p.vy += Math.sin(ang) * 0.015
-              }
-              p.vx *= 0.88
-              p.vy *= 0.88
-              p.x += p.vx
-              p.y += p.vy
-              const dx = p.tx - p.x
-              const dy = p.ty - p.y
-              p.bonded = dx * dx + dy * dy < 2.25
-            } else {
-              const ang = flowAngle(p.x, p.y, clock)
-              p.vx += Math.cos(ang) * 0.05
-              p.vy += Math.sin(ang) * 0.05
-              if (mouse.active) {
-                const mdx = p.x - mouse.x
-                const mdy = p.y - mouse.y
-                const d2 = mdx * mdx + mdy * mdy
-                if (d2 < 16000 && d2 > 0.01) {
-                  const f = (1 - d2 / 16000) * 0.9
-                  const inv = 1 / Math.sqrt(d2)
-                  p.vx += mdx * inv * f
-                  p.vy += mdy * inv * f
-                }
-              }
-              p.vx *= 0.92
-              p.vy *= 0.92
-              p.x += p.vx
-              p.y += p.vy
-              if (p.x < -4) p.x += cssW + 8
-              else if (p.x > cssW + 4) p.x -= cssW + 8
-              if (p.y < -4) p.y += cssH + 8
-              else if (p.y > cssH + 4) p.y -= cssH + 8
-              p.bonded = false
-            }
-
-            const s = p.depth > 0.66 ? 2 : 1
-            let a: number
-            if (p.target) {
-              a = (0.18 + p.depth * 0.34) * (0.45 + 0.55 * focus)
-              if (p.bonded) a += 0.22 * focus
-              if (p.bonded && inHold) a += 0.1 * Math.sin(holdP * Math.PI)
-            } else {
-              a = 0.08 + p.depth * 0.14
-            }
-            if (a <= 0.01) continue
-            context.globalAlpha = a > 1 ? 1 : a
-            blit(p.x, p.y, s + 1.4)
-          }
-
-          context.globalAlpha = 1
-          rafId = requestAnimationFrame(step)
+          render(now)
+          rafId = requestAnimationFrame(loop)
         }
-
         function start() {
           if (running) return
           running = true
-          lastTime = 0
-          rafId = requestAnimationFrame(step)
+          rafId = requestAnimationFrame(loop)
         }
         function stop() {
           running = false
@@ -1060,9 +958,10 @@ roughly check .</code></pre>
           window.clearTimeout(resizeTimer)
           resizeTimer = window.setTimeout(() => {
             relayout()
-            if (reduceMotion) drawStatic()
+            syncScroll()
           }, 150)
         })
+        window.addEventListener('scroll', syncScroll, { passive: true })
         window.addEventListener('mousemove', (e) => {
           const r = heroCanvas!.getBoundingClientRect()
           mouse.x = e.clientX - r.left
@@ -1073,8 +972,14 @@ roughly check .</code></pre>
 
         const begin = () => {
           relayout()
+          syncScroll()
           if (reduceMotion) {
-            drawStatic()
+            // No animation: show the settled headline shape and the crisp copy.
+            progress = 1
+            render(0)
+            if (nav) nav.style.setProperty('--reveal', '1')
+            if (copy) copy.style.setProperty('--copy-op', '1')
+            heroCanvas!.style.setProperty('--canvas-dim', '0.18')
             return
           }
           if (typeof IntersectionObserver === 'undefined') {
@@ -1088,7 +993,7 @@ roughly check .</code></pre>
                 else stop()
               }
             },
-            { threshold: 0.04 }
+            { threshold: 0 }
           )
           observer.observe(heroEl!)
         }
@@ -1731,73 +1636,12 @@ roughly check .</code></pre>
       // from a single rAF-coalesced scroll handler — no layout reads per frame
       // beyond scrollY / innerHeight, no layout thrash.
       // ======================================================================
-      function initHeroReveal() {
-        const stage = document.getElementById('hero')
-        const nav = document.getElementById('nav')
-        const copy = stage
-          ? (stage.querySelector('.hero-copy') as HTMLElement | null)
-          : null
-        const canvas = document.getElementById('hero-canvas')
-        const hint = stage
-          ? (stage.querySelector('.scroll-hint') as HTMLElement | null)
-          : null
-        if (!stage || !nav || !copy) return
-
-        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-        if (reduce) {
-          // Static hero: header and copy are shown in normal flow; no hidden
-          // chrome, no parallax. The <html> class is already 'hero-static'.
-          nav.style.setProperty('--reveal', '1')
-          return
-        }
-
-        const clamp = (t: number) => (t < 0 ? 0 : t > 1 ? 1 : t)
-        const smooth = (t: number) => t * t * (3 - 2 * t)
-        let ticking = false
-
-        function update() {
-          ticking = false
-          const vh = window.innerHeight || 1
-          const y = window.scrollY || window.pageYOffset || 0
-          const scrollable = Math.max(1, stage!.offsetHeight - vh)
-          const progress = clamp(y / scrollable)
-
-          // Header: hidden at the top, slides + fades in once past ~12vh.
-          const headerP = clamp((y - vh * 0.12) / (vh * 0.16))
-          nav!.style.setProperty('--reveal', String(headerP))
-
-          // Hero copy: parallax in over the lower-middle of the stage and settle.
-          const copyP = smooth(clamp((progress - 0.16) / 0.46))
-          copy!.style.setProperty('--copy-op', String(copyP))
-          copy!.style.setProperty('--copy-y', (1 - copyP) * 64 + 'px')
-
-          // Canvas depth: dim and scale up subtly as the copy settles.
-          if (canvas) {
-            canvas.style.setProperty('--canvas-dim', String(1 - copyP * 0.4))
-            canvas.style.setProperty('--canvas-scale', String(1 + progress * 0.06))
-          }
-
-          if (hint) hint.style.setProperty('--hint-op', String(clamp(1 - y / (vh * 0.16))))
-        }
-
-        const onScroll = () => {
-          if (!ticking) {
-            ticking = true
-            requestAnimationFrame(update)
-          }
-        }
-        window.addEventListener('scroll', onScroll, { passive: true })
-        window.addEventListener('resize', onScroll, { passive: true })
-        update()
-      }
-
       initHero()
       document
         .querySelectorAll('[data-tabs]')
         .forEach((el) => setupTabs(el as HTMLElement))
       initCloserMatrix()
       initNav()
-      initHeroReveal()
     </script>
 
     <style is:global>
@@ -2035,12 +1879,10 @@ roughly check .</code></pre>
       }
       .hero-reveal .hero-copy {
         opacity: var(--copy-op, 0);
-        transform: translateY(var(--copy-y, 4rem));
-        will-change: transform, opacity;
+        will-change: opacity;
       }
       .hero-reveal .hero-copy:focus-within {
         opacity: 1 !important;
-        transform: none !important;
       }
       .hero-reveal .scroll-hint {
         opacity: var(--hint-op, 1);
@@ -2075,13 +1917,13 @@ roughly check .</code></pre>
         position: relative;
         z-index: 2;
         width: 100%;
-        max-width: var(--prose);
+        max-width: 760px;
         padding: 3.5rem clamp(1.2rem, 5vw, 2rem) 4rem;
         display: flex;
         flex-direction: column;
-        align-items: flex-start;
+        align-items: center;
         gap: 1.25rem;
-        text-align: left;
+        text-align: center;
       }
       .hero-copy h1 {
         margin: 0;
