@@ -19,7 +19,6 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-tree.workspace = true
 tree-sitter.workspace = true
-tree-sitter-r.workspace = true
 serde_json.workspace = true
 analysis = { path = "../analysis" }
 engine = { path = "../engine" }
@@ -35,10 +34,12 @@ tokio-util.workspace = true
 [dev-dependencies]
 async-lsp.workspace = true
 fixtures = { path = "../fixtures" }
-futures.workspace = true
 insta.workspace = true
 regex.workspace = true
 tempfile = "3"
 tokio = { workspace = true, features = ["process"] }
 tokio-util.workspace = true
 tower.workspace = true
+# Only the grammar smoke test (test_tree.rs) references the R grammar directly; src reaches it via
+# `analysis`, so this is a test-only dependency.
+tree-sitter-r.workspace = true
