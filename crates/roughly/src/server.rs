@@ -230,23 +230,14 @@ impl ServerState {
         }
     }
 
-    // Diagnostics are now served by the engine (Phase 3b). The caller still identifies the document by its
-    // analysis `DocumentId` (the frozen oracle still selects the affected set in did_save); this maps it to
-    // the engine `FileId` via the path and renders the engine's `FileDiagnostics`, gating the typing/strict/
-    // unused classes by config exactly as production's `document_diagnostics` does. The type errors stay raw
-    // and are rendered here against the engine's interner + fallback range (single source for the error set).
-    fn convert_document_diagnostics(
-        &self,
-        document_id: analysis::DocumentId,
-    ) -> Vec<crate::lsp_types::Diagnostic> {
-        let path = self
-            .analysis_state
-            .path_for_document_id(document_id)
-            .expect("diagnostics document present in analysis state")
-            .to_path_buf();
+    // Diagnostics are served by the engine: map the path to its engine `FileId` and render the engine's
+    // `FileDiagnostics`, gating the typing/strict/unused classes by config exactly as production's
+    // `document_diagnostics` does. Type errors stay raw and are rendered here against the engine's interner +
+    // fallback range (single source for the error set).
+    fn convert_document_diagnostics(&self, path: &Path) -> Vec<crate::lsp_types::Diagnostic> {
         let file = self
             .file_ids
-            .get(&path)
+            .get(path)
             .copied()
             .expect("diagnostics document present in engine file ids");
 
@@ -590,17 +581,8 @@ impl LanguageServer for ServerState {
         self.open_documents.insert(path.clone());
         self.sync_engine_from_analysis();
 
-        let document_id = self
-            .analysis_state
-            .document_id_for_path(&path)
-            .unwrap_or_else(|| {
-                panic!(
-                    "analysis document not found after did_open sync {}",
-                    path.display()
-                )
-            });
         if !self.client_supports_pull_diagnostics {
-            let diagnostics = self.convert_document_diagnostics(document_id);
+            let diagnostics = self.convert_document_diagnostics(&path);
             if let Err(error) = self
                 .client
                 .publish_diagnostics(PublishDiagnosticsParams::new(
@@ -720,17 +702,8 @@ impl LanguageServer for ServerState {
         }
         self.sync_engine_from_analysis();
 
-        let document_id = self
-            .analysis_state
-            .document_id_for_path(&path)
-            .unwrap_or_else(|| {
-                panic!(
-                    "analysis document not found after did_change sync {}",
-                    path.display()
-                )
-            });
         if !self.client_supports_pull_diagnostics {
-            let diagnostics = self.convert_document_diagnostics(document_id);
+            let diagnostics = self.convert_document_diagnostics(&path);
             if let Err(error) = self
                 .client
                 .publish_diagnostics(PublishDiagnosticsParams::new(
@@ -799,9 +772,9 @@ impl LanguageServer for ServerState {
         // document's current diagnostics are correct — this is a superset of the old typecheck-affected set
         // and also catches naming-only dependents the affected set missed.
         for open_path in self.open_documents.clone() {
-            let Some(open_document_id) = self.analysis_state.document_id_for_path(&open_path) else {
+            if !self.file_ids.contains_key(&open_path) {
                 continue;
-            };
+            }
             let open_uri = if open_path == path {
                 uri.clone()
             } else {
@@ -810,7 +783,7 @@ impl LanguageServer for ServerState {
                     Err(()) => continue,
                 }
             };
-            let diagnostics = self.convert_document_diagnostics(open_document_id);
+            let diagnostics = self.convert_document_diagnostics(&open_path);
             if let Err(error) = self
                 .client
                 .publish_diagnostics(PublishDiagnosticsParams::new(open_uri, diagnostics, None))
@@ -906,15 +879,15 @@ impl LanguageServer for ServerState {
 
         // Unlike the sync notifications, a pull can legitimately target a document the server does
         // not track; answer with an empty full report rather than panicking.
-        let Some(document_id) = self.analysis_state.document_id_for_path(&path) else {
+        if !self.file_ids.contains_key(&path) {
             tracing::debug!(?path, "pull diagnostic for untracked document");
             return box_future(Ok(empty_full_diagnostic_report()));
-        };
+        }
 
         // The engine computes the report on demand (typecheck included via the `Diagnostics` fetch in
         // `convert_document_diagnostics`), so it already equals the push path and reflects package-visible
         // edits in dependent files — no separate full pass is needed.
-        let items = self.convert_document_diagnostics(document_id);
+        let items = self.convert_document_diagnostics(&path);
         let result_id = diagnostics_result_id(&items);
 
         // The result id is a content hash of the report, so an unchanged answer is correct even
