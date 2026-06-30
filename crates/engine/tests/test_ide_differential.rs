@@ -190,16 +190,22 @@ fn sorted_rename(rename: Option<RenameResult>) -> Option<BTreeMap<PathBuf, Vec<(
     })
 }
 
+// Cold parity: a fresh engine built from scratch for this exact state.
 fn assert_parity(label: &str, workspace: &Workspace) {
     let mut oracle = build_oracle(workspace);
     let (engine, paths) = build_engine(workspace);
     let engine_ide = EngineIde::new(&engine, &paths);
+    sweep_parity(label, workspace, &mut oracle, &engine_ide);
+}
 
+// Compare every feature at every position of every file between the oracle and one `EngineIde` (cold or
+// incrementally updated). Factored so the incremental driver re-sweeps a long-lived engine after each edit.
+fn sweep_parity(label: &str, workspace: &Workspace, oracle: &mut Analysis, engine_ide: &EngineIde) {
     // Inlay hints are whole-file (no position); compare once per file.
     for (id, state) in &workspace.files {
         let path = absolute_path(*id, state.package);
         assert_eq!(
-            ide::inlay_hints(&mut oracle, &path, None),
+            ide::inlay_hints(oracle, &path, None),
             engine_ide.inlay_hints(&path, None),
             "inlay_hints divergence at {label}, file {path:?}",
         );
@@ -210,34 +216,34 @@ fn assert_parity(label: &str, workspace: &Workspace) {
         let where_ = format!("{label}, {path:?} {position:?}");
 
         assert_eq!(
-            ide::hover(&mut oracle, &path, position),
+            ide::hover(oracle, &path, position),
             engine_ide.hover(&path, position),
             "hover divergence at {where_}",
         );
         assert_eq!(
-            ide::signature_help(&mut oracle, &path, position),
+            ide::signature_help(oracle, &path, position),
             engine_ide.signature_help(&path, position),
             "signature_help divergence at {where_}",
         );
         assert_eq!(
-            ide::completion(&mut oracle, &path, position),
+            ide::completion(oracle, &path, position),
             engine_ide.completion(&path, position),
             "completion divergence at {where_}",
         );
         assert_eq!(
-            sorted_locations(ide::definition(&mut oracle, &path, position)),
+            sorted_locations(ide::definition(oracle, &path, position)),
             sorted_locations(engine_ide.definition(&path, position)),
             "definition divergence at {where_}",
         );
         for include_declaration in [false, true] {
             assert_eq!(
-                sorted_locations(ide::references(&mut oracle, &path, position, include_declaration)),
+                sorted_locations(ide::references(oracle, &path, position, include_declaration)),
                 sorted_locations(engine_ide.references(&path, position, include_declaration)),
                 "references(include_declaration={include_declaration}) divergence at {where_}",
             );
         }
         assert_eq!(
-            sorted_rename(ide::rename(&mut oracle, &path, position, "renamed_symbol")),
+            sorted_rename(ide::rename(oracle, &path, position, "renamed_symbol")),
             sorted_rename(engine_ide.rename(&path, position, "renamed_symbol")),
             "rename divergence at {where_}",
         );
@@ -389,4 +395,138 @@ fn script_referencing_package_global() {
             ],
         ),
     );
+}
+
+// ----------------------------------------------------------------------------------------------------
+// Incremental parity: one long-lived engine driven through an edit stream, re-swept after every edit
+// ----------------------------------------------------------------------------------------------------
+
+// The cold scenarios prove the orchestration; this proves the engine still serves correct IDE output off
+// *incrementally invalidated* state. The engine memoizes the facts (parse/lower/naming/typecheck/index);
+// the IDE view only reads them, so a divergence here is an invalidation or priming/PathTable-lockstep bug
+// (a cache primed from a stale fetch, a path not retracted on delete, a kind not flipped on reclassify).
+
+fn sync_engine(
+    engine: &mut Engine<RoughlyQueries>,
+    paths: &mut PathTable,
+    previous: &Workspace,
+    next: &Workspace,
+) {
+    for id in previous.files.keys() {
+        if !next.files.contains_key(id) {
+            engine.remove_input(&Key::SourceText(*id));
+            engine.remove_input(&Key::DocumentKind(*id));
+            paths.remove(*id);
+        }
+    }
+    for (id, state) in &next.files {
+        engine.set_input(Key::SourceText(*id), state.source.clone());
+        engine.set_input(
+            Key::DocumentKind(*id),
+            if state.package {
+                analysis::naming::DocumentKind::Package
+            } else {
+                analysis::naming::DocumentKind::Script
+            },
+        );
+        // `PathTable::insert` retracts the old path when a reclassify changes it, keeping the bijection in
+        // lockstep with the `ProjectFiles` input exactly as the production host must.
+        paths.insert(*id, absolute_path(*id, state.package));
+    }
+    engine.set_input(Key::ProjectFiles, project_files_order(next));
+    engine.set_input(Key::Config, next.config.clone());
+}
+
+struct Driver {
+    engine: Engine<RoughlyQueries>,
+    paths: PathTable,
+    workspace: Workspace,
+}
+
+impl Driver {
+    fn new(config: Config) -> Driver {
+        Driver {
+            engine: Engine::new(RoughlyQueries::new()),
+            paths: PathTable::new(PathBuf::from(BASE)),
+            workspace: Workspace {
+                files: BTreeMap::new(),
+                config,
+            },
+        }
+    }
+
+    fn step(&mut self, label: &str, mutate: impl FnOnce(&mut Workspace)) {
+        let previous = self.workspace.clone();
+        mutate(&mut self.workspace);
+        sync_engine(&mut self.engine, &mut self.paths, &previous, &self.workspace);
+        let mut oracle = build_oracle(&self.workspace);
+        let engine_ide = EngineIde::new(&self.engine, &self.paths);
+        sweep_parity(label, &self.workspace, &mut oracle, &engine_ide);
+    }
+
+    fn set_package(&mut self, label: &str, id: FileId, source: &str) {
+        let source = source.to_owned();
+        self.step(label, |workspace| {
+            workspace.files.insert(id, FileState { source, package: true });
+        });
+    }
+
+    fn set_script(&mut self, label: &str, id: FileId, source: &str) {
+        let source = source.to_owned();
+        self.step(label, |workspace| {
+            workspace.files.insert(id, FileState { source, package: false });
+        });
+    }
+
+    fn delete(&mut self, label: &str, id: FileId) {
+        self.step(label, |workspace| {
+            workspace.files.remove(&id);
+        });
+    }
+}
+
+#[test]
+fn incremental_cross_file_interface_edits() {
+    // A referrer whose goto/hover/references resolve into a definer across a stream of interface edits:
+    // body edit (scheme unchanged), signature change (referrer's call becomes ill-typed), and a rename of
+    // the global. After each, the engine's IDE output must still match a fresh oracle at every position.
+    let mut driver = Driver::new(typing_config());
+    driver.set_package(
+        "define",
+        0,
+        "#: fn(count: integer) -> integer\ndouble_count <- function(count) count + count",
+    );
+    driver.set_package("use", 1, "result <- double_count(2L)\nalias <- double_count");
+    // Body-only edit: the exported scheme is unchanged, but goto/references on `double_count` must still
+    // land correctly (the definer's binding range may have moved).
+    driver.set_package(
+        "edit-body",
+        0,
+        "#: fn(count: integer) -> integer\ndouble_count <- function(count) count * 2L + count",
+    );
+    // Rename the global in the definer: the referrer's name now dangles; hover/goto/references must follow.
+    driver.set_package(
+        "rename-global",
+        0,
+        "#: fn(count: integer) -> integer\ndoubler <- function(count) count + count",
+    );
+    // Update the referrer to the new name.
+    driver.set_package("fix-referrer", 1, "result <- doubler(2L)\nalias <- doubler");
+}
+
+#[test]
+fn incremental_add_delete_and_reclassify() {
+    // File lifecycle under IDE queries: add a definer and a user, delete the definer (references collapse to
+    // the user file), re-add it (cross-file resolution returns), then reclassify the user to a script
+    // (still references the package global). Parity is swept after every step, exercising PathTable lockstep.
+    let mut driver = Driver::new(typing_config());
+    driver.set_package("add-def", 0, "shared <- 1L");
+    driver.set_package("add-use", 1, "value <- shared\nagain <- shared");
+    // Delete the definer: `shared` is no longer a package global, so the uses dangle (local-unresolved) on
+    // both engines, and references/goto must reflect that identically.
+    driver.delete("delete-def", 0);
+    // Re-add the same slot (tombstone re-add): cross-file resolution must return.
+    driver.set_package("readd-def", 0, "shared <- 2L");
+    // Reclassify the user as a script: it still references the package global `shared`.
+    driver.set_script("reclassify-use", 1, "value <- shared\nagain <- shared");
 }

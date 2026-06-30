@@ -68,8 +68,14 @@ impl PathTable {
     }
 
     pub fn insert(&mut self, file: FileId, path: PathBuf) {
-        self.to_id.insert(path.clone(), file);
-        self.to_path.insert(file, path);
+        // Reclassification (package ↔ script) re-inserts a file under a new path; drop the stale reverse
+        // mapping for its old path so a lookup of the old path no longer resolves to this file.
+        if let Some(previous_path) = self.to_path.insert(file, path.clone())
+            && previous_path != path
+        {
+            self.to_id.remove(&previous_path);
+        }
+        self.to_id.insert(path, file);
     }
 
     pub fn remove(&mut self, file: FileId) {
