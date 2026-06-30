@@ -1430,12 +1430,13 @@ impl EngineWorker {
                 }
                 Job::Write(closure) => closure(&mut self),
             }));
-            if let Err(payload) = outcome {
-                // A read closure catches its own `Cancelled` (it never escapes `with_cancellation`); this
-                // arm is defensive. Any other payload is a coherence panic — the hook already printed it.
-                if payload.is::<Cancelled>() {
-                    continue;
-                }
+            if outcome.is_err() {
+                // A read closure catches its own `Cancelled` inside `with_cancellation`, which restores the
+                // engine's transient state before returning, so `Cancelled` never escapes a job. Anything
+                // reaching here is therefore a coherence panic (the hook already printed it) — OR, were the
+                // cancellation invariant ever broken, an escaped `Cancelled` whose engine transient state is
+                // now uncleaned. Both are incoherent states, so terminate deterministically rather than
+                // resume the loop on a corrupted engine.
                 tracing::error!("engine worker thread panicked; terminating the language server");
                 std::process::exit(1);
             }
