@@ -1,7 +1,7 @@
 # Engine — R0 design
 
 The `engine` crate is the substrate for the analysis-engine rewrite onto a memoized-query model
-(decision record `.agents/decisions/incremental-architecture-and-recheck.md`, "REWRITE EXECUTION"). It
+(decision record `.agents/memory/decisions/incremental-architecture-and-recheck.md`, "REWRITE EXECUTION"). It
 holds the **generic red-green memoization core only** — no R, no `analysis` dependency. The R queries are
 layered on in R1+. This document is the crate's own design home (the module doc on `src/engine.rs` is the
 condensed algorithm; this is the full plan).
