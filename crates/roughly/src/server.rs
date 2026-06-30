@@ -37,7 +37,7 @@ use {
     engine::{
         Engine,
         ide_view::PathTable,
-        queries::{Config as EngineConfig, FileId, Key, RoughlyQueries},
+        queries::{Config as EngineConfig, FileDiagnostics, FileId, Key, ParsedDocument, RoughlyQueries},
     },
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
@@ -217,20 +217,55 @@ impl ServerState {
         }
     }
 
+    // Diagnostics are now served by the engine (Phase 3b). The caller still identifies the document by its
+    // analysis `DocumentId` (the frozen oracle still selects the affected set in did_save); this maps it to
+    // the engine `FileId` via the path and renders the engine's `FileDiagnostics`, gating the typing/strict/
+    // unused classes by config exactly as production's `document_diagnostics` does. The type errors stay raw
+    // and are rendered here against the engine's interner + fallback range (single source for the error set).
     fn convert_document_diagnostics(
         &self,
         document_id: analysis::DocumentId,
     ) -> Vec<crate::lsp_types::Diagnostic> {
-        let rope = self
+        let path = self
             .analysis_state
-            .document_by_id(document_id)
+            .path_for_document_id(document_id)
             .expect("diagnostics document present in analysis state")
-            .rope();
-        diagnostics::convert_diagnostics(
-            self.analysis_state.document_diagnostics(document_id),
-            rope,
-            self.position_encoding,
-        )
+            .to_path_buf();
+        let file = self
+            .file_ids
+            .get(&path)
+            .copied()
+            .expect("diagnostics document present in engine file ids");
+
+        let file_diagnostics = self.engine.fetch::<FileDiagnostics>(Key::Diagnostics(file));
+        let fallback = *self.engine.fetch::<tree_sitter::Range>(Key::FallbackRange);
+        let config = self.engine_config();
+
+        let mut rendered = Vec::new();
+        // Local naming, package naming, lowering (syntax), and lint are emitted unconditionally, exactly as
+        // production's `document_diagnostics` does (they are not config-gated).
+        rendered.extend(file_diagnostics.naming.iter().cloned());
+        rendered.extend(file_diagnostics.package_naming.iter().cloned());
+        rendered.extend(file_diagnostics.lowering.iter().cloned());
+        rendered.extend(file_diagnostics.lint.iter().cloned());
+        if config.unused {
+            rendered.extend(file_diagnostics.unused.iter().cloned());
+        }
+        if config.typing {
+            self.engine.group().with_interner(|interner| {
+                for error in &file_diagnostics.type_errors {
+                    rendered.push(analysis::Diagnostic::from_inference_error(
+                        error, fallback, interner,
+                    ));
+                }
+            });
+        }
+        if config.strict {
+            rendered.extend(file_diagnostics.strict_diagnostics.iter().cloned());
+        }
+
+        let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(file));
+        diagnostics::convert_diagnostics(rendered, parsed.0.rope(), self.position_encoding)
     }
 
     fn convert_location(&self, location: analysis::ide::Location) -> Location {
