@@ -725,6 +725,37 @@ fn unused_local_warnings_match_production() {
     driver.step("unused-off", |workspace| workspace.config.unused = false);
 }
 
+// A NON-EMPTY strict-origin case. The randomized stream and the other curated cases never force a genuine
+// strict `Unknown` origin (so the strict-origin rendering sub-path went unverified vs production); this
+// closes that gap. `1L %then% 2L` is a custom infix operator the checker does not model, so it lowers to an
+// `Unsupported` expression whose type is an undetermined `Unknown` — a real O1 strict origin. The binding
+// form flags the name. Asserts the oracle actually emits it (non-vacuity), drives it through the parity
+// harness, then clears it with `@trust Any` (which strict tolerates), proving appearance and disappearance
+// both hold at parity.
+#[test]
+fn strict_origin_non_empty_matches_production() {
+    let mut workspace = Workspace::new(typing_strict_config());
+    workspace.files.insert(
+        0,
+        FileState {
+            source: "x <- 1L %then% 2L".to_owned(),
+            package: true,
+        },
+    );
+    let oracle = build_oracle(&workspace);
+    assert!(
+        oracle_diagnostics(&oracle, 0, true)
+            .iter()
+            .any(|diagnostic| diagnostic.code == DiagnosticCode::Strict),
+        "the strict-origin scenario must produce a Strict diagnostic on the oracle (non-vacuity)"
+    );
+
+    let mut driver = Driver::new(typing_strict_config());
+    driver.set_package("strict-origin", 0, "x <- 1L %then% 2L");
+    // `@trust Any` makes the binding `Any`, which strict tolerates, so the origin clears.
+    driver.set_package("strict-origin-cleared", 0, "#: @trust Any\nx <- 1L %then% 2L");
+}
+
 // ----------------------------------------------------------------------------------------------------
 // Randomized, fixed-seed generator + adversarial edit stream
 // ----------------------------------------------------------------------------------------------------
