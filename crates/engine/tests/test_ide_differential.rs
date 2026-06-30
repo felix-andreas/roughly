@@ -530,3 +530,95 @@ fn incremental_add_delete_and_reclassify() {
     // Reclassify the user as a script: it still references the package global `shared`.
     driver.set_script("reclassify-use", 1, "value <- shared\nagain <- shared");
 }
+
+// ----------------------------------------------------------------------------------------------------
+// Randomized IDE differential stream (mirrors the diagnostic harness's adversarial stream)
+// ----------------------------------------------------------------------------------------------------
+
+// The curated incremental scenarios cover the obvious invalidation shapes; this drives a fixed-seed random
+// edit stream (add/edit/delete/reclassify over a small cross-file workspace) and sweeps full per-position
+// IDE parity after every step, catching the long-tail invalidation bugs the curated cases miss — the IDE
+// analog of the diagnostic harness's `randomized_adversarial_edit_stream`. Small workspace + modest step
+// count because each step re-sweeps every position of every file across all seven features.
+
+struct SplitMix64 {
+    state: u64,
+}
+
+impl SplitMix64 {
+    fn new(seed: u64) -> SplitMix64 {
+        SplitMix64 { state: seed }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    fn below(&mut self, bound: u64) -> u64 {
+        self.next_u64() % bound
+    }
+
+    fn chance(&mut self, numerator: u64, denominator: u64) -> bool {
+        self.below(denominator) < numerator
+    }
+}
+
+const NAMES: [&str; 3] = ["alpha", "beta", "gamma"];
+
+// Sources with real IDE targets: typed function defs, cross-file calls and value references, and a local
+// binding inside a function body — so hover/goto/refs/rename/signature/inlay/completion all have something
+// to resolve, and references draw freely from the pool so cross-file resolution forms and dissolves.
+fn generate_ide_source(rng: &mut SplitMix64) -> String {
+    let name = NAMES[rng.below(NAMES.len() as u64) as usize];
+    let target = NAMES[rng.below(NAMES.len() as u64) as usize];
+    match rng.below(5) {
+        0 => format!("#: fn(x: integer) -> integer\n{name} <- function(x) x + x"),
+        1 => format!("{name} <- {target}(1L)"),
+        2 => format!("result <- {target}\nalias <- {target}"),
+        3 => format!("{name} <- function() {{\n  local_value <- {target}(1L)\n  local_value\n}}"),
+        _ => format!("{name} <- 1L"),
+    }
+}
+
+const MAX_SLOTS: FileId = 3;
+
+#[test]
+fn randomized_ide_differential_stream() {
+    for seed in [0x1234_5678u64, 0xDEAD_BEEF, 42] {
+        let mut rng = SplitMix64::new(seed);
+        let mut driver = Driver::new(typing_config());
+
+        for step in 0..25 {
+            let label = format!("seed={seed:#x} step={step}");
+            let slot = rng.below(MAX_SLOTS as u64) as FileId;
+            let present = driver.workspace.files.contains_key(&slot);
+
+            match rng.below(6) {
+                0 if present => driver.delete(&label, slot),
+                1 if present => {
+                    // Reclassify, keeping the source.
+                    let source = driver.workspace.files[&slot].source.clone();
+                    let package = !driver.workspace.files[&slot].package;
+                    driver.step(&label, |workspace| {
+                        workspace.files.insert(slot, FileState { source, package });
+                    });
+                }
+                _ => {
+                    let source = generate_ide_source(&mut rng);
+                    let package = if present {
+                        driver.workspace.files[&slot].package
+                    } else {
+                        rng.chance(3, 4)
+                    };
+                    driver.step(&label, |workspace| {
+                        workspace.files.insert(slot, FileState { source, package });
+                    });
+                }
+            }
+        }
+    }
+}
