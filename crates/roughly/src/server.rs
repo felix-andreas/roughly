@@ -33,7 +33,12 @@ use {
         },
         symbols,
     },
-    analysis::{self, Analysis, DocumentChange, TextPosition, TextRange, ide},
+    analysis::{self, Analysis, DocumentChange, TextPosition, TextRange, ide, naming::DocumentKind},
+    engine::{
+        Engine,
+        ide_view::PathTable,
+        queries::{Config as EngineConfig, FileId, Key, RoughlyQueries},
+    },
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
         client_monitor::ClientProcessMonitorLayer,
@@ -105,6 +110,14 @@ struct ServerState {
     workspace_root: PathBuf,
     open_documents: HashSet<PathBuf>,
     analysis_state: Analysis,
+    // The memoized query engine, fed in lockstep with `analysis_state` during the cutover (Phase 3): the
+    // engine mirrors the document text as inputs so reads can flip to it one subsystem at a time, with
+    // `analysis_state` staying the frozen oracle until the final slice removes it. `paths`/`file_ids` are
+    // the host-owned path↔FileId bijection the engine keys on (the engine never sees paths).
+    engine: Engine<RoughlyQueries>,
+    paths: PathTable,
+    file_ids: HashMap<PathBuf, FileId>,
+    next_file_id: FileId,
     position_encoding: PositionEncoding,
     // When the client advertises pull-diagnostics support it owns the request cadence, so the
     // server stops pushing `publish_diagnostics` and answers `textDocument/diagnostic` instead.
@@ -130,6 +143,10 @@ impl ServerState {
             workspace_root: workspace_root.clone(),
             open_documents: HashSet::new(),
             analysis_state: Analysis::new(workspace_root.clone(), config.lint, config.check),
+            engine: Engine::new(RoughlyQueries::new()),
+            paths: PathTable::new(workspace_root.clone()),
+            file_ids: HashMap::new(),
+            next_file_id: 0,
             position_encoding: PositionEncoding::Utf16,
             client_supports_pull_diagnostics: false,
             client_supports_diagnostic_refresh: false,
@@ -241,6 +258,88 @@ impl ServerState {
             .collect()
     }
 
+    fn engine_config(&self) -> EngineConfig {
+        EngineConfig {
+            typing: self.config.check.typing,
+            strict: self.config.check.strict,
+            unused: self.config.check.unused,
+            lint: self.config.lint.clone(),
+        }
+    }
+
+    fn file_id_for(&mut self, path: &Path) -> FileId {
+        if let Some(file) = self.file_ids.get(path) {
+            return *file;
+        }
+        let file = self.next_file_id;
+        self.next_file_id += 1;
+        self.file_ids.insert(path.to_path_buf(), file);
+        file
+    }
+
+    // Mirror the current `analysis_state` document set into the engine inputs (Phase 3 transition).
+    // `analysis_state` owns the text and the incremental edit logic; this re-derives every engine input
+    // from it after each mutation so the engine stays a faithful shadow until reads cut over. `ProjectFiles`
+    // is ordered package-documents-first in `package_document_ids` (package-path-key) order so the engine's
+    // last-writer-wins symbol index selects the same winner production does; scripts follow (they export
+    // nothing, so their order does not affect winner selection).
+    fn sync_engine_from_analysis(&mut self) {
+        let package_ids = self.analysis_state.package_document_ids();
+        let package_set: HashSet<analysis::DocumentId> = package_ids.iter().copied().collect();
+        let mut ordered_paths = Vec::new();
+        for document_id in package_ids.iter().copied().chain(
+            self.analysis_state
+                .all_document_ids()
+                .into_iter()
+                .filter(|document_id| !package_set.contains(document_id)),
+        ) {
+            let Some(path) = self
+                .analysis_state
+                .path_for_document_id(document_id)
+                .map(Path::to_path_buf)
+            else {
+                continue;
+            };
+            let Some(document) = self.analysis_state.document_by_id(document_id) else {
+                continue;
+            };
+            ordered_paths.push((path, document.rope().to_string()));
+        }
+
+        let r_path = self.workspace_r_path();
+        let mut project = Vec::new();
+        let mut live = HashSet::new();
+        for (path, text) in ordered_paths {
+            let file = self.file_id_for(&path);
+            let kind = if path.starts_with(&r_path) {
+                DocumentKind::Package
+            } else {
+                DocumentKind::Script
+            };
+            self.engine.set_input(Key::SourceText(file), text);
+            self.engine.set_input(Key::DocumentKind(file), kind);
+            self.paths.insert(file, path);
+            project.push(file);
+            live.insert(file);
+        }
+        // Retract files that left the analysis set (a delete or a closed non-package document).
+        let stale = self
+            .file_ids
+            .iter()
+            .filter(|(_, file)| !live.contains(*file))
+            .map(|(path, file)| (path.clone(), *file))
+            .collect::<Vec<_>>();
+        for (path, file) in stale {
+            self.engine.remove_input(&Key::SourceText(file));
+            self.engine.remove_input(&Key::DocumentKind(file));
+            self.paths.remove(file);
+            self.file_ids.remove(&path);
+        }
+
+        self.engine.set_input(Key::ProjectFiles, project);
+        self.engine.set_input(Key::Config, self.engine_config());
+    }
+
     fn continue_with_error(&mut self, message: String) -> ControlFlow<async_lsp::Result<()>> {
         self.client
             .show_message(ShowMessageParams {
@@ -311,6 +410,8 @@ impl LanguageServer for ServerState {
                 }
             }
         }
+
+        self.sync_engine_from_analysis();
 
         box_future(Ok(InitializeResult {
             capabilities: ServerCapabilities {
@@ -433,6 +534,7 @@ impl LanguageServer for ServerState {
                 path.display()
             ));
         self.open_documents.insert(path.clone());
+        self.sync_engine_from_analysis();
 
         let document_id = self
             .analysis_state
@@ -492,6 +594,7 @@ impl LanguageServer for ServerState {
                     });
             }
         }
+        self.sync_engine_from_analysis();
 
         ControlFlow::Continue(())
     }
@@ -549,6 +652,7 @@ impl LanguageServer for ServerState {
                     )
                 });
         }
+        self.sync_engine_from_analysis();
 
         let document_id = self
             .analysis_state
@@ -715,6 +819,7 @@ impl LanguageServer for ServerState {
                 }
             }
         }
+        self.sync_engine_from_analysis();
 
         ControlFlow::Continue(())
     }
