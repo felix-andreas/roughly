@@ -33,7 +33,7 @@ use {
         },
         symbols,
     },
-    analysis::{self, Analysis, DocumentChange, TextPosition, TextRange, ide, naming::DocumentKind},
+    analysis::{self, Analysis, Document, DocumentChange, TextPosition, TextRange, ide, naming::DocumentKind},
     engine::{
         Engine, Shared,
         ide_view::{EngineIde, PathTable},
@@ -118,6 +118,12 @@ struct ServerState {
     paths: PathTable,
     file_ids: HashMap<PathBuf, FileId>,
     next_file_id: FileId,
+    // The open-document edit buffers (Phase 3e-2): the server owns the LSP document text for open files,
+    // reusing `Document::{parse, edit}` for incremental change application. `did_change` resolves each
+    // change's range against this evolving buffer. Closed package documents are not buffered here — they
+    // exist only as engine `SourceText` inputs read from disk.
+    documents: HashMap<PathBuf, Document>,
+    parser: tree_sitter::Parser,
     position_encoding: PositionEncoding,
     // When the client advertises pull-diagnostics support it owns the request cadence, so the
     // server stops pushing `publish_diagnostics` and answers `textDocument/diagnostic` instead.
@@ -147,6 +153,8 @@ impl ServerState {
             paths: PathTable::new(workspace_root.clone()),
             file_ids: HashMap::new(),
             next_file_id: 0,
+            documents: HashMap::new(),
+            parser: analysis::tree::new_parser().expect("server parser should initialize"),
             position_encoding: PositionEncoding::Utf16,
             client_supports_pull_diagnostics: false,
             client_supports_diagnostic_refresh: false,
@@ -157,8 +165,8 @@ impl ServerState {
         self.workspace_root.join("R")
     }
 
-    fn document(&self, path: &Path) -> Option<&analysis::Document> {
-        self.analysis_state.document(path)
+    fn document(&self, path: &Path) -> Option<&Document> {
+        self.documents.get(path)
     }
 
     // The engine's parsed document (rope + tree) for a path, or None if the path is not a tracked file.
@@ -169,11 +177,8 @@ impl ServerState {
         Some(self.engine.fetch::<ParsedDocument>(Key::Parse(file)))
     }
 
-    fn opened_document(&self, path: &Path) -> Option<&analysis::Document> {
-        self.open_documents
-            .contains(path)
-            .then(|| self.document(path))
-            .flatten()
+    fn opened_document(&self, path: &Path) -> Option<&Document> {
+        self.documents.get(path)
     }
 
     fn to_internal_position(&self, path: &Path, position: Position) -> Option<TextPosition> {
@@ -579,6 +584,9 @@ impl LanguageServer for ServerState {
                 "failed to sync analysis document from source {}",
                 path.display()
             ));
+        let document = Document::parse(&mut self.parser, text)
+            .unwrap_or_else(|_| panic!("failed to parse open document buffer {}", path.display()));
+        self.documents.insert(path.clone(), document);
         self.open_documents.insert(path.clone());
         self.sync_engine_from_analysis();
 
@@ -618,6 +626,7 @@ impl LanguageServer for ServerState {
         tracing::debug!(?path, "did close");
 
         self.open_documents.remove(&path);
+        self.documents.remove(&path);
         if path.starts_with(self.workspace_r_path()) {
             if path.exists() {
                 self.analysis_state
@@ -688,6 +697,18 @@ impl LanguageServer for ServerState {
                 range: internal_range,
                 text: change.text,
             };
+            // Apply to the evolving open buffer first: the NEXT change's range is resolved against the
+            // buffer after this one (via `to_internal_range` -> `document()` -> `documents`).
+            self.documents
+                .get_mut(&path)
+                .expect("open document buffer present for did_change")
+                .edit(&mut self.parser, std::slice::from_ref(&document_change))
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "failed to edit open document buffer {} incrementally: {error:?}",
+                        path.display()
+                    )
+                });
             self.analysis_state
                 .edit_document(&path, std::slice::from_ref(&document_change))
                 .unwrap_or_else(|error| {
