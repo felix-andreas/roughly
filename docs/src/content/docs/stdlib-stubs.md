@@ -4,16 +4,14 @@ description: Design note proposing a standard-library stub framework so the type
 ---
 
 :::caution[Status: partially implemented]
-The **stdlib-embedded first increment is implemented**: `T`/`F`/`pi` plus a curated set of base
-functions ship as `#:` declaration-only stubs (`crates/analysis/src/stdlib_base.R`), loaded once at
-`Analysis::new` into the inference template, with the LT2 isolation oracle (`assert_stub_isolation`)
-enforcing that an un-shadowed stub never becomes a package value, and the **LT2 zero-per-edit-cost
-benchmark** (`benchmark_stub_library_zero_per_edit_cost`) measuring that the corpus's mere presence
-adds no per-edit recheck cost. Still **proposed / not yet built**: the CRAN tier (per-project
-introspection, §7), R-version keying of the embedded corpus (§8), the stubtest CI validator, and
-`pkg::name` (`NamespaceGet`). Sections below mark which is which. The authoritative typing contract
-remains the [Typing Reference](/typing-reference); this note describes how the standard library feeds
-that contract.
+A first increment of the standard library ships: `T`/`F`/`pi` plus a curated set of base functions
+are declaration-only `#:` stubs under `crates/analysis/stubs/` (`base.R`, `stats.R`, `utils.R`,
+`methods.R`), loaded by the stub loader and bound into the checker as a **set-once input** that never
+invalidates a package edit (see [Incremental hygiene](#incremental-hygiene)). Still **proposed / not
+yet built**: the CRAN tier (per-project introspection, §7), R-version keying of the embedded corpus
+(§8), the stubtest CI validator, and `pkg::name` (`NamespaceGet`). Sections below mark which is which.
+The authoritative typing contract remains the [Typing Reference](/typing-reference); this note
+describes how the standard library feeds that contract.
 :::
 
 ## Problem
@@ -106,9 +104,8 @@ Until these land, affected functions degrade to `Any` / `@trust`.
 
 ## 3. Loading and namespacing
 
-Stubs are **immutable, high-durability inputs** — analogous to rust-analyzer's `Durability::HIGH` and
-the M3 reverse-dependency model. They are loaded, parsed, and interned **once at `Analysis::new`** and
-are never invalidated by user edits.
+Stubs are **immutable, set-once inputs** — analogous to rust-analyzer's `Durability::HIGH`. They are
+loaded, parsed, and interned once, and are never invalidated by user edits.
 
 - Store as an immutable `StubLibrary`: `namespaces: namespace -> {Symbol -> scheme}`, plus a base
   `TypeDefinitionEnvironment`.
@@ -118,26 +115,18 @@ are never invalidated by user edits.
 - `pkg::name` resolves against `StubLibrary.namespaces`. Today `NAMESPACE_OPERATOR` lowers to
   `Unsupported`; this requires adding a `NamespaceGet` node.
 
-### Incremental hygiene (the one subtle correctness risk)
+### Incremental hygiene
 
-Stub schemes are bound into the **template environment**, **not** into `global_bindings` and **not**
-into the package interface table. The isolation property that matters is that a stub never becomes a
-package **value** — never a package-definition, a package global, an interface export, or a naming
-dirty-name — so it never enters `render_dependency_fingerprint` (which renders only interface-table
-entries) and one edit can never spuriously invalidate package-wide through a base name.
+In the [query engine](/architecture#incremental-analysis-the-query-engine) the stub library is a
+**set-once input**: it is established once and its revision never advances, so it can never invalidate
+a query that reads it. That is the entire isolation property — a stub never triggers recomputation
+because it never changes — and it is automatic, not something a separate check must enforce.
 
-A stub name **may** still appear as a key in two indexes, harmlessly:
-
-- the **reverse-dependency index**: a value reference to a stub is indexed exactly like a reference
-  to an as-yet-undefined name. This is required, not a leak — if a later package binding *shadows* the
-  stub, the reference's defined-ness flips and the referrers must be revalidated via category D, which
-  walks that very edge. The edge is otherwise inert, because a stub never enters the dirty set.
-- the **type-definition / type-reference indices**: those are the *type* namespace, and a user type
-  that happens to share a stub value's name (`#: @type T` vs the value `T`) is an unrelated entity.
-
-The LT2 debug isolation assertion therefore checks only the package-*value* indexes (package
-definitions, `global_bindings`, interface exports, dirty-names), not the reverse-dependency or
-type-namespace indices.
+A package binding that *shadows* a stub name is an ordinary structural edit: it changes the package
+symbol index's winner for that name, which flows through the per-symbol interface to exactly the files
+that reference the name — the same path as any other definition appearing or disappearing. A stub
+value and an unrelated user type that share a name (`#: @type T` versus the value `T`) live in the
+type and value namespaces respectively and never interact.
 
 ### Two required integration edits
 
@@ -230,9 +219,9 @@ extensions land):
 
 ### Sequencing
 
-Implement **after** the M3/M4 incremental keystone. M3 is done; this plugs in as a high-durability
-input to the now-precise dependency model. Building it before M3 would have leaked base names into the
-package-global fingerprint and caused spurious package-wide invalidation.
+The stub library plugs into the query engine as a set-once input, so it adds no per-edit recheck
+cost: its revision never advances, and a file that references a stub records that dependency like any
+other input it reads.
 
 **Smallest first increment:** seed `T`/`F`/`pi` plus ~12 high-frequency base functions, parsed once
 from an embedded `base.R`, behind the template-seeding path — before any namespace / `::` / `library()`
@@ -247,28 +236,15 @@ machinery. This closes the `T`/`F`/`pi` gap with only the two integration edits 
   docs with real drift risk. The validation tool is a **stubtest-equivalent** that introspects real R
   signatures via `formals()` / `getNamespaceExports()` and diffs them against the `#:` annotations.
 - **`Any` over-permissiveness** silences real errors — hence the two-tier marker in §4.
-- **Index / fingerprint hygiene** is the one subtle correctness risk; see §3.
+- **Incremental isolation** is automatic — a set-once input; see §3.
 
-### LT2 perf gate (implemented)
+### Per-edit cost
 
-The isolation oracle (`assert_stub_isolation`) proves *correctness* — an un-shadowed stub never enters
-a package-value index, so it creates zero edges in the incremental graph. The
-`benchmark_stub_library_zero_per_edit_cost` benchmark (in `tests/test_incremental.rs`, `#[ignore]`,
-run via the bench harness) proves the matching *performance* claim. It builds a 500-file package, runs
-a full check, then times a single-file body recheck with the real `StubLibrary::load` corpus against
-`StubLibrary::empty()` (injected through `Analysis::new_with_stub_library`), in two scenarios:
-
-- **Plain sources** (no base names referenced) — isolates the corpus's *presence* overhead: the
-  once-per-`typecheck` template seeding plus the slightly larger template each rechecked document
-  clones. This is the true zero-cost claim, and it lands within noise (measured ≈ −0.05%: 75.5 ms
-  with stubs vs 75.6 ms empty — the with-stubs path is no slower than the empty one).
-- **Base-referencing sources** — the with-stubs recheck actually resolves base names to real schemes,
-  which the empty baseline skips by yielding `Unknown`/unresolved. The measured ≈ +9% here (165 ms vs
-  152 ms) is *legitimate inference work* (the feature functioning), not graph or bookkeeping overhead.
-
-In both scenarios exactly one document is rechecked, which is the incremental-isolation property. The
-takeaway: the stub library adds **zero per-edit cost from its presence**; the only added time is the
-inference a document pays for the base names it actually uses.
+Because the stub library is a set-once input (§3), its mere presence adds no per-edit recheck cost: an
+edit never invalidates it, and a body recheck still touches only the edited document and its referrers.
+A document pays inference time only for the base names it actually references — that is the feature
+working, not bookkeeping overhead — and a document that references no base names pays nothing for the
+corpus being loaded.
 
 ## 7. CRAN tier — per-project introspection (proposed, not built)
 
@@ -276,12 +252,10 @@ The embedded corpus covers base/stats/utils/methods — the packages every R ses
 party CRAN packages are **not shipped**; they are discovered and stubbed **per project**, because the
 installed set and versions are a property of the project's library, not of Roughly.
 
-The CRAN/introspected stubs are the **same kind of input** as the embedded corpus — immutable,
-high-durability, seeded into the inference template, kept out of `global_bindings` / the interface
-table / every fingerprint / the reverse-dependency and type indices / the dirty set (the §3 hygiene
-contract). The only difference is provenance: they are **generated by introspecting real R** rather
-than curated by hand. Everything in §3 (incremental hygiene) and the LT2 oracle/benchmark applies to
-them unchanged.
+The CRAN/introspected stubs are the **same kind of input** as the embedded corpus — an immutable,
+set-once input that never invalidates a package edit (the §3 hygiene contract). The only difference is
+provenance: they are **generated by introspecting real R** rather than curated by hand. Everything in
+§3 (incremental hygiene) applies to them unchanged.
 
 ### Discovery
 
