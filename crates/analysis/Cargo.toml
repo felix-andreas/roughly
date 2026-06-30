@@ -6,12 +6,6 @@ version.workspace = true
 [lib]
 path = "src/lib.rs"
 
-[features]
-# Additive, off by default: compiles the `query_spike` shadow memo-engine prototype and its
-# cross-check/measurement tests. A de-risking investigation only; never part of normal/release builds
-# and it changes no production code path.
-query-spike = []
-
 [dependencies]
 ropey.workspace = true
 serde = { workspace = true, features = ["derive"] }

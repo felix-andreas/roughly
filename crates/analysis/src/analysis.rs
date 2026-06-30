@@ -35,9 +35,8 @@ pub struct Analysis {
     parser: Parser,
     interner: Interner,
     // The standard-library stub corpus, loaded once here and never invalidated by user edits. Its
-    // schemes are seeded into the per-document inference template (see `typecheck`); its symbols are
-    // a base-environment input held strictly out of the incremental graph (LT2, see
-    // `assert_stub_isolation`).
+    // schemes are seeded into the per-document inference template (see `typecheck`); its symbols are a
+    // base-environment input only, never entering `global_bindings` or the materialized type index (LT2).
     stub_library: StubLibrary,
     next_document_id: u32,
     next_version: Version,
@@ -51,9 +50,9 @@ pub struct Analysis {
     lowering_outputs: HashMap<DocumentId, DocumentOutput<Module>>,
     document_naming_outputs: HashMap<DocumentId, DocumentOutput<NamesLocal>>,
     // Materialized package type index: each uniquely-defined type name's `TypeInfo`, plus the set of
-    // names defined more than once (kept out of the resolved index, diagnosed as duplicates). Derived
-    // from `type_definitions` by collating each affected name, the type-side analog of `global_bindings`;
-    // materialized for O(1) lookup during type-reference resolution. Guarded by a debug drift assertion.
+    // names defined more than once (kept out of the resolved index, diagnosed as duplicates). Rebuilt
+    // from scratch by `build_type_index` on each `resolve_package`, the type-side analog of
+    // `global_bindings`; materialized for O(1) lookup during type-reference resolution.
     package_type_index: BTreeMap<Symbol, TypeInfo>,
     duplicate_type_names: BTreeSet<Symbol>,
     package_naming_output: Option<PackageOutput<NamesGlobal>>,

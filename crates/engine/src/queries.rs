@@ -13,7 +13,8 @@
 //! `LocalNaming` but not the exported-name *set*, so `ExportedNames` recomputes to an equal value and cuts
 //! off before [`Key::PackageSymbolIndex`] — the lone all-files fold — re-runs at all. A referrer records a
 //! dependency on `GlobalScheme(s)` for precisely the symbols it references, so when one global's scheme
-//! changes only its actual referrers re-typecheck (the M3 reverse index, reconstructed for free).
+//! changes only its actual referrers re-typecheck (reverse-dependency routing, emergent for free from
+//! the dependency graph rather than a hand-maintained reverse index).
 //!
 //! # Ambient host state vs. inputs
 //!
@@ -149,7 +150,7 @@ pub enum Key {
     PackageTypeIndex,
     /// The firewall projecting one type name's status (undefined / defined / duplicate) out of
     /// [`Key::PackageTypeIndex`]. Value-eq per name, so changing type `X` re-runs only the files that
-    /// reference or define `X`, mirroring production's type reverse-dependency hop.
+    /// reference or define `X` — a type reverse-dependency hop, here emergent from the firewall.
     TypeNameStatus(Symbol),
     /// The package-wide ordered definer lists: each package-global name mapped to the files whose
     /// top-level bindings define it, in `ProjectFiles` (path) order — the full candidate list that
@@ -285,7 +286,7 @@ pub struct RoughlyQueries {
     // loaded once against the shared interner so a bare base name resolves to its scheme exactly as
     // production does. It is set-once ambient state, not a query input; its symbols never enter the
     // package interface (a stub is not a package definition, so `DefiningItem` is `None` for it), so it
-    // perturbs no per-symbol cutoff — the same isolation production asserts in `assert_stub_isolation`.
+    // perturbs no per-symbol cutoff — the same stub isolation the from-scratch checker keeps structurally.
     stubs: StubLibrary,
     counters: Counters,
 }

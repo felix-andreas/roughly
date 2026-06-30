@@ -1,5 +1,4 @@
-// Smoke tests for the generic red-green substrate, ported from the de-risking spike's correctness checks
-// (`crates/analysis/tests/test_query_spike.rs`) onto a trivial query graph defined entirely here:
+// Smoke tests for the generic red-green substrate, on a trivial query graph defined entirely here:
 //
 //   Text  (input)  ->  Length  (derived: text.len())  ->  Doubled (derived: length * 2)
 //   Other (input)  ->  OtherLength (derived: other.len())   [an independent chain]

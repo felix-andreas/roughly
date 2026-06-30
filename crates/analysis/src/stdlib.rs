@@ -22,10 +22,10 @@ const EMBEDDED_BASE_STUB: &str = include_str!("stdlib_base.R");
 // `Analysis::new` and never invalidated by user edits.
 //
 // HARD ISOLATION (LT2): a `StubLibrary` is a *base-environment* input only. Its symbols are seeded
-// into the per-document inference template, but they must never appear in `global_bindings`, the
-// package interface table, any dependency/type fingerprint, the reverse-dependency or
-// type-reference indices, or the dirty set — so they create zero edges in the incremental graph.
-// `Analysis::assert_stub_isolation` enforces this.
+// into the per-document inference template (so a bare base name resolves to its stub scheme), but they
+// must never appear in `global_bindings`, the package interface table, or the materialized type index —
+// a user binding over a base name is a shadow, not a package definition, and a stub is never a package
+// global. The seeding happens only in `typecheck`'s template, structurally outside package naming.
 #[derive(Debug, Clone, Default)]
 pub struct StubLibrary {
     values: BTreeMap<Symbol, StubValue>,

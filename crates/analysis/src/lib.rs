@@ -7,8 +7,6 @@ pub mod interner;
 pub mod lint;
 pub mod lower;
 pub mod naming;
-#[cfg(feature = "query-spike")]
-pub mod query_spike;
 pub mod stdlib;
 pub mod text;
 pub mod tree;

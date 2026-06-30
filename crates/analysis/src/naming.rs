@@ -67,11 +67,10 @@ pub(crate) struct PackageNamingComputation {
     pub diagnostics: HashMap<DocumentId, Vec<Diagnostic>>,
 }
 
-// The full-rebuild oracle for package naming. After M4.2, production is the incremental maintenance
-// in `analysis::resolve_package`; this from-scratch rebuild is retained as the debug drift oracle that
-// the maintained `global_bindings` and per-document diagnostic sets are asserted equal to. It and the
-// incremental path share `package_document_diagnostics`, so the assertion verifies the incremental
-// *routing* (which documents are re-diagnosed), not duplicated diagnostic logic.
+// The from-scratch package-naming pass: `analysis`'s sole path, computing `global_bindings` and every
+// package-document naming diagnostic in one fold over the current modules. The engine crate provides
+// incrementality; `analysis` is the from-scratch checker behind `run_full` (the CLI batch check) and the
+// engine differential oracle, so this rebuild is the production path here, not a debug-only oracle.
 pub(crate) fn rebuild_package_naming(
     package_modules: &[(DocumentId, &Module)],
     extra_modules: &[(DocumentId, &Module)],
@@ -495,10 +494,10 @@ pub(crate) fn build_script_local_type_index(
 // The full-rebuild oracle for the package type index: each uniquely-defined `@type`/`@alias` name
 // maps to its `TypeInfo`; a name defined by more than one package site stays out of the index (so
 // references to it remain unresolved) and is returned in `duplicate_type_names` so
-// `package_document_diagnostics` can emit the duplicate-type warning at each site. After M4.3 the
-// production index is maintained incrementally in `analysis`; this rebuild is the drift oracle the
-// maintained index is asserted equal to. Both fold `document_type_definitions` and collate with
-// `apply_type_definition_outcome`, so the membership and winner/duplicate rules have one source.
+// `package_document_diagnostics` can emit the duplicate-type warning at each site. This from-scratch
+// fold is `analysis`'s sole way to materialize the type index (rebuilt each `resolve_package`); it folds
+// `document_type_definitions` and collates with `apply_type_definition_outcome`, so the membership and
+// winner/duplicate rules have one source.
 pub(crate) fn build_type_index(
     package_modules: &[(DocumentId, &Module)],
 ) -> (BTreeMap<Symbol, TypeInfo>, BTreeSet<Symbol>) {
