@@ -35,7 +35,7 @@ use {
     },
     analysis::{self, Analysis, DocumentChange, TextPosition, TextRange, ide, naming::DocumentKind},
     engine::{
-        Engine,
+        Engine, Shared,
         ide_view::{EngineIde, PathTable},
         queries::{Config as EngineConfig, FileDiagnostics, FileId, Key, ParsedDocument, RoughlyQueries},
     },
@@ -161,6 +161,14 @@ impl ServerState {
         self.analysis_state.document(path)
     }
 
+    // The engine's parsed document (rope + tree) for a path, or None if the path is not a tracked file.
+    // Used to encode OUTGOING ranges — which may target a closed cross-file document the engine still holds,
+    // where the open-buffer set is insufficient — against the correct document's rope.
+    fn parsed_for(&self, path: &Path) -> Option<Shared<ParsedDocument>> {
+        let file = self.file_ids.get(path).copied()?;
+        Some(self.engine.fetch::<ParsedDocument>(Key::Parse(file)))
+    }
+
     fn opened_document(&self, path: &Path) -> Option<&analysis::Document> {
         self.open_documents
             .contains(path)
@@ -189,9 +197,9 @@ impl ServerState {
     // The target of a definition, reference, or rename edit may live in a different document than
     // the request, so the outgoing range is encoded against that document's rope.
     fn to_lsp_range_in(&self, path: &Path, range: TextRange) -> Range {
-        match self.document(path) {
-            Some(document) => {
-                position::internal_range_to_lsp(document.rope(), self.position_encoding, range)
+        match self.parsed_for(path) {
+            Some(parsed) => {
+                position::internal_range_to_lsp(parsed.0.rope(), self.position_encoding, range)
             }
             None => Range::new(
                 Position::new(
@@ -207,9 +215,9 @@ impl ServerState {
     }
 
     fn to_lsp_position_in(&self, path: &Path, position: TextPosition) -> Position {
-        match self.document(path) {
-            Some(document) => position::internal_position_to_lsp(
-                document.rope(),
+        match self.parsed_for(path) {
+            Some(parsed) => position::internal_position_to_lsp(
+                parsed.0.rope(),
                 self.position_encoding,
                 position,
             ),
