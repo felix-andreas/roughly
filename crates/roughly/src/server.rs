@@ -583,7 +583,6 @@ impl LanguageServer for ServerState {
                     path.display()
                 )
             });
-        analysis::run_fast(&mut self.analysis_state);
         if !self.client_supports_pull_diagnostics {
             let diagnostics = self.convert_document_diagnostics(document_id);
             if let Err(error) = self
@@ -701,7 +700,6 @@ impl LanguageServer for ServerState {
                     path.display()
                 )
             });
-        analysis::run_fast(&mut self.analysis_state);
         if !self.client_supports_pull_diagnostics {
             let diagnostics = self.convert_document_diagnostics(document_id);
             if let Err(error) = self
@@ -737,8 +735,8 @@ impl LanguageServer for ServerState {
             ));
         }
 
-        let document_id = self
-            .analysis_state
+        // Coherence: a saved document is open, so it must be tracked.
+        self.analysis_state
             .document_id_for_path(&path)
             .unwrap_or_else(|| {
                 panic!(
@@ -766,33 +764,27 @@ impl LanguageServer for ServerState {
             return ControlFlow::Continue(());
         }
 
-        // Package-visible changes can move diagnostics in dependent files, so every document whose
-        // typecheck output changed gets republished, not only the saved one.
-        let mut affected_document_ids = analysis::run_full(&mut self.analysis_state);
-        if !affected_document_ids.contains(&document_id) {
-            affected_document_ids.push(document_id);
-        }
-
-        for affected_document_id in affected_document_ids {
-            let Some(affected_path) = self
-                .analysis_state
-                .path_for_document_id(affected_document_id)
-                .map(Path::to_path_buf)
-            else {
+        // A package-visible save can move diagnostics in dependent files, and live edits push only the
+        // edited document, so on save every OPEN document is republished from the engine. The engine
+        // already reflects the synced text (the edit inputs were set as the changes arrived), so each open
+        // document's current diagnostics are correct — this is a superset of the old typecheck-affected set
+        // and also catches naming-only dependents the affected set missed.
+        for open_path in self.open_documents.clone() {
+            let Some(open_document_id) = self.analysis_state.document_id_for_path(&open_path) else {
                 continue;
             };
-            let affected_uri = if affected_path == path {
+            let open_uri = if open_path == path {
                 uri.clone()
             } else {
-                match Url::from_file_path(&affected_path) {
-                    Ok(affected_uri) => affected_uri,
+                match Url::from_file_path(&open_path) {
+                    Ok(open_uri) => open_uri,
                     Err(()) => continue,
                 }
             };
-            let diagnostics = self.convert_document_diagnostics(affected_document_id);
+            let diagnostics = self.convert_document_diagnostics(open_document_id);
             if let Err(error) = self
                 .client
-                .publish_diagnostics(PublishDiagnosticsParams::new(affected_uri, diagnostics, None))
+                .publish_diagnostics(PublishDiagnosticsParams::new(open_uri, diagnostics, None))
             {
                 tracing::error!(?error, "failed to publish diagnostics");
             }
@@ -890,9 +882,9 @@ impl LanguageServer for ServerState {
             return box_future(Ok(empty_full_diagnostic_report()));
         };
 
-        // The full pipeline (typecheck included) is required so the pulled report equals what the
-        // push path would send and reflects package-visible edits in dependent files.
-        analysis::run_full(&mut self.analysis_state);
+        // The engine computes the report on demand (typecheck included via the `Diagnostics` fetch in
+        // `convert_document_diagnostics`), so it already equals the push path and reflects package-visible
+        // edits in dependent files — no separate full pass is needed.
         let items = self.convert_document_diagnostics(document_id);
         let result_id = diagnostics_result_id(&items);
 
