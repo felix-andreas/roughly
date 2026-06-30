@@ -222,6 +222,17 @@ impl EngineWorker {
         Some(self.engine.fetch::<ParsedDocument>(Key::Parse(file)))
     }
 
+    // Run an engine read under the shared cancellation token (the worker resets it to `false` before each
+    // `Job::Read`). If a newer edit flips it mid-read, the engine abandons the in-flight computation and
+    // this returns the type's empty default, so the query answers empty rather than spending a full pass
+    // on a result the next edit already superseded — latest-edit-wins. Only used by read handlers; edit
+    // handlers run their (different-file-publishing) diagnostics to completion via the plain `fetch` path.
+    fn cancellable<R: Default>(&self, body: impl FnOnce() -> R) -> R {
+        self.engine
+            .with_cancellation(self.cancel.clone(), body)
+            .unwrap_or_default()
+    }
+
     fn opened_document(&self, path: &Path) -> Option<&Document> {
         self.documents.get(path)
     }
@@ -892,7 +903,7 @@ impl EngineWorker {
         // The engine computes the report on demand (typecheck included via the `Diagnostics` fetch in
         // `convert_document_diagnostics`), so it already equals the push path and reflects package-visible
         // edits in dependent files — no separate full pass is needed.
-        let items = self.convert_document_diagnostics(&path);
+        let items = self.cancellable(|| self.convert_document_diagnostics(&path));
         let result_id = diagnostics_result_id(&items);
 
         // The result id is a content hash of the report, so an unchanged answer is correct even
@@ -945,8 +956,8 @@ impl EngineWorker {
         let internal_position = self
             .to_internal_position(&path, position)
             .expect("opened document rope available for completion");
-        let completions = EngineIde::new(&self.engine, &self.paths)
-            .completion(&path, internal_position)
+        let completions = self
+            .cancellable(|| EngineIde::new(&self.engine, &self.paths).completion(&path, internal_position))
             .map(
             |result| {
                 CompletionResponse::List(CompletionList {
@@ -1007,8 +1018,9 @@ impl EngineWorker {
         let internal_position = self
             .to_internal_position(&path, position)
             .expect("opened document rope available for definition");
-        let response =
-            EngineIde::new(&self.engine, &self.paths).definition(&path, internal_position).map(|locations| {
+        let response = self
+            .cancellable(|| EngineIde::new(&self.engine, &self.paths).definition(&path, internal_position))
+            .map(|locations| {
                 let mut locations = locations
                     .into_iter()
                     .map(|location| self.convert_location(location))
@@ -1046,7 +1058,8 @@ impl EngineWorker {
         let internal_position = self
             .to_internal_position(&path, position)
             .expect("opened document rope available for hover");
-        let Some(hover_info) = EngineIde::new(&self.engine, &self.paths).hover(&path, internal_position)
+        let Some(hover_info) =
+            self.cancellable(|| EngineIde::new(&self.engine, &self.paths).hover(&path, internal_position))
         else {
             tracing::debug!(?position, "hover target not found");
             return Ok(None);
@@ -1086,7 +1099,8 @@ impl EngineWorker {
         let viewport = self
             .to_internal_range(&path, params.range)
             .expect("opened document rope available for inlay hints");
-        let raw_hints = EngineIde::new(&self.engine, &self.paths).inlay_hints(&path, Some(viewport));
+        let raw_hints =
+            self.cancellable(|| EngineIde::new(&self.engine, &self.paths).inlay_hints(&path, Some(viewport)));
         let hints = raw_hints
             .into_iter()
             .map(|hint| InlayHint {
@@ -1126,7 +1140,8 @@ impl EngineWorker {
         let internal_position = self
             .to_internal_position(&path, position)
             .expect("opened document rope available for signature help");
-        let Some(help) = EngineIde::new(&self.engine, &self.paths).signature_help(&path, internal_position)
+        let Some(help) = self
+            .cancellable(|| EngineIde::new(&self.engine, &self.paths).signature_help(&path, internal_position))
         else {
             return Ok(None);
         };
@@ -1278,14 +1293,20 @@ impl EngineWorker {
         let internal_position = self
             .to_internal_position(&path, position)
             .expect("opened document rope available for references");
-        let references =
-            EngineIde::new(&self.engine, &self.paths).references(&path, internal_position, include_declaration)
-                .map(|locations| {
-                    locations
-                        .into_iter()
-                        .map(|location| self.convert_location(location))
-                        .collect()
-                });
+        let references = self
+            .cancellable(|| {
+                EngineIde::new(&self.engine, &self.paths).references(
+                    &path,
+                    internal_position,
+                    include_declaration,
+                )
+            })
+            .map(|locations| {
+                locations
+                    .into_iter()
+                    .map(|location| self.convert_location(location))
+                    .collect()
+            });
 
         Ok(references)
     }
@@ -1313,8 +1334,9 @@ impl EngineWorker {
         let internal_position = self
             .to_internal_position(&path, position)
             .expect("opened document rope available for rename");
-        let workspace_edit =
-            EngineIde::new(&self.engine, &self.paths).rename(&path, internal_position, &new_name).map(
+        let workspace_edit = self
+            .cancellable(|| EngineIde::new(&self.engine, &self.paths).rename(&path, internal_position, &new_name))
+            .map(
                 |rename_result| {
                     let changes = rename_result
                         .edits
@@ -1376,7 +1398,7 @@ impl EngineWorker {
 
         tracing::debug!(?query);
 
-        let workspace_items = self.package_items_map();
+        let workspace_items = self.cancellable(|| self.package_items_map());
         let symbols = symbols::workspace(&query, &workspace_items, &|path, range| {
             self.to_lsp_range_in(path, range)
         });

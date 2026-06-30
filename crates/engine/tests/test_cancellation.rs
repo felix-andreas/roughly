@@ -169,6 +169,69 @@ fn latest_edit_wins_with_cooperative_cancellation() {
     );
 }
 
+// The LSP worker makes a whole multi-fetch READ cancellable (an IDE feature primes several queries) via
+// `with_cancellation`, not a single `fetch_cancellable`. Same headline guarantee through that primitive:
+// a newer edit flips the token mid-read, the in-flight multi-step pass abandons cleanly, and the next
+// read computes the up-to-date result — the exact shape `EngineWorker::cancellable` relies on.
+#[test]
+fn with_cancellation_latest_edit_wins_for_a_multi_fetch_read() {
+    silence_cancelled_panics();
+
+    let mut engine = Engine::new(Queries::default());
+    engine.set_input(Key::Source, 10u64);
+    engine.group().work_units.store(1_000_000_000, Ordering::Relaxed);
+    engine.group().started.store(false, Ordering::Relaxed);
+
+    let token = Arc::new(AtomicBool::new(false));
+    let token_for_thread = token.clone();
+    let started = engine.group().started.clone();
+    let canceller = thread::spawn(move || {
+        while !started.load(Ordering::Relaxed) {
+            std::hint::spin_loop();
+        }
+        token_for_thread.store(true, Ordering::Relaxed);
+    });
+
+    // A read closure that touches the engine more than once under one installed token (the worker's IDE-
+    // read shape). The long `Slow` pass abandons the moment the canceller flips the token mid-flight.
+    let outcome = engine.with_cancellation(token.clone(), || {
+        let _warm = engine.fetch::<u64>(Key::Source);
+        *engine.fetch::<u64>(Key::Slow)
+    });
+    canceller.join().expect("canceller thread should join");
+
+    assert_eq!(
+        outcome,
+        Err(Cancelled),
+        "the multi-fetch read abandons when the newer edit flips the token"
+    );
+    assert_eq!(
+        engine.group().slow_completions.load(Ordering::Relaxed),
+        0,
+        "the abandoned read never ran to completion"
+    );
+    assert_eq!(engine.computing_count(), 0, "nothing left computing after a cancelled read");
+    assert_eq!(
+        engine.dependency_stack_depth(),
+        0,
+        "no dangling dependency frame after a cancelled read"
+    );
+
+    // Newer edit + cleared token: the next read computes the up-to-date result. Latest edit wins.
+    engine.set_input(Key::Source, 21u64);
+    engine.group().work_units.store(4, Ordering::Relaxed);
+    token.store(false, Ordering::Relaxed);
+    let value = engine
+        .with_cancellation(token, || *engine.fetch::<u64>(Key::Slow))
+        .expect("the post-edit read is not cancelled");
+    assert_eq!(value, 42, "the read after the edit computes the up-to-date result (21 * 2)");
+    assert_eq!(
+        engine.group().slow_completions.load(Ordering::Relaxed),
+        1,
+        "`Slow` completed exactly once, on the post-edit read"
+    );
+}
+
 // Additive guarantee #1: the accidental-cycle guard still fires under a cancellable fetch. A `Cancelled`
 // unwind is caught and converted to `Err`, but any *other* panic — here the cycle guard — is re-raised
 // unchanged, so cancellation never masks a real host bug.
