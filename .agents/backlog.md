@@ -1,43 +1,59 @@
-# Backlog
+# Backlog — Production-readiness punch-list
 
-Director-owned feature backlog. **Sequencing directive (user):** clear this backlog **first**; the incremental-computation-engine migration (salsa / in-house memoized-query — see `.agents/decisions/incremental-architecture-and-recheck.md`) comes **after** the backlog is empty. A shadow spike of the query engine may be shelved (behind a feature flag) to resume then.
+**Status (2026-06-29):** the engine cutover is technically complete (one memoized query engine is the sole analysis backend; hand-rolled incremental machinery + drift oracles deleted; all 6 done-bar gates met, Expert-accepted). **But the PROJECT is NOT production-ready.** A component passing its tests ≠ releasable.
 
-Testing rule (user, standing): **anything that can be tested should use fixtures** — they generate in bulk and read well in diffs. Formatter tests already migrated (`2a82133`).
+**Goal:** bring the ENTIRE repository to **impeccable, rust-analyzer-level production quality**. Repository hygiene is expected, not optional. The Director (CEO) owns finding and fixing everything short of that bar proactively — the user must not have to point things out. Do **not** declare ready until it genuinely is; the **user merges**, not us — we only report when it is in impeccable production-ready state.
 
-## Active
+**Standing rules (user):** anything testable uses fixtures (not ad-hoc unit tests). Comments must be **context-free** — no internal milestone/process references (R0–R3, M1–M4, "Phase 4", "gate (c)", "3f", commit hashes); a fresh reader with zero project history must understand them (now in AGENTS.md).
 
-| # | Item | Owner | Notes |
-|---|------|-------|-------|
-| 1 | **Strict mode** — a `[check] strict` switch. Interpretation (confirm): in **strict**, an expression/binding that types to `Unknown` (un-annotatable / un-inferrable / missing library type) is a **diagnostic**; default (non-strict) tolerates `Unknown`. Design-first + bulk fixtures. | CTO | Plays with library typing (#2 reduces false positives). |
-| 2 | **Library typing** — represent types for R's stdlib (base/stats/utils) + external CRAN packages. Approach open: typeshed-like external `#:` decl-only `.R` stubs (design note `docs/.../stdlib-stubs.md`) vs. compiled-into-the-binary vs. other — **per the Expert's recommendation** (being asked). Subsumes the `T`/`F`/`pi` base-binding gap. | CTO + Expert | Stubs are immutable high-durability inputs (kept out of the incremental dep graph). Validate against real R (`formals()`/`getNamespaceExports()`). |
-| 3 | **Auto-format `#:` type-hint comments** — consistent layout of annotation comments. Needs a strong test suite (now in place via the formatter fixture migration). Bulk fixtures. | DX | Uses analysis `type_syntax` read-only; flag if it needs an analysis-crate API. |
-| 4 | **Pull diagnostics** — LSP `textDocument/diagnostic` (client pulls on demand) instead of/alongside server push. Pairs well with the decided debounced/on-demand recheck model + cancellation; lets the client control when (and which) diagnostics compute. Evaluate + implement. | CTO/DX | Good fit; see assessment below. |
-| 5 | **Formatter adversarial edge-case review** — an adversarial agent hunts formatter edge cases; failures become fixtures. | DX | |
-| 6 | **Docs to world-class state** — accuracy + clarity pass across the docs site (contracts). | DX | |
-| 7 | **Website improvement** — adversarial marketing-expert review + improvements. | DX | |
-| 8 | **Push-path stale dependents on save (typing-off)** — `run_full` returns an empty affected-set when `check.typing`/`strict` are off (the default; it only returns recomputed docs from `typecheck`), so the LSP **push** path's `did_save` republishes only the saved document, not dependents whose cross-file naming diagnostics (e.g. "could not resolve") moved. Same root cause as the pull-diagnostics refresh conservatism (#4). Fix: make `run_full` return the documents whose diagnostics changed even on the naming-only (`resolve_package`) path, then `did_save` (push) republishes dependents and the refresh (#4) can become precise. Real correctness gap; lower priority — sequence after the lower-recursion crash fix (done). | CTO | Found while implementing #4's refresh. |
+---
 
-## Resolved (Expert recommendations, 2026-06-28)
+## P0 — Production-ready gate (must all be DONE before "releasable")
 
-**#2 Library typing — APPROACH DECIDED: tiered stdlib-vs-CRAN, both as `#:` decl-only stubs (no bespoke format).**
-- **stdlib (base/stats/utils/methods):** curated in-repo, **compiled into the binary**, selected by detected **R version**; loaded once at `Analysis::new`; the "known" universe for strict mode. First increment: `T`/`F`/`pi` + ~12–50 high-frequency base fns.
-- **CRAN (third-party):** not shipped; discover the project's installed packages (`.libPaths()`/renv/DESCRIPTION), **auto-generate shallow stubs by introspecting real R** (`getNamespaceExports()` + `formals()` → arity + arg names, `Any`/`Incomplete` returns), cached per package version; optional curated overrides (typeshed-third-party model); unstubbed → `Any`, never a hard error. `pkg::name` needs a `NamespaceGet` HIR node (today `Unsupported`).
-- **Isolation (hard gate):** stubs are immutable high-durability inputs — never in `global_bindings`/interface table/fingerprints/reverse-deps/dirty-set; verified by an isolation assertion + a zero-per-edit-cost benchmark.
-- DoD = LT1–LT7 (format+SSOT; incremental isolation; stdlib embedded + R-version-keyed; CRAN per-project introspection; stubtest CI validator diffing curated stubs vs real R; scope discipline incl. optional/default params + the named-arg-lowering gap; type-syntax extensions gated). **Action:** revise `docs/.../stdlib-stubs.md` to add the CRAN tier + introspection-generation + R-version keying (currently stdlib-only).
+### 1. Stubs — proper format + standard-library coverage  *(owner: CTO; hard requirement)*
+- Replace the `crates/analysis/src/stdlib_base.R` Rust-embedded `include_str!` blob with **proper stub files**, ideally written in the same `#:` typing syntax.
+- CTO designs a **reasonable, documented stub format** (a real spec, not a blob).
+- Stub files must be **overridable**: a project supplies its own → takes **precedence** over the shipped stubs.
+- **Real stub files for at least the standard libraries (base, stats, utils, methods, …) MUST exist.** Without standard-library stubs it is NOT production-ready. (Coverage: comprehensive via real-R introspection — `getNamespaceExports()` + `formals()` — per the decided approach below.)
+- Design decisions preserved below ("Stub design — decided").
 
-**Fuzzing — DECIDED (Expert): YES, two `cargo-fuzz` targets (soak alone is insufficient).**
-- **(F1) Differential incremental oracle** — random `add/edit/delete/rename` op-sequences via `arbitrary`; invariant: incremental `Analysis` == full rebuild across all five drift oracles **plus** diagnostics + `global_bindings` + type index. The soak generalized to coverage-guided/auto-minimizing; hunts the silent-stale class and is the cross-check that de-risks the eventual salsa migration. Build now or with the migration.
-- **(F2) Parser + type-syntax + lowering robustness** — raw R + `#:` input; invariants: no panic / termination (S4 guards) / tree-sitter always-a-tree / no OOB on stale ranges (S6). Valuable **regardless** of architecture — build now (independent).
-- Run nightly + time-boxed in CI; commit the corpus and every crash repro as a deterministic regression seed/fixture.
+### 2. Docs + website — perfect shape  *(owner: DX; subjective → show the user before calling done)*
+- **Landing page:** particles are all on the RIGHT + the logo is built from SQUARE shapes → make particles **organic** (not squares), distributed properly.
+- **Scroll behaviour:** the particles should **morph into the heading** "Modern developer tooling for R." — instead of the heading appearing on top of the particles.
+- **"IDE features in your editor." section:** most tabs look bad + there is **layout shift** when a tab is clicked → fix both.
+- **Formatting-section examples:** not distinct — they only add spacing around operators. Replace with **inconsistently-formatted code that morphs into a consistent shape** (more organic, and genuinely distinct examples — auto-bracing, alignment, etc., read the formatter to pick meaningful ones).
+- Full **docs-site accuracy + clarity pass** (the docs are contracts).
+- (Prior DX website attempt was disliked — raise the design bar; show the user the result for a visual gut-check before declaring done.)
 
-## Open questions (Director to resolve / ask)
+### 3. Code hygiene + coding-guidelines compliance — whole repo  *(owner: CTO)*
+- **Compliance audit against the project's Rust coding guidelines** (AGENTS.md): **top-down ordering** (e.g. `crates/roughly/src/server.rs` flagged as violating), `use`-qualification style, no organizational/summary comments, full-word names, no needless helper indirection, make-illegal-states-unrepresentable, etc. Fix every violation.
+- **Context-free comments:** sweep ALL committed code for internal-milestone/process references (R0/R1/R2/R3, M1–M4, "Phase N", "gate (a–f)", "3f", "the audit", commit hashes, "the spike") and rewrite them to be context-free — explain the "why" in domain terms a fresh reader understands. This is pervasive after the cutover.
+- General polish to rust-analyzer level (dead code, stray TODOs, error-handling, naming).
 
-- **Strict-mode semantics** — confirm the interpretation above with the user (the phrasing was ambiguous; Director's read: strict ⇒ `Unknown` is an error, default tolerates).
+### 4. Remove `insta`  *(owner: CTO)*
+- Overkill for ~4 snapshot use-cases (`test_tree` node-kinds/field-names in analysis + roughly). Replace with plain assertions, drop the `insta` dep + the `snapshot`/`snapshot-delete-unreferenced` justfile recipes + the `.snap` files.
 
-## Notes
+### 5. Release-readiness audit — find what we're missing  *(owner: Expert + reviewers)*
+- A brutal whole-repo pass: is this in a releasable, rust-analyzer-quality state? Cover code hygiene, docs, website, tests, packaging/release, error handling, naming, dead code, panics, public API surface, README/CONTRIBUTING, CI. **Every finding is added to this punch-list.** The user should not be the one finding these.
 
-- **Pull diagnostics — yes, interesting.** The pull model (`textDocument/diagnostic` + workspace diagnostics, LSP 3.17) lets the client request diagnostics on demand rather than the server pushing on every change. It fits Roughly because Roughly *is* the only R checker (so it controls the full diagnostic lifecycle), and on-demand pull composes cleanly with the debounced/cancellable recheck model + the blast-radius incremental engine (compute dependents lazily when asked). Worth doing; sequence after strict mode + library typing since those define *what* diagnostics exist.
+---
 
-## After the backlog
+## P1 — Post-release (features; NOT required for production-ready)
 
-- **Incremental-computation-engine migration** (salsa or in-house red-green). Direction + de-risking-spike plan recorded in `.agents/decisions/incremental-architecture-and-recheck.md`. Resume the shelved spike → go/no-go → phased migration (keeps tree-sitter + the M2 type core).
+*User: "you don't need to add more features, but standard library stubs must exist." So these wait.*
+
+- **Stub system, fuller** (see `stub-system-requirements` memory + "Stub design" below): NAMESPACE-aware import-checking (strict-mode warn on missing stub — `import(pkg)` needs a whole-package stub; `importFrom(pkg, item)` needs the item defined); **configurable severity** (missing stub = error vs inferred-`Unknown`); CRAN auto-generation by introspecting installed packages.
+- **`#:` semantic-token highlighting** — colour the typing syntax inside `#:` comments (LSP semantic tokens; optionally a tree-sitter/TextMate injection in the VS Code + Zed extensions for instant offline colouring).
+- **Sub-linear validation walk** — the residual O(N) per-edit red-green validation (correct, not flat in N); a durability/changed-input-tracking slice.
+- **Cutover responsiveness follow-ups (Expert):** debounce + cancel the edit-path (push) diagnostics; an end-to-end server latest-edit-wins test (frontend→worker); pull-diagnostics flicker (`DiagnosticServerCancellationData` instead of empty-full); record the 281k memory number + an explicit acceptance verdict in the decision log.
+
+---
+
+## Stub design — decided (Expert, 2026-06-28) — keep
+
+Tiered, both as `#:` decl-only stubs (no bespoke binary format):
+- **stdlib (base/stats/utils/methods):** curated in-repo, compiled into the binary, selected by detected **R version**; loaded once; the "known" universe for strict mode.
+- **CRAN (third-party, post-release):** discover installed packages (`.libPaths()`/renv/DESCRIPTION), auto-generate shallow stubs by introspecting real R (`getNamespaceExports()` + `formals()` → arity + arg names, `Any`/`Incomplete` returns), cached per version; optional curated overrides; unstubbed → `Any`, never a hard error. `pkg::name` needs a `NamespaceGet` HIR node (today `Unsupported`).
+- **Isolation (hard gate):** stubs are immutable high-durability inputs — kept out of the engine's incremental dependency graph (set-once input).
+- Validate stubs against real R (a stubtest-style CI check diffing curated stubs vs `formals()`/`getNamespaceExports()`).
+- Update `docs/.../stdlib-stubs.md` to match the chosen format + the override mechanism.

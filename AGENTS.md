@@ -111,6 +111,7 @@ If the user says:
 ## Rust coding guidelines
 
 * Do not write organizational comments or comments that summarize the code. Comments should only be written in order to explain "why" the code is written in some way in the case there is a reason that is tricky / non-obvious.
+* Comments must be **context-free**. Never reference internal milestones, phases, process history, ticket/PR names, or commit hashes (e.g. "R0", "M3", "Phase 4", "gate (c)", "3f", "the spike", "added in the cutover"). A reader with zero project history must understand every comment — explain the "why" in domain terms, not in terms of when or how the code came to be.
 * Prefer implementing functionality in existing files unless it is a new logical component. Avoid creating many small files.
 * Avoid using functions that panic like `unwrap()`, instead use mechanisms like `?` to propagate errors.
 * Be careful with operations like indexing which may panic if the indexes are out of bounds.
