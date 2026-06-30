@@ -358,7 +358,7 @@ fn apply_bless_rewrites(bless_state: BlessState) {
             .sources
             .get(&source_path)
             .expect("bless source text should be captured");
-        rewrites.sort_by(|left, right| right.0.start.cmp(&left.0.start));
+        rewrites.sort_by_key(|rewrite| std::cmp::Reverse(rewrite.0.start));
 
         let mut blessed_text = source_text.clone();
         for (span, new_body) in &rewrites {
@@ -601,16 +601,16 @@ fn compare_fixture_outputs(
                 ));
             };
 
-            if let ExpectedFileOutput::Exact(expected_output_text) = expected_file_output {
-                if actual_output != expected_output_text {
-                    return Some(render_output_mismatch(
-                        fixture,
-                        fixture_name,
-                        expected_outputs,
-                        actual_outputs,
-                        "",
-                    ));
-                }
+            if let ExpectedFileOutput::Exact(expected_output_text) = expected_file_output
+                && actual_output != expected_output_text
+            {
+                return Some(render_output_mismatch(
+                    fixture,
+                    fixture_name,
+                    expected_outputs,
+                    actual_outputs,
+                    "",
+                ));
             }
         }
     }

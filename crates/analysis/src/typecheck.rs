@@ -1278,6 +1278,9 @@ impl InferenceState {
         Ok(last_type)
     }
 
+    // The trailing arena / resolution-scope / type-definition trio is the shared inference context
+    // threaded through every inference method; bundling it is a separate type-checker refactor.
+    #[allow(clippy::too_many_arguments)]
     fn infer_function_expression(
         &mut self,
         function_expression_id: ExpressionId,
@@ -1456,6 +1459,7 @@ impl InferenceState {
         Ok(CoreType::Function(expected_function_type))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn infer_if_expression(
         &mut self,
         condition: &Expression,
@@ -1514,6 +1518,7 @@ impl InferenceState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn infer_for_expression(
         &mut self,
         _expression_id: ExpressionId,
@@ -2134,10 +2139,10 @@ impl InferenceState {
             }
             SurfaceType::Scalar(atomic) => Ok(CoreType::Scalar(*atomic)),
             SurfaceType::Named(name, arguments) => {
-                if arguments.is_empty() {
-                    if let Some(core_type) = substitutions.get(name) {
-                        return Ok(core_type.clone());
-                    }
+                if arguments.is_empty()
+                    && let Some(core_type) = substitutions.get(name)
+                {
+                    return Ok(core_type.clone());
                 }
 
                 let lowered_arguments = arguments
@@ -3249,6 +3254,7 @@ impl InferenceState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn infer_function_call(
         &mut self,
         function_type: FunctionType<CoreType>,

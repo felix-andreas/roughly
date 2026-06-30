@@ -981,8 +981,8 @@ fn symbol_scc(engine: &Engine<RoughlyQueries>, symbol: Symbol) -> Vec<Symbol> {
         if frame.next_edge < frame.edges.len() {
             let target = frame.edges[frame.next_edge];
             frame.next_edge += 1;
-            if !index.contains_key(&target) {
-                index.insert(target, next_index);
+            if let std::collections::btree_map::Entry::Vacant(slot) = index.entry(target) {
+                slot.insert(next_index);
                 low.insert(target, next_index);
                 next_index += 1;
                 component_stack.push(target);

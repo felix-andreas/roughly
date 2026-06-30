@@ -18,7 +18,7 @@ impl Config {
         let path = path.as_ref();
 
         Ok(match std::fs::read_to_string(path) {
-            Ok(text) => Config::from_str(&text)?,
+            Ok(text) => Config::from_toml_str(&text)?,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 ConfigToml::default().to_config()
             }
@@ -26,7 +26,7 @@ impl Config {
         })
     }
 
-    pub fn from_str(text: &str) -> Result<Config, ConfigError> {
+    pub fn from_toml_str(text: &str) -> Result<Config, ConfigError> {
         Ok(toml::from_str::<ConfigToml>(text)?.to_config())
     }
 
@@ -108,7 +108,7 @@ pub struct ExperimentalFeatures {
 mod tests {
     use {super::*, crate::format::LineEnding, indoc::indoc};
     fn parse(text: &str) -> Config {
-        Config::from_str(text).unwrap()
+        Config::from_toml_str(text).unwrap()
     }
 
     #[test]

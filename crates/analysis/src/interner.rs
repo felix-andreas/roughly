@@ -15,6 +15,12 @@ pub struct Interner {
     text_by_symbol: Vec<String>,
 }
 
+impl Default for Interner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Interner {
     pub fn new() -> Self {
         Self {

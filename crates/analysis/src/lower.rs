@@ -32,6 +32,12 @@ pub struct LoweringResult {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+impl Default for LoweringContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LoweringContext {
     pub fn new() -> Self {
         Self {
@@ -128,8 +134,7 @@ pub(crate) fn lower_with_shared_interner(
     document: &Document,
     interner: &mut Interner,
 ) -> LoweringResult {
-    let mut lowering_context =
-        LoweringContext::with_interner(std::mem::replace(interner, Interner::new()));
+    let mut lowering_context = LoweringContext::with_interner(std::mem::take(interner));
     let lowering_result = lower_with_diagnostics(document, &mut lowering_context);
     *interner = lowering_context.into_interner();
     lowering_result

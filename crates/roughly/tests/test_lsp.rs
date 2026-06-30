@@ -117,12 +117,7 @@ async fn recv_diagnostics(
 }
 
 async fn drain_diagnostics(receiver: &mut mpsc::UnboundedReceiver<PublishDiagnosticsParams>) {
-    loop {
-        match receiver.try_recv() {
-            Ok(_) => continue,
-            Err(_) => break,
-        }
-    }
+    while receiver.try_recv().is_ok() {}
 }
 
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -890,7 +885,7 @@ async fn completion() {
 
     let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
     assert!(
-        labels.iter().any(|label| *label == "my_function"),
+        labels.contains(&"my_function"),
         "expected 'my_function' in completions, got: {labels:?}"
     );
 
@@ -1629,7 +1624,7 @@ async fn references_out_of_bounds_position_is_safe() {
         assert!(
             result
                 .as_ref()
-                .map_or(true, |locations| locations.is_empty()),
+                .is_none_or(|locations| locations.is_empty()),
             "OOB references should be None/empty at {position:?}, got: {result:?}"
         );
     }

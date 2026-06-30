@@ -361,7 +361,7 @@ impl EngineWorker {
             typing: self.config.check.typing,
             strict: self.config.check.strict,
             unused: self.config.check.unused,
-            lint: self.config.lint.clone(),
+            lint: self.config.lint,
         }
     }
 
@@ -673,10 +673,8 @@ impl EngineWorker {
             return;
         }
 
-        self.document(&path).expect(&format!(
-            "analysis document not found for {}",
-            path.display()
-        ));
+        self.document(&path).unwrap_or_else(|| panic!("analysis document not found for {}",
+            path.display()));
 
         // Each incremental change's range refers to the document state after the previous changes
         // in the batch are applied, so positions are converted and applied against the live rope
