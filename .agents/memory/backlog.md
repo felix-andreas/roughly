@@ -1,19 +1,19 @@
 # Backlog — Production-readiness punch-list
 
-**Status (2026-06-29):** the engine cutover is technically complete (one memoized query engine is the sole analysis backend; hand-rolled incremental machinery + drift oracles deleted; all 6 done-bar gates met, Expert-accepted). **But the PROJECT is NOT production-ready** — a component passing its tests ≠ releasable.
+**Status:** the engine cutover is complete (one memoized query engine is the sole analysis backend; the hand-rolled incremental machinery + drift oracles are deleted). **But the PROJECT is NOT production-ready** — a component passing its tests ≠ releasable.
 
 **Goal:** bring the ENTIRE repository to **impeccable, rust-analyzer-level production quality**. Repo hygiene is expected, not optional. The Director (CEO) finds + fixes everything short of that bar proactively — the user must not have to point things out. Do NOT declare ready until it genuinely is; the **user merges**, not us — report only when impeccable.
 
 **Standing rules (user):** testable things use fixtures, not ad-hoc unit tests. Comments must be **context-free** — no internal milestone/process references (R0–R3, M1–M4, "Phase 4", "gate (c)", "3f", "the spike", commit hashes); a fresh reader with zero project history must understand them (AGENTS.md).
 
-**Sources:** user review + the Expert release-readiness audit (2026-06-29). Anchors are `file:line` at audit time (may drift).
+**Sources:** user review + an Expert release-readiness audit. Anchors are `file:line` and may drift.
 
 ---
 
 ## P0 — blocks release
 
 - **CI — there is none** *(CTO)*. `.github/workflows/` is empty; every "green" has been manual. Add a workflow: `cargo build/test --all-targets --all-features`, `clippy -D warnings`, `fmt --check`, and the `#[ignore]` perf/memory/fuzz benches with thresholds. This gate would have caught most P1s below.
-- **`architecture.md` is a half-stale CONTRACT** *(DX, with CTO for engine facts)*. Describes deleted machinery as live (≈190–630: reverse-dep index, dirty-set, `maintain_package_naming`, drift oracles — all gone; every named symbol greps to 0 files) and the new `crates/engine` is documented nowhere. Rewrite to describe the actual engine (red-green substrate, revision clock, worker + cancellation; `analysis` = from-scratch oracle + CLI). Remove the M3/M4 headings + the "Slice plan" task-tracker (≈613–630). Stale code-comment mirror: `analysis.rs:651–658`. Source the engine architecture from `.agents/memory/decisions/incremental-architecture-and-recheck.md` + `crates/engine/DESIGN.md`.
+- **`architecture.md` is a half-stale CONTRACT** *(DX, with CTO for engine facts)*. Describes deleted machinery as live (≈190–630: reverse-dep index, dirty-set, `maintain_package_naming`, drift oracles — all gone; every named symbol greps to 0 files) and the new `crates/engine` is documented nowhere. Rewrite to describe the actual engine (red-green substrate, revision clock, worker + cancellation; `analysis` = from-scratch oracle + CLI). Remove the M3/M4 headings + the "Slice plan" task-tracker (≈613–630). Stale code-comment mirror: `analysis.rs:651–658`. Source the engine architecture from `.agents/memory/decisions.md` + `crates/engine/DESIGN.md`.
 - **Packaging unsafe to publish** *(CTO)*. Internal crates `{analysis,engine,fixtures,rofy}` lack `publish = false` + have squatter-bait names; `roughly` lacks `license`/`description`/`repository` despite shipping a `LICENSE`. Add them.
 - **Server-crash read-handlers** *(CTO)*. `uri.to_file_path().unwrap()` in 11 read handlers (`server.rs:892,945,1008,1048,1090,1130,1182,1227,1282,1323,1377`) → a non-`file:` URI (`untitled:`/`vscode-vfs:`) panics the worker → `process::exit(1)`. They return `Result` and have `path_not_found_error` available. Also `server.rs:866` `unreachable!()` on a future `FileChangeType`, and 2 client-send `.unwrap()` (`server.rs:439,847`). Real user-facing crash — fix.
 - **Stubs — proper format + standard-library coverage** *(CTO; user hard requirement)*. Replace the `crates/analysis/src/stdlib_base.R` blob (≈12 base fns) with a proper, documented stub format (ideally the `#:` typing syntax); real stubs for the standard libraries (base, stats, utils, methods, …); files **overridable** (project supplies its own → precedence). "No new features, but stdlib stubs must exist." (Stub design preserved below.)
@@ -33,7 +33,8 @@
 - **`structure.md` wrong** *(DX)* — cites non-existent `workspace.rs` + `resolve_document` (it's `resolve_document_locally`); omits `ide/generic.rs` + the whole `engine` crate.
 - **Perf/memory/fuzz tests `#[ignore]`'d + ungated** *(CTO)* — 12 ignored tests; wire into CI with thresholds; **record the 281k memory number + acceptance verdict** in the decision log.
 - **Sloppy TODO/HACK** *(CTO)* — `server.rs:72` tokio-main "???", `format.rs:1163` "HACK … ths" typo, `index.rs:207` incomplete TODO.
-- **Secondary doc staleness** *(DX)* — `development.md:11` "three crates" omits `engine`; `testing.md` omits the engine differential harnesses; `stdlib-stubs.md` (≈123–139,233–235) couples to the deleted substrate + leaks M3/M4; it's still titled "(Proposal)".
+- **Secondary doc staleness** *(DX)* — `development.md:11` "three crates" omits `engine`; `testing.md` omits the engine differential harnesses; `stdlib-stubs.md` (≈123–139,233–235) couples to the deleted incremental substrate + leaks internal milestone names; it is still titled "(Proposal)". **Stale Roadmaps that list already-shipped features as future:** `language-server.mdx` (goto-def / refs / rename / type-info — contradicts its own Features section just above), `development.md` (type checking, rename, inlay, unused), `linter.md` (the `unused` check; plus typo "Booleans values" → "Boolean values"). **Install story inconsistent** across surfaces (getting-started says binary, website says `cargo install`, VS Code is one-click) — reconcile, ordered VS Code → binary → cargo.
+- **Malformed-input regression test (engine `Lower`)** *(CTO)* — add a test asserting the engine emits no naming/type diagnostics on a transiently-malformed file (the `!root_node().has_error()` → empty `Module` short-circuit). The differential generator is well-formed, so it cannot catch a regression of this load-bearing invariant (see `MEMORY.md` engine invariants).
 - **Remove `insta`** *(CTO; in progress)* — overkill for ~4 `test_tree` snapshots; plain assertions, drop the dep + `snapshot*` justfile recipes + `.snap` files.
 
 ## P2 — polish
@@ -59,7 +60,7 @@
 
 ---
 
-## Stub design — decided (Expert, 2026-06-28) — keep
+## Stub design — decided, keep
 
 Tiered, both as `#:` decl-only stubs (no bespoke binary format):
 - **stdlib (base/stats/utils/methods):** curated in-repo, compiled into the binary, selected by detected R version; loaded once; the "known" universe for strict mode.

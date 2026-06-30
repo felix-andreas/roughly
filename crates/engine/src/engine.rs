@@ -1,7 +1,7 @@
 //! Roughly's incremental analysis substrate: a small, generic red-green memoized-query engine.
 //!
 //! This crate is the foundation of the analysis-engine rewrite (decision record
-//! `.agents/memory/decisions/incremental-architecture-and-recheck.md`). It is the **substrate only** — a
+//! `.agents/memory/decisions.md`). It is the **substrate only** — a
 //! reusable memoization core with no R-specific logic. The R queries (parse, lower, naming, typecheck,
 //! diagnostics) are layered on top in later phases; see `DESIGN.md` for the full plan.
 //!
