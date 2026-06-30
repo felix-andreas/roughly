@@ -36,7 +36,7 @@ use {
     analysis::{self, Analysis, DocumentChange, TextPosition, TextRange, ide, naming::DocumentKind},
     engine::{
         Engine,
-        ide_view::PathTable,
+        ide_view::{EngineIde, PathTable},
         queries::{Config as EngineConfig, FileDiagnostics, FileId, Key, ParsedDocument, RoughlyQueries},
     },
     async_lsp::{
@@ -943,7 +943,9 @@ impl LanguageServer for ServerState {
         let internal_position = self
             .to_internal_position(&path, position)
             .expect("opened document rope available for completion");
-        let completions = ide::completion(&mut self.analysis_state, &path, internal_position).map(
+        let completions = EngineIde::new(&self.engine, &self.paths)
+            .completion(&path, internal_position)
+            .map(
             |result| {
                 CompletionResponse::List(CompletionList {
                     is_incomplete: result.is_incomplete,
@@ -1004,7 +1006,7 @@ impl LanguageServer for ServerState {
             .to_internal_position(&path, position)
             .expect("opened document rope available for definition");
         let response =
-            ide::definition(&mut self.analysis_state, &path, internal_position).map(|locations| {
+            EngineIde::new(&self.engine, &self.paths).definition(&path, internal_position).map(|locations| {
                 let mut locations = locations
                     .into_iter()
                     .map(|location| self.convert_location(location))
@@ -1042,7 +1044,8 @@ impl LanguageServer for ServerState {
         let internal_position = self
             .to_internal_position(&path, position)
             .expect("opened document rope available for hover");
-        let Some(hover_info) = ide::hover(&mut self.analysis_state, &path, internal_position) else {
+        let Some(hover_info) = EngineIde::new(&self.engine, &self.paths).hover(&path, internal_position)
+        else {
             tracing::debug!(?position, "hover target not found");
             return box_future(Ok(None));
         };
@@ -1081,7 +1084,7 @@ impl LanguageServer for ServerState {
         let viewport = self
             .to_internal_range(&path, params.range)
             .expect("opened document rope available for inlay hints");
-        let raw_hints = ide::inlay_hints(&mut self.analysis_state, &path, Some(viewport));
+        let raw_hints = EngineIde::new(&self.engine, &self.paths).inlay_hints(&path, Some(viewport));
         let hints = raw_hints
             .into_iter()
             .map(|hint| InlayHint {
@@ -1121,7 +1124,7 @@ impl LanguageServer for ServerState {
         let internal_position = self
             .to_internal_position(&path, position)
             .expect("opened document rope available for signature help");
-        let Some(help) = ide::signature_help(&mut self.analysis_state, &path, internal_position)
+        let Some(help) = EngineIde::new(&self.engine, &self.paths).signature_help(&path, internal_position)
         else {
             return box_future(Ok(None));
         };
@@ -1274,7 +1277,7 @@ impl LanguageServer for ServerState {
             .to_internal_position(&path, position)
             .expect("opened document rope available for references");
         let references =
-            ide::references(&mut self.analysis_state, &path, internal_position, include_declaration)
+            EngineIde::new(&self.engine, &self.paths).references(&path, internal_position, include_declaration)
                 .map(|locations| {
                     locations
                         .into_iter()
@@ -1309,7 +1312,7 @@ impl LanguageServer for ServerState {
             .to_internal_position(&path, position)
             .expect("opened document rope available for rename");
         let workspace_edit =
-            ide::rename(&mut self.analysis_state, &path, internal_position, &new_name).map(
+            EngineIde::new(&self.engine, &self.paths).rename(&path, internal_position, &new_name).map(
                 |rename_result| {
                     let changes = rename_result
                         .edits
