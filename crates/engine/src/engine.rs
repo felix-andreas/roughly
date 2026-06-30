@@ -56,6 +56,10 @@
 // only `queries` depends on the `analysis` crate.
 pub mod queries;
 
+// The engine-backed IDE view: serves `analysis::ide::generic::*` off the query graph (the IDE half of the
+// production cutover). Depends on `analysis` (for the shared `IdeDatabase` orchestration) and `queries`.
+pub mod ide_view;
+
 use std::{
     any::Any,
     cell::{Cell, RefCell},

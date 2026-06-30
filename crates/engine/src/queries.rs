@@ -46,7 +46,7 @@ use {
     },
     analysis::diagnostic::{Diagnostic, render_type_scheme},
     std::{
-        cell::{Cell, RefCell},
+        cell::{Cell, Ref, RefCell},
         collections::{BTreeMap, BTreeSet, HashMap},
     },
     tree_sitter::{Parser, Point, Range},
@@ -317,6 +317,16 @@ impl RoughlyQueries {
         f(self.lowering.borrow().interner())
     }
 
+    /// An immutable borrow of the shared interner, held by an IDE orchestrator across its generic call.
+    /// Unlike [`with_interner`](RoughlyQueries::with_interner) (which releases the borrow on return), this
+    /// hands the borrow out so the engine-backed IDE view can keep `&Interner` alive while it renders. It is
+    /// sound **only after** every `fetch` the feature needs has completed: a query body `borrow_mut`s the
+    /// interner, so no body may run while this borrow is held (the prime-then-borrow discipline in
+    /// `ide_view.rs`).
+    pub fn interner_ref(&self) -> Ref<'_, Interner> {
+        Ref::map(self.lowering.borrow(), |lowering| lowering.interner())
+    }
+
     pub fn package_symbol_index_runs(&self) -> u64 {
         self.counters.package_symbol_index.get()
     }
@@ -581,7 +591,8 @@ impl QueryGroup for RoughlyQueries {
                     let defining = engine.fetch::<Option<FileId>>(Key::DefiningItem(*symbol));
                     let scheme = match *defining {
                         Some(defining_file) => {
-                            let (_check, exports) = infer_file(self, engine, defining_file, &no_overrides());
+                            let (_check, exports) =
+                                infer_file(self, engine, defining_file, &no_overrides(), false);
                             exports
                                 .into_iter()
                                 .find(|export| export.symbol == *symbol)
@@ -727,7 +738,7 @@ impl QueryGroup for RoughlyQueries {
                 bump(&self.counters.typecheck, *file);
                 // Recorded so a config change re-checks the file; the value is unused in R1a check logic.
                 let _config = engine.fetch::<Config>(Key::Config);
-                let (check, _exports) = infer_file(self, engine, *file, &no_overrides());
+                let (check, _exports) = infer_file(self, engine, *file, &no_overrides(), true);
                 Stored::new(check)
             }
 
@@ -782,6 +793,7 @@ fn infer_file(
     engine: &Engine<RoughlyQueries>,
     file: FileId,
     scc_overrides: &BTreeMap<Symbol, TypeScheme>,
+    record_expression_types: bool,
 ) -> (ModuleCheck, Vec<ExportedValue>) {
     let module = engine.fetch::<Module>(Key::Lower(file));
     let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(file));
@@ -844,6 +856,13 @@ fn infer_file(
     let mut lowering = group.lowering.borrow_mut();
     let mut inference_state = inference_state_with_builtins_in_interner(lowering.interner_mut());
     group.stubs.seed_into(&mut inference_state);
+    // The authoritative `Typecheck` round records per-expression types (for the IDE's
+    // `expression_types_by_id`) and strict `Unknown` origins; the `GlobalScheme`/SCC callers only need the
+    // exported schemes and discard the `ModuleCheck`, so they leave recording off (the wasted-work note on
+    // `record_strict_origin`), matching production, which records only in its round-2 authoritative check.
+    if record_expression_types {
+        inference_state.enable_expression_type_recording();
+    }
     for (symbol, scheme) in imported_schemes {
         let imported = inference_state.import_scheme(&scheme);
         // The cross-file *definition* range bound here is synthetic. It is read only by
@@ -1049,7 +1068,7 @@ fn resolve_interface_scc(
         // fresh exported scheme of every member.
         let mut fresh: BTreeMap<Symbol, TypeScheme> = BTreeMap::new();
         for file in &member_files {
-            let (_check, exports) = infer_file(group, engine, *file, &table);
+            let (_check, exports) = infer_file(group, engine, *file, &table, false);
             for export in exports {
                 if member_set.contains(&export.symbol) {
                     fresh.insert(export.symbol, export.type_scheme);
