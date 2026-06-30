@@ -6,11 +6,7 @@
 //! document symbols (per file) and workspace symbols (ranked, over several queries).
 
 use {
-    analysis::{
-        Analysis, CheckConfig, LintConfig,
-        document::DocumentId,
-        naming::DocumentKind,
-    },
+    analysis::{Analysis, CheckConfig, LintConfig, document::DocumentId, naming::DocumentKind},
     engine::{
         Engine,
         ide_view::PathTable,
@@ -62,8 +58,13 @@ fn analysis_package_items(analysis: &Analysis) -> HashMap<PathBuf, Vec<Item>> {
                 .path_for_document_id(document_id)
                 .expect("oracle path")
                 .to_path_buf();
-            let document = analysis.document_by_id(document_id).expect("oracle document");
-            (path, items_for(document.tree().root_node(), document.rope()))
+            let document = analysis
+                .document_by_id(document_id)
+                .expect("oracle document");
+            (
+                path,
+                items_for(document.tree().root_node(), document.rope()),
+            )
         })
         .collect()
 }
@@ -81,7 +82,10 @@ fn engine_package_items(
                 .path(DocumentId(*file))
                 .expect("engine path")
                 .to_path_buf();
-            (path, items_for(parsed.0.tree().root_node(), parsed.0.rope()))
+            (
+                path,
+                items_for(parsed.0.tree().root_node(), parsed.0.rope()),
+            )
         })
         .collect()
 }
@@ -90,8 +94,14 @@ fn engine_package_items(
 // using the same converter over identical item ranges, so byte columns are passed straight through.
 fn to_lsp_range(range: analysis::TextRange) -> Range {
     Range::new(
-        Position::new(range.start.line_index as u32, range.start.character_index as u32),
-        Position::new(range.end.line_index as u32, range.end.character_index as u32),
+        Position::new(
+            range.start.line_index as u32,
+            range.start.character_index as u32,
+        ),
+        Position::new(
+            range.end.line_index as u32,
+            range.end.character_index as u32,
+        ),
     )
 }
 
@@ -101,7 +111,11 @@ fn document_and_workspace_symbols_match_the_analysis_oracle() {
     let package_ids = files.iter().map(|(id, _)| *id).collect::<Vec<_>>();
 
     // Oracle: a fresh Analysis with the package documents loaded.
-    let mut oracle = Analysis::new(PathBuf::from(BASE), LintConfig::default(), CheckConfig::default());
+    let mut oracle = Analysis::new(
+        PathBuf::from(BASE),
+        LintConfig::default(),
+        CheckConfig::default(),
+    );
     for (id, source) in &files {
         oracle
             .add_document_from_source(package_path(*id), source)

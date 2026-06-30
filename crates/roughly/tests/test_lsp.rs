@@ -5,19 +5,16 @@ use {
         lsp_types::{
             ClientCapabilities, CompletionParams, CompletionResponse, DiagnosticClientCapabilities,
             DiagnosticServerCapabilities, DiagnosticWorkspaceClientCapabilities,
-            DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
-            DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
-            DocumentDiagnosticReport,
+            DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidOpenTextDocumentParams,
+            DidSaveTextDocumentParams, DocumentDiagnosticParams, DocumentDiagnosticReport,
             DocumentDiagnosticReportResult, DocumentFormattingParams, DocumentSymbolParams,
             DocumentSymbolResponse, FileChangeType, FileEvent, FormattingOptions,
             GeneralClientCapabilities, GotoDefinitionParams, GotoDefinitionResponse, HoverContents,
             HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-            InitializedParams, InlayHintParams, PartialResultParams, Position, PositionEncodingKind,
-            Range,
-            PublishDiagnosticsParams, ReferenceContext, ReferenceParams, RenameParams,
-            SignatureHelpParams,
-            TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-            TextDocumentItem,
+            InitializedParams, InlayHintParams, PartialResultParams, Position,
+            PositionEncodingKind, PublishDiagnosticsParams, Range, ReferenceContext,
+            ReferenceParams, RenameParams, SignatureHelpParams, TextDocumentClientCapabilities,
+            TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
             TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
             WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceFolder,
             notification::{PublishDiagnostics, ShowMessage},
@@ -532,7 +529,10 @@ async fn requests_for_non_file_uris_return_gracefully() {
         })
         .await
         .expect("hover request failed");
-    assert!(hover.is_none(), "hover on a non-file uri should return no result");
+    assert!(
+        hover.is_none(),
+        "hover on a non-file uri should return no result"
+    );
 
     let report = context.document_diagnostic(&untitled, None).await;
     assert!(
@@ -882,7 +882,10 @@ async fn completion() {
     let CompletionResponse::List(list) = result else {
         panic!("expected a CompletionList response carrying isIncomplete");
     };
-    assert!(!list.is_incomplete, "small candidate set should not be marked incomplete");
+    assert!(
+        !list.is_incomplete,
+        "small candidate set should not be marked incomplete"
+    );
     let items = list.items;
 
     let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
@@ -919,7 +922,11 @@ async fn inlay_hints_respect_requested_viewport() {
         .expect("expected inlay hints");
 
     let lines: Vec<u32> = hints.iter().map(|hint| hint.position.line).collect();
-    assert_eq!(lines, vec![1], "only the in-viewport hint should be returned");
+    assert_eq!(
+        lines,
+        vec![1],
+        "only the in-viewport hint should be returned"
+    );
 
     context.shutdown().await;
 }
@@ -1398,7 +1405,9 @@ async fn document_symbol_selection_range_under_utf16_with_non_ascii() {
     let file_uri = context.file_uri("R/symbol.R");
     // `café_fn` is seven scalars / seven UTF-16 units but eight UTF-8 bytes (`é` is two bytes), so
     // its selection range ends at UTF-16 column 7, not byte column 8.
-    context.open_file(&file_uri, "café_fn <- function() 1\n").await;
+    context
+        .open_file(&file_uri, "café_fn <- function() 1\n")
+        .await;
 
     drain_diagnostics(&mut context.diagnostics_receiver).await;
 
@@ -1457,7 +1466,12 @@ async fn diagnostics_range_under_utf16_with_non_bmp_emoji() {
         .diagnostics
         .iter()
         .find(|diagnostic| diagnostic.message.contains("TRUE"))
-        .unwrap_or_else(|| panic!("expected a T-vs-TRUE diagnostic, got: {:?}", diagnostics.diagnostics));
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a T-vs-TRUE diagnostic, got: {:?}",
+                diagnostics.diagnostics
+            )
+        });
 
     assert_eq!(true_diagnostic.range.start.line, 0);
     assert_eq!(
@@ -1549,7 +1563,10 @@ async fn hover_out_of_bounds_position_is_safe() {
             })
             .await
             .expect("hover request must not panic the server");
-        assert!(hover.is_none(), "OOB hover should be None at {position:?}, got: {hover:?}");
+        assert!(
+            hover.is_none(),
+            "OOB hover should be None at {position:?}, got: {hover:?}"
+        );
     }
 
     context.shutdown().await;
@@ -1576,7 +1593,10 @@ async fn goto_definition_out_of_bounds_position_is_safe() {
             })
             .await
             .expect("definition request must not panic the server");
-        assert!(result.is_none(), "OOB goto should be None at {position:?}, got: {result:?}");
+        assert!(
+            result.is_none(),
+            "OOB goto should be None at {position:?}, got: {result:?}"
+        );
     }
 
     context.shutdown().await;
@@ -1607,7 +1627,9 @@ async fn references_out_of_bounds_position_is_safe() {
             .await
             .expect("references request must not panic the server");
         assert!(
-            result.as_ref().map_or(true, |locations| locations.is_empty()),
+            result
+                .as_ref()
+                .map_or(true, |locations| locations.is_empty()),
             "OOB references should be None/empty at {position:?}, got: {result:?}"
         );
     }
@@ -1732,7 +1754,11 @@ fn full_report_messages(result: DocumentDiagnosticReportResult) -> (Vec<String>,
     match result {
         DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(full)) => {
             let report = full.full_document_diagnostic_report;
-            let messages = report.items.iter().map(|item| item.message.clone()).collect();
+            let messages = report
+                .items
+                .iter()
+                .map(|item| item.message.clone())
+                .collect();
             (messages, report.result_id)
         }
         other => panic!("expected a full diagnostic report, got: {other:?}"),
@@ -1773,7 +1799,8 @@ async fn pull_diagnostics_report_known_diagnostics() {
     context.open_file(&file_uri, "x <- T\ny = 1\n").await;
     drain_diagnostics(&mut context.diagnostics_receiver).await;
 
-    let (messages, result_id) = full_report_messages(context.document_diagnostic(&file_uri, None).await);
+    let (messages, result_id) =
+        full_report_messages(context.document_diagnostic(&file_uri, None).await);
 
     assert!(
         messages.iter().any(|message| message.contains("TRUE")),
@@ -1783,7 +1810,10 @@ async fn pull_diagnostics_report_known_diagnostics() {
         messages.iter().any(|message| message.contains("<-")),
         "expected an = vs <- diagnostic in the pull report, got: {messages:?}"
     );
-    assert!(result_id.is_some(), "a non-empty report must carry a result id");
+    assert!(
+        result_id.is_some(),
+        "a non-empty report must carry a result id"
+    );
 
     context.shutdown().await;
 }
@@ -1863,15 +1893,32 @@ async fn pull_diagnostics_match_pushed_across_files() {
 
     let pushed_a = recv_diagnostics(&mut context.diagnostics_receiver, &file_a_uri, TIMEOUT).await;
     let pushed_b = recv_diagnostics(&mut context.diagnostics_receiver, &file_b_uri, TIMEOUT).await;
-    let pushed_a: Vec<String> = pushed_a.diagnostics.iter().map(|d| d.message.clone()).collect();
-    let pushed_b: Vec<String> = pushed_b.diagnostics.iter().map(|d| d.message.clone()).collect();
+    let pushed_a: Vec<String> = pushed_a
+        .diagnostics
+        .iter()
+        .map(|d| d.message.clone())
+        .collect();
+    let pushed_b: Vec<String> = pushed_b
+        .diagnostics
+        .iter()
+        .map(|d| d.message.clone())
+        .collect();
 
     let (pulled_a, _) = full_report_messages(context.document_diagnostic(&file_a_uri, None).await);
     let (pulled_b, _) = full_report_messages(context.document_diagnostic(&file_b_uri, None).await);
 
-    assert_eq!(pulled_a, pushed_a, "pulled file A diagnostics must equal the pushed ones");
-    assert_eq!(pulled_b, pushed_b, "pulled file B diagnostics must equal the pushed ones");
-    assert!(!pulled_a.is_empty() && !pulled_b.is_empty(), "both files should report diagnostics");
+    assert_eq!(
+        pulled_a, pushed_a,
+        "pulled file A diagnostics must equal the pushed ones"
+    );
+    assert_eq!(
+        pulled_b, pushed_b,
+        "pulled file B diagnostics must equal the pushed ones"
+    );
+    assert!(
+        !pulled_a.is_empty() && !pulled_b.is_empty(),
+        "both files should report diagnostics"
+    );
 
     context.shutdown().await;
 }
@@ -1919,7 +1966,10 @@ async fn inlay_hint_on_document_is_safe() {
         })
         .await
         .expect("inlay_hint request must not panic the server");
-    assert!(hints.is_some(), "inlay_hint should return a (possibly empty) list");
+    assert!(
+        hints.is_some(),
+        "inlay_hint should return a (possibly empty) list"
+    );
 
     context.shutdown().await;
 }
@@ -1946,8 +1996,14 @@ async fn dependency_affecting_save_requests_diagnostic_refresh() {
         &a_uri,
         1,
         Range {
-            start: Position { line: 0, character: 0 },
-            end: Position { line: 0, character: 1 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 0,
+                character: 1,
+            },
         },
         "z",
     );
@@ -1980,8 +2036,14 @@ async fn pull_client_without_refresh_support_gets_no_refresh() {
         &solo_uri,
         1,
         Range {
-            start: Position { line: 0, character: 0 },
-            end: Position { line: 0, character: 1 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 0,
+                character: 1,
+            },
         },
         "z",
     );

@@ -28,7 +28,10 @@ pub(crate) const RECURSION_LIMIT: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InferenceEntry {
-    Unbound { level: Level, constraint: Constraint },
+    Unbound {
+        level: Level,
+        constraint: Constraint,
+    },
     Redirect(InferenceVariableId),
     Bound(CoreType),
 }
@@ -240,7 +243,12 @@ fn parameter_variances(definition: &TypeDefinition) -> Vec<Variance> {
     definition
         .type_parameters
         .iter()
-        .map(|parameter| variances.get(parameter).copied().unwrap_or(Variance::Bivariant))
+        .map(|parameter| {
+            variances
+                .get(parameter)
+                .copied()
+                .unwrap_or(Variance::Bivariant)
+        })
         .collect()
 }
 
@@ -306,10 +314,7 @@ fn accumulate_parameter_variances(
                 accumulate_parameter_variances(item, polarity, parameters, variances);
             }
         }
-        SurfaceType::Any
-        | SurfaceType::Unknown
-        | SurfaceType::Null
-        | SurfaceType::Scalar(_) => {}
+        SurfaceType::Any | SurfaceType::Unknown | SurfaceType::Null | SurfaceType::Scalar(_) => {}
     }
 }
 
@@ -391,9 +396,12 @@ impl InferenceState {
             CoreType::NamedList(inner) => {
                 CoreType::NamedList(Box::new(self.substitute_rigid_names(inner)))
             }
-            CoreType::Tuple(items) => {
-                CoreType::Tuple(items.iter().map(|item| self.substitute_rigid_names(item)).collect())
-            }
+            CoreType::Tuple(items) => CoreType::Tuple(
+                items
+                    .iter()
+                    .map(|item| self.substitute_rigid_names(item))
+                    .collect(),
+            ),
             CoreType::Record(fields) => CoreType::Record(
                 fields
                     .iter()
@@ -408,7 +416,10 @@ impl InferenceState {
             ),
             CoreType::Nominal(name, arguments) => CoreType::Nominal(
                 *name,
-                arguments.iter().map(|argument| self.substitute_rigid_names(argument)).collect(),
+                arguments
+                    .iter()
+                    .map(|argument| self.substitute_rigid_names(argument))
+                    .collect(),
             ),
             CoreType::Function(function_type) => CoreType::Function(FunctionType::new(
                 function_type
@@ -440,7 +451,12 @@ impl InferenceState {
     // Records a strict-mode `Unknown` origin, but only while expression-type recording is on (the
     // authoritative round-2 check). The interface rounds discard their `ModuleCheck`, so collecting
     // origins there would be wasted work and would leave the buffer non-empty in cloned states.
-    fn record_strict_origin(&mut self, expression_id: ExpressionId, range: Range, kind: StrictOriginKind) {
+    fn record_strict_origin(
+        &mut self,
+        expression_id: ExpressionId,
+        range: Range,
+        kind: StrictOriginKind,
+    ) {
         if self.record_expression_types {
             self.strict_origins.push(StrictUnknownOrigin {
                 expression_id,
@@ -495,7 +511,10 @@ impl InferenceState {
     // restoring entries and rigid markers and reclaiming the variable ids allocated in between.
     // Leaves `recursion_depth` and the non-reversed fields untouched.
     pub fn rollback_to(&mut self, snapshot: Snapshot) {
-        debug_assert!(self.snapshot_depth > 0, "rollback_to without an open snapshot");
+        debug_assert!(
+            self.snapshot_depth > 0,
+            "rollback_to without an open snapshot"
+        );
         while self.undo_log.len() > snapshot.log_len {
             match self.undo_log.pop() {
                 Some(UndoStep::Entry { variable, previous }) => match previous {
@@ -856,12 +875,8 @@ impl InferenceState {
         resolution_context: Option<&ResolutionContext<'_>>,
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<CoreType, InferenceError> {
-        let inferred_type = self.infer_expression_kind(
-            expression,
-            arena,
-            resolution_context,
-            type_definitions,
-        )?;
+        let inferred_type =
+            self.infer_expression_kind(expression, arena, resolution_context, type_definitions)?;
         // Apply an expression-level annotation such as `#: @new User` on a bare expression (for
         // example a block's final expression). Annotations that also bind a name are applied by the
         // assignment path instead, so they are skipped here to avoid double application.
@@ -1400,7 +1415,11 @@ impl InferenceState {
             .iter()
             .zip(parameter_types)
             .map(|(parameter, parameter_type)| {
-                RecordField::with_optional(parameter.symbol, parameter_type, parameter.has_default())
+                RecordField::with_optional(
+                    parameter.symbol,
+                    parameter_type,
+                    parameter.has_default(),
+                )
             })
             .collect();
         let inferred_function_type =
@@ -1424,9 +1443,9 @@ impl InferenceState {
         )?;
         if !compatible {
             return Err(InferenceError::TypeMismatch {
-                expected: Box::new(self.display_with_rigid_names(&CoreType::Function(
-                    expected_function_type,
-                ))),
+                expected: Box::new(
+                    self.display_with_rigid_names(&CoreType::Function(expected_function_type)),
+                ),
                 actual: Box::new(
                     self.display_with_rigid_names(&CoreType::Function(inferred_function_type)),
                 ),
@@ -1612,8 +1631,12 @@ impl InferenceState {
         // every mutation. This makes the predicate pure on failure, so it leaks nothing and its result
         // is order-independent. The snapshot does not capture `recursion_depth`.
         let snapshot = self.snapshot();
-        let result =
-            self.check_compatibility_inner(actual_type, expected_type, type_definitions, expression);
+        let result = self.check_compatibility_inner(
+            actual_type,
+            expected_type,
+            type_definitions,
+            expression,
+        );
         match &result {
             Ok(true) => self.commit(snapshot),
             Ok(false) | Err(_) => self.rollback_to(snapshot),
@@ -2297,8 +2320,10 @@ impl InferenceState {
                 // so this only makes annotation binders rigid.
                 let mut nested_type_parameters = substitutions.clone();
                 for type_parameter in bound_type_parameters {
-                    nested_type_parameters
-                        .insert(*type_parameter, CoreType::Variable(self.fresh_rigid_variable(*type_parameter)));
+                    nested_type_parameters.insert(
+                        *type_parameter,
+                        CoreType::Variable(self.fresh_rigid_variable(*type_parameter)),
+                    );
                 }
 
                 self.lower_surface_type_with_substitutions(
@@ -2953,7 +2978,8 @@ impl InferenceState {
     ) -> Result<CoreType, InferenceError> {
         let inferred_type =
             self.infer_expression_with_context(value, arena, resolution_context, type_definitions)?;
-        let resolved_type = self.resolve_structural(inferred_type, type_definitions, Some(value))?;
+        let resolved_type =
+            self.resolve_structural(inferred_type, type_definitions, Some(value))?;
 
         match classify_numeric_operand(&resolved_type) {
             NumericOperand::Concrete(shape, atomic) => Ok(core_type_for_shape(shape, atomic)),
@@ -2984,7 +3010,8 @@ impl InferenceState {
     ) -> Result<CoreType, InferenceError> {
         let inferred_type =
             self.infer_expression_with_context(value, arena, resolution_context, type_definitions)?;
-        let resolved_type = self.resolve_structural(inferred_type, type_definitions, Some(value))?;
+        let resolved_type =
+            self.resolve_structural(inferred_type, type_definitions, Some(value))?;
 
         match resolved_type {
             CoreType::Scalar(Atomic::Logical) => Ok(CoreType::Scalar(Atomic::Logical)),
@@ -2993,11 +3020,7 @@ impl InferenceState {
             }
             CoreType::Any | CoreType::Unknown => Ok(CoreType::Unknown),
             CoreType::Variable(_) => {
-                self.unify_with_context(
-                    CoreType::Scalar(Atomic::Logical),
-                    resolved_type,
-                    value,
-                )?;
+                self.unify_with_context(CoreType::Scalar(Atomic::Logical), resolved_type, value)?;
                 Ok(CoreType::Scalar(Atomic::Logical))
             }
             other_type => Err(InferenceError::InvalidOperand {
@@ -3281,7 +3304,12 @@ impl InferenceState {
                 };
 
                 let parameter = remaining_named_parameters.remove(parameter_index);
-                self.check_argument(parameter.value, inferred_argument, arg_expr, type_definitions)?;
+                self.check_argument(
+                    parameter.value,
+                    inferred_argument,
+                    arg_expr,
+                    type_definitions,
+                )?;
                 continue;
             }
 
@@ -3298,7 +3326,12 @@ impl InferenceState {
 
             if !remaining_named_parameters.is_empty() {
                 let parameter = remaining_named_parameters.remove(0);
-                self.check_argument(parameter.value, inferred_argument, arg_expr, type_definitions)?;
+                self.check_argument(
+                    parameter.value,
+                    inferred_argument,
+                    arg_expr,
+                    type_definitions,
+                )?;
                 continue;
             }
 
@@ -3879,19 +3912,21 @@ impl InferenceState {
                 expression_id: None,
             });
         }
-        let (survivor, redirected) = if left_rigid { (left, right) } else { (right, left) };
+        let (survivor, redirected) = if left_rigid {
+            (left, right)
+        } else {
+            (right, left)
+        };
 
         let (redirected_level, redirected_constraint) = match self.entries.get(&redirected) {
             Some(InferenceEntry::Unbound { level, constraint }) => (*level, *constraint),
             _ => return Err(InferenceError::UnknownInferenceVariable(redirected)),
         };
         let merged_survivor = match self.entries.get(&survivor) {
-            Some(InferenceEntry::Unbound { level, constraint }) => {
-                Some(InferenceEntry::Unbound {
-                    level: (*level).min(redirected_level),
-                    constraint: (*constraint).max(redirected_constraint),
-                })
-            }
+            Some(InferenceEntry::Unbound { level, constraint }) => Some(InferenceEntry::Unbound {
+                level: (*level).min(redirected_level),
+                constraint: (*constraint).max(redirected_constraint),
+            }),
             _ => None,
         };
         if let Some(entry) = merged_survivor {
@@ -4047,9 +4082,9 @@ impl InferenceState {
             CoreType::Nullable(inner_type) => {
                 Ok(nullable_type(self.default_free_numeric(*inner_type)?))
             }
-            CoreType::List(item_type) => {
-                Ok(CoreType::List(Box::new(self.default_free_numeric(*item_type)?)))
-            }
+            CoreType::List(item_type) => Ok(CoreType::List(Box::new(
+                self.default_free_numeric(*item_type)?,
+            ))),
             CoreType::NamedList(item_type) => Ok(CoreType::NamedList(Box::new(
                 self.default_free_numeric(*item_type)?,
             ))),
@@ -4565,7 +4600,9 @@ fn import_core_type(
         CoreType::Any => CoreType::Any,
         CoreType::Unknown => CoreType::Unknown,
         CoreType::Null => CoreType::Null,
-        CoreType::Nullable(inner_type) => nullable_type(import_core_type(inner_type, substitutions)),
+        CoreType::Nullable(inner_type) => {
+            nullable_type(import_core_type(inner_type, substitutions))
+        }
         CoreType::Scalar(atomic) => CoreType::Scalar(*atomic),
         CoreType::Nominal(symbol, type_arguments) => CoreType::Nominal(
             *symbol,
@@ -4809,8 +4846,10 @@ pub struct Binding {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{interner::Interner, types::Atomic};
+    use {
+        super::*,
+        crate::{interner::Interner, types::Atomic},
+    };
 
     // Exercises the private rigid-variable allocation path, which the integration tests cannot reach.
     // Without recording the `rigid_variables` insert, a rollback would reclaim the id but leave it
@@ -4835,7 +4874,10 @@ mod tests {
         let reused = inference_state.fresh_variable();
         assert_eq!(reused, rigid, "the rigid id should be reclaimed");
         inference_state
-            .unify(CoreType::Variable(reused), CoreType::Scalar(Atomic::Integer))
+            .unify(
+                CoreType::Variable(reused),
+                CoreType::Scalar(Atomic::Integer),
+            )
             .expect("the reclaimed id must no longer be treated as rigid");
     }
 
@@ -4852,7 +4894,12 @@ mod tests {
 
     fn check(state: &mut InferenceState, actual: CoreType, expected: CoreType) -> bool {
         state
-            .check_compatibility(actual, expected, &TypeDefinitionEnvironment::default(), None)
+            .check_compatibility(
+                actual,
+                expected,
+                &TypeDefinitionEnvironment::default(),
+                None,
+            )
             .expect("structural compatibility check should not error")
     }
 
@@ -4866,7 +4913,10 @@ mod tests {
         let a = forward.fresh_variable();
         let forward_incompatible = check(
             &mut forward,
-            tuple(vec![CoreType::Variable(a), CoreType::Scalar(Atomic::Logical)]),
+            tuple(vec![
+                CoreType::Variable(a),
+                CoreType::Scalar(Atomic::Logical),
+            ]),
             tuple(vec![
                 CoreType::Scalar(Atomic::Integer),
                 CoreType::Scalar(Atomic::Integer),
@@ -4880,7 +4930,10 @@ mod tests {
                 CoreType::Scalar(Atomic::Integer),
                 CoreType::Scalar(Atomic::Integer),
             ]),
-            tuple(vec![CoreType::Variable(b), CoreType::Scalar(Atomic::Logical)]),
+            tuple(vec![
+                CoreType::Variable(b),
+                CoreType::Scalar(Atomic::Logical),
+            ]),
         );
         assert!(!forward_incompatible);
         assert_eq!(forward_incompatible, backward_incompatible);
@@ -4890,7 +4943,10 @@ mod tests {
         let a = forward.fresh_variable();
         let forward_compatible = check(
             &mut forward,
-            tuple(vec![CoreType::Variable(a), CoreType::Scalar(Atomic::Integer)]),
+            tuple(vec![
+                CoreType::Variable(a),
+                CoreType::Scalar(Atomic::Integer),
+            ]),
             tuple(vec![
                 CoreType::Scalar(Atomic::Integer),
                 CoreType::Scalar(Atomic::Integer),
@@ -4904,7 +4960,10 @@ mod tests {
                 CoreType::Scalar(Atomic::Integer),
                 CoreType::Scalar(Atomic::Integer),
             ]),
-            tuple(vec![CoreType::Variable(b), CoreType::Scalar(Atomic::Integer)]),
+            tuple(vec![
+                CoreType::Variable(b),
+                CoreType::Scalar(Atomic::Integer),
+            ]),
         );
         assert!(forward_compatible);
         assert_eq!(forward_compatible, backward_compatible);
@@ -4923,7 +4982,10 @@ mod tests {
 
         let result = check(
             &mut state,
-            tuple(vec![CoreType::Variable(a), CoreType::Scalar(Atomic::Logical)]),
+            tuple(vec![
+                CoreType::Variable(a),
+                CoreType::Scalar(Atomic::Logical),
+            ]),
             tuple(vec![
                 CoreType::Scalar(Atomic::Integer),
                 CoreType::Scalar(Atomic::Integer),
@@ -4931,10 +4993,17 @@ mod tests {
         );
 
         assert!(!result, "logical is not compatible with integer");
-        assert_eq!(state.entry(a), Some(&unbound()), "the partial binding of `a` must be reversed");
+        assert_eq!(
+            state.entry(a),
+            Some(&unbound()),
+            "the partial binding of `a` must be reversed"
+        );
         assert_eq!(state.entry(b), Some(&unbound()));
         assert_eq!(state.entries.len(), entry_count_before, "no leaked entries");
-        assert_eq!(state.next_variable_id, next_id_before, "no leaked variable ids");
+        assert_eq!(
+            state.next_variable_id, next_id_before,
+            "no leaked variable ids"
+        );
     }
 
     // The complement of purity: a SUCCESSFUL check keeps the bindings it makes, which is how `@new`
@@ -4946,7 +5015,10 @@ mod tests {
 
         let result = check(
             &mut state,
-            tuple(vec![CoreType::Variable(a), CoreType::Scalar(Atomic::Integer)]),
+            tuple(vec![
+                CoreType::Variable(a),
+                CoreType::Scalar(Atomic::Integer),
+            ]),
             tuple(vec![
                 CoreType::Scalar(Atomic::Integer),
                 CoreType::Scalar(Atomic::Integer),

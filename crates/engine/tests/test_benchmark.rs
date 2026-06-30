@@ -115,7 +115,10 @@ fn total_loc(file_count: usize) -> usize {
 
 fn build_new_engine(file_count: usize) -> Engine<RoughlyQueries> {
     let mut engine = Engine::new(RoughlyQueries::new());
-    engine.set_input(Key::ProjectFiles, (0..file_count as FileId).collect::<Vec<_>>());
+    engine.set_input(
+        Key::ProjectFiles,
+        (0..file_count as FileId).collect::<Vec<_>>(),
+    );
     engine.set_input(
         Key::Config,
         Config {
@@ -126,7 +129,10 @@ fn build_new_engine(file_count: usize) -> Engine<RoughlyQueries> {
         },
     );
     for index in 0..file_count {
-        engine.set_input(Key::SourceText(index as FileId), generate_source(index, false));
+        engine.set_input(
+            Key::SourceText(index as FileId),
+            generate_source(index, false),
+        );
         engine.set_input(Key::DocumentKind(index as FileId), DocumentKind::Package);
     }
     engine
@@ -203,12 +209,19 @@ fn build_old_engine(file_count: usize) -> Analysis {
     analysis_state
 }
 
-fn measure_old_per_edit(analysis_state: &mut Analysis, edit_file: usize, rounds: usize) -> Duration {
+fn measure_old_per_edit(
+    analysis_state: &mut Analysis,
+    edit_file: usize,
+    rounds: usize,
+) -> Duration {
     let mut total = Duration::ZERO;
     for round in 0..rounds {
         let returns_double = round % 2 == 0;
         analysis_state
-            .add_document_from_source(old_path(edit_file), &generate_source(edit_file, returns_double))
+            .add_document_from_source(
+                old_path(edit_file),
+                &generate_source(edit_file, returns_double),
+            )
             .expect("benchmark edit should parse");
         let start = Instant::now();
         let _ = analysis::typecheck(analysis_state);
@@ -241,7 +254,10 @@ fn body_edit_recheck_is_blast_radius_bounded() {
     let typecheck_control_before = engine.group().typecheck_runs(control);
 
     // BODY-ONLY edit: every `g_{edit}_*` returns double instead of integer. Same exported name set.
-    engine.set_input(Key::SourceText(edit_file), generate_source(edit_file as usize, true));
+    engine.set_input(
+        Key::SourceText(edit_file),
+        generate_source(edit_file as usize, true),
+    );
     // Re-fetch EVERY file's diagnostics, so any file that *would* recompute does — the delta below is
     // then the true package-wide recompute set, not an artifact of which files we chose to fetch.
     warm_new_engine(&engine, file_count);

@@ -85,18 +85,19 @@ pub(crate) fn rebuild_package_naming(
     let mut diagnostics = HashMap::<DocumentId, Vec<Diagnostic>>::new();
     for (document_id, module) in package_modules {
         let local_naming = expect_local_naming(locals, *document_id);
-        let document_diagnostics = package_document_diagnostics(&PackageDocumentDiagnosticContext {
-            document_id: *document_id,
-            module,
-            local_naming,
-            is_script: false,
-            types: &types,
-            duplicate_type_names: &duplicate_type_names,
-            global_bindings: &global_bindings,
-            candidate_order: &candidate_order,
-            interner,
-            stub_library,
-        });
+        let document_diagnostics =
+            package_document_diagnostics(&PackageDocumentDiagnosticContext {
+                document_id: *document_id,
+                module,
+                local_naming,
+                is_script: false,
+                types: &types,
+                duplicate_type_names: &duplicate_type_names,
+                global_bindings: &global_bindings,
+                candidate_order: &candidate_order,
+                interner,
+                stub_library,
+            });
         if !document_diagnostics.is_empty() {
             diagnostics.insert(*document_id, document_diagnostics);
         }
@@ -106,18 +107,19 @@ pub(crate) fn rebuild_package_naming(
     for (document_id, module) in extra_modules {
         let local_naming = expect_local_naming(locals, *document_id);
         let script_types = build_script_local_type_index(&types, module);
-        let document_diagnostics = package_document_diagnostics(&PackageDocumentDiagnosticContext {
-            document_id: *document_id,
-            module,
-            local_naming,
-            is_script: true,
-            types: &script_types,
-            duplicate_type_names: &duplicate_type_names,
-            global_bindings: &global_bindings,
-            candidate_order: &candidate_order,
-            interner,
-            stub_library,
-        });
+        let document_diagnostics =
+            package_document_diagnostics(&PackageDocumentDiagnosticContext {
+                document_id: *document_id,
+                module,
+                local_naming,
+                is_script: true,
+                types: &script_types,
+                duplicate_type_names: &duplicate_type_names,
+                global_bindings: &global_bindings,
+                candidate_order: &candidate_order,
+                interner,
+                stub_library,
+            });
         if !document_diagnostics.is_empty() {
             diagnostics.insert(*document_id, document_diagnostics);
         }
@@ -193,7 +195,8 @@ pub(crate) fn package_document_diagnostics(
 
         let mut occurrences_seen = BTreeMap::<Symbol, usize>::new();
         for expression_id in &context.module.expressions {
-            let ExpressionKind::Assign { target, .. } = context.module.arena.get(*expression_id).kind
+            let ExpressionKind::Assign { target, .. } =
+                context.module.arena.get(*expression_id).kind
             else {
                 continue;
             };
@@ -227,7 +230,9 @@ pub(crate) fn package_document_diagnostics(
                 None => (0, 1),
             };
             let occurrence_index = *occurrences_seen.entry(target).or_default();
-            *occurrences_seen.get_mut(&target).expect("occurrence counter exists") += 1;
+            *occurrences_seen
+                .get_mut(&target)
+                .expect("occurrence counter exists") += 1;
             let occurrences_in_document = occurrence_totals.get(&target).copied().unwrap_or(1);
             let has_earlier = document_position > 0 || occurrence_index > 0;
             let has_later = document_position + 1 < candidate_count
@@ -304,7 +309,10 @@ pub(crate) fn build_candidate_order(
         // `document_package_definitions` is the single shared membership rule; each target appears
         // once per document, so the document is pushed onto a symbol's candidate list at most once.
         for target in document_package_definitions(module, local_naming) {
-            candidate_order.entry(target).or_default().push(*document_id);
+            candidate_order
+                .entry(target)
+                .or_default()
+                .push(*document_id);
         }
     }
     candidate_order
@@ -358,7 +366,10 @@ pub(crate) fn winners_from_candidate_order(
         .collect()
 }
 
-fn top_level_binding(local_naming: &NamesLocal, expression_id: ExpressionId) -> Option<&BindingInfo> {
+fn top_level_binding(
+    local_naming: &NamesLocal,
+    expression_id: ExpressionId,
+) -> Option<&BindingInfo> {
     let binding_id = local_naming
         .expression_resolutions
         .get(&expression_id)
@@ -429,21 +440,28 @@ fn find_exported_binding_in(
     symbol: Symbol,
     expressions: &[ExpressionId],
 ) -> Option<BindingId> {
-    expressions
-        .iter()
-        .rev()
-        .find_map(|expression_id| match &module.arena.get(*expression_id).kind {
+    expressions.iter().rev().find_map(|expression_id| {
+        match &module.arena.get(*expression_id).kind {
             ExpressionKind::Assign { target, .. } => (*target == symbol)
-                .then(|| local_naming.expression_resolutions.get(expression_id).copied())
+                .then(|| {
+                    local_naming
+                        .expression_resolutions
+                        .get(expression_id)
+                        .copied()
+                })
                 .flatten(),
             ExpressionKind::Block { expressions, .. } => {
                 find_exported_binding_in(module, local_naming, symbol, expressions)
             }
             _ => None,
-        })
+        }
+    })
 }
 
-fn expect_local_naming(locals: &HashMap<DocumentId, NamesLocal>, document_id: DocumentId) -> &NamesLocal {
+fn expect_local_naming(
+    locals: &HashMap<DocumentId, NamesLocal>,
+    document_id: DocumentId,
+) -> &NamesLocal {
     locals.get(&document_id).unwrap_or_else(|| {
         panic!("missing local naming for module {document_id:?} during package rebuild")
     })
@@ -895,7 +913,10 @@ impl<'a> DocumentNamingContext<'a> {
     fn compute_unused_bindings(&mut self) {
         let mut used = BTreeSet::new();
         for (expression_id, binding_id) in &self.document_naming.expression_resolutions {
-            if matches!(self.arena.get(*expression_id).kind, ExpressionKind::Symbol(_)) {
+            if matches!(
+                self.arena.get(*expression_id).kind,
+                ExpressionKind::Symbol(_)
+            ) {
                 used.insert(*binding_id);
             }
         }
@@ -982,8 +1003,11 @@ impl<'a> DocumentNamingContext<'a> {
             ExpressionKind::Function { parameters, body } => {
                 let mut scope = BTreeMap::new();
                 for parameter in parameters {
-                    let binding_id =
-                        self.fresh_binding(parameter.symbol, parameter.range, BindingKind::Parameter);
+                    let binding_id = self.fresh_binding(
+                        parameter.symbol,
+                        parameter.range,
+                        BindingKind::Parameter,
+                    );
                     scope.insert(parameter.symbol, binding_id);
                 }
                 self.local_scopes.push(scope);

@@ -53,7 +53,8 @@ impl Host {
     }
 
     fn edit(&mut self, id: FileId, source: &str) {
-        self.engine.set_input(Key::SourceText(id), source.to_owned());
+        self.engine
+            .set_input(Key::SourceText(id), source.to_owned());
     }
 
     // Each feature drives the genuine `EngineIde` priming path; the result is discarded because the
@@ -67,7 +68,8 @@ impl Host {
     }
 
     fn signature_help(&self, id: FileId, position: TextPosition) {
-        let _ = EngineIde::new(&self.engine, &self.paths).signature_help(&package_path(id), position);
+        let _ =
+            EngineIde::new(&self.engine, &self.paths).signature_help(&package_path(id), position);
     }
 
     fn completion(&self, id: FileId, position: TextPosition) {
@@ -97,12 +99,18 @@ fn repeated_point_query_reruns_no_typecheck() {
     // A referrer (file 0) of a typed global defined in file 1 — a real cross-file Class-1 query.
     let host = Host::new(&[
         (0, "result <- shared_fn(2L)"),
-        (1, "#: fn(x: integer) -> integer\nshared_fn <- function(x) x + x"),
+        (
+            1,
+            "#: fn(x: integer) -> integer\nshared_fn <- function(x) x + x",
+        ),
     ]);
 
     host.hover(0, ORIGIN); // warm: runs Typecheck(0) once
     let baseline = host.typecheck_runs(0);
-    assert_eq!(baseline, 1, "warming should run the target's Typecheck exactly once");
+    assert_eq!(
+        baseline, 1,
+        "warming should run the target's Typecheck exactly once"
+    );
 
     // The headline property: a point query on an unchanged file re-runs zero Typecheck bodies.
     for _ in 0..5 {
@@ -138,7 +146,10 @@ fn all_class1_features_rerun_no_typecheck_on_unchanged_file() {
     // defined in file 1.
     let host = Host::new(&[
         (0, "result <- shared_fn(2L)\nlocal_value <- 1L"),
-        (1, "#: fn(x: integer) -> integer\nshared_fn <- function(x) x + x"),
+        (
+            1,
+            "#: fn(x: integer) -> integer\nshared_fn <- function(x) x + x",
+        ),
     ]);
 
     let on_use = TextPosition {
@@ -155,7 +166,9 @@ fn all_class1_features_rerun_no_typecheck_on_unchanged_file() {
     }; // a completion context
 
     assert_no_typecheck_rerun(&host, "hover", |host| host.hover(0, on_use));
-    assert_no_typecheck_rerun(&host, "signature_help", |host| host.signature_help(0, in_args));
+    assert_no_typecheck_rerun(&host, "signature_help", |host| {
+        host.signature_help(0, in_args)
+    });
     assert_no_typecheck_rerun(&host, "inlay_hints", |host| host.inlay_hints(0));
     assert_no_typecheck_rerun(&host, "definition", |host| host.definition(0, on_use));
     assert_no_typecheck_rerun(&host, "completion", |host| host.completion(0, after_local));

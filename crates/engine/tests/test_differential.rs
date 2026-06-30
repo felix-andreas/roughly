@@ -193,7 +193,11 @@ fn sync_engine(engine: &mut Engine<RoughlyQueries>, previous: &Workspace, next: 
     engine.set_input(Key::Config, next.config.clone());
 }
 
-fn engine_diagnostics(engine: &Engine<RoughlyQueries>, id: FileId, config: &Config) -> Vec<Diagnostic> {
+fn engine_diagnostics(
+    engine: &Engine<RoughlyQueries>,
+    id: FileId,
+    config: &Config,
+) -> Vec<Diagnostic> {
     let file_diagnostics = engine.fetch::<FileDiagnostics>(Key::Diagnostics(id));
     let fallback = *engine.fetch::<Range>(Key::FallbackRange);
     let mut rendered = Vec::new();
@@ -280,7 +284,8 @@ fn assert_parity(label: &str, engine: &Engine<RoughlyQueries>, workspace: &Works
         let engine_set = normalize(engine_diagnostics(engine, *id, &workspace.config));
         let oracle_set = normalize(oracle_diagnostics(&oracle, *id, state.package));
         assert_eq!(
-            engine_set, oracle_set,
+            engine_set,
+            oracle_set,
             "parity divergence at step `{label}` for file {id} (path {:?})\n\
              engine: {engine_set:#?}\noracle: {oracle_set:#?}\nsource:\n{}",
             absolute_path(*id, state.package),
@@ -469,7 +474,11 @@ fn cross_file_nominal_new_and_use() {
         "#: @new Person\nperson <- list(name = \"bob\")\nresult <- get_name(person)",
     );
     // A structural value (no @new) is rejected where a nominal is expected.
-    driver.set_package("structural-rejected", 1, "result <- get_name(list(name = \"bob\"))");
+    driver.set_package(
+        "structural-rejected",
+        1,
+        "result <- get_name(list(name = \"bob\"))",
+    );
 }
 
 #[test]
@@ -487,7 +496,11 @@ fn stdlib_base_name_use_resolves_via_real_stubs() {
 fn reexport_chain_and_cycle() {
     let mut driver = Driver::new(typing_config());
     // A monotone re-export chain a <- b <- c, with c a typed function; the chain converges to its scheme.
-    driver.set_package("c", 2, "#: fn(x: integer) -> integer\nc_fn <- function(x) x + x");
+    driver.set_package(
+        "c",
+        2,
+        "#: fn(x: integer) -> integer\nc_fn <- function(x) x + x",
+    );
     driver.set_package("b", 1, "b_fn <- c_fn");
     driver.set_package("a", 0, "a_fn <- b_fn");
     driver.set_package("use-chain", 3, "result <- a_fn(2L)");
@@ -525,35 +538,63 @@ fn interface_change_creates_and_resolves_dependent_error() {
 #[test]
 fn add_delete_readd_same_path() {
     let mut driver = Driver::new(typing_config());
-    driver.set_package("def", 0, "#: fn(x: integer) -> integer\nf <- function(x) x + x");
+    driver.set_package(
+        "def",
+        0,
+        "#: fn(x: integer) -> integer\nf <- function(x) x + x",
+    );
     driver.set_package("use", 1, "result <- f(2L)");
     // Delete the defining file: the referrer can no longer resolve `f`'s scheme.
     driver.delete("delete-def", 0);
     // Re-add the same slot (same path → tombstone re-add) with a different scheme that the call violates.
-    driver.set_package("readd-def", 0, "#: fn(x: character) -> integer\nf <- function(x) 1L");
+    driver.set_package(
+        "readd-def",
+        0,
+        "#: fn(x: character) -> integer\nf <- function(x) 1L",
+    );
     // Re-add with the original scheme; the call is clean again.
-    driver.set_package("readd-original", 0, "#: fn(x: integer) -> integer\nf <- function(x) x + x");
+    driver.set_package(
+        "readd-original",
+        0,
+        "#: fn(x: integer) -> integer\nf <- function(x) x + x",
+    );
 }
 
 #[test]
 fn package_script_reclassification() {
     let mut driver = Driver::new(typing_config());
-    driver.set_package("def", 0, "#: fn(x: integer) -> integer\nf <- function(x) x + x");
+    driver.set_package(
+        "def",
+        0,
+        "#: fn(x: integer) -> integer\nf <- function(x) x + x",
+    );
     driver.set_package("ref-as-package", 1, "result <- f(\"bad\")");
     // Reclassify the referrer as a script: it no longer participates as a package document, but it still
     // references the package global `f`, so the same type error must hold.
     driver.set_script("ref-as-script", 1, "result <- f(\"bad\")");
     // Reclassify the *definer* as a script: `f` stops being a package global, so the reference dangles.
-    driver.set_script("def-as-script", 0, "#: fn(x: integer) -> integer\nf <- function(x) x + x");
+    driver.set_script(
+        "def-as-script",
+        0,
+        "#: fn(x: integer) -> integer\nf <- function(x) x + x",
+    );
 }
 
 #[test]
 fn rename_a_global_breaks_referrer() {
     let mut driver = Driver::new(typing_config());
-    driver.set_package("def", 0, "#: fn(x: integer) -> integer\nhelper <- function(x) x + x");
+    driver.set_package(
+        "def",
+        0,
+        "#: fn(x: integer) -> integer\nhelper <- function(x) x + x",
+    );
     driver.set_package("use", 1, "result <- helper(2L)");
     // Rename the global: the referrer's name no longer resolves to a package global.
-    driver.set_package("rename", 0, "#: fn(x: integer) -> integer\nhelper_renamed <- function(x) x + x");
+    driver.set_package(
+        "rename",
+        0,
+        "#: fn(x: integer) -> integer\nhelper_renamed <- function(x) x + x",
+    );
     // Update the referrer to the new name and pass a wrong argument.
     driver.set_package("use-renamed-bad", 1, "result <- helper_renamed(\"two\")");
 }
@@ -584,7 +625,11 @@ fn package_naming_diagnostics_match_production() {
     // (T) duplicate-type + (C) reference-to-duplicate: `Count` declared in two package files becomes a
     // duplicate (each declaration site flagged) and stays unresolved at its references.
     driver.set_package("dup-type-first", 5, "#: @alias Count {integer}");
-    driver.set_package("dup-type-second", 6, "#: @alias Count {integer}\n\n#: Count\nlabel <- 1L");
+    driver.set_package(
+        "dup-type-second",
+        6,
+        "#: @alias Count {integer}\n\n#: Count\nlabel <- 1L",
+    );
 
     // (C) unknown type: a reference to a type no package file defines.
     driver.set_package("unknown-type", 7, "#: Mystery\nvalue <- 1L");
@@ -628,8 +673,16 @@ fn package_naming_diagnostics_match_production_without_typing() {
     driver.set_package("overwrite-earlier", 2, "shared <- 1L");
     driver.set_package("overwrite-later", 3, "shared <- 2L");
     driver.set_package("dup-type-first", 4, "#: @alias Count {integer}");
-    driver.set_package("dup-type-and-ref", 5, "#: @alias Count {integer}\n\n#: Count\nlabel <- 1L");
-    driver.set_package("new-on-alias", 6, "#: @alias Tag {integer}\n\n#: @new Tag\ntagged <- 1L");
+    driver.set_package(
+        "dup-type-and-ref",
+        5,
+        "#: @alias Count {integer}\n\n#: Count\nlabel <- 1L",
+    );
+    driver.set_package(
+        "new-on-alias",
+        6,
+        "#: @alias Tag {integer}\n\n#: @new Tag\ntagged <- 1L",
+    );
 }
 
 // GAP #3: malformed input. A tree-sitter parse error lowers to an empty module on both sides (production's
@@ -648,14 +701,22 @@ fn malformed_sources_are_detected_and_reach_parity() {
     }
 
     let mut driver = Driver::new(typing_strict_config());
-    driver.set_package("def", 0, "#: fn(x: integer) -> integer\nhelper <- function(x) x + x");
+    driver.set_package(
+        "def",
+        0,
+        "#: fn(x: integer) -> integer\nhelper <- function(x) x + x",
+    );
     driver.set_package("use", 1, "result <- helper(2L)");
     // Make the definer malformed (incomplete `function` head): `helper` disappears from the package, so the
     // referrer can no longer resolve it — and the definer itself emits only its lowering syntax errors, which
     // the engine now reproduces (via `LoweringDiagnostics`) and the harness compares at full parity.
     driver.set_package("def-malformed", 0, "helper <- function(x");
     // Repair it: parity returns to the clean cross-file state.
-    driver.set_package("def-repaired", 0, "#: fn(x: integer) -> integer\nhelper <- function(x) x + x");
+    driver.set_package(
+        "def-repaired",
+        0,
+        "#: fn(x: integer) -> integer\nhelper <- function(x) x + x",
+    );
 }
 
 // A *well-formed* tree (no `root.has_error()`) whose lowering pass rejects a directive mix ("cannot mix
@@ -753,7 +814,11 @@ fn strict_origin_non_empty_matches_production() {
     let mut driver = Driver::new(typing_strict_config());
     driver.set_package("strict-origin", 0, "x <- 1L %then% 2L");
     // `@trust Any` makes the binding `Any`, which strict tolerates, so the origin clears.
-    driver.set_package("strict-origin-cleared", 0, "#: @trust Any\nx <- 1L %then% 2L");
+    driver.set_package(
+        "strict-origin-cleared",
+        0,
+        "#: @trust Any\nx <- 1L %then% 2L",
+    );
 }
 
 // ----------------------------------------------------------------------------------------------------
@@ -991,4 +1056,3 @@ fn run_randomized_stream(seed: u64, steps: usize) {
         }
     }
 }
-

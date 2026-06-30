@@ -9,9 +9,9 @@
 //! identifier-resolution machinery, and one `// Utils` block for remaining shared helpers.
 use {
     super::{
-        COMPLETION_LIMIT, CompletionItem, CompletionItemKind, CompletionItemSource, CompletionResult,
-        DebugSection, HoverInfo, IdeDatabase, InlayHint, Location, RenameEdit, RenameResult,
-        SignatureHelp,
+        COMPLETION_LIMIT, CompletionItem, CompletionItemKind, CompletionItemSource,
+        CompletionResult, DebugSection, HoverInfo, IdeDatabase, InlayHint, Location, RenameEdit,
+        RenameResult, SignatureHelp,
     },
     crate::{
         diagnostic::render_core_type,
@@ -56,10 +56,12 @@ pub fn hover(database: &dyn IdeDatabase, path: &Path, position: TextPosition) ->
             let expression = module.arena.try_get(expression_id)?;
 
             if let Some(core_type) = database.checked_expression_type(document_id, expression_id) {
-                contents.push(code_block(&render_core_type(database.interner(), core_type)));
+                contents.push(code_block(&render_core_type(
+                    database.interner(),
+                    core_type,
+                )));
             }
-            if let Some(summary) =
-                variable_definition_summary(database, document_id, expression_id)
+            if let Some(summary) = variable_definition_summary(database, document_id, expression_id)
             {
                 contents.push(summary);
             }
@@ -455,7 +457,10 @@ fn render_expression_hover(database: &dyn IdeDatabase, expression: &Expression) 
             format!("If(alternative: {})", alternative.is_some())
         }
         ExpressionKind::For { variable, .. } => {
-            let name = database.interner().resolve(*variable).unwrap_or("<unknown>");
+            let name = database
+                .interner()
+                .resolve(*variable)
+                .unwrap_or("<unknown>");
             format!("For({name})")
         }
         ExpressionKind::While { .. } => "While".to_owned(),
@@ -572,7 +577,11 @@ fn render_binding_site(database: &dyn IdeDatabase, binding: &BindingInfo) -> Str
     )
 }
 
-fn render_source_location(database: &dyn IdeDatabase, document_id: DocumentId, range: Range) -> String {
+fn render_source_location(
+    database: &dyn IdeDatabase,
+    document_id: DocumentId,
+    range: Range,
+) -> String {
     let path = database
         .path_for_document_id(document_id)
         .map(|path| {
@@ -599,7 +608,8 @@ pub fn definition(
     path: &Path,
     position: TextPosition,
 ) -> Option<Vec<Location>> {
-    let occurrences = symbol_occurrences_at(database, path, position, OccurrenceScope::Declaration)?;
+    let occurrences =
+        symbol_occurrences_at(database, path, position, OccurrenceScope::Declaration)?;
     let definitions = occurrences
         .into_iter()
         .filter(|occurrence| occurrence.is_declaration)
@@ -1028,7 +1038,13 @@ fn push_call_s4_occurrences(call: Node<'_>, rope: &Rope, out: &mut Vec<S4Occurre
             // The signature is a class name or a `c(...)` of class names.
             if let Some(signature) = call_argument(arguments, rope, "signature", 1) {
                 for class_string in signature_class_strings(signature) {
-                    push_string_occurrence(Some(class_string), S4SymbolKind::Class, false, rope, out);
+                    push_string_occurrence(
+                        Some(class_string),
+                        S4SymbolKind::Class,
+                        false,
+                        rope,
+                        out,
+                    );
                 }
             }
         }
@@ -1151,10 +1167,17 @@ pub fn completion(
     match context {
         CompletionContext::Default => {}
         CompletionContext::Field => {
-            return Some(complete_result(rendered_query_matches(tree, rope, FIELD_QUERY, &query)));
+            return Some(complete_result(rendered_query_matches(
+                tree,
+                rope,
+                FIELD_QUERY,
+                &query,
+            )));
         }
         CompletionContext::Item => {
-            return Some(complete_result(rendered_query_matches(tree, rope, ITEM_QUERY, &query)));
+            return Some(complete_result(rendered_query_matches(
+                tree, rope, ITEM_QUERY, &query,
+            )));
         }
         CompletionContext::Namespace => {
             return Some(complete_result(rendered_query_matches(
@@ -1456,7 +1479,11 @@ fn binding_completion_kind(
     };
     match expression.kind {
         ExpressionKind::Assign { value, .. } => {
-            match module.arena.try_get(value).map(|expression| &expression.kind) {
+            match module
+                .arena
+                .try_get(value)
+                .map(|expression| &expression.kind)
+            {
                 Some(ExpressionKind::Function { .. }) => CompletionItemKind::Function,
                 _ => CompletionItemKind::Variable,
             }
@@ -1466,7 +1493,10 @@ fn binding_completion_kind(
 }
 
 fn complete_result(items: Vec<CompletionItem>) -> CompletionResult {
-    CompletionResult { items, is_incomplete: false }
+    CompletionResult {
+        items,
+        is_incomplete: false,
+    }
 }
 
 fn deduplicate_completion_items(
@@ -1506,7 +1536,10 @@ fn deduplicate_completion_items(
     let is_incomplete = deduplicated.len() > COMPLETION_LIMIT;
     deduplicated.truncate(COMPLETION_LIMIT);
 
-    (!deduplicated.is_empty()).then_some(CompletionResult { items: deduplicated, is_incomplete })
+    (!deduplicated.is_empty()).then_some(CompletionResult {
+        items: deduplicated,
+        is_incomplete,
+    })
 }
 
 //
@@ -1767,7 +1800,11 @@ fn query_matches(label: &str, query: &str) -> bool {
 
 fn query_prefix_matches(label: &str, query: &str) -> bool {
     query.is_empty()
-        || prefix_under_case(label, query, query.chars().any(|character| character.is_uppercase()))
+        || prefix_under_case(
+            label,
+            query,
+            query.chars().any(|character| character.is_uppercase()),
+        )
 }
 
 fn text_range(range: Range) -> TextRange {
@@ -1867,8 +1904,23 @@ mod search_match_tests {
     #[test]
     fn exact_then_prefix_then_substring_then_subsequence_rank_in_order() {
         assert_eq!(
-            rank("inst", vec!["my_instrument", "reinstall", "install", "instrument", "inst"]),
-            vec!["inst", "install", "instrument", "reinstall", "my_instrument"],
+            rank(
+                "inst",
+                vec![
+                    "my_instrument",
+                    "reinstall",
+                    "install",
+                    "instrument",
+                    "inst"
+                ]
+            ),
+            vec![
+                "inst",
+                "install",
+                "instrument",
+                "reinstall",
+                "my_instrument"
+            ],
         );
     }
 

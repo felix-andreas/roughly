@@ -73,10 +73,7 @@ pub fn workspace(
         (left_score, left_name).cmp(&(right_score, right_name))
     });
     matches.truncate(WORKSPACE_SYMBOL_LIMIT);
-    matches
-        .into_iter()
-        .map(|(_, _, symbol)| symbol)
-        .collect()
+    matches.into_iter().map(|(_, _, symbol)| symbol).collect()
 }
 
 pub fn to_document_symbol(item: &Item, to_lsp: &impl Fn(TextRange) -> Range) -> DocumentSymbol {
@@ -87,10 +84,12 @@ pub fn to_document_symbol(item: &Item, to_lsp: &impl Fn(TextRange) -> Range) -> 
         tags: None,
         range: to_lsp(item.range),
         selection_range: to_lsp(item.selection_range),
-        children: item
-            .children
-            .as_ref()
-            .map(|children| children.iter().map(|child| to_document_symbol(child, to_lsp)).collect()),
+        children: item.children.as_ref().map(|children| {
+            children
+                .iter()
+                .map(|child| to_document_symbol(child, to_lsp))
+                .collect()
+        }),
         #[allow(deprecated)]
         deprecated: None,
     }
@@ -177,16 +176,31 @@ mod workspace_tests {
         // exact/prefix beat scattered subsequence regardless of map order
         let ranked = names(
             "inst",
-            &["my_instrument", "reinstall", "install", "instrument", "inst"],
+            &[
+                "my_instrument",
+                "reinstall",
+                "install",
+                "instrument",
+                "inst",
+            ],
         );
         assert_eq!(
             ranked,
-            vec!["inst", "install", "instrument", "reinstall", "my_instrument"],
+            vec![
+                "inst",
+                "install",
+                "instrument",
+                "reinstall",
+                "my_instrument"
+            ],
         );
     }
 
     #[test]
     fn non_matching_symbols_are_excluded() {
-        assert_eq!(names("xyz", &["instrument", "install"]), Vec::<String>::new());
+        assert_eq!(
+            names("xyz", &["instrument", "install"]),
+            Vec::<String>::new()
+        );
     }
 }

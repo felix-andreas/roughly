@@ -77,7 +77,10 @@ fn rollback_restores_a_bound_variable_and_reclaims_fresh_ids() {
     let snapshot = inference_state.snapshot();
     let variable = inference_state.fresh_variable();
     inference_state
-        .unify(CoreType::Variable(variable), CoreType::Scalar(Atomic::Integer))
+        .unify(
+            CoreType::Variable(variable),
+            CoreType::Scalar(Atomic::Integer),
+        )
         .expect("variable should bind to integer");
     assert_eq!(
         inference_state.entry(variable),
@@ -89,7 +92,10 @@ fn rollback_restores_a_bound_variable_and_reclaims_fresh_ids() {
     // The variable allocated inside the snapshot is gone entirely (entry removed, id reclaimed).
     assert_eq!(inference_state.entry(variable), None);
     let reused = inference_state.fresh_variable();
-    assert_eq!(reused, variable, "the reclaimed id should be handed out again");
+    assert_eq!(
+        reused, variable,
+        "the reclaimed id should be handed out again"
+    );
     assert_eq!(inference_state.entry(reused), Some(&unbound()));
 }
 
@@ -174,7 +180,10 @@ fn mutations_without_an_active_snapshot_are_permanent() {
     let mut inference_state = InferenceState::new();
     let permanent = inference_state.fresh_variable();
     inference_state
-        .unify(CoreType::Variable(permanent), CoreType::Scalar(Atomic::Integer))
+        .unify(
+            CoreType::Variable(permanent),
+            CoreType::Scalar(Atomic::Integer),
+        )
         .expect("permanent variable should bind");
 
     // With nothing recorded on the committed path, a later snapshot/rollback cannot reach this write.

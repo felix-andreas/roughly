@@ -100,8 +100,9 @@ fn check_input(source: &str) {
     let mut parser = new_parser().expect("parser should initialize");
 
     // Invariant 3: tree-sitter must always produce a tree.
-    let document = Document::parse(&mut parser, source)
-        .unwrap_or_else(|error| panic!("Document::parse returned no tree for {source:?}: {error:?}"));
+    let document = Document::parse(&mut parser, source).unwrap_or_else(|error| {
+        panic!("Document::parse returned no tree for {source:?}: {error:?}")
+    });
 
     // Invariant 1: lowering must not panic. (Source nesting is bounded by the generators below the
     // unguarded-`lower` overflow boundary — see the module-level KNOWN GAP note.)
@@ -173,22 +174,131 @@ impl Rng {
 // Weighted token alphabet biased toward R syntax. Brackets appear here too, but the generator tracks
 // nesting separately so source depth stays bounded.
 const R_TOKENS: &[&str] = &[
-    "x", "y", "value", "foo", "f", "df", ".x", "x1", "T", "F",
-    "1", "1L", "1.5", "0xFF", "1e10", "1i", ".5", "0x", "100L", "NA",
-    "NA_integer_", "NA_real_", "NULL", "TRUE", "FALSE", "Inf", "NaN",
-    "<-", "<<-", "->", "->>", "=", "==", "!=", "<=", ">=", "<", ">",
-    "+", "-", "*", "/", "^", "%%", "%/%", "%in%", "%>%", "%custom%",
-    "::", ":::", "$", "@", ":", "|>", "|", "||", "&", "&&", "!", "~", "?",
-    "function", "if", "else", "for", "while", "repeat", "in", "next", "break", "return",
-    "'str'", "\"str\"", "'unterminated", "\"unterminated", "r\"(raw)\"", "r\"(unterminated",
-    "\\(x)", ";", ",", " ", "\n", "\t", "#comment", "café", "λ", "\u{0}",
+    "x",
+    "y",
+    "value",
+    "foo",
+    "f",
+    "df",
+    ".x",
+    "x1",
+    "T",
+    "F",
+    "1",
+    "1L",
+    "1.5",
+    "0xFF",
+    "1e10",
+    "1i",
+    ".5",
+    "0x",
+    "100L",
+    "NA",
+    "NA_integer_",
+    "NA_real_",
+    "NULL",
+    "TRUE",
+    "FALSE",
+    "Inf",
+    "NaN",
+    "<-",
+    "<<-",
+    "->",
+    "->>",
+    "=",
+    "==",
+    "!=",
+    "<=",
+    ">=",
+    "<",
+    ">",
+    "+",
+    "-",
+    "*",
+    "/",
+    "^",
+    "%%",
+    "%/%",
+    "%in%",
+    "%>%",
+    "%custom%",
+    "::",
+    ":::",
+    "$",
+    "@",
+    ":",
+    "|>",
+    "|",
+    "||",
+    "&",
+    "&&",
+    "!",
+    "~",
+    "?",
+    "function",
+    "if",
+    "else",
+    "for",
+    "while",
+    "repeat",
+    "in",
+    "next",
+    "break",
+    "return",
+    "'str'",
+    "\"str\"",
+    "'unterminated",
+    "\"unterminated",
+    "r\"(raw)\"",
+    "r\"(unterminated",
+    "\\(x)",
+    ";",
+    ",",
+    " ",
+    "\n",
+    "\t",
+    "#comment",
+    "café",
+    "λ",
+    "\u{0}",
 ];
 
 // Type-syntax tokens for the `#:` / standalone-type path.
 const TYPE_TOKENS: &[&str] = &[
-    "integer", "double", "character", "logical", "complex", "raw", "Any", "Unknown", "NULL",
-    "fn", "->", "|", "[", "]", "{", "}", "(", ")", ",", ":", "<", ">", "@new", "@type", "@alias",
-    "@trust", "@if-unknown", "list", "data.frame", "Foo", "T", "x", " ", "\n",
+    "integer",
+    "double",
+    "character",
+    "logical",
+    "complex",
+    "raw",
+    "Any",
+    "Unknown",
+    "NULL",
+    "fn",
+    "->",
+    "|",
+    "[",
+    "]",
+    "{",
+    "}",
+    "(",
+    ")",
+    ",",
+    ":",
+    "<",
+    ">",
+    "@new",
+    "@type",
+    "@alias",
+    "@trust",
+    "@if-unknown",
+    "list",
+    "data.frame",
+    "Foo",
+    "T",
+    "x",
+    " ",
+    "\n",
 ];
 
 const ANNOTATION_PREFIXES: &[&str] = &["#: ", "#:", "# ", "#' ", ""];
@@ -246,15 +356,13 @@ fn gen_type_string(rng: &mut Rng, max_tokens: usize) -> String {
 // Pathologically deep type strings to actively exercise the recursion guard (invariant 2).
 fn gen_deep_type(rng: &mut Rng) -> String {
     let depth = 200 + rng.below(DEEP_TYPE_NESTING);
-    let (opener, closer) = rng.pick(&[
-        ("list[", "]"),
-        ("fn(", ")"),
-        ("(", ")"),
-        ("{", "}"),
-    ]);
+    let (opener, closer) = rng.pick(&[("list[", "]"), ("fn(", ")"), ("(", ")"), ("{", "}")]);
     // For `|` there is no closer; build a long alternation chain instead.
     if rng.chance(20) {
-        return std::iter::repeat("integer | ").take(depth).collect::<String>() + "integer";
+        return std::iter::repeat("integer | ")
+            .take(depth)
+            .collect::<String>()
+            + "integer";
     }
     let mut out = String::with_capacity(depth * opener.len() + 8 + depth);
     for _ in 0..depth {
@@ -316,7 +424,10 @@ fn check_edit_sequence(rng: &mut Rng) {
     );
 
     // Initial source includes unicode so columns can land mid-codepoint.
-    let initial = format!("x <- 1L # café\nf <- function(a) a + λ\n{}", gen_type_string(rng, 4));
+    let initial = format!(
+        "x <- 1L # café\nf <- function(a) a + λ\n{}",
+        gen_type_string(rng, 4)
+    );
     analysis
         .add_document_from_source(path.clone(), &initial)
         .expect("initial document should parse");
@@ -367,7 +478,11 @@ fn run_fuzz(seed: u64, input_iters: usize, type_iters: usize, edit_sequences: us
         let source = match index % 4 {
             0 | 1 => gen_r_source(&mut rng),
             2 => gen_random_bytes(&mut rng),
-            _ => format!("#: {}\n{}", gen_type_string(&mut rng, 10), gen_r_source(&mut rng)),
+            _ => format!(
+                "#: {}\n{}",
+                gen_type_string(&mut rng, 10),
+                gen_r_source(&mut rng)
+            ),
         };
         check_input(&source);
     }

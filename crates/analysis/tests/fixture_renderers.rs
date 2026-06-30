@@ -310,7 +310,9 @@ fn render_named_expression(
         ExpressionKind::Integer(value) => lines.push(format!("{prefix}Integer({value})")),
         ExpressionKind::Double(value) => lines.push(format!("{prefix}Double({value})")),
         ExpressionKind::Character(value) => lines.push(format!("{prefix}Character({value:?})")),
-        ExpressionKind::AtomicConstant(atomic) => lines.push(format!("{prefix}AtomicConstant({atomic:?})")),
+        ExpressionKind::AtomicConstant(atomic) => {
+            lines.push(format!("{prefix}AtomicConstant({atomic:?})"))
+        }
         ExpressionKind::StringLiteralName(symbol) => {
             let name = interner.resolve(*symbol).unwrap_or("<unknown>");
             lines.push(format!("{prefix}StringLiteralName({name:?})"));
@@ -473,7 +475,9 @@ fn render_locally_named_expression(
         ExpressionKind::Integer(value) => lines.push(format!("{prefix}Integer({value})")),
         ExpressionKind::Double(value) => lines.push(format!("{prefix}Double({value})")),
         ExpressionKind::Character(value) => lines.push(format!("{prefix}Character({value:?})")),
-        ExpressionKind::AtomicConstant(atomic) => lines.push(format!("{prefix}AtomicConstant({atomic:?})")),
+        ExpressionKind::AtomicConstant(atomic) => {
+            lines.push(format!("{prefix}AtomicConstant({atomic:?})"))
+        }
         ExpressionKind::StringLiteralName(symbol) => {
             let name = interner.resolve(*symbol).unwrap_or("<unknown>");
             lines.push(format!("{prefix}StringLiteralName({name:?})"));

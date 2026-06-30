@@ -7,8 +7,8 @@ use {
         lint::{self as lint_phase, NameStyle},
         lower::lower_with_shared_interner,
         naming::{
-            DocumentKind, NamesGlobal, NamesLocal, TypeInfo, build_type_index, rebuild_package_naming,
-            resolve_document_locally,
+            DocumentKind, NamesGlobal, NamesLocal, TypeInfo, build_type_index,
+            rebuild_package_naming, resolve_document_locally,
         },
         stdlib::StubLibrary,
         tree,
@@ -415,7 +415,10 @@ impl Analysis {
             if self.check_config.unused {
                 for binding_id in &output.output.unused_bindings {
                     if let Some(binding) = output.output.bindings.get(binding_id) {
-                        let name = self.interner().resolve(binding.symbol).unwrap_or("<unknown>");
+                        let name = self
+                            .interner()
+                            .resolve(binding.symbol)
+                            .unwrap_or("<unknown>");
                         diagnostics.push(Diagnostic::naming_warning(
                             binding.range,
                             format!("`{name}` is assigned but never used."),
@@ -551,8 +554,12 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
         } else {
             DocumentKind::Package
         };
-        let local_naming =
-            resolve_document_locally(*document_id, module, analysis_state.interner(), document_kind);
+        let local_naming = resolve_document_locally(
+            *document_id,
+            module,
+            analysis_state.interner(),
+            document_kind,
+        );
         analysis_state.document_naming_outputs.insert(
             *document_id,
             DocumentOutput {
@@ -569,13 +576,21 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
     let package_document_ids = analysis_state.package_document_ids();
     let package_modules = package_document_ids
         .iter()
-        .filter_map(|document_id| analysis_state.module(*document_id).map(|module| (*document_id, module)))
+        .filter_map(|document_id| {
+            analysis_state
+                .module(*document_id)
+                .map(|module| (*document_id, module))
+        })
         .collect::<Vec<_>>();
     let extra_modules = analysis_state
         .all_document_ids()
         .into_iter()
         .filter(|document_id| !package_document_ids.contains(document_id))
-        .filter_map(|document_id| analysis_state.module(document_id).map(|module| (document_id, module)))
+        .filter_map(|document_id| {
+            analysis_state
+                .module(document_id)
+                .map(|module| (document_id, module))
+        })
         .collect::<Vec<_>>();
     let naming_locals = analysis_state
         .document_naming_outputs
@@ -661,7 +676,8 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
 
     let package_document_ids = analysis_state.package_document_ids();
     let all_document_ids = analysis_state.all_document_ids();
-    let mut template_state = inference_state_with_builtins_in_interner(analysis_state.interner_mut());
+    let mut template_state =
+        inference_state_with_builtins_in_interner(analysis_state.interner_mut());
     // Seed the stdlib stub schemes as base globals alongside the builtins, so a document cloned from
     // this template resolves a bare base name (`length`, `T`, `pi`, ...) to its stub scheme. These live
     // only in the template environment, never in `global_bindings` or the interface table.
@@ -687,7 +703,10 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         .output
         .clone();
 
-    let package_document_set = package_document_ids.iter().copied().collect::<BTreeSet<_>>();
+    let package_document_set = package_document_ids
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
 
     // Per-document exported interface — scratch for the fixed-point only. Local (never a persisted
     // `Analysis` field), so each from-scratch `typecheck` starts the iteration from an empty table.
@@ -729,8 +748,10 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
             let Some(export) = table.get(symbol) else {
                 continue;
             };
-            let rendered =
-                crate::diagnostic::render_type_scheme(analysis_state.interner(), &export.type_scheme);
+            let rendered = crate::diagnostic::render_type_scheme(
+                analysis_state.interner(),
+                &export.type_scheme,
+            );
             let history = symbol_value_history.entry(*symbol).or_default();
             if history.last().is_some_and(|last| *last != rendered) && history.contains(&rendered) {
                 newly_pinned.push(*symbol);
@@ -761,9 +782,9 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 .get(document_id)
                 .map(|output| output.fingerprint.clone());
 
-            let module = analysis_state.module(*document_id).unwrap_or_else(|| {
-                panic!("missing lowered module for typecheck {document_id:?}")
-            });
+            let module = analysis_state
+                .module(*document_id)
+                .unwrap_or_else(|| panic!("missing lowered module for typecheck {document_id:?}"));
             let mut inference_state = template_state.clone();
             for symbol in &referenced {
                 if let Some(export) = table.get(symbol) {
@@ -783,7 +804,13 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
             if previous_fingerprint.as_deref() != Some(fingerprint.as_str()) {
                 any_interface_changed = true;
             }
-            fresh_interfaces.push((*document_id, InterfaceOutput { exports, fingerprint }));
+            fresh_interfaces.push((
+                *document_id,
+                InterfaceOutput {
+                    exports,
+                    fingerprint,
+                },
+            ));
         }
         for (document_id, output) in fresh_interfaces {
             document_interface_outputs.insert(document_id, output);
@@ -805,11 +832,8 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
 
     // The converged package interface table. It supplies the schemes bound when each document runs its
     // authoritative round-2 check; names pinned during the fixed-point are forced to `Unknown` here too.
-    let mut final_table = build_package_interface_table(
-        &package_naming,
-        &document_interface_outputs,
-        fallback_range,
-    );
+    let mut final_table =
+        build_package_interface_table(&package_naming, &document_interface_outputs, fallback_range);
     for symbol in &pinned_unknown {
         if let Some(export) = final_table.get_mut(symbol) {
             export.type_scheme = TypeScheme::monomorphic(CoreType::Unknown);
@@ -865,8 +889,11 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 Diagnostic::from_inference_error(error, fallback_range, analysis_state.interner())
             })
             .collect();
-        let strict_diagnostics =
-            strict_origin_diagnostics(module, &module_check.strict_origins, analysis_state.interner());
+        let strict_diagnostics = strict_origin_diagnostics(
+            module,
+            &module_check.strict_origins,
+            analysis_state.interner(),
+        );
         let expression_types = module_check
             .expression_types_by_id
             .into_iter()
@@ -1260,7 +1287,9 @@ mod tests {
             "type errors must be suppressed when `[check] typing` is off"
         );
         assert!(
-            analysis.document_typecheck_outputs.contains_key(&document_id),
+            analysis
+                .document_typecheck_outputs
+                .contains_key(&document_id),
             "the typecheck phase must still run and retain output for IDE features"
         );
 
@@ -1381,10 +1410,9 @@ mod tests {
             "{:?}",
             hover.contents
         );
-        assert!(
-            hover.debug.iter().any(|section| section.title == "Lowering"
-                && section.body.contains("Symbol(parameter)"))
-        );
+        assert!(hover.debug.iter().any(
+            |section| section.title == "Lowering" && section.body.contains("Symbol(parameter)")
+        ));
     }
 
     #[test]
@@ -1423,10 +1451,12 @@ mod tests {
             "{:?}",
             hover.contents
         );
-        assert!(
-            hover.debug.iter().any(|section| section.title == "Naming"
-                && section.body.contains("package resolution: binding `value` at R/a.R:1:1"))
-        );
+        assert!(hover.debug.iter().any(|section| {
+            section.title == "Naming"
+                && section
+                    .body
+                    .contains("package resolution: binding `value` at R/a.R:1:1")
+        }));
     }
 
     fn unique_temp_workspace_path() -> PathBuf {

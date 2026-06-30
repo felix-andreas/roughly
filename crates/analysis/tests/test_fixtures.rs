@@ -1000,9 +1000,11 @@ fn run_naming_global_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile
                     .map_err(|error| {
                         format!("failed to move `{}`: {error:?}", destination_path.display())
                     })?;
-                analysis_state.delete_document(source_path).map_err(|error| {
-                    format!("failed to delete `{}`: {error:?}", source_path.display())
-                })
+                analysis_state
+                    .delete_document(source_path)
+                    .map_err(|error| {
+                        format!("failed to delete `{}`: {error:?}", source_path.display())
+                    })
             }
             FixtureOperation::DeleteDocument { path } => analysis_state
                 .delete_document(path)

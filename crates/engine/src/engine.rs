@@ -364,7 +364,12 @@ impl<G: QueryGroup> Engine<G> {
             } else {
                 Vec::new()
             };
-            (slot.is_input, slot.verified_at, slot.changed_at, dependencies)
+            (
+                slot.is_input,
+                slot.verified_at,
+                slot.changed_at,
+                dependencies,
+            )
         });
 
         let Some((is_input, verified_at, changed_at, dependencies)) = snapshot else {

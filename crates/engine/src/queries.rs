@@ -27,6 +27,7 @@ use {
     crate::{Engine, QueryGroup, Shared, Stored},
     analysis::{
         LintConfig,
+        diagnostic::{Diagnostic, render_type_scheme},
         document::{Document, DocumentId},
         hir::{DefinitionKind, ExpressionId, ExpressionKind, HirArena, Module},
         interner::{Interner, Symbol},
@@ -45,7 +46,6 @@ use {
         },
         types::{Annotation, CoreType, NamedTypeRef, SurfaceType, TypeScheme},
     },
-    analysis::diagnostic::{Diagnostic, render_type_scheme},
     std::{
         cell::{Cell, Ref, RefCell},
         collections::{BTreeMap, BTreeSet, HashMap},
@@ -545,7 +545,10 @@ impl QueryGroup for RoughlyQueries {
                 for file in files.iter() {
                     let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
                     if *kind == DocumentKind::Package {
-                        modules.push(engine.fetch::<TypeDefinitionsModule>(Key::TypeDefinitionsModule(*file)));
+                        modules.push(
+                            engine
+                                .fetch::<TypeDefinitionsModule>(Key::TypeDefinitionsModule(*file)),
+                        );
                     }
                 }
                 Stored::new(TypeDefinitionEnvironment::from_modules(
@@ -606,8 +609,8 @@ impl QueryGroup for RoughlyQueries {
                     // Cyclic: route through the SCC fixed-point body, which owns the whole component and
                     // never re-enters `fetch` on a `GlobalScheme`/`InterfaceScc`/`SymbolScc` key — so the
                     // core's accidental-cycle guard stays intact for *real* graph bugs. Project this member.
-                    let interface =
-                        engine.fetch::<BTreeMap<Symbol, TypeScheme>>(Key::InterfaceScc((*scc).clone()));
+                    let interface = engine
+                        .fetch::<BTreeMap<Symbol, TypeScheme>>(Key::InterfaceScc((*scc).clone()));
                     Stored::new(interface.get(symbol).cloned())
                 }
             }
@@ -638,10 +641,14 @@ impl QueryGroup for RoughlyQueries {
                     if *kind != DocumentKind::Package {
                         continue;
                     }
-                    let definitions = engine
-                        .fetch::<BTreeMap<Symbol, Vec<EngineTypeInfo>>>(Key::FileTypeDefinitions(*file));
+                    let definitions = engine.fetch::<BTreeMap<Symbol, Vec<EngineTypeInfo>>>(
+                        Key::FileTypeDefinitions(*file),
+                    );
                     for (name, infos) in definitions.iter() {
-                        sites.entry(*name).or_default().extend(infos.iter().copied());
+                        sites
+                            .entry(*name)
+                            .or_default()
+                            .extend(infos.iter().copied());
                     }
                 }
                 let mut resolved = BTreeMap::new();
@@ -700,7 +707,8 @@ impl QueryGroup for RoughlyQueries {
 
             Key::DefinerOrder(name) => {
                 bump(&self.counters.definer_order, *name);
-                let order = engine.fetch::<BTreeMap<Symbol, Vec<FileId>>>(Key::PackageCandidateOrder);
+                let order =
+                    engine.fetch::<BTreeMap<Symbol, Vec<FileId>>>(Key::PackageCandidateOrder);
                 Stored::new(order.get(name).cloned().unwrap_or_default())
             }
 
@@ -750,7 +758,8 @@ impl QueryGroup for RoughlyQueries {
                 let module = engine.fetch::<Module>(Key::Lower(*file));
                 // Fetched before the `lowering` borrow below: their bodies borrow the interner/parser too,
                 // so re-entering them while holding the borrow would double-borrow the `RefCell`.
-                let package_naming = engine.fetch::<Vec<Diagnostic>>(Key::PackageNamingDiagnostics(*file));
+                let package_naming =
+                    engine.fetch::<Vec<Diagnostic>>(Key::PackageNamingDiagnostics(*file));
                 let lowering_diagnostics =
                     engine.fetch::<Vec<Diagnostic>>(Key::LoweringDiagnostics(*file));
                 let lint = engine.fetch::<Vec<Diagnostic>>(Key::Lint(*file));
@@ -842,8 +851,9 @@ fn infer_file(
             if *other_kind == DocumentKind::Package {
                 // The declarations-only view, like `PackageTypeDefinitions`: a body edit to a package
                 // file does not re-fold this script's type environment.
-                package_modules
-                    .push(engine.fetch::<TypeDefinitionsModule>(Key::TypeDefinitionsModule(*other)));
+                package_modules.push(
+                    engine.fetch::<TypeDefinitionsModule>(Key::TypeDefinitionsModule(*other)),
+                );
             }
         }
         TypeDefinitionEnvironment::from_modules(
@@ -914,7 +924,10 @@ fn interface_deps(engine: &Engine<RoughlyQueries>, symbol: Symbol) -> Vec<Symbol
     let referenced: BTreeSet<Symbol> = naming.naming.non_locals.values().copied().collect();
     let mut deps = BTreeSet::new();
     for candidate in referenced {
-        if engine.fetch::<Option<FileId>>(Key::DefiningItem(candidate)).is_some() {
+        if engine
+            .fetch::<Option<FileId>>(Key::DefiningItem(candidate))
+            .is_some()
+        {
             deps.insert(candidate);
         }
     }
@@ -930,8 +943,7 @@ fn interface_deps(engine: &Engine<RoughlyQueries>, symbol: Symbol) -> Vec<Symbol
 // the one SCC that contains `symbol`. Every member of that SCC computes the identical sorted list (Tarjan
 // from any member finds the same component), so all members share one `InterfaceScc` memo.
 fn symbol_scc(engine: &Engine<RoughlyQueries>, symbol: Symbol) -> Vec<Symbol> {
-    let deps_of =
-        |node: Symbol| (*engine.fetch::<Vec<Symbol>>(Key::InterfaceDeps(node))).clone();
+    let deps_of = |node: Symbol| (*engine.fetch::<Vec<Symbol>>(Key::InterfaceDeps(node))).clone();
 
     // A self-referential singleton: `symbol`'s own winning file forward-references `symbol`, so the SCC is
     // the non-trivial `{symbol}` even though Tarjan reports a size-1 component (a self-edge does not lower a
@@ -991,7 +1003,9 @@ fn symbol_scc(engine: &Engine<RoughlyQueries>, symbol: Symbol) -> Vec<Symbol> {
             if low[&node] == index[&node] {
                 let mut component = Vec::new();
                 loop {
-                    let member = component_stack.pop().expect("component stack is non-empty at a root");
+                    let member = component_stack
+                        .pop()
+                        .expect("component stack is non-empty at a root");
                     on_stack.remove(&member);
                     component.push(member);
                     if member == node {
@@ -1050,8 +1064,10 @@ fn resolve_interface_scc(
     }
 
     let unknown = TypeScheme::monomorphic(CoreType::Unknown);
-    let mut table: BTreeMap<Symbol, TypeScheme> =
-        members.iter().map(|member| (*member, unknown.clone())).collect();
+    let mut table: BTreeMap<Symbol, TypeScheme> = members
+        .iter()
+        .map(|member| (*member, unknown.clone()))
+        .collect();
     let mut pinned: BTreeSet<Symbol> = BTreeSet::new();
     let mut history: HashMap<Symbol, Vec<String>> = HashMap::new();
 
@@ -1084,7 +1100,10 @@ fn resolve_interface_scc(
             } else {
                 next.insert(
                     *member,
-                    fresh.get(member).cloned().unwrap_or_else(|| unknown.clone()),
+                    fresh
+                        .get(member)
+                        .cloned()
+                        .unwrap_or_else(|| unknown.clone()),
                 );
             }
         }
@@ -1713,7 +1732,11 @@ fn collect_surface_type_references(
                 collect_surface_type_references(parameter, local_type_parameters, references);
             }
             for parameter in &function_type.named_parameters {
-                collect_surface_type_references(&parameter.value, local_type_parameters, references);
+                collect_surface_type_references(
+                    &parameter.value,
+                    local_type_parameters,
+                    references,
+                );
             }
             collect_surface_type_references(
                 &function_type.return_type,
@@ -1753,7 +1776,10 @@ fn file_type_definitions(module: &Module) -> BTreeMap<Symbol, Vec<EngineTypeInfo
 
 // The binding a top-level assignment resolves to, if any (`analysis::naming`'s `top_level_binding`):
 // shared by the package-definition membership rule and the overwrite/shadow loop.
-fn top_level_binding(local_naming: &NamesLocal, expression_id: ExpressionId) -> Option<&BindingInfo> {
+fn top_level_binding(
+    local_naming: &NamesLocal,
+    expression_id: ExpressionId,
+) -> Option<&BindingInfo> {
     let binding_id = local_naming
         .expression_resolutions
         .get(&expression_id)
@@ -1764,9 +1790,11 @@ fn top_level_binding(local_naming: &NamesLocal, expression_id: ExpressionId) -> 
 // Whether a symbol names one of the type checker's hardcoded builtins (`analysis::naming`'s
 // `is_builtin_symbol`). Stub-corpus names are checked separately against the live `StubLibrary`.
 fn is_builtin(interner: &Interner, symbol: Symbol) -> bool {
-    interner
-        .resolve(symbol)
-        .is_some_and(|name| BUILTINS.iter().any(|(builtin_name, _)| *builtin_name == name))
+    interner.resolve(symbol).is_some_and(|name| {
+        BUILTINS
+            .iter()
+            .any(|(builtin_name, _)| *builtin_name == name)
+    })
 }
 
 // Renders each strict `Unknown` origin into a diagnostic, ported verbatim from `analysis.rs`'s private
@@ -1824,7 +1852,10 @@ fn unused_diagnostics(local_naming: &NamesLocal, interner: &Interner) -> Vec<Dia
         .filter_map(|binding_id| local_naming.bindings.get(binding_id))
         .map(|binding| {
             let name = interner.resolve(binding.symbol).unwrap_or("<unknown>");
-            Diagnostic::naming_warning(binding.range, format!("`{name}` is assigned but never used."))
+            Diagnostic::naming_warning(
+                binding.range,
+                format!("`{name}` is assigned but never used."),
+            )
         })
         .collect()
 }

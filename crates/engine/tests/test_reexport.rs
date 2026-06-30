@@ -73,7 +73,10 @@ fn monotone_reexport_chain_converges_to_concrete() {
         CoreType::Unknown,
         "the chain resolves to the concrete scheme, not Unknown"
     );
-    assert_eq!(scheme_a, scheme_c, "every link equals the concrete base's scheme");
+    assert_eq!(
+        scheme_a, scheme_c,
+        "every link equals the concrete base's scheme"
+    );
 
     // The consumer `z <- a()` typechecks against a concrete `() -> integer`: no cross-file errors.
     let diagnostics = engine.fetch::<FileDiagnostics>(Key::Diagnostics(3));
@@ -87,7 +90,10 @@ fn monotone_reexport_chain_converges_to_concrete() {
     engine.set_input(Key::SourceText(2), "c <- function() \"two\"".to_owned());
     let scheme_a_after = global_scheme(&engine, a);
     let scheme_c_after = global_scheme(&engine, c);
-    assert_ne!(scheme_a, scheme_a_after, "editing the base updates the chain head");
+    assert_ne!(
+        scheme_a, scheme_a_after,
+        "editing the base updates the chain head"
+    );
     assert_eq!(
         scheme_a_after, scheme_c_after,
         "the chain still tracks the (now string) concrete base"
@@ -100,11 +106,7 @@ fn monotone_reexport_chain_converges_to_concrete() {
 // round cap and does NOT trip the accidental-cycle guard). A consumer sees `Unknown`, not a crash.
 #[test]
 fn period_two_cycle_pins_to_unknown_and_converges() {
-    let engine = setup(&[
-        (0, "a <- b"),
-        (1, "b <- a"),
-        (2, "z <- a()"),
-    ]);
+    let engine = setup(&[(0, "a <- b"), (1, "b <- a"), (2, "z <- a()")]);
     let a = engine.group().intern("a");
     let b = engine.group().intern("b");
 
@@ -112,7 +114,10 @@ fn period_two_cycle_pins_to_unknown_and_converges() {
     let scc_a = (*engine.fetch::<Vec<Symbol>>(Key::SymbolScc(a))).clone();
     let scc_b = (*engine.fetch::<Vec<Symbol>>(Key::SymbolScc(b))).clone();
     assert_eq!(scc_a.len(), 2, "a and b form a 2-cycle");
-    assert_eq!(scc_a, scc_b, "every member projects the same canonical SCC, sharing one memo");
+    assert_eq!(
+        scc_a, scc_b,
+        "every member projects the same canonical SCC, sharing one memo"
+    );
 
     // The pure mutual re-export cycle holds no information: both resolve to Unknown.
     assert_eq!(body_of(&global_scheme(&engine, a)), CoreType::Unknown);
@@ -149,8 +154,10 @@ fn deep_chain_is_not_truncated() {
         };
         sources.push((index, body));
     }
-    let borrowed: Vec<(FileId, &str)> =
-        sources.iter().map(|(file, body)| (*file, body.as_str())).collect();
+    let borrowed: Vec<(FileId, &str)> = sources
+        .iter()
+        .map(|(file, body)| (*file, body.as_str()))
+        .collect();
     let engine = setup(&borrowed);
 
     let head = engine.group().intern("s0");

@@ -10,7 +10,6 @@
 pub mod generic;
 
 pub use generic::{MatchScore, search_match};
-
 use {
     crate::{
         analysis::{Analysis, lower, resolve_package, typecheck},
@@ -314,7 +313,11 @@ mod completion_limit_tests {
             source.push_str(&format!("g{index:04} <- function() NULL\n"));
         }
 
-        let mut analysis = Analysis::new(PathBuf::new(), LintConfig::default(), CheckConfig::default());
+        let mut analysis = Analysis::new(
+            PathBuf::new(),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
         analysis
             .add_document_from_source(PathBuf::from("R/globals.R"), &source)
             .expect("globals parse");
@@ -329,7 +332,10 @@ mod completion_limit_tests {
         completion(
             analysis,
             Path::new("R/main.R"),
-            TextPosition { line_index: 0, character_index: 1 },
+            TextPosition {
+                line_index: 0,
+                character_index: 1,
+            },
         )
         .expect("completions present")
     }
@@ -366,7 +372,11 @@ mod inlay_viewport_tests {
     };
 
     fn analysis_with_three_bindings() -> Analysis {
-        let mut analysis = Analysis::new(PathBuf::new(), LintConfig::default(), CheckConfig::default());
+        let mut analysis = Analysis::new(
+            PathBuf::new(),
+            LintConfig::default(),
+            CheckConfig::default(),
+        );
         analysis
             .add_document_from_source(
                 PathBuf::from("R/main.R"),
@@ -390,8 +400,14 @@ mod inlay_viewport_tests {
         let mut analysis = analysis_with_three_bindings();
         // Cover only the middle line; the surrounding bindings must drop out.
         let viewport = TextRange {
-            start: TextPosition { line_index: 1, character_index: 0 },
-            end: TextPosition { line_index: 1, character_index: 99 },
+            start: TextPosition {
+                line_index: 1,
+                character_index: 0,
+            },
+            end: TextPosition {
+                line_index: 1,
+                character_index: 99,
+            },
         };
         let hints = inlay_hints(&mut analysis, Path::new("R/main.R"), Some(viewport));
 

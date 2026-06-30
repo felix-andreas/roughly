@@ -104,7 +104,10 @@ pub struct EngineIde<'engine> {
 }
 
 impl<'engine> EngineIde<'engine> {
-    pub fn new(engine: &'engine Engine<RoughlyQueries>, paths: &'engine PathTable) -> EngineIde<'engine> {
+    pub fn new(
+        engine: &'engine Engine<RoughlyQueries>,
+        paths: &'engine PathTable,
+    ) -> EngineIde<'engine> {
         EngineIde { engine, paths }
     }
 
@@ -163,7 +166,12 @@ impl<'engine> EngineIde<'engine> {
         generic::references(&database, path, position, include_declaration)
     }
 
-    pub fn rename(&self, path: &Path, position: TextPosition, new_name: &str) -> Option<RenameResult> {
+    pub fn rename(
+        &self,
+        path: &Path,
+        position: TextPosition,
+        new_name: &str,
+    ) -> Option<RenameResult> {
         let _target = self.paths.id(path)?;
         let caches = self.prime_all_files();
         let interner = self.engine.group().interner_ref();
@@ -208,7 +216,12 @@ impl<'engine> EngineIde<'engine> {
         let mut caches = self.empty_caches();
         self.prime_parse(&mut caches, target);
         let package_naming = self.synthesize_package_naming();
-        for export in package_naming.global_bindings.values().copied().collect::<BTreeSet<_>>() {
+        for export in package_naming
+            .global_bindings
+            .values()
+            .copied()
+            .collect::<BTreeSet<_>>()
+        {
             self.prime_module(&mut caches, export);
             self.prime_naming(&mut caches, export);
         }
@@ -264,10 +277,10 @@ impl<'engine> EngineIde<'engine> {
     }
 
     fn prime_parse(&self, caches: &mut Caches, document_id: DocumentId) {
-        caches
-            .parses
-            .entry(document_id)
-            .or_insert_with(|| self.engine.fetch::<ParsedDocument>(Key::Parse(document_id.0)));
+        caches.parses.entry(document_id).or_insert_with(|| {
+            self.engine
+                .fetch::<ParsedDocument>(Key::Parse(document_id.0))
+        });
     }
 
     fn prime_module(&self, caches: &mut Caches, document_id: DocumentId) {
@@ -278,20 +291,17 @@ impl<'engine> EngineIde<'engine> {
     }
 
     fn prime_naming(&self, caches: &mut Caches, document_id: DocumentId) {
-        caches
-            .namings
-            .entry(document_id)
-            .or_insert_with(|| {
-                self.engine
-                    .fetch::<DocumentNamingComputation>(Key::LocalNaming(document_id.0))
-            });
+        caches.namings.entry(document_id).or_insert_with(|| {
+            self.engine
+                .fetch::<DocumentNamingComputation>(Key::LocalNaming(document_id.0))
+        });
     }
 
     fn prime_check(&self, caches: &mut Caches, document_id: DocumentId) {
-        caches
-            .checks
-            .entry(document_id)
-            .or_insert_with(|| self.engine.fetch::<ModuleCheck>(Key::Typecheck(document_id.0)));
+        caches.checks.entry(document_id).or_insert_with(|| {
+            self.engine
+                .fetch::<ModuleCheck>(Key::Typecheck(document_id.0))
+        });
     }
 
     fn project_ids(&self) -> Vec<DocumentId> {
@@ -306,7 +316,9 @@ impl<'engine> EngineIde<'engine> {
     // `NamesGlobal` shape `analysis::ide` expects. Held owned in `Caches` so its `&NamesGlobal` is tied to
     // the cache borrow exactly like `Analysis::package_naming`'s.
     fn synthesize_package_naming(&self) -> NamesGlobal {
-        let index = self.engine.fetch::<BTreeMap<Symbol, FileId>>(Key::PackageSymbolIndex);
+        let index = self
+            .engine
+            .fetch::<BTreeMap<Symbol, FileId>>(Key::PackageSymbolIndex);
         NamesGlobal {
             global_bindings: index
                 .iter()
@@ -404,7 +416,10 @@ impl<'a> IdeDatabase for EngineIdeRef<'a> {
             self.caches.modules.contains_key(&document_id),
             "ide: document {document_id:?} not primed for module"
         );
-        self.caches.modules.get(&document_id).map(|module| &**module)
+        self.caches
+            .modules
+            .get(&document_id)
+            .map(|module| &**module)
     }
 
     fn document_naming(&self, document_id: DocumentId) -> Option<&NamesLocal> {

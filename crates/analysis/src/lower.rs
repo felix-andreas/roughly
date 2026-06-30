@@ -155,7 +155,11 @@ fn lower_node_with_rope(
                 "This expression is nested too deeply to analyze (more than {LOWER_RECURSION_LIMIT} levels)."
             ),
         ));
-        return lowering_context.annotated_expression(node.range(), None, ExpressionKind::Unsupported);
+        return lowering_context.annotated_expression(
+            node.range(),
+            None,
+            ExpressionKind::Unsupported,
+        );
     }
     lowering_context.depth += 1;
     let result = lower_node_inner(node, rope, lowering_context);
@@ -949,7 +953,9 @@ fn annotation_parse_diagnostic(range: Range, error: TypeParseError) -> Diagnosti
         }
         TypeParseError::RecursionLimitExceeded { limit } => Diagnostic::syntax_error(
             range,
-            format!("This type annotation is nested too deeply to parse (more than {limit} levels)."),
+            format!(
+                "This type annotation is nested too deeply to parse (more than {limit} levels)."
+            ),
         ),
     }
 }

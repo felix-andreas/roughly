@@ -1352,12 +1352,18 @@ fn tokenize_annotation(body: &str) -> Option<Vec<AnnotationToken>> {
             b'<' => {
                 // A `<` that follows a type name is a generic application (`Foo<...>`); otherwise it
                 // opens a leading type-parameter binder (`<T> ...`).
-                let kind = if matches!(tokens.last().map(|token| &token.kind), Some(AnnotationTokenKind::Word)) {
+                let kind = if matches!(
+                    tokens.last().map(|token| &token.kind),
+                    Some(AnnotationTokenKind::Word)
+                ) {
                     AnnotationTokenKind::GenericOpen
                 } else {
                     AnnotationTokenKind::BinderOpen
                 };
-                tokens.push(AnnotationToken { kind, text: "<".to_owned() });
+                tokens.push(AnnotationToken {
+                    kind,
+                    text: "<".to_owned(),
+                });
                 index += 1;
                 continue;
             }

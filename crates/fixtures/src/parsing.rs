@@ -1,4 +1,8 @@
-use {serde_json::from_str, std::ops::Range, std::path::PathBuf, thiserror::Error};
+use {
+    serde_json::from_str,
+    std::{ops::Range, path::PathBuf},
+    thiserror::Error,
+};
 
 #[derive(Debug)]
 pub struct FixtureFile {

@@ -4,40 +4,34 @@ use {
         config::{Config, ExperimentalFeatures},
         diagnostics, format,
         index::{self, IndexError, Item},
-        position::{self, PositionEncoding},
         lsp_types::{
             CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionList,
-            CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
-            DiagnosticOptions, DiagnosticServerCapabilities, DidChangeTextDocumentParams,
-            DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
-            DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-            DocumentDiagnosticParams, DocumentDiagnosticReport, DocumentDiagnosticReportResult,
-            DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol,
-            DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
+            CompletionOptions, CompletionParams, CompletionResponse, Diagnostic, DiagnosticOptions,
+            DiagnosticServerCapabilities, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+            DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
+            DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
+            DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentFormattingParams,
+            DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
+            DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
             FullDocumentDiagnosticReport, GlobPattern, Hover, HoverContents, HoverParams,
-            HoverProviderCapability, InlayHint,
-            InlayHintKind, InlayHintLabel, InlayHintParams,
-            InitializeParams, InitializeResult, InitializedParams, Location, MarkupContent,
-            MarkupKind, MessageType, OneOf, Position, PublishDiagnosticsParams, Range,
-            ParameterInformation, ParameterLabel, ReferenceParams, Registration,
-            RegistrationParams, RelatedFullDocumentDiagnosticReport,
-            RelatedUnchangedDocumentDiagnosticReport, RelativePattern, RenameParams, SaveOptions,
-            ServerCapabilities,
-            ServerInfo, ShowMessageParams, SignatureHelp, SignatureHelpOptions,
-            SignatureHelpParams, SignatureInformation,
-            TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-            TextDocumentSyncSaveOptions, TextEdit, UnchangedDocumentDiagnosticReport, Url,
-            WorkspaceEdit, WorkspaceSymbolParams,
+            HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+            InlayHint, InlayHintKind, InlayHintLabel, InlayHintParams, Location, MarkupContent,
+            MarkupKind, MessageType, OneOf, ParameterInformation, ParameterLabel, Position,
+            PublishDiagnosticsParams, Range, ReferenceParams, Registration, RegistrationParams,
+            RelatedFullDocumentDiagnosticReport, RelatedUnchangedDocumentDiagnosticReport,
+            RelativePattern, RenameParams, SaveOptions, ServerCapabilities, ServerInfo,
+            ShowMessageParams, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+            SignatureInformation, TextDocumentSyncCapability, TextDocumentSyncKind,
+            TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
+            UnchangedDocumentDiagnosticReport, Url, WorkspaceEdit, WorkspaceSymbolParams,
             WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
         },
+        position::{self, PositionEncoding},
         symbols,
     },
-    analysis::{self, Document, DocumentChange, TextPosition, TextRange, ide, naming::DocumentKind},
-    engine::{
-        Cancelled, Engine, Shared,
-        ide_view::{EngineIde, PathTable},
-        queries::{Config as EngineConfig, FileDiagnostics, FileId, Key, ParsedDocument, RoughlyQueries},
+    analysis::{
+        self, Document, DocumentChange, TextPosition, TextRange, ide, naming::DocumentKind,
     },
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
@@ -47,6 +41,13 @@ use {
         router::Router,
         server::LifecycleLayer,
         tracing::TracingLayer,
+    },
+    engine::{
+        Cancelled, Engine, Shared,
+        ide_view::{EngineIde, PathTable},
+        queries::{
+            Config as EngineConfig, FileDiagnostics, FileId, Key, ParsedDocument, RoughlyQueries,
+        },
     },
     futures::future::BoxFuture,
     std::{
@@ -76,11 +77,10 @@ pub async fn run(experimental_features: ExperimentalFeatures) {
     let runtime = tokio::runtime::Handle::current();
 
     let (server, _) = async_lsp::MainLoop::new_server(|client| {
-        let config = Config::from_path(Path::new(CONFIG_FILE_NAME))
-            .unwrap_or_else(|error| {
-                cli::error(&error.to_string());
-                panic!("failed to load config: {error}");
-            });
+        let config = Config::from_path(Path::new(CONFIG_FILE_NAME)).unwrap_or_else(|error| {
+            cli::error(&error.to_string());
+            panic!("failed to load config: {error}");
+        });
 
         // The `!Send` engine lives on a dedicated worker thread, built INSIDE the closure (it cannot be
         // moved across threads). The frontend forwards every LSP op to it over the channel + shares the
@@ -425,7 +425,10 @@ impl EngineWorker {
             })
             .collect::<Vec<_>>();
         entries.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
-        let project = entries.into_iter().map(|(_, _, file)| file).collect::<Vec<_>>();
+        let project = entries
+            .into_iter()
+            .map(|(_, _, file)| file)
+            .collect::<Vec<_>>();
         self.engine.set_input(Key::ProjectFiles, project);
     }
 
@@ -440,10 +443,7 @@ impl EngineWorker {
 }
 
 impl EngineWorker {
-    fn initialize(
-        &mut self,
-        params: InitializeParams,
-    ) -> Result<InitializeResult, ResponseError> {
+    fn initialize(&mut self, params: InitializeParams) -> Result<InitializeResult, ResponseError> {
         tracing::info!(?self.experimental_features, "initialize");
 
         let client_encodings = params
@@ -505,12 +505,14 @@ impl EngineWorker {
                     ..Default::default()
                 }),
                 definition_provider: Some(OneOf::Left(true)),
-                diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
-                    identifier: Some("roughly".into()),
-                    inter_file_dependencies: true,
-                    workspace_diagnostics: false,
-                    work_done_progress_options: Default::default(),
-                })),
+                diagnostic_provider: Some(DiagnosticServerCapabilities::Options(
+                    DiagnosticOptions {
+                        identifier: Some("roughly".into()),
+                        inter_file_dependencies: true,
+                        workspace_diagnostics: false,
+                        work_done_progress_options: Default::default(),
+                    },
+                )),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(
                     self.experimental_features.range_formatting,
@@ -593,17 +595,13 @@ impl EngineWorker {
             }
             tracing::info!("registered file watching for R files");
         });
-
     }
 
     //
     // TEXT SYNC
     //
 
-    fn did_open(
-        &mut self,
-        params: DidOpenTextDocumentParams,
-    ) {
+    fn did_open(&mut self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let text = &params.text_document.text;
@@ -631,13 +629,9 @@ impl EngineWorker {
                 tracing::error!(?error, "failed to publish diagnostics");
             }
         }
-
     }
 
-    fn did_close(
-        &mut self,
-        params: DidCloseTextDocumentParams,
-    ) {
+    fn did_close(&mut self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
@@ -649,7 +643,10 @@ impl EngineWorker {
             // A closed package file still on disk reverts to its on-disk text (discarding unsaved buffer
             // edits); the file set is unchanged, so no `rebuild_project_files`.
             let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-                panic!("failed to reload package source on close {}: {error}", path.display())
+                panic!(
+                    "failed to reload package source on close {}: {error}",
+                    path.display()
+                )
             });
             self.set_source_input(&path, text, true);
         } else {
@@ -657,13 +654,9 @@ impl EngineWorker {
             self.retract_source_input(&path);
             self.rebuild_project_files();
         }
-
     }
 
-    fn did_change(
-        &mut self,
-        params: DidChangeTextDocumentParams,
-    ) {
+    fn did_change(&mut self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let content_changes = params.content_changes;
@@ -744,13 +737,9 @@ impl EngineWorker {
         }
 
         tracing::debug!(elapsed = start.elapsed().as_millis());
-
     }
 
-    fn did_save(
-        &mut self,
-        params: DidSaveTextDocumentParams,
-    ) {
+    fn did_save(&mut self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
@@ -815,13 +804,9 @@ impl EngineWorker {
                 tracing::error!(?error, "failed to publish diagnostics");
             }
         }
-
     }
 
-    fn did_change_watched_files(
-        &mut self,
-        params: DidChangeWatchedFilesParams,
-    ) {
+    fn did_change_watched_files(&mut self, params: DidChangeWatchedFilesParams) {
         let config_path = self.workspace_root.join(CONFIG_FILE_NAME);
         let workspace_r_path = self.workspace_r_path();
 
@@ -866,13 +851,9 @@ impl EngineWorker {
         // The file set and/or config may have changed across the batch.
         self.rebuild_project_files();
         self.engine.set_input(Key::Config, self.engine_config());
-
     }
 
-    fn did_change_configuration(
-        &mut self,
-        _params: DidChangeConfigurationParams,
-    ) {
+    fn did_change_configuration(&mut self, _params: DidChangeConfigurationParams) {
         // Stub implementation to satisfy Zed's requirements; does not apply any configuration changes.
     }
 
@@ -957,9 +938,10 @@ impl EngineWorker {
             .to_internal_position(&path, position)
             .expect("opened document rope available for completion");
         let completions = self
-            .cancellable(|| EngineIde::new(&self.engine, &self.paths).completion(&path, internal_position))
-            .map(
-            |result| {
+            .cancellable(|| {
+                EngineIde::new(&self.engine, &self.paths).completion(&path, internal_position)
+            })
+            .map(|result| {
                 CompletionResponse::List(CompletionList {
                     is_incomplete: result.is_incomplete,
                     items: result
@@ -990,8 +972,7 @@ impl EngineWorker {
                         })
                         .collect(),
                 })
-            },
-        );
+            });
 
         Ok(completions)
     }
@@ -1021,7 +1002,9 @@ impl EngineWorker {
             .to_internal_position(&path, position)
             .expect("opened document rope available for definition");
         let response = self
-            .cancellable(|| EngineIde::new(&self.engine, &self.paths).definition(&path, internal_position))
+            .cancellable(|| {
+                EngineIde::new(&self.engine, &self.paths).definition(&path, internal_position)
+            })
             .map(|locations| {
                 let mut locations = locations
                     .into_iter()
@@ -1042,10 +1025,7 @@ impl EngineWorker {
     // HOVER
     //
 
-    fn hover(
-        &mut self,
-        params: HoverParams,
-    ) -> Result<Option<Hover>, ResponseError> {
+    fn hover(&mut self, params: HoverParams) -> Result<Option<Hover>, ResponseError> {
         let uri = params.text_document_position_params.text_document.uri;
         let Ok(path) = uri.to_file_path() else {
             return Ok(None);
@@ -1062,9 +1042,9 @@ impl EngineWorker {
         let internal_position = self
             .to_internal_position(&path, position)
             .expect("opened document rope available for hover");
-        let Some(hover_info) =
-            self.cancellable(|| EngineIde::new(&self.engine, &self.paths).hover(&path, internal_position))
-        else {
+        let Some(hover_info) = self.cancellable(|| {
+            EngineIde::new(&self.engine, &self.paths).hover(&path, internal_position)
+        }) else {
             tracing::debug!(?position, "hover target not found");
             return Ok(None);
         };
@@ -1105,8 +1085,9 @@ impl EngineWorker {
         let viewport = self
             .to_internal_range(&path, params.range)
             .expect("opened document rope available for inlay hints");
-        let raw_hints =
-            self.cancellable(|| EngineIde::new(&self.engine, &self.paths).inlay_hints(&path, Some(viewport)));
+        let raw_hints = self.cancellable(|| {
+            EngineIde::new(&self.engine, &self.paths).inlay_hints(&path, Some(viewport))
+        });
         let hints = raw_hints
             .into_iter()
             .map(|hint| InlayHint {
@@ -1148,9 +1129,9 @@ impl EngineWorker {
         let internal_position = self
             .to_internal_position(&path, position)
             .expect("opened document rope available for signature help");
-        let Some(help) = self
-            .cancellable(|| EngineIde::new(&self.engine, &self.paths).signature_help(&path, internal_position))
-        else {
+        let Some(help) = self.cancellable(|| {
+            EngineIde::new(&self.engine, &self.paths).signature_help(&path, internal_position)
+        }) else {
             return Ok(None);
         };
 
@@ -1329,10 +1310,7 @@ impl EngineWorker {
     // RENAME
     //
 
-    fn rename(
-        &mut self,
-        params: RenameParams,
-    ) -> Result<Option<WorkspaceEdit>, ResponseError> {
+    fn rename(&mut self, params: RenameParams) -> Result<Option<WorkspaceEdit>, ResponseError> {
         let uri = params.text_document_position.text_document.uri;
         let Ok(path) = uri.to_file_path() else {
             return Ok(None);
@@ -1351,32 +1329,36 @@ impl EngineWorker {
             .to_internal_position(&path, position)
             .expect("opened document rope available for rename");
         let workspace_edit = self
-            .cancellable(|| EngineIde::new(&self.engine, &self.paths).rename(&path, internal_position, &new_name))
-            .map(
-                |rename_result| {
-                    let changes = rename_result
-                        .edits
-                        .into_iter()
-                        .map(|(edit_path, edits)| {
-                            let uri = Url::from_file_path(&edit_path)
-                                .expect("rename edit path should convert to URI");
-                            let edits = edits
-                                .into_iter()
-                                .map(|edit| TextEdit {
-                                    range: self.to_lsp_range_in(&edit_path, edit.range),
-                                    new_text: edit.replacement_text,
-                                })
-                                .collect();
-                            (uri, edits)
-                        })
-                        .collect();
+            .cancellable(|| {
+                EngineIde::new(&self.engine, &self.paths).rename(
+                    &path,
+                    internal_position,
+                    &new_name,
+                )
+            })
+            .map(|rename_result| {
+                let changes = rename_result
+                    .edits
+                    .into_iter()
+                    .map(|(edit_path, edits)| {
+                        let uri = Url::from_file_path(&edit_path)
+                            .expect("rename edit path should convert to URI");
+                        let edits = edits
+                            .into_iter()
+                            .map(|edit| TextEdit {
+                                range: self.to_lsp_range_in(&edit_path, edit.range),
+                                new_text: edit.replacement_text,
+                            })
+                            .collect();
+                        (uri, edits)
+                    })
+                    .collect();
 
-                    WorkspaceEdit {
-                        changes: Some(changes),
-                        ..Default::default()
-                    }
-                },
-            );
+                WorkspaceEdit {
+                    changes: Some(changes),
+                    ..Default::default()
+                }
+            });
 
         Ok(workspace_edit)
     }
@@ -1540,7 +1522,10 @@ impl LanguageServer for ServerState {
         self.notify(move |worker| worker.initialized(params))
     }
 
-    fn did_open(&mut self, params: DidOpenTextDocumentParams) -> ControlFlow<async_lsp::Result<()>> {
+    fn did_open(
+        &mut self,
+        params: DidOpenTextDocumentParams,
+    ) -> ControlFlow<async_lsp::Result<()>> {
         self.notify_edit(move |worker| worker.did_open(params))
     }
 
@@ -1558,7 +1543,10 @@ impl LanguageServer for ServerState {
         self.notify_edit(move |worker| worker.did_close(params))
     }
 
-    fn did_save(&mut self, params: DidSaveTextDocumentParams) -> ControlFlow<async_lsp::Result<()>> {
+    fn did_save(
+        &mut self,
+        params: DidSaveTextDocumentParams,
+    ) -> ControlFlow<async_lsp::Result<()>> {
         self.notify_edit(move |worker| worker.did_save(params))
     }
 
@@ -1715,4 +1703,3 @@ fn path_not_found_error(path: &Path) -> ResponseError {
         format!("path not found '{}'", path.display()),
     )
 }
-

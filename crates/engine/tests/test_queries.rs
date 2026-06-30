@@ -33,7 +33,10 @@ fn setup(sources: &[(FileId, &str)]) -> Engine<RoughlyQueries> {
     engine.set_input(Key::Config, Config::default());
     for (file, source) in sources {
         engine.set_input(Key::SourceText(*file), (*source).to_owned());
-        engine.set_input(Key::DocumentKind(*file), analysis::naming::DocumentKind::Package);
+        engine.set_input(
+            Key::DocumentKind(*file),
+            analysis::naming::DocumentKind::Package,
+        );
     }
     engine
 }
@@ -47,11 +50,7 @@ fn realize_all(engine: &Engine<RoughlyQueries>) {
 // The whole `parse -> ... -> diagnostics` chain runs on real R input and each body runs exactly once.
 #[test]
 fn full_chain_runs_once_on_real_r() {
-    let engine = setup(&[
-        (A, "x <- function() 1"),
-        (B, "z <- x()"),
-        (C, "w <- 5"),
-    ]);
+    let engine = setup(&[(A, "x <- function() 1"), (B, "z <- x()"), (C, "w <- 5")]);
     realize_all(&engine);
 
     let group = engine.group();
@@ -59,12 +58,20 @@ fn full_chain_runs_once_on_real_r() {
     assert_eq!(group.lower_runs(A), 1);
     assert_eq!(group.local_naming_runs(A), 1);
     assert_eq!(group.exported_names_runs(A), 1);
-    assert_eq!(group.package_symbol_index_runs(), 1, "the one all-files fold runs once");
+    assert_eq!(
+        group.package_symbol_index_runs(),
+        1,
+        "the one all-files fold runs once"
+    );
     assert_eq!(group.typecheck_runs(B), 1);
     assert_eq!(group.diagnostics_runs(B), 1);
     // b references x, so its typecheck pulled x's global scheme through the per-symbol firewall.
     let x = group.intern("x");
-    assert_eq!(group.global_scheme_runs(x), 1, "x's scheme computed once for its referrer");
+    assert_eq!(
+        group.global_scheme_runs(x),
+        1,
+        "x's scheme computed once for its referrer"
+    );
 }
 
 // ACCEPTANCE CONDITION 1 — the headline. Editing a function *body* (not its exported name) must trigger
@@ -73,11 +80,7 @@ fn full_chain_runs_once_on_real_r() {
 // does not re-typecheck at all.
 #[test]
 fn body_edit_does_not_refold_index_and_confines_to_referrers() {
-    let engine = setup(&[
-        (A, "x <- function() 1"),
-        (B, "z <- x()"),
-        (C, "w <- 5"),
-    ]);
+    let engine = setup(&[(A, "x <- function() 1"), (B, "z <- x()"), (C, "w <- 5")]);
     realize_all(&engine);
 
     let x = engine.group().intern("x");
@@ -130,11 +133,7 @@ fn body_edit_does_not_refold_index_and_confines_to_referrers() {
 // `x : () -> integer`.
 #[test]
 fn body_edit_with_unchanged_scheme_cuts_off_at_global_scheme() {
-    let engine = setup(&[
-        (A, "x <- function() 1"),
-        (B, "z <- x()"),
-        (C, "w <- 5"),
-    ]);
+    let engine = setup(&[(A, "x <- function() 1"), (B, "z <- x()"), (C, "w <- 5")]);
     realize_all(&engine);
 
     let x = engine.group().intern("x");
@@ -163,11 +162,7 @@ fn body_edit_with_unchanged_scheme_cuts_off_at_global_scheme() {
 // its scheme is unchanged, so the referrer `b` does not re-typecheck.
 #[test]
 fn structural_edit_refolds_index_once_but_firewall_confines_propagation() {
-    let engine = setup(&[
-        (A, "x <- function() 1"),
-        (B, "z <- x()"),
-        (C, "w <- 5"),
-    ]);
+    let engine = setup(&[(A, "x <- function() 1"), (B, "z <- x()"), (C, "w <- 5")]);
     realize_all(&engine);
 
     let index_before = engine.group().package_symbol_index_runs();
@@ -202,7 +197,11 @@ fn structural_edit_refolds_index_once_but_firewall_confines_propagation() {
     // The new symbol y resolves to a winning file (a) through the same firewall.
     let y = group.intern("y");
     let defining_y = engine.fetch::<Option<FileId>>(Key::DefiningItem(y));
-    assert_eq!(*defining_y, Some(A), "the newly added binding y wins in a.R");
+    assert_eq!(
+        *defining_y,
+        Some(A),
+        "the newly added binding y wins in a.R"
+    );
 }
 
 // PACKAGE-NAMING INCREMENTALITY (R2 gap 1). The per-file `PackageNamingDiagnostics` query is fine-grained

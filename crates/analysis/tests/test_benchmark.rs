@@ -78,7 +78,11 @@ fn run_ide_benchmark(target_loc: usize) {
         ($label:literal, $count:expr) => {{
             let start = Instant::now();
             let result_count: usize = $count;
-            println!("  {:<28} {:?} ({result_count} result(s))", $label, start.elapsed());
+            println!(
+                "  {:<28} {:?} ({result_count} result(s))",
+                $label,
+                start.elapsed()
+            );
         }};
     }
 

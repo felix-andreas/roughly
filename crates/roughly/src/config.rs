@@ -14,9 +14,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn from_path(
-        path: impl AsRef<Path>,
-    ) -> Result<Config, ConfigError> {
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Config, ConfigError> {
         let path = path.as_ref();
 
         Ok(match std::fs::read_to_string(path) {

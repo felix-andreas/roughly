@@ -1361,7 +1361,10 @@ impl<'a> TypeParser<'a> {
                         ));
                     };
                     self.skip_ascii_whitespace();
-                    self.expect_byte(b':', "expected `:` after `[name]` in an optional parameter.")?;
+                    self.expect_byte(
+                        b':',
+                        "expected `:` after `[name]` in an optional parameter.",
+                    )?;
                     let name = self.interner.intern(&self.source[start..end]);
                     let value = self
                         .parse_type_until(StopContext::FUNCTION_PARAMETER)

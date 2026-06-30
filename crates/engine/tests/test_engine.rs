@@ -96,8 +96,16 @@ fn no_op_input_set_recomputes_nothing() {
 
     engine.set_input(Key::Text, "hello".to_owned()); // identical value -> backdated
     let _ = engine.fetch::<usize>(Key::Doubled);
-    assert_eq!(engine.group().length_runs.get(), 1, "input backdate cuts off before length");
-    assert_eq!(engine.group().doubled_runs.get(), 1, "input backdate cuts off before doubled");
+    assert_eq!(
+        engine.group().length_runs.get(),
+        1,
+        "input backdate cuts off before length"
+    );
+    assert_eq!(
+        engine.group().doubled_runs.get(),
+        1,
+        "input backdate cuts off before doubled"
+    );
 }
 
 // Early cutoff #2 (value-eq within the chain): a changed input whose derived value is unchanged stops
@@ -111,7 +119,11 @@ fn value_eq_cuts_off_mid_chain() {
 
     engine.set_input(Key::Text, "world".to_owned()); // different text, same length 5
     let _ = engine.fetch::<usize>(Key::Doubled);
-    assert_eq!(engine.group().length_runs.get(), 2, "text changed -> length re-runs");
+    assert_eq!(
+        engine.group().length_runs.get(),
+        2,
+        "text changed -> length re-runs"
+    );
     assert_eq!(
         engine.group().doubled_runs.get(),
         1,
@@ -246,12 +258,20 @@ mod fan_in {
 
         // Re-fetch with no change: the fold validates its four deps, none changed, no body run.
         let _ = engine.fetch::<u32>(Key::Sum);
-        assert_eq!(engine.group().sum_runs.get(), 1, "no input changed -> fold cut off");
+        assert_eq!(
+            engine.group().sum_runs.get(),
+            1,
+            "no input changed -> fold cut off"
+        );
 
         // Change exactly one of the four inputs: the fold recomputes once.
         engine.set_input(Key::Input(2), 30u32);
         assert_eq!(*engine.fetch::<u32>(Key::Sum), 1 + 2 + 30 + 4);
-        assert_eq!(engine.group().sum_runs.get(), 2, "one input changed -> fold re-ran once");
+        assert_eq!(
+            engine.group().sum_runs.get(),
+            2,
+            "one input changed -> fold re-ran once"
+        );
     }
 }
 
@@ -315,17 +335,29 @@ mod diamond {
         let mut engine = Engine::new(Queries::default());
         engine.set_input(Key::Root, 10u32); // Base=11, Left=22, Right=33, Down=55
         assert_eq!(*engine.fetch::<u32>(Key::Down), 55);
-        assert_eq!(engine.group().base_runs.get(), 1, "Base computed once despite two paths");
+        assert_eq!(
+            engine.group().base_runs.get(),
+            1,
+            "Base computed once despite two paths"
+        );
         assert_eq!(engine.group().left_runs.get(), 1);
         assert_eq!(engine.group().right_runs.get(), 1);
         assert_eq!(engine.group().down_runs.get(), 1);
 
         engine.set_input(Key::Root, 20u32); // Base=21, Left=42, Right=63, Down=105
         assert_eq!(*engine.fetch::<u32>(Key::Down), 105);
-        assert_eq!(engine.group().base_runs.get(), 2, "Base recomputed exactly once, not per arm");
+        assert_eq!(
+            engine.group().base_runs.get(),
+            2,
+            "Base recomputed exactly once, not per arm"
+        );
         assert_eq!(engine.group().left_runs.get(), 2);
         assert_eq!(engine.group().right_runs.get(), 2);
-        assert_eq!(engine.group().down_runs.get(), 2, "Down recomputed once through both arms");
+        assert_eq!(
+            engine.group().down_runs.get(),
+            2,
+            "Down recomputed once through both arms"
+        );
     }
 }
 
@@ -389,7 +421,11 @@ mod partial_change {
         engine.set_input(Key::P, "ab".to_owned()); // identical -> backdated, no change
         engine.set_input(Key::Q, "yyyy".to_owned()); // real change
         assert_eq!(*engine.fetch::<usize>(Key::Tens), 20);
-        assert_eq!(engine.group().fold_runs.get(), 2, "Q changed -> fold re-ran");
+        assert_eq!(
+            engine.group().fold_runs.get(),
+            2,
+            "Q changed -> fold re-ran"
+        );
         assert_eq!(
             engine.group().tens_runs.get(),
             1,
@@ -453,8 +489,16 @@ mod removal {
         // Delete member 1: shrink the membership input and remove the member's own input slot.
         engine.set_input(Key::Members, vec![0u8]);
         engine.remove_input(&Key::Member(1));
-        assert_eq!(*engine.fetch::<u32>(Key::Total), 10, "removed member dropped from the fold");
-        assert_eq!(engine.group().total_runs.get(), 2, "fold recomputed over the smaller set");
+        assert_eq!(
+            *engine.fetch::<u32>(Key::Total),
+            10,
+            "removed member dropped from the fold"
+        );
+        assert_eq!(
+            engine.group().total_runs.get(),
+            2,
+            "fold recomputed over the smaller set"
+        );
         assert_eq!(
             engine.slot_count(),
             slots_before,
@@ -471,11 +515,19 @@ mod removal {
 
         engine.set_input(Key::Members, Vec::<u8>::new());
         engine.remove_input(&Key::Member(0));
-        assert_eq!(*engine.fetch::<u32>(Key::Total), 0, "empty set folds to zero");
+        assert_eq!(
+            *engine.fetch::<u32>(Key::Total),
+            0,
+            "empty set folds to zero"
+        );
 
         // Re-add the same member: add→delete→re-add must converge, not read a stale removed slot.
         engine.set_input(Key::Members, vec![0u8]);
         engine.set_input(Key::Member(0), 7u32);
-        assert_eq!(*engine.fetch::<u32>(Key::Total), 7, "re-added member folds with its new value");
+        assert_eq!(
+            *engine.fetch::<u32>(Key::Total),
+            7,
+            "re-added member folds with its new value"
+        );
     }
 }

@@ -224,7 +224,10 @@ fn plan_bless_rewrites(
             .get(location.generation_index)
             .and_then(|files| files.get(&location.path))?;
         if actual_text != expected_text {
-            rewrites.push((span.clone(), blessed_block_body(source_text, span, actual_text)));
+            rewrites.push((
+                span.clone(),
+                blessed_block_body(source_text, span, actual_text),
+            ));
         }
     }
 

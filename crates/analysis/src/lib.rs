@@ -30,8 +30,7 @@ pub use crate::{
     },
     ide::{
         CompletionItem, CompletionItemKind, CompletionItemSource, CompletionResult, DebugSection,
-        HoverInfo,
-        InlayHint, Location, RenameEdit, RenameResult, SignatureHelp, inlay_hints,
+        HoverInfo, InlayHint, Location, RenameEdit, RenameResult, SignatureHelp, inlay_hints,
         render_hover_markdown, signature_help,
     },
     interner::{Interner, Symbol},

@@ -8,7 +8,12 @@ const LINES_PER_ITEM: usize = 5;
 
 pub fn generate_package(file_count: usize, items_per_file: usize) -> Vec<(PathBuf, String)> {
     (0..file_count)
-        .map(|file_index| (file_path(file_index), generate_file(file_index, items_per_file, false)))
+        .map(|file_index| {
+            (
+                file_path(file_index),
+                generate_file(file_index, items_per_file, false),
+            )
+        })
         .collect()
 }
 
@@ -36,9 +41,15 @@ pub fn generate_file(file_index: usize, items_per_file: usize, braced_body: bool
             format!("count + {item_index}L")
         };
         source.push_str("#: fn(count: integer) -> integer\n");
-        source.push_str(&format!("fn_{file_index}_{item_index} <- function(count) {body}\n"));
-        source.push_str(&format!("id_{file_index}_{item_index} <- function(value) value\n"));
-        source.push_str(&format!("const_{file_index}_{item_index} <- {item_index}L\n"));
+        source.push_str(&format!(
+            "fn_{file_index}_{item_index} <- function(count) {body}\n"
+        ));
+        source.push_str(&format!(
+            "id_{file_index}_{item_index} <- function(value) value\n"
+        ));
+        source.push_str(&format!(
+            "const_{file_index}_{item_index} <- {item_index}L\n"
+        ));
         source.push_str(&format!(
             "use_{file_index}_{item_index} <- fn_{dependency_file}_{item_index}(2L)\n"
         ));
@@ -56,7 +67,10 @@ pub fn generate_package_with_base_refs(
 ) -> Vec<(PathBuf, String)> {
     (0..file_count)
         .map(|file_index| {
-            (file_path(file_index), generate_file_with_base_refs(file_index, items_per_file, false))
+            (
+                file_path(file_index),
+                generate_file_with_base_refs(file_index, items_per_file, false),
+            )
         })
         .collect()
 }
@@ -77,16 +91,24 @@ pub fn generate_file_with_base_refs(
             "count + length(seq_len(count))".to_string()
         };
         source.push_str("#: fn(count: integer) -> integer\n");
-        source.push_str(&format!("fn_{file_index}_{item_index} <- function(count) {body}\n"));
-        source.push_str(&format!("id_{file_index}_{item_index} <- function(value) value\n"));
-        source.push_str(&format!("const_{file_index}_{item_index} <- {item_index}L\n"));
+        source.push_str(&format!(
+            "fn_{file_index}_{item_index} <- function(count) {body}\n"
+        ));
+        source.push_str(&format!(
+            "id_{file_index}_{item_index} <- function(value) value\n"
+        ));
+        source.push_str(&format!(
+            "const_{file_index}_{item_index} <- {item_index}L\n"
+        ));
         source.push_str(&format!(
             "use_{file_index}_{item_index} <- fn_{dependency_file}_{item_index}(2L)\n"
         ));
         source.push_str(&format!(
             "blen_{file_index}_{item_index} <- length(seq_along(c(1L, 2L)))\n"
         ));
-        source.push_str(&format!("bchr_{file_index}_{item_index} <- nchar(toupper(\"x\"))\n"));
+        source.push_str(&format!(
+            "bchr_{file_index}_{item_index} <- nchar(toupper(\"x\"))\n"
+        ));
         source.push_str(&format!("bflag_{file_index}_{item_index} <- T\n"));
         source.push_str(&format!("bfalse_{file_index}_{item_index} <- F\n"));
         source.push_str(&format!("bpi_{file_index}_{item_index} <- pi\n"));

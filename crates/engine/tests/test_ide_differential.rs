@@ -144,7 +144,9 @@ fn positions(workspace: &Workspace) -> Vec<(FileId, bool, TextPosition)> {
 }
 
 // LSP location order is not semantic, so location-bearing results are compared as a sorted set.
-fn sorted_locations(locations: Option<Vec<Location>>) -> Option<Vec<(PathBuf, usize, usize, usize, usize)>> {
+fn sorted_locations(
+    locations: Option<Vec<Location>>,
+) -> Option<Vec<(PathBuf, usize, usize, usize, usize)>> {
     locations.map(|mut locations| {
         let mut keyed = locations
             .drain(..)
@@ -165,7 +167,9 @@ fn sorted_locations(locations: Option<Vec<Location>>) -> Option<Vec<(PathBuf, us
 
 // Rename edits already group by path (a `BTreeMap`); normalize each path's edit list to a sorted set so
 // the comparison ignores within-file occurrence order.
-fn sorted_rename(rename: Option<RenameResult>) -> Option<BTreeMap<PathBuf, Vec<(usize, usize, usize, usize, String)>>> {
+fn sorted_rename(
+    rename: Option<RenameResult>,
+) -> Option<BTreeMap<PathBuf, Vec<(usize, usize, usize, usize, String)>>> {
     rename.map(|rename| {
         rename
             .edits
@@ -237,7 +241,12 @@ fn sweep_parity(label: &str, workspace: &Workspace, oracle: &mut Analysis, engin
         );
         for include_declaration in [false, true] {
             assert_eq!(
-                sorted_locations(ide::references(oracle, &path, position, include_declaration)),
+                sorted_locations(ide::references(
+                    oracle,
+                    &path,
+                    position,
+                    include_declaration
+                )),
                 sorted_locations(engine_ide.references(&path, position, include_declaration)),
                 "references(include_declaration={include_declaration}) divergence at {where_}",
             );
@@ -310,7 +319,11 @@ fn cross_file_function_use() {
                     true,
                     "#: fn(count: integer) -> integer\ndouble_count <- function(count) count + count",
                 ),
-                (1, true, "result <- double_count(2L)\nother <- double_count(3L)"),
+                (
+                    1,
+                    true,
+                    "result <- double_count(2L)\nother <- double_count(3L)",
+                ),
             ],
         ),
     );
@@ -391,7 +404,11 @@ fn script_referencing_package_global() {
                     true,
                     "#: fn(x: integer) -> integer\nhelper <- function(x) x + x",
                 ),
-                (1, false, "local_result <- helper(2L)\nfollow <- local_result"),
+                (
+                    1,
+                    false,
+                    "local_result <- helper(2L)\nfollow <- local_result",
+                ),
             ],
         ),
     );
@@ -458,7 +475,12 @@ impl Driver {
     fn step(&mut self, label: &str, mutate: impl FnOnce(&mut Workspace)) {
         let previous = self.workspace.clone();
         mutate(&mut self.workspace);
-        sync_engine(&mut self.engine, &mut self.paths, &previous, &self.workspace);
+        sync_engine(
+            &mut self.engine,
+            &mut self.paths,
+            &previous,
+            &self.workspace,
+        );
         let mut oracle = build_oracle(&self.workspace);
         let engine_ide = EngineIde::new(&self.engine, &self.paths);
         sweep_parity(label, &self.workspace, &mut oracle, &engine_ide);
@@ -467,14 +489,26 @@ impl Driver {
     fn set_package(&mut self, label: &str, id: FileId, source: &str) {
         let source = source.to_owned();
         self.step(label, |workspace| {
-            workspace.files.insert(id, FileState { source, package: true });
+            workspace.files.insert(
+                id,
+                FileState {
+                    source,
+                    package: true,
+                },
+            );
         });
     }
 
     fn set_script(&mut self, label: &str, id: FileId, source: &str) {
         let source = source.to_owned();
         self.step(label, |workspace| {
-            workspace.files.insert(id, FileState { source, package: false });
+            workspace.files.insert(
+                id,
+                FileState {
+                    source,
+                    package: false,
+                },
+            );
         });
     }
 
@@ -496,7 +530,11 @@ fn incremental_cross_file_interface_edits() {
         0,
         "#: fn(count: integer) -> integer\ndouble_count <- function(count) count + count",
     );
-    driver.set_package("use", 1, "result <- double_count(2L)\nalias <- double_count");
+    driver.set_package(
+        "use",
+        1,
+        "result <- double_count(2L)\nalias <- double_count",
+    );
     // Body-only edit: the exported scheme is unchanged, but goto/references on `double_count` must still
     // land correctly (the definer's binding range may have moved).
     driver.set_package(

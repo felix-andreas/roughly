@@ -89,7 +89,10 @@ fn total_loc(file_count: usize) -> usize {
 
 fn build_and_warm_new_engine(file_count: usize) -> Engine<RoughlyQueries> {
     let mut engine = Engine::new(RoughlyQueries::new());
-    engine.set_input(Key::ProjectFiles, (0..file_count as FileId).collect::<Vec<_>>());
+    engine.set_input(
+        Key::ProjectFiles,
+        (0..file_count as FileId).collect::<Vec<_>>(),
+    );
     engine.set_input(
         Key::Config,
         Config {
@@ -163,7 +166,11 @@ fn memory_new_vs_old_resident() {
 
         let new_mb = new_bytes / (1024.0 * 1024.0);
         let old_mb = old_bytes / (1024.0 * 1024.0);
-        let ratio = if new_bytes > 0.0 { old_bytes / new_bytes } else { 0.0 };
+        let ratio = if new_bytes > 0.0 {
+            old_bytes / new_bytes
+        } else {
+            0.0
+        };
         println!(
             "  {loc:>8}  {file_count:>7}  {new_mb:>11.1} MB  {old_mb:>11.1} MB  {ratio:>6.2}x"
         );

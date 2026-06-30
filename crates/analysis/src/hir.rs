@@ -465,8 +465,7 @@ impl Module {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use tree_sitter::Point;
+    use {super::*, tree_sitter::Point};
 
     fn range(start_byte: usize, end_byte: usize) -> Range {
         Range {
@@ -483,9 +482,18 @@ mod tests {
     fn expression_id_by_range_keeps_smallest_id_on_shared_range() {
         let mut arena = HirArena::new();
         let shared = range(0, 5);
-        let first = arena.alloc(Expression::new(ExpressionId(0), shared, None, ExpressionKind::Null));
-        let _second =
-            arena.alloc(Expression::new(ExpressionId(0), shared, None, ExpressionKind::Null));
+        let first = arena.alloc(Expression::new(
+            ExpressionId(0),
+            shared,
+            None,
+            ExpressionKind::Null,
+        ));
+        let _second = arena.alloc(Expression::new(
+            ExpressionId(0),
+            shared,
+            None,
+            ExpressionKind::Null,
+        ));
         let other = arena.alloc(Expression::new(
             ExpressionId(0),
             range(6, 9),

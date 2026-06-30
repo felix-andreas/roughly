@@ -95,7 +95,10 @@ fn latest_edit_wins_with_cooperative_cancellation() {
     engine.set_input(Key::Source, 10u64);
     // High enough that the canceller always flips the token before the loop can finish; if cancellation
     // were broken the body would *complete* (failing the assertions below) rather than hang the suite.
-    engine.group().work_units.store(1_000_000_000, Ordering::Relaxed);
+    engine
+        .group()
+        .work_units
+        .store(1_000_000_000, Ordering::Relaxed);
     engine.group().started.store(false, Ordering::Relaxed);
 
     // The "newer edit" arrives on another thread. Only the token (an `Arc<AtomicBool>`) crosses the
@@ -150,7 +153,10 @@ fn latest_edit_wins_with_cooperative_cancellation() {
     let value = engine
         .fetch_cancellable::<u64>(Key::Slow, token.clone())
         .expect("the post-edit fetch is not cancelled");
-    assert_eq!(*value, 42, "the subsequent fetch computes the up-to-date result (21 * 2)");
+    assert_eq!(
+        *value, 42,
+        "the subsequent fetch computes the up-to-date result (21 * 2)"
+    );
     assert_eq!(
         engine.group().slow_completions.load(Ordering::Relaxed),
         1,
@@ -179,7 +185,10 @@ fn with_cancellation_latest_edit_wins_for_a_multi_fetch_read() {
 
     let mut engine = Engine::new(Queries::default());
     engine.set_input(Key::Source, 10u64);
-    engine.group().work_units.store(1_000_000_000, Ordering::Relaxed);
+    engine
+        .group()
+        .work_units
+        .store(1_000_000_000, Ordering::Relaxed);
     engine.group().started.store(false, Ordering::Relaxed);
 
     let token = Arc::new(AtomicBool::new(false));
@@ -210,7 +219,11 @@ fn with_cancellation_latest_edit_wins_for_a_multi_fetch_read() {
         0,
         "the abandoned read never ran to completion"
     );
-    assert_eq!(engine.computing_count(), 0, "nothing left computing after a cancelled read");
+    assert_eq!(
+        engine.computing_count(),
+        0,
+        "nothing left computing after a cancelled read"
+    );
     assert_eq!(
         engine.dependency_stack_depth(),
         0,
@@ -224,7 +237,10 @@ fn with_cancellation_latest_edit_wins_for_a_multi_fetch_read() {
     let value = engine
         .with_cancellation(token, || *engine.fetch::<u64>(Key::Slow))
         .expect("the post-edit read is not cancelled");
-    assert_eq!(value, 42, "the read after the edit computes the up-to-date result (21 * 2)");
+    assert_eq!(
+        value, 42,
+        "the read after the edit computes the up-to-date result (21 * 2)"
+    );
     assert_eq!(
         engine.group().slow_completions.load(Ordering::Relaxed),
         1,
@@ -264,13 +280,20 @@ fn cancellation_is_additive_when_no_token_is_set() {
     engine.set_input(Key::Source, 7u64);
     engine.group().work_units.store(3, Ordering::Relaxed);
 
-    assert_eq!(*engine.fetch::<u64>(Key::Slow), 14, "the plain fetch path is unaffected");
+    assert_eq!(
+        *engine.fetch::<u64>(Key::Slow),
+        14,
+        "the plain fetch path is unaffected"
+    );
 
     let token = Arc::new(AtomicBool::new(false));
     let value = engine
         .fetch_cancellable::<u64>(Key::Slow, token)
         .expect("an unset token never cancels");
-    assert_eq!(*value, 14, "fetch_cancellable with an inert token matches plain fetch");
+    assert_eq!(
+        *value, 14,
+        "fetch_cancellable with an inert token matches plain fetch"
+    );
     assert_eq!(engine.computing_count(), 0);
     assert_eq!(engine.dependency_stack_depth(), 0);
 }

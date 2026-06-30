@@ -575,7 +575,11 @@ fn blesses_multi_file_and_generation_expectations() {
         ])
     };
 
-    run_fixture_suite_with_bless(path_to_string(&fixture_directory).as_str(), run_fixture, true);
+    run_fixture_suite_with_bless(
+        path_to_string(&fixture_directory).as_str(),
+        run_fixture,
+        true,
+    );
 
     assert_eq!(
         read_suite_file(&fixture_directory),
