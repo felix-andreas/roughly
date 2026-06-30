@@ -31,7 +31,6 @@ name = "analysis"
 version = "0.2.4-alpha"
 dependencies = [
  "fixtures",
- "insta",
  "itertools 0.14.0",
  "ropey",
  "serde",
@@ -268,18 +267,6 @@ name = "colorchoice"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
-
-[[package]]
-name = "console"
-version = "0.15.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "054ccb5b10f9f2cbf51eb355ca1d05c2d279ce1804688d0db74b4733a5aeafd8"
-dependencies = [
- "encode_unicode",
- "libc",
- "once_cell",
- "windows-sys 0.59.0",
-]
 
 [[package]]
 name = "console"
@@ -847,17 +834,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4c7245a08504955605670dbf141fceab975f15ca21570696aebe9d2e71576bd"
 
 [[package]]
-name = "insta"
-version = "1.43.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46fdb647ebde000f43b5b53f773c30cf9b0cb4300453208713fa38b2c70935a0"
-dependencies = [
- "console 0.15.11",
- "once_cell",
- "similar",
-]
-
-[[package]]
 name = "io-uring"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1226,13 +1202,12 @@ dependencies = [
  "analysis",
  "async-lsp",
  "clap",
- "console 0.16.1",
+ "console",
  "engine",
  "fixtures",
  "futures",
  "ignore",
  "indoc",
- "insta",
  "itertools 0.14.0",
  "regex",
  "ropey",

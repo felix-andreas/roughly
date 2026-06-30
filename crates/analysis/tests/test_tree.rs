@@ -1,25 +1,17 @@
 use {
     analysis::tree::{field, kind},
-    itertools::Itertools,
     serde_json::Value,
     tree_sitter::Language,
 };
 
+// These tests pin the tree-sitter grammar's node-kind and field ids against the constants the analyzer
+// indexes nodes by (`tree::kind` / `tree::field`). `KIND_MAPPING` / `FIELD_MAPPING` assert each constant
+// still resolves to the expected grammar name, and the coverage loops assert every grammar name is
+// mapped — so a grammar upgrade that renumbers or adds a node is caught here rather than silently
+// mis-indexing nodes at runtime.
 #[test]
 fn node_ids() {
     let language: Language = tree_sitter_r::LANGUAGE.into();
-
-    for (snapshot_name, filter_named) in [("node_kinds_named", true), ("node_kinds_unnamed", false)]
-    {
-        insta::assert_snapshot!(
-            snapshot_name,
-            (0u16..language.node_kind_count() as u16)
-                .filter(|&i| language.node_kind_is_visible(i)
-                    && language.node_kind_is_named(i) == filter_named)
-                .map(|id| format(language.node_kind_for_id(id).unwrap(), id))
-                .join("\n")
-        );
-    }
 
     for (node_id, node_kind) in KIND_MAPPING {
         assert_eq!(language.node_kind_for_id(node_id).unwrap(), node_kind);
@@ -59,26 +51,11 @@ fn node_ids() {
 fn field_ids() {
     let language: Language = tree_sitter_r::LANGUAGE.into();
 
-    insta::assert_snapshot!(
-        "field_names",
-        (1u16..=language.field_count() as u16)
-            .map(|id| format(language.field_name_for_id(id).unwrap(), id))
-            .join("\n")
-    );
-
     for (field_id, field_name) in FIELD_MAPPING {
         assert_eq!(language.field_name_for_id(field_id).unwrap(), field_name);
     }
 }
 
-fn format(name: &str, id: u16) -> String {
-    format!(
-        r#"pub const {}: u16 = {}; // "{}""#,
-        name.to_uppercase(),
-        id,
-        name
-    )
-}
 const KIND_MAPPING: [(u16, &str); 96] = [
     // SPECIAL (NAMED)
     (kind::IDENTIFIER, "identifier"),

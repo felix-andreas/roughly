@@ -34,7 +34,6 @@ tokio-util.workspace = true
 [dev-dependencies]
 async-lsp.workspace = true
 fixtures = { path = "../fixtures" }
-insta.workspace = true
 regex.workspace = true
 tempfile = "3"
 tokio = { workspace = true, features = ["process"] }
