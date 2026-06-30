@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+
+# Cancel superseded runs on the same ref so a fast push does not queue stale jobs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  # The fast, blocking gate: formatting, lints, build, and the full (non-ignored) test suite.
+  check:
+    name: fmt + clippy + build + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: build
+        run: cargo build --all-targets --all-features
+      - name: test
+        run: cargo test --all-targets --all-features
+      - name: doctests
+        run: cargo test --doc --all-features
+
+  # The heavy, ignored perf / memory / fuzz / blast-radius suites. Their *deterministic* assertions
+  # (exec-counter blast radius, recheck scope, fuzz-robustness invariants) are the regression thresholds;
+  # the wall-clock and resident-memory figures are printed for the record, not gated, so runner variance
+  # cannot flake the build. Runs in a separate job so the fast gate reports first.
+  extended:
+    name: ignored benches + fuzz
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: ignored suites (release)
+        run: cargo test --release --all-targets --all-features -- --ignored --nocapture
