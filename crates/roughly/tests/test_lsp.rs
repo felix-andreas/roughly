@@ -1622,9 +1622,7 @@ async fn references_out_of_bounds_position_is_safe() {
             .await
             .expect("references request must not panic the server");
         assert!(
-            result
-                .as_ref()
-                .is_none_or(|locations| locations.is_empty()),
+            result.as_ref().is_none_or(|locations| locations.is_empty()),
             "OOB references should be None/empty at {position:?}, got: {result:?}"
         );
     }

@@ -673,8 +673,8 @@ impl EngineWorker {
             return;
         }
 
-        self.document(&path).unwrap_or_else(|| panic!("analysis document not found for {}",
-            path.display()));
+        self.document(&path)
+            .unwrap_or_else(|| panic!("open document not found for {}", path.display()));
 
         // Each incremental change's range refers to the document state after the previous changes
         // in the batch are applied, so positions are converted and applied against the live rope
