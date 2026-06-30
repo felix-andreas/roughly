@@ -512,6 +512,41 @@ async fn hover_returns_identifier_definition_without_debug_by_default() {
 }
 
 #[tokio::test]
+async fn requests_for_non_file_uris_return_gracefully() {
+    // Editors send requests for non-`file:` buffers (`untitled:`, `vscode-vfs:`, ...). Those have no
+    // filesystem path, so the read handlers must answer with an empty result rather than panicking the
+    // worker thread, which would terminate the whole server process.
+    let mut context = setup_test(&[("R/main.R", "x <- 1L")]).await;
+    let untitled = Url::parse("untitled:Untitled-1").expect("untitled uri should parse");
+
+    let hover = context
+        .server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: untitled.clone(),
+                },
+                position: Position::new(0, 0),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover request failed");
+    assert!(hover.is_none(), "hover on a non-file uri should return no result");
+
+    let report = context.document_diagnostic(&untitled, None).await;
+    assert!(
+        matches!(
+            report,
+            DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(_))
+        ),
+        "a pull diagnostic on a non-file uri should return an empty full report"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
 async fn hover_returns_debug_section_when_debug_enabled() {
     let mut context = setup_test_with_features(&[], &["debug"]).await;
 

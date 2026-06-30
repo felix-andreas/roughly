@@ -430,13 +430,12 @@ impl EngineWorker {
     }
 
     fn report_error(&self, message: String) {
-        self.client
-            .clone()
-            .show_message(ShowMessageParams {
-                typ: MessageType::ERROR,
-                message,
-            })
-            .unwrap();
+        if let Err(error) = self.client.clone().show_message(ShowMessageParams {
+            typ: MessageType::ERROR,
+            message,
+        }) {
+            tracing::error!(?error, "failed to send error message to client");
+        }
     }
 }
 
@@ -584,12 +583,12 @@ impl EngineWorker {
         let mut client = self.client.clone();
         self.runtime.spawn(async move {
             if let Err(err) = client.register_capability(params).await {
-                client
-                    .show_message(ShowMessageParams {
-                        typ: MessageType::ERROR,
-                        message: format!("failed to watch R files: {err:#}"),
-                    })
-                    .unwrap();
+                if let Err(error) = client.show_message(ShowMessageParams {
+                    typ: MessageType::ERROR,
+                    message: format!("failed to watch R files: {err:#}"),
+                }) {
+                    tracing::error!(?error, "failed to notify client of file-watch failure");
+                }
                 return;
             }
             tracing::info!("registered file watching for R files");
@@ -839,12 +838,7 @@ impl EngineWorker {
                         self.config = config;
                     }
                     Err(error) => {
-                        self.client
-                            .show_message(ShowMessageParams {
-                                typ: MessageType::ERROR,
-                                message: format!("failed to reload config: {error}"),
-                            })
-                            .unwrap();
+                        self.report_error(format!("failed to reload config: {error}"));
                     }
                 }
                 continue;
@@ -863,7 +857,9 @@ impl EngineWorker {
                     FileChangeType::DELETED => {
                         self.retract_source_input(&path);
                     }
-                    _ => unreachable!(),
+                    other => {
+                        tracing::debug!(?other, "ignoring unhandled watched-file change type");
+                    }
                 }
             }
         }
@@ -889,7 +885,9 @@ impl EngineWorker {
         params: DocumentDiagnosticParams,
     ) -> Result<DocumentDiagnosticReportResult, ResponseError> {
         let uri = params.text_document.uri;
-        let path = uri.to_file_path().unwrap();
+        let Ok(path) = uri.to_file_path() else {
+            return Ok(empty_full_diagnostic_report());
+        };
 
         tracing::debug!(?path, "document diagnostic");
 
@@ -938,12 +936,14 @@ impl EngineWorker {
         &mut self,
         params: CompletionParams,
     ) -> Result<Option<CompletionResponse>, ResponseError> {
-        let path = params
+        let Ok(path) = params
             .text_document_position
             .text_document
             .uri
             .to_file_path()
-            .unwrap();
+        else {
+            return Ok(None);
+        };
         let position = params.text_document_position.position;
 
         tracing::debug!(?path, "completion");
@@ -1005,7 +1005,9 @@ impl EngineWorker {
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>, ResponseError> {
         let uri = params.text_document_position_params.text_document.uri;
-        let path = uri.to_file_path().unwrap();
+        let Ok(path) = uri.to_file_path() else {
+            return Ok(None);
+        };
         let position = params.text_document_position_params.position;
 
         tracing::debug!(?path, ?position, "goto definition");
@@ -1045,7 +1047,9 @@ impl EngineWorker {
         params: HoverParams,
     ) -> Result<Option<Hover>, ResponseError> {
         let uri = params.text_document_position_params.text_document.uri;
-        let path = uri.to_file_path().unwrap();
+        let Ok(path) = uri.to_file_path() else {
+            return Ok(None);
+        };
         let position = params.text_document_position_params.position;
 
         tracing::debug!(?path, ?position, "hover");
@@ -1087,7 +1091,9 @@ impl EngineWorker {
         params: InlayHintParams,
     ) -> Result<Option<Vec<InlayHint>>, ResponseError> {
         let uri = params.text_document.uri;
-        let path = uri.to_file_path().unwrap();
+        let Ok(path) = uri.to_file_path() else {
+            return Ok(None);
+        };
 
         tracing::debug!(?path, "inlay hints");
 
@@ -1127,7 +1133,9 @@ impl EngineWorker {
         params: SignatureHelpParams,
     ) -> Result<Option<SignatureHelp>, ResponseError> {
         let uri = params.text_document_position_params.text_document.uri;
-        let path = uri.to_file_path().unwrap();
+        let Ok(path) = uri.to_file_path() else {
+            return Ok(None);
+        };
         let position = params.text_document_position_params.position;
 
         tracing::debug!(?path, ?position, "signature help");
@@ -1179,7 +1187,9 @@ impl EngineWorker {
         params: DocumentFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>, ResponseError> {
         let uri = params.text_document.uri;
-        let path = uri.to_file_path().unwrap();
+        let Ok(path) = uri.to_file_path() else {
+            return Ok(None);
+        };
 
         tracing::debug!(?path, "format");
 
@@ -1224,7 +1234,9 @@ impl EngineWorker {
     ) -> Result<Option<Vec<TextEdit>>, ResponseError> {
         let uri = params.text_document.uri;
         let range = params.range;
-        let path = uri.to_file_path().unwrap();
+        let Ok(path) = uri.to_file_path() else {
+            return Ok(None);
+        };
 
         tracing::debug!(?path, "format");
 
@@ -1279,7 +1291,9 @@ impl EngineWorker {
         params: ReferenceParams,
     ) -> Result<Option<Vec<Location>>, ResponseError> {
         let uri = params.text_document_position.text_document.uri;
-        let path = uri.to_file_path().unwrap();
+        let Ok(path) = uri.to_file_path() else {
+            return Ok(None);
+        };
         let position = params.text_document_position.position;
         let include_declaration = params.context.include_declaration;
 
@@ -1320,7 +1334,9 @@ impl EngineWorker {
         params: RenameParams,
     ) -> Result<Option<WorkspaceEdit>, ResponseError> {
         let uri = params.text_document_position.text_document.uri;
-        let path = uri.to_file_path().unwrap();
+        let Ok(path) = uri.to_file_path() else {
+            return Ok(None);
+        };
         let position = params.text_document_position.position;
         let new_name = params.new_name;
 
@@ -1374,7 +1390,9 @@ impl EngineWorker {
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>, ResponseError> {
         let uri = params.text_document.uri;
-        let path = uri.to_file_path().unwrap();
+        let Ok(path) = uri.to_file_path() else {
+            return Ok(None);
+        };
 
         let Some(file) = self.file_ids.get(&path).copied() else {
             tracing::error!(?path, "symbols not found");
