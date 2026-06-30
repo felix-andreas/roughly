@@ -56,7 +56,6 @@ pub struct Analysis {
     package_type_index: BTreeMap<Symbol, TypeInfo>,
     duplicate_type_names: BTreeSet<Symbol>,
     package_naming_output: Option<PackageOutput<NamesGlobal>>,
-    document_interface_outputs: HashMap<DocumentId, InterfaceOutput>,
     document_typecheck_outputs: HashMap<DocumentId, TypecheckDocumentOutput>,
 }
 
@@ -111,22 +110,25 @@ struct LintOutput {
     diagnostics: Vec<Diagnostic>,
 }
 
+// Within-run scratch for the package-interface fixed-point: one document's exported schemes plus a
+// fingerprint of them. Held only in a local map inside `typecheck` (never persisted on `Analysis`), so
+// each from-scratch run starts the fixed-point empty.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct InterfaceOutput {
-    version: Version,
     exports: Vec<ExportedValue>,
     // Fingerprint of this document's exported schemes; the interface fixed-point converges when a round
     // changes no document's fingerprint.
     fingerprint: String,
 }
 
+// One document's authoritative typecheck result, the output `run_full` leaves on `Analysis` for callers
+// (`document_diagnostics`, `checked_expression_type`) to read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TypecheckDocumentOutput {
-    version: Version,
     diagnostics: Vec<Diagnostic>,
-    // Strict-mode `Unknown`-origin diagnostics, computed alongside the type errors from the same
-    // inputs and cached on the same keys. Published only when `[check] strict` is on, exactly as
-    // `diagnostics` is published only when `[check] typing` is on.
+    // Strict-mode `Unknown`-origin diagnostics, computed alongside the type errors from the same inputs.
+    // Published only when `[check] strict` is on, exactly as `diagnostics` is published only when
+    // `[check] typing` is on.
     strict_diagnostics: Vec<Diagnostic>,
     expression_types: HashMap<ExpressionId, CoreType>,
 }
@@ -187,7 +189,6 @@ impl Analysis {
             package_type_index: BTreeMap::new(),
             duplicate_type_names: BTreeSet::new(),
             package_naming_output: None,
-            document_interface_outputs: HashMap::new(),
             document_typecheck_outputs: HashMap::new(),
         }
     }
@@ -562,16 +563,9 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
         );
     }
 
-    // From-scratch package naming + materialized type index. This is the former drift-oracle rebuild,
-    // now the production path: there is no incremental mirror to maintain or to assert against.
-    let package_naming_current = analysis_state
-        .package_naming_output
-        .as_ref()
-        .is_some_and(|output| output.version == analysis_state.package_version);
-    if package_naming_current {
-        return;
-    }
-
+    // From-scratch package naming + materialized type index, rebuilt unconditionally: `analysis` is the
+    // from-scratch oracle/CLI checker (the engine owns incrementality), so there is no cross-call cache
+    // to consult and no incremental mirror to maintain or assert against.
     let package_document_ids = analysis_state.package_document_ids();
     let package_modules = package_document_ids
         .iter()
@@ -695,6 +689,10 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
 
     let package_document_set = package_document_ids.iter().copied().collect::<BTreeSet<_>>();
 
+    // Per-document exported interface — scratch for the fixed-point only. Local (never a persisted
+    // `Analysis` field), so each from-scratch `typecheck` starts the iteration from an empty table.
+    let mut document_interface_outputs: HashMap<DocumentId, InterfaceOutput> = HashMap::new();
+
     // Package interface fixed-point. Every package document is re-inferred each round against the current
     // interface table; the loop converges when a round changes no document's exported interface. Each
     // round's table is the previous round's output, so an acyclic re-export/forward-reference chain
@@ -710,7 +708,7 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     for _round in 0..max_package_interface_rounds {
         let mut table = build_package_interface_table(
             &package_naming,
-            &analysis_state.document_interface_outputs,
+            &document_interface_outputs,
             fallback_range,
         );
         for symbol in &pinned_unknown {
@@ -751,9 +749,6 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         let mut any_interface_changed = false;
         let mut fresh_interfaces = Vec::new();
         for document_id in &package_document_set {
-            let Some(document_version) = analysis_state.document_version(*document_id) else {
-                continue;
-            };
             let local_naming = analysis_state
                 .document_naming(*document_id)
                 .unwrap_or_else(|| panic!("missing local naming for typecheck {document_id:?}"));
@@ -762,8 +757,7 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 .values()
                 .copied()
                 .collect::<BTreeSet<_>>();
-            let previous_fingerprint = analysis_state
-                .document_interface_outputs
+            let previous_fingerprint = document_interface_outputs
                 .get(document_id)
                 .map(|output| output.fingerprint.clone());
 
@@ -789,19 +783,10 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
             if previous_fingerprint.as_deref() != Some(fingerprint.as_str()) {
                 any_interface_changed = true;
             }
-            fresh_interfaces.push((
-                *document_id,
-                InterfaceOutput {
-                    version: document_version,
-                    exports,
-                    fingerprint,
-                },
-            ));
+            fresh_interfaces.push((*document_id, InterfaceOutput { exports, fingerprint }));
         }
         for (document_id, output) in fresh_interfaces {
-            analysis_state
-                .document_interface_outputs
-                .insert(document_id, output);
+            document_interface_outputs.insert(document_id, output);
         }
 
         if !any_interface_changed && !pinned_this_round {
@@ -822,7 +807,7 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     // authoritative round-2 check; names pinned during the fixed-point are forced to `Unknown` here too.
     let mut final_table = build_package_interface_table(
         &package_naming,
-        &analysis_state.document_interface_outputs,
+        &document_interface_outputs,
         fallback_range,
     );
     for symbol in &pinned_unknown {
@@ -836,9 +821,6 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     let mut checked_document_ids = Vec::new();
     let mut fresh_outputs = Vec::new();
     for document_id in &all_document_ids {
-        let Some(document_version) = analysis_state.document_version(*document_id) else {
-            continue;
-        };
         let local_naming = analysis_state
             .document_naming(*document_id)
             .unwrap_or_else(|| panic!("missing local naming for typecheck {document_id:?}"));
@@ -892,7 +874,6 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
         fresh_outputs.push((
             *document_id,
             TypecheckDocumentOutput {
-                version: document_version,
                 diagnostics,
                 strict_diagnostics,
                 expression_types,
@@ -971,7 +952,6 @@ impl Analysis {
         self.lint_outputs.remove(&document_id);
         self.lowering_outputs.remove(&document_id);
         self.document_naming_outputs.remove(&document_id);
-        self.document_interface_outputs.remove(&document_id);
         self.document_typecheck_outputs.remove(&document_id);
     }
 

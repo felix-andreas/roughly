@@ -50,6 +50,16 @@ The user **DECIDED on a full production cutover**, quality-first, risk explicitl
 
 Six done-bar gates: (a) full diagnostic parity, zero exclusions; (b) IDE parity per feature incl. cross-file; (c) all hand-rolled indexes + drift oracles + soak deleted, no surviving mirror; (d) LSP/CLI off-thread on the engine + cancellable + UTF-16 + coherence-panic preserved; (e) memory bounded at 281k (or LRU); (f) net deletion > addition.
 
+**GATE (e) — GATED + ACCEPTED (measured `crates/engine/tests/test_memory.rs`, release, `--test-threads=1`, counting global allocator = live heap bytes):** engine vs. from-scratch `analysis`, ITEMS_PER_FILE=5 / CHAIN_LEN=8 synthetic package:
+
+| LoC | files | engine live heap | analysis live heap | old/new |
+|---|---|---|---|---|
+| 8.8k | 937 | 29.9 MB | 15.0 MB | 0.50x |
+| 88k | 9375 | 286.2 MB | 146.2 MB | 0.51x |
+| 264k | 28125 | 908.3 MB | 436.8 MB | 0.48x |
+
+**Verdict — within budget, accepted; no LRU needed now.** The engine is **linear** in LoC (~3.4 KB/LoC, stable across all three scales — no superlinear blowup) at a **constant ~2x** the from-scratch baseline. The 2x is the deliberate, bounded space-for-time cost of full memoization (every derived fact cached so an edit recomputes only its blast radius); the constant factor across 30x scale change confirms it is overhead, not a leak. At the 300k-LoC target this projects to ~1.0 GB live heap, comfortably within a modern dev machine's budget and in line with mature incremental servers (rust-analyzer routinely holds multiple GB on large workspaces). **Future lever if ever needed:** LRU/arena eviction of cold memos (the substrate already supports red-green recompute, so dropping a cold memo is sound) could roughly halve it — recorded as a non-blocking optimization, not a gate failure.
+
 Two load-bearing constraints (from the RA/LSP Expert): **(1) sequencing** — per IDE surface, build the engine query → stand up its IDE differential (engine == old `analysis` IDE output, cross-file included) → green → only THEN delete the old IDE impl; keep `analysis::run_full` frozen as the diagnostic oracle until cutover is proven. **(2) granularity** — Class-1 per-keystroke features (hover/local-goto/completion/inlay/signature) must be O(1)-on-cached-`Typecheck(f)` + sub-linear span lookup (exec-counter-proven: a point query on an unchanged file ⇒ zero `Typecheck` re-runs); Class-2 cross-file (references/rename/workspace-symbols/cross-file-goto) may be O(project)-with-text-prefilter but must not resurrect an occurrence mirror or bleed a coarse dep into Class-1.
 
 **Plan (5 phases, green per slice):** 1 — complete diagnostics (done-bar a); 2 — IDE: refactor `ide.rs` generic over an `IdeDatabase` fact-provider trait (`Analysis` = frozen oracle, `EngineIde` = engine-backed), port the 8 features reusing the identical orchestration, stand up the IDE differential + exec-counter granularity + direct fact-parity (done-bar b); 3 — wire LSP/CLI to the engine off-thread + cancellation + UTF-16 + coherence-panic (done-bar d); 4 — delete the hand-rolled incremental machinery + drift oracles + soak, rewrite `run_full` as a clean from-scratch oracle (done-bar c, f); 5 — memory bench (done-bar e).
