@@ -31,13 +31,11 @@ name = "analysis"
 version = "0.2.4-alpha"
 dependencies = [
  "fixtures",
- "indoc",
  "insta",
  "itertools 0.14.0",
  "ropey",
  "serde",
  "serde_json",
- "thiserror",
  "tree-sitter",
  "tree-sitter-r",
 ]
