@@ -35,14 +35,13 @@ use {
     },
     analysis::{self, Document, DocumentChange, TextPosition, TextRange, ide, naming::DocumentKind},
     engine::{
-        Engine, Shared,
+        Cancelled, Engine, Shared,
         ide_view::{EngineIde, PathTable},
         queries::{Config as EngineConfig, FileDiagnostics, FileId, Key, ParsedDocument, RoughlyQueries},
     },
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
         client_monitor::ClientProcessMonitorLayer,
-        concurrency::ConcurrencyLayer,
         lsp_types::{DidChangeConfigurationParams, GotoDefinitionParams, GotoDefinitionResponse},
         panic::CatchUnwindLayer,
         router::Router,
@@ -54,9 +53,16 @@ use {
         collections::{HashMap, HashSet, hash_map::DefaultHasher},
         hash::{Hash, Hasher},
         ops::ControlFlow,
+        panic::{AssertUnwindSafe, catch_unwind},
         path::{Path, PathBuf},
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+            mpsc,
+        },
         time::Instant,
     },
+    tokio::sync::oneshot,
     tower::ServiceBuilder,
     tree_sitter::Point,
 };
@@ -66,6 +72,9 @@ const CONFIG_FILE_NAME: &str = "roughly.toml";
 // #[tokio::main] # TODO: understand if this makes a difference???
 #[tokio::main(flavor = "current_thread")]
 pub async fn run(experimental_features: ExperimentalFeatures) {
+    install_panic_hook();
+    let runtime = tokio::runtime::Handle::current();
+
     let (server, _) = async_lsp::MainLoop::new_server(|client| {
         let config = Config::from_path(Path::new(CONFIG_FILE_NAME))
             .unwrap_or_else(|error| {
@@ -73,17 +82,38 @@ pub async fn run(experimental_features: ExperimentalFeatures) {
                 panic!("failed to load config: {error}");
             });
 
+        // The `!Send` engine lives on a dedicated worker thread, built INSIDE the closure (it cannot be
+        // moved across threads). The frontend forwards every LSP op to it over the channel + shares the
+        // cancellation token.
+        let (sender, receiver) = mpsc::channel::<Job>();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_client = client.clone();
+        let worker_cancel = cancel.clone();
+        let worker_runtime = runtime.clone();
+        std::thread::Builder::new()
+            .name("roughly-engine".to_owned())
+            .spawn(move || {
+                EngineWorker::new(
+                    worker_client,
+                    config,
+                    experimental_features,
+                    worker_cancel,
+                    worker_runtime,
+                )
+                .run(receiver);
+            })
+            .expect("engine worker thread should spawn");
+
+        // No `ConcurrencyLayer`: the serial worker IS the concurrency bound, and that layer's poll_ready
+        // backpressure deadlocks pending request futures against MainLoop's inner dispatch loop (it awaits
+        // the gate without polling the in-flight task set). Dropping it loses only `$/cancelRequest`
+        // early-abort, which the edit-driven cancellation token supersedes.
         ServiceBuilder::new()
             .layer(TracingLayer::default())
             .layer(LifecycleLayer::default())
             .layer(CatchUnwindLayer::default())
-            .layer(ConcurrencyLayer::default())
             .layer(ClientProcessMonitorLayer::new(client.clone()))
-            .service(ServerState::new_router(
-                client,
-                config,
-                experimental_features,
-            ))
+            .service(Router::from_language_server(ServerState { sender, cancel }))
     });
 
     // Prefer truly asynchronous piped stdin/stdout without blocking tasks.
@@ -103,8 +133,19 @@ pub async fn run(experimental_features: ExperimentalFeatures) {
     server.run_buffered(stdin, stdout).await.unwrap();
 }
 
-struct ServerState {
+// The analysis backend, running on its own dedicated thread (the engine is `!Send`/`!Sync`). The
+// async-lsp frontend (`ServerState`) forwards every LSP op here as a `Job` over an mpsc channel; this
+// is the single owner of the engine + open-document buffers + path tables, so all engine access is
+// single-threaded. See the "off-thread + cancellation" design in the decisions record.
+struct EngineWorker {
     client: ClientSocket,
+    // Cancellation token shared with the frontend: the frontend stores `true` before every input-
+    // mutating notification; the worker stores `false` at the start of each read and installs it around
+    // the read's engine fetches, so a newer edit abandons an in-flight read (latest-edit-wins).
+    cancel: Arc<AtomicBool>,
+    // The tokio runtime handle, to spawn the rare async client-requests (capability registration,
+    // workspace diagnostic refresh) — a `std::thread` worker cannot `.await` directly.
+    runtime: tokio::runtime::Handle,
     config: Config,
     experimental_features: ExperimentalFeatures,
     workspace_root: PathBuf,
@@ -133,16 +174,22 @@ struct ServerState {
     client_supports_diagnostic_refresh: bool,
 }
 
-impl ServerState {
-    fn new_router(
+impl EngineWorker {
+    // Built INSIDE the worker thread closure (the engine is `!Send`, so it cannot be constructed on the
+    // runtime thread and moved). The closure captures only `Send` inputs (client, cancel, runtime, config).
+    fn new(
         client: ClientSocket,
         config: Config,
         experimental_features: ExperimentalFeatures,
-    ) -> Router<Self> {
+        cancel: Arc<AtomicBool>,
+        runtime: tokio::runtime::Handle,
+    ) -> Self {
         let workspace_root = std::env::current_dir().unwrap();
 
-        Router::from_language_server(Self {
+        Self {
             client,
+            cancel,
+            runtime,
             config,
             experimental_features,
             workspace_root: workspace_root.clone(),
@@ -156,7 +203,7 @@ impl ServerState {
             position_encoding: PositionEncoding::Utf16,
             client_supports_pull_diagnostics: false,
             client_supports_diagnostic_refresh: false,
-        })
+        }
     }
 
     fn workspace_r_path(&self) -> PathBuf {
@@ -371,25 +418,22 @@ impl ServerState {
         self.engine.set_input(Key::ProjectFiles, project);
     }
 
-    fn continue_with_error(&mut self, message: String) -> ControlFlow<async_lsp::Result<()>> {
+    fn report_error(&self, message: String) {
         self.client
+            .clone()
             .show_message(ShowMessageParams {
                 typ: MessageType::ERROR,
                 message,
             })
             .unwrap();
-        ControlFlow::Continue(())
     }
 }
 
-impl LanguageServer for ServerState {
-    type Error = ResponseError;
-    type NotifyResult = ControlFlow<async_lsp::Result<()>>;
-
+impl EngineWorker {
     fn initialize(
         &mut self,
         params: InitializeParams,
-    ) -> BoxFuture<'static, Result<InitializeResult, ResponseError>> {
+    ) -> Result<InitializeResult, ResponseError> {
         tracing::info!(?self.experimental_features, "initialize");
 
         let client_encodings = params
@@ -443,7 +487,7 @@ impl LanguageServer for ServerState {
         self.rebuild_project_files();
         self.engine.set_input(Key::Config, self.engine_config());
 
-        box_future(Ok(InitializeResult {
+        Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 position_encoding: Some(self.position_encoding.kind()),
                 completion_provider: Some(CompletionOptions {
@@ -488,10 +532,10 @@ impl LanguageServer for ServerState {
                 name: env!("CARGO_PKG_NAME").into(),
                 version: Some(env!("CARGO_PKG_VERSION").into()),
             }),
-        }))
+        })
     }
 
-    fn initialized(&mut self, _: InitializedParams) -> ControlFlow<async_lsp::Result<()>> {
+    fn initialized(&mut self, _: InitializedParams) {
         let workspace_r_path = self.workspace_r_path();
 
         let params = RegistrationParams {
@@ -527,7 +571,7 @@ impl LanguageServer for ServerState {
         };
 
         let mut client = self.client.clone();
-        tokio::spawn(async move {
+        self.runtime.spawn(async move {
             if let Err(err) = client.register_capability(params).await {
                 client
                     .show_message(ShowMessageParams {
@@ -540,7 +584,6 @@ impl LanguageServer for ServerState {
             tracing::info!("registered file watching for R files");
         });
 
-        ControlFlow::Continue(())
     }
 
     //
@@ -550,7 +593,7 @@ impl LanguageServer for ServerState {
     fn did_open(
         &mut self,
         params: DidOpenTextDocumentParams,
-    ) -> ControlFlow<async_lsp::Result<()>> {
+    ) {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let text = &params.text_document.text;
@@ -579,13 +622,12 @@ impl LanguageServer for ServerState {
             }
         }
 
-        ControlFlow::Continue(())
     }
 
     fn did_close(
         &mut self,
         params: DidCloseTextDocumentParams,
-    ) -> ControlFlow<async_lsp::Result<()>> {
+    ) {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
@@ -606,13 +648,12 @@ impl LanguageServer for ServerState {
             self.rebuild_project_files();
         }
 
-        ControlFlow::Continue(())
     }
 
     fn did_change(
         &mut self,
         params: DidChangeTextDocumentParams,
-    ) -> ControlFlow<async_lsp::Result<()>> {
+    ) {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let content_changes = params.content_changes;
@@ -622,10 +663,11 @@ impl LanguageServer for ServerState {
         let start = Instant::now();
 
         if !self.open_documents.contains(&path) {
-            return self.continue_with_error(format!(
+            self.report_error(format!(
                 "received did_change for non-open document {}",
                 path.display()
             ));
+            return;
         }
 
         self.document(&path).expect(&format!(
@@ -693,23 +735,23 @@ impl LanguageServer for ServerState {
 
         tracing::debug!(elapsed = start.elapsed().as_millis());
 
-        ControlFlow::Continue(())
     }
 
     fn did_save(
         &mut self,
         params: DidSaveTextDocumentParams,
-    ) -> ControlFlow<async_lsp::Result<()>> {
+    ) {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
         tracing::debug!(?path, "did save");
 
         if !self.open_documents.contains(&path) {
-            return self.continue_with_error(format!(
+            self.report_error(format!(
                 "received did_save for non-open document {}",
                 path.display()
             ));
+            return;
         }
 
         // Coherence: a saved document is open, so it must be a tracked engine file.
@@ -729,13 +771,13 @@ impl LanguageServer for ServerState {
         if self.client_supports_pull_diagnostics {
             if self.client_supports_diagnostic_refresh {
                 let mut client = self.client.clone();
-                tokio::spawn(async move {
+                self.runtime.spawn(async move {
                     if let Err(error) = client.workspace_diagnostic_refresh(()).await {
                         tracing::error!(?error, "failed to request workspace diagnostic refresh");
                     }
                 });
             }
-            return ControlFlow::Continue(());
+            return;
         }
 
         // A package-visible save can move diagnostics in dependent files, and live edits push only the
@@ -764,13 +806,12 @@ impl LanguageServer for ServerState {
             }
         }
 
-        ControlFlow::Continue(())
     }
 
     fn did_change_watched_files(
         &mut self,
         params: DidChangeWatchedFilesParams,
-    ) -> ControlFlow<async_lsp::Result<()>> {
+    ) {
         let config_path = self.workspace_root.join(CONFIG_FILE_NAME);
         let workspace_r_path = self.workspace_r_path();
 
@@ -819,15 +860,13 @@ impl LanguageServer for ServerState {
         self.rebuild_project_files();
         self.engine.set_input(Key::Config, self.engine_config());
 
-        ControlFlow::Continue(())
     }
 
     fn did_change_configuration(
         &mut self,
         _params: DidChangeConfigurationParams,
-    ) -> ControlFlow<async_lsp::Result<()>> {
+    ) {
         // Stub implementation to satisfy Zed's requirements; does not apply any configuration changes.
-        ControlFlow::Continue(())
     }
 
     //
@@ -837,7 +876,7 @@ impl LanguageServer for ServerState {
     fn document_diagnostic(
         &mut self,
         params: DocumentDiagnosticParams,
-    ) -> BoxFuture<'static, Result<DocumentDiagnosticReportResult, ResponseError>> {
+    ) -> Result<DocumentDiagnosticReportResult, ResponseError> {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
@@ -847,7 +886,7 @@ impl LanguageServer for ServerState {
         // not track; answer with an empty full report rather than panicking.
         if !self.file_ids.contains_key(&path) {
             tracing::debug!(?path, "pull diagnostic for untracked document");
-            return box_future(Ok(empty_full_diagnostic_report()));
+            return Ok(empty_full_diagnostic_report());
         }
 
         // The engine computes the report on demand (typecheck included via the `Diagnostics` fetch in
@@ -859,17 +898,17 @@ impl LanguageServer for ServerState {
         // The result id is a content hash of the report, so an unchanged answer is correct even
         // under inter-file dependencies where the document's own edit version did not move.
         if params.previous_result_id.as_deref() == Some(result_id.as_str()) {
-            return box_future(Ok(DocumentDiagnosticReportResult::Report(
+            return Ok(DocumentDiagnosticReportResult::Report(
                 DocumentDiagnosticReport::Unchanged(RelatedUnchangedDocumentDiagnosticReport {
                     related_documents: None,
                     unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
                         result_id,
                     },
                 }),
-            )));
+            ));
         }
 
-        box_future(Ok(DocumentDiagnosticReportResult::Report(
+        Ok(DocumentDiagnosticReportResult::Report(
             DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
                 related_documents: None,
                 full_document_diagnostic_report: FullDocumentDiagnosticReport {
@@ -877,7 +916,7 @@ impl LanguageServer for ServerState {
                     items,
                 },
             }),
-        )))
+        ))
     }
 
     //
@@ -887,7 +926,7 @@ impl LanguageServer for ServerState {
     fn completion(
         &mut self,
         params: CompletionParams,
-    ) -> BoxFuture<'static, Result<Option<CompletionResponse>, ResponseError>> {
+    ) -> Result<Option<CompletionResponse>, ResponseError> {
         let path = params
             .text_document_position
             .text_document
@@ -900,7 +939,7 @@ impl LanguageServer for ServerState {
 
         if self.opened_document(&path).is_none() {
             tracing::error!(?path, "document not found");
-            return box_future(Err(path_not_found_error(&path)));
+            return Err(path_not_found_error(&path));
         }
 
         let internal_position = self
@@ -943,7 +982,7 @@ impl LanguageServer for ServerState {
             },
         );
 
-        box_future(Ok(completions))
+        Ok(completions)
     }
 
     //
@@ -953,7 +992,7 @@ impl LanguageServer for ServerState {
     fn definition(
         &mut self,
         params: GotoDefinitionParams,
-    ) -> BoxFuture<'static, Result<Option<GotoDefinitionResponse>, ResponseError>> {
+    ) -> Result<Option<GotoDefinitionResponse>, ResponseError> {
         let uri = params.text_document_position_params.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let position = params.text_document_position_params.position;
@@ -962,7 +1001,7 @@ impl LanguageServer for ServerState {
 
         if self.opened_document(&path).is_none() {
             tracing::info!(?path, "document not found");
-            return box_future(Err(path_not_found_error(&path)));
+            return Err(path_not_found_error(&path));
         }
 
         let internal_position = self
@@ -982,7 +1021,7 @@ impl LanguageServer for ServerState {
                 }
             });
 
-        box_future(Ok(response))
+        Ok(response)
     }
 
     //
@@ -992,7 +1031,7 @@ impl LanguageServer for ServerState {
     fn hover(
         &mut self,
         params: HoverParams,
-    ) -> BoxFuture<'static, Result<Option<Hover>, ResponseError>> {
+    ) -> Result<Option<Hover>, ResponseError> {
         let uri = params.text_document_position_params.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let position = params.text_document_position_params.position;
@@ -1001,7 +1040,7 @@ impl LanguageServer for ServerState {
 
         if self.opened_document(&path).is_none() {
             tracing::info!(?path, "document not found");
-            return box_future(Err(path_not_found_error(&path)));
+            return Err(path_not_found_error(&path));
         }
 
         let internal_position = self
@@ -1010,7 +1049,7 @@ impl LanguageServer for ServerState {
         let Some(hover_info) = EngineIde::new(&self.engine, &self.paths).hover(&path, internal_position)
         else {
             tracing::debug!(?position, "hover target not found");
-            return box_future(Ok(None));
+            return Ok(None);
         };
 
         let value = ide::render_hover_markdown(&hover_info, self.experimental_features.debug);
@@ -1023,7 +1062,7 @@ impl LanguageServer for ServerState {
             range: Some(self.to_lsp_range_in(&path, hover_info.range)),
         };
 
-        box_future(Ok(Some(hover)))
+        Ok(Some(hover))
     }
 
     //
@@ -1033,7 +1072,7 @@ impl LanguageServer for ServerState {
     fn inlay_hint(
         &mut self,
         params: InlayHintParams,
-    ) -> BoxFuture<'static, Result<Option<Vec<InlayHint>>, ResponseError>> {
+    ) -> Result<Option<Vec<InlayHint>>, ResponseError> {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
@@ -1041,7 +1080,7 @@ impl LanguageServer for ServerState {
 
         if self.opened_document(&path).is_none() {
             tracing::info!(?path, "document not found");
-            return box_future(Err(path_not_found_error(&path)));
+            return Err(path_not_found_error(&path));
         }
 
         let viewport = self
@@ -1062,7 +1101,7 @@ impl LanguageServer for ServerState {
             })
             .collect();
 
-        box_future(Ok(Some(hints)))
+        Ok(Some(hints))
     }
 
     //
@@ -1072,7 +1111,7 @@ impl LanguageServer for ServerState {
     fn signature_help(
         &mut self,
         params: SignatureHelpParams,
-    ) -> BoxFuture<'static, Result<Option<SignatureHelp>, ResponseError>> {
+    ) -> Result<Option<SignatureHelp>, ResponseError> {
         let uri = params.text_document_position_params.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let position = params.text_document_position_params.position;
@@ -1081,7 +1120,7 @@ impl LanguageServer for ServerState {
 
         if self.opened_document(&path).is_none() {
             tracing::info!(?path, "document not found");
-            return box_future(Err(path_not_found_error(&path)));
+            return Err(path_not_found_error(&path));
         }
 
         let internal_position = self
@@ -1089,7 +1128,7 @@ impl LanguageServer for ServerState {
             .expect("opened document rope available for signature help");
         let Some(help) = EngineIde::new(&self.engine, &self.paths).signature_help(&path, internal_position)
         else {
-            return box_future(Ok(None));
+            return Ok(None);
         };
 
         let active_parameter = help.active_parameter.map(|index| index as u32);
@@ -1113,7 +1152,7 @@ impl LanguageServer for ServerState {
             active_parameter,
         };
 
-        box_future(Ok(Some(signature_help)))
+        Ok(Some(signature_help))
     }
 
     //
@@ -1123,7 +1162,7 @@ impl LanguageServer for ServerState {
     fn formatting(
         &mut self,
         params: DocumentFormattingParams,
-    ) -> BoxFuture<'static, Result<Option<Vec<TextEdit>>, ResponseError>> {
+    ) -> Result<Option<Vec<TextEdit>>, ResponseError> {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
@@ -1131,7 +1170,7 @@ impl LanguageServer for ServerState {
 
         let Some(document) = self.opened_document(&path) else {
             tracing::info!(?path, "document not found");
-            return box_future(Err(path_not_found_error(&path)));
+            return Err(path_not_found_error(&path));
         };
 
         let new_text = match format::format(
@@ -1142,7 +1181,7 @@ impl LanguageServer for ServerState {
             Ok(text) => text,
             Err(error) => {
                 tracing::error!(?error, "failed to format");
-                return box_future(Ok(None));
+                return Ok(None);
             }
         };
 
@@ -1161,13 +1200,13 @@ impl LanguageServer for ServerState {
             range: Range::new(Position::new(0, 0), document_end),
         }];
 
-        box_future(Ok(Some(edits)))
+        Ok(Some(edits))
     }
 
     fn range_formatting(
         &mut self,
         params: DocumentRangeFormattingParams,
-    ) -> BoxFuture<'static, Result<Option<Vec<TextEdit>>, ResponseError>> {
+    ) -> Result<Option<Vec<TextEdit>>, ResponseError> {
         let uri = params.text_document.uri;
         let range = params.range;
         let path = uri.to_file_path().unwrap();
@@ -1176,7 +1215,7 @@ impl LanguageServer for ServerState {
 
         let Some(document) = self.opened_document(&path) else {
             tracing::info!(?path, "document not found");
-            return box_future(Err(path_not_found_error(&path)));
+            return Err(path_not_found_error(&path));
         };
 
         let internal_range = self
@@ -1193,14 +1232,14 @@ impl LanguageServer for ServerState {
             ),
         ) else {
             tracing::info!(?range, "no node for range");
-            return box_future(Ok(None));
+            return Ok(None);
         };
 
         let new_text = match format::format(node, document.rope(), self.config.format) {
             Ok(text) => text,
             Err(error) => {
                 tracing::error!(?error, "failed to format");
-                return box_future(Ok(None));
+                return Ok(None);
             }
         };
 
@@ -1213,7 +1252,7 @@ impl LanguageServer for ServerState {
             ),
         }];
 
-        box_future(Ok(Some(edits)))
+        Ok(Some(edits))
     }
 
     //
@@ -1223,7 +1262,7 @@ impl LanguageServer for ServerState {
     fn references(
         &mut self,
         params: ReferenceParams,
-    ) -> BoxFuture<'static, Result<Option<Vec<Location>>, ResponseError>> {
+    ) -> Result<Option<Vec<Location>>, ResponseError> {
         let uri = params.text_document_position.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let position = params.text_document_position.position;
@@ -1233,7 +1272,7 @@ impl LanguageServer for ServerState {
 
         if self.opened_document(&path).is_none() {
             tracing::info!(?path, "document not found");
-            return box_future(Err(path_not_found_error(&path)));
+            return Err(path_not_found_error(&path));
         }
 
         let internal_position = self
@@ -1248,7 +1287,7 @@ impl LanguageServer for ServerState {
                         .collect()
                 });
 
-        box_future(Ok(references))
+        Ok(references)
     }
 
     //
@@ -1258,7 +1297,7 @@ impl LanguageServer for ServerState {
     fn rename(
         &mut self,
         params: RenameParams,
-    ) -> BoxFuture<'static, Result<Option<WorkspaceEdit>, ResponseError>> {
+    ) -> Result<Option<WorkspaceEdit>, ResponseError> {
         let uri = params.text_document_position.text_document.uri;
         let path = uri.to_file_path().unwrap();
         let position = params.text_document_position.position;
@@ -1268,7 +1307,7 @@ impl LanguageServer for ServerState {
 
         if self.opened_document(&path).is_none() {
             tracing::info!(?path, "document not found");
-            return box_future(Err(path_not_found_error(&path)));
+            return Err(path_not_found_error(&path));
         }
 
         let internal_position = self
@@ -1301,7 +1340,7 @@ impl LanguageServer for ServerState {
                 },
             );
 
-        box_future(Ok(workspace_edit))
+        Ok(workspace_edit)
     }
 
     //
@@ -1311,13 +1350,13 @@ impl LanguageServer for ServerState {
     fn document_symbol(
         &mut self,
         params: DocumentSymbolParams,
-    ) -> BoxFuture<'static, Result<Option<DocumentSymbolResponse>, ResponseError>> {
+    ) -> Result<Option<DocumentSymbolResponse>, ResponseError> {
         let uri = params.text_document.uri;
         let path = uri.to_file_path().unwrap();
 
         let Some(file) = self.file_ids.get(&path).copied() else {
             tracing::error!(?path, "symbols not found");
-            return box_future(Err(path_not_found_error(&path)));
+            return Err(path_not_found_error(&path));
         };
         // Document symbols are requested on every keystroke and only need top-level symbols, so
         // they read the engine's parsed tree directly rather than running any analysis phase.
@@ -1326,13 +1365,13 @@ impl LanguageServer for ServerState {
         let symbols: Vec<DocumentSymbol> =
             symbols::document(&items, &|range| self.to_lsp_range_in(&path, range));
 
-        box_future(Ok(Some(DocumentSymbolResponse::Nested(symbols))))
+        Ok(Some(DocumentSymbolResponse::Nested(symbols)))
     }
 
     fn symbol(
         &mut self,
         params: WorkspaceSymbolParams,
-    ) -> BoxFuture<'static, Result<Option<WorkspaceSymbolResponse>, ResponseError>> {
+    ) -> Result<Option<WorkspaceSymbolResponse>, ResponseError> {
         let query = params.query;
 
         tracing::debug!(?query);
@@ -1342,8 +1381,264 @@ impl LanguageServer for ServerState {
             self.to_lsp_range_in(path, range)
         });
 
-        box_future(Ok(Some(WorkspaceSymbolResponse::Nested(symbols))))
+        Ok(Some(WorkspaceSymbolResponse::Nested(symbols)))
     }
+}
+
+// One LSP operation handed to the worker. A `Read` (a query handler) resets the cancellation token at
+// the start so a newer edit can abandon it; a `Write` (a lifecycle/edit notification, or the mutating
+// `initialize`) runs to completion. Both carry a boxed closure that runs the migrated handler on the
+// worker's `&mut EngineWorker` and (for requests) sends the reply back over a oneshot.
+enum Job {
+    Read(Box<dyn FnOnce(&mut EngineWorker) + Send>),
+    Write(Box<dyn FnOnce(&mut EngineWorker) + Send>),
+}
+
+impl EngineWorker {
+    // The worker thread's run loop: own the engine, process jobs serially. Each job runs under
+    // `catch_unwind` because no async-lsp layer covers this thread — a non-`Cancelled` panic is a
+    // coherence failure that must become deterministic process death (a silently-dead worker would leave
+    // a zombie server that errors every request and drops every edit).
+    fn run(mut self, receiver: mpsc::Receiver<Job>) {
+        while let Ok(job) = receiver.recv() {
+            let outcome = catch_unwind(AssertUnwindSafe(|| match job {
+                Job::Read(closure) => {
+                    self.cancel.store(false, Ordering::Relaxed);
+                    closure(&mut self);
+                }
+                Job::Write(closure) => closure(&mut self),
+            }));
+            if let Err(payload) = outcome {
+                // A read closure catches its own `Cancelled` (it never escapes `with_cancellation`); this
+                // arm is defensive. Any other payload is a coherence panic — the hook already printed it.
+                if payload.is::<Cancelled>() {
+                    continue;
+                }
+                tracing::error!("engine worker thread panicked; terminating the language server");
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+// The async-lsp frontend: stateless except the channel to the worker, the shared cancellation token, and
+// a client handle for the rare error message. Every handler serializes its params into a `Job` and (for
+// requests) awaits the worker's reply over a oneshot — never touching the `!Send` engine directly.
+struct ServerState {
+    sender: mpsc::Sender<Job>,
+    cancel: Arc<AtomicBool>,
+}
+
+impl ServerState {
+    // A cancellable query: the worker resets the token then runs `build`; an edit arriving mid-read flips
+    // the token and abandons it (the handler returns its empty default).
+    fn read<T, F>(&self, build: F) -> BoxFuture<'static, Result<T, ResponseError>>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut EngineWorker) -> Result<T, ResponseError> + Send + 'static,
+    {
+        let (reply, receive) = oneshot::channel();
+        let job = Job::Read(Box::new(move |worker| {
+            let _ = reply.send(build(worker));
+        }));
+        if self.sender.send(job).is_err() {
+            return box_future(Err(worker_gone_error()));
+        }
+        Box::pin(async move { receive.await.unwrap_or_else(|_| Err(worker_gone_error())) })
+    }
+
+    // A mutating request (`initialize`): runs to completion (non-cancellable) but still replies.
+    fn write_request<T, F>(&self, build: F) -> BoxFuture<'static, Result<T, ResponseError>>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut EngineWorker) -> Result<T, ResponseError> + Send + 'static,
+    {
+        let (reply, receive) = oneshot::channel();
+        let job = Job::Write(Box::new(move |worker| {
+            let _ = reply.send(build(worker));
+        }));
+        if self.sender.send(job).is_err() {
+            return box_future(Err(worker_gone_error()));
+        }
+        Box::pin(async move { receive.await.unwrap_or_else(|_| Err(worker_gone_error())) })
+    }
+
+    // An input-mutating notification: flip the token (abandon any in-flight read) BEFORE enqueuing the
+    // edit, so the in-flight read observes it and the worker processes the edit next.
+    fn notify_edit<F>(&self, build: F) -> ControlFlow<async_lsp::Result<()>>
+    where
+        F: FnOnce(&mut EngineWorker) + Send + 'static,
+    {
+        self.cancel.store(true, Ordering::Relaxed);
+        let _ = self.sender.send(Job::Write(Box::new(build)));
+        ControlFlow::Continue(())
+    }
+
+    // A notification that does not mutate engine inputs (no token flip needed).
+    fn notify<F>(&self, build: F) -> ControlFlow<async_lsp::Result<()>>
+    where
+        F: FnOnce(&mut EngineWorker) + Send + 'static,
+    {
+        let _ = self.sender.send(Job::Write(Box::new(build)));
+        ControlFlow::Continue(())
+    }
+}
+
+impl LanguageServer for ServerState {
+    type Error = ResponseError;
+    type NotifyResult = ControlFlow<async_lsp::Result<()>>;
+
+    fn initialize(
+        &mut self,
+        params: InitializeParams,
+    ) -> BoxFuture<'static, Result<InitializeResult, ResponseError>> {
+        self.write_request(move |worker| worker.initialize(params))
+    }
+
+    fn initialized(&mut self, params: InitializedParams) -> ControlFlow<async_lsp::Result<()>> {
+        self.notify(move |worker| worker.initialized(params))
+    }
+
+    fn did_open(&mut self, params: DidOpenTextDocumentParams) -> ControlFlow<async_lsp::Result<()>> {
+        self.notify_edit(move |worker| worker.did_open(params))
+    }
+
+    fn did_change(
+        &mut self,
+        params: DidChangeTextDocumentParams,
+    ) -> ControlFlow<async_lsp::Result<()>> {
+        self.notify_edit(move |worker| worker.did_change(params))
+    }
+
+    fn did_close(
+        &mut self,
+        params: DidCloseTextDocumentParams,
+    ) -> ControlFlow<async_lsp::Result<()>> {
+        self.notify_edit(move |worker| worker.did_close(params))
+    }
+
+    fn did_save(&mut self, params: DidSaveTextDocumentParams) -> ControlFlow<async_lsp::Result<()>> {
+        self.notify_edit(move |worker| worker.did_save(params))
+    }
+
+    fn did_change_watched_files(
+        &mut self,
+        params: DidChangeWatchedFilesParams,
+    ) -> ControlFlow<async_lsp::Result<()>> {
+        self.notify_edit(move |worker| worker.did_change_watched_files(params))
+    }
+
+    fn did_change_configuration(
+        &mut self,
+        params: DidChangeConfigurationParams,
+    ) -> ControlFlow<async_lsp::Result<()>> {
+        self.notify(move |worker| worker.did_change_configuration(params))
+    }
+
+    fn document_diagnostic(
+        &mut self,
+        params: DocumentDiagnosticParams,
+    ) -> BoxFuture<'static, Result<DocumentDiagnosticReportResult, ResponseError>> {
+        self.read(move |worker| worker.document_diagnostic(params))
+    }
+
+    fn completion(
+        &mut self,
+        params: CompletionParams,
+    ) -> BoxFuture<'static, Result<Option<CompletionResponse>, ResponseError>> {
+        self.read(move |worker| worker.completion(params))
+    }
+
+    fn definition(
+        &mut self,
+        params: GotoDefinitionParams,
+    ) -> BoxFuture<'static, Result<Option<GotoDefinitionResponse>, ResponseError>> {
+        self.read(move |worker| worker.definition(params))
+    }
+
+    fn hover(
+        &mut self,
+        params: HoverParams,
+    ) -> BoxFuture<'static, Result<Option<Hover>, ResponseError>> {
+        self.read(move |worker| worker.hover(params))
+    }
+
+    fn inlay_hint(
+        &mut self,
+        params: InlayHintParams,
+    ) -> BoxFuture<'static, Result<Option<Vec<InlayHint>>, ResponseError>> {
+        self.read(move |worker| worker.inlay_hint(params))
+    }
+
+    fn signature_help(
+        &mut self,
+        params: SignatureHelpParams,
+    ) -> BoxFuture<'static, Result<Option<SignatureHelp>, ResponseError>> {
+        self.read(move |worker| worker.signature_help(params))
+    }
+
+    fn formatting(
+        &mut self,
+        params: DocumentFormattingParams,
+    ) -> BoxFuture<'static, Result<Option<Vec<TextEdit>>, ResponseError>> {
+        self.read(move |worker| worker.formatting(params))
+    }
+
+    fn range_formatting(
+        &mut self,
+        params: DocumentRangeFormattingParams,
+    ) -> BoxFuture<'static, Result<Option<Vec<TextEdit>>, ResponseError>> {
+        self.read(move |worker| worker.range_formatting(params))
+    }
+
+    fn references(
+        &mut self,
+        params: ReferenceParams,
+    ) -> BoxFuture<'static, Result<Option<Vec<Location>>, ResponseError>> {
+        self.read(move |worker| worker.references(params))
+    }
+
+    fn rename(
+        &mut self,
+        params: RenameParams,
+    ) -> BoxFuture<'static, Result<Option<WorkspaceEdit>, ResponseError>> {
+        self.read(move |worker| worker.rename(params))
+    }
+
+    fn document_symbol(
+        &mut self,
+        params: DocumentSymbolParams,
+    ) -> BoxFuture<'static, Result<Option<DocumentSymbolResponse>, ResponseError>> {
+        self.read(move |worker| worker.document_symbol(params))
+    }
+
+    fn symbol(
+        &mut self,
+        params: WorkspaceSymbolParams,
+    ) -> BoxFuture<'static, Result<Option<WorkspaceSymbolResponse>, ResponseError>> {
+        self.read(move |worker| worker.symbol(params))
+    }
+}
+
+// The worker thread is gone (it `exit(1)`s on a coherence panic, so this is only reachable in the tiny
+// window before the process dies): answer the in-flight request with an internal error rather than hang.
+fn worker_gone_error() -> ResponseError {
+    ResponseError::new(ErrorCode::INTERNAL_ERROR, "engine worker unavailable")
+}
+
+// Installed once at startup. The engine's cooperative cancellation raises a `Cancelled` panic that runs
+// the process hook before `with_cancellation` catches it, so suppress that payload (per-keystroke, not a
+// fault); every other panic prints via the default hook. This hook only PRINTS — process death on a
+// worker coherence panic is the worker loop's `exit(1)`, not here (aborting here would kill the process
+// on every routine cancellation and defeat the frontend's `CatchUnwindLayer`).
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if info.payload().is::<Cancelled>() {
+            return;
+        }
+        default_hook(info);
+    }));
 }
 
 #[inline(always)]
