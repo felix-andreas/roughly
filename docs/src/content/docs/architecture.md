@@ -1,11 +1,14 @@
 ---
 title: Architecture
-description: Implementation architecture and durable design constraints of the analysis crate
+description: Implementation architecture of Roughly's analysis engine and its durable phase and representation boundaries
 ---
 
-This document is the authoritative implementation architecture for the `analysis` crate.
+This document is the authoritative implementation architecture for Roughly's analysis. Two crates cooperate:
 
-The [Typing Reference](/typing-reference) is the authoritative user-facing typing contract. This page defines the implementation boundaries needed to realize that contract. Keep it focused on durable phase boundaries and representation boundaries.
+- **`engine`** — a generic red-green *memoized query* core. It holds no R knowledge and does not depend on `analysis`; it is the substrate that turns the analysis phases into incrementally-recomputed queries with automatic, dependency-tracked invalidation.
+- **`analysis`** — the computational phases: parsing (over tree-sitter), lowering, naming, type inference, lint, and the IDE logic. The engine drives incremental analysis by running these phases as query bodies. `analysis` also exposes a clean *from-scratch* checker, `run_full`, retained as the correctness oracle (see [Differential correctness](#differential-correctness)) and used directly by the command-line path.
+
+The [Typing Reference](/typing-reference) is the authoritative user-facing typing contract. This page defines the implementation boundaries needed to realize that contract.
 
 ## Role of this document
 
@@ -13,7 +16,7 @@ Use this document for:
 
 - phase boundaries
 - representation boundaries
-- lint architecture
+- the query-engine / incremental-analysis model
 - naming and scope architecture
 - typechecking architecture
 
@@ -29,9 +32,9 @@ The analysis phase surface is:
 
 parsed syntax -> `lint` -> `lower` -> `naming` -> `typecheck` -> checked-file results and diagnostics
 
-`check` is the orchestration entry point around that pipeline. It wires phases together and returns file results, but it is not itself a semantic phase.
+These phases are pure functions of their inputs. The engine wires them together as memoized queries (see [Incremental analysis](#incremental-analysis-the-query-engine)); `run_full` wires them together as one from-scratch pass. Neither wiring is itself a semantic phase.
 
-Syntax parsing is not an `analysis` crate phase. The checker may receive already-parsed syntax from `roughly` or from tests.
+Syntax parsing produces the tree the phases consume; the phases never re-parse spelled `#:` text after lowering.
 
 Diagnostics are not a separate phase. They are structured outputs produced by lint, lowering, naming, and typechecking.
 
@@ -41,7 +44,7 @@ Diagnostics are not a separate phase. They are structured outputs produced by li
 
 Input:
 
-- one `workspace::Document`
+- one document's parsed syntax and source text
 - lint configuration
 
 Output:
@@ -66,7 +69,7 @@ Lint is a separate file-local phase.
 
 Input:
 
-- one `workspace::Document`
+- one document's parsed syntax
 - shared interner state when available
 
 Output:
@@ -97,16 +100,15 @@ Lowering is the front-end structural boundary. Later phases consume parsed HIR d
 
 Input:
 
-- lowered HIR for one package
-- project file order
-- project-global declaration tables derived from lowered files as needed
+- lowered HIR for one file
+- the package's set of files and the exported names each contributes
 
 Output:
 
-- `NamedModule`
+- a named view of the file (HIR plus side tables keyed by stable ids)
 - naming diagnostics
 
-`NamedModule` is the named view consumed by typechecking. It may be represented as HIR plus side tables keyed by stable ids, but the phase contract is fixed even if the exact Rust types evolve.
+The named view is what typechecking consumes. The phase contract is fixed even if the exact Rust types evolve.
 
 Responsibilities:
 
@@ -118,22 +120,18 @@ Responsibilities:
 - leave package-global value references unresolved during file-local naming, even when the declaration is in the same file
 - collect top-level value declarations and top-level type declarations
 - record unresolved value and type references that require package-global lookup
-- run project-global resolution by updating those per-file naming results in place
-- build one final package-global value table from top-level exports
-- resolve every unresolved top-level value reference against that final package-global table
-- build the project-global type namespace from top-level declarations
-- resolve type references in annotations and declarations
-- resolve type references against that project-global namespace
+- resolve package-global value references against the package's table of exported top-level names
+- build the project-global type namespace from top-level declarations and resolve type references in annotations and declarations against it
 - assign package-visible project-level identities for top-level declarations
 - diagnose unknown type names, duplicate type declarations, wrong type-argument arity, alias-versus-nominal misuse for `@new`, and cross-file top-level value collisions
 
 Naming data is also a tooling boundary, not only a typechecking prerequisite.
 
-The naming result should be rich enough to support:
+The naming result is rich enough to support:
 
 - go-to-definition within a file
 - local rename within a file
-- project-level rename across files once cross-file naming data and project scheduling exist
+- project-level rename across files
 
 Non-responsibilities:
 
@@ -141,33 +139,28 @@ Non-responsibilities:
 - structural placement validation already enforced by lowering
 - expression type inference and compatibility checking
 
-Naming is the semantic name-resolution boundary. Lowering may still run document-by-document, but naming operates at package scope. Later phases must consume resolved binding identity and resolved type identity rather than re-resolving spelled names ad hoc.
+Naming is the semantic name-resolution boundary. Lowering runs per file; package-global resolution operates over the package. Later phases consume resolved binding identity and resolved type identity rather than re-resolving spelled names ad hoc.
 
-Internally, naming should be split into:
+Naming is split into:
 
-1. file-local naming preparation
-2. project-global resolution
+1. file-local naming preparation — authoritative for local lexical facts; also yields the file's exported-name set
+2. package-global resolution — authoritative for package-visible top-level value and type resolution
 
-The file-local preparation pass is authoritative for local lexical facts.
-The project-global pass is authoritative for package-visible top-level value and type resolution.
-This split does not require a separate durable intermediate artifact. The project-global pass may update the same naming result built by file-local resolution, leaving still-unresolved names in place when lookup fails.
+Known limitation — which top-level assignments are package globals: a bare top-level `{ }` block executes unconditionally, so its direct-child assignments (including nested bare blocks) are package globals, exactly like a top-level `name <- value`. Assignments inside `if`/`for`/`while` bodies are conditionally executed and are not yet package globals — a cross-file reference to such a name reports "could not resolve" — pending a future conditional-global (weak-global) tier. This is the single membership rule used everywhere a binding's package-global status is decided, so the answer cannot disagree between sites.
 
-Known limitation — which top-level assignments are package globals: a bare top-level `{ }` block executes unconditionally, so its direct-child assignments (including nested bare blocks) are package globals, exactly like a top-level `name <- value`. Assignments inside `if`/`for`/`while` bodies are conditionally executed and are not yet package globals — a cross-file reference to such a name reports "could not resolve" — pending a future conditional-global (weak-global) tier. This single membership rule is shared by the candidate index, the rebuild oracle, and the export lookup so they cannot disagree.
-
-Top-level declarations should not keep their preliminary file-local binding ids as their final package-visible identities.
-The project-global pass should assign distinct project-level ids for package-visible declarations so cross-file naming facts are owned by the package-level result rather than by incidental file-local traversal order.
+Top-level declarations do not keep their preliminary file-local binding ids as their final package-visible identities. Package-global resolution assigns distinct project-level ids for package-visible declarations, so cross-file naming facts are owned by the package-level result rather than by incidental file-local traversal order.
 
 ### `typecheck`
 
 Input:
 
-- `NamedModule`
+- the named view of one file
 - builtin typing information
-- project summaries as needed for semantic checking and incremental invalidation
+- the exported type schemes of the package-global symbols the file references
 
 Output:
 
-- `CheckedFile`
+- a checked file (typed results and the file's exported interface)
 - typechecking diagnostics
 
 Responsibilities:
@@ -187,61 +180,17 @@ Non-responsibilities:
 
 Inference is an internal mechanism of `typecheck`, not the architectural name of the phase.
 
-#### Incremental model
+#### Cross-file interface
 
-Typechecking is incremental at document grain through a two-phase interface model:
-
-- The interface phase computes each package document's exported value schemes by a package-level
-  fixed-point. Each round builds the package-global table (the winning document's exported scheme
-  per name, `Unknown` where not yet computed), then recomputes every document whose version, the
-  type-definition fingerprint, or a referenced scheme changed, binding the table's schemes for the
-  names it references and re-extracting its exports. Iterating to a fixed point lets re-exports and
-  forward references resolve both within and across files (`second <- first` exports `first`'s
-  scheme even when `first` lives in another file). Each document's interface is cached by document
-  version, the type-definition fingerprint, and a dependency fingerprint of the referenced schemes,
-  so an edit only re-derives the changed document and its dependents. Propagation advances one hop per
-  round, and every acyclic package-global's exported scheme transitions at most once (`Unknown` to
-  concrete; leaves are stable annotations and literals), so the worklist converges in at most
-  `#package-globals + 1` rounds and is bounded accordingly. A genuine re-export cycle (file a:
-  `a <- b`, file b: `b <- a`) is *not* monotone — under synchronous iteration its members' schemes
-  swap every round and never settle — so the round drives an oscillation guard: a name whose table
-  rendering returns to a value it already produced in an earlier round (while differing from the
-  previous round) is pinned to the conservative `Unknown`, collapsing the cycle and restoring
-  monotone progress. Cyclic re-exports are legitimate R input, so they resolve to `Unknown` rather
-  than erroring or panicking. That bound can never truncate legitimate propagation — a fixed cap
-  would silently leave chains deeper than it unresolved — so non-convergence is a fixed-point defect
-  that fails a debug assertion in debug and test builds, with a conservative all-document round-2
-  candidate fallback keeping release builds correct (never stale).
-- The package interface table maps each package-global name to the winning document's exported
-  scheme. Its rendered form, together with the type-definition fingerprint, is the environment
-  fingerprint.
-- The check phase checks every candidate document (package files and scripts) against the interface
-  table, binding only the schemes the document references. The result is cached by document version,
-  the type-definition fingerprint, and that document's own dependency fingerprint — the rendered
-  schemes of exactly the package-global names it references — rather than a package-global key. The
-  candidate set is chosen by reverse-dependency routing (`dirty docs ∪ reverse-deps of changed
-  exports`; see [Reverse-dependency invalidation](#reverse-dependency-invalidation-m3)), so a
-  body-only edit rechecks just the edited document, and an interface change rechecks exactly the
-  changed document plus the documents that reference the changed name (`k + 1`), leaving independent
-  documents untouched. A type-definition change is still package-global today and falls back to the
-  full document set.
+`typecheck` infers each file against the exported type schemes of the package-global symbols it references. A symbol's exported scheme is computed once, per symbol, and shared with every file that references it (the per-symbol interface layer in [Incremental analysis](#incremental-analysis-the-query-engine)). Re-exports and forward references resolve through that shared interface, so `second <- first` exports `first`'s scheme even when `first` lives in another file.
 
 Consequences that are part of the contract:
 
-- cross-file references see the exporting document's generalized scheme, and a re-export's own
-  exported scheme is derived from what it re-exports; type information still does not flow back
-  across file boundaries through inference (a call in one file never changes the inferred type of a
-  function defined in another file)
-- interface schemes move between per-document inference states by importing: quantified
-  variables are re-bound to fresh local ids, and stray free variables erase to `Unknown`
-- `typecheck` returns the set of documents whose output was recomputed so callers can republish
-  exactly those diagnostics
-- checking recovers per top-level expression, so every error in every document is reported
+- cross-file references see the exporting file's generalized scheme; type information does not flow back across file boundaries through inference (a call in one file never changes the inferred type of a function defined in another file)
+- interface schemes move between per-file inference states by importing: quantified variables are re-bound to fresh local ids, and stray free variables erase to `Unknown`
+- checking recovers per top-level expression, so every error in every file is reported
 
-Generalization is level-based: variables created while inferring a binding's value live one
-level deeper than the binding boundary, unification propagates the lower level outward, and
-generalization quantifies exactly the variables deeper than the current level without walking
-the environment.
+Generalization is level-based: variables created while inferring a binding's value live one level deeper than the binding boundary, unification propagates the lower level outward, and generalization quantifies exactly the variables deeper than the current level without walking the environment.
 
 ## Representation boundaries
 
@@ -296,13 +245,13 @@ The naming representation should preserve both:
 - file-local naming facts needed to explain lexical resolution within one file
 - project-level naming identities for package-visible declarations and cross-file references
 
-For top-level value declarations, the final package-visible identity should come from the project-global naming pass rather than directly reusing a file-local provisional id.
+For top-level value declarations, the final package-visible identity should come from the package-global naming pass rather than directly reusing a file-local provisional id.
 
 The named representation should also preserve the information needed for editor tooling built on name resolution, especially:
 
 - jumping from a use site to its definition site
 - enumerating all use sites for local rename
-- extending that same identity model to project-level rename when cross-file naming data is available
+- extending that same identity model to project-level rename across files
 
 ### Internal semantic types
 
@@ -316,318 +265,77 @@ It must represent:
 - generalized binding types
 - exported interface types
 
-## Project-level direction
+## Incremental analysis: the query engine
 
-Multi-file checking should build on the file-local lowering pipeline rather than bypass it.
+Incremental analysis is built on the `engine` crate, a generic red-green memoized query core. The phases above are written once, as ordinary functions, and the engine runs them as *queries* whose results are cached and recomputed only when something they actually read has changed. Invalidation is therefore a consequence of recorded dependencies, not a hand-maintained mirror of the dependency graph — which is the structural property the whole design is for.
 
-The checker should support shared analysis state across files for:
+### The red-green core
 
-- interned names
-- project file order
-- project-global declaration tables
-- later project-level caches
+- **Revision** — a logical clock bumped on every input change.
+- **Slots** — one table holds every query's memoized value (type-erased) together with the revision it was last verified at, the revision it last changed at, and the dependencies it recorded. Inputs and derived queries live in the same table.
+- **Inputs vs. derived queries** — inputs are set from outside and never computed; derived queries are produced by a body that reads other queries.
+- **`fetch`** — the only way a body reads another query. It records that query as a dependency of the currently-computing query, validates it, and returns the value. Reading *is* recording; there is no untracked read path to forget.
+- **Validation (red-green)** — a memo is *green by revision* (already verified this revision), *green by early cutoff* (all of its dependencies revalidated to equal values, so it need not re-run), or *red* (a dependency changed; recompute).
+- **Value-equality early cutoff** — when a recomputed query produces a value equal to its previous value, its dependents do not recompute. This is what lets an edit that does not change an exported scheme stop at that boundary instead of propagating onward.
+- **Input removal** — deleting an input leaves a tombstone, so a dependent revalidates against the now-smaller input set instead of re-executing an absent input.
+- **Accidental-cycle guard** — a derived body that transitively fetches itself fails loudly rather than overflowing the stack; this is treated as a programming error. (The one *intended* cycle is contained in a single body — see [the re-export cycle](#the-re-export-interface-cycle).)
 
-That project-level direction should leave room for tooling operations built on naming identity, including cross-file go-to-definition and rename.
+### The query graph
 
-The architecture should optimize for fast re-analysis of a single changed file.
+Inputs (set from outside, never computed):
 
-File-local phases and artifacts should remain explicit so one file can be reparsed and relowered without unnecessary project-wide recomputation, while naming and later semantic phases still operate on the package.
+- **`source_text(file)`** — per-file source. The high-churn input: every keystroke sets it.
+- **`document_kind(file)`** — package source vs. script, kept as a *separate* input so a text-only edit does not invalidate through a kind read.
+- **`project_files`** — the set of files that exist. This is the single source of truth for membership; adding or removing a file is an edit to this input plus the file's own `source_text` / `document_kind`.
+- **`config`** — the project `roughly.toml` (`[format]`, `[lint]`, `[check] typing/unused/strict`).
+- **`stdlib_stubs`** — the immutable standard-library stubs. Set once; it never invalidates anything.
 
-Project-level analysis should track dependencies through project-global names and any later checked-file summaries used for incremental invalidation.
+Derived queries (every edge is a recorded `fetch`, so the dependency is automatic):
 
-If file `A` changes, later files that depend on `A`'s project-visible names must be rechecked when those visible names change, even if those dependent files are not open.
+| Query | Reads | Role |
+| --- | --- | --- |
+| `parse(file)` | `source_text(file)` | the tree is a pure function of the bytes |
+| `lower(file)` | `parse(file)` | HIR |
+| `local_naming(file)` | `lower(file)`, `document_kind(file)` | file-local resolution; also yields the file's exported-name set |
+| `package_symbol_index` | `project_files`, each package file's exported-name set, `stdlib_stubs` | the def-map: name → winning defining/re-exporting item. **Names only, no types.** The single all-files fold; it changes on *structural* edits (add/remove/rename a top-level binding, add/remove/reclassify a file), not on body edits |
+| `defining_item(symbol)` | `package_symbol_index` | a firewall projecting one symbol's winner out of the index, so a change to one symbol's winner cuts off for the others |
+| `global_scheme(symbol)` | `defining_item(symbol)`, then the winning file's inference for that item (or the re-export cycle body) | the per-symbol exported type scheme |
+| `typecheck(file)` | `lower(file)`, `local_naming(file)`, `config`, and `global_scheme(s)` for **each symbol `s` the file references** | HM inference over the file |
+| `diagnostics(file)` | `typecheck(file)`, `lint(file)`, lowering diagnostics, `config` | the rendered diagnostics; `config` gates typing/unused/strict |
 
-The intended later project-level stages are:
+### Automatic dependency-tracked invalidation
 
-1. build or load project file order and project-global declaration tables
-2. run `lower`
-3. run file-local naming preparation
-4. run project-global naming resolution and assign project-level declaration identities
-5. run `typecheck`
-6. extract any checked-file summaries needed for incremental invalidation
-7. track dependency invalidation and dependent diagnostics
+The fine-grained, per-symbol interface layer is what makes invalidation precise. `typecheck(file)` records `global_scheme(s)` for exactly the symbols the file references. When a global's scheme changes, only that symbol's `changed_at` advances, and only the `typecheck` memos that recorded it revalidate. That recorded per-symbol dependency set *is* the reverse-dependency map — reconstructed automatically and exactly, with nothing to patch and nothing to drift.
 
-The architecture should not assume that only full-file rechecking is possible, but it should also not commit yet to reusing unification or inference state across edits.
+The consequences:
 
-The desired near-term file split is recorded on the [Structure](/structure) page.
+- Editing a function body changes one symbol's scheme and re-typechecks only its referrers. The names-only `package_symbol_index` does not re-fold for a body edit, because the file's exported-name set is unchanged and cuts off.
+- `typecheck(file)` never reads `project_files` or `package_symbol_index` directly — it reaches the file set and the def-map only *behind* the per-symbol `global_scheme` / `defining_item` firewall — so adding an unrelated file cannot invalidate a file that does not reference a symbol whose winner changed.
+- There is no hand-maintained reverse-dependency index, dirty-set, or dependency fingerprint. Each of those was a stand-in for what the recorded `fetch` graph plus value-equality cutoff now provide directly, and each carried a class of silent-staleness bug (a mirror the untracked read path could bypass). With `fetch` as the only read path, that bug class is structurally impossible.
 
-## Incremental analysis
+### The re-export interface cycle
 
-Analysis should be operation-driven rather than running one fixed whole-package pipeline on every
-edit.
+R allows mutual typed re-exports (`a <- b` in one file, `b <- a` in another), a genuine dependency cycle the acyclic core cannot express through plain `fetch` recursion (it would re-enter a key already being computed and trip the accidental-cycle guard). It is resolved inside a single query body that owns the whole strongly-connected component: a bounded fixed-point that iterates to convergence — acyclic re-export and forward-reference chains are monotone (each scheme transitions at most once, `Unknown` to concrete) and converge within a bound proportional to the number of globals — with an oscillation guard that pins a genuinely cyclic symbol to `Unknown`, collapsing the cycle so the loop converges. Downstream queries depend on its converged result normally, and value-equality cutoff stops propagation when that result is unchanged. This is the one non-trivial query body; it carries its full correctness burden (the convergence bound and the oscillation guard) rather than dissolving.
 
-The single source of truth is one set of versioned retained phase outputs owned by `Analysis`.
-Different operations request different freshness floors over those retained artifacts. They must not
-create separate semantic caches per IDE action.
+### Concurrency
 
-Freshness is split by scope:
+The engine uses non-thread-safe interior pointers, so it is not shared across threads. The shipped language server runs it on one dedicated worker thread, off the main thread, and is **demand-driven**: it computes only what an editor query asks for — open files and their dependents — with no eager whole-workspace pass.
 
-- document-scoped phases compare their retained outputs against a document version
-- package-scoped phases compare their retained outputs against a package version
+Live responsiveness comes from **cooperative cancellation**, not parallelism. Each edit flips a cancellation token; an in-flight cross-file pass observes it at recompute boundaries and abandons by unwinding to the `fetch` entry point, committing no partial memo, so the next pass recomputes only its blast radius — latest edit wins. Edit notifications run to completion (uncancellable), so a file's published diagnostics are never left stale; interactive read requests are cancellable. A coherence failure on the worker (a sync that cannot keep state consistent) is unrecoverable and ends the process rather than continuing on corrupt state.
 
-The intended trigger policy is:
+Parallel evaluation is deliberately not adopted: a correct parallel red-green engine is research-grade, and because evaluation is demand-driven there is no eager cold pass for it to fan out across cores. The shared-pointer and memo-table types are kept behind thin aliases so a future parallel retrofit, if ever justified by measurement, stays localized.
 
-- on edit or keystroke, refresh document-scoped phases for the current document: `lint`, `lower`,
-  and file-local naming preparation
-- on hover, rename, and similar IDE actions, first ensure current document-scoped phases for the
-  unsaved buffer, then request only the minimum package-scoped naming or typecheck work that action
-  requires
-- on save, request full semantic diagnostics for the saved package snapshot, while still rerunning
-  only the package-scoped work whose retained outputs are stale
+### Differential correctness
 
-This model should preserve two boundaries:
+The engine's correctness is held to a differential check against `analysis::run_full` — a clean from-scratch checker built fresh for the current file set, never an incremental path. (Comparing against an incremental path could ratify a stale result on both sides; the from-scratch rebuild cannot.) Over randomized and adversarial edit streams — interleaved edits and queries, add/delete/re-add, package↔script reclassification, renames, re-export and value-reference cycles, malformed input — after every edit the engine's output must equal a fresh full rebuild of the then-current state, byte-exact on rendered diagnostics and per-cursor-position for every IDE feature. This from-scratch checker is retained permanently as the regression net; it is also the command-line path, since a one-shot batch check needs no incrementality.
 
-- phase boundaries remain stable even if scheduling changes later
-- future finer-grained invalidation should refine package-scoped work, not replace the retained
-  artifact model
+### IDE queries
 
-### Reverse-dependency invalidation (M3)
+The interactive features — hover, completion, go-to-definition, find references, rename, inlay hints, signature help — are written once, generic over an `IdeDatabase` fact-provider trait. Both the from-scratch oracle and the engine-backed view implement that trait, so the identical orchestration runs on both and the engine-backed output is differential-checked per cursor position (cross-file included) against the oracle. Per-keystroke features are O(1) over the cached typecheck of the queried file plus a sub-linear span lookup — a point query on an unchanged file triggers no re-inference; cross-file features (find references, rename, workspace symbols) may scan the project behind a cheap text prefilter but never resurrect a persistent occurrence index.
 
-This is the design M3 implements to make package-scoped invalidation precise instead of
-package-wide. It refines the package-scoped phases above; it does not replace the retained-artifact
-model. Per-document dependency re-keying, the reverse-dependency index, the per-edit dirty set, and
-the fixture-visible recompute scope are implemented; the check-phase prose in
-[the typecheck incremental model](#incremental-model) describes the per-document dependency
-fingerprints and reverse-dependency routing that are now in effect.
+### Performance characteristics
 
-Four pieces:
-
-1. **Per-document dependency re-keying.** The round-2 typecheck (the check phase) is re-keyed on
-   each document's *own* dependency fingerprint — the per-document set of referenced schemes already
-   computed in round-1 — instead of one global environment fingerprint. A document's check cache is
-   then invalidated only when a scheme it actually references changes.
-2. **Reverse-dependency index.** A package-global map from `Symbol` (a package-visible name) to the
-   set of `DocumentId`s that refer to it.
-3. **Per-edit dirty set.** The set of changed `DocumentId`s is carried into the package-scoped
-   phases. The recompute candidate set is `dirty docs ∪ reverse-deps of changed exports`.
-4. **Fixture-visible recompute scope.** The recomputed `DocumentId` set and the reason per document
-   (body-edit vs interface-change) are exposed so the routing is testable, not just an internal
-   optimization.
-
-#### Maintenance invariant (single source of truth)
-
-The reverse-dependency index is a pure function of the per-document naming outputs:
-
-```
-index == ⋃ over docs D of { (s, D) : s ∈ non_locals(D) }
-```
-
-It is *derived and patched per document* — to update a document, remove its own entries (the edges
-keyed by that contributing `DocumentId`) then insert its new ones — never a hand-synced mirror.
-Edges are keyed by the **name a reference attempts to resolve**, not by the resolved target. Keying
-on the attempted name (not the resolved binding) is what keeps the following correct without special
-cases:
-
-- forward references to a not-yet-defined global,
-- shadowing / last-writer-wins winner flips,
-- deletion of a definition,
-- local↔global transitions.
-
-A debug-only assertion compares the patched index against a full rebuild and guards against drift.
-
-#### One-hop correctness premise (contract precondition)
-
-A single reverse-dependency hop suffices to pick recompute candidates **only because inference never
-flows across files**: a document's exported scheme is a pure function of its own source, not of its
-dependencies' bodies or inferred types. So changing document A's exports can only affect the
-documents that directly reference A's exported names — one hop.
-
-Re-exports (a top-level binding that aliases another global) are the genuinely transitive case. They
-are not handled by extra reverse-dependency hops; they are handled by the existing two-round
-interface fixed-point, which remains the convergence safety net.
-
-If cross-file inference is ever added, the one-hop guarantee is void and this routing must be
-replaced by a worklist iterated to a fixed point.
-
-#### Find-references stays on the text prefilter
-
-Find-references intentionally does *not* gain a persistent reverse-reference index. A full
-reverse-*reference* index is exactly the fragile mirrored state rust-analyzer deliberately avoids;
-find-references stays on the text-prefilter path. The reverse-*dependency* index here is the narrow,
-cheaply derivable structure used only for invalidation routing — not a general reference store.
-
-#### Exit proof (targeted, made durable as a fixture)
-
-The design targets, and a fixture makes durable, the following:
-
-- an interface change to a global `G` referenced by `k` documents recomputes exactly `k + 1`
-  documents (`G`'s own document plus its `k` referrers);
-- a body-only edit recomputes exactly `1` document and renders no `O(package)` fingerprint.
-
-### Incremental package naming (M4)
-
-M3 made the interface fixed-point and round-2 typecheck `O(blast-radius)`, but `resolve_package`
-still rebuilt the entire global binding table and all package-naming diagnostics by scanning every
-package document on each `package_version` bump (~111ms single-file recheck at 500 files) — the last
-`O(package)` cost on a body-only edit. M4 makes package naming incremental: when a document's
-exported top-level names change, patch the affected names and re-diagnose only the affected
-documents instead of rebuilding.
-
-#### Source of truth and derived structures
-
-Same discipline as the M3 reverse-dependency index — a pure fold of per-document naming outputs,
-never a hand-synced mirror:
-
-- **Per-document exported names.** Each document `D` contributes the symbols of its top-level
-  assignments — `NamesLocal.bindings` filtered to `kind == BindingKind::TopLevelAssignment`. A pure
-  function of `D`'s local naming.
-- **Per-name candidate index** (`package_definitions`, landed in M4.1). For each package-global
-  `Symbol` `N`, the set of package documents defining `N`. `Winner(N)` = the path-last candidate in
-  package path-lexicographic order (`package_path_key`, the single order source shared with
-  `package_document_ids`), **not** `DocumentId` numeric order. `global_bindings[N] == Winner(N)`,
-  materialized for `O(1)` lookup.
-
-#### Maintenance invariant (single source of truth)
-
-```
-package_definitions == ⋃ over package docs D of { (N, D) : N is a top-level binding symbol of D }
-global_bindings[N]  == the path-last candidate of N
-```
-
-`package_definitions` is patched per document at the local-naming recompute site and on delete
-(remove `D`'s own entries by contributing `DocumentId`, then insert its new exported set). The
-materialized `global_bindings` is patched only for affected names. Both are guarded by a debug-only
-full-rebuild drift assertion.
-
-#### Incremental winner update on a document change
-
-- Compute `D`'s new exported set; diff against `D`'s prior contribution (read from
-  `package_definitions`'s current membership of `D`). Affected names = (names `D` drops) ∪ (names `D`
-  adds). A pure body edit that changes no top-level name leaves the exported set identical → zero
-  affected names → no `global_bindings` change, the flat-recheck win.
-- For each affected `N`, recompute `Winner(N)` = path-last of `package_definitions[N]` and patch
-  `global_bindings` (remove `N` if it has no definers left). A name **flips defined-ness** when its
-  definer count crosses `0 ↔ ≥1`; the set of flipped names drives `D`-diagnostic re-diagnosis below.
-
-#### Diagnostics: four categories, each incrementally bounded (correctness-critical)
-
-`rebuild_package_naming` produces four package-naming diagnostic categories. All four are incremental
-(not just overwrite). They are stored per contributing document and a document's whole contribution
-is recomputed when that document is in the recompute set; `document_diagnostics` reads the stored
-per-document vector unchanged.
-
-- **(A) Overwrite warnings** — a pure function of a name's *ordered* candidate list: every candidate
-  except the path-last gets "is overwritten by a later top-level binding"; every candidate except the
-  path-first gets "overwrites an earlier top-level binding". When a name's candidate set changes,
-  every current co-definer's contribution must be regenerated (its first/last position may have
-  moved).
-- **(B) Builtin/namespace-shadow warnings** — per-`(document, binding)`, independent of winner
-  selection; regenerated from `D`'s own bindings when `D` changes.
-- **(C) Type-reference resolution** + **(T) duplicate-type-definition** warnings — depend on the
-  package type index. As of M4.3 the type index is maintained incrementally (see below), and these two
-  categories are routed per affected type name exactly like the value categories: when a type name's
-  materialized entry changes (kind, arity, presence, or duplicate status), its **co-definers** (the
-  `type_definitions[N]` documents, whose duplicate diagnostic may move) and its **referrers**
-  (`documents_type_referencing(N)`, whose type-reference diagnostic may move) are re-diagnosed. A
-  body-only edit changes no type name, so neither set grows. Never stale.
-- **(D) Unresolved-reference** ("I could not resolve `name`…") warnings — depend on
-  `global_bindings` membership (a reference resolves iff the name is a package global, an import, or a
-  builtin). This is the cross-cutting category: when a name `N` **flips defined-ness**, every document
-  that *references* `N` changes its (D) diagnostics even though it is not itself dirty. Those referrers
-  are exactly `documents_referencing(N)` from the M3 reverse-dependency index — a single reverse hop.
-
-##### Recompute set (which documents are re-diagnosed)
-
-```
-recompute_diag_docs =
-    re-derived-naming docs                                    // own naming changed (A self, B, C self, D/T self)
-  ∪ ⋃ over affected value names N of package_definitions[N]   // (A) co-definers whose ordered position moved
-  ∪ ⋃ over flipped value names N of documents_referencing(N)  // (D) referrers gaining/losing "could not resolve N"
-  ∪ ⋃ over affected type names N of type_definitions[N].keys  // (T) type co-definers whose duplicate status moved
-  ∪ ⋃ over affected type names N of documents_type_referencing(N)  // (C) type referrers whose kind/arity/presence moved
-```
-
-A pure body edit yields no affected value names, no flips, and no affected type names, so
-`recompute_diag_docs` is just the edited document — the flat-recheck win, with no `O(package)` residual:
-the type index is no longer rebuilt across the package (M4.3).
-
-#### Non-circular drift assertion (four-category oracle)
-
-The M4.1 assertion compared derived winners to `global_bindings`; now `global_bindings` *is* the
-maintained thing, so that comparison would be circular. The M4.2 debug assertion instead rebuilds a
-fresh oracle from **all** package naming outputs (the existing `rebuild_package_naming` over every
-document, not the patched state) and asserts both (1) the maintained `global_bindings` equals the
-oracle's, and (2) every document's maintained diagnostic set (A+B+C+D+T) equals the oracle's, compared
-as multisets (order-insensitive). This keeps the verify real across the diagnostics refactor.
-
-M4.3 extends the verify to the type index, all rebuilt from the **primary** inputs (the lowered package
-modules + per-document `NamesLocal`), never the patched state. `assert_type_definitions_consistent`
-rebuilds the type-definition candidate index (folding `document_type_definitions`) and the materialized
-type index + duplicate set (via `build_type_index`) and asserts all three equal the maintained
-structures; `assert_type_references_consistent` folds `document_type_references` and asserts the
-maintained type reverse-dependency index equals it. Because the (C)/(T) oracle in
-`assert_package_naming_consistent` re-derives those diagnostics through the same `build_type_index`, the
-maintained type index *and* its derived diagnostics are proven equal to a from-scratch rebuild on every
-`resolve_package`, non-circularly.
-
-#### Type index: candidate, materialized, reverse-dependency (M4.3)
-
-The type side mirrors the value side structurally. The shared membership predicate is
-`document_type_definitions(module)` → for each `@type`/`@alias` name the `TypeInfo`s (kind, arity) a
-document declares; `build_type_index` (the rebuild oracle) and the incremental patch both fold it, so
-they cannot disagree by construction. The single winner/duplicate rule is
-`apply_type_definition_outcome`: a name with exactly one site across the package resolves to its
-`TypeInfo`, zero sites is absent, two or more is a duplicate (kept out of the resolved index).
-
-- **`type_definitions: Symbol → DocumentId → Vec<TypeInfo>`** — the candidate index (source of truth),
-  the type analog of `package_definitions`, patched per re-derived/deleted document. A `Vec` per
-  document preserves a document that declares the same name twice (which makes the name a duplicate).
-  `patch_type_definitions` marks a name affected when the document's contribution changes by *presence
-  or by `TypeInfo`* (kind/arity), which is what makes a kind/arity flip route to referrers.
-- **`package_type_index: Symbol → TypeInfo`** + **`duplicate_type_names`** — the materialized index
-  (the type analog of `global_bindings`), re-collated only for affected names, materialized for O(1)
-  lookup during type-reference resolution.
-- **`type_references: Symbol → {DocumentId}`** — the type reverse-dependency index, the analog of
-  `reverse_dependencies`, patched against `document_type_references` (the type names a document looks up
-  in its definitions and annotations, the type analog of `non_locals`). Covers all documents (scripts
-  reference package types); the candidate index covers package documents only.
-
-A type-def fingerprint in `typecheck` is still package-global today: a type-definition change forces all
-documents into the typecheck candidate set. Tightening it to a per-document type-dependency fingerprint
-(the rendered definitions of exactly the type names each document references, the type analog of the M3
-value `dependency_fingerprint`, routed through `documents_type_referencing`) is the remaining M4.3
-follow-up; it is independent of the incremental type index above and does not affect package-naming
-diagnostics.
-
-#### Driving set and the frozen typecheck baseline
-
-Naming maintenance is driven by the set of documents whose **local naming was re-derived** in
-`resolve_package` (self-contained), not by `dirty_documents`. `dirty_documents` and
-`last_typecheck_global_bindings` belong to the typecheck winner-diff (M3), whose `changed_globals`
-seed must keep comparing against the baseline frozen at the last completed typecheck; a
-package-naming-only refresh must not touch or clear them. Decoupling the naming driver from
-`dirty_documents` preserves that frozen baseline by construction.
-
-#### Correctness premise (contract precondition)
-
-Winner selection is last-writer-wins in package path order, so a name's winner depends **only** on the
-set of documents defining it and their path order — never on document bodies — so patching per
-affected name is complete, and a single reverse-dependency hop captures every document whose
-(D) diagnostics can change. The same premise holds for types: a (C)/(T) diagnostic is a pure function
-of the names a document *defines* or *references* crossed with the type index, so routing every affected
-type name to its co-definers and referrers is complete. The debug five-category oracle plus the type
-index/reference oracles enforce equality with a from-scratch rebuild on every run.
-
-#### Slice plan
-
-- **M4.1** (done) — the per-name `package_definitions` candidate index, maintained incrementally with
-  a drift assertion; `global_bindings` still derived by full rebuild (pure addition, no behavior
-  change).
-- **M4.2** (done) — make `resolve_package` patch `global_bindings` and all four diagnostic categories from
-  the candidate + reverse-dependency indexes incrementally (the behavior-changing slice; guarded by
-  the shadowing fixture suite, the (D) defined-ness-flip-on-non-dirty-referrer fixture, the
-  four-category drift oracle, and the existing `naming_global` fixtures).
-- **M4.3** — make the package type index incremental: the `type_definitions` candidate index, the
-  materialized `package_type_index` + `duplicate_type_names`, and the `type_references` reverse-dependency
-  index, all patched per document and collated per affected name (single `document_type_definitions` /
-  `apply_type_definition_outcome` rule, shared with the `build_type_index` oracle). The (C)/(T)
-  diagnostics route per affected type name (co-definers ∪ type referrers); the drift oracle is extended
-  to assert the maintained type index/references equal a from-scratch rebuild from primary inputs.
-  `maintain_package_naming` no longer rebuilds the type index across the package, so a body-only edit
-  pays no `O(package)` type-index cost. Guarded by the `incremental_types` fixtures (added/dropped/
-  duplicate-flip, kind-flip and arity-flip on a non-dirty referrer, forward type reference) and the
-  extended drift assertions. **Remaining follow-up:** the per-document type-def fingerprint in
-  `typecheck` (above), which still falls back to all documents on any type-definition change.
+A body edit's recompute is bounded by its blast radius — the edited file plus its referrers — with no whole-package fold (the names-only def-map and the per-symbol scheme both cut off). Memory is linear in workspace size: full memoization trades roughly a constant factor of space for incrementality, and demand-driven evaluation pays the cold cost lazily per query. The residual per-edit cost that is *not* flat in workspace size is the red-green validation walk — a cheap revalidation per file with no inference; driving that sub-linear (durability tiers or sharded def-maps) is a known, deferred optimization.
 
 ## Diagnostics
 
@@ -637,7 +345,7 @@ Diagnostic data should stay structured until rendering so wording, ranges, and p
 
 ## Testing seams
 
-The architecture should expose stable phase boundaries for fixture testing.
+The architecture exposes stable phase boundaries for fixture testing, plus the differential cross-check above.
 
 At the architectural level, the important requirement is that the implementation support direct testing of:
 
@@ -646,3 +354,4 @@ At the architectural level, the important requirement is that the implementation
 - naming results
 - successful checked output
 - rendered diagnostics
+- engine output against a from-scratch rebuild over edit streams
