@@ -229,6 +229,18 @@ The intended fixture suites are:
 
 Keep focused test-running guidance minimal in this document. Exact suite adoption may lag behind the intended split while implementation and fixture migration are still in progress.
 
+## Engine differential harnesses
+
+Incremental analysis (the `engine` crate, see [Architecture](/architecture)) is not fixture-tested; it is held to a **differential regression net** that asserts the engine's output equals a from-scratch rebuild. These live in `crates/engine/tests/` (plus one in `crates/roughly/tests/`), and run with `cargo test -p engine`:
+
+- `test_differential` — engine diagnostics == `analysis::run_full` (a fresh from-scratch build), byte-exact on rendered diagnostics, asserted after every edit over curated and randomized adversarial edit streams (interleaved edits and queries, add/delete/re-add, package↔script reclassification, renames, re-export and value cycles, malformed input).
+- `test_ide_differential` — every IDE feature compared per cursor position against a fresh-`Analysis` oracle, cold and over incremental edit streams, single-file and cross-file.
+- `test_ide_granularity` — exec-counter proofs that a per-keystroke point query on an unchanged file triggers zero re-inference.
+- `test_symbols_differential` (in `crates/roughly`) — engine-served document and workspace symbols == the oracle.
+- `test_engine`, `test_queries`, `test_reexport`, `test_cancellation`, `test_read_cancellation`, `test_memory`, `test_benchmark` — the memoized core, the query bodies, the re-export fixed-point, cooperative cancellation, and the memory / per-edit-cost measurements.
+
+Because the from-scratch oracle (`analysis::run_full`) is the ground truth, keep it correct and well-fixtured: the differential net proves the *engine* matches the oracle, while the fixtures above pin the oracle to the language.
+
 ## Suite contracts
 
 ### `type_syntax`

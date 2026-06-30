@@ -8,15 +8,19 @@ codebase.
 
 ## Project layout
 
-Roughly is a Rust workspace with three main crates:
+Roughly is a Rust workspace with four main crates:
 
 - **`crates/roughly`** — the CLI, the LSP server, the formatter, and the linter.
-- **`crates/analysis`** — the analysis engine: parsing, lowering, naming, and type checking. Its
-  intended file layout is documented in [Structure](/structure), and its design in
-  [Architecture](/architecture).
+- **`crates/analysis`** — the analysis phases (parsing, lowering, naming, type checking, lint, IDE
+  logic) plus `run_full`, the from-scratch checker kept as the correctness oracle and the CLI path.
+- **`crates/engine`** — the generic red-green memoized-query core and the R query bodies that drive
+  incremental analysis by running the `analysis` phases as cached queries. This is the incremental
+  backend behind the language server.
 - **`crates/fixtures`** — the shared fixture-test harness used by the test suites.
 
-The editor extensions live under `editors/` (`code` for VS Code, `zed` for Zed).
+The analysis design is documented in [Architecture](/architecture) and the file layout in
+[Structure](/structure). The editor extensions live under `editors/` (`code` for VS Code, `zed` for
+Zed).
 
 ## Build and test
 
