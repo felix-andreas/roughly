@@ -2,7 +2,9 @@ use {
     crate::{
         interner::{Interner, Symbol},
         typecheck::{InferenceError, OperandExpectation, RECURSION_LIMIT, SubscriptKind},
-        types::{Atomic, Constraint, CoreType, InferenceVariableId, TypeScheme},
+        types::{
+            Atomic, Constraint, CoreType, InferenceVariableId, QuantifiedVariable, TypeScheme,
+        },
     },
     std::{collections::BTreeMap, fmt},
     tree_sitter::{Point, Range},
@@ -36,6 +38,77 @@ pub fn render_core_type(interner: &Interner, core_type: &CoreType) -> String {
 pub fn render_type_scheme(interner: &Interner, type_scheme: &TypeScheme) -> String {
     let mut renderer = TypeRenderer::fixture(interner);
     renderer.render_type_scheme(type_scheme)
+}
+
+// Renders a `CoreType` for display, presenting its free inference variables as a quantified scheme so a
+// generalized binding reads with a readable `<T, U>` binder and named type parameters (`<T> fn(x: T) ->
+// T`) rather than raw variable ids. The IDE layer records a binding's inferred type as a `CoreType`
+// (not a `TypeScheme`), so the free variables are collected here in first-occurrence order and quantified
+// for the render only — this changes nothing about inference.
+pub fn render_generalized_type(interner: &Interner, core_type: &CoreType) -> String {
+    // Only a function type reads naturally with a `<T>` binder — it scopes the whole signature, turning
+    // `fn(x: ?1) -> ?1` into `<T> fn(x: T) -> T`. A bare type variable at a use site (a parameter use, an
+    // unresolved inference variable) is not a polymorphic scheme, so it renders plainly rather than as a
+    // misleading `<T> T`.
+    if !matches!(core_type, CoreType::Function(_)) {
+        return render_core_type(interner, core_type);
+    }
+    let mut free_variables = Vec::new();
+    collect_free_variables(core_type, &mut free_variables);
+    if free_variables.is_empty() {
+        return render_core_type(interner, core_type);
+    }
+    let scheme = TypeScheme {
+        quantified_variables: free_variables
+            .into_iter()
+            .map(|variable| QuantifiedVariable::new(variable, Constraint::Unconstrained))
+            .collect(),
+        body: core_type.clone(),
+    };
+    render_type_scheme(interner, &scheme)
+}
+
+// Collects a type's inference variables in first-occurrence order (deduplicated), so the display
+// renderer can name them `T, U, …` in reading order.
+fn collect_free_variables(core_type: &CoreType, out: &mut Vec<InferenceVariableId>) {
+    match core_type {
+        CoreType::Variable(variable) => {
+            if !out.contains(variable) {
+                out.push(*variable);
+            }
+        }
+        CoreType::Nullable(inner) | CoreType::List(inner) | CoreType::NamedList(inner) => {
+            collect_free_variables(inner, out)
+        }
+        CoreType::Nominal(_, arguments) | CoreType::Tuple(arguments) => {
+            for argument in arguments {
+                collect_free_variables(argument, out);
+            }
+        }
+        CoreType::Record(fields) => {
+            for field in fields {
+                collect_free_variables(&field.value, out);
+            }
+        }
+        CoreType::Function(function_type) => {
+            for parameter in &function_type.parameters {
+                collect_free_variables(parameter, out);
+            }
+            for parameter in &function_type.named_parameters {
+                collect_free_variables(&parameter.value, out);
+            }
+            if let Some(variadic) = &function_type.variadic {
+                collect_free_variables(variadic, out);
+            }
+            collect_free_variables(&function_type.return_type, out);
+        }
+        CoreType::Any
+        | CoreType::Unknown
+        | CoreType::Null
+        | CoreType::Scalar(_)
+        | CoreType::Vector(_)
+        | CoreType::NamedVector(_) => {}
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

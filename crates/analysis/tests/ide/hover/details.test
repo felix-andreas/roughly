@@ -164,3 +164,32 @@ value <- 1L
 R/main.R:1:12
 #++++
 no hover
+
+#==== generalized_functions
+#---- one_type_variable
+#---- R/main.R
+identity <- function(x) x
+identity
+#++++ any
+#!!!! hover identity.hover
+R/main.R:2:1
+#++++
+```
+<T> fn(x: T) -> T
+```
+
+Package global, defined at `R/main.R:1:1`
+
+#---- two_type_variables
+#---- R/main.R
+pair <- function(x, y) x
+pair
+#++++ any
+#!!!! hover pair.hover
+R/main.R:2:1
+#++++
+```
+<T, U> fn(x: T, y: U) -> T
+```
+
+Package global, defined at `R/main.R:1:1`

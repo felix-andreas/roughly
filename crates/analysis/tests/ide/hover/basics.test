@@ -320,13 +320,13 @@ value <- function(parameter) parameter
 R/main.R:1:10
 #++++
 ```
-fn(parameter: ?1) -> ?1
+<T> fn(parameter: T) -> T
 ```
 #!!!! hover binding.hover
 R/main.R:1:19
 #++++
 ```
-fn(parameter: ?1) -> ?1
+<T> fn(parameter: T) -> T
 ```
 #!!!! hover use.hover
 R/main.R:1:31

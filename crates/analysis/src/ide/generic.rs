@@ -14,7 +14,7 @@ use {
         RenameResult, SignatureHelp,
     },
     crate::{
-        diagnostic::render_core_type,
+        diagnostic::{render_core_type, render_generalized_type},
         document::{Document, DocumentId},
         hir::{
             DefinitionId, DefinitionItem, DefinitionKind, Expression, ExpressionId, ExpressionKind,
@@ -57,7 +57,7 @@ pub fn hover(database: &dyn IdeDatabase, path: &Path, position: TextPosition) ->
             let expression = module.arena.try_get(expression_id)?;
 
             if let Some(core_type) = database.checked_expression_type(document_id, expression_id) {
-                contents.push(code_block(&render_core_type(
+                contents.push(code_block(&render_generalized_type(
                     database.interner(),
                     core_type,
                 )));
