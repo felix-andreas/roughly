@@ -19,9 +19,12 @@ use {
             MarkupKind, MessageType, OneOf, ParameterInformation, ParameterLabel, Position,
             PublishDiagnosticsParams, Range, ReferenceParams, Registration, RegistrationParams,
             RelatedFullDocumentDiagnosticReport, RelatedUnchangedDocumentDiagnosticReport,
-            RelativePattern, RenameParams, SaveOptions, ServerCapabilities, ServerInfo,
-            ShowMessageParams, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-            SignatureInformation, TextDocumentSyncCapability, TextDocumentSyncKind,
+            RelativePattern, RenameParams, SaveOptions, SemanticToken, SemanticTokenType,
+            SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
+            SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
+            ServerCapabilities, ServerInfo, ShowMessageParams, SignatureHelp, SignatureHelpOptions,
+            SignatureHelpParams, SignatureInformation, TextDocumentSyncCapability,
+            TextDocumentSyncKind,
             TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
             UnchangedDocumentDiagnosticReport, Url, WorkspaceEdit, WorkspaceSymbolParams,
             WorkspaceSymbolResponse,
@@ -533,6 +536,17 @@ impl EngineWorker {
                 }),
                 references_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Left(true)),
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
+                        legend: SemanticTokensLegend {
+                            token_types: semantic_token_legend(),
+                            token_modifiers: Vec::new(),
+                        },
+                        full: Some(SemanticTokensFullOptions::Bool(true)),
+                        range: None,
+                        work_done_progress_options: Default::default(),
+                    }),
+                ),
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
                     TextDocumentSyncOptions {
                         open_close: Some(true),
@@ -1110,6 +1124,106 @@ impl EngineWorker {
     }
 
     //
+    // SEMANTIC TOKENS
+    //
+
+    // Highlights the type notation inside `#:` annotation comments in an `.R` document. The annotation
+    // parser discards per-token spans into interned symbols, so the type text is classified directly by
+    // `analysis::type_semantic_tokens`; this is a highlighter, not a re-parse. Scope is `#:` annotations
+    // in `.R` files only — `.Rti` stub files are not served as documents yet, so they are not covered.
+    fn semantic_tokens_full(
+        &mut self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>, ResponseError> {
+        let uri = params.text_document.uri;
+        let Ok(path) = uri.to_file_path() else {
+            return Ok(None);
+        };
+
+        tracing::debug!(?path, "semantic tokens");
+
+        let Some(parsed) = self.parsed_for(&path) else {
+            return Ok(None);
+        };
+        let rope = parsed.0.rope();
+        let mut comment_nodes = Vec::new();
+        collect_comment_nodes(parsed.0.tree().root_node(), &mut comment_nodes);
+
+        // Absolute (line, utf-position) of the previous emitted token, for the delta encoding the LSP
+        // protocol requires.
+        let mut previous_line = 0u32;
+        let mut previous_start = 0u32;
+        let mut data = Vec::new();
+
+        for node in comment_nodes {
+            let comment_text = rope
+                .byte_slice(node.start_byte()..node.end_byte())
+                .to_string();
+            let trimmed = comment_text.trim_start();
+            if !trimmed.starts_with("#:") {
+                continue;
+            }
+            // The classifier runs on the annotation body after `#:`; offsets it returns are relative to
+            // that body, so shift them by the body's byte offset within the comment. A comment is a
+            // single line, so the row is fixed and the column is a byte offset on that line.
+            let leading_whitespace = comment_text.len() - trimmed.len();
+            let Some(body) = trimmed.strip_prefix("#:") else {
+                continue;
+            };
+            let body_offset_in_comment = leading_whitespace + "#:".len();
+            let comment_start_row = node.start_position().row;
+            let comment_start_column = node.start_position().column;
+
+            for token in analysis::type_semantic_tokens(body) {
+                let comment_relative_start = body_offset_in_comment + token.start;
+                let length_bytes = token.end - token.start;
+                let line_byte_column = comment_start_column + comment_relative_start;
+                let start_position = self.to_lsp_position_in(
+                    &path,
+                    TextPosition {
+                        line_index: comment_start_row,
+                        character_index: line_byte_column,
+                    },
+                );
+                let end_position = self.to_lsp_position_in(
+                    &path,
+                    TextPosition {
+                        line_index: comment_start_row,
+                        character_index: line_byte_column + length_bytes,
+                    },
+                );
+                let line = start_position.line;
+                let start_character = start_position.character;
+                let length = end_position.character.saturating_sub(start_character);
+                if length == 0 {
+                    continue;
+                }
+
+                let delta_line = line - previous_line;
+                let delta_start = if delta_line == 0 {
+                    start_character - previous_start
+                } else {
+                    start_character
+                };
+                data.push(SemanticToken {
+                    delta_line,
+                    delta_start,
+                    length,
+                    token_type: semantic_token_index(token.role),
+                    token_modifiers_bitset: 0,
+                });
+                previous_line = line;
+                previous_start = start_character;
+            }
+        }
+
+        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+            result_id: None,
+            data,
+        })))
+    }
+
+    //
     // SIGNATURE HELP
     //
 
@@ -1603,6 +1717,13 @@ impl LanguageServer for ServerState {
         self.read(move |worker| worker.inlay_hint(params))
     }
 
+    fn semantic_tokens_full(
+        &mut self,
+        params: SemanticTokensParams,
+    ) -> BoxFuture<'static, Result<Option<SemanticTokensResult>, ResponseError>> {
+        self.read(move |worker| worker.semantic_tokens_full(params))
+    }
+
     fn signature_help(
         &mut self,
         params: SignatureHelpParams,
@@ -1699,6 +1820,46 @@ fn diagnostics_result_id(items: &[Diagnostic]) -> String {
     let mut hasher = DefaultHasher::new();
     serialized.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
+}
+
+// The semantic-token legend: the token types the server emits, in the order their indices reference.
+// The type notation maps onto four standard token types (there are no modifiers).
+fn semantic_token_legend() -> Vec<SemanticTokenType> {
+    vec![
+        SemanticTokenType::TYPE,
+        SemanticTokenType::TYPE_PARAMETER,
+        SemanticTokenType::PARAMETER,
+        SemanticTokenType::OPERATOR,
+    ]
+}
+
+// The legend index for a type-notation role. The `:` separator, the `->` arrow, and the `...` variadic
+// marker are all punctuation, so they share the `operator` type.
+fn semantic_token_index(role: analysis::TypeTokenRole) -> u32 {
+    match role {
+        analysis::TypeTokenRole::TypeName => 0,
+        analysis::TypeTokenRole::TypeParameter => 1,
+        analysis::TypeTokenRole::ParameterName => 2,
+        analysis::TypeTokenRole::Separator
+        | analysis::TypeTokenRole::Operator
+        | analysis::TypeTokenRole::Variadic => 3,
+    }
+}
+
+// Collects every comment node in the tree in document order, so their `#:` annotations can be
+// highlighted. Comments can appear at the top level or nested inside expressions, so the whole tree is
+// traversed rather than only the top-level children.
+fn collect_comment_nodes<'tree>(
+    node: tree_sitter::Node<'tree>,
+    comment_nodes: &mut Vec<tree_sitter::Node<'tree>>,
+) {
+    if node.kind_id() == analysis::tree::kind::COMMENT {
+        comment_nodes.push(node);
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_comment_nodes(child, comment_nodes);
+    }
 }
 
 fn path_not_found_error(path: &Path) -> ResponseError {

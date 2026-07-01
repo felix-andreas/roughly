@@ -292,6 +292,132 @@ pub fn parse_annotation_type(
     Ok(surface_type)
 }
 
+// The role a token in the type notation plays, for editor highlighting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeTokenRole {
+    // A type name or type constructor keyword (`integer`, `list`, `fn`, `NULL`, `Any`, a nominal name).
+    TypeName,
+    // A type parameter, both at its `<...>` binder and at its uses.
+    TypeParameter,
+    // A parameter or field name that precedes a `:` (`x` in `x: integer`).
+    ParameterName,
+    // The `:` that separates a parameter or field name from its type.
+    Separator,
+    // The `->` return arrow.
+    Operator,
+    // The `...` rest-parameter marker.
+    Variadic,
+}
+
+// One classified token in the type notation, as a byte range into the text passed to
+// [`semantic_tokens`] and its highlighting role.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TypeToken {
+    pub start: usize,
+    pub end: usize,
+    pub role: TypeTokenRole,
+}
+
+// Classifies the type-notation tokens in `text` for editor highlighting, returning their byte ranges
+// and roles in source order.
+//
+// `text` is the body of a `#:` annotation (with the `#:` prefix already stripped) or a stub
+// declaration line. This is a single lexing pass that shares the identifier and member-name lexers with
+// the parser; it is a highlighter, not the parser — the parser discards per-token spans into interned
+// symbols, so highlighting cannot recover them from a parsed `SurfaceType` and classifies the surface
+// text directly. Classification is heuristic where the grammar is context-sensitive (an identifier is a
+// parameter name when a `:` follows it, otherwise a type name), which is sufficient for coloring.
+pub fn semantic_tokens(text: &str) -> Vec<TypeToken> {
+    let bytes = text.as_bytes();
+    let mut tokens = Vec::new();
+    let mut position = 0;
+    // Depth inside a leading `<...>` binder: identifiers lexed while this is positive are type
+    // parameters. Their later uses are colored as type names, matching how an editor without full type
+    // resolution would treat a bare identifier.
+    let mut binder_depth: usize = 0;
+
+    while position < bytes.len() {
+        let byte = bytes[position];
+
+        if byte.is_ascii_whitespace() {
+            position += 1;
+            continue;
+        }
+
+        if text[position..].starts_with("...") {
+            tokens.push(TypeToken {
+                start: position,
+                end: position + 3,
+                role: TypeTokenRole::Variadic,
+            });
+            position += 3;
+            continue;
+        }
+
+        if text[position..].starts_with("->") {
+            tokens.push(TypeToken {
+                start: position,
+                end: position + 2,
+                role: TypeTokenRole::Operator,
+            });
+            position += 2;
+            continue;
+        }
+
+        if byte == b'<' {
+            binder_depth += 1;
+            position += 1;
+            continue;
+        }
+        if byte == b'>' {
+            binder_depth = binder_depth.saturating_sub(1);
+            position += 1;
+            continue;
+        }
+
+        if byte == b':' {
+            tokens.push(TypeToken {
+                start: position,
+                end: position + 1,
+                role: TypeTokenRole::Separator,
+            });
+            position += 1;
+            continue;
+        }
+
+        // A member-name lexer admits interior dots, so a dotted parameter name (`na.rm`) is one token.
+        if let Some((start, end)) = utils::member_name_span_at(text, position) {
+            let role = if binder_depth > 0 {
+                TypeTokenRole::TypeParameter
+            } else if next_non_space_byte(bytes, end) == Some(b':') {
+                TypeTokenRole::ParameterName
+            } else {
+                TypeTokenRole::TypeName
+            };
+            tokens.push(TypeToken { start, end, role });
+            position = end;
+            continue;
+        }
+
+        // Any other byte (a delimiter such as `(`, `)`, `[`, `]`, `{`, `}`, `,`, or `|`) carries no
+        // highlight; skip it.
+        position += 1;
+    }
+
+    tokens
+}
+
+fn next_non_space_byte(bytes: &[u8], mut position: usize) -> Option<u8> {
+    while let Some(&byte) = bytes.get(position) {
+        if byte.is_ascii_whitespace() {
+            position += 1;
+        } else {
+            return Some(byte);
+        }
+    }
+    None
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BlockItemKind {
     Compact,
@@ -1742,5 +1868,75 @@ mod utils {
 
     fn is_identifier_continue(character: char) -> bool {
         character == '_' || character.is_alphanumeric()
+    }
+}
+
+#[cfg(test)]
+mod semantic_token_tests {
+    use super::{TypeToken, TypeTokenRole, semantic_tokens};
+
+    // Renders each classified token as `slice=role` so the span and role are both asserted.
+    fn rendered(text: &str) -> Vec<String> {
+        semantic_tokens(text)
+            .into_iter()
+            .map(|TypeToken { start, end, role }| {
+                let role = match role {
+                    TypeTokenRole::TypeName => "type",
+                    TypeTokenRole::TypeParameter => "typeparam",
+                    TypeTokenRole::ParameterName => "param",
+                    TypeTokenRole::Separator => "sep",
+                    TypeTokenRole::Operator => "op",
+                    TypeTokenRole::Variadic => "variadic",
+                };
+                format!("{}={role}", &text[start..end])
+            })
+            .collect()
+    }
+
+    #[test]
+    fn classifies_named_parameters_and_return_arrow() {
+        assert_eq!(
+            rendered("fn(count: integer) -> logical"),
+            ["fn=type", "count=param", ":=sep", "integer=type", "->=op", "logical=type"]
+        );
+    }
+
+    #[test]
+    fn classifies_dotted_parameter_name_as_one_token() {
+        assert_eq!(
+            rendered("fn(x: double, na.rm: logical) -> double"),
+            [
+                "fn=type",
+                "x=param",
+                ":=sep",
+                "double=type",
+                "na.rm=param",
+                ":=sep",
+                "logical=type",
+                "->=op",
+                "double=type"
+            ]
+        );
+    }
+
+    #[test]
+    fn classifies_type_parameters_at_binder_and_use() {
+        assert_eq!(
+            rendered("<T> fn(x: T) -> T"),
+            ["T=typeparam", "fn=type", "x=param", ":=sep", "T=type", "->=op", "T=type"]
+        );
+    }
+
+    #[test]
+    fn classifies_variadic_rest_parameter() {
+        assert_eq!(
+            rendered("fn(...: character) -> character"),
+            ["fn=type", "...=variadic", ":=sep", "character=type", "->=op", "character=type"]
+        );
+    }
+
+    #[test]
+    fn classifies_bare_value_type() {
+        assert_eq!(rendered("double"), ["double=type"]);
     }
 }
