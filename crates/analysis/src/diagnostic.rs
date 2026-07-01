@@ -641,7 +641,16 @@ impl<'a> TypeRenderer<'a> {
             CoreType::Null => "NULL".to_owned(),
             CoreType::Union(members) => members
                 .iter()
-                .map(|member| self.render_core_type(member))
+                .map(|member| {
+                    let rendered = self.render_core_type(member);
+                    // A bare function member would render identically to a function *returning* a
+                    // union (`fn() -> integer | NULL` is ambiguous), so it is parenthesized.
+                    if matches!(member, CoreType::Function(_)) {
+                        format!("({rendered})")
+                    } else {
+                        rendered
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join(" | "),
             CoreType::Scalar(atomic) => render_atomic(*atomic).to_owned(),

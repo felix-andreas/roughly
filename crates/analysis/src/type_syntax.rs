@@ -95,7 +95,16 @@ pub fn render_surface_type(surface_type: &SurfaceType, interner: &Interner) -> S
         SurfaceType::Null => "NULL".to_owned(),
         SurfaceType::Union(members) => members
             .iter()
-            .map(|member| render_surface_type(member, interner))
+            .map(|member| {
+                let rendered = render_surface_type(member, interner);
+                // A bare function member would render identically to a function *returning* a
+                // union (`fn() -> integer | NULL` is ambiguous), so it is parenthesized.
+                if matches!(member, SurfaceType::Function(_)) {
+                    format!("({rendered})")
+                } else {
+                    rendered
+                }
+            })
             .collect::<Vec<_>>()
             .join(" | "),
         SurfaceType::Scalar(atomic) => match atomic {

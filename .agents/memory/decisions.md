@@ -222,7 +222,7 @@ Rationale: the old model was verified unsound (`x <- 1L; if (f) x <- "two"; x + 
 
 ## Multi-member unions — join/annotation-only, never in unification variables
 
-General unions `A | B | C` (normalized: flat, deduped, order-insensitive; `T | NULL` becomes the special case) are adopted for joins and annotations. **The HM-speed guardrail:** a union is never *bound into* a unification variable and imposes no union constraints on inference variables — unification stays syntactic (a union unifies only with a structurally equal union); all member-wise directional logic lives in `check_compatibility`. This keeps inference decidable and fast and matches the existing unification-is-the-invariant-floor split. Tags/discriminated-union `match` (post-beta) builds on these unions.
+General unions `A | B | C` (normalized: flat, deduped, order-insensitive; `T | NULL` becomes the special case) are adopted for joins and annotations. **The HM-speed guardrail:** a union imposes no union *constraints* on inference variables (plain substitution-binding of a variable **to** a union value is permitted, like any other type) — unification stays syntactic (a union unifies only with a structurally equal union); all member-wise directional logic lives in `check_compatibility`. This keeps inference decidable and fast and matches the existing unification-is-the-invariant-floor split. Tags/discriminated-union `match` (post-beta) builds on these unions.
 
 ## Overload sets — bounded ordered probes
 
