@@ -1611,7 +1611,13 @@ impl ServerState {
         F: FnOnce(&mut EngineWorker) + Send + 'static,
     {
         self.cancel.store(true, Ordering::Relaxed);
-        let _ = self.sender.send(Job::Write(Box::new(build)));
+        // These notifications carry document-sync edits (`did_open`/`did_change`/`did_save`). A dead
+        // worker channel means the edit cannot be applied, so analysis state would silently diverge from
+        // the document; there is no response channel to report the failure on. A desynced analysis state
+        // is unrecoverable, so fail loudly rather than serve stale results.
+        if self.sender.send(Job::Write(Box::new(build))).is_err() {
+            panic!("analysis worker is gone; cannot apply a document-sync edit");
+        }
         ControlFlow::Continue(())
     }
 
@@ -1620,7 +1626,11 @@ impl ServerState {
     where
         F: FnOnce(&mut EngineWorker) + Send + 'static,
     {
-        let _ = self.sender.send(Job::Write(Box::new(build)));
+        // As with `notify_edit`, a dead worker channel drops a state mutation with no way to report it,
+        // leaving analysis state incoherent; fail loudly rather than continue in a corrupt state.
+        if self.sender.send(Job::Write(Box::new(build))).is_err() {
+            panic!("analysis worker is gone; cannot apply a state mutation");
+        }
         ControlFlow::Continue(())
     }
 }
