@@ -1,15 +1,15 @@
-//! R2 — the differential correctness gate (`DESIGN.md` §7).
+//! The differential correctness check (`DESIGN.md` §7).
 //!
 //! # What this proves
 //!
-//! The new engine, driven *incrementally* through an edit stream, produces the same diagnostics as the
-//! production `analysis` crate's **full from-scratch rebuild** of the *final* state after every edit. The
-//! oracle is deliberately `analysis`'s `run_full` on a freshly built `Analysis` for the current file set —
-//! never `analysis`'s own incremental path — because the incremental path is exactly what carried the
-//! silent-stale bug class the rewrite exists to remove; comparing against it could ratify a stale result
-//! on both sides. The production debug drift oracles run inside `run_full`, so the oracle is self-checked.
+//! The engine, driven *incrementally* through an edit stream, produces the same diagnostics as the
+//! `analysis` crate's **full from-scratch rebuild** of the *final* state after every edit. The oracle is
+//! deliberately `analysis`'s `run_full` on a freshly built `Analysis` for the current file set — never
+//! `analysis`'s own incremental path — because comparing against an incremental path could ratify a stale
+//! result on both sides. `analysis`'s debug drift assertions run inside `run_full`, so the oracle is
+//! self-checked.
 //!
-//! # Comparison scope (decided and documented, per the R2 brief)
+//! # Comparison scope
 //!
 //! After each edit, for every current file, the engine's `Diagnostics(f)` must equal the oracle's
 //! `document_diagnostics(f)` as a **normalized set** (sorted by range, then code, then severity, then

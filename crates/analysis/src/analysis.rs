@@ -387,9 +387,9 @@ impl Analysis {
     }
 
     // The package-relative, slash-normalized path used to order package documents. This is the single
-    // source of truth for package document order: `package_document_ids` sorts by it and the M4
-    // candidate-index winner derivation (last-writer-wins) takes the path-last definer by it. Winner
-    // selection must use this, never `DocumentId` numeric order.
+    // source of truth for package document order: `package_document_ids` sorts by it, and last-writer-wins
+    // winner selection for a duplicated definition takes the path-last definer by it. Winner selection
+    // must use this, never `DocumentId` numeric order.
     fn package_path_key(&self, document_id: DocumentId) -> String {
         self.path_for_document_id(document_id)
             .map(|path| {

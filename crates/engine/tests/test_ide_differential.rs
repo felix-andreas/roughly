@@ -1,4 +1,4 @@
-//! The IDE differential gate (cutover Phase 2, done-bar (b)): the engine-backed [`EngineIde`] view must
+//! The IDE differential check: the engine-backed [`EngineIde`] view must
 //! produce, for **every** cursor position over curated single- and cross-file workspaces, byte-identical
 //! IDE output to the frozen `analysis` oracle (`analysis::ide::*` on a fresh `Analysis`). The oracle drives
 //! its own phases; the engine serves the same facts off its memoized query graph through the shared

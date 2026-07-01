@@ -1,9 +1,8 @@
 //! Roughly's incremental analysis substrate: a small, generic red-green memoized-query engine.
 //!
-//! This crate is the foundation of the analysis-engine rewrite (decision record
-//! `.agents/memory/decisions.md`). It is the **substrate only** — a
-//! reusable memoization core with no R-specific logic. The R queries (parse, lower, naming, typecheck,
-//! diagnostics) are layered on top in later phases; see `DESIGN.md` for the full plan.
+//! This crate is the analysis substrate: the **substrate only** — a reusable memoization core with no
+//! R-specific logic. The R queries (parse, lower, naming, typecheck, diagnostics) are layered on top in
+//! [`queries`]; see `DESIGN.md` for the architecture.
 //!
 //! # The model
 //!
@@ -40,24 +39,24 @@
 //! Inputs get the same treatment at the source: [`Engine::set_input`] **backdates** `changed_at` when the
 //! new value equals the old, so a no-op re-set leaves every dependent green without running a single body.
 //!
-//! Together these give the two properties the rewrite needs: an edit recomputes work proportional to its
-//! blast radius (not the package size), and a structurally-irrelevant edit (a comment, a same-length
-//! rename) stops propagating the moment a value stops changing.
+//! Together these give the two properties incremental analysis needs: an edit recomputes work
+//! proportional to its blast radius (not the package size), and a structurally-irrelevant edit (a
+//! comment, a same-length rename) stops propagating the moment a value stops changing.
 //!
 //! # What lives elsewhere
 //!
 //! The core assumes an **acyclic** dependency graph. R has exactly one cyclic query — the package
 //! interface fixed-point for mutual re-exports — and it is handled inside that query's own body (bounded
 //! fixed-point iteration with `Unknown`-pinning), not by the core. Any *other* cycle is an accidental host
-//! bug: a re-entered query body panics with a clear message instead of overflowing the stack. Cancellation,
-//! parallelism, and memo eviction are designed for but not implemented in this phase; see `DESIGN.md`.
+//! bug: a re-entered query body panics with a clear message instead of overflowing the stack. Parallelism
+//! and memo eviction are possible extensions the current core does not implement; see `DESIGN.md`.
 
 // The R-specific query group lives here, on top of the generic core below. The core stays analysis-free;
 // only `queries` depends on the `analysis` crate.
 pub mod queries;
 
-// The engine-backed IDE view: serves `analysis::ide::generic::*` off the query graph (the IDE half of the
-// production cutover). Depends on `analysis` (for the shared `IdeDatabase` orchestration) and `queries`.
+// The engine-backed IDE view: serves `analysis::ide::generic::*` off the query graph. Depends on
+// `analysis` (for the shared `IdeDatabase` orchestration) and `queries`.
 pub mod ide_view;
 
 use std::{

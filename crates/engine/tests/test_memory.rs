@@ -1,5 +1,5 @@
-//! Resident-memory benchmark: the new engine vs. the production `analysis` crate at 9k / 94k / 281k LoC
-//! (cutover done-bar (e): "memory bounded at 281k"). Measures *live heap bytes* — net `alloc - dealloc`
+//! Resident-memory benchmark: the engine vs. the from-scratch `analysis` crate at 9k / 94k / 281k LoC.
+//! Measures *live heap bytes* — net `alloc - dealloc`
 //! held by each structure once fully built and warmed — via a counting global allocator, which is a clean,
 //! deterministic proxy for resident set size of the data structures (it excludes transient scratch that has
 //! already been freed, exactly the steady-state figure we care about).

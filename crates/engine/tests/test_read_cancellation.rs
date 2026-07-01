@@ -4,7 +4,7 @@
 //! abandons (the engine unwinds `Cancelled` at its first recompute check, which sits at the start of
 //! every recompute), and the same read with the token clear computes the real result. Together with the
 //! generic `with_cancellation` concurrency test in `test_cancellation.rs` and the functional worker
-//! coverage in `roughly`'s `test_lsp`, this closes gate (d)'s "reads are cancellable" requirement.
+//! coverage in `roughly`'s `test_lsp`, this covers the "reads are cancellable" requirement.
 
 use {
     analysis::{LintConfig, TextPosition, naming::DocumentKind},

@@ -1,6 +1,6 @@
-//! The engine-backed [`IdeDatabase`]: it serves the 7 IDE features (`analysis::ide::generic::*`) off the
-//! memoized query graph instead of `analysis`'s retained incremental state, so the *same* IDE orchestration
-//! runs on the engine. This is the IDE half of the production cutover (decision record, "CUTOVER EXECUTION").
+//! The engine-backed [`IdeDatabase`]: it serves the IDE features (`analysis::ide::generic::*`) off the
+//! memoized query graph, reusing the *same* IDE orchestration that `analysis` exposes so both the engine
+//! and the from-scratch path answer identically.
 //!
 //! # The prime-then-borrow discipline (the load-bearing mechanic)
 //!
@@ -16,11 +16,12 @@
 //!    borrowed. Returning `&T` from the owned `Rc`s in `Caches` is exactly how `Analysis` returns `&T` from
 //!    its retained maps; the per-call cache plays the role of the retained state.
 //!
-//! The prime scope is feature-specific and is what keeps the per-keystroke (Class-1) features off the
+//! The prime scope is feature-specific and is what keeps the per-keystroke point-query features off the
 //! O(project) path: hover/inlay/signature fetch `Typecheck` only for the *target* file, so a point query on
 //! an unchanged file re-runs zero `Typecheck` bodies (proven by the exec-counter tests). references/rename
-//! are Class-2 and prime every file (text-prefiltered inside the generic occurrence scan), but add no new
-//! query key — they record no memo dependency (IDE fetches are top-level, outside any `recompute`).
+//! are whole-project scans and prime every file (text-prefiltered inside the generic occurrence scan), but
+//! add no new query key — they record no memo dependency (IDE fetches are top-level, outside any
+//! `recompute`).
 
 use {
     crate::{
@@ -252,7 +253,7 @@ impl<'engine> EngineIde<'engine> {
         caches
     }
 
-    // references / rename (Class-2): every file's parse + module + naming, plus the package index. The
+    // references / rename (whole-project scans): every file's parse + module + naming, plus the package index. The
     // occurrence scan text-prefilters per identifier, but the fact scope is the whole project.
     fn prime_all_files(&self) -> Caches {
         let mut caches = self.empty_caches();

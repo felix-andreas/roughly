@@ -1,4 +1,4 @@
-// Granularity tests for the R query group (`DESIGN.md` §3, R1 acceptance condition 1). They drive the
+// Granularity tests for the R query group (`DESIGN.md` §3). They drive the
 // real `analysis` phase chain through the generic engine and assert *exact* body-execution counts on the
 // group, the same instrumentation style as the engine smoke tests.
 //
@@ -204,7 +204,7 @@ fn structural_edit_refolds_index_once_but_firewall_confines_propagation() {
     );
 }
 
-// PACKAGE-NAMING INCREMENTALITY (R2 gap 1). The per-file `PackageNamingDiagnostics` query is fine-grained
+// PACKAGE-NAMING INCREMENTALITY. The per-file `PackageNamingDiagnostics` query is fine-grained
 // at the same per-symbol grain as the type interface: a body edit elsewhere re-runs no unaffected file's
 // package-naming, and the could-not-resolve firewall (`DefiningItem`) re-runs exactly the referrers when a
 // referenced name's defined-ness flips. Diagnostics fetch `PackageNamingDiagnostics` regardless of config,

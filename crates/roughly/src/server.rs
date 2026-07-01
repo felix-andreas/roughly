@@ -153,15 +153,15 @@ struct EngineWorker {
     experimental_features: ExperimentalFeatures,
     workspace_root: PathBuf,
     open_documents: HashSet<PathBuf>,
-    // The memoized query engine: the single analysis backend (Phase 3 cutover complete). Document text is
-    // fed in as `SourceText` inputs from the open-document buffers (`documents`) and from disk for closed
-    // package files. `paths`/`file_ids` are the host-owned path↔FileId bijection the engine keys on (the
-    // engine itself never sees paths).
+    // The memoized query engine: the single analysis backend. Document text is fed in as `SourceText`
+    // inputs from the open-document buffers (`documents`) and from disk for closed package files.
+    // `paths`/`file_ids` are the host-owned path↔FileId bijection the engine keys on (the engine itself
+    // never sees paths).
     engine: Engine<RoughlyQueries>,
     paths: PathTable,
     file_ids: HashMap<PathBuf, FileId>,
     next_file_id: FileId,
-    // The open-document edit buffers (Phase 3e-2): the server owns the LSP document text for open files,
+    // The open-document edit buffers: the server owns the LSP document text for open files,
     // reusing `Document::{parse, edit}` for incremental change application. `did_change` resolves each
     // change's range against this evolving buffer. Closed package documents are not buffered here — they
     // exist only as engine `SourceText` inputs read from disk.

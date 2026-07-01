@@ -504,7 +504,7 @@ impl InferenceState {
     //   binding inference and expression-type recording, never by the compatibility/unification paths
     //   a probe runs; and `current_level` is balanced by paired `enter_level`/`exit_level`, so a probe
     //   that does not leak an unbalanced level change leaves it untouched. `recursion_depth` is
-    //   likewise transient and deliberately excluded. M2.2 must keep its probes within this contract.
+    //   likewise transient and deliberately excluded. A probe must keep its writes within this contract.
     //
     // Nested snapshots compose: an inner rollback truncates the log to the inner mark, leaving outer
     // writes intact.

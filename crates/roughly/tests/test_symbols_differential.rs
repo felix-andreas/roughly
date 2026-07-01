@@ -1,7 +1,7 @@
-//! Symbols differential (cutover Phase 2/3, done-bar (b) for the 8th IDE feature). Document and workspace
-//! symbols are purely structural — `roughly::symbols` runs `index::index` over a document's tree+rope and
-//! never touches the analysis pipeline — so the only thing the cutover must preserve is that the engine
-//! serves the *same* document trees and the *same* package-document set as `analysis`. This asserts exactly
+//! Symbols differential. Document and workspace symbols are purely structural — `roughly::symbols` runs
+//! `index::index` over a document's tree+rope and never touches the analysis pipeline — so the only thing
+//! the engine path must preserve is that it serves the *same* document trees and the *same*
+//! package-document set as `analysis`. This asserts exactly
 //! that: symbol output built from engine-served parses equals output built from the `analysis` oracle, for
 //! document symbols (per file) and workspace symbols (ranked, over several queries).
 

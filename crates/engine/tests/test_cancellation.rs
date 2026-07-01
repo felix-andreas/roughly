@@ -1,5 +1,4 @@
-//! R3 — cooperative cancellation (`DESIGN.md` §6: single-engine, off-thread, cooperative cancellation,
-//! "latest edit wins").
+//! Cooperative cancellation (`DESIGN.md` §6): single-engine, off-thread, "latest edit wins".
 //!
 //! The model: the engine lives on one thread; a newer edit (from another thread, or simply the next
 //! request) flips an `Arc<AtomicBool>` cancellation token, and the in-flight cross-file pass abandons

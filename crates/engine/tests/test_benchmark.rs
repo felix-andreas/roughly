@@ -1,5 +1,5 @@
-//! R3 — the O(blast-radius) per-edit benchmark (`DESIGN.md` §8 R3: "per-edit cost measured
-//! O(blast-radius) and competitive with (better than) the hand-rolled path").
+//! The O(blast-radius) per-edit benchmark (`DESIGN.md` §8): per-edit cost is measured O(blast-radius) and
+//! compared against the from-scratch `analysis` path.
 //!
 //! # What this measures
 //!
@@ -22,8 +22,8 @@
 //!    `PackageTypeDefinitions`, the package-naming candidate order) are unchanged is an O(package)
 //!    *validation walk* — it touches each file's per-file memo once (a hash lookup + an early-cutoff bump,
 //!    no clone after the `validate` lazy-dependency fix, no inference). This is the inherent cost of
-//!    demand-driven red-green over an all-files fold (salsa pays it too); driving it sub-linear needs the
-//!    durability / changed-input-tracking slice `DESIGN.md` §1 defers, or sharded per-module def-maps.
+//!    demand-driven red-green over an all-files fold; driving it sub-linear needs durability /
+//!    changed-input tracking (`DESIGN.md` §8) or sharded per-module def-maps.
 //!    Production's O(package) term, by contrast, is HM re-inference plus a per-round interface-table
 //!    rebuild and a type-definition-fingerprint render over every module — far costlier per unit N, which
 //!    is why the engine is an order of magnitude faster at every size even though both grow.

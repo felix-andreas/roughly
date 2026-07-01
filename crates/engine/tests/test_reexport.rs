@@ -1,7 +1,7 @@
-// R1b — the re-export fixed-point (`DESIGN.md` §5, R1 acceptance condition 2). These drive the real
-// `analysis` phase chain through the engine and exercise the SCC routing in `GlobalScheme`:
+// The re-export fixed-point (`DESIGN.md` §5). These drive the real `analysis` phase chain through the
+// engine and exercise the SCC routing in `GlobalScheme`:
 //
-//   - a TRIVIAL SCC (acyclic chain) keeps the R1a path: `GlobalScheme(a)` resolves an acyclic re-export
+//   - a TRIVIAL SCC (acyclic chain): `GlobalScheme(a)` resolves an acyclic re-export
 //     `a <- b <- … <- concrete` by plain fetch recursion (no round cap to truncate it);
 //   - a NON-TRIVIAL SCC (a genuine cycle) routes `GlobalScheme` through `InterfaceScc(scc)`, a single
 //     bounded fixed-point body that pins a pure mutual cycle to `Unknown` and converges.
@@ -48,7 +48,7 @@ fn body_of(scheme: &Option<TypeScheme>) -> CoreType {
 
 // MONOTONE RE-EXPORT CHAIN: `a <- b <- c <- (concrete)` resolves every link to the concrete scheme, and
 // editing the concrete base updates the whole chain. No panic; the chain is acyclic (every link is a
-// trivial SCC), so it travels the R1a fetch-recursion path.
+// trivial SCC), so it travels the plain fetch-recursion path.
 #[test]
 fn monotone_reexport_chain_converges_to_concrete() {
     let mut engine = setup(&[

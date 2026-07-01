@@ -1,7 +1,7 @@
-//! Class-1 IDE granularity (cutover constraint 2): a per-keystroke point query (hover/inlay/signature)
+//! Point-query IDE granularity: a per-keystroke point query (hover/inlay/signature)
 //! must be O(1)-on-cached-`Typecheck` — a point query on an **unchanged** file re-runs **zero** `Typecheck`
-//! bodies. Proven directly with the engine's exec counters: the `EngineIde` priming for a Class-1 feature
-//! fetches `Typecheck(target)` only, so a repeated query on a warm engine recomputes nothing, an unrelated
+//! bodies. Proven directly with the engine's exec counters: the `EngineIde` priming for a point-query
+//! feature fetches `Typecheck(target)` only, so a repeated query on a warm engine recomputes nothing, an unrelated
 //! edit recomputes nothing for the untouched file (blast-radius), and only editing the target's own body
 //! re-runs its `Typecheck` (exactly once — never stale).
 
@@ -96,7 +96,7 @@ const ORIGIN: TextPosition = TextPosition {
 
 #[test]
 fn repeated_point_query_reruns_no_typecheck() {
-    // A referrer (file 0) of a typed global defined in file 1 — a real cross-file Class-1 query.
+    // A referrer (file 0) of a typed global defined in file 1 — a real cross-file point query.
     let host = Host::new(&[
         (0, "result <- shared_fn(2L)"),
         (

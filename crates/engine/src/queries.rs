@@ -1,8 +1,8 @@
 //! The R query group layered on the generic red-green core in `engine.rs`.
 //!
 //! This is the only part of the crate that depends on `analysis`. The query *bodies* do not reimplement
-//! parse / lower / naming / inference — they call `analysis`'s public phase functions verbatim (the
-//! rewrite keeps tree-sitter + the M2 HM type core as bodies; see `DESIGN.md` §8 R1). Each body reads its
+//! parse / lower / naming / inference — they call `analysis`'s public phase functions verbatim, so the
+//! tree-sitter parser and the Hindley-Milner type core run inside query bodies. Each body reads its
 //! dependencies through [`Engine::fetch`], so the engine records the exact dependency edges automatically.
 //!
 //! # The per-symbol interface layer (the headline)
@@ -116,8 +116,8 @@ pub enum Key {
     /// degenerate case. SCC detection over it is Tarjan, not a chain walk (see [`Key::SymbolScc`]).
     InterfaceDeps(Symbol),
     /// The strongly-connected component of the [`Key::InterfaceDeps`] graph containing `symbol`, as the
-    /// **canonical (sorted)** member list. Empty means a trivial, non-self-looping SCC (acyclic — keep the
-    /// R1a `GlobalScheme` fetch-recursion path); a non-empty list (size ≥ 2) is a cycle of mutually
+    /// **canonical (sorted)** member list. Empty means a trivial, non-self-looping SCC (acyclic — take the
+    /// plain `GlobalScheme` fetch-recursion path); a non-empty list (size ≥ 2) is a cycle of mutually
     /// interface-dependent globals through `symbol` — a mutual re-export *or* a mutual value reference —
     /// (route `GlobalScheme` through [`Key::InterfaceScc`]). Every cycle member computes the *same* sorted
     /// list, so they share one `InterfaceScc` memo. Computed by Tarjan over the lazily-fetched edge graph.
@@ -131,7 +131,7 @@ pub enum Key {
     /// guard intact: no `GlobalScheme`/`InterfaceScc`/`SymbolScc` key ever re-enters itself.
     InterfaceScc(Vec<Symbol>),
 
-    // --- Package-naming interface (R2 gap 1) ------------------------------------------------------
+    // --- Package-naming interface -----------------------------------------------------------------
     // The cross-file naming diagnostics `analysis` computes in its `pub(crate)` package-naming
     // subsystem (`package_document_diagnostics`), reproduced here as fine-grained queries. The
     // rewrite decision allows the duplication: the production logic is unreachable across the crate
@@ -755,7 +755,7 @@ impl QueryGroup for RoughlyQueries {
 
             Key::Typecheck(file) => {
                 bump(&self.counters.typecheck, *file);
-                // Recorded so a config change re-checks the file; the value is unused in R1a check logic.
+                // Recorded so a config change re-checks the file; the value is unused in the check logic.
                 let _config = engine.fetch::<Config>(Key::Config);
                 let (check, _exports) = infer_file(self, engine, *file, &no_overrides(), true);
                 Stored::new(check)

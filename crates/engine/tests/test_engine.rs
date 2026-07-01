@@ -5,7 +5,7 @@
 //
 // The two chains share no inputs, so editing one must not recompute the other — this is what proves
 // dependency recording (no hand-declared deps). Body-execution counters live on the query group and are
-// read back through `engine.group()`, mirroring the spike's `ExecCounts`.
+// read back through `engine.group()`.
 
 use {
     engine::{Engine, QueryGroup, Stored},
@@ -158,8 +158,8 @@ fn independent_chains_do_not_cross_invalidate() {
 //
 // The core assumes an acyclic recorded dependency graph. The one intended cycle (the package-interface
 // fixed-point) is resolved inside a single body and never re-enters `fetch` on its own key. Any *other*
-// cycle is an accidental host bug — exactly the kind R1 introduces when wiring real query bodies — and
-// must fail loudly instead of recursing into a stack overflow.
+// cycle is an accidental host bug — a query body transitively fetching its own key — and must fail loudly
+// instead of recursing into a stack overflow.
 mod cycle {
     use {
         engine::{Engine, QueryGroup, Stored},
