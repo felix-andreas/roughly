@@ -36,6 +36,147 @@ pub enum InferenceEntry {
     Bound(CoreType),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Binding {
+    pub type_scheme: TypeScheme,
+    pub range: Range,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinKind {
+    Plus,
+    Minus,
+    Multiply,
+    Divide,
+    Power,
+    Modulo,
+    IntegerDivide,
+    Colon,
+    Compare,
+    And,
+    Or,
+    Combine,
+    List,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperandExpectation {
+    Numeric,
+    ScalarNumeric,
+    Logical,
+    Comparable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubscriptKind {
+    Position,
+    FieldName,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InferenceError {
+    UnknownInferenceVariable(InferenceVariableId),
+    UnknownName {
+        symbol: Symbol,
+        range: Range,
+        expression_id: ExpressionId,
+    },
+    AliasCycle {
+        symbol: Symbol,
+        range: Range,
+        expression_id: Option<ExpressionId>,
+    },
+    ExpectedFunction {
+        actual_type: Box<CoreType>,
+        range: Range,
+        expression_id: ExpressionId,
+    },
+    OccursCheckFailed {
+        variable: InferenceVariableId,
+        in_type: Box<CoreType>,
+        range: Option<Range>,
+        expression_id: Option<ExpressionId>,
+    },
+    TypeMismatch {
+        expected: Box<CoreType>,
+        actual: Box<CoreType>,
+        range: Option<Range>,
+        expression_id: Option<ExpressionId>,
+    },
+    UnresolvedAnnotationType {
+        symbol: Symbol,
+    },
+    ConstraintViolation {
+        constraint: Constraint,
+        actual: Box<CoreType>,
+        range: Option<Range>,
+        expression_id: Option<ExpressionId>,
+    },
+    InvalidOperand {
+        expected: OperandExpectation,
+        actual: Box<CoreType>,
+        range: Range,
+        expression_id: ExpressionId,
+    },
+    TupleLengthMismatch {
+        expected: usize,
+        actual: usize,
+        range: Option<Range>,
+        expression_id: Option<ExpressionId>,
+    },
+    MixedListElements {
+        range: Option<Range>,
+        expression_id: Option<ExpressionId>,
+    },
+    RecordFieldMismatch {
+        expected_fields: Vec<Symbol>,
+        actual_fields: Vec<Symbol>,
+        range: Option<Range>,
+        expression_id: Option<ExpressionId>,
+    },
+    FunctionArityMismatch {
+        expected: usize,
+        actual: usize,
+        range: Option<Range>,
+        expression_id: Option<ExpressionId>,
+    },
+    NamedParameterMismatch {
+        expected_parameters: Vec<Symbol>,
+        actual_parameters: Vec<Symbol>,
+        range: Option<Range>,
+        expression_id: Option<ExpressionId>,
+    },
+    NotAList {
+        actual: Box<CoreType>,
+        range: Range,
+        expression_id: ExpressionId,
+    },
+    FieldDoesNotExist {
+        field: Symbol,
+        container: Box<CoreType>,
+        range: Range,
+        expression_id: ExpressionId,
+    },
+    PositionDoesNotExist {
+        position: usize,
+        container: Box<CoreType>,
+        range: Range,
+        expression_id: ExpressionId,
+    },
+    NonLiteralSubscript {
+        container: Box<CoreType>,
+        by: SubscriptKind,
+        range: Range,
+        expression_id: ExpressionId,
+    },
+    UnsupportedSubset {
+        actual: Box<CoreType>,
+        range: Range,
+        expression_id: ExpressionId,
+    },
+    RecursionLimitExceeded,
+}
+
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct InferenceState {
     next_variable_id: u32,
@@ -4524,31 +4665,6 @@ enum NumericResultAtomic {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BuiltinKind {
-    Plus,
-    Minus,
-    Multiply,
-    Divide,
-    Power,
-    Modulo,
-    IntegerDivide,
-    Colon,
-    Compare,
-    And,
-    Or,
-    Combine,
-    List,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OperandExpectation {
-    Numeric,
-    ScalarNumeric,
-    Logical,
-    Comparable,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ComparisonFamily {
     Numeric,
     Character,
@@ -4865,122 +4981,6 @@ fn flatten_expected_parameter_types(function_type: &FunctionType<CoreType>) -> V
             .map(|parameter| parameter.value.clone()),
     );
     parameter_types
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum InferenceError {
-    UnknownInferenceVariable(InferenceVariableId),
-    UnknownName {
-        symbol: Symbol,
-        range: Range,
-        expression_id: ExpressionId,
-    },
-    AliasCycle {
-        symbol: Symbol,
-        range: Range,
-        expression_id: Option<ExpressionId>,
-    },
-    ExpectedFunction {
-        actual_type: Box<CoreType>,
-        range: Range,
-        expression_id: ExpressionId,
-    },
-    OccursCheckFailed {
-        variable: InferenceVariableId,
-        in_type: Box<CoreType>,
-        range: Option<Range>,
-        expression_id: Option<ExpressionId>,
-    },
-    TypeMismatch {
-        expected: Box<CoreType>,
-        actual: Box<CoreType>,
-        range: Option<Range>,
-        expression_id: Option<ExpressionId>,
-    },
-    UnresolvedAnnotationType {
-        symbol: Symbol,
-    },
-    ConstraintViolation {
-        constraint: Constraint,
-        actual: Box<CoreType>,
-        range: Option<Range>,
-        expression_id: Option<ExpressionId>,
-    },
-    InvalidOperand {
-        expected: OperandExpectation,
-        actual: Box<CoreType>,
-        range: Range,
-        expression_id: ExpressionId,
-    },
-    TupleLengthMismatch {
-        expected: usize,
-        actual: usize,
-        range: Option<Range>,
-        expression_id: Option<ExpressionId>,
-    },
-    MixedListElements {
-        range: Option<Range>,
-        expression_id: Option<ExpressionId>,
-    },
-    RecordFieldMismatch {
-        expected_fields: Vec<Symbol>,
-        actual_fields: Vec<Symbol>,
-        range: Option<Range>,
-        expression_id: Option<ExpressionId>,
-    },
-    FunctionArityMismatch {
-        expected: usize,
-        actual: usize,
-        range: Option<Range>,
-        expression_id: Option<ExpressionId>,
-    },
-    NamedParameterMismatch {
-        expected_parameters: Vec<Symbol>,
-        actual_parameters: Vec<Symbol>,
-        range: Option<Range>,
-        expression_id: Option<ExpressionId>,
-    },
-    NotAList {
-        actual: Box<CoreType>,
-        range: Range,
-        expression_id: ExpressionId,
-    },
-    FieldDoesNotExist {
-        field: Symbol,
-        container: Box<CoreType>,
-        range: Range,
-        expression_id: ExpressionId,
-    },
-    PositionDoesNotExist {
-        position: usize,
-        container: Box<CoreType>,
-        range: Range,
-        expression_id: ExpressionId,
-    },
-    NonLiteralSubscript {
-        container: Box<CoreType>,
-        by: SubscriptKind,
-        range: Range,
-        expression_id: ExpressionId,
-    },
-    UnsupportedSubset {
-        actual: Box<CoreType>,
-        range: Range,
-        expression_id: ExpressionId,
-    },
-    RecursionLimitExceeded,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SubscriptKind {
-    Position,
-    FieldName,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Binding {
-    pub type_scheme: TypeScheme,
-    pub range: Range,
 }
 
 #[cfg(test)]
