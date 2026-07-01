@@ -695,6 +695,12 @@ pub fn definition(
     path: &Path,
     position: TextPosition,
 ) -> Option<Vec<Location>> {
+    // A type name inside a `#:` annotation is invisible to the naming analysis, so it is resolved to
+    // its `@type`/`@alias` declaration structurally before the identifier path runs.
+    if let Some(location) = type_name_definition_at(database, path, position) {
+        return Some(vec![location]);
+    }
+
     let occurrences =
         symbol_occurrences_at(database, path, position, OccurrenceScope::Declaration)?;
     let definitions = occurrences
@@ -703,6 +709,48 @@ pub fn definition(
         .map(|occurrence| occurrence.location)
         .collect::<Vec<_>>();
     (!definitions.is_empty()).then_some(definitions)
+}
+
+fn type_name_definition_at(
+    database: &dyn IdeDatabase,
+    path: &Path,
+    position: TextPosition,
+) -> Option<Location> {
+    let document_id = database.document_id_for_path(path)?;
+    let module = database.module(document_id)?;
+    let document = database.document_by_id(document_id)?;
+    let point = Point::new(position.line_index, position.character_index);
+
+    let token = type_token_at(module, document, point)?;
+    if token.role != TypeTokenRole::TypeName {
+        return None;
+    }
+
+    let name = database.interner().symbol_for(&token.text)?;
+    let (definition_document_id, definition) = type_definition_site(database, name)?;
+    let definition_path = database
+        .path_for_document_id(definition_document_id)?
+        .to_path_buf();
+    Some(Location {
+        path: definition_path,
+        range: text_range(definition.range),
+    })
+}
+
+// The document and `@type`/`@alias` `DefinitionItem` that declares `name`, searched across every package
+// module. Goto-definition on a type name resolves cross-file, so this scans all modules the database
+// holds rather than a single one.
+fn type_definition_site(
+    database: &dyn IdeDatabase,
+    name: Symbol,
+) -> Option<(DocumentId, DefinitionItem)> {
+    database
+        .all_document_ids()
+        .into_iter()
+        .find_map(|document_id| {
+            let module = database.module(document_id)?;
+            type_definition_in(module, name).map(|definition| (document_id, definition.clone()))
+        })
 }
 
 //
@@ -1010,6 +1058,18 @@ fn symbol_target_for_binding(
 pub fn cursor_is_s4_symbol(document: &Document, position: TextPosition) -> bool {
     let point = Point::new(position.line_index, position.character_index);
     s4_symbol_at(document.tree(), document.rope(), point).is_some()
+}
+
+// Whether the cursor sits on a type name inside a `#:` annotation. Goto-definition on such a name
+// resolves cross-file, so the engine uses this to widen its definition prime to every package module.
+pub fn cursor_on_annotation_type_name(
+    module: &Module,
+    document: &Document,
+    position: TextPosition,
+) -> bool {
+    let point = Point::new(position.line_index, position.character_index);
+    type_token_at(module, document, point)
+        .is_some_and(|token| token.role == TypeTokenRole::TypeName)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

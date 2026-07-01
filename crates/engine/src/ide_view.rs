@@ -259,6 +259,13 @@ impl<'engine> EngineIde<'engine> {
                 self.prime_parse(&mut caches, file);
             }
         }
+        // A type name inside a `#:` annotation resolves to its `@type`/`@alias` declaration, which may
+        // live in any package file, so its modules must all be primed for the cross-file search.
+        if self.target_is_annotation_type_name(target, position) {
+            for file in caches.all_ids.clone() {
+                self.prime_module(&mut caches, file);
+            }
+        }
         caches.package_naming = Some(package_naming);
         caches
     }
@@ -361,6 +368,12 @@ impl<'engine> EngineIde<'engine> {
     fn target_is_s4(&self, target: DocumentId, position: TextPosition) -> bool {
         let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(target.0));
         generic::cursor_is_s4_symbol(&parsed.0, position)
+    }
+
+    fn target_is_annotation_type_name(&self, target: DocumentId, position: TextPosition) -> bool {
+        let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(target.0));
+        let module = self.engine.fetch::<Module>(Key::Lower(target.0));
+        generic::cursor_on_annotation_type_name(&module, &parsed.0, position)
     }
 }
 
