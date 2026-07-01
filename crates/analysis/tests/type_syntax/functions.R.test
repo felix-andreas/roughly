@@ -172,3 +172,44 @@ InvalidSyntax { message: "unexpected trailing input starting at byte 3." }
 <T.x> fn(T) -> T
 #++++
 InvalidSyntax { message: "expected `,` or `>` in `<...>`." }
+
+#==== variadic
+#---- bare_rest_parameter
+fn(...) -> character
+#++++
+fn(...: Any) -> character
+
+#---- typed_rest_parameter
+fn(...: character) -> character
+#++++
+fn(...: character) -> character
+
+#---- named_rest_parameter
+fn(...values: integer) -> integer
+#++++
+fn(...: integer) -> integer
+
+#---- rest_after_fixed_parameters
+fn(sep: character, ...: Any) -> character
+#++++
+fn(sep: character, ...: Any) -> character
+
+#---- rest_after_positional
+fn(integer, ...: double) -> double
+#++++
+fn(integer, ...: double) -> double
+
+#---- generic_rest_parameter
+<T> fn(...: T) -> list[T]
+#++++
+<T> fn(...: T) -> list[T]
+
+#---- rest_must_be_last
+fn(..., x: integer) -> integer
+#++++
+InvalidSyntax { message: "a `...` rest parameter must be the last parameter in `fn(...)`." }
+
+#---- two_rest_parameters_rejected
+fn(..., ...) -> integer
+#++++
+InvalidSyntax { message: "a `...` rest parameter must be the last parameter in `fn(...)`." }

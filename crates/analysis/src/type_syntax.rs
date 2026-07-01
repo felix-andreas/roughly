@@ -169,6 +169,12 @@ pub fn render_surface_type(surface_type: &SurfaceType, interner: &Interner) -> S
                 .collect::<Vec<_>>();
             let mut rendered_parts = rendered_parameters;
             rendered_parts.extend(rendered_named_parameters);
+            if let Some(variadic_element) = &function_type.variadic {
+                rendered_parts.push(format!(
+                    "...: {}",
+                    render_surface_type(variadic_element, interner)
+                ));
+            }
             format!(
                 "fn({}) -> {}",
                 rendered_parts.join(", "),
@@ -1347,10 +1353,39 @@ impl<'a> TypeParser<'a> {
         self.skip_ascii_whitespace();
         let mut parameters = Vec::new();
         let mut named_parameters = Vec::new();
+        let mut variadic = None;
 
         if !self.consume_byte(b')') {
             loop {
                 self.skip_ascii_whitespace();
+
+                // A rest parameter `...name: TYPE` (or bare `...` ≡ `...: Any`) makes the function
+                // variadic. It must be the last parameter, so after parsing it the only legal token is
+                // the closing `)`.
+                if self.source[self.position..].starts_with("...") {
+                    self.position += "...".len();
+                    // An optional rest-parameter name is accepted for readability but discarded: the
+                    // variadic carries only its element type, since rest arguments are matched by
+                    // position, never by name.
+                    let _ = self.parse_member_name_span();
+                    self.skip_ascii_whitespace();
+                    let element_type = if self.consume_byte(b':') {
+                        self.parse_type_until(StopContext::FUNCTION_PARAMETER)
+                            .map_err(|error| {
+                                error.with_context("while parsing rest parameter type")
+                            })?
+                    } else {
+                        SurfaceType::Any
+                    };
+                    variadic = Some(element_type);
+
+                    self.skip_ascii_whitespace();
+                    self.expect_byte(
+                        b')',
+                        "a `...` rest parameter must be the last parameter in `fn(...)`.",
+                    )?;
+                    break;
+                }
 
                 if self.consume_byte(b'[') {
                     let parsed_name = self.parse_member_name_span();
@@ -1429,9 +1464,10 @@ impl<'a> TypeParser<'a> {
             SurfaceType::Null
         };
 
-        Ok(SurfaceType::Function(FunctionType::new(
+        Ok(SurfaceType::Function(FunctionType::with_variadic(
             parameters,
             named_parameters,
+            variadic,
             return_type,
         )))
     }

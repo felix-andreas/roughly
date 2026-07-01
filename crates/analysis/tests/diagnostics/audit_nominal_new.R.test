@@ -81,11 +81,11 @@ error[type-error] expected `Person`, found `list{name: character}`
 #: @type Dog {list{name: character}}
 
 #: @new Cat
-cat <- list(name = "felix")
+kit <- list(name = "felix")
 
 #: Dog
-d <- cat
+d <- kit
 #++++
 error[type-error] expected `Dog`, found `Cat`
 --> 8:1-8:9
-| d <- cat
+| d <- kit

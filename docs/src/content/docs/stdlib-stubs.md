@@ -127,18 +127,23 @@ carve-out — documented as such, not an oversight.
 
 ### Expressiveness gaps base functions expose
 
-Faithfully stubbing base requires type-syntax extensions:
+Two extensions that a faithful corpus needs have landed:
 
-| Gap | Example that fails today | Extension needed |
-|-----|--------------------------|------------------|
-| Variadics (highest value) | `paste`, `sum`, `c` | `...args: T` parameter form |
-| Dotted parameter names | `na.rm`, `length.out` | allow `.` in the parameter-name grammar |
+| Extension | Example | Form |
+|-----------|---------|------|
+| Variadics | `paste`, `sum`, `cat` | trailing `...: TYPE` rest parameter (`fn(...: Any) -> character`) |
+| Dotted parameter names | `na.rm`, `length.out` | interior `.` allowed in parameter and field names |
+
+Two remain, so the affected functions still degrade to `Any`:
+
+| Gap | Example | Extension needed |
+|-----|---------|------------------|
 | Generic atomic suffix | `rev`, `head`, shape-threading | accept `T[]` (type variable + suffix) |
 | Overloading | one name resolves last-wins | overload sets or traits in the type system |
 
 The declaration grammar already permits repeated declarations of one name, so adopting overload sets
-later needs no corpus rewrite; until then, and until the other extensions land, affected functions
-degrade to `Any` (see [Overloads and generics](#overloads-and-generics)).
+later needs no corpus rewrite; until then, and until the generic-vector design lands, the shape-mirroring
+functions degrade to `Any` (see [Overloads and generics](#overloads-and-generics)).
 
 ## 3. Loading and namespacing
 
@@ -235,12 +240,11 @@ flag <- T                      #: logical  (stub value binding)
 This demonstrates stub schemes and the hardcoded kernel interoperating: `length`'s scheme types `n`,
 the operator kernel promotes `pi / 2`, and the `T` value binding types `flag`.
 
-**Signatures the current grammar cannot yet express** (flagged, degrade to `Any`/`@trust` until the
-extensions land):
+`paste`'s variadics and `length.out`'s dotted parameter name are now expressible directly
+(`paste : fn(...: Any) -> character`, `seq_len : fn(length.out: integer) -> integer[]`). One gap
+remains, degrading to `Any` until the generic-vector design lands:
 
-- `nchar`'s shape polymorphism (result shape should track the input vector shape);
-- `paste`'s variadics (`...`);
-- `length.out`'s dotted parameter name.
+- `nchar`'s / `rev`'s shape polymorphism (the result shape should track the input vector shape).
 
 ## 6. Sequencing and risks
 
@@ -256,8 +260,9 @@ machinery. This closes the `T`/`F`/`pi` gap with only the two integration edits 
 
 ### Risks
 
-- **Type-syntax expressiveness.** Variadics, dotted names, and the generic `T[]` suffix are needed for
-  a faithful corpus; until they land, degrade to `Any` / `@trust`.
+- **Type-syntax expressiveness.** Variadics and dotted parameter names have landed; the generic `T[]`
+  suffix (and overload sets) remain, so shape-mirroring and ad-hoc-overloaded functions still degrade
+  to `Any` until that design lands.
 - **The operator/`c` kernel cannot migrate.** One-source-of-truth is necessarily partial.
 - **Corpus size.** Base alone is ~1200 functions. Curate a high-value subset; treat stubs as living
   docs with real drift risk. The validation tool is a **stubtest-equivalent** that introspects real R

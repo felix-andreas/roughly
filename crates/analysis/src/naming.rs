@@ -791,6 +791,9 @@ impl<'a> TypeResolver<'a> {
                         document_id,
                     );
                 }
+                if let Some(element) = &function_type.variadic {
+                    self.resolve_surface_type(element, local_type_parameters, range, document_id);
+                }
                 self.resolve_surface_type(
                     &function_type.return_type,
                     local_type_parameters,

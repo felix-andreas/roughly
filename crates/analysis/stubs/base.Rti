@@ -3,11 +3,11 @@
 # Declaration-only stub file (`.Rti`): each line is `name : <type-expr>`, reusing the `#:` annotation
 # type grammar. There is no function body to write, so these files are declarations only.
 #
-# A "widened to Any" note marks a binding whose precise type the annotation grammar cannot yet express
-# (variadic `...`, optional arguments, or a result shape that mirrors the argument). Such a binding is
-# deliberately given `Any` rather than a falsely-precise signature: a call then yields `Any`, which never
-# produces a spurious type or arity error. The name still resolves, so it is never reported as undefined
-# and never flagged by strict mode.
+# A "widened to Any" note marks a binding whose precise type the annotation grammar cannot yet express.
+# Such a binding is deliberately given `Any` rather than a falsely-precise signature: a call then yields
+# `Any`, which never produces a spurious type or arity error. The name still resolves, so it is never
+# reported as undefined and never flagged by strict mode. Variadic functions and optional (dotted)
+# arguments CAN now be expressed, so many former `Any` widenings carry real signatures.
 #
 # The arithmetic and comparison operators and the `c` / `list` constructors are NOT stubbed here: their
 # result type is an algorithm over the argument types (numeric promotion, `NULL`-dropping combination,
@@ -22,7 +22,7 @@ pi : double
 # Length and sequence helpers: the result type is fixed by the function, independent of the argument's
 # element type or shape.
 length : fn(x: Any) -> integer
-seq_len : fn(length_out: integer) -> integer[]
+seq_len : fn(length.out: integer) -> integer[]
 seq_along : fn(along_with: Any) -> integer[]
 
 # Type predicates: always return a single logical.
@@ -49,27 +49,40 @@ substr : fn(x: character, start: integer, stop: integer) -> character
 startsWith : fn(x: character, prefix: character) -> logical
 endsWith : fn(x: character, suffix: character) -> logical
 
-# widened to Any: the result shape mirrors the argument shape, which the grammar cannot express as a
-# type variable, so any concrete return type would be falsely precise.
+# widened to Any: the result shape mirrors the argument shape. Expressing it needs a shape-preserving
+# generic over vector element types, which is deferred pending the generic-vector design (see
+# `.agents/memory/typing-design.md`); until then a concrete return type would be falsely precise.
 rev : fn(x: Any) -> Any
 abs : fn(x: Any) -> Any
 sqrt : fn(x: Any) -> Any
 sort : fn(x: Any) -> Any
 unique : fn(x: Any) -> Any
 
-# widened to Any: variadic (`...`); the argument list cannot be expressed, so the whole binding is
-# `Any` and a call yields `Any`.
-paste : Any
-paste0 : Any
-sum : Any
-prod : Any
-min : Any
-max : Any
-range : Any
+# Variadic string joins: any number of arguments, coerced and concatenated to a character result.
+# (R's `sep`/`collapse` controls are not modeled: mixing an optional named parameter with `...` would
+# capture a leading positional argument by position, so they are omitted rather than risk a false
+# error; a call still type-checks and yields `character`.)
+paste : fn(...: Any) -> character
+paste0 : fn(...: Any) -> character
+cat : fn(...: Any) -> NULL
 
-# widened to Any: optional arguments (`na.rm`, `fixed`, `ignore.case`, `which`, ...) cannot yet be
-# expressed, so a fixed-arity signature would wrongly reject valid calls.
-mean : Any
+# Variadic numeric reductions: any number of numeric arguments reduce to a numeric result, with an
+# optional `na.rm` matched by name. `range` returns the two-element min/max vector. The rest element is
+# `Any` rather than `double` because the checker does not widen an `integer` argument to `double` at a
+# parameter position (numeric promotion lives only in the operator kernel), so a `double` element would
+# falsely reject `sum(1L, 2L)`; the precise result type is still declared.
+sum : fn([na.rm]: logical, ...: Any) -> double
+prod : fn([na.rm]: logical, ...: Any) -> double
+min : fn([na.rm]: logical, ...: Any) -> double
+max : fn([na.rm]: logical, ...: Any) -> double
+range : fn([na.rm]: logical, ...: Any) -> double[]
+
+# A required numeric argument with an optional `na.rm`. The argument is `Any` for the same reason the
+# reductions above use `Any`: the checker does not widen `integer` to `double` at a parameter position.
+mean : fn(x: Any, [na.rm]: logical) -> double
+
+# widened to Any: optional arguments beyond what is modeled here, or a result shape that mirrors the
+# argument, which the grammar cannot yet express.
 trimws : Any
 substring : Any
 gsub : Any

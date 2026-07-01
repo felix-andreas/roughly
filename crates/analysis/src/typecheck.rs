@@ -289,6 +289,11 @@ fn accumulate_parameter_variances(
                     variances,
                 );
             }
+            // A rest parameter is a parameter position, so its element is contravariant like the fixed
+            // parameters.
+            if let Some(element) = &function_type.variadic {
+                accumulate_parameter_variances(element, polarity.flip(), parameters, variances);
+            }
             accumulate_parameter_variances(
                 &function_type.return_type,
                 polarity,
@@ -421,7 +426,7 @@ impl InferenceState {
                     .map(|argument| self.substitute_rigid_names(argument))
                     .collect(),
             ),
-            CoreType::Function(function_type) => CoreType::Function(FunctionType::new(
+            CoreType::Function(function_type) => CoreType::Function(FunctionType::with_variadic(
                 function_type
                     .parameters
                     .iter()
@@ -438,6 +443,10 @@ impl InferenceState {
                         )
                     })
                     .collect(),
+                function_type
+                    .variadic
+                    .as_ref()
+                    .map(|element| self.substitute_rigid_names(element)),
                 self.substitute_rigid_names(&function_type.return_type),
             )),
             other => other.clone(),
@@ -1860,6 +1869,25 @@ impl InferenceState {
                     return Ok(false);
                 }
 
+                // Variadic compatibility is conservative: a variadic function is compatible only with
+                // another variadic (their rest elements are contravariant, like ordinary parameters),
+                // and a variadic/fixed pair is always incompatible. This over-rejects some safe pairings
+                // but never admits an unsound one.
+                match (&actual_function.variadic, &expected_function.variadic) {
+                    (Some(actual_element), Some(expected_element)) => {
+                        if !self.check_compatibility(
+                            (**expected_element).clone(),
+                            (**actual_element).clone(),
+                            type_definitions,
+                            expression,
+                        )? {
+                            return Ok(false);
+                        }
+                    }
+                    (None, None) => {}
+                    _ => return Ok(false),
+                }
+
                 let mut actual_parameters = actual_function
                     .parameters
                     .into_iter()
@@ -2268,45 +2296,61 @@ impl InferenceState {
                     })
                     .collect::<Result<Vec<_>, _>>()?,
             )),
-            SurfaceType::Function(function_type) => Ok(CoreType::Function(FunctionType::new(
-                function_type
-                    .parameters
-                    .iter()
-                    .map(|parameter| {
+            SurfaceType::Function(function_type) => {
+                let variadic = function_type
+                    .variadic
+                    .as_ref()
+                    .map(|element| {
                         self.lower_surface_type_with_substitutions(
-                            parameter,
+                            element,
                             substitutions,
                             expanding_aliases,
                             type_definitions,
                             expression,
                         )
                     })
-                    .collect::<Result<Vec<_>, _>>()?,
-                function_type
-                    .named_parameters
-                    .iter()
-                    .map(|parameter| {
-                        Ok(RecordField::with_optional(
-                            parameter.name,
+                    .transpose()?;
+                Ok(CoreType::Function(FunctionType::with_variadic(
+                    function_type
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
                             self.lower_surface_type_with_substitutions(
-                                &parameter.value,
+                                parameter,
                                 substitutions,
                                 expanding_aliases,
                                 type_definitions,
                                 expression,
-                            )?,
-                            parameter.optional,
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-                self.lower_surface_type_with_substitutions(
-                    &function_type.return_type,
-                    substitutions,
-                    expanding_aliases,
-                    type_definitions,
-                    expression,
-                )?,
-            ))),
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    function_type
+                        .named_parameters
+                        .iter()
+                        .map(|parameter| {
+                            Ok(RecordField::with_optional(
+                                parameter.name,
+                                self.lower_surface_type_with_substitutions(
+                                    &parameter.value,
+                                    substitutions,
+                                    expanding_aliases,
+                                    type_definitions,
+                                    expression,
+                                )?,
+                                parameter.optional,
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    variadic,
+                    self.lower_surface_type_with_substitutions(
+                        &function_type.return_type,
+                        substitutions,
+                        expanding_aliases,
+                        type_definitions,
+                        expression,
+                    )?,
+                )))
+            }
             SurfaceType::Binders(bound_type_parameters, inner_type) => {
                 if bound_type_parameters.is_empty() {
                     return self.lower_surface_type_with_substitutions(
@@ -2643,6 +2687,12 @@ impl InferenceState {
                     }
                 }
 
+                if let Some(element) = &function_type.variadic
+                    && self.occurs_in(variable, element)?
+                {
+                    return Ok(true);
+                }
+
                 self.occurs_in(variable, &function_type.return_type)
             }
             _ => Ok(false),
@@ -2900,7 +2950,7 @@ impl InferenceState {
         if let NumericOperand::Invalid = left {
             return Err(InferenceError::InvalidOperand {
                 expected: OperandExpectation::Numeric,
-                actual: resolved_left,
+                actual: Box::new(resolved_left),
                 range: arg0.range,
                 expression_id: arg0.id,
             });
@@ -2908,7 +2958,7 @@ impl InferenceState {
         if let NumericOperand::Invalid = right {
             return Err(InferenceError::InvalidOperand {
                 expected: OperandExpectation::Numeric,
-                actual: resolved_right,
+                actual: Box::new(resolved_right),
                 range: arg1.range,
                 expression_id: arg1.id,
             });
@@ -2999,7 +3049,7 @@ impl InferenceState {
             NumericOperand::AnyUnknown => Ok(CoreType::Unknown),
             NumericOperand::Invalid => Err(InferenceError::InvalidOperand {
                 expected: OperandExpectation::Numeric,
-                actual: resolved_type,
+                actual: Box::new(resolved_type),
                 range: value.range,
                 expression_id: value.id,
             }),
@@ -3030,7 +3080,7 @@ impl InferenceState {
             }
             other_type => Err(InferenceError::InvalidOperand {
                 expected: OperandExpectation::Logical,
-                actual: other_type,
+                actual: Box::new(other_type),
                 range: value.range,
                 expression_id: value.id,
             }),
@@ -3077,7 +3127,7 @@ impl InferenceState {
         if left_parts.is_none() && !left_is_variable {
             return Err(InferenceError::InvalidOperand {
                 expected: OperandExpectation::Comparable,
-                actual: resolved_left,
+                actual: Box::new(resolved_left),
                 range: arg0.range,
                 expression_id: arg0.id,
             });
@@ -3085,7 +3135,7 @@ impl InferenceState {
         if right_parts.is_none() && !right_is_variable {
             return Err(InferenceError::InvalidOperand {
                 expected: OperandExpectation::Comparable,
-                actual: resolved_right,
+                actual: Box::new(resolved_right),
                 range: arg1.range,
                 expression_id: arg1.id,
             });
@@ -3176,7 +3226,7 @@ impl InferenceState {
                 other_type => {
                     return Err(InferenceError::InvalidOperand {
                         expected: OperandExpectation::ScalarNumeric,
-                        actual: other_type,
+                        actual: Box::new(other_type),
                         range: argument_expression.range,
                         expression_id: argument_expression.id,
                     });
@@ -3247,7 +3297,7 @@ impl InferenceState {
                 type_definitions,
             ),
             other_type => Err(InferenceError::ExpectedFunction {
-                actual_type: other_type,
+                actual_type: Box::new(other_type),
                 range: callee.range,
                 expression_id: callee.id,
             }),
@@ -3284,6 +3334,7 @@ impl InferenceState {
             .collect::<Vec<_>>();
 
         let positional_parameters = function_type.parameters;
+        let variadic_element = function_type.variadic.map(|element| *element);
         let return_type = *function_type.return_type;
         let mut next_positional_index = 0;
         let mut remaining_named_parameters = function_type.named_parameters;
@@ -3330,10 +3381,27 @@ impl InferenceState {
                 continue;
             }
 
-            if !remaining_named_parameters.is_empty() {
+            // A positional argument past the fixed positionals fills an optional named parameter by
+            // position — but only when the function is not variadic. In a variadic function, surplus
+            // positionals belong to `...` (R's rule: a named parameter after `...` is matched by name
+            // only), so they are absorbed below instead of consuming an optional named parameter.
+            if variadic_element.is_none() && !remaining_named_parameters.is_empty() {
                 let parameter = remaining_named_parameters.remove(0);
                 self.check_argument(
                     parameter.value,
+                    inferred_argument,
+                    arg_expr,
+                    type_definitions,
+                )?;
+                continue;
+            }
+
+            // A variadic function absorbs any number of surplus positional arguments, each checked
+            // against the rest-parameter element type. Cloning the element per argument keeps the check
+            // order-independent — no argument's check mutates state a later one reads.
+            if let Some(element) = &variadic_element {
+                self.check_argument(
+                    element.clone(),
                     inferred_argument,
                     arg_expr,
                     type_definitions,
@@ -3817,7 +3885,7 @@ impl InferenceState {
         if self.occurs_in(variable, &core_type)? {
             return Err(InferenceError::OccursCheckFailed {
                 variable,
-                in_type: core_type,
+                in_type: Box::new(core_type),
                 range: expression.map(|current_expression| current_expression.range),
                 expression_id: expression.map(|current_expression| current_expression.id),
             });
@@ -4045,12 +4113,18 @@ impl InferenceState {
                     ));
                 }
 
+                let instantiated_variadic = match &function_type.variadic {
+                    Some(element) => Some(self.instantiate_core_type(element, substitutions)?),
+                    None => None,
+                };
+
                 let instantiated_return_type =
                     self.instantiate_core_type(&function_type.return_type, substitutions)?;
 
-                Ok(CoreType::Function(FunctionType::new(
+                Ok(CoreType::Function(FunctionType::with_variadic(
                     instantiated_parameters,
                     instantiated_named_parameters,
+                    instantiated_variadic,
                     instantiated_return_type,
                 )))
             }
@@ -4212,6 +4286,10 @@ impl InferenceState {
                         .extend(self.free_type_variables_in_core_type(&named_parameter.value)?);
                 }
 
+                if let Some(element) = &function_type.variadic {
+                    free_variables.extend(self.free_type_variables_in_core_type(element)?);
+                }
+
                 free_variables
                     .extend(self.free_type_variables_in_core_type(&function_type.return_type)?);
 
@@ -4239,11 +4317,17 @@ impl InferenceState {
             ));
         }
 
+        let resolved_variadic = match function_type.variadic {
+            Some(element) => Some(self.resolve(*element)?),
+            None => None,
+        };
+
         let resolved_return_type = self.resolve(*function_type.return_type)?;
 
-        Ok(FunctionType::new(
+        Ok(FunctionType::with_variadic(
             resolved_parameters,
             resolved_named_parameters,
+            resolved_variadic,
             resolved_return_type,
         ))
     }
@@ -4324,10 +4408,14 @@ impl InferenceState {
     ) -> Result<FunctionType<CoreType>, InferenceError> {
         let left_total = left_function.parameters.len() + left_function.named_parameters.len();
         let right_total = right_function.parameters.len() + right_function.named_parameters.len();
-        if left_total != right_total {
+        // A variadic function accepts a caller shape a fixed function does not, so the two are never the
+        // same type. Treat a variadic/fixed mismatch as an arity mismatch (the rest parameter counts as
+        // one interface slot the other side lacks).
+        if left_total != right_total || left_function.variadic.is_some() != right_function.variadic.is_some()
+        {
             return Err(InferenceError::FunctionArityMismatch {
-                expected: left_total,
-                actual: right_total,
+                expected: left_total + usize::from(left_function.variadic.is_some()),
+                actual: right_total + usize::from(right_function.variadic.is_some()),
                 range: expression.map(|current_expression| current_expression.range),
                 expression_id: expression.map(|current_expression| current_expression.id),
             });
@@ -4368,15 +4456,24 @@ impl InferenceState {
             ));
         }
 
+        let unified_variadic = match (left_function.variadic, right_function.variadic) {
+            (Some(left_element), Some(right_element)) => {
+                Some(self.unify_internal(*left_element, *right_element, expression)?)
+            }
+            // Presence was checked to match above, so only the both-absent case remains here.
+            _ => None,
+        };
+
         let unified_return_type = self.unify_internal(
             *left_function.return_type,
             *right_function.return_type,
             expression,
         )?;
 
-        Ok(FunctionType::new(
+        Ok(FunctionType::with_variadic(
             unified_parameters,
             unified_named_parameters,
+            unified_variadic,
             unified_return_type,
         ))
     }
@@ -4643,7 +4740,7 @@ fn import_core_type(
                 .map(|item| import_core_type(item, substitutions))
                 .collect(),
         ),
-        CoreType::Function(function_type) => CoreType::Function(FunctionType::new(
+        CoreType::Function(function_type) => CoreType::Function(FunctionType::with_variadic(
             function_type
                 .parameters
                 .iter()
@@ -4660,6 +4757,10 @@ fn import_core_type(
                     )
                 })
                 .collect(),
+            function_type
+                .variadic
+                .as_ref()
+                .map(|element| import_core_type(element, substitutions)),
             import_core_type(&function_type.return_type, substitutions),
         )),
         // A variable absent from `substitutions` is a free scheme variable that belongs to another
@@ -4748,13 +4849,13 @@ pub enum InferenceError {
         expression_id: Option<ExpressionId>,
     },
     ExpectedFunction {
-        actual_type: CoreType,
+        actual_type: Box<CoreType>,
         range: Range,
         expression_id: ExpressionId,
     },
     OccursCheckFailed {
         variable: InferenceVariableId,
-        in_type: CoreType,
+        in_type: Box<CoreType>,
         range: Option<Range>,
         expression_id: Option<ExpressionId>,
     },
@@ -4775,7 +4876,7 @@ pub enum InferenceError {
     },
     InvalidOperand {
         expected: OperandExpectation,
-        actual: CoreType,
+        actual: Box<CoreType>,
         range: Range,
         expression_id: ExpressionId,
     },

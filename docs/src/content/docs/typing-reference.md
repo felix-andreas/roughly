@@ -837,13 +837,20 @@ Examples:
 A function call is a type error when:
 
 - required arguments are missing
-- too many arguments are provided
+- too many arguments are provided **and the callee has no rest parameter**
 - an argument value is incompatible with the corresponding parameter type
 
 Argument checking is compatibility-based, not exact-equality-based:
 
 - the ordinary coercions defined in this document apply at parameter positions, for example scalar-like `T` into array-like `T[]` and `T` or `NULL` into `T | NULL`
 - an argument whose type is `Unknown` is accepted at any parameter; the reason the value became `Unknown` was already diagnosed where it happened, and repeating it at every later use would only cascade noise
+
+A **rest parameter** (`...: TYPE`) changes how surplus arguments are handled:
+
+- a rest parameter adds no required arguments, so a variadic function may be called with none (`paste()` is legal)
+- after the fixed positional and named parameters are matched, any number of remaining positional arguments are absorbed by the rest parameter, each checked against its element type
+- surplus positional arguments never fill an optional named parameter of a variadic function; a named parameter after `...` is matched by name only (as in R), so `sum(1, 2, na.rm = TRUE)` sends `1` and `2` to the rest and `na.rm` by name
+- an unmatched **named** argument is still a named-parameter error even when the callee is variadic; named arguments are never routed into the rest parameter
 
 ### Indexing
 
@@ -1223,11 +1230,28 @@ Compact function annotations use a single function type:
 
 Optional parameters must be named: `[name]: TYPE`. A bare optional positional form like `fn(integer, [character])` is not supported.
 
+A function may declare a trailing **rest parameter** to accept a variable number of arguments:
+
+- `fn(...) -> RETURN_TYPE` — accepts any number of arguments of any type (`...` is shorthand for `...: Any`)
+- `fn(...name: TYPE) -> RETURN_TYPE` — each additional argument must have type `TYPE`; the name is optional and, if given, is discarded (rest arguments are matched by position, never by name)
+- `fn(prefix: TYPE, ...: TYPE) -> RETURN_TYPE` — a rest parameter may follow fixed parameters
+
+The rest parameter must be the last parameter, and there may be at most one. `fn(..., x: integer)` is a syntax error.
+
 Additional rules:
 
 - if the return type is omitted, it is implicitly `NULL`
 - when a compact function annotation starts with `<...>`, the binder introduces rank-1 type parameters for the whole function type
 - compact function annotations do not use `fn<T>(...)`; the supported binder form is `<T> fn(...) -> ...`
+
+Examples:
+
+```r
+#: fn(...: character) -> character
+join <- function(...) paste0(...)
+```
+
+The rest parameter is available in compact `fn(...)` annotations and in stub declarations. Because type inference does not treat R's `...` as a rest parameter (see [Inferred function types](#inferred-function-types)), annotating a rest parameter over a hand-written `function(...)` body is not yet supported; declare such signatures in a [stub file](/stdlib-stubs) instead.
 
 Examples:
 
@@ -1324,6 +1348,13 @@ Examples:
   expected, because `integer` is compatible with `integer | NULL`
 - a function of type `fn(integer) -> integer` is rejected where `fn(integer | NULL) -> integer` is
   expected, because the expected interface may pass `NULL`, which the actual function does not accept
+
+Variadic compatibility is conservative:
+
+- a variadic function type is compatible only with another variadic function type; their rest element types are contravariant, like ordinary parameters, and the fixed prefixes must match by the rules above
+- a variadic function type and a fixed-arity function type are never compatible, in either direction
+
+This over-rejects some safe pairings (for example a fixed function that happens to accept the same arguments), but it never admits an unsound one.
 
 ### Higher-order function types
 

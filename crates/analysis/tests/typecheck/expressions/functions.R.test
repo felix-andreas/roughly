@@ -87,6 +87,15 @@ identity(1L, 2L)
 #++++
 error: function arity mismatch
 
+#---- non_variadic_annotated_function_still_rejects_surplus_arguments
+# Regression fence: adding a `...` rest parameter must not slacken arity checking for functions that
+# have none. A fixed-arity annotated function must still error on a surplus positional argument.
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+double_count(1L, 2L)
+#++++
+error: function arity mismatch
+
 #---- call_argument_type_mismatch
 #: fn(integer) -> integer
 identity <- function(value) value

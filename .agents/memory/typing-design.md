@@ -29,7 +29,6 @@ Forward-looking design space for Roughly's type system: questions that are **not
 
 **Current stopgap:** ad-hoc-overloaded functions are `Any` for v1; genuinely parametric higher-order functions (`lapply`, `Map`, `Reduce`, `identity`) keep real `<T> fn(...)` generics (already supported).
 
-## What is NOT open (already moving)
+## Landed (no longer open)
 
-- **Variadic `...` in annotations/stubs** — being added now (a `variadic: Option<Box<Type>>` field on `FunctionType`, an arity-checker absorption loop, a conservative compatibility rule; annotations/stubs only, no inference change). Tracked in `backlog.md`; the settled semantics land in `typing-reference.md` when implemented.
-- **Dotted parameter names** (`na.rm`) — pure surface-lexer widening, no semantic question.
+- **Variadic `...` in annotations/stubs** and **dotted parameter names** (`na.rm`) are implemented; their semantics are in `typing-reference.md`. Variadic is effectively stub/declaration-only for now — annotating a rest parameter over an R `function(...)` body reports a spurious mismatch because inference still lowers `...` as an ordinary named parameter; whether to bridge that (an inference change, or a compat special-case for a trailing `...` parameter) is a deferred decision noted in `backlog.md`, not yet a committed design.
