@@ -62,14 +62,14 @@ build-extension $kind *args:
 # RELEASE
 #
 
-publish $version $kind:
+publish $version:
     #!/usr/bin/env bash
     set -euo pipefail
 
     just bump-version $version
-    just release $version $kind
+    just release $version
     just publish-github $version
-    just publish-marketplace $version $kind
+    just publish-marketplace $version
 
 publish-commit $version="":
     #!/usr/bin/env bash
@@ -79,7 +79,8 @@ publish-commit $version="":
     	version=$(git rev-parse --short=6 HEAD)
     	echo "info: using git revision $version as version"
     fi
-    just release $version pre-release
+    # A bare git revision is not `X.Y.Z`, so `release-kind` classifies it as a pre-release.
+    just release $version
     just publish-github $version
 
 bump-version $version:
@@ -110,10 +111,11 @@ bump-version $version:
     git add Cargo.toml Cargo.lock editors/code/package.json
     git commit -m "chore: Release v{{ version }}"
 
-release $version $kind:
+release $version:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    kind=$(just release-kind $version)
     dir=release/$version
 
     mkdir -p release
@@ -164,11 +166,11 @@ publish-github-update $version:
         "release/$version/roughly-win32-x64.vsix#VS Code extension (win32-x64)" \
         --clobber
 
-publish-marketplace $version $kind:
+publish-marketplace $version:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    release_flag=$(just vsce-release-flag $kind)
+    release_flag=$(just vsce-release-flag $(just release-kind $version))
 
     just vsce publish $release_flag --packagePath ../../release/$version/roughly-linux-x64.vsix
     just vsce publish $release_flag --packagePath ../../release/$version/roughly-darwin-arm64.vsix
@@ -205,6 +207,21 @@ rlib *args:
 
 vsce-release-flag $kind:
     @echo {{ if kind == "release" { "" } else if kind == "pre-release" { "--pre-release" } else { error("kind must be either release or pre-release") } }}
+
+# The release channel implied by a version string: a bare `X.Y.Z` is a stable release; an
+# `X.Y.Z-alpha`/`-beta` postfix (and any other non-`X.Y.Z` form, such as a bare git revision used
+# by `publish-commit`) is a marketplace pre-release. This is the single source of truth for the
+# channel, so `release`/`publish` never take a separate kind argument.
+release-kind $version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    case "{{ version }}" in
+    	*-alpha|*-beta) echo pre-release ;;
+    	*-*) echo "error: version suffix must be -alpha or -beta, got {{ version }}" >&2; exit 1 ;;
+    	[0-9]*.[0-9]*.[0-9]*) echo release ;;
+    	*) echo pre-release ;;
+    esac
 
 #
 # ROFY
