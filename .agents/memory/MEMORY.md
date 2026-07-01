@@ -12,8 +12,9 @@ Companion documents (kept separate only because they are larger in scope): `back
 
 - CI is green on branch `feat/hm-type-checker` (the active gate, scoped to the `crates/roughly` default member).
 - The landing-page hero animation was restored to the liked load-intro→types→scroll-morph-into-heading behavior (particle-formed heading, no text overlay); live on the branch, awaiting the user's aesthetic verdict.
-- Working a large user task batch (`backlog.md` "Incoming user batch"): hover UX landed (readable `<T,U>` generics, `Unknown` on hover, origin-package on hover); **type-notation cursor features landed** — hover a type name in a `#:` comment, goto-def on it, and narrowed unresolved-type error ranges. The remaining batch items (the `#:` typing formatter, `.Rtypes` highlighting) queue next.
+- Working a large user task batch (`backlog.md` "Incoming user batch"): hover UX landed (readable `<T,U>` generics, `Unknown` on hover, origin-package on hover); **type-notation cursor features landed** — hover a type name in a `#:` comment, goto-def on it, and narrowed unresolved-type error ranges. The **`#:` typing formatter landed** — multi-line annotations hug (one indent step per line-break, honoring `indent_width`; `format.rs::annotation_continuation_indent`). `.Rtypes` highlighting queues next.
 - The widened whole-workspace CI is staged in `.github/pending-ci.yml`; a human must `git mv` it into `.github/workflows/` (an automated session's token lacks GitHub `workflow` scope).
+- `crates/engine/tests/test_document_lifecycle.rs` scripts the LSP document events (`did_open/change/save/close/change_watched_files`) against the real engine through the server's exact event→input mapping (open-buffer-vs-disk duality modeled). Chosen as a Rust harness, not a fixture-DSL extension, because the behaviors are event-kind-specific and depend on an open-set/disk model the `MultiFile` shape lacks. Pins malformed-edit suppression-then-restore and watched add/delete cross-file resolution.
 
 ## Mid-term
 

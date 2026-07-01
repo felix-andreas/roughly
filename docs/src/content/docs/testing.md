@@ -240,8 +240,11 @@ Incremental analysis (the `engine` crate, see [Architecture](/architecture)) is 
 - `test_ide_granularity` — exec-counter proofs that a per-keystroke point query on an unchanged file triggers zero re-inference.
 - `test_symbols_differential` (in `crates/roughly`) — engine-served document and workspace symbols == the oracle.
 - `test_engine`, `test_queries`, `test_reexport`, `test_cancellation`, `test_read_cancellation`, `test_memory`, `test_benchmark` — the memoized core, the query bodies, the re-export fixed-point, cooperative cancellation, and the memory / per-edit-cost measurements.
+- `test_document_lifecycle` — scripts the LSP document events (`did_open`, `did_change`, `did_save`, `did_close`, `did_change_watched_files`) against the engine through the *same* event → engine-input mapping the server uses (`crates/roughly/src/server.rs`), so the incremental paths are driven the way an editor drives them. It models the open-buffer-vs-disk duality the events depend on (`did_change` is an incremental range edit against a live buffer; `did_close` of an on-disk package file reverts to disk; a watched change to an *open* file is ignored). It pins the invariants that had no other test in this form: a transiently-malformed edit emits no spurious semantic diagnostics and a following well-formed edit restores them (the `Lower` empty-module short-circuit, also pinned directly by `test_malformed_lower`), and a watched-file add/delete changes cross-file resolution.
 
 Because the from-scratch oracle (`analysis::run_full`) is the ground truth, keep it correct and well-fixtured: the differential net proves the *engine* matches the oracle, while the fixtures above pin the oracle to the language.
+
+This is a **Rust harness, not a fixture DSL**. The `MultiFile` fixture shape (whole-file create / range edit / delete / move with per-generation diagnostics) models document *state* transitions but has no open-set or on-disk-vs-buffer model and does not distinguish which LSP event drove a change, so an event sequence that turns on those distinctions (close-reverts-to-disk, ignore-watched-while-open, open→edit→save) is expressed as a scripted driver alongside the other engine incremental drivers rather than by extending the fixture grammar.
 
 ## Suite contracts
 
