@@ -66,6 +66,67 @@ Assign(f@b1)
             Integer(1L)
       Symbol(x@b0)
 
+#==== within_branch_resolves_locally
+#---- reference_within_if_body_resolves_to_local_binding
+#---- R/main.R
+f <- function() {
+  if (TRUE) {
+    x <- 1L
+    x
+  }
+}
+#++++
+Assign(f@b1)
+  Function()
+    Block
+      If
+        Logical(true)
+        Block
+          Assign(x@b0)
+            Integer(1L)
+          Symbol(x@b0)
+
+#---- reference_within_for_body_resolves_to_local_binding
+#---- R/main.R
+f <- function() {
+  for (item in list(1L)) {
+    x <- 1L
+    x
+  }
+}
+#++++
+Assign(f@b2)
+  Function()
+    Block
+      For(item@b0)
+        Call
+          Symbol(list@?)
+          Argument
+            Integer(1L)
+        Block
+          Assign(x@b1)
+            Integer(1L)
+          Symbol(x@b1)
+
+#---- reference_within_while_body_resolves_to_local_binding
+#---- R/main.R
+f <- function() {
+  while (TRUE) {
+    x <- 1L
+    x
+  }
+}
+#++++
+Assign(f@b1)
+  Function()
+    Block
+      While
+        Logical(true)
+        Block
+          Assign(x@b0)
+            Integer(1L)
+          Symbol(x@b0)
+
 #==== conditionals
 #---- if_branch_introduction_might_be_undefined_after_conditional
 #---- R/main.R

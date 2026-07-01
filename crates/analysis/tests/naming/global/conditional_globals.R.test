@@ -1,0 +1,179 @@
+#==== conditional_top_level_not_package_global
+#---- if_body_binding_is_not_package_global
+#---- R/a.R
+if (TRUE) {
+  x <- 1L
+}
+#++++
+If
+  Logical(true)
+  Block
+    Assign(x@b0)
+      Integer(1L)
+#---- R/b.R
+x
+#++++
+Symbol(x@?)
+
+warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+--> 1:1-1:2
+| x
+
+#---- else_body_binding_is_not_package_global
+#---- R/a.R
+if (FALSE) {
+  1L
+} else {
+  x <- 1L
+}
+#++++
+If
+  Logical(false)
+  Block
+    Integer(1L)
+  Block
+    Assign(x@b0)
+      Integer(1L)
+#---- R/b.R
+x
+#++++
+Symbol(x@?)
+
+warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+--> 1:1-1:2
+| x
+
+#---- else_if_body_binding_is_not_package_global
+#---- R/a.R
+if (FALSE) {
+  1L
+} else if (TRUE) {
+  x <- 1L
+}
+#++++
+If
+  Logical(false)
+  Block
+    Integer(1L)
+  If
+    Logical(true)
+    Block
+      Assign(x@b0)
+        Integer(1L)
+#---- R/b.R
+x
+#++++
+Symbol(x@?)
+
+warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+--> 1:1-1:2
+| x
+
+#---- for_body_binding_is_not_package_global
+#---- R/a.R
+for (item in list(1L)) {
+  x <- 1L
+}
+#++++
+For(item@b0)
+  Call
+    Symbol(list@?)
+    Argument
+      Integer(1L)
+  Block
+    Assign(x@b1)
+      Integer(1L)
+#---- R/b.R
+x
+#++++
+Symbol(x@?)
+
+warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+--> 1:1-1:2
+| x
+
+#---- while_body_binding_is_not_package_global
+#---- R/a.R
+while (TRUE) {
+  x <- 1L
+}
+#++++
+While
+  Logical(true)
+  Block
+    Assign(x@b0)
+      Integer(1L)
+#---- R/b.R
+x
+#++++
+Symbol(x@?)
+
+warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+--> 1:1-1:2
+| x
+
+#---- repeat_body_binding_is_not_package_global
+#---- R/a.R
+repeat {
+  x <- 1L
+}
+#++++
+Repeat
+  Block
+    Assign(x@b0)
+      Integer(1L)
+#---- R/b.R
+x
+#++++
+Symbol(x@?)
+
+warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+--> 1:1-1:2
+| x
+
+#---- nested_conditional_body_binding_is_not_package_global
+#---- R/a.R
+if (TRUE) {
+  for (item in list(1L)) {
+    x <- 1L
+  }
+}
+#++++
+If
+  Logical(true)
+  Block
+    For(item@b0)
+      Call
+        Symbol(list@?)
+        Argument
+          Integer(1L)
+      Block
+        Assign(x@b1)
+          Integer(1L)
+#---- R/b.R
+x
+#++++
+Symbol(x@?)
+
+warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+--> 1:1-1:2
+| x
+
+#==== conditional_top_level_reference_is_not_a_local
+#---- reference_within_top_level_if_body_is_not_a_local
+#---- R/a.R
+if (TRUE) {
+  x <- 1L
+  x
+}
+#++++
+If
+  Logical(true)
+  Block
+    Assign(x@b0)
+      Integer(1L)
+    Symbol(x@?)
+
+warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+--> 3:3-3:4
+|   x
