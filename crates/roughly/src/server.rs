@@ -177,6 +177,15 @@ struct EngineWorker {
     client_supports_diagnostic_refresh: bool,
 }
 
+// One LSP operation handed to the worker. A `Read` (a query handler) resets the cancellation token at
+// the start so a newer edit can abandon it; a `Write` (a lifecycle/edit notification, or the mutating
+// `initialize`) runs to completion. Both carry a boxed closure that runs the migrated handler on the
+// worker's `&mut EngineWorker` and (for requests) sends the reply back over a oneshot.
+enum Job {
+    Read(Box<dyn FnOnce(&mut EngineWorker) + Send>),
+    Write(Box<dyn FnOnce(&mut EngineWorker) + Send>),
+}
+
 impl EngineWorker {
     // Built INSIDE the worker thread closure (the engine is `!Send`, so it cannot be constructed on the
     // runtime thread and moved). The closure captures only `Send` inputs (client, cancel, runtime, config).
@@ -1535,15 +1544,6 @@ impl EngineWorker {
 
         Ok(Some(WorkspaceSymbolResponse::Nested(symbols)))
     }
-}
-
-// One LSP operation handed to the worker. A `Read` (a query handler) resets the cancellation token at
-// the start so a newer edit can abandon it; a `Write` (a lifecycle/edit notification, or the mutating
-// `initialize`) runs to completion. Both carry a boxed closure that runs the migrated handler on the
-// worker's `&mut EngineWorker` and (for requests) sends the reply back over a oneshot.
-enum Job {
-    Read(Box<dyn FnOnce(&mut EngineWorker) + Send>),
-    Write(Box<dyn FnOnce(&mut EngineWorker) + Send>),
 }
 
 impl EngineWorker {
