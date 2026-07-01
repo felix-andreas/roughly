@@ -193,3 +193,29 @@ R/main.R:2:1
 ```
 
 Package global, defined at `R/main.R:1:1`
+
+#==== unknown_type
+#---- uninferable_binding_shows_unknown
+#---- R/main.R
+value <- undefined_fn()
+value
+#++++ any
+#!!!! hover value.hover
+R/main.R:2:1
+#++++
+```
+Unknown
+```
+
+Package global, defined at `R/main.R:1:1`
+
+#---- uninferable_expression_shows_unknown
+#---- R/main.R
+undefined_fn(1L)
+#++++ any
+#!!!! hover call.hover
+R/main.R:1:1
+#++++
+```
+Unknown
+```
