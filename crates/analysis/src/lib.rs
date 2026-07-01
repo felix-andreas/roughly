@@ -7,6 +7,7 @@ pub mod interner;
 pub mod lint;
 pub mod lower;
 pub mod naming;
+pub mod s4;
 pub mod stdlib;
 pub mod stub;
 pub mod text;

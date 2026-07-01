@@ -1,6 +1,6 @@
 use {
     crate::{tree, utils},
-    analysis::TextRange,
+    analysis::{TextRange, s4},
     ropey::Rope,
     std::{
         collections::HashMap,
@@ -303,15 +303,7 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<Item> {
     match name.as_str() {
         "setClass" => {
             // setClass("Person", slots = c(name = "character", age = "numeric"))
-            let class_name = get_argument(arguments, rope, "Class", 0)
-                .and_then(|argument| {
-                    (argument.kind() == "string").then(|| {
-                        argument
-                            .child_by_field_name("content")
-                            .map(|content| rope.byte_slice(content.byte_range()).to_string())
-                            .unwrap_or_default()
-                    })
-                })
+            let class_name = s4_string_name(arguments, rope, "Class", 0)
                 .unwrap_or_else(|| "Unknown".to_string());
 
             Some(Item::new(
@@ -325,16 +317,7 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<Item> {
         }
         "setGeneric" => {
             // setGeneric("foo", function(x) standardGeneric("foo"))
-            let generic_name = get_argument(arguments, rope, "name", 0)
-                .and_then(|argument| {
-                    if argument.kind() == "string" {
-                        argument
-                            .child_by_field_name("content")
-                            .map(|content| rope.byte_slice(content.byte_range()).to_string())
-                    } else {
-                        None
-                    }
-                })
+            let generic_name = s4_string_name(arguments, rope, "name", 0)
                 .unwrap_or_else(|| "Unknown".to_string());
             Some(Item::new(
                 generic_name,
@@ -349,56 +332,21 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<Item> {
             // setMethod("foo", "Person", function(x) x@foo)
             // setMethod(f = "baz", signature = "Person", definition = function(x) x@baz)
             // setMethod("qux", c("Person", "Other"), function(x, y) x@qux + y@qux)
-            let method_name = get_argument(arguments, rope, "f", 0)
-                .and_then(|argument| {
-                    if argument.kind() == "string" {
-                        Some(
-                            argument
-                                .child_by_field_name("content")
-                                .map(|content| rope.byte_slice(content.byte_range()).to_string())
-                                .unwrap_or_default(),
-                        )
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_else(|| "Unknown".to_string());
+            let method_name =
+                s4_string_name(arguments, rope, "f", 0).unwrap_or_else(|| "Unknown".to_string());
 
-            let signature = get_argument(arguments, rope, "signature", 1)
-                .and_then(|argument| {
-                    match argument.kind() {
-                        "string" => Some(
-                            argument
-                                .child_by_field_name("content")
-                                .map(|content| rope.byte_slice(content.byte_range()).to_string())
-                                .unwrap_or_default(),
-                        ),
-                        "call" => {
-                            // c("Person", "Other") or c(signature = "Person", other = "Other")
-                            argument.child_by_field_name("arguments").map(|arguments| {
-                                arguments
-                                    .children_by_field_name("argument", &mut arguments.walk())
-                                    .map(|argument| {
-                                        argument
-                                            .child_by_field_name("value")
-                                            .and_then(|value| {
-                                                (value.kind() == "string").then(|| {
-                                                    value
-                                                        .child_by_field_name("content")
-                                                        .map(|content| {
-                                                            rope.byte_slice(content.byte_range())
-                                                                .to_string()
-                                                        })
-                                                        .unwrap_or_default()
-                                                })
-                                            })
-                                            .unwrap_or_else(|| "Unknown".to_string())
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            })
-                        }
-                        _ => None,
+            // The signature is a class name or a `c(...)` of class names; render the class names,
+            // comma-joined, as the method's detail. An empty/unrecognized signature reads as "Unknown".
+            let signature = s4::call_argument(arguments, rope, "signature", 1)
+                .map(|signature| {
+                    let classes = s4::signature_class_strings(signature)
+                        .into_iter()
+                        .map(|class_string| string_content_text(class_string, rope))
+                        .collect::<Vec<_>>();
+                    if classes.is_empty() {
+                        "Unknown".to_string()
+                    } else {
+                        classes.join(", ")
                     }
                 })
                 .unwrap_or_else(|| "Unknown".to_string());
@@ -488,6 +436,21 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<Item> {
     }
 }
 
+// The name string of an S4 constructor's name argument (`setClass`'s `Class`, `setGeneric`'s `name`,
+// `setMethod`'s `f`): resolves the named-or-positional argument, requires a string literal, and reads
+// its content. `None` when the argument is absent or not a string.
+fn s4_string_name(arguments: Node, rope: &Rope, name: &str, index: usize) -> Option<String> {
+    let string_node = s4::string_argument(arguments, rope, name, index)?;
+    Some(string_content_text(string_node, rope))
+}
+
+// The text between the quotes of a string-literal node (empty when it has no content, e.g. `""`).
+fn string_content_text(string_node: Node, rope: &Rope) -> String {
+    s4::string_content(string_node)
+        .map(|content| rope.byte_slice(content.byte_range()).to_string())
+        .unwrap_or_default()
+}
+
 // note: this function shouldn't be used for keyword-only arguments (arguments after ...)
 pub fn get_argument<'a>(
     arguments: Node<'a>,
@@ -495,26 +458,5 @@ pub fn get_argument<'a>(
     query: &str,
     pos: usize,
 ) -> Option<Node<'a>> {
-    // Try named argument
-    for argument in arguments.children_by_field_name("argument", &mut arguments.walk()) {
-        if let Some(name) = argument.child_by_field_name("name") {
-            let name = rope.byte_slice(name.byte_range()).to_string();
-            if name == query {
-                return argument.child_by_field_name("value");
-            }
-        }
-    }
-
-    // Fallback to positional
-    arguments
-        .children_by_field_name("argument", &mut arguments.walk())
-        .nth(pos)
-        .and_then(|argument| {
-            // Only return if there is no name (i.e., it's a positional argument)
-            if argument.child_by_field_name("name").is_none() {
-                argument.child_by_field_name("value")
-            } else {
-                None
-            }
-        })
+    s4::call_argument(arguments, rope, query, pos)
 }
