@@ -86,19 +86,75 @@ list{value: integer | NULL, meta: list{missing: Unknown, default: Any}}
 #---- special_forms_in_higher_order_function
 fn(handler:fn(Unknown)->Any)->list{result:Any,missing:Unknown|NULL}
 #++++
-fn(handler: fn(Unknown) -> Any) -> list{result: Any, missing: Unknown | NULL}
+fn(handler: fn(Unknown) -> Any) -> list{result: Any, missing: Unknown}
 
-#==== invalid_unions
-#---- invalid_non_nullable_union
+#==== multi_member_unions
+#---- two_members
 integer | character
 #++++
-UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now." }
+integer | character
 
-#---- invalid_union_with_multiple_non_null_members
+#---- three_members
+integer | character | logical
+#++++
+integer | character | logical
+
+#---- multi_member_with_null
 integer | character | NULL
 #++++
-UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now." }
+integer | character | NULL
 
+#---- null_moves_last
+NULL | integer | character
+#++++
+integer | character | NULL
+
+#---- duplicate_members_collapse
+integer | character | integer
+#++++
+integer | character
+
+#---- duplicate_null_members_collapse
+integer | NULL | character | NULL
+#++++
+integer | character | NULL
+
+#---- any_member_absorbs_union
+integer | Any | character
+#++++
+Any
+
+#---- unknown_member_absorbs_union
+integer | Unknown
+#++++
+Unknown
+
+#---- multi_member_function_parameter
+fn(integer | character) -> integer
+#++++
+fn(integer | character) -> integer
+
+#---- multi_member_function_return
+fn(integer) -> integer | character
+#++++
+fn(integer) -> integer | character
+
+#---- multi_member_list_item
+list[integer | character]
+#++++
+list[integer | character]
+
+#---- multi_member_record_field
+list{value: integer | character}
+#++++
+list{value: integer | character}
+
+#---- multi_member_vector_members
+integer[] | character[] | NULL
+#++++
+integer[] | character[] | NULL
+
+#==== invalid_unions
 #---- invalid_null_null_union
 NULL | NULL
 #++++

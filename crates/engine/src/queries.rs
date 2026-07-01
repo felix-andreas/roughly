@@ -1565,8 +1565,7 @@ fn resolve_surface_type(
                 );
             }
         }
-        SurfaceType::Nullable(inner_type)
-        | SurfaceType::Vector(inner_type)
+        SurfaceType::Vector(inner_type)
         | SurfaceType::NamedVector(inner_type)
         | SurfaceType::List(inner_type)
         | SurfaceType::NamedList(inner_type) => resolve_surface_type(
@@ -1578,6 +1577,19 @@ fn resolve_surface_type(
             interner,
             diagnostics,
         ),
+        SurfaceType::Union(members) => {
+            for member in members {
+                resolve_surface_type(
+                    member,
+                    local_type_parameters,
+                    range,
+                    resolved,
+                    rope,
+                    interner,
+                    diagnostics,
+                );
+            }
+        }
         SurfaceType::Record(fields) => {
             for field in fields {
                 resolve_surface_type(
@@ -1619,6 +1631,17 @@ fn resolve_surface_type(
             for parameter in &function_type.named_parameters {
                 resolve_surface_type(
                     &parameter.value,
+                    local_type_parameters,
+                    range,
+                    resolved,
+                    rope,
+                    interner,
+                    diagnostics,
+                );
+            }
+            if let Some(element) = &function_type.variadic {
+                resolve_surface_type(
+                    element,
                     local_type_parameters,
                     range,
                     resolved,
@@ -1759,12 +1782,16 @@ fn collect_surface_type_references(
                 collect_surface_type_references(argument, local_type_parameters, references);
             }
         }
-        SurfaceType::Nullable(inner_type)
-        | SurfaceType::Vector(inner_type)
+        SurfaceType::Vector(inner_type)
         | SurfaceType::NamedVector(inner_type)
         | SurfaceType::List(inner_type)
         | SurfaceType::NamedList(inner_type) => {
             collect_surface_type_references(inner_type, local_type_parameters, references);
+        }
+        SurfaceType::Union(members) => {
+            for member in members {
+                collect_surface_type_references(member, local_type_parameters, references);
+            }
         }
         SurfaceType::Record(fields) => {
             for field in fields {
@@ -1786,6 +1813,9 @@ fn collect_surface_type_references(
                     local_type_parameters,
                     references,
                 );
+            }
+            if let Some(element) = &function_type.variadic {
+                collect_surface_type_references(element, local_type_parameters, references);
             }
             collect_surface_type_references(
                 &function_type.return_type,

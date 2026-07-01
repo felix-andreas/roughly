@@ -276,3 +276,30 @@ R/main.R:4:15
 ```
 type Person = list{name: character}
 ```
+
+#==== union_types
+#---- if_else_union_binding
+#---- R/main.R
+value <- if (TRUE) 1L else "foo"
+#++++ any
+#!!!! hover union_binding.hover
+R/main.R:1:1
+#++++
+```
+integer | character
+```
+
+Local variable, defined at `R/main.R:1:1`
+
+#---- for_element_over_heterogeneous_named_list
+#---- R/main.R
+for (item in list(a = 1L, b = "two")) item
+#++++ any
+#!!!! hover loop_element.hover
+R/main.R:1:39
+#++++
+```
+integer | character
+```
+
+Local variable, defined at `R/main.R:1:1`

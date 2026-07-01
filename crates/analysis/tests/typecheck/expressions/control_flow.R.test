@@ -29,10 +29,19 @@ if (TRUE) { } else { }
 #++++
 NULL
 
-#---- if_else_branch_mismatch
+#---- if_else_different_branches_union
 if (TRUE) 1L else "foo"
 #++++
-error: type mismatch
+integer | character
+
+#---- if_else_union_flows_into_binding
+flag <- TRUE
+value <- if (flag) 1L else "foo"
+value
+#++++
+logical
+integer | character
+integer | character
 
 #---- if_condition_must_be_scalar_logical
 if (c(TRUE, FALSE)) 1L else 2L
@@ -156,8 +165,33 @@ for (count in c(1L, 2L)) double_count(count)
 fn(count: integer) -> integer
 NULL
 
-#---- for_over_heterogeneous_tuple_is_rejected
+#---- for_over_heterogeneous_tuple_allowed
 for (item in list(1L, "foo")) item
+#++++
+NULL
+
+#---- for_over_empty_list_allowed
+for (item in list()) item
+#++++
+NULL
+
+#---- for_over_heterogeneous_named_list_allowed
+for (item in list(a = 1L, b = "two")) item
+#++++
+NULL
+
+#---- for_element_union_usable_at_union_parameter
+#: fn(value: integer | character) -> logical
+accepts <- function(value) TRUE
+for (item in list(a = 1L, b = "two")) accepts(item)
+#++++
+fn(value: integer | character) -> logical
+NULL
+
+#---- for_element_union_rejected_at_member_parameter
+#: fn(count: integer) -> integer
+double_count <- function(count) count + count
+for (item in list(a = 1L, b = "two")) double_count(item)
 #++++
 error: type mismatch
 

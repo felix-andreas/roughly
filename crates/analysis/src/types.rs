@@ -34,7 +34,10 @@ pub enum SurfaceType {
     Any,
     Unknown,
     Null,
-    Nullable(Box<SurfaceType>),
+    // Invariant: normalized — flattened (no `Union` member), structurally deduplicated, `Null`
+    // last, no `Any`/`Unknown` member (they absorb the union), and at least two members. Build
+    // through `SurfaceType::union_of`.
+    Union(Vec<SurfaceType>),
     Scalar(Atomic),
     Named(Symbol, Vec<SurfaceType>),
     Vector(Box<SurfaceType>),
@@ -47,12 +50,44 @@ pub enum SurfaceType {
     Binders(Vec<Symbol>, Box<SurfaceType>),
 }
 
+impl SurfaceType {
+    pub fn union_of(members: Vec<SurfaceType>) -> SurfaceType {
+        let Some(mut members) =
+            normalize_union(members, SurfaceType::Null, |member| match member {
+                SurfaceType::Union(inner) => Ok(inner),
+                other => Err(other),
+            })
+        else {
+            return SurfaceType::Null;
+        };
+        // `Any` and `Unknown` each already contain every value, so a union with such a member says
+        // nothing more than the member itself. `Any` wins over `Unknown` because it is the wider
+        // claim (explicitly opted out of checking).
+        if members.contains(&SurfaceType::Any) {
+            return SurfaceType::Any;
+        }
+        if members.contains(&SurfaceType::Unknown) {
+            return SurfaceType::Unknown;
+        }
+        if members.len() == 1 {
+            members.pop().expect("length was checked")
+        } else {
+            SurfaceType::Union(members)
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CoreType {
     Any,
     Unknown,
     Null,
-    Nullable(Box<CoreType>),
+    // Invariant: normalized — flattened (no `Union` member), structurally deduplicated, `Null`
+    // last, no `Any`/`Unknown` member (they absorb the union), and at least two members. Build
+    // through `CoreType::union_of`. Member order otherwise preserves first occurrence; union
+    // equality where it matters semantically (unification, compatibility) is set-based, so
+    // `integer | NULL` and `NULL | integer` behave identically.
+    Union(Vec<CoreType>),
     Scalar(Atomic),
     Nominal(Symbol, Vec<CoreType>),
     Vector(Atomic),
@@ -63,6 +98,64 @@ pub enum CoreType {
     Tuple(Vec<CoreType>),
     Function(FunctionType<CoreType>),
     Variable(InferenceVariableId),
+}
+
+impl CoreType {
+    pub fn union_of(members: Vec<CoreType>) -> CoreType {
+        let Some(mut members) = normalize_union(members, CoreType::Null, |member| match member {
+            CoreType::Union(inner) => Ok(inner),
+            other => Err(other),
+        }) else {
+            return CoreType::Null;
+        };
+        // `Any` and `Unknown` each already contain every value, so a union with such a member says
+        // nothing more than the member itself. `Any` wins over `Unknown` because it is the wider
+        // claim (explicitly opted out of checking).
+        if members.contains(&CoreType::Any) {
+            return CoreType::Any;
+        }
+        if members.contains(&CoreType::Unknown) {
+            return CoreType::Unknown;
+        }
+        if members.len() == 1 {
+            members.pop().expect("length was checked")
+        } else {
+            CoreType::Union(members)
+        }
+    }
+}
+
+// Shared union normalization: flatten nested unions, deduplicate structurally (first occurrence
+// wins), and move `Null` to the end. Returns `None` for an empty member list (the caller maps it
+// to `Null`, the unit type) and the normalized members otherwise.
+fn normalize_union<Type: PartialEq>(
+    members: Vec<Type>,
+    null: Type,
+    into_union_members: impl Fn(Type) -> Result<Vec<Type>, Type> + Copy,
+) -> Option<Vec<Type>> {
+    let mut normalized: Vec<Type> = Vec::with_capacity(members.len());
+    let mut saw_null = false;
+    let mut queue: Vec<Type> = members.into_iter().rev().collect();
+    while let Some(member) = queue.pop() {
+        match into_union_members(member) {
+            Ok(inner) => queue.extend(inner.into_iter().rev()),
+            Err(member) => {
+                if member == null {
+                    saw_null = true;
+                } else if !normalized.contains(&member) {
+                    normalized.push(member);
+                }
+            }
+        }
+    }
+    if saw_null {
+        normalized.push(null);
+    }
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -252,3 +252,13 @@ twiceapply: <T> fn(f: fn(T) -> T) -> fn(x: T) -> T
 pick <- function(cond, a, b) if (cond) a else b
 #++++
 pick: <T> fn(cond: logical, a: T, b: T) -> T
+
+#---- null_else_branch_keeps_variable_polymorphic
+maybe <- function(flag, value) if (flag) value else NULL
+#++++
+maybe: <T> fn(flag: logical, value: T) -> T | NULL
+
+#---- different_branch_literals_join_to_union
+label_or_count <- function(flag) if (flag) 1L else "one"
+#++++
+label_or_count: fn(flag: logical) -> integer | character

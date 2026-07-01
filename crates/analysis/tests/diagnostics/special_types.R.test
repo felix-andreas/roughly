@@ -1,10 +1,8 @@
 #==== special_types
-#---- nullable_if_else_branch_mismatch
+#---- if_else_different_branches_accepted
 if (TRUE) 1L else "foo"
 #++++
-error[type-error] expected `integer`, found `character`
---> 1:1-1:24
-| if (TRUE) 1L else "foo"
+No diagnostics.
 
 #---- nullable_if_condition_must_be_scalar_logical
 if (c(TRUE, FALSE)) 1L
@@ -45,7 +43,7 @@ error[type-error] expected `integer`, found `NULL`
 #: integer
 value <- if (TRUE) break
 #++++
-error[type-error] expected `integer`, found `Unknown | NULL`
+error[type-error] expected `integer`, found `Unknown`
 --> 2:1-2:25
 | value <- if (TRUE) break
 
@@ -60,3 +58,14 @@ No diagnostics.
 value <- if (TRUE) break
 #++++
 No diagnostics.
+
+#---- multi_member_union_not_assignable_to_plain_member
+#: integer | character
+value <- 1L
+
+#: integer
+narrowed <- value
+#++++
+error[type-error] expected `integer`, found `integer | character`
+--> 5:1-5:18
+| narrowed <- value

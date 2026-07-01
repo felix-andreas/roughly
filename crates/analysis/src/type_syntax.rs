@@ -93,9 +93,11 @@ pub fn render_surface_type(surface_type: &SurfaceType, interner: &Interner) -> S
         SurfaceType::Any => "Any".to_owned(),
         SurfaceType::Unknown => "Unknown".to_owned(),
         SurfaceType::Null => "NULL".to_owned(),
-        SurfaceType::Nullable(inner_type) => {
-            format!("{} | NULL", render_surface_type(inner_type, interner))
-        }
+        SurfaceType::Union(members) => members
+            .iter()
+            .map(|member| render_surface_type(member, interner))
+            .collect::<Vec<_>>()
+            .join(" | "),
         SurfaceType::Scalar(atomic) => match atomic {
             Atomic::Logical => "logical",
             Atomic::Integer => "integer",
@@ -634,8 +636,12 @@ fn validate_surface_type(
                 validate_surface_type(arg, interner)?;
             }
         }
-        SurfaceType::Nullable(inner)
-        | SurfaceType::Vector(inner)
+        SurfaceType::Union(members) => {
+            for member in members {
+                validate_surface_type(member, interner)?;
+            }
+        }
+        SurfaceType::Vector(inner)
         | SurfaceType::NamedVector(inner)
         | SurfaceType::List(inner)
         | SurfaceType::NamedList(inner) => validate_surface_type(inner, interner)?,
@@ -1261,7 +1267,8 @@ impl<'a> TypeParser<'a> {
         stop_context: StopContext,
     ) -> Result<SurfaceType, TypeParseError> {
         self.skip_ascii_whitespace();
-        let mut surface_type = self.parse_primary(stop_context)?;
+        let first_member = self.parse_primary(stop_context)?;
+        let mut members = vec![first_member];
 
         loop {
             self.skip_ascii_whitespace();
@@ -1277,33 +1284,21 @@ impl<'a> TypeParser<'a> {
                 break;
             }
 
-            if matches!(surface_type, SurfaceType::Nullable(_)) {
-                return Err(unsupported_construct(
-                    "only unions with exactly one non-`NULL` member are supported for now.",
-                ));
-            }
-
             self.position += 1;
             self.skip_ascii_whitespace();
-
-            let right_type = self.parse_primary(stop_context)?;
-            surface_type = match (surface_type, right_type) {
-                (SurfaceType::Null, SurfaceType::Null) => {
-                    return Err(unsupported_construct(
-                        "`NULL | NULL` is not valid type syntax.",
-                    ));
-                }
-                (SurfaceType::Null, right_type) => SurfaceType::Nullable(Box::new(right_type)),
-                (left_type, SurfaceType::Null) => SurfaceType::Nullable(Box::new(left_type)),
-                (_left_type, _right_type) => {
-                    return Err(unsupported_construct(
-                        "only nullable unions with `NULL` are supported for now.",
-                    ));
-                }
-            };
+            members.push(self.parse_primary(stop_context)?);
         }
 
-        Ok(surface_type)
+        if members.len() > 1 && members.iter().all(|member| *member == SurfaceType::Null) {
+            return Err(unsupported_construct(
+                "`NULL | NULL` is not valid type syntax.",
+            ));
+        }
+
+        if members.len() == 1 {
+            return Ok(members.pop().expect("length was checked"));
+        }
+        Ok(SurfaceType::union_of(members))
     }
 
     fn parse_primary(&mut self, stop_context: StopContext) -> Result<SurfaceType, TypeParseError> {

@@ -124,3 +124,84 @@ unsupported + 1L
 #++++
 Unknown
 Unknown
+
+#==== multi_member_unions
+#---- union_annotation_accepts_integer
+#: integer | character
+value <- 1L
+value
+#++++
+integer | character
+integer | character
+
+#---- union_annotation_accepts_character
+#: integer | character
+value <- "two"
+value
+#++++
+integer | character
+integer | character
+
+#---- union_annotation_rejects_non_member
+#: integer | character
+value <- TRUE
+#++++
+error: type mismatch
+
+#---- member_accepted_where_union_parameter_expected
+#: fn(value: integer | character | NULL) -> logical
+accepts <- function(value) TRUE
+
+accepts(1L)
+#++++
+fn(value: integer | character | NULL) -> logical
+logical
+
+#---- null_accepted_where_union_contains_null
+#: fn(value: integer | character | NULL) -> logical
+accepts <- function(value) TRUE
+
+accepts(NULL)
+#++++
+fn(value: integer | character | NULL) -> logical
+logical
+
+#---- union_rejected_where_plain_member_expected
+#: integer | character
+value <- 1L
+
+#: integer
+narrowed <- value
+#++++
+error: type mismatch
+
+#---- union_accepted_where_wider_union_expected
+#: integer | NULL
+narrow <- 1L
+
+#: integer | character | NULL
+wide <- narrow
+wide
+#++++
+integer | NULL
+integer | character | NULL
+integer | character | NULL
+
+#---- union_rejected_where_narrower_union_expected
+#: integer | character | NULL
+wide <- 1L
+
+#: integer | NULL
+narrow <- wide
+#++++
+error: type mismatch
+
+#---- alias_expansion_into_union_dedupes
+#: @alias MaybeCount {integer | NULL}
+
+#: MaybeCount | integer | NULL
+value <- 1L
+value
+#++++
+integer | NULL
+integer | NULL

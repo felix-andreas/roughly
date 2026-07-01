@@ -5,7 +5,7 @@ description: The precise static-typing semantics contract for Roughly's R type c
 
 This is the authoritative specification of Roughly's typing semantics — the precise contract the type checker implements. For a gentler, example-driven introduction, start with the [Type Checker guide](/type-checker).
 
-This page is the single source of truth for the user-facing typing semantics: the type syntax, the inferred type shapes, the coercion rules, and the rendered type forms that appear in errors and hovers. The main motivation for the restricted union feature is to support `if` expressions without an `else` branch.
+This page is the single source of truth for the user-facing typing semantics: the type syntax, the inferred type shapes, the coercion rules, and the rendered type forms that appear in errors and hovers.
 
 ## Typing comment syntax
 
@@ -729,7 +729,7 @@ shape <- person
 
 When two applications of the same generic nominal type are checked for compatibility — for example `Box<integer>` against `Box<integer | NULL>` — each type argument is checked in the direction determined by **where its type parameter occurs** in the representation type. The variance of each parameter is computed from its occurrences:
 
-- a **function return** position, a **container or structural element** position (`list` item, `list{...}` field, tuple item, vector element, and nullable inner type), and a **direct** occurrence are *covariant*: they preserve the checking direction, so `Box<integer>` is compatible where `Box<integer | NULL>` is expected (a narrower argument satisfies a wider one);
+- a **function return** position, a **container or structural element** position (`list` item, `list{...}` field, tuple item, vector element, and union member), and a **direct** occurrence are *covariant*: they preserve the checking direction, so `Box<integer>` is compatible where `Box<integer | NULL>` is expected (a narrower argument satisfies a wider one);
 - a **function parameter** position is *contravariant*: it flips the checking direction, so for `@type Handler<T> {fn(value: T) -> NULL}`, `Handler<integer | NULL>` is compatible where `Handler<integer>` is expected, but `Handler<integer>` is **not** compatible where `Handler<integer | NULL>` is expected (otherwise a `NULL` could reach a function that only accepts `integer`);
 - a parameter that occurs in **both** a covariant and a contravariant position is *invariant*: its argument must match exactly in both directions, so `Cell<integer>` and `Cell<integer | NULL>` are mutually incompatible for `@type Cell<T> {list{ get: T, set: fn(value: T) -> NULL }}`;
 - a parameter that does not occur constrains nothing and accepts any argument.
@@ -744,42 +744,63 @@ Unification is the **invariant floor**: when it must produce a single representa
 
 ### Union types
 
-For now, the only supported union form is a nullable union with `NULL`.
+A union type `A | B | ...` describes a value that has one of the member types. Any number of members is allowed, and any type may be a member; `T | NULL` — the nullable form of `T` — is simply the two-member special case.
 
-- `T | NULL` and `NULL | T` mean the same thing
-- this is the nullable form of `T`, but for now it remains explicit in the surface syntax rather than being treated as implicit nullability
-- nullable union syntax is allowed anywhere a type can appear, including:
+- union syntax is allowed anywhere a type can appear, including:
   - variable annotations
   - function parameters
   - function returns
   - compact function type annotations
   - nested function types
   - list and map-like list annotations
-- only nullable unions are allowed for now
+- a union describes which shapes a value can take; it does not merge or coerce its members
 
 Examples:
 
-- `integer | NULL`
-- `NULL | integer`
+- `integer | character`
+- `integer | character | NULL`
 - `character[] | NULL`
-- `fn(count: integer | NULL) -> character | NULL`
+- `integer[] | character[]`
+- `fn(count: integer | NULL) -> character | logical | NULL`
 
 Not allowed:
 
-- `integer | character`
-- `integer | character | NULL`
-- any union with more than one non-`NULL` member
-- writing `NULL | NULL` in user-facing type syntax
+- `NULL | NULL` — a union of only `NULL` members is rejected as invalid type syntax (write `NULL`)
 
-`NULL | NULL` is not valid user-facing syntax, even though it remains a relevant internal edge case for implementation.
+#### Union normalization
 
-### Nullable union compatibility
+Unions are kept in one normal form, so equivalent spellings mean — and render as — the same type:
 
-- `T` is compatible with `T | NULL`
-- `NULL` is compatible with `T | NULL`
-- `T | NULL` is not compatible with plain `T`
-- nested nullable unions collapse internally
-- for example, `(T | NULL) | NULL` normalizes to `T | NULL`, and `NULL | NULL` normalizes internally to `NULL`
+- **flat**: a union member that is itself a union flattens into the enclosing union; for example an alias expanding to `(A | B) | C` normalizes to `A | B | C`
+- **deduplicated**: repeated members collapse, keeping the first occurrence; `integer | character | integer` normalizes to `integer | character`
+- **order-insensitive**: member order does not affect meaning; `integer | NULL` and `NULL | integer` are the same type. Rendering preserves first-occurrence order, except that `NULL` always renders last
+- **singleton collapse**: a union whose members collapse to a single type is that type; `integer | integer` is `integer`, and a nullable of `NULL` itself normalizes to `NULL`
+- **`Any` absorbs**: a union with an `Any` member is `Any` (every value already satisfies `Any`)
+- **`Unknown` absorbs**: otherwise, a union with an `Unknown` member is `Unknown` (the union claims no more than "not statically known")
+
+Normalization also applies to unions the checker builds itself (branch joins, alias expansion, `NULL`-producing lookups), so a rendered union is always flat, deduplicated, and at least two members.
+
+### Union compatibility
+
+Compatibility treats a union on the two sides differently:
+
+- **into a union (expected side)**: a value fits an expected union when it fits *any* member
+  - `T` is compatible with any union containing `T`; `integer` is compatible with `integer | character | NULL`
+  - `NULL` is compatible with any union containing `NULL`
+  - the usual coercions apply per member; a value coercible to some member fits the union
+- **out of a union (actual side)**: a union value must be accepted in *every* shape it can take, so a union is compatible with an expected type only when each of its members is
+  - a union is compatible with any wider union: `integer | NULL` is compatible with `integer | character | NULL`
+  - a union is **not** compatible with a plain member type: `integer | character` is not compatible with `integer`, and `T | NULL` is not compatible with plain `T`
+- member checks are attempted in member order, and a failed member attempt leaks no inference bindings into the next attempt
+
+### Union unification
+
+Unification (used where two types must become one representative type, such as inferring a shared type argument) is stricter than compatibility — it is the invariant floor:
+
+- an inference variable may be bound *to* a union, exactly like any other type
+- two unions unify only when their member sets are equal (member order is presentation, not identity)
+- the single member-wise case is the nullable shape: `T | NULL` unifies with `U | NULL` by unifying `T` with `U` when each side has exactly one non-`NULL` member, which is what lets a `<T> ... T | NULL` scheme instantiate against a concrete nullable
+- there is no member-matching search inside unification; directional member-wise reasoning lives entirely in compatibility
 
 ## Operators
 
@@ -789,8 +810,8 @@ Not allowed:
 
 - requires a scalar `logical` condition
 - infers the branch body as type `T`
-- produces the result type `T | NULL`
-- if the branch body already has type `NULL`, the result normalizes to `NULL`
+- produces the result type `T | NULL` (the missing branch contributes `NULL` to the join)
+- union normalization applies: a `NULL` body stays `NULL`, an already-nullable body stays a single `T | NULL`, and an `Unknown` body stays `Unknown`
 
 Examples:
 
@@ -800,23 +821,20 @@ Examples:
 #### `if ... else`
 
 - requires a scalar `logical` condition
-- requires both branches to have the same type, unless one branch is `NULL`
-- returns the shared branch type when both branches match exactly
-- returns `T | NULL` when one branch has type `T` and the other has type `NULL`
-- does not use any additional coercion beyond the nullable-union rule above
+- **joins** the two branch types into the result type:
+  - branches that unify share that type: `if (flag) 1L else 2L` is `integer`, and `if (cond) a else b` over two unconstrained values keeps them unified as one polymorphic type
+  - a `NULL` branch joins by union without constraining the other branch: one branch `T` and one branch `NULL` produce `T | NULL`
+  - branches with genuinely different types produce their union: `if (flag) 1L else "foo"` is `integer | character` — different branch types are **not** a type error
+  - an `Unknown` branch makes the whole conditional `Unknown` rather than claiming the other branch's type
+- the join does not merge or coerce branch types beyond unification; it only records the alternatives
 
 Examples:
 
 - `if (flag) 1L else 2L` infers as `integer`
 - `if (flag) 1L else NULL` infers as `integer | NULL`
 - `if (flag) NULL else 2L` infers as `integer | NULL`
+- `if (flag) 1L else "foo"` infers as `integer | character`
 - `if (flag) { } else { }` infers as `NULL`
-
-It is a type error when the branches do not match and neither branch is `NULL`.
-
-Examples:
-
-- `if (flag) 1L else "foo"` is a type error
 - `if (c(TRUE, FALSE)) 1L else 2L` is invalid because the condition is not scalar `logical`
 
 ### Blocks
@@ -907,14 +925,14 @@ Use `[[` for supported vector indexing instead.
 
 #### `[` on lists
 
-`[` is currently defined only for array-like and map-like list shapes.
-
-Tuple-like, record-like, or map-like list values may be used with `[` only when they can coerce to an array-like or map-like list shape.
+`[` slices a list: the result is a sub-list, so the subject's fixed shape does not survive into the result type.
 
 - for array-like `list[T]`, `[` returns `list[T]`
 - for map-like `list[named: T]`, `[` returns `list[named: T]`
+- for a tuple-like list, `[` returns `list[T]` where `T` is the **union of the item types**; `list(1L, "foo")[1L]` is `list[integer | character]`
+- for a record-like list, `[` returns `list[named: T]` where `T` is the union of the field value types
 
-When `[` accepts a tuple-like, record-like, or map-like list through coercion, the resulting type is the array-like or map-like list type produced by that coercion.
+For a homogeneous fixed-shape list the union collapses, so the result matches the plain coercion to the array-like or map-like shape.
 
 Some indexing forms remain unsupported for now. In particular, this document does not currently define `[` on vectors, and tuple-like or fixed-shape record-like `[[` access requires statically known literal indices or names.
 
@@ -1130,13 +1148,12 @@ Examples:
 ### `for`
 
 - has the form `for (name in value) body`
-- requires an iteration source coercible to array-like iteration
-- accepted iteration sources include:
-  - values that can coerce to array-like vectors `T[]`
-  - tuple-like, record-like, or map-like lists that can coerce to array-like `list[T]`
-- only checks whether the iteration source can be coerced to the required shape
+- requires an iterable iteration source:
+  - scalar-like, array-like, and map-like vectors iterate with the scalar element type
+  - array-like `list[T]` and map-like `list[named: T]` iterate with element type `T`
+  - tuple-like and record-like lists iterate with the **union of their item types** (which collapses to the single item type for a homogeneous list), so heterogeneous fixed-shape lists are iterable: `for (item in list(a = 1L, b = "two")) ...` binds `item` as `integer | character`
 - does not itself change the type of the iterated value outside the loop
-- inside the loop body, the bound name has the iterated element type `T`
+- inside the loop body, the bound name has the iterated element type
 
 ### `while`
 

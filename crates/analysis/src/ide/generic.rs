@@ -267,9 +267,10 @@ fn expression_overlaps_viewport(range: Range, viewport: &TextRange) -> bool {
 fn is_concrete_type(core_type: &CoreType) -> bool {
     match core_type {
         CoreType::Variable(_) | CoreType::Unknown => false,
-        CoreType::Nullable(inner_type)
-        | CoreType::List(inner_type)
-        | CoreType::NamedList(inner_type) => is_concrete_type(inner_type),
+        CoreType::List(inner_type) | CoreType::NamedList(inner_type) => {
+            is_concrete_type(inner_type)
+        }
+        CoreType::Union(members) => members.iter().all(is_concrete_type),
         CoreType::Nominal(_, type_arguments) => type_arguments.iter().all(is_concrete_type),
         CoreType::Record(fields) => fields.iter().all(|field| is_concrete_type(&field.value)),
         CoreType::Tuple(items) => items.iter().all(is_concrete_type),

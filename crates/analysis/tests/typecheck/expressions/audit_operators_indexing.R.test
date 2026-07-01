@@ -165,10 +165,10 @@ list(foo = 1L, bar = 2L)["bar"]
 #++++
 list[named: integer]
 
-#---- bracket_heterogeneous_tuple_rejected
+#---- bracket_heterogeneous_tuple_union_element
 list(1L, "foo")[1L]
 #++++
-error: unsupported `[` subset
+list[integer | character]
 
 #---- bracket_on_scalar_vector_rejected
 y <- 1L

@@ -23,3 +23,23 @@ error: tuple length mismatch
 value <- list(right = 1L)
 #++++
 error: record field mismatch
+
+#==== unions
+#---- null_join_keeps_variable_in_union
+maybe <- function(flag, value) if (flag) value
+#++++
+fn(flag: logical, value: ?1) -> ?1 | NULL
+
+#---- union_typed_argument_instantiates_scheme
+maybe <- function(flag, value) if (flag) value
+maybe(TRUE, 1L)
+#++++
+fn(flag: logical, value: ?1) -> ?1 | NULL
+integer | NULL
+
+#---- branch_join_falls_back_to_union
+pick_label <- function(flag) if (flag) 1L else "one"
+pick_label(TRUE)
+#++++
+fn(flag: logical) -> integer | character
+integer | character

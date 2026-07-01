@@ -619,11 +619,11 @@ fn annotation_contains_named_type(annotation: &AttachedAnnotation) -> bool {
 fn surface_type_contains_named_type(surface_type: &SurfaceType) -> bool {
     match surface_type {
         SurfaceType::Named(_, _) => true,
-        SurfaceType::Nullable(inner_type)
-        | SurfaceType::Vector(inner_type)
+        SurfaceType::Vector(inner_type)
         | SurfaceType::NamedVector(inner_type)
         | SurfaceType::List(inner_type)
         | SurfaceType::NamedList(inner_type) => surface_type_contains_named_type(inner_type),
+        SurfaceType::Union(members) => members.iter().any(surface_type_contains_named_type),
         SurfaceType::Record(fields) => fields
             .iter()
             .any(|field| surface_type_contains_named_type(&field.value)),
@@ -781,12 +781,16 @@ impl<'a> TypeResolver<'a> {
                     self.resolve_surface_type(argument, local_type_parameters, range, document_id);
                 }
             }
-            SurfaceType::Nullable(inner_type)
-            | SurfaceType::Vector(inner_type)
+            SurfaceType::Vector(inner_type)
             | SurfaceType::NamedVector(inner_type)
             | SurfaceType::List(inner_type)
             | SurfaceType::NamedList(inner_type) => {
                 self.resolve_surface_type(inner_type, local_type_parameters, range, document_id);
+            }
+            SurfaceType::Union(members) => {
+                for member in members {
+                    self.resolve_surface_type(member, local_type_parameters, range, document_id);
+                }
             }
             SurfaceType::Record(fields) => {
                 for field in fields {

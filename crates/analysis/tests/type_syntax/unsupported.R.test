@@ -25,37 +25,7 @@ fn(integer) -> <T> fn(T) -> T
 UnsupportedConstruct { message: "higher-rank polymorphism is not supported. type parameter binders may only appear at the outermost level." }
 
 #==== unsupported_unions
-#---- non_nullable_union_two_members
-integer | character
-#++++
-UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now." }
-
-#---- non_nullable_union_three_members
-integer | character | logical
-#++++
-UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now." }
-
-#---- nullable_union_with_two_non_null_members
-integer | character | NULL
-#++++
-UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now." }
-
 #---- duplicate_null_union
 NULL | NULL
 #++++
 UnsupportedConstruct { message: "`NULL | NULL` is not valid type syntax." }
-
-#---- nested_nonnullable_union_in_function
-fn(integer | character) -> integer
-#++++
-UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now. (while parsing positional parameter)" }
-
-#---- nested_nonnullable_union_in_list
-list[integer | character]
-#++++
-UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now." }
-
-#---- nested_nonnullable_union_in_record
-list{value: integer | character}
-#++++
-UnsupportedConstruct { message: "only nullable unions with `NULL` are supported for now. (while parsing field `value`)" }

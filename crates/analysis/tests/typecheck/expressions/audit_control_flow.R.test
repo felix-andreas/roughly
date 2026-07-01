@@ -58,15 +58,15 @@ if (TRUE) c(1L, 2L) else c(3L, 4L)
 #++++
 integer[]
 
-#---- if_else_mismatch_integer_double
+#---- if_else_integer_double_union
 if (TRUE) 1L else 2.5
 #++++
-error: type mismatch
+integer | double
 
-#---- if_else_mismatch_character_integer
+#---- if_else_character_integer_union
 if (TRUE) "a" else 1L
 #++++
-error: type mismatch
+character | integer
 
 #---- if_condition_integer_rejected
 if (1L) 1L else 2L

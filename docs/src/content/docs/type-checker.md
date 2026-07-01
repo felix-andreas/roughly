@@ -287,12 +287,15 @@ Fixed-shape lists coerce to the homogeneous forms when every element is compatib
 the element type: tuple-like and record-like lists coerce to `list[T]`, and record-like
 lists also coerce to `list[named: T]`. The reverse coercions do not hold.
 
-### `T | NULL`, `Any`, `Unknown`
+### Unions, `Any`, `Unknown`
 
-The only supported union is the nullable union `T | NULL` (equivalently `NULL | T`). It
-is the nullable form of `T`: a plain `T` or `NULL` is compatible with `T | NULL`, but a
-`T | NULL` is not compatible with plain `T`. Unions of two non-`NULL` members are not
-supported.
+A union `A | B | ...` describes a value that has one of the member types; `T | NULL` is
+the nullable special case. A value of a member type is compatible with the union
+(`integer` fits `integer | character | NULL`), and a union fits any wider union, but a
+union is not compatible with a plain member type: `integer | character` does not fit
+`integer`, and `T | NULL` does not fit plain `T`. Unions normalize — nested unions
+flatten, duplicate members collapse, `NULL` renders last, and an `Any` or `Unknown`
+member absorbs the whole union.
 
 `Any` is the explicit escape hatch: it is compatible with every type in both
 directions, and should appear only when you write it. `Unknown` means the checker could
@@ -366,10 +369,11 @@ non-numeric argument is an error at the call site.
 
 - `if` without `else` produces `T | NULL` (or `NULL` if the branch is `NULL`); the
   condition must be scalar `logical`.
-- `if ... else` requires both branches to share a type, except that one branch may be
-  `NULL`, giving `T | NULL`.
+- `if ... else` joins the branch types: branches that unify share that type, a `NULL`
+  branch gives `T | NULL`, and genuinely different branches produce their union —
+  `if (flag) 1L else "foo"` is `integer | character`, not an error.
 - A block evaluates to the type of its last expression, or `NULL` if empty or
   terminated with `;`.
-- `for`, `while`, and `repeat` all evaluate to `NULL`. A `for` loop iterates over any
-  value coercible to an array-like vector or `list[T]`, binding the element type inside
-  the body.
+- `for`, `while`, and `repeat` all evaluate to `NULL`. A `for` loop iterates vectors and
+  homogeneous lists with their element type, and fixed-shape lists with the union of
+  their item types, binding that element type inside the body.

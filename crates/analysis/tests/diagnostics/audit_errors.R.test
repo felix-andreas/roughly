@@ -168,12 +168,10 @@ c(1L, "a")
 #++++
 No diagnostics.
 
-#---- if_branch_mismatch
+#---- if_branch_union_accepted
 if (TRUE) 1L else "foo"
 #++++
-error[type-error] expected `integer`, found `character`
---> 1:1-1:24
-| if (TRUE) 1L else "foo"
+No diagnostics.
 
 #---- if_condition_not_scalar
 if (c(TRUE, FALSE)) 1L

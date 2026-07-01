@@ -442,8 +442,12 @@ fn accumulate_parameter_variances(
                 variances,
             );
         }
-        SurfaceType::Nullable(inner)
-        | SurfaceType::Vector(inner)
+        SurfaceType::Union(members) => {
+            for member in members {
+                accumulate_parameter_variances(member, polarity, parameters, variances);
+            }
+        }
+        SurfaceType::Vector(inner)
         | SurfaceType::NamedVector(inner)
         | SurfaceType::List(inner)
         | SurfaceType::NamedList(inner)
@@ -537,7 +541,12 @@ impl InferenceState {
     fn substitute_rigid_names(&self, core_type: &CoreType) -> CoreType {
         match core_type {
             CoreType::Variable(variable) => self.rigid_display(*variable),
-            CoreType::Nullable(inner) => nullable_type(self.substitute_rigid_names(inner)),
+            CoreType::Union(members) => CoreType::union_of(
+                members
+                    .iter()
+                    .map(|member| self.substitute_rigid_names(member))
+                    .collect(),
+            ),
             CoreType::List(inner) => CoreType::List(Box::new(self.substitute_rigid_names(inner))),
             CoreType::NamedList(inner) => {
                 CoreType::NamedList(Box::new(self.substitute_rigid_names(inner)))
@@ -1678,32 +1687,15 @@ impl InferenceState {
             type_definitions,
         )?;
         let alternative_type = self.resolve(inferred_alternative)?;
-        if consequence_type == alternative_type {
-            return Ok(consequence_type);
+
+        // An unmodelled branch makes the result unmodelled rather than claiming the other branch's
+        // type, matching how `Unknown` propagates (and absorbs unions) through the rest of the
+        // checker.
+        if consequence_type == CoreType::Unknown || alternative_type == CoreType::Unknown {
+            return Ok(CoreType::Unknown);
         }
 
-        match (&consequence_type, &alternative_type) {
-            // Exactly one branch is `NULL`: the other becomes nullable.
-            (CoreType::Null, _) => return Ok(nullable_type(alternative_type)),
-            (_, CoreType::Null) => return Ok(nullable_type(consequence_type)),
-            // An unmodelled branch makes the result unmodelled rather than a spurious mismatch,
-            // matching how `Unknown` propagates through the rest of the checker.
-            (CoreType::Unknown, _) | (_, CoreType::Unknown) => return Ok(CoreType::Unknown),
-            _ => {}
-        }
-
-        // Both branches must share a type. Unifying them accepts the chooser idiom
-        // `if (cond) a else b` where each branch is an inference variable, while still reporting a
-        // clean mismatch (with resolved, user-facing types) for genuinely different concrete types.
-        match self.unify(consequence_type.clone(), alternative_type.clone()) {
-            Ok(unified_type) => self.resolve(unified_type),
-            Err(_) => Err(InferenceError::TypeMismatch {
-                expected: Box::new(self.resolve(consequence_type)?),
-                actual: Box::new(self.resolve(alternative_type)?),
-                range: Some(expression.range),
-                expression_id: Some(expression.id),
-            }),
-        }
+        self.join_types(consequence_type, alternative_type, expression)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1870,9 +1862,37 @@ impl InferenceState {
 
         match (actual_type, expected_type) {
             (CoreType::Unknown, CoreType::Any) => Ok(true),
-            (CoreType::Null, CoreType::Nullable(_)) => Ok(true),
-            (other_type, CoreType::Nullable(inner_type)) => {
-                self.check_compatibility(other_type, *inner_type, type_definitions, expression)
+            // A union value must be accepted in every shape it can take, so each actual member is
+            // checked against the expected type. This arm comes first so union-vs-union reduces to
+            // "every actual member fits somewhere in the expected union".
+            (CoreType::Union(actual_members), expected_type) => {
+                for member in actual_members {
+                    if !self.check_compatibility(
+                        member,
+                        expected_type.clone(),
+                        type_definitions,
+                        expression,
+                    )? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            // A value fits an expected union when it fits any member. Each attempt is its own
+            // probe (`check_compatibility` rolls back failed attempts), so an earlier failing
+            // member leaks no bindings into a later one.
+            (actual_type, CoreType::Union(expected_members)) => {
+                for member in expected_members {
+                    if self.check_compatibility(
+                        actual_type.clone(),
+                        member,
+                        type_definitions,
+                        expression,
+                    )? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
             }
             (
                 CoreType::Nominal(actual_name, actual_arguments),
@@ -2335,14 +2355,22 @@ impl InferenceState {
             SurfaceType::Any => Ok(CoreType::Any),
             SurfaceType::Unknown => Ok(CoreType::Unknown),
             SurfaceType::Null => Ok(CoreType::Null),
-            SurfaceType::Nullable(inner_type) => {
-                Ok(nullable_type(self.lower_surface_type_with_substitutions(
-                    inner_type,
-                    substitutions,
-                    expanding_aliases,
-                    type_definitions,
-                    expression,
-                )?))
+            SurfaceType::Union(members) => {
+                let lowered = members
+                    .iter()
+                    .map(|member| {
+                        self.lower_surface_type_with_substitutions(
+                            member,
+                            substitutions,
+                            expanding_aliases,
+                            type_definitions,
+                            expression,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                // Re-normalize: an alias member may have expanded into a type equal to another
+                // member, or into a union itself.
+                Ok(CoreType::union_of(lowered))
             }
             SurfaceType::Scalar(atomic) => Ok(CoreType::Scalar(*atomic)),
             SurfaceType::Named(name, arguments) => {
@@ -2448,7 +2476,7 @@ impl InferenceState {
                 fields
                     .iter()
                     .map(|field| {
-                        Ok(RecordField::new(
+                        Ok(RecordField::with_optional(
                             field.name,
                             self.lower_surface_type_with_substitutions(
                                 &field.value,
@@ -2457,6 +2485,7 @@ impl InferenceState {
                                 type_definitions,
                                 expression,
                             )?,
+                            field.optional,
                         ))
                     })
                     .collect::<Result<Vec<_>, _>>()?,
@@ -2649,9 +2678,14 @@ impl InferenceState {
     fn resolve_inner(&mut self, core_type: CoreType) -> Result<CoreType, InferenceError> {
         match core_type {
             CoreType::Variable(variable) => self.resolve_variable(variable),
-            CoreType::Nullable(inner_type) => {
-                let resolved_inner_type = self.resolve(*inner_type)?;
-                Ok(nullable_type(resolved_inner_type))
+            CoreType::Union(members) => {
+                let mut resolved_members = Vec::with_capacity(members.len());
+                for member in members {
+                    resolved_members.push(self.resolve(member)?);
+                }
+                // Re-normalize: members that resolved to equal types collapse, and a member that
+                // resolved to a union flattens.
+                Ok(CoreType::union_of(resolved_members))
             }
             CoreType::Nominal(symbol, type_arguments) => {
                 let mut resolved_type_arguments = Vec::with_capacity(type_arguments.len());
@@ -2671,7 +2705,11 @@ impl InferenceState {
             CoreType::Record(fields) => {
                 let mut resolved_fields = Vec::with_capacity(fields.len());
                 for field in fields {
-                    resolved_fields.push(RecordField::new(field.name, self.resolve(field.value)?));
+                    resolved_fields.push(RecordField::with_optional(
+                        field.name,
+                        self.resolve(field.value)?,
+                        field.optional,
+                    ));
                 }
                 Ok(CoreType::Record(resolved_fields))
             }
@@ -2710,6 +2748,44 @@ impl InferenceState {
         self.unify_internal(left, right, Some(expression))
     }
 
+    // Joins two control-flow results into one type. Types that unify share a representative — the
+    // probe commits, which is what keeps the chooser idiom `if (c) a else b` linking two inference
+    // variables — and genuinely different types fall back to their union, with the failed probe's
+    // bindings rolled back so neither side is left constrained by the attempt. A recursion-limit
+    // error is resource exhaustion, not a mismatch, so it propagates instead of producing a union.
+    fn join_types(
+        &mut self,
+        left: CoreType,
+        right: CoreType,
+        expression: &Expression,
+    ) -> Result<CoreType, InferenceError> {
+        let left = self.resolve(left)?;
+        let right = self.resolve(right)?;
+
+        // A `NULL` side joins by pure union, exactly like `if` without `else`: probing unification
+        // first would bind an unconstrained inference variable on the other side to `NULL`,
+        // collapsing the `T | NULL` results the nullable idioms rely on.
+        if left == CoreType::Null || right == CoreType::Null {
+            return Ok(CoreType::union_of(vec![left, right]));
+        }
+
+        let snapshot = self.snapshot();
+        match self.unify_internal(left.clone(), right.clone(), Some(expression)) {
+            Ok(unified_type) => {
+                self.commit(snapshot);
+                self.resolve(unified_type)
+            }
+            Err(InferenceError::RecursionLimitExceeded) => {
+                self.rollback_to(snapshot);
+                Err(InferenceError::RecursionLimitExceeded)
+            }
+            Err(_) => {
+                self.rollback_to(snapshot);
+                Ok(CoreType::union_of(vec![left, right]))
+            }
+        }
+    }
+
     fn unify_internal(
         &mut self,
         left: CoreType,
@@ -2746,9 +2822,35 @@ impl InferenceState {
             (CoreType::Any, other_type) | (other_type, CoreType::Any) => Ok(other_type),
             (CoreType::Unknown, other_type) | (other_type, CoreType::Unknown) => Ok(other_type),
             (CoreType::Null, CoreType::Null) => Ok(CoreType::Null),
-            (CoreType::Nullable(left_type), CoreType::Nullable(right_type)) => {
-                let unified_type = self.unify_internal(*left_type, *right_type, expression)?;
-                Ok(nullable_type(unified_type))
+            // Unification is the invariant floor and stays syntactic for unions: no member-wise
+            // subtyping search happens here (that is `check_compatibility`'s job). Two unions unify
+            // when their member sets are equal (order is presentation, not identity). The one
+            // member-wise case kept is the nullable shape `T | NULL` vs `U | NULL` with exactly one
+            // non-`NULL` member each — the pairing is unambiguous, and inferring through it is what
+            // lets a `<T> ... T | NULL` scheme instantiate against a concrete nullable.
+            (CoreType::Union(left_members), CoreType::Union(right_members)) => {
+                let left_nullable_inner = nullable_single_member(&left_members);
+                let right_nullable_inner = nullable_single_member(&right_members);
+                if let (Some(left_inner), Some(right_inner)) =
+                    (left_nullable_inner, right_nullable_inner)
+                {
+                    let unified = self.unify_internal(left_inner, right_inner, expression)?;
+                    return Ok(CoreType::union_of(vec![unified, CoreType::Null]));
+                }
+                let sets_equal = left_members.len() == right_members.len()
+                    && left_members
+                        .iter()
+                        .all(|member| right_members.contains(member));
+                if sets_equal {
+                    Ok(CoreType::Union(left_members))
+                } else {
+                    Err(InferenceError::TypeMismatch {
+                        expected: Box::new(CoreType::Union(left_members)),
+                        actual: Box::new(CoreType::Union(right_members)),
+                        range: expression.map(|current_expression| current_expression.range),
+                        expression_id: expression.map(|current_expression| current_expression.id),
+                    })
+                }
             }
             (
                 CoreType::Nominal(left_name, left_arguments),
@@ -2769,10 +2871,6 @@ impl InferenceState {
                     )?);
                 }
                 Ok(CoreType::Nominal(left_name, unified_arguments))
-            }
-            (CoreType::Nullable(inner_type), CoreType::Null)
-            | (CoreType::Null, CoreType::Nullable(inner_type)) => {
-                Ok(CoreType::Nullable(inner_type))
             }
             (CoreType::Scalar(left_atomic), CoreType::Scalar(right_atomic))
                 if left_atomic == right_atomic =>
@@ -2826,7 +2924,14 @@ impl InferenceState {
     ) -> Result<bool, InferenceError> {
         match self.resolve(core_type.clone())? {
             CoreType::Variable(other_variable) => Ok(variable == other_variable),
-            CoreType::Nullable(inner_type) => self.occurs_in(variable, &inner_type),
+            CoreType::Union(members) => {
+                for member in members {
+                    if self.occurs_in(variable, &member)? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
             CoreType::Nominal(_, type_arguments) => {
                 for type_argument in type_arguments {
                     if self.occurs_in(variable, &type_argument)? {
@@ -3699,20 +3804,13 @@ impl InferenceState {
             CoreType::Any => Ok(CoreType::Any),
             CoreType::List(item_type) => Ok(CoreType::List(item_type)),
             CoreType::NamedList(item_type) => Ok(CoreType::NamedList(item_type)),
-            CoreType::Tuple(items) => match homogeneous_structural_item_type(&items) {
-                Some(item_type) => Ok(CoreType::List(Box::new(item_type))),
-                None => Err(unsupported(CoreType::Tuple(items))),
-            },
-            CoreType::Record(fields) => {
-                let field_types = fields
-                    .iter()
-                    .map(|field| field.value.clone())
-                    .collect::<Vec<_>>();
-                match homogeneous_structural_item_type(&field_types) {
-                    Some(item_type) => Ok(CoreType::NamedList(Box::new(item_type))),
-                    None => Err(unsupported(CoreType::Record(fields))),
-                }
-            }
+            // A `[` slice of a fixed-shape list is a sub-list that can contain any of the item
+            // types, so the element type is their union (collapsing back to the single item type
+            // for a homogeneous list).
+            CoreType::Tuple(items) => Ok(CoreType::List(Box::new(CoreType::union_of(items)))),
+            CoreType::Record(fields) => Ok(CoreType::NamedList(Box::new(CoreType::union_of(
+                fields.iter().map(|field| field.value.clone()).collect(),
+            )))),
             other_type => Err(unsupported(other_type)),
         }
     }
@@ -4237,9 +4335,13 @@ impl InferenceState {
             CoreType::Any => Ok(CoreType::Any),
             CoreType::Unknown => Ok(CoreType::Unknown),
             CoreType::Null => Ok(CoreType::Null),
-            CoreType::Nullable(inner_type) => Ok(nullable_type(
-                self.instantiate_core_type(inner_type, substitutions)?,
-            )),
+            CoreType::Union(members) => {
+                let mut instantiated_members = Vec::with_capacity(members.len());
+                for member in members {
+                    instantiated_members.push(self.instantiate_core_type(member, substitutions)?);
+                }
+                Ok(CoreType::union_of(instantiated_members))
+            }
             CoreType::Scalar(atomic) => Ok(CoreType::Scalar(*atomic)),
             CoreType::Nominal(symbol, type_arguments) => {
                 let mut instantiated_type_arguments = Vec::with_capacity(type_arguments.len());
@@ -4260,9 +4362,10 @@ impl InferenceState {
             CoreType::Record(fields) => {
                 let mut instantiated_fields = Vec::with_capacity(fields.len());
                 for field in fields {
-                    instantiated_fields.push(RecordField::new(
+                    instantiated_fields.push(RecordField::with_optional(
                         field.name,
                         self.instantiate_core_type(&field.value, substitutions)?,
+                        field.optional,
                     ));
                 }
                 Ok(CoreType::Record(instantiated_fields))
@@ -4338,8 +4441,12 @@ impl InferenceState {
                 }
                 Ok(CoreType::Variable(variable))
             }
-            CoreType::Nullable(inner_type) => {
-                Ok(nullable_type(self.default_free_numeric(*inner_type)?))
+            CoreType::Union(members) => {
+                let mut defaulted_members = Vec::with_capacity(members.len());
+                for member in members {
+                    defaulted_members.push(self.default_free_numeric(member)?);
+                }
+                Ok(CoreType::union_of(defaulted_members))
             }
             CoreType::List(item_type) => Ok(CoreType::List(Box::new(
                 self.default_free_numeric(*item_type)?,
@@ -4428,7 +4535,13 @@ impl InferenceState {
             | CoreType::Scalar(_)
             | CoreType::Vector(_)
             | CoreType::NamedVector(_) => Ok(BTreeSet::new()),
-            CoreType::Nullable(inner_type) => self.free_type_variables_in_core_type(&inner_type),
+            CoreType::Union(members) => {
+                let mut free_variables = BTreeSet::new();
+                for member in members {
+                    free_variables.extend(self.free_type_variables_in_core_type(&member)?);
+                }
+                Ok(free_variables)
+            }
             CoreType::Variable(variable) => Ok(BTreeSet::from([variable])),
             CoreType::Nominal(_, type_arguments) => {
                 let mut free_variables = BTreeSet::new();
@@ -4817,10 +4930,15 @@ fn core_type_for_shape(shape: OperandShape, atomic: Atomic) -> CoreType {
 }
 
 fn nullable_type(core_type: CoreType) -> CoreType {
-    match core_type {
-        CoreType::Null => CoreType::Null,
-        CoreType::Nullable(inner_type) => CoreType::Nullable(inner_type),
-        other_type => CoreType::Nullable(Box::new(other_type)),
+    CoreType::union_of(vec![core_type, CoreType::Null])
+}
+
+// The one member-wise union shape `unify` handles: a normalized two-member `T | NULL` union
+// exposes its non-`NULL` member. Everything else returns `None`.
+fn nullable_single_member(members: &[CoreType]) -> Option<CoreType> {
+    match members {
+        [member, CoreType::Null] if *member != CoreType::Null => Some(member.clone()),
+        _ => None,
     }
 }
 
@@ -4830,23 +4948,14 @@ fn iterable_item_type(core_type: &CoreType) -> Option<CoreType> {
             Some(CoreType::Scalar(*atomic))
         }
         CoreType::List(item_type) | CoreType::NamedList(item_type) => Some((**item_type).clone()),
-        CoreType::Tuple(items) => homogeneous_structural_item_type(items),
-        CoreType::Record(fields) => homogeneous_structural_item_type(
-            &fields
-                .iter()
-                .map(|field| field.value.clone())
-                .collect::<Vec<_>>(),
-        ),
+        // A fixed-shape list iterates every element, so the loop variable can hold any of the item
+        // types: the element type is their union (which collapses back to the single item type for
+        // a homogeneous list).
+        CoreType::Tuple(items) => Some(CoreType::union_of(items.clone())),
+        CoreType::Record(fields) => Some(CoreType::union_of(
+            fields.iter().map(|field| field.value.clone()).collect(),
+        )),
         _ => None,
-    }
-}
-
-fn homogeneous_structural_item_type(items: &[CoreType]) -> Option<CoreType> {
-    let first_item = items.first()?.clone();
-    if items.iter().skip(1).all(|item| *item == first_item) {
-        Some(first_item)
-    } else {
-        None
     }
 }
 
@@ -4858,9 +4967,14 @@ fn import_core_type(
         CoreType::Any => CoreType::Any,
         CoreType::Unknown => CoreType::Unknown,
         CoreType::Null => CoreType::Null,
-        CoreType::Nullable(inner_type) => {
-            nullable_type(import_core_type(inner_type, substitutions))
-        }
+        // Re-normalize: importing can collapse members (a free variable erases to `Unknown`, which
+        // absorbs the union) or make two members equal.
+        CoreType::Union(members) => CoreType::union_of(
+            members
+                .iter()
+                .map(|member| import_core_type(member, substitutions))
+                .collect(),
+        ),
         CoreType::Scalar(atomic) => CoreType::Scalar(*atomic),
         CoreType::Nominal(symbol, type_arguments) => CoreType::Nominal(
             *symbol,

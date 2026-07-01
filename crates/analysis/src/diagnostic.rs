@@ -77,8 +77,11 @@ fn collect_free_variables(core_type: &CoreType, out: &mut Vec<InferenceVariableI
                 out.push(*variable);
             }
         }
-        CoreType::Nullable(inner) | CoreType::List(inner) | CoreType::NamedList(inner) => {
-            collect_free_variables(inner, out)
+        CoreType::List(inner) | CoreType::NamedList(inner) => collect_free_variables(inner, out),
+        CoreType::Union(members) => {
+            for member in members {
+                collect_free_variables(member, out);
+            }
         }
         CoreType::Nominal(_, arguments) | CoreType::Tuple(arguments) => {
             for argument in arguments {
@@ -636,9 +639,11 @@ impl<'a> TypeRenderer<'a> {
             CoreType::Any => "Any".to_owned(),
             CoreType::Unknown => "Unknown".to_owned(),
             CoreType::Null => "NULL".to_owned(),
-            CoreType::Nullable(inner_type) => {
-                format!("{} | NULL", self.render_core_type(inner_type))
-            }
+            CoreType::Union(members) => members
+                .iter()
+                .map(|member| self.render_core_type(member))
+                .collect::<Vec<_>>()
+                .join(" | "),
             CoreType::Scalar(atomic) => render_atomic(*atomic).to_owned(),
             CoreType::Nominal(symbol, type_arguments) => {
                 let name = self.interner.resolve(*symbol).unwrap_or("<unknown>");
