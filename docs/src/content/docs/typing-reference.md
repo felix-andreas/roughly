@@ -1293,6 +1293,13 @@ Optional parameters follow the same rule and must be named:
 
 - `fn(count: integer, [label]: character) -> integer`
 
+Parameter names — and record field names — may contain interior `.`, matching R's identifier convention for arguments like `na.rm` and `length.out`:
+
+- `fn(x: double, na.rm: logical) -> double`
+- `list{na.rm: logical}`
+
+The leading character must still be a letter or `_`, and the dot is interior only. Type names and type parameter names are unaffected: a type reference or a `<...>` binder name may not contain `.`.
+
 ### Function type compatibility
 
 Parameter names describe the call interface, not the identity of a function type. Two function types match by position across the flattened parameter list:

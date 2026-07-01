@@ -1353,7 +1353,7 @@ impl<'a> TypeParser<'a> {
                 self.skip_ascii_whitespace();
 
                 if self.consume_byte(b'[') {
-                    let parsed_name = self.parse_identifier_span();
+                    let parsed_name = self.parse_member_name_span();
                     self.skip_ascii_whitespace();
                     let Some((start, end)) = parsed_name.filter(|_| self.consume_byte(b']')) else {
                         return Err(invalid_syntax(
@@ -1383,7 +1383,7 @@ impl<'a> TypeParser<'a> {
 
                 let parameter_start = self.position;
 
-                let parsed_name = self.parse_identifier_span();
+                let parsed_name = self.parse_member_name_span();
                 let is_named = if let Some((start, end)) = parsed_name {
                     self.skip_ascii_whitespace();
                     if self.consume_byte(b':') {
@@ -1443,6 +1443,16 @@ impl<'a> TypeParser<'a> {
         Some(span)
     }
 
+    // Lexes a parameter or field name, which — unlike a type name — may contain interior `.` (`na.rm`).
+    // The dot is admitted only at the name sites that call this; type names, type parameters, and
+    // `@type` names keep the dot-free `identifier_span_at`.
+    fn parse_member_name_span(&mut self) -> Option<(usize, usize)> {
+        self.skip_ascii_whitespace();
+        let span = utils::member_name_span_at(self.source, self.position)?;
+        self.position = span.1;
+        Some(span)
+    }
+
     fn peek_record_field_name(&self) -> Option<(usize, usize)> {
         let mut position = self.position;
         let remaining = &self.source[position..];
@@ -1457,7 +1467,7 @@ impl<'a> TypeParser<'a> {
             break;
         }
 
-        utils::identifier_span_at(self.source, position)
+        utils::member_name_span_at(self.source, position)
     }
 
     fn starts_list_brace_type(&self) -> bool {
@@ -1641,6 +1651,31 @@ mod utils {
             if is_identifier_continue(character) {
                 end = start + index + character.len_utf8();
             } else {
+                break;
+            }
+        }
+
+        Some((start, end))
+    }
+
+    // A parameter or field name: like an identifier but with interior `.` permitted (`na.rm`,
+    // `length.out`). The leading character must still be a letter or `_`, and the name may not end in
+    // `.` — the dot is interior only, so a trailing dot ends the span before it.
+    pub(super) fn member_name_span_at(text: &str, start: usize) -> Option<(usize, usize)> {
+        let remaining = &text[start..];
+        let mut characters = remaining.char_indices();
+        let (_, first_character) = characters.next()?;
+        if !is_identifier_start(first_character) {
+            return None;
+        }
+
+        // `end` tracks the last non-dot character, so a trailing `.` (which R identifiers do not use as
+        // a final character) is excluded from the returned span rather than dangling in the name.
+        let mut end = start + first_character.len_utf8();
+        for (index, character) in characters {
+            if is_identifier_continue(character) {
+                end = start + index + character.len_utf8();
+            } else if character != '.' {
                 break;
             }
         }

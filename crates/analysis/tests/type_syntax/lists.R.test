@@ -206,3 +206,8 @@ InvalidSyntax { message: "cannot mix named and unnamed items in `list{...}`." }
 list{naïve:integer}
 #++++
 list{naïve: integer}
+
+#---- record_field_name_with_interior_dot
+list{na.rm:logical,length.out:integer}
+#++++
+list{na.rm: logical, length.out: integer}

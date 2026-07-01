@@ -151,3 +151,24 @@ InvalidSyntax { message: "expected `:` after `[name]` in an optional parameter."
 fn([label] character) -> integer
 #++++
 InvalidSyntax { message: "expected `:` after `[name]` in an optional parameter." }
+
+#==== dotted_parameter_names
+#---- named_parameter_with_interior_dot
+fn(x: double, na.rm: logical) -> double
+#++++
+fn(x: double, na.rm: logical) -> double
+
+#---- optional_parameter_with_interior_dot
+fn(x: integer, [length.out]: integer) -> integer[]
+#++++
+fn(x: integer, [length.out]: integer) -> integer[]
+
+#---- dot_not_allowed_in_type_name
+foo.bar
+#++++
+InvalidSyntax { message: "unexpected trailing input starting at byte 3." }
+
+#---- dot_not_allowed_in_type_parameter
+<T.x> fn(T) -> T
+#++++
+InvalidSyntax { message: "expected `,` or `>` in `<...>`." }
