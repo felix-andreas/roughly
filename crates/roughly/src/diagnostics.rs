@@ -3,7 +3,6 @@ use {
         lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString},
         position::{self, PositionEncoding},
     },
-    analysis,
     ropey::Rope,
 };
 

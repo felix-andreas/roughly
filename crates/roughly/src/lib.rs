@@ -1,10 +1,10 @@
 pub mod cli;
-pub mod config;
-pub mod diagnostics;
+pub(crate) mod config;
+pub(crate) mod diagnostics;
 pub mod format;
 pub mod index;
-pub mod position;
-pub mod server;
+pub(crate) mod position;
+pub(crate) mod server;
 pub mod symbols;
 pub mod tree;
 pub mod utils;
