@@ -2114,8 +2114,10 @@ async fn workspace_root_comes_from_the_client_not_the_process_cwd() {
     drain_diagnostics(&mut context.diagnostics_receiver).await;
 
     let formatted = formatted_text(&mut context, &file_uri).await;
+    // Exact-line assertion: a substring check would pass vacuously under the 8-space decoy too
+    // ("        x + 1" contains "    x + 1").
     assert!(
-        formatted.contains("    x + 1"),
+        formatted.lines().any(|line| line == "    x + 1"),
         "expected the workspace root's 4-space config to govern, got:\n{formatted}"
     );
 
@@ -2125,8 +2127,9 @@ async fn workspace_root_comes_from_the_client_not_the_process_cwd() {
 #[tokio::test]
 async fn ancestor_config_governs_a_workspace_without_its_own() {
     // No config in the workspace root itself: discovery walks up and finds the one in the parent
-    // directory, matching the CLI's nearest-ancestor behavior.
-    let mut context = setup_test(&[("../roughly.toml", "[format]\nindent-width = 4\n")]).await;
+    // directory, matching the CLI's nearest-ancestor behavior. The ancestor asks for an indent
+    // width the built-in default (2) would never produce, so the assertion cannot pass vacuously.
+    let mut context = setup_test(&[("../roughly.toml", "[format]\nindent-width = 6\n")]).await;
 
     let file_uri = context.file_uri("R/ancestor.R");
     context
@@ -2136,8 +2139,8 @@ async fn ancestor_config_governs_a_workspace_without_its_own() {
 
     let formatted = formatted_text(&mut context, &file_uri).await;
     assert!(
-        formatted.contains("    x + 1"),
-        "expected the ancestor config to govern the workspace, got:\n{formatted}"
+        formatted.lines().any(|line| line == "      x + 1"),
+        "expected the ancestor config's 6-space indent to govern the workspace, got:\n{formatted}"
     );
 
     context.shutdown().await;

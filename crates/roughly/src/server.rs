@@ -1542,14 +1542,15 @@ fn run_worker(seed: WorkerSeed, receiver: mpsc::Receiver<Job>) {
                 worker.cancel.store(false, Ordering::Relaxed);
                 closure(worker);
             }
-            // A notification before `initialize` is a client protocol violation the server cannot
-            // recover from (a dropped document-sync edit leaves analysis state incoherent), so it
-            // panics into the deterministic-death path below.
-            Job::Write(closure) => closure(
-                worker
-                    .as_mut()
-                    .expect("notifications must not arrive before initialize"),
-            ),
+            // LifecycleLayer rejects pre-initialize requests but lets notifications through. The
+            // LSP protocol says a server should drop notifications that arrive before
+            // `initialize`, and there is no analysis state yet for a dropped one to corrupt — so
+            // drop, don't die. (Post-initialize document-sync failures still panic; that policy is
+            // about corrupting live state, which does not exist here.)
+            Job::Write(closure) => match worker.as_mut() {
+                Some(worker) => closure(worker),
+                None => tracing::warn!("dropping a notification that arrived before initialize"),
+            },
         }));
         if outcome.is_err() {
             // A read closure catches its own `Cancelled` inside `with_cancellation`, which restores the

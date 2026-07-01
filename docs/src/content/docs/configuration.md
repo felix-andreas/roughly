@@ -11,7 +11,7 @@ Configure Roughly with a `roughly.toml` file in your project. Roughly uses the n
 
 The starting directory depends on how Roughly runs:
 
-- **Editor (language server):** the search starts at the workspace root your editor announces when it starts the server — never at the server process's working directory. Edits to the workspace's `roughly.toml` are picked up live, and diagnostics refresh immediately so toggles like `[check] strict` apply without further edits.
+- **Editor (language server):** the search starts at the workspace root your editor announces when it starts the server; the server process's working directory is used only when the editor announces no root (for example, a single file opened without a folder). Edits to the workspace's `roughly.toml` are picked up live, and diagnostics refresh immediately so toggles like `[check] strict` apply without further edits.
 - **CLI:** the search starts at each file or directory argument (a file's own directory), so `roughly check R/utils.R` and `roughly check .` inside the same project resolve the same configuration.
 
 ```toml

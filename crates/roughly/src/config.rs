@@ -34,6 +34,11 @@ impl Config {
             path: target.to_path_buf(),
             source: error,
         })?;
+        // `std::path::absolute` keeps `..` components, and `parent()` strips them lexically — so a
+        // target like `/a/b/../c.R` would walk `/a/b/..` and then back INTO `/a/b`, which is not an
+        // ancestor of the target at all. Resolve `.`/`..` away first so the walk visits only true
+        // ancestors.
+        let target = normalize_lexically(&target);
 
         let mut directory = if target.is_dir() {
             Some(target.as_path())
@@ -122,6 +127,31 @@ impl fmt::Display for ConfigParseError {
 }
 
 impl std::error::Error for ConfigParseError {}
+
+// Resolves `.` and `..` components lexically (without touching the filesystem), so an ancestor
+// walk over the result visits only true ancestors. Lexical resolution can differ from the
+// filesystem view when `..` crosses a symlink; the walk prefers the path as the user spelled it,
+// which matches how sibling tools resolve project roots.
+fn normalize_lexically(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => match normalized.components().next_back() {
+                // The root's parent is the root itself, so a `..` there dissolves.
+                Some(Component::RootDir | Component::Prefix(_)) => {}
+                Some(Component::Normal(_)) => {
+                    normalized.pop();
+                }
+                // A leading `..` on a relative path has nothing to cancel and must survive.
+                _ => normalized.push(component),
+            },
+            other => normalized.push(other),
+        }
+    }
+    normalized
+}
 
 // The 1-based line and column of a byte offset within `text`, for rendering a toml error span.
 fn line_and_column(text: &str, offset: usize) -> (usize, usize) {
@@ -375,5 +405,39 @@ mod tests {
         let directory = tempfile::tempdir().expect("temp dir");
         let config = Config::discover(directory.path()).expect("discover config");
         assert_eq!(config, Config::default());
+    }
+
+    // A `..` in the target must not let the walk wander back into a sibling directory: a config in
+    // `project/` does not govern `project/../outside.R`.
+    #[test]
+    fn discover_ignores_configs_behind_dot_dot_components() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let root = directory.path();
+        let project = root.join("project");
+        std::fs::create_dir_all(&project).expect("create project dir");
+        std::fs::write(
+            project.join(CONFIG_FILE_NAME),
+            "[format]\nindent-width = 7\n",
+        )
+        .expect("write project config");
+        std::fs::write(root.join("outside.R"), "x <- 1\n").expect("write outside script");
+
+        let config = Config::discover(project.join("..").join("outside.R"))
+            .expect("discover through dot-dot");
+        assert_eq!(config, Config::default());
+    }
+
+    #[test]
+    fn normalize_lexically_resolves_dot_components() {
+        use std::path::Path;
+        assert_eq!(
+            super::normalize_lexically(Path::new("/a/b/../c/./d.R")),
+            Path::new("/a/c/d.R")
+        );
+        assert_eq!(super::normalize_lexically(Path::new("/../a")), Path::new("/a"));
+        assert_eq!(
+            super::normalize_lexically(Path::new("../../a")),
+            Path::new("../../a")
+        );
     }
 }
