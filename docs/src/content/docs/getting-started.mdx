@@ -30,8 +30,11 @@ Install the [Roughly extension](https://zed.dev/extensions/roughly) from Zed's e
 
 ### Command line
 
-Prebuilt binaries are available for Linux, macOS, and Windows. Use the CLI directly for formatting and
-linting in CI, with RStudio, or to back an editor extension on a platform without a bundled binary.
+Use the CLI directly for formatting and linting in CI, with RStudio, or to back an editor extension on
+a platform without a bundled binary. Install it in whichever way suits you — a prebuilt binary, or from
+source with Cargo.
+
+**Prebuilt binary** (Linux, macOS, and Windows):
 
 <Steps>
 
@@ -39,6 +42,12 @@ linting in CI, with RStudio, or to back an editor extension on a platform withou
 2. Add it to your system `PATH`.
 
 </Steps>
+
+**With Cargo**, if you have a [Rust toolchain](https://www.rust-lang.org/tools/install):
+
+```bash
+cargo install --git https://github.com/felix-andreas/roughly roughly
+```
 
 ### RStudio (formatter only)
 

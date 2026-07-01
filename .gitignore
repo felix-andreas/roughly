@@ -16,3 +16,6 @@ node_modules
 r-examples
 R*/
 roughly.toml
+
+# Claude Code local harness state (config, worktrees)
+.claude/

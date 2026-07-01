@@ -222,6 +222,8 @@ The intended fixture suites are:
   multi-file workspace state, split into per-feature subdirectories under `tests/ide/`
 - `lint` - file-local lint diagnostics
 - `lowering` - syntax-to-HIR lowering output
+- `stub` - the declaration-line parser for `.Rti` stub files (`name : <type-expr>`), reusing the
+  type-expression parser; the type grammar itself stays in `type_syntax`
 - `naming/local` - file-local binding introduction and lexical use-site resolution
 - `naming/global` - package-global resolution across multiple files
 - `project` - multi-file typed package behavior, currently rendered as per-file diagnostics

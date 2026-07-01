@@ -79,7 +79,11 @@ roughly server        # Usually started automatically by your editor
 
 ### Installation
 
-#### Download Binary (Recommended)
+For most users the [VS Code extension](#vs-code-extension) is the recommended way in — it bundles the
+CLI, so there is nothing else to set up. Install the standalone CLI below when you want it for CI, for
+RStudio, or on a platform without a bundled binary.
+
+#### Download Binary
 
 Download the pre-built binary for your platform from the [releases page](https://github.com/felix-andreas/roughly/releases).
 

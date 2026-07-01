@@ -8,7 +8,8 @@ codebase.
 
 ## Project layout
 
-Roughly is a Rust workspace with four main crates:
+Roughly is a Rust workspace. The language tool covered by this documentation lives in three crates
+plus a shared test harness:
 
 - **`crates/roughly`** — the CLI, the LSP server, the formatter, and the linter.
 - **`crates/analysis`** — the analysis phases (parsing, lowering, naming, type checking, lint, IDE
@@ -17,6 +18,9 @@ Roughly is a Rust workspace with four main crates:
   incremental analysis by running the `analysis` phases as cached queries. This is the incremental
   backend behind the language server.
 - **`crates/fixtures`** — the shared fixture-test harness used by the test suites.
+
+The workspace also contains **`crates/rofy`**, a separate experimental R REPL that embeds R through
+`extendr`; it is not part of the language-tool pipeline above.
 
 The analysis design is documented in [Architecture](/architecture) and the file layout in
 [Structure](/structure). The editor extensions live under `editors/` (`code` for VS Code, `zed` for
@@ -192,7 +196,6 @@ See https://github.com/r-lib/tree-sitter-r/issues/166
 ## Linting ideas
 
 * Empty loops: for, while, repeat
-* unused variables
 
 ## References
 
