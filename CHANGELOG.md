@@ -15,9 +15,9 @@ This file starts from the type-checker work; earlier history lives in the git lo
   keeps annotated code compatible with ordinary R tooling). Type-error diagnostics are opt-in via
   `[check] typing`; hover types, inlay hints, and signature help are on by default. The typing
   semantics are specified in `docs/typing-reference.md`.
-- **Standard-library type stubs.** Declaration-only `.Rti` stub files (`name : <type-expr>`) for the
+- **Standard-library type stubs.** Declaration-only `.Rtypes` stub files (`name : <type-expr>`) for the
   base/stats/utils/methods libraries, compiled into the binary and overridable per project
-  (`stubs/*.Rti` win over the shipped set). Parametric higher-order functions (`lapply`, `Map`,
+  (`stubs/*.Rtypes` win over the shipped set). Parametric higher-order functions (`lapply`, `Map`,
   `Reduce`, …) carry real generics.
 - **Type-annotation syntax extensions**: variadic rest parameters (`fn(...: T)`) and dotted parameter
   names (`na.rm`).

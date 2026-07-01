@@ -142,7 +142,7 @@ struct PackageOutput<T> {
 
 impl Analysis {
     pub fn new(base_path: PathBuf, lint_config: LintConfig, check_config: CheckConfig) -> Self {
-        // A project may ship its own `.Rti` stubs under `<base_path>/stubs/` that override or extend the
+        // A project may ship its own `.Rtypes` stubs under `<base_path>/stubs/` that override or extend the
         // shipped corpus. They are discovered and folded in once here; the assembled library is a
         // set-once base-environment input.
         let overrides = crate::stdlib::discover_project_stub_sources(&base_path);
@@ -1381,7 +1381,7 @@ mod tests {
         fs::create_dir_all(override_workspace.join("R")).expect("package root");
         fs::create_dir_all(override_workspace.join("stubs")).expect("stubs dir");
         fs::write(
-            override_workspace.join("stubs/overrides.Rti"),
+            override_workspace.join("stubs/overrides.Rtypes"),
             "nchar : fn(x: character) -> character\n",
         )
         .expect("override stub should be written");

@@ -1,6 +1,6 @@
 # Standard-library stubs: base package.
 #
-# Declaration-only stub file (`.Rti`): each line is `name : <type-expr>`, reusing the `#:` annotation
+# Declaration-only stub file (`.Rtypes`): each line is `name : <type-expr>`, reusing the `#:` annotation
 # type grammar. There is no function body to write, so these files are declarations only.
 #
 # A "widened to Any" note marks a binding whose precise type the annotation grammar cannot yet express.

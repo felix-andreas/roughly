@@ -1,12 +1,12 @@
 ---
 title: Stdlib Stubs
-description: The standard-library stub format (.Rti declaration files) that teaches the type checker base/stats/utils instead of resolving them to Unknown
+description: The standard-library stub format (.Rtypes declaration files) that teaches the type checker base/stats/utils instead of resolving them to Unknown
 ---
 
 :::note[Status]
 The standard-library stub format ships. `T`/`F`/`pi` plus a curated set of base functions are
-declaration-only `.Rti` stub files under `crates/analysis/stubs/` (`base.Rti`, `stats.Rti`,
-`utils.Rti`, `methods.Rti`), loaded and bound into the checker as a **set-once input** that never
+declaration-only `.Rtypes` stub files under `crates/analysis/stubs/` (`base.Rtypes`, `stats.Rtypes`,
+`utils.Rtypes`, `methods.Rtypes`), loaded and bound into the checker as a **set-once input** that never
 invalidates a package edit (see [Incremental hygiene](#incremental-hygiene)). Project
 [overrides](#override-precedence) are supported. Still **proposed / not yet built**: the CRAN tier
 (per-project introspection, §7), R-version keying of the embedded corpus (§8), the stubtest CI
@@ -28,7 +28,7 @@ as immutable inputs, so the checker knows the standard library the same way rust
 
 ## 1. Stub format
 
-Stub files are **dedicated declaration-only files** with the extension `.Rti` ("R type information").
+Stub files are **dedicated declaration-only files** with the extension `.Rtypes` ("R type information").
 Each non-blank, non-comment line is a declaration:
 
 ```
@@ -43,7 +43,7 @@ Blank lines and `#` comments (whole-line or trailing) are ignored. The loader ha
 expression directly into a `TypeScheme`.
 
 ```
-# base.Rti — a fragment
+# base.Rtypes — a fragment
 
 # plain value bindings
 T : logical
@@ -65,13 +65,13 @@ stub carry a meaningless, unreachable function body and required a full parse pl
 reach the annotation. A dedicated declaration file removes both problems: a body is unrepresentable, so
 a stub cannot drift into carrying one, and the loader parses only declarations.
 
-The extension `.Rti` evokes R's own `.Rd` documentation convention (R-something) without colliding with
+The extension `.Rtypes` evokes R's own `.Rd` documentation convention (R-something) without colliding with
 `.Rd`, `.Rmd`, or `.Rda`/`.RData`. A JSON / TOML stub grammar was rejected because it would need a
 second type notation; reusing the `#:` type grammar keeps one source of truth for type syntax across
 inline annotations and stub files.
 
 A declaration binds a **value** name (a function or a constant) to a type. Nominal **type/class**
-declarations in stub files (the `@type` form described in §2/§4) are not yet expressible in `.Rti`;
+declarations in stub files (the `@type` form described in §2/§4) are not yet expressible in `.Rtypes`;
 until they are, the shipped corpus is value bindings only.
 
 ### Cross-ecosystem note
@@ -79,8 +79,8 @@ until they are, the shipped corpus is value bindings only.
 Statically-typed hosts that publish types for foreign code use **separate** declaration files —
 TypeScript `.d.ts`, Python `.pyi`, Sorbet `.rbi`. Dynamically-typed hosts retrofitting types onto their
 *own* source put them **inline** — Elixir/Erlang `@spec`. R does both: inline `#:` is primary for a
-project's own source, and separate `.Rti` files exist for foreign packages (base and CRAN) that cannot
-be annotated at the source. `.Rti` reuses the same type grammar as the inline form, so the two are one
+project's own source, and separate `.Rtypes` files exist for foreign packages (base and CRAN) that cannot
+be annotated at the source. `.Rtypes` reuses the same type grammar as the inline form, so the two are one
 notation in two carriers.
 
 ### Overloads and generics
@@ -98,7 +98,7 @@ is deferred), a repeated name is resolved last-wins by the loader. Two rules gov
 
 ## Override precedence
 
-A project can override or extend the shipped stubs by dropping `.Rti` files under `<project>/stubs/`.
+A project can override or extend the shipped stubs by dropping `.Rtypes` files under `<project>/stubs/`.
 The loader folds project sources over the shipped corpus in sorted path order, so a declaration a
 project supplies **replaces** the shipped declaration of the same name — a project can correct a return
 type or add a name the shipped corpus omits. A missing directory, an unreadable file, or a malformed
@@ -153,7 +153,7 @@ loaded, parsed, and interned once, and are never invalidated by user edits.
 The `StubLibrary` is a **flat set-once map**: `values: Symbol -> scheme` (each entry pairs the harvested
 `TypeScheme` with the declaration's source range). It is not keyed by namespace.
 
-- Every shipped `.Rti` file (`base.Rti`, `stats.Rti`, `utils.Rti`, `methods.Rti`) is harvested into the
+- Every shipped `.Rtypes` file (`base.Rtypes`, `stats.Rtypes`, `utils.Rtypes`, `methods.Rtypes`) is harvested into the
   one flat map, folded in file order — a later declaration of a name overrides an earlier one (last-wins,
   the same rule that governs project overrides). All shipped namespaces are thus attached to the base
   scope together; there is no per-namespace partition.
@@ -266,7 +266,7 @@ cost: its revision never advances, and a file that references a stub records tha
 other input it reads.
 
 **Smallest first increment:** seed `T`/`F`/`pi` plus ~12 high-frequency base functions, parsed once
-from an embedded `base.Rti`, behind the template-seeding path — before any namespace / `::` / `library()`
+from an embedded `base.Rtypes`, behind the template-seeding path — before any namespace / `::` / `library()`
 machinery. This closes the `T`/`F`/`pi` gap with only the two integration edits from §3.
 
 ### Risks
@@ -328,7 +328,7 @@ mistakes while staying sound (never claiming a false-precise return).
 - **Cached per package version.** A generated stub is a pure function of `(package, version)`, so it is
   cached on that key and regenerated only when the installed version changes — the same immutability
   the embedded corpus enjoys, just keyed per project.
-- **Optional curated overrides** (the typeshed third-party model): a hand-written `.Rti` stub for a
+- **Optional curated overrides** (the typeshed third-party model): a hand-written `.Rtypes` stub for a
   high-value package (or specific functions) layers over the generated shallow stub, supplying precise
   returns the introspection cannot. Curated overrides win where present; generation fills the rest.
 - **Unstubbed → `Any`, never a hard error.** A package with no generated and no curated stub (R not
@@ -365,7 +365,7 @@ the stubtest validator both need a **real R installation available to run** (`ge
 as a future slice, in dependency order:
 
 1. **Introspection generator** — the tool that runs R, harvests `getNamespaceExports()` + `formals()`
-   into shallow `.Rti` stubs (returns `Any`/`Incomplete`), and caches them per package version. Gated on
+   into shallow `.Rtypes` stubs (returns `Any`/`Incomplete`), and caches them per package version. Gated on
    an available R; ships as offline tooling that writes a cache the checker consumes.
 2. **stubtest validator (LT5)** — a stubtest-equivalent CI check that introspects real R and **diffs**
    the curated stubs (embedded corpus *and* curated CRAN overrides) against the live signatures,

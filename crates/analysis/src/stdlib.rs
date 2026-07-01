@@ -10,20 +10,20 @@ use {
     tree_sitter::Range,
 };
 
-// The shipped standard-library stub corpus: one declaration-only `.Rti` file per namespace. Each file is
+// The shipped standard-library stub corpus: one declaration-only `.Rtypes` file per namespace. Each file is
 // a flat list of `name : <type-expr>` declarations the loader harvests into type schemes. All shipped
 // namespaces are attached to the base environment, so their names resolve as bare globals. See
-// `stubs/base.Rti` for the format.
+// `stubs/base.Rtypes` for the format.
 const SHIPPED_STUBS: &[&str] = &[
-    include_str!("../stubs/base.Rti"),
-    include_str!("../stubs/stats.Rti"),
-    include_str!("../stubs/utils.Rti"),
-    include_str!("../stubs/methods.Rti"),
+    include_str!("../stubs/base.Rtypes"),
+    include_str!("../stubs/stats.Rtypes"),
+    include_str!("../stubs/utils.Rtypes"),
+    include_str!("../stubs/methods.Rtypes"),
 ];
 
 // The extension of a stub file: R type information, declaration-only. The name mirrors R's own `.Rd`
 // documentation convention without colliding with it.
-pub const STUB_EXTENSION: &str = "Rti";
+pub const STUB_EXTENSION: &str = "Rtypes";
 
 // An immutable description of the standard library's value bindings: each base name mapped to the
 // `TypeScheme` harvested from its declaration. Built once when an analysis session starts and never
@@ -100,7 +100,7 @@ impl StubLibrary {
     }
 }
 
-// Reads a project's override stub files from `<root>/stubs/*.Rti`, in sorted path order, returning their
+// Reads a project's override stub files from `<root>/stubs/*.Rtypes`, in sorted path order, returning their
 // source text. A project drops declaration-only stub files there to override or extend the shipped
 // standard-library stubs. A missing directory or an unreadable file is silently skipped: overrides are
 // optional, and a malformed override must never block analysis.

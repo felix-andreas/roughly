@@ -1,6 +1,6 @@
 # Standard-library stubs: methods package (S4).
 #
-# Declaration-only stub file (`.Rti`); see base.Rti for the format. The S4 machinery is dynamic — class
+# Declaration-only stub file (`.Rtypes`); see base.Rtypes for the format. The S4 machinery is dynamic — class
 # membership and coercion results depend on runtime class definitions and dispatch — so almost everything
 # is widened to `Any`. Stubbing the names still resolves them and keeps strict mode from flagging them.
 # (S4 class, generic, and method *names* are tracked separately as string literals, not through these

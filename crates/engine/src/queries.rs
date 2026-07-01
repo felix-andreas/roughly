@@ -296,7 +296,7 @@ impl RoughlyQueries {
         Self::with_project_stubs(Vec::new())
     }
 
-    // Builds the query group with project-supplied `.Rti` override sources folded over the shipped stub
+    // Builds the query group with project-supplied `.Rtypes` override sources folded over the shipped stub
     // corpus, so a project stub overrides a shipped one of the same name. The stubs load through the very
     // interner every body interns through, so a user reference to a base name and the stub's own binding
     // share one `Symbol` id (no cross-interner mismatch is representable), mirroring

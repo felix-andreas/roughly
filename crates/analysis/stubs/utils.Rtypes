@@ -1,6 +1,6 @@
 # Standard-library stubs: utils package.
 #
-# Declaration-only stub file (`.Rti`); see base.Rti for the format. These helpers either take optional
+# Declaration-only stub file (`.Rtypes`); see base.Rtypes for the format. These helpers either take optional
 # arguments or return a value whose shape mirrors their input, so most are widened to `Any`; stubbing
 # them still makes the names resolve and keeps strict mode from flagging them.
 

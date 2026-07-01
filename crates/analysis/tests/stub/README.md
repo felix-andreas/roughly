@@ -1,6 +1,6 @@
 # Stub declaration-parser suite
 
-Exercises `analysis::stub::parse_stub_declarations`, the declaration-line layer for `.Rti` stub files.
+Exercises `analysis::stub::parse_stub_declarations`, the declaration-line layer for `.Rtypes` stub files.
 The parser splits each non-blank, non-comment line into a name and a type expression and reuses the `#:`
 annotation type parser (`parse_surface_type`) for the type half, so this suite covers the declaration
 layer, not the type grammar itself (that is `tests/type_syntax`).

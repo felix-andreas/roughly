@@ -54,10 +54,10 @@ Keep it focused on the file split and the role of each file.
   - the irreducible builtin kernel (operators and core constructors)
   - interface extraction
 
-- `stub.rs` + `stdlib.rs` + `stubs/*.Rti`
+- `stub.rs` + `stdlib.rs` + `stubs/*.Rtypes`
   - `stub.rs` parses the declaration-only stub format (`name : <type-expr>` lines, reusing the type-expression parser)
   - `stdlib.rs` loads the standard-library stubs and folds project overrides over them
-  - `stubs/base.Rti`, `stubs/stats.Rti`, `stubs/utils.Rti`, `stubs/methods.Rti` are declaration-only stub files, harvested into type schemes by the loader
+  - `stubs/base.Rtypes`, `stubs/stats.Rtypes`, `stubs/utils.Rtypes`, `stubs/methods.Rtypes` are declaration-only stub files, harvested into type schemes by the loader
 
 - `diagnostic.rs`
   - structured diagnostics
@@ -94,7 +94,7 @@ Keep it focused on the file split and the role of each file.
 
 ## Deferred split
 
-- the scheme-expressible standard library lives in `stub.rs` + `stdlib.rs` + `stubs/*.Rti`; only the irreducible builtin kernel (operators and core constructors) remains in `typecheck.rs`
+- the scheme-expressible standard library lives in `stub.rs` + `stdlib.rs` + `stubs/*.Rtypes`; only the irreducible builtin kernel (operators and core constructors) remains in `typecheck.rs`
 - keep compatibility logic and interface extraction inside `typecheck.rs` for now; split those out only after the `typecheck` structure stabilizes
 
 ## Role of this document

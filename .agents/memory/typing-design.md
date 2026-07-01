@@ -22,7 +22,7 @@ Forward-looking design space for Roughly's type system: questions that are **not
 **Question.** How do we type functions whose result type depends on the argument type — `abs`, `rep`, `seq`, `range`, and similar — where a single scheme can't be precise?
 
 **Options.**
-- **Overload sets.** Allow multiple type schemes per name; resolve a call by the first argument-compatible scheme. The `.Rti` grammar already permits repeated declarations of one name (loader last-wins) so a corpus need not be rewritten when this lands.
+- **Overload sets.** Allow multiple type schemes per name; resolve a call by the first argument-compatible scheme. The `.Rtypes` grammar already permits repeated declarations of one name (loader last-wins) so a corpus need not be rewritten when this lands.
 - **Traits / typeclasses.** A class mechanism (e.g. a `Numeric`-like class carrying `abs`/arithmetic) with associated method types; a call resolves through the class. More expressive and composable; larger design.
 
 **Interaction with §1.** The user's steer was explicitly open between "a generic vector type or a trait or whatever." A trait/typeclass system could subsume both the array-element constraint (§1) *and* ad-hoc overloading (§2) under one mechanism. Before committing to overload sets, evaluate whether a single trait design pays for both — that is the more likely world-class shape.

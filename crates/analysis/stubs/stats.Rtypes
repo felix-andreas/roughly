@@ -1,6 +1,6 @@
 # Standard-library stubs: stats package.
 #
-# Declaration-only stub file (`.Rti`); see base.Rti for the format.
+# Declaration-only stub file (`.Rtypes`); see base.Rtypes for the format.
 #
 # Summary statistics reduce a numeric input to a numeric result. The result type is precise, but each
 # numeric argument stays `Any`: the checker does not widen an `integer` argument to `double` at a

@@ -197,7 +197,7 @@ impl EngineWorker {
     ) -> Self {
         let workspace_root = std::env::current_dir().unwrap();
 
-        // A project may ship its own `.Rti` stubs under `<root>/stubs/` to override or extend the
+        // A project may ship its own `.Rtypes` stubs under `<root>/stubs/` to override or extend the
         // shipped standard-library corpus. They are read once here and folded into the engine's set-once
         // stub library; they are never re-read on an edit.
         let project_stub_sources = analysis::stdlib::discover_project_stub_sources(&workspace_root);
@@ -1151,7 +1151,7 @@ impl EngineWorker {
     // Highlights the type notation inside `#:` annotation comments in an `.R` document. The annotation
     // parser discards per-token spans into interned symbols, so the type text is classified directly by
     // `analysis::type_semantic_tokens`; this is a highlighter, not a re-parse. Scope is `#:` annotations
-    // in `.R` files only — `.Rti` stub files are not served as documents yet, so they are not covered.
+    // in `.R` files only — `.Rtypes` stub files are not served as documents yet, so they are not covered.
     fn semantic_tokens_full(
         &mut self,
         params: SemanticTokensParams,
