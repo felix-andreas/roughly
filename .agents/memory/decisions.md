@@ -190,3 +190,17 @@ The drift assertions are `#[cfg(debug_assertions)]` and the soak runs in debug, 
 ## Open risk to carry
 
 The **one-hop premise** ("a single reverse-dep hop suffices only because inference never flows across files") is the load-bearing assumption of the entire hand-rolled model. It is stated in prose and enforced by nothing at compile time — a future contributor adding a small cross-file inference shortcut silently voids it. Either encode it as a loud invariant at the inference boundary, or treat its violation as an automatic Part-B = framework trigger.
+
+# Decision record: standard-library stub format
+
+## DECIDED — dedicated declaration-only stub files
+
+Stdlib type information ships as **dedicated declaration-only stub files**, not ordinary R files (the current `crates/analysis/src/stdlib_base.R` placeholder-body approach — `length <- function(x) 0L` harvested by ignoring the body — is retired). The accepted shape is the Expert's design: a flat list of `name : <type-expr>` declarations that **reuse the existing type-expression parser** (so the only new grammar is a thin declaration-line layer, not a second type system); a function body is unrepresentable, so "declaration-only" is enforced structurally the way `.d.ts`/`.pyi` do. Override precedence (project stub wins over shipped stdlib, selected by detected R version) reuses the existing `stdlib.rs` `load_with_overrides` fold; the assembled stub library stays a **set-once input kept out of the incremental dependency graph** (engine invariant — do not route stub files through `did_change`).
+
+**File extension:** a dedicated one, name to be chosen by the CTO + Expert design pass — **not** `.Rstub` (that specific name was vetoed). Candidates: `.Rti` / `.Ri` / `.Rtypes` / `.Rdecl`; avoid collisions with `.Rd` (R documentation), `.Rmd`, `.Rda`/`.RData`.
+
+**Overloads:** v1 uses `Any` for ad-hoc overloads only. Genuinely parametric higher-order functions (`lapply`, `Map`, `Reduce`, `identity`, …) must get **real generic types** via the existing `<T> fn(...)` polymorphism — they are NOT widened to `Any`. Only functions whose return type varies by argument type (`abs`, `rep`, `seq`) fall back to `Any`/`Incomplete` for now. The permanent solution — **traits in the type system vs. overload sets** — is deferred to a later decision. The declaration grammar must permit repeated declarations of one name now, so adopting either later needs no corpus rewrite.
+
+**Syntax highlighting:** LSP semantic tokens first (one server implementation colours both inline `#:` annotations and the stub files, in every LSP client, reusing spans the server already computes); a tree-sitter/TextMate grammar for offline/static highlighting is a later nice-to-have that reuses the declaration grammar.
+
+**Open questions routed to the CTO design pass:** (1) does `type_syntax` already expose a parse-a-bare-type entry point, or must one be extracted (effort driver); (2) per-namespace vs per-item stub file granularity, and whether editing a project stub live triggers a coarse (non-incremental) re-seed vs a restart; (3) `pkg::name` needs a real `NamespaceGet` HIR node (currently `Unsupported`) for re-exports — confirm deferral to the CRAN tier. The full Expert proposal (ecosystem precedent from `.pyi`/`.d.ts`, worked format examples, the precedence stack) should be folded into `docs/.../stdlib-stubs.md` when the format is built.
