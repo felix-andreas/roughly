@@ -844,7 +844,39 @@ impl InferenceState {
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<TypeScheme, InferenceError> {
         let core_type = self.lower_annotation_surface_type(surface_type, type_definitions, None)?;
-        self.generalize(core_type)
+        self.generalize_annotation(core_type)
+    }
+
+    // Generalizes a type lowered directly from an annotation (a stub declaration or `@trust` type),
+    // where there is no function body to check against. A `<T>` binder lowers to a rigid variable; with
+    // no body-inference step to turn it back into an ordinary free variable, ordinary `generalize`
+    // (which quantifies only level-scoped unbound variables) would leave it un-quantified and the
+    // resulting scheme monomorphic-but-open. Here every rigid variable in the lowered type is a
+    // universally quantified parameter, so quantify them alongside the normally generalizable ones.
+    fn generalize_annotation(
+        &mut self,
+        core_type: CoreType,
+    ) -> Result<TypeScheme, InferenceError> {
+        let resolved_type = self.resolve(core_type)?;
+        let type_variables = self.free_type_variables_in_core_type(&resolved_type)?;
+
+        let mut quantified_variables = Vec::new();
+        for variable in type_variables {
+            let Some(entry) = self.entries.get(&variable) else {
+                return Err(InferenceError::UnknownInferenceVariable(variable));
+            };
+            if let InferenceEntry::Unbound { level, constraint } = entry {
+                let constraint = *constraint;
+                if *level > self.current_level || self.rigid_variables.contains_key(&variable) {
+                    quantified_variables.push(QuantifiedVariable::new(variable, constraint));
+                }
+            }
+        }
+
+        Ok(TypeScheme {
+            quantified_variables,
+            body: resolved_type,
+        })
     }
 
     fn infer_module_with_context(

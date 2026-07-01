@@ -94,5 +94,6 @@ round : Any
 seq : Any
 rep : Any
 vapply : Any
-lapply : Any
 sapply : Any
+
+

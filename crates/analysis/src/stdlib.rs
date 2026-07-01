@@ -82,9 +82,16 @@ impl StubLibrary {
 
     // Binds every stub scheme as a base global into `inference_state`, so a document's check resolves a
     // bare base name to its stub scheme. The schemes live only in the template environment.
+    //
+    // Each scheme is *imported* first: it was harvested in a throwaway inference state, so a generic
+    // scheme's quantified (and body) variables carry that state's variable ids. Importing re-binds them
+    // to fresh ids owned by `inference_state`; without it a call to a generic stub instantiates against
+    // variable ids the consuming state never registered, failing with "unknown inference variable". A
+    // monomorphic scheme has no variables, so importing is a no-op for it.
     pub fn seed_into(&self, inference_state: &mut InferenceState) {
         for (symbol, value) in &self.values {
-            inference_state.bind_global_scheme(*symbol, value.scheme.clone(), value.range);
+            let imported = inference_state.import_scheme(&value.scheme);
+            inference_state.bind_global_scheme(*symbol, imported, value.range);
         }
     }
 
