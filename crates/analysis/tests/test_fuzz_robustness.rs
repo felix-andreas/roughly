@@ -359,10 +359,7 @@ fn gen_deep_type(rng: &mut Rng) -> String {
     let (opener, closer) = rng.pick(&[("list[", "]"), ("fn(", ")"), ("(", ")"), ("{", "}")]);
     // For `|` there is no closer; build a long alternation chain instead.
     if rng.chance(20) {
-        return std::iter::repeat("integer | ")
-            .take(depth)
-            .collect::<String>()
-            + "integer";
+        return "integer | ".repeat(depth) + "integer";
     }
     let mut out = String::with_capacity(depth * opener.len() + 8 + depth);
     for _ in 0..depth {
@@ -386,7 +383,7 @@ fn gen_random_bytes(rng: &mut Rng) -> String {
         let choice = rng.below(100);
         let ch = if choice < 60 {
             // Printable ASCII.
-            char::from((0x20 + rng.below(0x5F) as u8) as u8)
+            char::from(0x20 + rng.below(0x5F) as u8)
         } else if choice < 75 {
             '\u{0}'
         } else if choice < 85 {

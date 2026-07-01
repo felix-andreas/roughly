@@ -143,10 +143,13 @@ fn positions(workspace: &Workspace) -> Vec<(FileId, bool, TextPosition)> {
     out
 }
 
+// A location flattened to its comparable fields: path plus start/end line and character.
+type LocationKey = (PathBuf, usize, usize, usize, usize);
+// An edit flattened to its comparable fields: start/end line and character plus replacement text.
+type EditKey = (usize, usize, usize, usize, String);
+
 // LSP location order is not semantic, so location-bearing results are compared as a sorted set.
-fn sorted_locations(
-    locations: Option<Vec<Location>>,
-) -> Option<Vec<(PathBuf, usize, usize, usize, usize)>> {
+fn sorted_locations(locations: Option<Vec<Location>>) -> Option<Vec<LocationKey>> {
     locations.map(|mut locations| {
         let mut keyed = locations
             .drain(..)
@@ -167,9 +170,7 @@ fn sorted_locations(
 
 // Rename edits already group by path (a `BTreeMap`); normalize each path's edit list to a sorted set so
 // the comparison ignores within-file occurrence order.
-fn sorted_rename(
-    rename: Option<RenameResult>,
-) -> Option<BTreeMap<PathBuf, Vec<(usize, usize, usize, usize, String)>>> {
+fn sorted_rename(rename: Option<RenameResult>) -> Option<BTreeMap<PathBuf, Vec<EditKey>>> {
     rename.map(|rename| {
         rename
             .edits

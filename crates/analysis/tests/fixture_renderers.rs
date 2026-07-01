@@ -140,6 +140,9 @@ pub fn render_interface_snapshot(
         .join("\n")
 }
 
+// Threads the full set of naming-phase artifacts needed to render resolved names; grouping them
+// would add indirection to a test-only renderer without simplifying anything.
+#[allow(clippy::too_many_arguments)]
 pub fn render_named_hir(
     analysis: &Analysis,
     document_id: ModuleId,
@@ -239,6 +242,9 @@ fn render_named_definition(
     ));
 }
 
+// Threads the full set of naming-phase artifacts needed to render resolved names; grouping them
+// would add indirection to a test-only renderer without simplifying anything.
+#[allow(clippy::too_many_arguments)]
 fn render_named_expression(
     analysis: &Analysis,
     document_id: DocumentId,
@@ -265,7 +271,7 @@ fn render_named_expression(
             .expression_resolutions
             .get(&expression_id)
         {
-            let binding_document_id = local_naming_result.bindings.get(&binding_id)?.module_id;
+            let binding_document_id = local_naming_result.bindings.get(binding_id)?.module_id;
             return Some((binding_document_id, *binding_id));
         }
 

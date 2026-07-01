@@ -68,7 +68,7 @@ fn generate_source(index: usize) -> String {
     for item in 0..ITEMS_PER_FILE {
         source.push_str(&format!("g_{index}_{item} <- function() 1L\n"));
     }
-    if index % CHAIN_LEN != 0 {
+    if !index.is_multiple_of(CHAIN_LEN) {
         let previous = index - 1;
         for item in 0..ITEMS_PER_FILE {
             source.push_str(&format!("u_{index}_{item} <- g_{previous}_{item}()\n"));

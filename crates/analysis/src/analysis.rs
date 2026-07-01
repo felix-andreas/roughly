@@ -1026,16 +1026,15 @@ impl Analysis {
 mod tests {
     use {
         super::{
-            Analysis, CheckConfig, DocumentChange, DocumentId, LintConfig, Symbol, lint, lower,
-            resolve_package, run_full,
+            Analysis, CheckConfig, DocumentChange, LintConfig, lint, lower, resolve_package,
+            run_full,
         },
         crate::{
-            Diagnostic, Severity,
+            Severity,
             lint::NameStyle,
             text::{TextPosition, TextRange},
         },
         std::{
-            collections::{BTreeMap, BTreeSet},
             fs,
             path::{Path, PathBuf},
             sync::atomic::{AtomicU64, Ordering},
@@ -1474,10 +1473,10 @@ mod tests {
     }
 
     fn remove_workspace_path(workspace_path: &Path) {
-        if let Err(error) = fs::remove_dir_all(workspace_path) {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                panic!("failed to remove test workspace: {error}");
-            }
+        if let Err(error) = fs::remove_dir_all(workspace_path)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            panic!("failed to remove test workspace: {error}");
         }
     }
 }
