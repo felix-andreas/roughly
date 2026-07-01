@@ -219,3 +219,60 @@ R/main.R:1:1
 ```
 Unknown
 ```
+
+#==== hover_type_in_annotation
+#---- alias_name_use
+#---- R/main.R
+#: @alias Identifier {character}
+
+#: Identifier
+id <- "x"
+#++++ any
+#!!!! hover alias_use.hover
+R/main.R:3:5
+#++++
+```
+alias Identifier = character
+```
+
+#---- type_name_use
+#---- R/main.R
+#: @type Person {list{name: character}}
+
+#: Person
+who <- make_person()
+#++++ any
+#!!!! hover type_use.hover
+R/main.R:3:5
+#++++
+```
+type Person = list{name: character}
+```
+
+#---- nested_field_type
+#---- R/main.R
+#: list{name: character, age: integer}
+record <- make_record()
+#++++ any
+#!!!! hover field_type.hover
+R/main.R:1:32
+#++++
+```
+integer
+```
+
+#---- multi_line_annotation
+#---- R/main.R
+#: @type Person {list{name: character}}
+
+#: fn(
+#:   subject: Person
+#: ) -> character
+greet <- function(subject) "hi"
+#++++ any
+#!!!! hover wrapped_type.hover
+R/main.R:4:15
+#++++
+```
+type Person = list{name: character}
+```

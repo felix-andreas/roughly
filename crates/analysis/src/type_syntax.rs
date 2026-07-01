@@ -1,10 +1,14 @@
-use crate::{
-    hir::{Definition, DefinitionKind},
-    interner::{Interner, Symbol},
-    types::{
-        Annotation, Atomic, FunctionType, NamedTypeRef, RecordField, SurfaceType,
-        TypeAnnotationKind,
+use {
+    crate::{
+        hir::{Definition, DefinitionKind},
+        interner::{Interner, Symbol},
+        types::{
+            Annotation, Atomic, FunctionType, NamedTypeRef, RecordField, SurfaceType,
+            TypeAnnotationKind,
+        },
     },
+    ropey::Rope,
+    tree_sitter::{Point, Range},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -416,6 +420,57 @@ fn next_non_space_byte(bytes: &[u8], mut position: usize) -> Option<u8> {
         }
     }
     None
+}
+
+// A type-notation token located at its position in the document, rather than at a body-relative offset.
+// This is what lets IDE features and diagnostics point at an individual type name inside a `#:`
+// annotation without threading spans through the parser: the annotation's document text is re-lexed and
+// each token is rebased to its document range.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentTypeToken {
+    pub range: Range,
+    pub role: TypeTokenRole,
+    pub text: String,
+}
+
+// Re-lexes the `#:` type notation covered by `annotation_range` and returns its tokens with document
+// ranges. Reuses [`semantic_tokens`] as the single type-notation lexer: each source line in the range is
+// stripped of its `#:` prefix, its body is lexed, and every token offset is rebased to the document by
+// adding the body's start column on that line. A single token never spans lines, so per-line lexing is
+// sufficient and multi-line annotation blocks work without a cross-line offset map.
+pub fn type_tokens_in_range(rope: &Rope, annotation_range: Range) -> Vec<DocumentTypeToken> {
+    let mut tokens = Vec::new();
+    for row in annotation_range.start_point.row..=annotation_range.end_point.row {
+        let Some(line) = rope.get_line(row) else {
+            continue;
+        };
+        let line = line.to_string();
+        let trimmed = line.trim_start();
+        let Some(body) = trimmed.strip_prefix("#:") else {
+            continue;
+        };
+        let leading_whitespace = line.len() - trimmed.len();
+        let body_column = leading_whitespace + "#:".len();
+        let Ok(line_start_byte) = rope.try_line_to_byte(row) else {
+            continue;
+        };
+
+        for token in semantic_tokens(body) {
+            let start_column = body_column + token.start;
+            let end_column = body_column + token.end;
+            tokens.push(DocumentTypeToken {
+                range: Range {
+                    start_byte: line_start_byte + start_column,
+                    end_byte: line_start_byte + end_column,
+                    start_point: Point::new(row, start_column),
+                    end_point: Point::new(row, end_column),
+                },
+                role: token.role,
+                text: body[token.start..token.end].to_string(),
+            });
+        }
+    }
+    tokens
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

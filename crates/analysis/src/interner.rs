@@ -54,6 +54,12 @@ impl Interner {
         self.symbols_by_text.contains_key(text)
     }
 
+    // The symbol for already-interned text, without interning it. Read-only callers (IDE queries over
+    // existing state) use this to look up a name that lowering has already interned.
+    pub fn symbol_for(&self, text: &str) -> Option<Symbol> {
+        self.symbols_by_text.get(text).copied()
+    }
+
     pub fn len(&self) -> usize {
         self.text_by_symbol.len()
     }

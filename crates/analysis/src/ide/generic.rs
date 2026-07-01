@@ -27,7 +27,10 @@ use {
         },
         s4::{self, S4Constructor},
         text::{TextPosition, TextRange},
-        type_syntax::{render_named_type_ref, render_surface_type},
+        type_syntax::{
+            DocumentTypeToken, TypeTokenRole, render_named_type_ref, render_surface_type,
+            type_tokens_in_range,
+        },
         types::{Annotation, CoreType, TypeAnnotationKind},
     },
     ropey::{Rope, iter::Chunks},
@@ -45,7 +48,15 @@ use {
 pub fn hover(database: &dyn IdeDatabase, path: &Path, position: TextPosition) -> Option<HoverInfo> {
     let document_id = database.document_id_for_path(path)?;
     let module = database.module(document_id)?;
+    let document = database.document_by_id(document_id)?;
     let point = Point::new(position.line_index, position.character_index);
+
+    // A cursor inside a `#:` type annotation resolves against the type notation, not the R expression
+    // it decorates: the token under the cursor is re-lexed from the document and rendered on its own.
+    if let Some(info) = type_annotation_hover(database, module, document, point) {
+        return Some(info);
+    }
+
     let target = smallest_expression_hover_target(module, point)
         .or_else(|| smallest_definition_hover_target(module, point))?;
 
@@ -113,6 +124,73 @@ pub fn hover(database: &dyn IdeDatabase, path: &Path, position: TextPosition) ->
         contents,
         debug,
     })
+}
+
+fn type_annotation_hover(
+    database: &dyn IdeDatabase,
+    module: &Module,
+    document: &Document,
+    point: Point,
+) -> Option<HoverInfo> {
+    let token = type_token_at(module, document, point)?;
+    if token.role != TypeTokenRole::TypeName {
+        return None;
+    }
+
+    // The type name is resolved against the same document's `@type`/`@alias` declarations. Cross-file
+    // resolution would need every package module primed on each hover keystroke, which the scoped hover
+    // priming deliberately avoids; goto-definition (which primes more broadly) covers the cross-file case.
+    let body = database
+        .interner()
+        .symbol_for(&token.text)
+        .and_then(|symbol| type_definition_in(module, symbol))
+        .map(|definition| render_definition_summary(database, definition))
+        // A builtin scalar or otherwise undeclared type name has no `@type`/`@alias` definition to
+        // expand (and may not even be interned), so show the name itself — hovering `integer` in
+        // `list[integer]` still confirms what the cursor is on.
+        .unwrap_or_else(|| token.text.clone());
+
+    Some(HoverInfo {
+        range: text_range(token.range),
+        contents: vec![code_block(&body)],
+        debug: Vec::new(),
+    })
+}
+
+// The type-notation token under the cursor, if the cursor is inside a `#:` annotation. The containing
+// annotation is found first (it carries a document range), then its notation is re-lexed to locate the
+// individual token the cursor points at.
+fn type_token_at(module: &Module, document: &Document, point: Point) -> Option<DocumentTypeToken> {
+    let annotation_range = annotation_range_at(module, point)?;
+    type_tokens_in_range(document.rope(), annotation_range)
+        .into_iter()
+        .find(|token| range_contains_position(token.range, point))
+}
+
+// The range of the `#:` expression annotation containing the cursor. Only expression annotations are
+// considered: a `@type`/`@alias` declaration keeps its richer definition-target hover (with the debug
+// sections), whereas a *use* of a type name inside an annotation has no other hover to offer.
+fn annotation_range_at(module: &Module, point: Point) -> Option<Range> {
+    module
+        .arena
+        .expressions()
+        .iter()
+        .filter_map(|expression| {
+            expression
+                .annotation
+                .as_ref()
+                .map(|annotation| annotation.range())
+        })
+        .find(|range| range_contains_position(*range, point))
+}
+
+// The `@type`/`@alias` declaration of `name` within a single module. `None` when the module declares no
+// such type (a builtin scalar, an unknown name, or a type parameter).
+fn type_definition_in(module: &Module, name: Symbol) -> Option<&DefinitionItem> {
+    module
+        .definitions
+        .iter()
+        .find(|definition| definition.definition.name == name)
 }
 
 //

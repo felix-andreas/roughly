@@ -198,6 +198,8 @@ impl<'engine> EngineIde<'engine> {
     // `Typecheck` body on an unchanged package.
     fn prime_hover(&self, target: DocumentId) -> Caches {
         let mut caches = self.empty_caches();
+        // The target's parse (rope) is read directly to re-lex a `#:` type annotation the cursor sits in.
+        self.prime_parse(&mut caches, target);
         self.prime_module(&mut caches, target);
         self.prime_naming(&mut caches, target);
         self.prime_check(&mut caches, target);
