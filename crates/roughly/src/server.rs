@@ -1852,11 +1852,13 @@ fn semantic_token_legend() -> Vec<SemanticTokenType> {
         SemanticTokenType::TYPE_PARAMETER,
         SemanticTokenType::PARAMETER,
         SemanticTokenType::OPERATOR,
+        SemanticTokenType::DECORATOR,
     ]
 }
 
 // The legend index for a type-notation role. The `:` separator, the `->` arrow, and the `...` variadic
-// marker are all punctuation, so they share the `operator` type.
+// marker are all punctuation, so they share the `operator` type; an `@`-directive gets the `decorator`
+// type so editors theme it distinctly from type names.
 fn semantic_token_index(role: analysis::TypeTokenRole) -> u32 {
     match role {
         analysis::TypeTokenRole::TypeName => 0,
@@ -1865,6 +1867,7 @@ fn semantic_token_index(role: analysis::TypeTokenRole) -> u32 {
         analysis::TypeTokenRole::Separator
         | analysis::TypeTokenRole::Operator
         | analysis::TypeTokenRole::Variadic => 3,
+        analysis::TypeTokenRole::Directive => 4,
     }
 }
 

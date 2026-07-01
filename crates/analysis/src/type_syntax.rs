@@ -311,6 +311,9 @@ pub enum TypeTokenRole {
     Operator,
     // The `...` rest-parameter marker.
     Variadic,
+    // An `@`-directive keyword (`@type`, `@alias`, `@new`, `@param`, `@return`, `@forall`, …), including
+    // its leading `@`.
+    Directive,
 }
 
 // One classified token in the type notation, as a byte range into the text passed to
@@ -345,6 +348,21 @@ pub fn semantic_tokens(text: &str) -> Vec<TypeToken> {
 
         if byte.is_ascii_whitespace() {
             position += 1;
+            continue;
+        }
+
+        // An `@`-directive: the `@` plus the identifier that names the directive (`@type`, `@param`, …).
+        // The name after `@` is lexed with the member-name lexer, so the whole `@name` is one token.
+        if byte == b'@' {
+            let name_end = utils::member_name_span_at(text, position + 1)
+                .map(|(_, end)| end)
+                .unwrap_or(position + 1);
+            tokens.push(TypeToken {
+                start: position,
+                end: name_end,
+                role: TypeTokenRole::Directive,
+            });
+            position = name_end;
             continue;
         }
 
@@ -1953,6 +1971,7 @@ mod semantic_token_tests {
                     TypeTokenRole::Separator => "sep",
                     TypeTokenRole::Operator => "op",
                     TypeTokenRole::Variadic => "variadic",
+                    TypeTokenRole::Directive => "directive",
                 };
                 format!("{}={role}", &text[start..end])
             })
@@ -2026,5 +2045,25 @@ mod semantic_token_tests {
     #[test]
     fn classifies_bare_value_type() {
         assert_eq!(rendered("double"), ["double=type"]);
+    }
+
+    #[test]
+    fn classifies_directives_with_their_own_role() {
+        assert_eq!(
+            rendered("@type Person {list{name: character}}"),
+            [
+                "@type=directive",
+                "Person=type",
+                "list=type",
+                "name=param",
+                ":=sep",
+                "character=type",
+            ]
+        );
+        assert_eq!(
+            rendered("@param x integer"),
+            ["@param=directive", "x=type", "integer=type"]
+        );
+        assert_eq!(rendered("@new Person"), ["@new=directive", "Person=type"]);
     }
 }
