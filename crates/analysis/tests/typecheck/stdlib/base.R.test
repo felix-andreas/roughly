@@ -150,17 +150,122 @@ abs(1L)
 #++++
 Any
 
-#---- optional_arg_substring_degrades_to_any
+#==== precise_strings
+#---- trimws_is_character
+trimws("  hi  ")
+#++++
+character
+
+#---- substring_is_character
 substring("hello", 1L)
 #++++
-Any
+character
 
-#---- optional_arg_gsub_degrades_to_any
+#---- sprintf_variadic_is_character
+sprintf("%d-%s", 1L, "a")
+#++++
+character
+
+#---- gsub_is_character
 gsub("a", "b", "banana")
 #++++
-Any
+character
 
-#---- optional_arg_sub_degrades_to_any
-sub("a", "b", "banana")
+#---- grepl_is_logical
+grepl("a", "banana")
+#++++
+logical
+
+#---- strsplit_is_list_of_character_vectors
+strsplit("a,b", ",")
+#++++
+list[character[]]
+
+#==== precise_math
+#---- round_is_double
+round(3.14159, 2L)
+#++++
+double
+
+#---- floor_is_double
+floor(3.7)
+#++++
+double
+
+#---- signif_is_double
+signif(3.14159, 3L)
+#++++
+double
+
+#==== generic_apply
+#---- lapply_preserves_element_type_via_mapper
+#: list[character]
+xs <- list("a", "b")
+lapply(xs, toupper)
+#++++
+list[character]
+list[character]
+
+#---- lapply_maps_element_type_through_predicate
+#: list[character]
+words <- list("a", "b")
+lapply(words, nchar)
+#++++
+list[character]
+list[integer]
+
+#---- filter_preserves_list_type
+#: list[integer]
+ns <- list(1L, 2L)
+Filter(is.numeric, ns)
+#++++
+list[integer]
+list[integer]
+
+#---- find_returns_nullable_element
+#: list[integer]
+ns <- list(1L, 2L)
+Find(is.numeric, ns)
+#++++
+list[integer]
+integer | NULL
+
+#---- position_returns_nullable_index
+#: list[integer]
+ns <- list(1L, 2L)
+Position(is.numeric, ns)
+#++++
+list[integer]
+integer | NULL
+
+#==== still_any
+#---- grep_stays_any
+grep("a", "banana")
 #++++
 Any
+
+#---- sapply_stays_any
+sapply(list(1L), is.numeric)
+#++++
+Any
+
+#==== precise_stats
+#---- sd_is_double
+sd(c(1, 2, 3))
+#++++
+double
+
+#---- median_accepts_na_rm
+median(c(1, 2), na.rm = TRUE)
+#++++
+double
+
+#---- quantile_is_double_vector
+quantile(c(1, 2, 3))
+#++++
+double[]
+
+#---- rnorm_is_double_vector
+rnorm(5L)
+#++++
+double[]

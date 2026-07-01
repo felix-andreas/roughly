@@ -81,19 +81,56 @@ range : fn([na.rm]: logical, ...: Any) -> double[]
 # reductions above use `Any`: the checker does not widen `integer` to `double` at a parameter position.
 mean : fn(x: Any, [na.rm]: logical) -> double
 
-# widened to Any: optional arguments beyond what is modeled here, or a result shape that mirrors the
-# argument, which the grammar cannot yet express.
-trimws : Any
-substring : Any
-gsub : Any
-sub : Any
-grepl : Any
+# String helpers with a character result. Vectorization over the input is not modeled (the element type
+# is what matters), and the many optional arguments (`fixed`, `ignore.case`, `perl`, ...) are omitted.
+trimws : fn(x: character) -> character
+substring : fn(text: character, first: integer) -> character
+# `sprintf`/`format` take a leading required argument then variadic extras. That leading argument is
+# left unnamed (a plain positional) rather than named: the checker fills a variadic function's named
+# parameters by name only, so a named leading parameter plus `...` would reject the positional call
+# `sprintf("%d", 1L)`. A bare positional is matched first, and the rest flow into `...`.
+sprintf : fn(character, ...: Any) -> character
+format : fn(Any, ...: Any) -> character
+gsub : fn(pattern: character, replacement: character, x: character) -> character
+sub : fn(pattern: character, replacement: character, x: character) -> character
+grepl : fn(pattern: character, x: character) -> logical
+
+# `strsplit` splits each input string, returning one character vector per input, so a list of them.
+strsplit : fn(x: character, split: character) -> list[character[]]
+
+# Rounding: the result is a double regardless of the (numeric) input, with an optional digit count. The
+# argument stays `Any` for the numeric-widening reason noted above (an `integer` argument at a `double`
+# parameter would be falsely rejected).
+round : fn(x: Any, [digits]: integer) -> double
+signif : fn(x: Any, [digits]: integer) -> double
+floor : fn(x: Any) -> double
+ceiling : fn(x: Any) -> double
+trunc : fn(x: Any) -> double
+
+# Genuinely parametric list transforms. `lapply` maps each element through `f`, so the result is a list
+# of `f`'s results. `Filter` keeps elements, preserving the element type. `Find` returns a matching
+# element or `NULL`; `Position` returns its index or `NULL`. `Reduce` folds a list to a single value.
+# These are the type system's payoff: a call over a typed list preserves or transforms the element type.
+lapply : <T, U> fn(x: list[T], f: fn(T) -> U) -> list[U]
+Filter : <T> fn(f: fn(T) -> logical, x: list[T]) -> list[T]
+Find : <T> fn(f: fn(T) -> logical, x: list[T]) -> T | NULL
+Position : <T> fn(f: fn(T) -> logical, x: list[T]) -> integer | NULL
+Reduce : <T> fn(f: fn(T, T) -> T, x: list[T]) -> T
+
+# widened to Any: a result whose shape or type varies by argument value, or optional arguments beyond
+# what is modeled, which the grammar cannot yet express.
+# - `grep` returns indices or matched values depending on `value=`.
+# - `regmatches` returns a nested, extraction-mode-dependent structure.
+# - `seq`/`rep` return types vary by which arguments are supplied.
+# - `sapply` simplifies (or not) to a vector, matrix, or list depending on `f`'s results.
+# - `vapply`/`mapply` need multi-argument or template-driven shapes not yet expressible.
+# - `Map` applies over several lists in parallel (variadic list arguments).
 grep : Any
-strsplit : Any
-round : Any
+regmatches : Any
 seq : Any
 rep : Any
-vapply : Any
 sapply : Any
-
+vapply : Any
+mapply : Any
+Map : Any
 

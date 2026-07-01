@@ -1,18 +1,20 @@
 # Standard-library stubs: stats package.
 #
-# Declaration-only stub file (`.Rti`); see base.Rti for the format. Most statistical functions take
-# optional arguments (`na.rm`, `trim`, `probs`, ...) or return data-dependent structures (model objects,
-# data frames), neither of which the annotation grammar can describe yet, so they are widened to `Any`.
-# Stubbing them anyway means the names resolve (never reported as undefined, never flagged by strict
-# mode) and a call yields `Any` rather than a falsely-precise type.
-sd : Any
-var : Any
-median : Any
-quantile : Any
-cor : Any
-cov : Any
-fivenum : Any
-weighted.mean : Any
+# Declaration-only stub file (`.Rti`); see base.Rti for the format.
+#
+# Summary statistics reduce a numeric input to a numeric result. The result type is precise, but each
+# numeric argument stays `Any`: the checker does not widen an `integer` argument to `double` at a
+# parameter position (numeric promotion lives only in the operator kernel), so a `double` parameter would
+# falsely reject `sd(c(1L, 2L))`. Scalar reducers return `double`; `quantile`/`fivenum` return a numeric
+# vector.
+sd : fn(x: Any, [na.rm]: logical) -> double
+var : fn(x: Any, [na.rm]: logical) -> double
+median : fn(x: Any, [na.rm]: logical) -> double
+cor : fn(x: Any, y: Any) -> double
+cov : fn(x: Any, y: Any) -> double
+weighted.mean : fn(x: Any, w: Any) -> double
+quantile : fn(x: Any, [na.rm]: logical) -> double[]
+fivenum : fn(x: Any) -> double[]
 
 # Model fitting and prediction: the result is a model object whose shape depends on the formula and
 # data, so it is not statically typeable.
@@ -23,9 +25,10 @@ residuals : Any
 fitted : Any
 coef : Any
 
-# Random generation and distributions: a numeric vector whose length is a runtime value, with optional
-# distribution parameters, so widened to Any.
-rnorm : Any
-runif : Any
-dnorm : Any
-pnorm : Any
+# Random generation and distribution functions return a numeric (double) vector. Their distribution
+# parameters (`mean`, `sd`, `min`, `max`, ...) are optional and omitted here; the leading argument stays
+# `Any` for the numeric-widening reason above.
+rnorm : fn(n: Any) -> double[]
+runif : fn(n: Any) -> double[]
+dnorm : fn(x: Any) -> double[]
+pnorm : fn(q: Any) -> double[]
