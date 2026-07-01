@@ -269,3 +269,35 @@ double[]
 rnorm(5L)
 #++++
 double[]
+
+#==== precise_utils
+#---- str_is_null
+str(list(1L, 2L))
+#++++
+NULL
+
+#---- write_csv_is_null
+write.csv("x", "out.csv")
+#++++
+NULL
+
+#---- install_packages_is_null
+install.packages("roughly")
+#++++
+NULL
+
+#---- help_is_null
+help(length)
+#++++
+NULL
+
+#==== still_any_utils
+#---- read_csv_stays_any
+read.csv("data.csv")
+#++++
+Any
+
+#---- head_stays_any
+head(c(1L, 2L, 3L))
+#++++
+Any

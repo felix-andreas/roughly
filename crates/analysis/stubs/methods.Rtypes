@@ -6,8 +6,13 @@
 # (S4 class, generic, and method *names* are tracked separately as string literals, not through these
 # bindings.)
 
-# widened to Any: `is(object)` returns the class vector while `is(object, class2)` returns a logical, an
-# arity-dependent result the grammar cannot express.
+# widened to Any: each return is dynamic — it depends on a runtime class or argument value, not on the
+# argument *types*, so a static return would be falsely precise.
+# - `is(object)` returns the class vector while `is(object, class2)` returns a logical (arity-dependent).
+# - `as(object, Class)` and `new(Class, ...)` return an object of the runtime-named class.
+# - `validObject` returns its argument if valid (shape mirrors the input).
+# - `setClass`/`setGeneric`/`setMethod`/`setValidity`/`setRefClass` return S4 machinery objects (a class
+#   generator, the generic/method name, a class representation) tied to the dynamic dispatch system.
 is : Any
 as : Any
 new : Any
