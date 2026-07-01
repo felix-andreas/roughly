@@ -1,0 +1,43 @@
+# Curated snapshot of real `stats` package exports (a HAND-MAINTAINED list, NOT R-derived).
+# See base.txt for the policy: a superset of the stubbed names, used to catch stubbed non-exports and to
+# gauge coverage. Blank lines and `#` comments are ignored.
+
+# --- stubbed ---
+coef
+cor
+cov
+dnorm
+fitted
+fivenum
+glm
+lm
+median
+pnorm
+predict
+quantile
+residuals
+rnorm
+runif
+sd
+var
+weighted.mean
+
+# --- real exports not yet stubbed (coverage gauge) ---
+aggregate
+anova
+aov
+confint
+density
+ecdf
+lag
+loess
+mad
+nlm
+optim
+pbinom
+ppois
+qnorm
+rbinom
+rpois
+smooth
+ts

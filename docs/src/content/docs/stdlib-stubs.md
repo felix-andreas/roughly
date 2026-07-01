@@ -276,8 +276,14 @@ machinery. This closes the `T`/`F`/`pi` gap with only the two integration edits 
   to `Any` until that design lands.
 - **The operator/`c` kernel cannot migrate.** One-source-of-truth is necessarily partial.
 - **Corpus size.** Base alone is ~1200 functions. Curate a high-value subset; treat stubs as living
-  docs with real drift risk. The validation tool is a **stubtest-equivalent** that introspects real R
-  signatures via `formals()` / `getNamespaceExports()` and diffs them against the `#:` annotations.
+  docs with real drift risk. The full validation tool is a **stubtest-equivalent** that introspects real
+  R signatures via `formals()` / `getNamespaceExports()` and diffs them against the `#:` annotations
+  (R-dependent, future — §7-9). A **name-level** slice of it already ships and runs in the ordinary unit
+  suite (no R): `tests/test_stdlib_exports.rs` diffs the names the corpus declares against a checked-in,
+  hand-maintained snapshot of each namespace's real exports (`tests/stdlib_exports/<namespace>.txt`).
+  Policy — the corpus must be a **subset** of the snapshot (every stubbed name must be a real export;
+  a stubbed non-export is a hard failure), while unstubbed real exports are allowed and only counted as a
+  coverage gauge. It is names only; arity/type validation stays the R-dependent future slice.
 - **`Any` over-permissiveness** silences real errors — hence the two-tier marker in §4.
 - **Incremental isolation** is automatic — a set-once input; see §3.
 

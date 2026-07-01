@@ -1,0 +1,30 @@
+# Curated snapshot of real `methods` package exports (a HAND-MAINTAINED list, NOT R-derived).
+# See base.txt for the policy: a superset of the stubbed names. Blank lines and `#` comments are ignored.
+
+# --- stubbed ---
+as
+extends
+is
+isVirtualClass
+new
+setClass
+setGeneric
+setMethod
+setRefClass
+setValidity
+validObject
+
+# --- real exports not yet stubbed (coverage gauge) ---
+callNextMethod
+existsMethod
+getGenerics
+getMethod
+getSlots
+isGeneric
+representation
+selectMethod
+show
+signature
+slot
+slotNames
+standardGeneric

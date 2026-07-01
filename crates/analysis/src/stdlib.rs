@@ -110,6 +110,28 @@ impl StubLibrary {
     }
 }
 
+// The names each shipped namespace declares, keyed by namespace in `SHIPPED_STUBS` order. Names are
+// extracted with the real stub parser (not a second scanner), so this stays in step with what the loader
+// harvests. A name repeated within one file appears once. Used by the exhaustiveness check that diffs the
+// declared corpus against a curated list of each namespace's real R exports.
+pub fn shipped_stub_names_by_namespace() -> Vec<(&'static str, Vec<String>)> {
+    let mut interner = Interner::default();
+    SHIPPED_STUBS
+        .iter()
+        .map(|&(namespace, source)| {
+            let (declarations, _errors) = parse_stub_declarations(source, &mut interner);
+            let mut names = declarations
+                .iter()
+                .filter_map(|declaration| interner.resolve(declaration.name))
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            names.sort();
+            names.dedup();
+            (namespace, names)
+        })
+        .collect()
+}
+
 // Reads a project's override stub files from `<root>/stubs/*.Rtypes`, in sorted path order, returning their
 // source text. A project drops declaration-only stub files there to override or extend the shipped
 // standard-library stubs. A missing directory or an unreadable file is silently skipped: overrides are

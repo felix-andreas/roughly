@@ -1,0 +1,23 @@
+# Curated snapshot of real `utils` package exports (a HAND-MAINTAINED list, NOT R-derived).
+# See base.txt for the policy: a superset of the stubbed names. Blank lines and `#` comments are ignored.
+
+# --- stubbed ---
+head
+help
+install.packages
+modifyList
+read.csv
+str
+tail
+write.csv
+
+# --- real exports not yet stubbed (coverage gauge) ---
+available.packages
+capture.output
+combn
+download.file
+packageVersion
+read.table
+untar
+unzip
+write.table
