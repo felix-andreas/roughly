@@ -687,14 +687,13 @@ fn build_package_interface_table(
     table
 }
 
-// Typechecking is incremental at document grain. Round 1 computes each package document's
-// exported value schemes in isolation (cross-file references check as `Unknown`), cached by
-// document version plus the package type-definition fingerprint. Round 2 checks every
-// document against the package interface table built from round 1, cached by document
-// version, the type-definition fingerprint, plus that document's own dependency fingerprint
-// (the schemes it references, rendered against the converged table), so a value-interface change
-// rechecks only the documents that reference the changed name. Returns the documents whose
-// typecheck output was recomputed, so callers can republish exactly those diagnostics.
+// From-scratch whole-package typecheck: the one-shot CLI path and the differential oracle the
+// incremental engine is checked against. Round 1 computes each package document's exported value
+// schemes in isolation (cross-file references check as `Unknown`); the interface fixed-point then
+// converges the package table; finally every document is checked against the converged table.
+// Nothing here is cached across calls — per-document output maps are within-run scratch (never
+// call `typecheck` twice on one `Analysis`). Returns the documents whose typecheck output was
+// computed, so callers can publish exactly those diagnostics.
 pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     resolve_package(analysis_state);
 

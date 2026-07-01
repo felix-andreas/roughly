@@ -118,7 +118,7 @@ actually reads.
  document_kind(f)+----------------------------------------------+        |
                                                                 |        |
  project_files --+-------> package_symbol_index  <--------------+        |
- stdlib_stubs ---+              |   (the only all-files fold; names only) |
+                                |   (the only all-files fold; names only) |
                                 v                                        |
                         defining_item(symbol)   <-- firewall, one symbol |
                                 |                                        |
@@ -142,8 +142,9 @@ Inputs (set from outside, never computed):
   …)` (plus the file's own `source_text`/`document_kind` set or `remove_input`). This is the single source
   of truth for which files exist — there is no separate mirrored package/script set.
 - `config` — project `roughly.toml` (`[check] typing/unused/strict`, …). Low churn.
-- `stdlib_stubs` — the immutable stub library (base + project overrides). Set once; its `changed_at` never
-  advances, so it never invalidates anything.
+- `stdlib_stubs` — the immutable stub library (base + project overrides). Not an engine input at all:
+  it is set-once ambient state on the query group, outside the dependency graph, so it can never
+  invalidate anything (routing stub edits through the graph is explicitly out of scope).
 
 Queries (each edge is a recorded `fetch`, so the dependency is automatic):
 
@@ -152,7 +153,7 @@ Queries (each edge is a recorded `fetch`, so the dependency is automatic):
 | `parse(f)` | `source_text(f)` | the tree is a pure function of the bytes |
 | `lower(f)` | `parse(f)` | HIR is lowered from the tree |
 | `local_naming(f)` | `lower(f)`, `document_kind(f)` | file-local resolution; also yields the file's **exported-name set** |
-| `package_symbol_index` | `project_files`, each package file's `local_naming` export-name set, `stdlib_stubs` | the def-map: `name → winning defining/re-exporting item`. **Names only, no schemes.** The one all-files fold; changes only on *structural* edits (add/remove/rename a top-level binding, add/remove/reclassify a file), **not** on body edits |
+| `package_symbol_index` | `project_files`, each package file's `local_naming` export-name set | the def-map: `name → winning defining/re-exporting item`. **Names only, no schemes.** The one all-files fold; changes only on *structural* edits (add/remove/rename a top-level binding, add/remove/reclassify a file), **not** on body edits |
 | `defining_item(symbol)` | `package_symbol_index` | **firewall**: projects one symbol's winner out of the index. Value-equality cutoff per symbol — when the index changes because symbol *x*'s winner changed, `defining_item(s)` for *s ≠ x* re-projects to the same value and cuts off |
 | `global_scheme(symbol)` | `defining_item(symbol)`, then the winning file's `lower`/local inference for that item (or, for an acyclic re-export `a <- b`, `global_scheme(b)`; for a re-export **cycle**, the SCC interface body, §5) | the per-symbol exported **scheme**. Editing a function body recomputes only *its* `global_scheme`, not a global fold |
 | `typecheck(f)` | `lower(f)`, `local_naming(f)`, `config`, and `global_scheme(s)` for **each symbol `s` that `f` references** | HM inference over the file. Records a dependency on exactly the interface symbols it reads — nothing more |
@@ -171,10 +172,14 @@ Queries (each edge is a recorded `fetch`, so the dependency is automatic):
   the blast: only symbols whose winner actually changed propagate to `global_scheme` and onward. A body
   edit does not touch the index at all (the file's exported-name *set* is unchanged, so `local_naming`'s
   index contribution is value-equal and cuts off).
-- `typecheck(f)` **never** reads `project_files` or `package_symbol_index` directly — it reaches the file
-  set and the def-map only *behind* the per-symbol `global_scheme`/`defining_item` firewall. So no coarse
-  all-files fold gates `typecheck`; adding an unrelated file cannot invalidate a file that does not
-  reference any symbol whose winner changed.
+- For **package files**, `typecheck(f)` never reads `project_files` or `package_symbol_index` directly —
+  it reaches the file set and the def-map only *behind* the per-symbol `global_scheme`/`defining_item`
+  firewall. So no coarse all-files fold gates a package file's `typecheck`; adding an unrelated file
+  cannot invalidate a package file that does not reference any symbol whose winner changed.
+- **Scripts are the exception**: a script's inference fetches `project_files` and each file's
+  `document_kind` directly (it must know the package universe to resolve globals), so any file
+  add/remove/reclassification re-infers every open script in full. Acceptable while open-script counts
+  are small; narrowing it behind a membership firewall is an open follow-up.
 
 ### File addition, deletion, and reclassification
 

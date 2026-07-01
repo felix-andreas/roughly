@@ -65,18 +65,23 @@ result <- sum(1, 2, 3,)
 
 ### Opt-in Checks
 
-Two further checks are available but off by default; enable them in `roughly.toml`:
+Three further checks are available but off by default; enable them in `roughly.toml`:
 
 ```toml
 [check]
 typing = true   # report type errors and function-call argument mismatches
 unused = true   # report unused local variables
+strict = true   # report expressions whose type the checker could not determine
 ```
 
-- **Unused variables**: Flags local variables and parameters that are assigned but never used.
+- **Unused variables**: Flags local variables that are assigned but never used. Function
+  parameters, `for`-loop variables, top-level (package-visible) bindings, and names starting with
+  `.` or `_` are never reported.
 - **Type checking**: Reports type errors and argument mismatches from Roughly's static type
   checker. Type *inference* is always on (it powers editor features); this setting controls whether
   `roughly check` surfaces type-error diagnostics. See [Type Checker](/type-checker).
+- **Strict mode**: Reports the places where the checker genuinely could not determine a type. See
+  the [typing reference](/typing-reference#strict-mode) for exactly what strict mode flags.
 
 ## Configuration
 
