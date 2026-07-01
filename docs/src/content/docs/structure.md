@@ -35,6 +35,7 @@ Keep it focused on the file split and the role of each file.
 - `type_syntax.rs`
   - typing-comment and type-declaration parsing
   - surface-type rendering
+  - type-notation lexing (one pass shared by editor highlighting and by re-lexing a `#:` annotation's document text to map a cursor to the type token under it, for hover/goto/error-range narrowing)
 
 - `types.rs`
   - core type representation shared by inference and checking
