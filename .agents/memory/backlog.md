@@ -39,6 +39,22 @@
 
 ---
 
+## Incoming user batch (to sequence)
+
+**KEYSTONE — type-syntax per-node spans.** `SurfaceType` carries no per-node ranges (the coarse-ranges gap). Threading spans through type-syntax parsing unlocks THREE items below at once, so do it first: (a) local type-syntax error ranges (`list{age: intgr}` should underline only `intgr`, not the whole annotation); (b) goto-definition on a type name inside a `#:` comment → its `@type`/`@alias`; (c) hover on a type inside a `#:` comment.
+
+- **Code quality** *(CTO)*: (1) analysis front end still uses string-based `child_by_field_name`/`kind()` — consolidate on id-based (`kind_id`/`field_id`), matching `roughly` (MEMORY mid-term gap); (2) modules that are a lone file in their own directory — flatten per AGENTS.md ("a directory should hold more than one file").
+- **UX** *(CTO)*: (3) hovering `lapply` should make its package (`base`) clear; (4) hover renders `fn(x: list[?1], f: fn(?1) -> ?2) -> list[?2]` — unfriendly; render inference/generic vars readably (e.g. `<A, B>`), tie to #13; (5) goto-def on types in `#:` comments [keystone]; (6) hover on types in `#:` comments [keystone]; (7) the `#:` **typing formatter** looks awkward on multiline `@type`/`list{...}` and ignores the formatter indent width — give it much better coverage (both a hugged `{list{ … }}` form and an expanded form are acceptable; use the formatter's indent size).
+- **Dev tooling** *(DX)*: (8) restructure the justfile to infer the release kind from an `alpha`/`beta` postfix.
+- **Stubs** *(CTO)*: (9) location — **DECIDED: keep `crates/analysis/stubs/`** (crate-owned asset embedded via `include_str!`; a top-level dir would be ambiguous vs project stubs). (10) an exhaustiveness-check script (stubtest-style, R-dependent — see §7-9 future) — decide scope; (11) tighten stubs that fall back to `Any` where a precise type is now expressible.
+- **Typing** *(CTO + Expert)*: (12) support `local(...)` expressions (scoping); (13) `identity <- function(x) x` shows `fn(a: ?1) -> ?1` instead of a generalized `<A> fn(x: A) -> A` — investigate whether local let-generalization is deliberately withheld (value restriction) or a gap, and whether to generalize/render it (ties to #4); (14) when a type can't be inferred, SHOW that on hover (e.g. `Unknown`/`?`) instead of nothing.
+- **Naming** *(Expert decision, then CTO)*: (15) bindings introduced inside conditionals are currently kept unresolved in fixtures — decide whether they should resolve; (16) make the conditional-binding fixture exhaustive; (17) *(deferred)* local `@type` types (same-file, opaque, editable only locally) — later.
+- **Type-syntax errors** *(CTO)*: (18) local error ranges [keystone] — `list{age: intgr}` underlines only the bad token.
+- **Config** *(CTO)*: (19) `debug` should be normal config, not an experimental feature — check how it's currently gated and normalize.
+- **Fixtures** *(CTO)*: (20) let fixtures simulate `did_change` / `did_save` / `did_close` / `did_change_watched_files` (drives the engine's incremental paths + would let the malformed-input and latest-edit-wins invariants be fixture-tested).
+
+---
+
 ## Post-release — features (NOT required for production-ready)
 
 *User: "you don't need to add more features, but standard library stubs must exist." These wait.*
