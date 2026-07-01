@@ -446,7 +446,7 @@ The reformat is deliberately non-invasive: it only adjusts whitespace. Token ord
 #: @returns { character }
 ```
 
-When a single annotation wraps across several `#:` lines, the formatter keeps your line breaks but normalizes the continuation indentation: each line is indented by the bracket nesting (`(`, `[`, `{`, generic `<...>`) left open by the earlier lines of the block, and a line that begins by closing a bracket dedents one step so the closer lines up with its opener. A blank line, a non-`#:` comment, or ordinary code ends the block, so unrelated comments never inherit this indentation.
+When a single annotation wraps across several `#:` lines, the formatter keeps your line breaks but normalizes the continuation indentation: one level of break is one indent step (`indent-width` spaces). A line that ends still open adds one step however many brackets it opened, and a line that begins by closing brackets dedents one step — so a wrapper that opens several brackets before breaking (for example `@type Instrument {list{`) hugs its inner content to a single level, and its matching closers (`}}`) line up with the opener rather than stair-stepping one indent per bracket. A blank line, a non-`#:` comment, or ordinary code ends the block, so unrelated comments never inherit this indentation.
 
 ```r
 # type_annotations_multiline : compare

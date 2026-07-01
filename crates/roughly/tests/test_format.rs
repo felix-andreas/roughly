@@ -133,6 +133,27 @@ fn annotation_formatting_is_idempotent() {
 }
 
 #[test]
+fn annotation_continuation_honors_indent_width() {
+    // The continuation indent of a wrapped `#:` annotation is `depth * indent_width` spaces after
+    // `#: `, so a non-default width scales the steps (here one hugged level renders as four spaces,
+    // and the closing `}}` dedents fully).
+    let input = "#: @type Instrument {list{\n#: id: integer\n#: }}\n";
+    let formatted = format(
+        tree::parse(&mut tree::new_parser(), input, None).root_node(),
+        &Rope::from_str(input),
+        Config {
+            indent_width: 4,
+            line_ending: LineEnding::Lf,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        formatted,
+        "#: @type Instrument {list{\n#:     id: integer\n#: }}\n"
+    );
+}
+
+#[test]
 fn trailing_spaces_in_comments() {
     assert_eq!(format_str("#' \n#' comment  ").unwrap(), "#'\n#' comment\n");
 }

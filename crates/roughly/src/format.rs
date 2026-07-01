@@ -1216,23 +1216,24 @@ fn format_type_annotation_comment(out: &mut String, raw: &str, node: Node, conte
     }
 }
 
-// Indent steps for a `#:` line inside a multi-line annotation block: the net bracket depth left open
-// by the earlier lines of its block, minus one step when this line itself begins by closing a
+// Indent steps for a `#:` line inside a multi-line annotation block: the visual nesting level carried
+// in from the earlier lines of its block, minus one step when this line itself begins by closing a
 // bracket so the closer aligns with its opener's line.
 fn annotation_continuation_indent(node: Node, rope: &Rope, body: &str) -> usize {
     let carried = carried_annotation_depth(node, rope);
-    if carried <= 0 {
-        return 0;
-    }
-    (carried - i32::from(annotation_first_is_closer(body))).max(0) as usize
+    carried.saturating_sub(usize::from(annotation_first_is_closer(body)))
 }
 
-// Net bracket depth opened by the consecutive `#:` annotation lines immediately preceding `node`
-// (the same block: comment siblings on adjacent rows). Walking stops at a blank line, a non-comment,
-// a non-`#:` comment, or a line that does not tokenize as an annotation, so unrelated comments never
-// bleed indentation into a following annotation.
-fn carried_annotation_depth(node: Node, rope: &Rope) -> i32 {
-    let mut depth = 0;
+// Visual nesting level opened by the consecutive `#:` annotation lines immediately preceding `node`
+// (the same block: comment siblings on adjacent rows). One line of break equals one level: a line
+// that ends still open (a hanging opener) adds a single level however many brackets it opened, and a
+// line that begins by closing brackets drops a single level — so a wrapper that opens several brackets
+// before breaking (`@type X {list{`) and its matching closers (`}}`) read as one hugged level, not one
+// per bracket. Walking stops at a blank line, a non-comment, a non-`#:` comment, or a line that does
+// not tokenize as an annotation, so unrelated comments never bleed indentation into a following
+// annotation.
+fn carried_annotation_depth(node: Node, rope: &Rope) -> usize {
+    let mut preceding_bodies = Vec::new();
     let mut current = node;
     while let Some(previous) = current.prev_sibling() {
         if previous.kind_id() != kind::COMMENT
@@ -1244,17 +1245,27 @@ fn carried_annotation_depth(node: Node, rope: &Rope) -> i32 {
         let Some(previous_body) = raw.trim_end().strip_prefix("#:") else {
             break;
         };
-        match annotation_net_delta(previous_body) {
-            Some(delta) => depth += delta,
-            None => break,
+        if annotation_net_delta(previous_body).is_none() {
+            break;
         }
+        preceding_bodies.push(previous_body.to_owned());
         current = previous;
+    }
+
+    let mut depth: usize = 0;
+    for body in preceding_bodies.iter().rev() {
+        if annotation_first_is_closer(body) {
+            depth = depth.saturating_sub(1);
+        }
+        if annotation_last_is_opener(body) {
+            depth += 1;
+        }
     }
     depth
 }
 
-// The net bracket balance of an annotation line (openers minus closers), or `None` when the body is
-// not a well-formed annotation.
+// The net bracket balance of an annotation line (openers minus closers), used only to reject lines
+// that are not well-formed annotations (returns `None`); depth is tracked one level per line.
 fn annotation_net_delta(body: &str) -> Option<i32> {
     use AnnotationTokenKind::*;
     let mut depth = 0;
@@ -1266,6 +1277,17 @@ fn annotation_net_delta(body: &str) -> Option<i32> {
         }
     }
     Some(depth)
+}
+
+fn annotation_last_is_opener(body: &str) -> bool {
+    use AnnotationTokenKind::*;
+    let Some(tokens) = tokenize_annotation(body) else {
+        return false;
+    };
+    matches!(
+        tokens.last().map(|token| &token.kind),
+        Some(OpenParen | OpenBracket | OpenBrace | GenericOpen | BinderOpen)
+    )
 }
 
 fn annotation_first_is_closer(body: &str) -> bool {

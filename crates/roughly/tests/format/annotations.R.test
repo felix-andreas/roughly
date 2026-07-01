@@ -255,9 +255,9 @@
 #: } ]
 #++++
 #: list[list{
-#:     id: integer,
-#:     name: character
-#:   }]
+#:   id: integer,
+#:   name: character
+#: }]
 
 #==== annotation_multiline_expanded
 #---- param_type_wraps_across_lines
@@ -268,9 +268,9 @@
 #: @return {logical}
 #++++
 #: @param {fn(
-#:     integer,
-#:     character
-#:   ) -> double} callback
+#:   integer,
+#:   character
+#: ) -> double} callback
 #: @return {logical}
 
 #---- forall_then_wrapped_param
@@ -282,8 +282,8 @@
 #++++
 #: @forall T
 #: @param {list{
-#:     value: T
-#:   }} box
+#:   value: T
+#: }} box
 #: @return {T}
 
 #---- balanced_params_stay_flat
@@ -321,6 +321,40 @@
 #:     second: B
 #:   }
 #: }
+
+#---- type_definition_hugs_nested_list
+#: @type Instrument {list{
+#: id : integer ,
+#: name : character
+#: }}
+#++++
+#: @type Instrument {list{
+#:   id: integer,
+#:   name: character
+#: }}
+
+#==== annotation_multiline_hug
+#---- record_value_across_lines
+#: list{
+#: name : character ,
+#: age : double
+#: }
+#++++
+#: list{
+#:   name: character,
+#:   age: double
+#: }
+
+#---- nested_list_hugs_to_one_level
+#: list{list{
+#: x : integer ,
+#: y : integer
+#: }}
+#++++
+#: list{list{
+#:   x: integer,
+#:   y: integer
+#: }}
 
 #==== annotation_preserve
 #---- empty
