@@ -54,9 +54,9 @@ const analysisTabs = [
 ]
 
 const formatterTabs = [
-  { key: 'spacing', label: 'Operators & spacing' },
+  { key: 'spacing', label: 'Braces & indentation' },
   { key: 'pipeline', label: 'Pipelines' },
-  { key: 'normalize', label: 'Quotes, comments & types' },
+  { key: 'normalize', label: 'Alignment' },
 ]
 
 const year = new Date().getFullYear()
@@ -399,10 +399,10 @@ const year = new Date().getFullYear()
           <p class="eyebrow">ship</p>
           <h2>One consistent style.</h2>
           <p class="lede">
-            Bad R reflows into formatted R in place — spacing tightens around some operators and
-            opens around others, indentation snaps to a grid, quotes and comments normalize, and
-            changed tokens flash red, then green, then settle. <code>roughly fmt</code> (and
-            <code>--diff</code> for CI).
+            Scrappy R reflows into a consistent shape in place — one-line <code>if</code> and
+            <code>for</code> bodies get braced and indented, jammed pipelines break onto aligned
+            steps, and ragged assignments snap into a column. <code>roughly fmt</code> rewrites the
+            whole project (and <code>--diff</code> for CI).
           </p>
         </div>
         <div class="col show-col">
@@ -423,90 +423,74 @@ const year = new Date().getFullYear()
               }
             </div>
             <div class="tab-panels">
-              <!-- Operators & spacing -->
+              <!-- Braces & indentation: one-line if/for bodies get braced and indented -->
               <div role="tabpanel" id="panel-spacing" aria-labelledby="tab-spacing" tabindex="0">
                 <div class="ed">
-                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">operators.R · roughly fmt</span></div>
+                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">retry.R · roughly fmt</span></div>
                   <div class="ed-body fmt-body">
-                    <div class="fmt-morph" aria-hidden="true">
-                      <div class="fln" style="--i:0"><span class="tok-id">total</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-id">a</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'+'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-id">b</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'*'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-id">c</span></div>
-                      <div class="fln" style="--i:1"><span class="tok-id">growth</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-id">base</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tok-op">{'^'}</span><span class="tok-id">years</span></div>
-                      <div class="fln" style="--i:2"><span class="tok-id">window</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-num">1</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tok-op">{':'}</span><span class="tok-id">n</span></div>
-                      <div class="fln" style="--i:3"><span class="tok-id">name</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-id">record</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tok-op">{'$'}</span><span class="tok-id">name</span></div>
-                      <div class="fln" style="--i:4"><span class="tok-id">clean</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-id">dplyr</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tok-op">{'::'}</span><span class="tok-fn">filter</span><span class="tok-op">{'('}</span><span class="tok-id">df</span><span class="tok-op">{')'}</span></div>
+                    <div class="fmt-stack" aria-hidden="true">
+                      <div class="fmt-layer fmt-before">
+                        <div class="fln" style="--i:0"><span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-id">attempts</span> <span class="tok-op">&gt;</span> <span class="tok-id">max</span><span class="tok-op">)</span> <span class="tok-fn">stop</span><span class="tok-op">(</span><span class="tok-str">"give up"</span><span class="tok-op">)</span></div>
+                        <div class="fln" style="--i:1"><span class="tok-kw">for</span> <span class="tok-op">(</span><span class="tok-id">i</span> <span class="tok-kw">in</span> <span class="tok-id">seq</span><span class="tok-op">)</span> <span class="tok-fn">log</span><span class="tok-op">(</span><span class="tok-id">i</span><span class="tok-op">)</span></div>
+                        <div class="fln" style="--i:2"><span class="tok-kw">while</span> <span class="tok-op">(</span><span class="tok-id">ok</span><span class="tok-op">)</span> <span class="tok-id">ok</span> <span class="tok-op">&lt;-</span> <span class="tok-fn">step</span><span class="tok-op">()</span></div>
+                      </div>
+                      <div class="fmt-layer fmt-after">
+                        <div class="fln" style="--i:0"><span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-id">attempts</span> <span class="tok-op">&gt;</span> <span class="tok-id">max</span><span class="tok-op">)</span> <span class="tok-op">{'{'}</span></div>
+                        <div class="fln" style="--i:1"><span class="tab-in">  </span><span class="tok-fn">stop</span><span class="tok-op">(</span><span class="tok-str">"give up"</span><span class="tok-op">)</span></div>
+                        <div class="fln" style="--i:2"><span class="tok-op">{'}'}</span></div>
+                        <div class="fln" style="--i:3"><span class="tok-kw">for</span> <span class="tok-op">(</span><span class="tok-id">i</span> <span class="tok-kw">in</span> <span class="tok-id">seq</span><span class="tok-op">)</span> <span class="tok-op">{'{'}</span></div>
+                        <div class="fln" style="--i:4"><span class="tab-in">  </span><span class="tok-fn">log</span><span class="tok-op">(</span><span class="tok-id">i</span><span class="tok-op">)</span></div>
+                        <div class="fln" style="--i:5"><span class="tok-op">{'}'}</span></div>
+                        <div class="fln" style="--i:6"><span class="tok-kw">while</span> <span class="tok-op">(</span><span class="tok-id">ok</span><span class="tok-op">)</span> <span class="tok-op">{'{'}</span></div>
+                        <div class="fln" style="--i:7"><span class="tab-in">  </span><span class="tok-id">ok</span> <span class="tok-op">&lt;-</span> <span class="tok-fn">step</span><span class="tok-op">()</span></div>
+                        <div class="fln" style="--i:8"><span class="tok-op">{'}'}</span></div>
+                      </div>
                     </div>
-                    <span class="sr-only">total &lt;- a + b * c growth &lt;- base^years window &lt;- 1:n name &lt;- record$name clean &lt;- dplyr::filter(df)</span>
-                    <div class="fmt-static" aria-hidden="true">
-                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">total</span><span class="tok-op">{'<-'}</span><span class="tok-id">a</span><span class="tok-op">{'+'}</span><span class="tok-id">b</span><span class="tok-op">{'*'}</span><span class="tok-id">c</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">growth</span><span class="tok-op">{'<-'}</span><span class="tok-id">base</span><span class="tok-op">{' ^'}</span><span class="tok-id">years</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">window</span><span class="tok-op">{'<-'}</span><span class="tok-num">1</span><span class="tok-op">{' :'}</span><span class="tok-id">n</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">name</span><span class="tok-op">{'<-'}</span><span class="tok-id">record</span><span class="tok-op">{' $'}</span><span class="tok-id">name</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">clean</span><span class="tok-op">{'<-'}</span><span class="tok-id">dplyr</span><span class="tok-op">{' ::'}</span><span class="tok-fn">filter</span><span class="tok-op">{'('}</span><span class="tok-id">df</span><span class="tok-op">{')'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">total</span><span class="tok-op">{' <- '}</span><span class="tok-id">a</span><span class="tok-op">{' + '}</span><span class="tok-id">b</span><span class="tok-op">{' * '}</span><span class="tok-id">c</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">growth</span><span class="tok-op">{' <- '}</span><span class="tok-id">base</span><span class="tok-op">{'^'}</span><span class="tok-id">years</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">window</span><span class="tok-op">{' <- '}</span><span class="tok-num">1</span><span class="tok-op">{':'}</span><span class="tok-id">n</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">name</span><span class="tok-op">{' <- '}</span><span class="tok-id">record</span><span class="tok-op">{'$'}</span><span class="tok-id">name</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">clean</span><span class="tok-op">{' <- '}</span><span class="tok-id">dplyr</span><span class="tok-op">{'::'}</span><span class="tok-fn">filter</span><span class="tok-op">{'('}</span><span class="tok-id">df</span><span class="tok-op">{')'}</span></div>
-                    </div>
+                    <span class="sr-only">Before: if (attempts &gt; max) stop("give up"); for (i in seq) log(i); while (ok) ok &lt;- step(). After: each one-line body is wrapped in braces and indented.</span>
                   </div>
                 </div>
               </div>
-              <!-- Pipelines -->
+              <!-- Pipelines: a jammed one-liner splits onto indented steps -->
               <div role="tabpanel" id="panel-pipeline" aria-labelledby="tab-pipeline" tabindex="0" hidden>
                 <div class="ed">
                   <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">sales.R · roughly fmt</span></div>
                   <div class="ed-body fmt-body">
-                    <div class="fmt-morph" aria-hidden="true">
-                      <div class="fln" style="--i:0"><span class="tok-id">top_sales</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-kw">function</span><span class="tok-op">(</span><span class="tok-id">df</span><span class="tok-op">)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'{'}</span></div>
-                      <div class="fln" style="--i:1"><span class="sp" style="--w:2ch;--wf:2ch"></span><span class="tok-id">df</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'%>%'}</span></div>
-                      <div class="fln" style="--i:2"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tok-fn">filter</span><span class="tok-op">(</span><span class="tok-id">amount</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'>'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-num">100</span><span class="tok-op">)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'%>%'}</span></div>
-                      <div class="fln" style="--i:3"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tok-fn">group_by</span><span class="tok-op">(</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tok-id">region</span><span class="sp sp-ch" style="--w:1ch;--wf:0ch"></span><span class="tok-op">)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'%>%'}</span></div>
-                      <div class="fln" style="--i:4"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tok-fn">summarise</span><span class="tok-op">(</span><span class="tok-id">total</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'='}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-fn">sum</span><span class="tok-op">(</span><span class="tok-id">amount</span><span class="tok-op">{'))'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'%>%'}</span></div>
-                      <div class="fln" style="--i:5"><span class="sp" style="--w:4ch;--wf:4ch"></span><span class="tok-fn">arrange</span><span class="tok-op">(</span><span class="tok-fn">desc</span><span class="tok-op">(</span><span class="tok-id">total</span><span class="tok-op">{'))'}</span></div>
-                      <div class="fln" style="--i:6"><span class="tok-op">{'}'}</span></div>
+                    <div class="fmt-stack" aria-hidden="true">
+                      <div class="fmt-layer fmt-before">
+                        <div class="fln" style="--i:0"><span class="tok-id">top</span> <span class="tok-op">&lt;-</span> <span class="tok-id">df</span> <span class="tok-op">%&gt;%</span> <span class="tok-fn">filter</span><span class="tok-op">(</span><span class="tok-id">amt</span><span class="tok-op">&gt;</span><span class="tok-num">100</span><span class="tok-op">)</span> <span class="tok-op">%&gt;%</span> <span class="tok-fn">arrange</span><span class="tok-op">(</span><span class="tok-fn">desc</span><span class="tok-op">(</span><span class="tok-id">amt</span><span class="tok-op">))</span></div>
+                      </div>
+                      <div class="fmt-layer fmt-after">
+                        <div class="fln" style="--i:0"><span class="tok-id">top</span> <span class="tok-op">&lt;-</span> <span class="tok-id">df</span> <span class="tok-op">%&gt;%</span></div>
+                        <div class="fln" style="--i:1"><span class="tab-in">  </span><span class="tok-fn">filter</span><span class="tok-op">(</span><span class="tok-id">amt</span> <span class="tok-op">&gt;</span> <span class="tok-num">100</span><span class="tok-op">)</span> <span class="tok-op">%&gt;%</span></div>
+                        <div class="fln" style="--i:2"><span class="tab-in">  </span><span class="tok-fn">arrange</span><span class="tok-op">(</span><span class="tok-fn">desc</span><span class="tok-op">(</span><span class="tok-id">amt</span><span class="tok-op">))</span></div>
+                      </div>
                     </div>
-                    <span class="sr-only">top_sales &lt;- function(df) {'{'} df %>% filter(amount > 100) %>% group_by(region) %>% summarise(total = sum(amount)) %>% arrange(desc(total)) {'}'}</span>
-                    <div class="fmt-static" aria-hidden="true">
-                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">top_sales</span><span class="tok-op">{'<-'}</span><span class="tok-kw">function</span><span class="tok-op">(</span><span class="tok-id">df</span><span class="tok-op">{')'}</span><span class="tok-op">{'{'}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'   '}<span class="tok-id">df</span><span class="tok-op">{'%>%'}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'     '}<span class="tok-fn">filter</span><span class="tok-op">(</span><span class="tok-id">amount</span><span class="tok-op">{'>'}</span><span class="tok-num">100</span><span class="tok-op">{')'}</span><span class="tok-op">{'%>%'}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'     '}<span class="tok-fn">group_by</span><span class="tok-op">{'( '}</span><span class="tok-id">region</span><span class="tok-op">{' )'}</span><span class="tok-op">{'%>%'}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'     '}<span class="tok-fn">summarise</span><span class="tok-op">(</span><span class="tok-id">total</span><span class="tok-op">{'='}</span><span class="tok-fn">sum</span><span class="tok-op">(</span><span class="tok-id">amount</span><span class="tok-op">{'))'}</span><span class="tok-op">{'%>%'}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{'     '}<span class="tok-fn">arrange</span><span class="tok-op">(</span><span class="tok-fn">desc</span><span class="tok-op">(</span><span class="tok-id">total</span><span class="tok-op">{'))'}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-op">{'}'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">top_sales</span><span class="tok-op">{' <- '}</span><span class="tok-kw">function</span><span class="tok-op">(</span><span class="tok-id">df</span><span class="tok-op">{') '}</span><span class="tok-op">{'{'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'   '}<span class="tok-id">df</span><span class="tok-op">{' %>%'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'     '}<span class="tok-fn">filter</span><span class="tok-op">(</span><span class="tok-id">amount</span><span class="tok-op">{' > '}</span><span class="tok-num">100</span><span class="tok-op">{') '}</span><span class="tok-op">{'%>%'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'     '}<span class="tok-fn">group_by</span><span class="tok-op">(</span><span class="tok-id">region</span><span class="tok-op">{') '}</span><span class="tok-op">{'%>%'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'     '}<span class="tok-fn">summarise</span><span class="tok-op">(</span><span class="tok-id">total</span><span class="tok-op">{' = '}</span><span class="tok-fn">sum</span><span class="tok-op">(</span><span class="tok-id">amount</span><span class="tok-op">{')) '}</span><span class="tok-op">{'%>%'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{'     '}<span class="tok-fn">arrange</span><span class="tok-op">(</span><span class="tok-fn">desc</span><span class="tok-op">(</span><span class="tok-id">total</span><span class="tok-op">{'))'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-op">{'}'}</span></div>
-                    </div>
+                    <span class="sr-only">Before: top &lt;- df %&gt;% filter(amt&gt;100) %&gt;% arrange(desc(amt)). After: each pipe step on its own indented line, with spaced operators.</span>
                   </div>
                 </div>
               </div>
-              <!-- Quotes, comments & types -->
+              <!-- Alignment: a ragged assignment block snaps to an aligned column -->
               <div role="tabpanel" id="panel-normalize" aria-labelledby="tab-normalize" tabindex="0" hidden>
                 <div class="ed">
-                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">strings.R · roughly fmt</span></div>
+                  <div class="ed-bar"><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-dot"></span><span class="ed-name">config.R · roughly fmt</span></div>
                   <div class="ed-body fmt-body">
-                    <div class="fmt-morph" aria-hidden="true">
-                      <div class="fln" style="--i:0"><span class="tok-id">msg</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-str">"Hello world"</span></div>
-                      <div class="fln" style="--i:1"><span class="tok-id">note</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-op">{'<-'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-str">{`'Say "hi"'`}</span></div>
-                      <div class="fln" style="--i:2"><span class="tok-com">#</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-com">clean the data</span></div>
-                      <div class="fln" style="--i:3"><span class="tok-com">#:</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-com">fn(x:</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-com">integer)</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-com">{'->'}</span><span class="sp sp-ch" style="--w:0ch;--wf:1ch"></span><span class="tok-com">double</span></div>
+                    <div class="fmt-stack" aria-hidden="true">
+                      <div class="fmt-layer fmt-before">
+                        <div class="fln" style="--i:0"><span class="tok-fn">opts</span> <span class="tok-op">&lt;-</span> <span class="tok-fn">list</span><span class="tok-op">(</span></div>
+                        <div class="fln" style="--i:1"><span class="tab-in"></span><span class="tok-id">host</span><span class="gap" style="--g:1ch"></span><span class="tok-op">=</span> <span class="tok-str">"localhost"</span><span class="tok-op">,</span></div>
+                        <div class="fln" style="--i:2"><span class="tab-in"></span><span class="tok-id">port</span><span class="gap" style="--g:1ch"></span><span class="tok-op">=</span> <span class="tok-num">8080</span><span class="tok-op">,</span></div>
+                        <div class="fln" style="--i:3"><span class="tab-in"></span><span class="tok-id">retries</span><span class="gap" style="--g:1ch"></span><span class="tok-op">=</span> <span class="tok-num">3</span></div>
+                        <div class="fln" style="--i:4"><span class="tok-op">)</span></div>
+                      </div>
+                      <div class="fmt-layer fmt-after">
+                        <div class="fln" style="--i:0"><span class="tok-fn">opts</span> <span class="tok-op">&lt;-</span> <span class="tok-fn">list</span><span class="tok-op">(</span></div>
+                        <div class="fln" style="--i:1"><span class="tab-in"></span><span class="tok-id">host</span><span class="gap" style="--g:4ch"></span><span class="tok-op">=</span> <span class="tok-str">"localhost"</span><span class="tok-op">,</span></div>
+                        <div class="fln" style="--i:2"><span class="tab-in"></span><span class="tok-id">port</span><span class="gap" style="--g:4ch"></span><span class="tok-op">=</span> <span class="tok-num">8080</span><span class="tok-op">,</span></div>
+                        <div class="fln" style="--i:3"><span class="tab-in"></span><span class="tok-id">retries</span><span class="gap" style="--g:1ch"></span><span class="tok-op">=</span> <span class="tok-num">3</span></div>
+                        <div class="fln" style="--i:4"><span class="tok-op">)</span></div>
+                      </div>
                     </div>
-                    <span class="sr-only">msg &lt;- "Hello world" note &lt;- 'Say "hi"' # clean the data #: fn(x: integer) -&gt; double</span>
-                    <div class="fmt-static" aria-hidden="true">
-                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">msg</span><span class="tok-op">{'<-'}</span><span class="tok-str">{`'Hello world'`}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-id">note</span><span class="tok-op">{'<-'}</span><span class="tok-str">{`'Say "hi"'`}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-com">{'#clean the data'}</span></div>
-                      <div class="dl c-del"><span class="dsign">-</span>{' '}<span class="tok-com">{'#:fn(x:integer)->double'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">msg</span><span class="tok-op">{' <- '}</span><span class="tok-str">"Hello world"</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-id">note</span><span class="tok-op">{' <- '}</span><span class="tok-str">{`'Say "hi"'`}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-com">{'# clean the data'}</span></div>
-                      <div class="dl c-add"><span class="dsign">+</span>{' '}<span class="tok-com">{'#: fn(x: integer) -> double'}</span></div>
-                    </div>
+                    <span class="sr-only">Before: a list() with ragged single spaces before each =. After: the = signs align into one column.</span>
                   </div>
                 </div>
               </div>
@@ -598,12 +582,20 @@ roughly check .</code></pre>
       type Particle = {
         x: number
         y: number
-        // Two resting shapes the particle interpolates between as you scroll: the
-        // logo (progress 0) and the headline (progress 1).
+        // Resting shapes the particle interpolates between as you scroll. At the
+        // top (progress 0) most particles rest on the logo but a fraction stay
+        // scattered at an ambient home spread across the whole hero, so the field
+        // reads as an organic cloud rather than a rigid glyph. As you scroll they
+        // all converge on the headline (progress 1).
         lx: number
         ly: number
         hx: number
         hy: number
+        // Ambient scattered home and how strongly this particle joins the logo
+        // (0 = pure ambient drifter, 1 = fully on the glyph).
+        ax: number
+        ay: number
+        logoness: number
         depth: number
         seed: number
       }
@@ -810,6 +802,13 @@ roughly check .</code></pre>
           const count = particleCount()
           particles = []
           for (let i = 0; i < count; i++) {
+            // Ambient home: scattered across the full hero, biased away from the
+            // dead centre so the resting field spreads to both edges instead of
+            // clustering behind the glyph.
+            const ang = Math.random() * Math.PI * 2
+            const rad = Math.sqrt(Math.random())
+            const ax = cssW * (0.5 + Math.cos(ang) * rad * 0.52)
+            const ay = cssH * (0.5 + Math.sin(ang) * rad * 0.46)
             particles.push({
               x: Math.random() * cssW,
               y: Math.random() * cssH,
@@ -817,6 +816,11 @@ roughly check .</code></pre>
               ly: 0,
               hx: 0,
               hy: 0,
+              ax,
+              ay,
+              // ~70% of particles settle onto the glyph; the rest stay as an
+              // ambient cloud so the logo reads as organic, not a solid block.
+              logoness: Math.random() < 0.7 ? 0.78 + Math.random() * 0.22 : 0,
               depth: 0.35 + Math.random() * 0.65,
               seed: Math.random() * Math.PI * 2,
             })
@@ -887,11 +891,20 @@ roughly check .</code></pre>
           const wander = 1 + flux * 7
           for (let i = 0; i < particles.length; i++) {
             const p = particles[i]
-            const baseX = p.lx + (p.hx - p.lx) * morph
-            const baseY = p.ly + (p.hy - p.ly) * morph
+            // Resting shape at the top: glyph particles sit on the logo, ambient
+            // drifters stay scattered at their ambient home. As you scroll, every
+            // particle pulls from its rest position toward its headline point, so
+            // the whole cloud visibly coalesces into the letters.
+            const restX = p.lx * p.logoness + p.ax * (1 - p.logoness)
+            const restY = p.ly * p.logoness + p.ay * (1 - p.logoness)
+            const baseX = restX + (p.hx - restX) * morph
+            const baseY = restY + (p.hy - restY) * morph
+            // Ambient drifters breathe more than glyph particles so the field
+            // never looks like a static stamp.
+            const drift = wander * (1 + (1 - p.logoness) * 2.2)
             const angle = flowAngle(baseX, baseY, t) + p.seed
-            let x = baseX + Math.cos(angle) * wander
-            let y = baseY + Math.sin(angle) * wander
+            let x = baseX + Math.cos(angle) * drift
+            let y = baseY + Math.sin(angle) * drift
             if (mouse.active) {
               const mdx = x - mouse.x
               const mdy = y - mouse.y
@@ -906,7 +919,10 @@ roughly check .</code></pre>
             p.x = x
             p.y = y
             const size = (p.depth > 0.6 ? 2.9 : 2.1) + flux * 0.7
-            const alpha = (0.5 + p.depth * 0.5) * (1 - flux * 0.42)
+            // Ambient drifters are fainter at rest but rise to full as they join
+            // the headline (morph 1), so the text reads crisp as it forms.
+            const ambientFade = p.logoness > 0 ? 1 : 0.24 + 0.76 * morph
+            const alpha = (0.5 + p.depth * 0.5) * (1 - flux * 0.42) * ambientFade
             context.globalAlpha = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha
             blit(x, y, size)
           }
@@ -927,12 +943,15 @@ roughly check .</code></pre>
           const scrollable = Math.max(1, (stage ? stage.offsetHeight : vh) - vh)
           progress = clamp01(y / scrollable)
           if (nav) nav.style.setProperty('--reveal', String(clamp01((y - vh * 0.12) / (vh * 0.16))))
-          // The real, selectable copy fades in over the back half of the morph, as
-          // the particles finish forming the headline.
-          const copyP = smooth01(clamp01((progress - 0.58) / 0.34))
+          // The particle text is fully assembled well before the crisp copy takes
+          // over: the real headline only fades in over the last stretch of the
+          // scroll, so the viewer watches the dots resolve into the letters first,
+          // then the sharp text hands off from underneath them.
+          const copyP = smooth01(clamp01((progress - 0.8) / 0.2))
           if (copy) copy.style.setProperty('--copy-op', String(copyP))
-          // Particles dim out as the crisp copy takes over, leaving a faint field.
-          heroCanvas!.style.setProperty('--canvas-dim', String(1 - copyP * 0.82))
+          // Particles stay bright while they form the headline, then dim to a faint
+          // field once the crisp copy has taken over.
+          heroCanvas!.style.setProperty('--canvas-dim', String(1 - copyP * 0.85))
           if (hint) hint.style.setProperty('--hint-op', String(clamp01(1 - y / (vh * 0.14))))
           render(performance.now())
         }
@@ -2274,51 +2293,66 @@ roughly check .</code></pre>
       }
       [role='tablist'] {
         display: flex;
-        gap: 2px;
+        gap: 4px;
       }
       .tabs[data-orientation='vertical'] [role='tablist'] {
         flex-direction: column;
         position: sticky;
         top: 72px;
       }
+      /* Horizontal tabs read as a segmented control: a rounded track holds the
+         pills, and the selected pill carries a faint accent fill. */
       .tabs[data-orientation='horizontal'] [role='tablist'] {
         flex-direction: row;
         flex-wrap: wrap;
-        border-bottom: 1px solid var(--border);
-        margin-bottom: 1.1rem;
+        gap: 2px;
+        padding: 3px;
+        margin-bottom: 1.4rem;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: color-mix(in oklab, var(--code-bg) 60%, transparent);
+        width: fit-content;
+        max-width: 100%;
       }
       [role='tab'] {
         font-family: 'Geist Sans', sans-serif;
         font-size: 14px;
+        font-weight: 450;
         color: var(--muted);
         background: transparent;
         border: none;
         cursor: pointer;
         text-align: left;
-        padding: 0.55rem 0.8rem;
         position: relative;
-        transition: color 0.15s ease, background 0.15s ease;
+        white-space: nowrap;
+        transition: color 0.16s ease, background 0.16s ease;
       }
+      /* Vertical tabs: a left accent rail marks the active feature; the whole row
+         gets a soft accent-tinted fill and a subtle inset so it reads as a
+         pressed segment rather than a bare link. */
       .tabs[data-orientation='vertical'] [role='tab'] {
-        border-left: 2px solid transparent;
-        border-radius: 0 4px 4px 0;
+        padding: 0.62rem 0.85rem 0.62rem 0.95rem;
+        border-radius: 8px;
+        box-shadow: inset 2px 0 0 transparent;
       }
       .tabs[data-orientation='horizontal'] [role='tab'] {
-        border-bottom: 2px solid transparent;
-        margin-bottom: -1px;
+        padding: 0.5rem 0.95rem;
+        border-radius: 7px;
       }
       [role='tab']:hover {
         color: var(--foreground);
+        background: color-mix(in oklch, var(--cap) 8%, transparent);
       }
       [role='tab'][aria-selected='true'] {
         color: var(--foreground);
-        background: color-mix(in oklch, var(--cap) 14%, transparent);
+        font-weight: 550;
+        background: color-mix(in oklch, var(--cap) 15%, transparent);
       }
       .tabs[data-orientation='vertical'] [role='tab'][aria-selected='true'] {
-        border-left-color: var(--border-strong);
+        box-shadow: inset 2px 0 0 var(--cap);
       }
       .tabs[data-orientation='horizontal'] [role='tab'][aria-selected='true'] {
-        border-bottom-color: var(--cap);
+        box-shadow: 0 1px 2px oklch(0 0 0 / 0.3);
       }
       [role='tab']:focus-visible {
         outline: 2px solid color-mix(in oklch, var(--cap) 60%, transparent);
@@ -2366,17 +2400,22 @@ roughly check .</code></pre>
         .tabs[data-orientation='vertical'] [role='tablist'] {
           flex-direction: row;
           flex-wrap: wrap;
+          gap: 2px;
           position: static;
-          border-bottom: 1px solid var(--border);
-          padding-bottom: 2px;
+          padding: 3px;
+          border: 1px solid var(--border);
+          border-radius: 10px;
+          background: color-mix(in oklab, var(--code-bg) 60%, transparent);
+          width: fit-content;
+          max-width: 100%;
         }
         .tabs[data-orientation='vertical'] [role='tab'] {
-          border-left: none;
-          border-bottom: 2px solid transparent;
+          padding: 0.5rem 0.95rem;
+          border-radius: 7px;
+          box-shadow: none;
         }
         .tabs[data-orientation='vertical'] [role='tab'][aria-selected='true'] {
-          border-left-color: transparent;
-          border-bottom-color: var(--cap);
+          box-shadow: 0 1px 2px oklch(0 0 0 / 0.3);
         }
       }
 
@@ -2956,16 +2995,25 @@ roughly check .</code></pre>
 
       /* ---------- formatter morph ---------- */
       .fmt-tabs {
-        --dur: 700ms;
         --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
       }
       .fmt-body {
         font-size: clamp(0.85rem, 1.7vw, 1rem);
-        line-height: 2.2;
-        min-height: 340px;
+        line-height: 2;
+        min-height: 300px;
       }
       .fln {
-        white-space: nowrap;
+        white-space: pre;
+      }
+      .tab-in {
+        display: inline-block;
+        width: 2ch;
+      }
+      .gap {
+        display: inline-block;
+        width: var(--g, 1ch);
+        transition: width 360ms var(--ease);
+        transition-delay: calc(var(--i, 0) * 65ms);
       }
       /* Syntax tokens — restrained, dark-monochrome palette. Hierarchy is
          encoded in lightness as well as hue, so it survives grayscale: dim
@@ -2993,71 +3041,86 @@ roughly check .</code></pre>
         color: oklch(0.52 0.012 160);
         font-style: italic;
       }
-      .sp {
-        display: inline-block;
-        width: var(--w);
-        transition: width var(--dur) var(--ease);
-        transition-delay: calc(var(--i, 0) * 60ms);
+      /* Formatter morph: an inconsistently-formatted "before" and the clean
+         "after" are stacked in the same grid cell. On format, the messy layer
+         blurs and lifts away while the clean layer settles in line-by-line, so
+         the viewer reads it as scrappy code reflowing into a consistent shape.
+         Because both layers share one grid cell, the panel height never changes
+         and switching tabs never reflows the page. */
+      .fmt-stack {
+        display: grid;
       }
-      .is-formatted .sp {
-        width: var(--wf);
+      .fmt-layer {
+        grid-area: 1 / 1;
       }
-      .no-anim .sp {
-        transition: none !important;
-        animation: none !important;
+      .fmt-before {
+        opacity: 1;
+        filter: blur(0);
+        transform: translateY(0);
+        transition: opacity 340ms var(--ease), filter 340ms var(--ease),
+          transform 340ms var(--ease);
       }
-      .is-formatted .sp.sp-ch {
-        animation: spFlash var(--dur) var(--ease);
-        animation-delay: calc(var(--i, 0) * 60ms);
+      .fmt-after {
+        opacity: 0;
+        transition: opacity 200ms var(--ease);
+        transition-delay: 220ms;
       }
-      @keyframes spFlash {
+      .is-formatted .fmt-before {
+        opacity: 0;
+        filter: blur(6px);
+        transform: translateY(-8px);
+      }
+      .is-formatted .fmt-after {
+        opacity: 1;
+      }
+      /* Each clean line drops in on a short stagger with an emerald flash that
+         settles as it lands, echoing a formatter rewriting the file top-down. */
+      .fmt-after .fln {
+        opacity: 0;
+        transform: translateY(7px);
+      }
+      .is-formatted .fmt-after .fln {
+        animation: flnSettle 440ms var(--ease) forwards;
+        animation-delay: calc(240ms + var(--i, 0) * 65ms);
+      }
+      @keyframes flnSettle {
         0% {
-          background: color-mix(in oklch, var(--del) 36%, transparent);
+          opacity: 0;
+          transform: translateY(7px);
+          background: color-mix(in oklch, var(--add) 24%, transparent);
         }
-        45% {
-          background: color-mix(in oklch, var(--add) 40%, transparent);
+        60% {
+          opacity: 1;
+          transform: translateY(0);
         }
         100% {
+          opacity: 1;
+          transform: translateY(0);
           background: transparent;
         }
       }
-      /* Reduced-motion diff: the +/- gutter and a faint side-tinted background
-         carry the add/del semantics, while .tok-* coloring composes on top. */
-      .fmt-static {
-        display: none;
+      .no-anim .fmt-before,
+      .no-anim .fmt-after,
+      .no-anim .fmt-after .fln {
+        transition: none !important;
+        animation: none !important;
       }
-      .fmt-static .dl {
-        white-space: pre;
+      /* Reduced motion: skip the choreography and show the clean, formatted
+         result outright. */
+      .reduced .fmt-before,
+      .reduced .fmt-after,
+      .reduced .fmt-after .fln {
+        transition: none !important;
+        animation: none !important;
       }
-      .fmt-static .dsign {
-        display: inline-block;
-        width: 1ch;
-        text-align: center;
-        font-weight: 600;
+      .reduced .fmt-before {
+        opacity: 0;
+        visibility: hidden;
       }
-      .fmt-static .c-del,
-      .fmt-static .c-add {
-        text-decoration: none;
-      }
-      .fmt-static .c-del {
-        background: color-mix(in oklch, var(--del) 9%, transparent);
-        box-shadow: inset 2px 0 0 color-mix(in oklch, var(--del) 65%, transparent);
-      }
-      .fmt-static .c-add {
-        background: color-mix(in oklch, var(--add) 9%, transparent);
-        box-shadow: inset 2px 0 0 color-mix(in oklch, var(--add) 65%, transparent);
-      }
-      .fmt-static .c-del .dsign {
-        color: var(--del);
-      }
-      .fmt-static .c-add .dsign {
-        color: var(--add);
-      }
-      .reduced .fmt-morph {
-        display: none;
-      }
-      .reduced .fmt-static {
-        display: block;
+      .reduced .fmt-after,
+      .reduced .fmt-after .fln {
+        opacity: 1;
+        transform: none;
       }
 
       /* ---------- closer ---------- */
