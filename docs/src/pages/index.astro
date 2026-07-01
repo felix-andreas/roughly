@@ -113,7 +113,7 @@ const year = new Date().getFullYear()
         <div class="hero-vignette" aria-hidden="true"></div>
         <div class="hero-copy">
           <p class="eyebrow">the first type checker for R · written in rust</p>
-          <h1>Modern developer tooling for R.</h1>
+          <h1 class="hero-heading">Modern developer tooling for R.</h1>
           <p class="subhead">
             Roughly is a fast, Rust-built toolchain — a static type checker, a language server, and a
             formatter in one. It catches type errors before you run your code, works in your editor,
@@ -568,29 +568,28 @@ roughly check .</code></pre>
 
     <script>
       // ======================================================================
-      // Hero particle field, scroll-driven. The same particle population forms
-      // the R logo at the top of the page and, as you scroll the hero, morphs
-      // into the headline "Modern developer tooling for R." — at which point the
-      // real (crisp, selectable) headline and copy crossfade in over it. Each
-      // particle interpolates between a logo point and a headline point, so the
-      // whole field is a pure function of scroll progress.
+      // Hero particle field. On load the field runs a one-shot intro: particles
+      // fly in and assemble into the R logo, hold, then disperse into a drifting
+      // ambient cloud. As you then scroll the hero, the same particles morph into
+      // the headline "Modern developer tooling for R." — the letters are drawn by
+      // the particles themselves; there is no separate DOM heading laid on top.
       // ======================================================================
       type Particle = {
         x: number
         y: number
-        // Resting shapes the particle interpolates between as you scroll. At the
-        // top (progress 0) most particles rest on the logo but a fraction stay
-        // scattered at an ambient home spread across the whole hero, so the field
-        // reads as an organic cloud rather than a rigid glyph. As you scroll they
-        // all converge on the headline (progress 1).
+        vx: number
+        vy: number
+        // The three shapes a particle can rest on: its logo point (assembled
+        // during the intro), its headline point (formed as you scroll), and an
+        // ambient scattered home it drifts around when it belongs to neither.
         lx: number
         ly: number
         hx: number
         hy: number
-        // Ambient scattered home and how strongly this particle joins the logo
-        // (0 = pure ambient drifter, 1 = fully on the glyph).
         ax: number
         ay: number
+        // How strongly this particle joins the shapes: 1 = fully on the glyph and
+        // then the letters, 0 = a pure ambient drifter that only ever hovers.
         logoness: number
         depth: number
         seed: number
@@ -599,11 +598,11 @@ roughly check .</code></pre>
 
       const heroCanvas = document.getElementById('hero-canvas') as HTMLCanvasElement | null
       // The particle field fills the sticky viewport pin (100svh), not the tall
-      // scroll stage (#hero) that drives the reveal choreography.
+      // scroll stage (#hero) that drives the scroll morph.
       const heroEl = document.getElementById('hero-viewport') as HTMLElement | null
 
       // The headline the particles resolve into as you scroll, wrapped to two
-      // lines so the particle text roughly matches the rendered <h1>.
+      // lines so the particle text roughly matches the hidden <h1>.
       const HEADING_LINES = ['Modern developer', 'tooling for R.']
 
       function initHero() {
@@ -633,6 +632,16 @@ roughly check .</code></pre>
           context.drawImage(DOT, x - d / 2, y - d / 2, d, d)
         }
 
+        // Load intro timeline (seconds). Particles fly in and assemble onto the
+        // logo, hold, then disperse back into the ambient cloud. `intro` (below)
+        // is the resulting logo-assembly amount that rises 0->1 and falls 1->0.
+        const INTRO_DELAY = 0.2
+        const ASSEMBLE = 1.6
+        const HOLD = 1.2
+        const DISPERSE = 1.8
+        const disperseStart = INTRO_DELAY + ASSEMBLE + HOLD
+        const introEnd = disperseStart + DISPERSE
+
         let dpr = Math.min(window.devicePixelRatio || 1, 2)
         let cssW = 0
         let cssH = 0
@@ -641,6 +650,8 @@ roughly check .</code></pre>
         let headingTargets: Target[] = []
         let running = false
         let rafId = 0
+        let clock = 0
+        let lastTime = 0
         let progress = 0
         let centroidX = 0
         let centroidY = 0
@@ -798,18 +809,21 @@ roughly check .</code></pre>
           const count = particleCount()
           particles = []
           for (let i = 0; i < count; i++) {
-            // Ambient home: scattered as a surrounding halo, held out of the
-            // centre so ambient dots never fill the glyph or its negative space
-            // (which would blur the R). The radius rides an annulus — no closer
-            // than ~0.42 of the half-extent — so the field spreads toward the
-            // edges while the R core stays readable.
+            // Ambient home: a soft radial scatter filling the whole hero, denser
+            // toward the edges (sqrt keeps a gentle centre thinning) but never a
+            // hollow ring, so once the logo disperses the field reads as an even
+            // living cloud rather than an empty donut. The logo and headline are
+            // transient shapes formed by the intro and scroll, so ambient dots may
+            // cross the centre freely.
             const ang = Math.random() * Math.PI * 2
-            const rad = Math.sqrt(0.42 + Math.random() * 0.58)
-            const ax = cssW * (0.5 + Math.cos(ang) * rad * 0.55)
-            const ay = cssH * (0.5 + Math.sin(ang) * rad * 0.48)
+            const rad = Math.sqrt(Math.random())
+            const ax = cssW * (0.5 + Math.cos(ang) * rad * 0.6)
+            const ay = cssH * (0.5 + Math.sin(ang) * rad * 0.55)
             particles.push({
               x: Math.random() * cssW,
               y: Math.random() * cssH,
+              vx: 0,
+              vy: 0,
               lx: 0,
               ly: 0,
               hx: 0,
@@ -860,9 +874,10 @@ roughly check .</code></pre>
           heroCanvas!.style.width = cssW + 'px'
           heroCanvas!.style.height = cssH + 'px'
           context.setTransform(dpr, 0, 0, dpr, 0, 0)
-          // Anchor the morph on the real headline's centre so the particle text
-          // lines up with the <h1> that crossfades in. The copy only fades (it is
-          // never transformed), so its laid-out position is already its final one.
+          // Anchor the particle headline on the invisible <h1>'s laid-out box, so
+          // the particle letters land exactly where the heading would sit and the
+          // subhead below flows under them without overlap. The <h1> is fully
+          // transparent (a screen-reader label) but keeps its layout box.
           const headline = heroEl!.querySelector('.hero-copy h1') as HTMLElement | null
           if (headline) {
             const hr = headline.getBoundingClientRect()
@@ -870,7 +885,7 @@ roughly check .</code></pre>
             centroidY = hr.top - r.top + hr.height / 2
           } else {
             centroidX = cssW / 2
-            centroidY = cssH * 0.42
+            centroidY = cssH * 0.44
           }
           logoTargets = buildLogoTarget()
           headingTargets = buildTextTarget(HEADING_LINES)
@@ -878,67 +893,81 @@ roughly check .</code></pre>
           pairTargets()
         }
 
-        // One frame: each particle sits between its logo point and its headline
-        // point, interpolated by the eased scroll progress, with a flow-field drift
-        // so the field stays alive. Particles are loosest mid-morph and settle
-        // crisply onto each shape at the two ends.
-        function render(time: number) {
+        // Logo-assembly amount for the load intro: 0 before it starts, eases up to
+        // 1 as particles fly onto the glyph, holds, then eases back to 0 as the
+        // field disperses into the ambient cloud. Scroll morph takes over from there.
+        function introAmount() {
+          if (clock <= INTRO_DELAY) return 0
+          if (clock < INTRO_DELAY + ASSEMBLE) return smooth01((clock - INTRO_DELAY) / ASSEMBLE)
+          if (clock < disperseStart) return 1
+          if (clock < introEnd) return 1 - smooth01((clock - disperseStart) / DISPERSE)
+          return 0
+        }
+
+        // One frame. Each particle chases a target that blends its ambient home,
+        // its logo point (weighted by the intro), and its headline point (weighted
+        // by scroll). A spring integrator gives the fly-in and settle their weight,
+        // and a flow-field drift keeps the field alive. Because the target is a
+        // pure function of the intro clock and scroll progress, the morph tracks
+        // the scrollbar exactly while the drift only rides on top.
+        function render(now: number) {
           context.clearRect(0, 0, cssW, cssH)
           context.fillStyle = '#fff'
           const morph = smooth01(progress)
-          const flux = Math.sin(Math.PI * clamp01(progress)) // 0 at the ends, 1 mid-morph
-          const t = time * 0.0006
-          const wander = 1 + flux * 7
+          const intro = introAmount()
+          // Looseness peaks mid-transition (mid-assemble and mid-scroll) so the
+          // field breathes as it reshapes and settles crisp at either resting shape.
+          const settle = Math.max(intro < 1 ? Math.sin(Math.PI * intro) : 0, Math.sin(Math.PI * morph))
+          const t = now * 0.0006
+          const k = 0.14 + 0.16 * Math.max(intro, morph)
+          const damp = 0.82
           for (let i = 0; i < particles.length; i++) {
             const p = particles[i]
-            // Resting shape at the top: glyph particles sit on the logo, ambient
-            // drifters stay scattered at their ambient home. As you scroll, every
-            // particle pulls from its rest position toward its headline point, so
-            // the whole cloud visibly coalesces into the letters.
-            const restX = p.lx * p.logoness + p.ax * (1 - p.logoness)
-            const restY = p.ly * p.logoness + p.ay * (1 - p.logoness)
-            const baseX = restX + (p.hx - restX) * morph
-            const baseY = restY + (p.hy - restY) * morph
-            // Ambient drifters breathe more than glyph particles so the field
-            // never looks like a static stamp.
-            const drift = wander * (1 + (1 - p.logoness) * 2.2)
-            const angle = flowAngle(baseX, baseY, t) + p.seed
-            let x = baseX + Math.cos(angle) * drift
-            let y = baseY + Math.sin(angle) * drift
+            // Blend the three resting shapes in order: ambient home, then pull
+            // toward the logo by the intro, then toward the headline by scroll.
+            // Heading wins at full scroll (weight 1) so the letters read crisp.
+            const wLogo = p.logoness * intro * (1 - morph)
+            let tx = p.ax + (p.lx - p.ax) * wLogo
+            let ty = p.ay + (p.ly - p.ay) * wLogo
+            tx += (p.hx - tx) * morph
+            ty += (p.hy - ty) * morph
+            // Spring toward the target, with a flow-field wander that grows while
+            // the field is in motion and for the loose ambient drifters.
+            const wander = (1 + settle * 6) * (1 + (1 - p.logoness) * 1.8)
+            const angle = flowAngle(p.x, p.y, t) + p.seed
+            p.vx += (tx - p.x) * k + Math.cos(angle) * wander * 0.05
+            p.vy += (ty - p.y) * k + Math.sin(angle) * wander * 0.05
             if (mouse.active) {
-              const mdx = x - mouse.x
-              const mdy = y - mouse.y
+              const mdx = p.x - mouse.x
+              const mdy = p.y - mouse.y
               const d2 = mdx * mdx + mdy * mdy
               if (d2 < 11000 && d2 > 0.01) {
-                const push = (1 - d2 / 11000) * 13
+                const push = (1 - d2 / 11000) * 1.6
                 const inv = 1 / Math.sqrt(d2)
-                x += mdx * inv * push
-                y += mdy * inv * push
+                p.vx += mdx * inv * push
+                p.vy += mdy * inv * push
               }
             }
-            p.x = x
-            p.y = y
-            // Glyph particles are drawn a touch larger and stay opaque so the R
-            // reads as a solid brand at rest; ambient drifters keep the smaller,
-            // softer size that makes the surrounding field feel like a cloud.
-            const glyphBoost = 0.55 * (1 - morph) * p.logoness
-            const size = (p.depth > 0.6 ? 2.9 : 2.1) + flux * 0.7 + glyphBoost
-            // Ambient drifters are fainter at rest but rise to full as they join
-            // the headline (morph 1), so the text reads crisp as it forms.
-            const ambientFade = p.logoness > 0 ? 1 : 0.24 + 0.76 * morph
-            // Lift the on-glyph dots' floor at rest so thin strokes of the R stay
-            // legible; the boost fades out as the field morphs into the headline.
-            const glyphAlpha = 1 + 0.35 * (1 - morph) * p.logoness
-            const alpha = (0.5 + p.depth * 0.5) * (1 - flux * 0.42) * ambientFade * glyphAlpha
+            p.vx *= damp
+            p.vy *= damp
+            p.x += p.vx
+            p.y += p.vy
+            // On-glyph / on-letter particles are a touch larger and brighter so the
+            // shapes read solid; ambient drifters stay smaller and fainter, rising
+            // to full only as they join the headline.
+            const shaped = Math.max(wLogo, morph)
+            const size = (p.depth > 0.6 ? 2.9 : 2.1) + settle * 0.6 + 0.5 * shaped * p.logoness
+            const ambientFade = p.logoness > 0 ? 1 : 0.22 + 0.78 * morph
+            const shapeAlpha = 1 + 0.35 * shaped * p.logoness
+            const alpha = (0.5 + p.depth * 0.5) * (1 - settle * 0.4) * ambientFade * shapeAlpha
             context.globalAlpha = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha
-            blit(x, y, size)
+            blit(p.x, p.y, size)
           }
           context.globalAlpha = 1
         }
 
-        // Scroll progress drives the morph and the copy/nav crossfade. We repaint
-        // straight from the scroll handler (not only from rAF) so the morph tracks
-        // the scrollbar exactly. The rAF loop only adds the idle drift on top.
+        // Scroll only updates progress and the nav/copy/hint reveal. The rAF loop
+        // owns rendering so the spring integration advances on a real timestep.
         const stage = document.getElementById('hero')
         const nav = document.getElementById('nav')
         const copy = heroEl!.querySelector('.hero-copy') as HTMLElement | null
@@ -950,27 +979,28 @@ roughly check .</code></pre>
           const scrollable = Math.max(1, (stage ? stage.offsetHeight : vh) - vh)
           progress = clamp01(y / scrollable)
           if (nav) nav.style.setProperty('--reveal', String(clamp01((y - vh * 0.12) / (vh * 0.16))))
-          // The particle text is fully assembled well before the crisp copy takes
-          // over: the real headline only fades in over the last stretch of the
-          // scroll, so the viewer watches the dots resolve into the letters first,
-          // then the sharp text hands off from underneath them.
-          const copyP = smooth01(clamp01((progress - 0.8) / 0.2))
+          // The subhead and buttons fade in over the last stretch of the scroll,
+          // after the particles have resolved into the headline. The headline
+          // itself is never shown as DOM text — the particles are the heading.
+          const copyP = smooth01(clamp01((progress - 0.72) / 0.28))
           if (copy) copy.style.setProperty('--copy-op', String(copyP))
-          // Particles stay bright while they form the headline, then dim to a faint
-          // field once the crisp copy has taken over.
-          heroCanvas!.style.setProperty('--canvas-dim', String(1 - copyP * 0.85))
           if (hint) hint.style.setProperty('--hint-op', String(clamp01(1 - y / (vh * 0.14))))
-          render(performance.now())
         }
 
         function loop(now: number) {
           if (!running) return
+          if (lastTime === 0) lastTime = now
+          let dt = (now - lastTime) / 1000
+          lastTime = now
+          if (dt > 0.05) dt = 0.05
+          clock += dt
           render(now)
           rafId = requestAnimationFrame(loop)
         }
         function start() {
           if (running) return
           running = true
+          lastTime = 0
           rafId = requestAnimationFrame(loop)
         }
         function stop() {
@@ -1000,12 +1030,18 @@ roughly check .</code></pre>
           relayout()
           syncScroll()
           if (reduceMotion) {
-            // No animation: show the settled headline shape and the crisp copy.
-            progress = 1
+            // No animation: show the crisp DOM headline and copy. The particles
+            // rest as a faint static ambient field behind the text (no logo, no
+            // particle headline) so nothing competes with the legible <h1>.
+            progress = 0
+            clock = introEnd
+            for (const p of particles) {
+              p.x = p.ax
+              p.y = p.ay
+            }
             render(0)
             if (nav) nav.style.setProperty('--reveal', '1')
             if (copy) copy.style.setProperty('--copy-op', '1')
-            heroCanvas!.style.setProperty('--canvas-dim', '0.18')
             return
           }
           if (typeof IntersectionObserver === 'undefined') {
@@ -1913,6 +1949,15 @@ roughly check .</code></pre>
       .hero-reveal .scroll-hint {
         opacity: var(--hint-op, 1);
       }
+      /* In the animated hero the heading is drawn by the particles themselves, so
+         the real <h1> is never painted — no crisp text is laid over the particle
+         letters. It keeps its layout box (so the subhead sits below the particle
+         heading) and stays readable to screen readers, but is fully transparent. */
+      .hero-reveal .hero-heading {
+        opacity: 0;
+        pointer-events: none;
+        user-select: none;
+      }
 
       /* static / reduced-motion mode: a normal single-viewport hero */
       .hero-static #hero {
@@ -2334,13 +2379,13 @@ roughly check .</code></pre>
         white-space: nowrap;
         transition: color 0.16s ease, background 0.16s ease;
       }
-      /* Vertical tabs: a left accent rail marks the active feature; the whole row
-         gets a soft accent-tinted fill and a subtle inset so it reads as a
-         pressed segment rather than a bare link. */
+      /* The active feature reads as a pressed, accent-tinted segment: a soft
+         accent fill plus a full accent-tinted ring around the whole rounded pill.
+         (No left accent rail — an inset side-border on rounded corners looks
+         generic; the ring hugs the radius instead.) */
       .tabs[data-orientation='vertical'] [role='tab'] {
-        padding: 0.62rem 0.85rem 0.62rem 0.95rem;
+        padding: 0.62rem 0.95rem;
         border-radius: 8px;
-        box-shadow: inset 2px 0 0 transparent;
       }
       .tabs[data-orientation='horizontal'] [role='tab'] {
         padding: 0.5rem 0.95rem;
@@ -2353,13 +2398,13 @@ roughly check .</code></pre>
       [role='tab'][aria-selected='true'] {
         color: var(--foreground);
         font-weight: 550;
-        background: color-mix(in oklch, var(--cap) 15%, transparent);
-      }
-      .tabs[data-orientation='vertical'] [role='tab'][aria-selected='true'] {
-        box-shadow: inset 2px 0 0 var(--cap);
+        background: color-mix(in oklch, var(--cap) 16%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--cap) 42%, transparent);
       }
       .tabs[data-orientation='horizontal'] [role='tab'][aria-selected='true'] {
-        box-shadow: 0 1px 2px oklch(0 0 0 / 0.3);
+        box-shadow:
+          inset 0 0 0 1px color-mix(in oklch, var(--cap) 42%, transparent),
+          0 1px 2px oklch(0 0 0 / 0.3);
       }
       [role='tab']:focus-visible {
         outline: 2px solid color-mix(in oklch, var(--cap) 60%, transparent);
@@ -2419,10 +2464,11 @@ roughly check .</code></pre>
         .tabs[data-orientation='vertical'] [role='tab'] {
           padding: 0.5rem 0.95rem;
           border-radius: 7px;
-          box-shadow: none;
         }
         .tabs[data-orientation='vertical'] [role='tab'][aria-selected='true'] {
-          box-shadow: 0 1px 2px oklch(0 0 0 / 0.3);
+          box-shadow:
+            inset 0 0 0 1px color-mix(in oklch, var(--cap) 42%, transparent),
+            0 1px 2px oklch(0 0 0 / 0.3);
         }
       }
 
