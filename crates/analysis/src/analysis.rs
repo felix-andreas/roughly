@@ -217,6 +217,12 @@ impl Analysis {
         &mut self.interner
     }
 
+    // The standard-library namespace a symbol's stub was declared in, for showing a stdlib name's origin
+    // package on hover. `None` when the symbol is not a stdlib stub.
+    pub fn stub_namespace(&self, symbol: Symbol) -> Option<&'static str> {
+        self.stub_library.namespace_of(symbol)
+    }
+
     pub fn base_path(&self) -> &Path {
         &self.base_path
     }

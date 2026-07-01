@@ -346,6 +346,14 @@ fn variable_definition_summary(
         return Some(format!("Package global, defined at `{location}`"));
     }
 
+    // A stdlib stub name (a non-local resolved to no package binding) reports its origin namespace so a
+    // standard-library function reads as coming from its package (e.g. `lapply` from `base`).
+    if let Some(symbol) = local_naming.non_locals.get(&expression_id)
+        && let Some(namespace) = database.stub_namespace(*symbol)
+    {
+        return Some(format!("From the `{namespace}` package."));
+    }
+
     None
 }
 

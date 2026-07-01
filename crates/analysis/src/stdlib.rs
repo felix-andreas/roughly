@@ -10,15 +10,16 @@ use {
     tree_sitter::Range,
 };
 
-// The shipped standard-library stub corpus: one declaration-only `.Rtypes` file per namespace. Each file is
-// a flat list of `name : <type-expr>` declarations the loader harvests into type schemes. All shipped
-// namespaces are attached to the base environment, so their names resolve as bare globals. See
+// The shipped standard-library stub corpus: one declaration-only `.Rtypes` file per namespace, paired
+// with the R namespace it declares. Each file is a flat list of `name : <type-expr>` declarations the
+// loader harvests into type schemes. All shipped namespaces fold into the base environment, so their
+// names resolve as bare globals; the origin tag is retained only for display on hover. See
 // `stubs/base.Rtypes` for the format.
-const SHIPPED_STUBS: &[&str] = &[
-    include_str!("../stubs/base.Rtypes"),
-    include_str!("../stubs/stats.Rtypes"),
-    include_str!("../stubs/utils.Rtypes"),
-    include_str!("../stubs/methods.Rtypes"),
+const SHIPPED_STUBS: &[(&str, &str)] = &[
+    ("base", include_str!("../stubs/base.Rtypes")),
+    ("stats", include_str!("../stubs/stats.Rtypes")),
+    ("utils", include_str!("../stubs/utils.Rtypes")),
+    ("methods", include_str!("../stubs/methods.Rtypes")),
 ];
 
 // The extension of a stub file: R type information, declaration-only. The name mirrors R's own `.Rd`
@@ -42,6 +43,9 @@ pub struct StubLibrary {
 struct StubValue {
     scheme: TypeScheme,
     range: Range,
+    // The R namespace the stub was declared in (`base`, `stats`, …), or `None` for a project override.
+    // Shown on hover so a stdlib name reads as coming from its package; it does not affect resolution.
+    namespace: Option<&'static str>,
 }
 
 impl StubLibrary {
@@ -62,11 +66,11 @@ impl StubLibrary {
     // share one symbol id.
     pub fn load_with_overrides(interner: &mut Interner, override_sources: &[String]) -> Self {
         let mut values = BTreeMap::new();
-        for source in SHIPPED_STUBS {
-            harvest_stub_source(interner, source, &mut values);
+        for &(namespace, source) in SHIPPED_STUBS {
+            harvest_stub_source(interner, source, Some(namespace), &mut values);
         }
         for source in override_sources {
-            harvest_stub_source(interner, source, &mut values);
+            harvest_stub_source(interner, source, None, &mut values);
         }
 
         debug_assert!(
@@ -97,6 +101,12 @@ impl StubLibrary {
 
     pub fn symbols(&self) -> impl Iterator<Item = Symbol> + '_ {
         self.values.keys().copied()
+    }
+
+    // The R namespace a stub name was declared in (`base`, `stats`, …), for display on hover. `None`
+    // when the symbol is not a stub, or when it comes from a project override (no shipped namespace).
+    pub fn namespace_of(&self, symbol: Symbol) -> Option<&'static str> {
+        self.values.get(&symbol)?.namespace
     }
 }
 
@@ -132,6 +142,7 @@ pub fn discover_project_stub_sources(root: &Path) -> Vec<String> {
 fn harvest_stub_source(
     interner: &mut Interner,
     source: &str,
+    namespace: Option<&'static str>,
     values: &mut BTreeMap<Symbol, StubValue>,
 ) {
     let (declarations, _errors) = parse_stub_declarations(source, interner);
@@ -148,6 +159,7 @@ fn harvest_stub_source(
             StubValue {
                 scheme,
                 range: declaration.range,
+                namespace,
             },
         );
     }

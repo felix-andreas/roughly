@@ -15,7 +15,7 @@ use {
         analysis::{Analysis, lower, resolve_package, typecheck},
         document::{Document, DocumentId},
         hir::{ExpressionId, Module},
-        interner::Interner,
+        interner::{Interner, Symbol},
         naming::{NamesGlobal, NamesLocal},
         text::{TextPosition, TextRange},
         types::CoreType,
@@ -46,6 +46,9 @@ pub trait IdeDatabase {
         expression_id: ExpressionId,
     ) -> Option<&CoreType>;
     fn all_document_ids(&self) -> Vec<DocumentId>;
+    // The standard-library namespace a symbol's stub was declared in (`base`, `stats`, …), for showing a
+    // stdlib name's origin package on hover. `None` when the symbol is not a stdlib stub.
+    fn stub_namespace(&self, symbol: Symbol) -> Option<&'static str>;
 }
 
 // `Analysis`'s inherent accessors already expose every fact the trait names, so the impl forwards to
@@ -94,6 +97,10 @@ impl IdeDatabase for Analysis {
 
     fn all_document_ids(&self) -> Vec<DocumentId> {
         self.all_document_ids()
+    }
+
+    fn stub_namespace(&self, symbol: Symbol) -> Option<&'static str> {
+        self.stub_namespace(symbol)
     }
 }
 
@@ -413,5 +420,68 @@ mod inlay_viewport_tests {
 
         let lines: Vec<usize> = hints.iter().map(|hint| hint.position.line_index).collect();
         assert_eq!(lines, vec![1]);
+    }
+}
+
+#[cfg(test)]
+mod stub_namespace_hover_tests {
+    use {
+        super::hover,
+        crate::{
+            analysis::{Analysis, CheckConfig, LintConfig},
+            render_hover_markdown,
+            text::TextPosition,
+        },
+        std::{
+            path::PathBuf,
+            sync::atomic::{AtomicU64, Ordering},
+            time::{SystemTime, UNIX_EPOCH},
+        },
+    };
+
+    // A base path in the system temp dir with no `stubs/` directory, so project-override discovery finds
+    // nothing and the shipped stubs keep their origin namespace. (A `PathBuf::new()` base would resolve
+    // the relative `stubs/` against the test's working directory, picking the crate's own shipped stubs
+    // up as "overrides" and dropping their namespace tag.)
+    fn isolated_base_path() -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!(
+            "roughly-hover-ns-{nanos}-{}",
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    #[test]
+    fn stdlib_function_hover_shows_origin_package() {
+        let mut analysis = Analysis::new(
+            isolated_base_path(),
+            LintConfig::default(),
+            CheckConfig {
+                typing: true,
+                ..CheckConfig::default()
+            },
+        );
+        analysis
+            .add_document_from_source(PathBuf::from("R/main.R"), "lapply\n")
+            .expect("document should parse");
+
+        let info = hover(
+            &mut analysis,
+            &PathBuf::from("R/main.R"),
+            TextPosition {
+                line_index: 0,
+                character_index: 0,
+            },
+        )
+        .expect("hover over a stdlib function should produce a result");
+        let rendered = render_hover_markdown(&info, false);
+        assert!(
+            rendered.contains("From the `base` package."),
+            "hovering a base stdlib function should note its origin package, got:\n{rendered}"
+        );
     }
 }

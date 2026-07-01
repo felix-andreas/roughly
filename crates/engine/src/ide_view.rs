@@ -37,6 +37,7 @@ use {
         },
         interner::{Interner, Symbol},
         naming::{DocumentNamingComputation, NamesGlobal, NamesLocal},
+        stdlib::StubLibrary,
         text::{TextPosition, TextRange},
         typecheck::ModuleCheck,
         types::CoreType,
@@ -116,7 +117,8 @@ impl<'engine> EngineIde<'engine> {
         let target = self.paths.id(path)?;
         let caches = self.prime_hover(target);
         let interner = self.engine.group().interner_ref();
-        let database = EngineIdeRef::new(&caches, &interner, self.paths);
+        let database =
+            EngineIdeRef::new(&caches, &interner, self.paths, self.engine.group().stubs());
         generic::hover(&database, path, position)
     }
 
@@ -126,7 +128,8 @@ impl<'engine> EngineIde<'engine> {
         };
         let caches = self.prime_typed(target);
         let interner = self.engine.group().interner_ref();
-        let database = EngineIdeRef::new(&caches, &interner, self.paths);
+        let database =
+            EngineIdeRef::new(&caches, &interner, self.paths, self.engine.group().stubs());
         generic::inlay_hints(&database, path, viewport)
     }
 
@@ -134,7 +137,8 @@ impl<'engine> EngineIde<'engine> {
         let target = self.paths.id(path)?;
         let caches = self.prime_typed(target);
         let interner = self.engine.group().interner_ref();
-        let database = EngineIdeRef::new(&caches, &interner, self.paths);
+        let database =
+            EngineIdeRef::new(&caches, &interner, self.paths, self.engine.group().stubs());
         generic::signature_help(&database, path, position)
     }
 
@@ -142,7 +146,8 @@ impl<'engine> EngineIde<'engine> {
         let target = self.paths.id(path)?;
         let caches = self.prime_completion(target);
         let interner = self.engine.group().interner_ref();
-        let database = EngineIdeRef::new(&caches, &interner, self.paths);
+        let database =
+            EngineIdeRef::new(&caches, &interner, self.paths, self.engine.group().stubs());
         generic::completion(&database, path, position)
     }
 
@@ -150,7 +155,8 @@ impl<'engine> EngineIde<'engine> {
         let target = self.paths.id(path)?;
         let caches = self.prime_definition(target, position);
         let interner = self.engine.group().interner_ref();
-        let database = EngineIdeRef::new(&caches, &interner, self.paths);
+        let database =
+            EngineIdeRef::new(&caches, &interner, self.paths, self.engine.group().stubs());
         generic::definition(&database, path, position)
     }
 
@@ -163,7 +169,8 @@ impl<'engine> EngineIde<'engine> {
         let _target = self.paths.id(path)?;
         let caches = self.prime_all_files();
         let interner = self.engine.group().interner_ref();
-        let database = EngineIdeRef::new(&caches, &interner, self.paths);
+        let database =
+            EngineIdeRef::new(&caches, &interner, self.paths, self.engine.group().stubs());
         generic::references(&database, path, position, include_declaration)
     }
 
@@ -176,7 +183,8 @@ impl<'engine> EngineIde<'engine> {
         let _target = self.paths.id(path)?;
         let caches = self.prime_all_files();
         let interner = self.engine.group().interner_ref();
-        let database = EngineIdeRef::new(&caches, &interner, self.paths);
+        let database =
+            EngineIdeRef::new(&caches, &interner, self.paths, self.engine.group().stubs());
         generic::rename(&database, path, position, new_name)
     }
 
@@ -373,16 +381,23 @@ struct EngineIdeRef<'a> {
     caches: &'a Caches,
     interner: &'a Interner,
     paths: &'a PathTable,
+    stubs: &'a StubLibrary,
 }
 
 impl<'a> EngineIdeRef<'a> {
     // `interner` is passed as `&Ref<Interner>`, which deref-coerces to `&Interner` at this argument site;
     // the orchestrator holds the `Ref` on its stack frame for the duration of the generic call.
-    fn new(caches: &'a Caches, interner: &'a Interner, paths: &'a PathTable) -> EngineIdeRef<'a> {
+    fn new(
+        caches: &'a Caches,
+        interner: &'a Interner,
+        paths: &'a PathTable,
+        stubs: &'a StubLibrary,
+    ) -> EngineIdeRef<'a> {
         EngineIdeRef {
             caches,
             interner,
             paths,
+            stubs,
         }
     }
 }
@@ -452,5 +467,9 @@ impl<'a> IdeDatabase for EngineIdeRef<'a> {
 
     fn all_document_ids(&self) -> Vec<DocumentId> {
         self.caches.all_ids.clone()
+    }
+
+    fn stub_namespace(&self, symbol: Symbol) -> Option<&'static str> {
+        self.stubs.namespace_of(symbol)
     }
 }

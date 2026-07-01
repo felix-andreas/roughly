@@ -338,6 +338,11 @@ impl RoughlyQueries {
         Ref::map(self.lowering.borrow(), |lowering| lowering.interner())
     }
 
+    // The set-once stub library, so the IDE view can report a stdlib name's origin namespace on hover.
+    pub fn stubs(&self) -> &StubLibrary {
+        &self.stubs
+    }
+
     pub fn package_symbol_index_runs(&self) -> u64 {
         self.counters.package_symbol_index.get()
     }
