@@ -52,6 +52,7 @@
 - **Type-syntax errors** *(CTO)*: (18) local error ranges [keystone] — `list{age: intgr}` underlines only the bad token.
 - **Config** *(CTO)*: (19) `debug` should be normal config, not an experimental feature — check how it's currently gated and normalize.
 - **Fixtures** *(CTO)*: (20) let fixtures simulate `did_change` / `did_save` / `did_close` / `did_change_watched_files` (drives the engine's incremental paths + would let the malformed-input and latest-edit-wins invariants be fixture-tested).
+- **Lint** *(CTO)*: (21) unused-variable warning. NOTE: an unused-**local** lint already exists (gated by `[check] unused`; excludes parameters, for-loop vars, top-level/exported, `.`/`_`-prefixed — see MEMORY typing internals). Confirm what this asks for beyond it: if it's the same, verify + close; if broader (unused function **parameters**, unused `library()`/`require()` imports, or assignments never read across nested scopes), scope that as the delta. Clarify with the user before building to avoid duplicating the existing lint.
 
 ---
 
