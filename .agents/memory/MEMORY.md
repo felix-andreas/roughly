@@ -7,20 +7,6 @@ Keep this file:
 - **high-signal** — terse; point at code/docs;
 - **current** — adding what is durable *and* pruning what is resolved, stale, or duplicated is part of repository hygiene, not optional.
 
-## For the next CEO — read this first, then delete this section
-
-You are the **CEO / Director** of Roughly. Your role and operating rules are in `.agents/roles/ceo.md` — read it; it is binding. You own outcomes and direction, not implementation: you orchestrate worker subagents (a **CTO** → `crates/` + `.github/` + root manifests; a **DX lead** → `docs/` + `editors/`; an **RA/LSP Expert** → adversarial acceptance authority who owns the Definition-of-Done and signs off "done"), you verify their work yourself (never trust a status report — workers have over-claimed and resumed on stale premises), and you drive the WHOLE repository to impeccable, rust-analyzer-level production quality. You write no production code, and you do NOT merge — the human merges; you report only when it is genuinely impeccable.
-
-You are reading the knowledge-base index. To start:
-1. Finish reading this file — the current architecture, the **quality bar** (perf budgets + soundness conditions) to hold work to, the **engine invariants** not to break, the conventions/traps, and the open gaps.
-2. Read `backlog.md` — the prioritized production-readiness punch-list (P0 → P1 → P2); **that is your work queue**. Reference `decisions.md` + the docs site as needed.
-3. Confirm the green baseline yourself: `cargo check --all-targets`, `cargo test`, `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings` (CI gates all four).
-4. Spawn/brief the workers on the top remaining backlog items. Single writer per lane; commit per green step; never yield a red or uncommitted tree; **never touch `HUMAN_NOTES.md`** (the human's file).
-
-Objective: clear `backlog.md` to impeccable production quality. The engine cutover to the in-house memoized query engine is complete; what remains is whole-repo polish plus the one hard requirement — real standard-library type stubs in a proper overridable format. Drive it proactively (the human should not have to point gaps out). When the repo is genuinely release-ready, report it to the human to merge (work is on branch `feat/hm-type-checker`).
-
-*This is a one-time handoff note. Once you have internalized it, delete this whole section — pruning what has been read is part of keeping this file clean.*
-
 ## Current state
 
 - **The analysis backend is a single in-house red-green memoized query engine** (`crates/engine`) behind the LSP server. It records each query's dependencies and recomputes only what an edit invalidates — there is no hand-maintained reverse-dependency index, dirty-set, or fingerprint table; those dissolve into recorded dependencies. It runs on a dedicated worker thread with latest-edit-wins cancellation. The `analysis` crate supplies the computational cores — parse, lower, naming, the Hindley-Milner type core, and the IDE-query layer (generic over an `IdeDatabase` fact provider) — as query bodies, plus a from-scratch `run_full` retained as the differential regression oracle and the one-shot CLI path. Architecture detail: `architecture.md` + `crates/engine/DESIGN.md`.
