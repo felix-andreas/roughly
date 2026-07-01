@@ -2,11 +2,16 @@ use {
     crate::format::Config as FormatConfig,
     analysis::{CheckConfig, LintConfig, NameStyle},
     serde::Deserialize,
-    std::{io, path::Path},
+    std::{
+        fmt, io,
+        path::{Path, PathBuf},
+    },
     thiserror::Error,
 };
 
-#[derive(Debug, Clone, Copy, Default)]
+pub const CONFIG_FILE_NAME: &str = "roughly.toml";
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Config {
     pub format: FormatConfig,
     pub lint: LintConfig,
@@ -16,51 +21,118 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn from_path(path: impl AsRef<Path>) -> Result<Config, ConfigError> {
-        let path = path.as_ref();
-
-        Ok(match std::fs::read_to_string(path) {
-            Ok(text) => Config::from_toml_str(&text)?,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                ConfigToml::default().to_config()
-            }
-            Err(error) => return Err(error.into()),
-        })
-    }
-
-    pub fn from_toml_str(text: &str) -> Result<Config, ConfigError> {
-        Ok(toml::from_str::<ConfigToml>(text)?.to_config())
-    }
-
-    /// Loads the `roughly.toml` governing `target` by searching the target's directory and
-    /// its ancestors, falling back to the default configuration when none exists.
-    pub fn for_target(target: impl AsRef<Path>) -> Result<Config, ConfigError> {
+    /// Loads the `roughly.toml` governing `target`: the nearest one found in the target's
+    /// directory (its parent, when `target` is a file) or the directory's ancestors, falling back
+    /// to the default configuration when none exists. Both the language server (from the client's
+    /// workspace root) and the CLI (from each target argument) resolve configuration through this
+    /// one search.
+    pub fn discover(target: impl AsRef<Path>) -> Result<Config, ConfigError> {
         let target = target.as_ref();
-        let start = if target.is_dir() {
-            Some(target)
+        // A relative path is made absolute first: its lexical parent chain ends at the empty path,
+        // so walking it directly would never reach the real filesystem ancestors.
+        let target = std::path::absolute(target).map_err(|error| ConfigError::Io {
+            path: target.to_path_buf(),
+            source: error,
+        })?;
+
+        let mut directory = if target.is_dir() {
+            Some(target.as_path())
         } else {
             target.parent()
         };
-
-        let mut directory = start;
         while let Some(current) = directory {
-            let candidate = current.join("roughly.toml");
+            let candidate = current.join(CONFIG_FILE_NAME);
             if candidate.is_file() {
                 return Config::from_path(candidate);
             }
             directory = current.parent();
         }
 
-        Ok(ConfigToml::default().to_config())
+        Ok(Config::default())
+    }
+
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Config, ConfigError> {
+        let path = path.as_ref();
+
+        match std::fs::read_to_string(path) {
+            Ok(text) => Config::from_toml_str(&text).map_err(|error| error.with_path(path)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Config::default()),
+            Err(error) => Err(ConfigError::Io {
+                path: path.to_path_buf(),
+                source: error,
+            }),
+        }
+    }
+
+    pub fn from_toml_str(text: &str) -> Result<Config, ConfigError> {
+        match toml::from_str::<ConfigToml>(text) {
+            Ok(config) => Ok(config.to_config()),
+            Err(error) => Err(ConfigError::Invalid(ConfigParseError::new(&error, text))),
+        }
     }
 }
 
 #[derive(Error, Debug)]
 pub enum ConfigError {
-    #[error("failed to read config")]
-    IoError(#[from] io::Error),
-    #[error("invalid config file")]
-    Invalid(#[from] toml::de::Error),
+    #[error("failed to read config file {path}: {source}", path = .path.display())]
+    Io { path: PathBuf, source: io::Error },
+    #[error(transparent)]
+    Invalid(ConfigParseError),
+}
+
+impl ConfigError {
+    fn with_path(mut self, path: &Path) -> ConfigError {
+        if let ConfigError::Invalid(error) = &mut self {
+            error.path = Some(path.to_path_buf());
+        }
+        self
+    }
+}
+
+/// A malformed `roughly.toml`: the toml parse or deserialize failure, with its source span
+/// resolved to a 1-based line and column so the message can point at the offending key or value.
+#[derive(Debug)]
+pub struct ConfigParseError {
+    path: Option<PathBuf>,
+    location: Option<(usize, usize)>,
+    message: String,
+}
+
+impl ConfigParseError {
+    fn new(error: &toml::de::Error, text: &str) -> ConfigParseError {
+        ConfigParseError {
+            path: None,
+            location: error.span().map(|span| line_and_column(text, span.start)),
+            message: error.message().to_owned(),
+        }
+    }
+}
+
+impl fmt::Display for ConfigParseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "invalid config")?;
+        if let Some(path) = &self.path {
+            write!(formatter, " in {}", path.display())?;
+        }
+        if let Some((line, column)) = self.location {
+            write!(formatter, " at line {line}, column {column}")?;
+        }
+        write!(formatter, ": {}", self.message)
+    }
+}
+
+impl std::error::Error for ConfigParseError {}
+
+// The 1-based line and column of a byte offset within `text`, for rendering a toml error span.
+fn line_and_column(text: &str, offset: usize) -> (usize, usize) {
+    let mut offset = offset.min(text.len());
+    while offset > 0 && !text.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    let line_start = text[..offset].rfind('\n').map_or(0, |newline| newline + 1);
+    let line = text[..line_start].matches('\n').count() + 1;
+    let column = text[line_start..offset].chars().count() + 1;
+    (line, column)
 }
 
 //
@@ -68,7 +140,7 @@ pub enum ConfigError {
 //
 
 #[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 #[derive(Default)]
 pub struct ConfigToml {
     pub case: Option<NameStyle>, // kept for backwards compatibility
@@ -112,6 +184,12 @@ mod tests {
     use {super::*, crate::format::LineEnding, indoc::indoc};
     fn parse(text: &str) -> Config {
         Config::from_toml_str(text).unwrap()
+    }
+
+    fn parse_error(text: &str) -> String {
+        Config::from_toml_str(text)
+            .expect_err("expected the config to be rejected")
+            .to_string()
     }
 
     #[test]
@@ -172,5 +250,130 @@ mod tests {
     fn debug_toggle() {
         assert!(parse("debug = true\n").debug);
         assert!(!parse("debug = false\n").debug);
+    }
+
+    #[test]
+    fn unknown_top_level_key_is_rejected_with_location() {
+        let message = parse_error("strict = true\n");
+        assert!(
+            message.contains("unknown field `strict`"),
+            "expected the error to name the unknown key, got: {message}"
+        );
+        assert!(
+            message.contains("at line 1, column 1"),
+            "expected the error to point at the key, got: {message}"
+        );
+    }
+
+    #[test]
+    fn unknown_key_in_each_section_is_rejected() {
+        let format = parse_error("[format]\nindent = 4\n");
+        assert!(
+            format.contains("unknown field `indent`") && format.contains("line 2"),
+            "expected an unknown-field error in [format], got: {format}"
+        );
+
+        let lint = parse_error("[lint]\nstyle = \"snake_case\"\n");
+        assert!(
+            lint.contains("unknown field `style`") && lint.contains("line 2"),
+            "expected an unknown-field error in [lint], got: {lint}"
+        );
+
+        let check = parse_error("[check]\ntyping = true\nstric = true\n");
+        assert!(
+            check.contains("unknown field `stric`") && check.contains("line 3"),
+            "expected an unknown-field error in [check], got: {check}"
+        );
+    }
+
+    #[test]
+    fn underscore_spelling_of_kebab_case_key_is_rejected() {
+        let message = parse_error("[lint]\nnaming_style = \"snake_case\"\n");
+        assert!(
+            message.contains("unknown field `naming_style`"),
+            "expected the error to name the misspelled key, got: {message}"
+        );
+        assert!(
+            message.contains("`naming-style`"),
+            "expected the error to suggest the kebab-case spelling, got: {message}"
+        );
+        assert!(
+            message.contains("at line 2, column 1"),
+            "expected the error to point at the key, got: {message}"
+        );
+    }
+
+    #[test]
+    fn wrong_value_type_is_rejected_with_location() {
+        let message = parse_error("[check]\nstrict = \"yes\"\n");
+        assert!(
+            message.contains("expected a boolean"),
+            "expected a type error, got: {message}"
+        );
+        assert!(
+            message.contains("at line 2"),
+            "expected the error to point at the offending line, got: {message}"
+        );
+    }
+
+    #[test]
+    fn from_path_names_the_file_in_errors() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let config_path = directory.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&config_path, "debug = 1\n").expect("write config");
+
+        let message = Config::from_path(&config_path)
+            .expect_err("expected the config to be rejected")
+            .to_string();
+        assert!(
+            message.contains("roughly.toml"),
+            "expected the error to name the file, got: {message}"
+        );
+        assert!(
+            message.contains("at line 1"),
+            "expected the error to carry a location, got: {message}"
+        );
+    }
+
+    #[test]
+    fn discover_walks_ancestors_from_a_file_target() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let root = directory.path();
+        std::fs::write(root.join(CONFIG_FILE_NAME), "[format]\nindent-width = 7\n")
+            .expect("write config");
+        let nested = root.join("a").join("b");
+        std::fs::create_dir_all(&nested).expect("create nested dirs");
+        std::fs::write(nested.join("script.R"), "x <- 1\n").expect("write script");
+
+        let config = Config::discover(nested.join("script.R")).expect("discover config");
+        assert_eq!(config.format.indent_width, 7);
+    }
+
+    #[test]
+    fn discover_prefers_the_nearest_config() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let root = directory.path();
+        std::fs::write(root.join(CONFIG_FILE_NAME), "[format]\nindent-width = 7\n")
+            .expect("write outer config");
+        let nested = root.join("inner");
+        std::fs::create_dir_all(&nested).expect("create nested dir");
+        std::fs::write(
+            nested.join(CONFIG_FILE_NAME),
+            "[format]\nindent-width = 3\n",
+        )
+        .expect("write inner config");
+
+        let from_directory = Config::discover(&nested).expect("discover from directory");
+        assert_eq!(from_directory.format.indent_width, 3);
+
+        let from_file = Config::discover(nested.join("script.R")).expect("discover from file");
+        assert_eq!(from_file.format.indent_width, 3);
+    }
+
+    #[test]
+    fn discover_defaults_when_no_config_exists() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let config = Config::discover(directory.path()).expect("discover config");
+        assert_eq!(config, Config::default());
     }
 }

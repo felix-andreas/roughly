@@ -11,11 +11,11 @@ use {
             DocumentSymbolResponse, FileChangeType, FileEvent, FormattingOptions,
             GeneralClientCapabilities, GotoDefinitionParams, GotoDefinitionResponse, HoverContents,
             HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-            InitializedParams, InlayHintParams, PartialResultParams, Position,
+            InitializedParams, InlayHintParams, MessageType, PartialResultParams, Position,
             PositionEncodingKind, PublishDiagnosticsParams, Range, ReferenceContext,
-            ReferenceParams, RenameParams, SignatureHelpParams, TextDocumentClientCapabilities,
-            TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-            TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
+            ReferenceParams, RenameParams, ShowMessageParams, SignatureHelpParams,
+            TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier,
+            TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
             WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceFolder,
             notification::{PublishDiagnostics, ShowMessage},
             request::{RegisterCapability, WorkspaceDiagnosticRefresh},
@@ -37,6 +37,7 @@ use {
 struct TestClientState {
     diagnostics_sender: mpsc::UnboundedSender<PublishDiagnosticsParams>,
     refresh_sender: mpsc::UnboundedSender<()>,
+    messages_sender: mpsc::UnboundedSender<ShowMessageParams>,
 }
 
 struct Stop;
@@ -46,11 +47,13 @@ type TestService = CatchUnwind<Concurrency<Router<TestClientState>>>;
 fn build_test_client(
     diagnostics_sender: mpsc::UnboundedSender<PublishDiagnosticsParams>,
     refresh_sender: mpsc::UnboundedSender<()>,
+    messages_sender: mpsc::UnboundedSender<ShowMessageParams>,
 ) -> (async_lsp::MainLoop<TestService>, async_lsp::ServerSocket) {
     async_lsp::MainLoop::new_client(|_server| {
         let mut router = Router::new(TestClientState {
             diagnostics_sender,
             refresh_sender,
+            messages_sender,
         });
 
         router.notification::<PublishDiagnostics>(|state, params| {
@@ -68,7 +71,10 @@ fn build_test_client(
             std::future::ready(Ok(()))
         });
 
-        router.notification::<ShowMessage>(|_, _| ControlFlow::Continue(()));
+        router.notification::<ShowMessage>(|state, params| {
+            let _ = state.messages_sender.send(params);
+            ControlFlow::Continue(())
+        });
 
         router.event(|_, _: Stop| ControlFlow::Break(Ok(())));
 
@@ -80,7 +86,7 @@ fn build_test_client(
 }
 
 fn spawn_server_with_experimental_features(
-    workspace_dir: &Path,
+    server_cwd: &Path,
     experimental_features: &[&str],
 ) -> tokio::process::Child {
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_roughly"));
@@ -90,7 +96,7 @@ fn spawn_server_with_experimental_features(
         command.arg(experimental_features.join(" "));
     }
     command
-        .current_dir(workspace_dir)
+        .current_dir(server_cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -126,6 +132,7 @@ struct TestContext {
     server: async_lsp::ServerSocket,
     diagnostics_receiver: mpsc::UnboundedReceiver<PublishDiagnosticsParams>,
     refresh_receiver: mpsc::UnboundedReceiver<()>,
+    messages_receiver: mpsc::UnboundedReceiver<ShowMessageParams>,
     mainloop_handle: tokio::task::JoinHandle<()>,
     init_result: InitializeResult,
     _temp_dir: tempfile::TempDir,
@@ -160,7 +167,12 @@ async fn setup_test_inner(
     capabilities: ClientCapabilities,
 ) -> TestContext {
     let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
-    let workspace_dir = temp_dir.path().to_path_buf();
+    // The server process is spawned with the temp ROOT as its working directory while the client
+    // announces the `workspace` subdirectory as the workspace root, so every test exercises the
+    // server deriving its root from the initialize params rather than from the process cwd.
+    let server_cwd = temp_dir.path().to_path_buf();
+    let workspace_dir = temp_dir.path().join("workspace");
+    std::fs::create_dir_all(&workspace_dir).expect("failed to create workspace directory");
     if create_r_directory {
         std::fs::create_dir_all(workspace_dir.join("R")).expect("failed to create R directory");
     }
@@ -175,9 +187,11 @@ async fn setup_test_inner(
 
     let (diagnostics_sender, diagnostics_receiver) = mpsc::unbounded_channel();
     let (refresh_sender, refresh_receiver) = mpsc::unbounded_channel();
-    let (mainloop, mut server) = build_test_client(diagnostics_sender, refresh_sender);
+    let (messages_sender, messages_receiver) = mpsc::unbounded_channel();
+    let (mainloop, mut server) =
+        build_test_client(diagnostics_sender, refresh_sender, messages_sender);
 
-    let mut child = spawn_server_with_experimental_features(&workspace_dir, experimental_features);
+    let mut child = spawn_server_with_experimental_features(&server_cwd, experimental_features);
     let stdout = child.stdout.take().expect("missing stdout").compat();
     let stdin = child.stdin.take().expect("missing stdin").compat_write();
 
@@ -214,6 +228,7 @@ async fn setup_test_inner(
         server,
         diagnostics_receiver,
         refresh_receiver,
+        messages_receiver,
         mainloop_handle,
         init_result,
         _temp_dir: temp_dir,
@@ -348,6 +363,14 @@ impl TestContext {
             .await
             .map(|received| received.is_some())
             .unwrap_or(false)
+    }
+
+    // Waits briefly for a `window/showMessage` notification, returning it when one arrives.
+    async fn received_message(&mut self) -> Option<ShowMessageParams> {
+        tokio::time::timeout(Duration::from_secs(2), self.messages_receiver.recv())
+            .await
+            .ok()
+            .flatten()
     }
 
     fn notify_watched_file_changed(&mut self, relative_path: &str, change_type: FileChangeType) {
@@ -2045,6 +2068,215 @@ async fn pull_client_without_refresh_support_gets_no_refresh() {
     assert!(
         !context.received_refresh().await,
         "a client without refresh support must not receive a refresh request"
+    );
+
+    context.shutdown().await;
+}
+
+// Config subsystem: the workspace root comes from the client, `roughly.toml` is discovered by
+// nearest-ancestor search from that root, a malformed config never takes the server down, and a
+// config reload applies to diagnostics immediately.
+
+async fn formatted_text(context: &mut TestContext, uri: &Url) -> String {
+    let edits = context
+        .server
+        .formatting(DocumentFormattingParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            options: FormattingOptions {
+                tab_size: 2,
+                insert_spaces: true,
+                ..FormattingOptions::default()
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("formatting request failed")
+        .expect("expected formatting edits");
+    edits[0].new_text.clone()
+}
+
+#[tokio::test]
+async fn workspace_root_comes_from_the_client_not_the_process_cwd() {
+    // A decoy config in the server process's working directory (the temp root, one level above the
+    // workspace) and the real config in the client-announced workspace root: the workspace config
+    // is the nearest one, so it must win. A server resolving config against its process cwd would
+    // pick the 8-space decoy.
+    let mut context = setup_test(&[
+        ("../roughly.toml", "[format]\nindent-width = 8\n"),
+        ("roughly.toml", "[format]\nindent-width = 4\n"),
+    ])
+    .await;
+
+    let file_uri = context.file_uri("R/root.R");
+    context
+        .open_file(&file_uri, "f <- function(x) {\nx + 1\n}\n")
+        .await;
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    let formatted = formatted_text(&mut context, &file_uri).await;
+    assert!(
+        formatted.contains("    x + 1"),
+        "expected the workspace root's 4-space config to govern, got:\n{formatted}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn ancestor_config_governs_a_workspace_without_its_own() {
+    // No config in the workspace root itself: discovery walks up and finds the one in the parent
+    // directory, matching the CLI's nearest-ancestor behavior.
+    let mut context = setup_test(&[("../roughly.toml", "[format]\nindent-width = 4\n")]).await;
+
+    let file_uri = context.file_uri("R/ancestor.R");
+    context
+        .open_file(&file_uri, "f <- function(x) {\nx + 1\n}\n")
+        .await;
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    let formatted = formatted_text(&mut context, &file_uri).await;
+    assert!(
+        formatted.contains("    x + 1"),
+        "expected the ancestor config to govern the workspace, got:\n{formatted}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn malformed_config_falls_back_to_defaults_and_reports() {
+    // Setup completing at all proves a malformed `roughly.toml` no longer aborts server startup.
+    let mut context = setup_test(&[("roughly.toml", "[check]\nstrict = \"yes\"\n")]).await;
+
+    let message = context
+        .received_message()
+        .await
+        .expect("expected a config error message after initialization");
+    assert_eq!(message.typ, MessageType::ERROR);
+    assert!(
+        message.message.contains("roughly.toml"),
+        "expected the message to name the config file, got: {}",
+        message.message
+    );
+    assert!(
+        message.message.contains("line 2"),
+        "expected the message to point at the offending line, got: {}",
+        message.message
+    );
+    assert!(
+        message.message.contains("expected a boolean"),
+        "expected the message to describe the type error, got: {}",
+        message.message
+    );
+
+    // The server keeps serving on the default configuration.
+    let file_uri = context.file_uri("R/alive.R");
+    context.open_file(&file_uri, "x <- T\n").await;
+    let diagnostics = recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
+    assert!(
+        diagnostics
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("TRUE")),
+        "expected the server to keep serving diagnostics, got: {:?}",
+        diagnostics.diagnostics
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn config_reload_refreshes_push_diagnostics() {
+    // Type errors are off by default, so the open document starts clean; enabling `[check] typing`
+    // via a config reload must republish the open document's diagnostics without any edit.
+    let mut context = setup_test(&[]).await;
+
+    let file_uri = context.file_uri("R/toggle.R");
+    context.open_file(&file_uri, "x <- 1L + \"a\"\n").await;
+
+    let initial = recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
+    assert!(
+        initial.diagnostics.is_empty(),
+        "type errors are off by default, got: {:?}",
+        initial.diagnostics
+    );
+
+    std::fs::write(
+        context.workspace_dir.join("roughly.toml"),
+        "[check]\ntyping = true\n",
+    )
+    .expect("failed to write config");
+    context.notify_watched_file_changed("roughly.toml", FileChangeType::CREATED);
+
+    let refreshed = recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
+    assert!(
+        !refreshed.diagnostics.is_empty(),
+        "expected the newly enabled type check to surface diagnostics without an edit"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn config_reload_requests_refresh_for_pull_clients() {
+    let mut context = setup_test_with_pull_and_refresh(&[]).await;
+
+    let file_uri = context.file_uri("R/pull_toggle.R");
+    context.open_file(&file_uri, "x <- 1L\n").await;
+
+    std::fs::write(
+        context.workspace_dir.join("roughly.toml"),
+        "[check]\ntyping = true\n",
+    )
+    .expect("failed to write config");
+    context.notify_watched_file_changed("roughly.toml", FileChangeType::CREATED);
+
+    assert!(
+        context.received_refresh().await,
+        "a config reload must ask pull clients to re-pull diagnostics"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn config_reload_failure_keeps_previous_config_and_reports() {
+    let mut context = setup_test(&[("roughly.toml", "[format]\nindent-width = 4\n")]).await;
+
+    let file_uri = context.file_uri("R/keep.R");
+    context
+        .open_file(&file_uri, "f <- function(x) {\nx + 1\n}\n")
+        .await;
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    std::fs::write(
+        context.workspace_dir.join("roughly.toml"),
+        "[format]\nindent-widht = 8\n",
+    )
+    .expect("failed to write config");
+    context.notify_watched_file_changed("roughly.toml", FileChangeType::CHANGED);
+
+    let message = context
+        .received_message()
+        .await
+        .expect("expected a reload error message");
+    assert!(
+        message.message.contains("unknown field `indent-widht`"),
+        "expected the message to name the unknown key, got: {}",
+        message.message
+    );
+    assert!(
+        message
+            .message
+            .contains("keeping the previous configuration"),
+        "expected the message to say the old config stays, got: {}",
+        message.message
+    );
+
+    let formatted = formatted_text(&mut context, &file_uri).await;
+    assert!(
+        formatted.contains("    x + 1"),
+        "expected the previous 4-space config to remain in effect, got:\n{formatted}"
     );
 
     context.shutdown().await;

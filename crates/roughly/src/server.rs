@@ -1,7 +1,6 @@
 use {
     crate::{
-        cli,
-        config::{Config, ExperimentalFeatures},
+        config::{CONFIG_FILE_NAME, Config, ExperimentalFeatures},
         diagnostics, format,
         index::{self, IndexError, Item},
         lsp_types::{
@@ -70,8 +69,6 @@ use {
     tree_sitter::Point,
 };
 
-const CONFIG_FILE_NAME: &str = "roughly.toml";
-
 // #[tokio::main] # TODO: understand if this makes a difference???
 #[tokio::main(flavor = "current_thread")]
 pub async fn run(experimental_features: ExperimentalFeatures) {
@@ -79,31 +76,21 @@ pub async fn run(experimental_features: ExperimentalFeatures) {
     let runtime = tokio::runtime::Handle::current();
 
     let (server, _) = async_lsp::MainLoop::new_server(|client| {
-        let config = Config::from_path(Path::new(CONFIG_FILE_NAME)).unwrap_or_else(|error| {
-            cli::error(&error.to_string());
-            panic!("failed to load config: {error}");
-        });
-
-        // The `!Send` engine lives on a dedicated worker thread, built INSIDE the closure (it cannot be
-        // moved across threads). The frontend forwards every LSP op to it over the channel + shares the
-        // cancellation token.
+        // The `!Send` engine lives on a dedicated worker thread, built INSIDE the thread (it cannot be
+        // moved across threads) — and only once `initialize` arrives, because the client-announced
+        // workspace root drives config discovery and stub loading. The frontend forwards every LSP op
+        // to it over the channel + shares the cancellation token.
         let (sender, receiver) = mpsc::channel::<Job>();
         let cancel = Arc::new(AtomicBool::new(false));
-        let worker_client = client.clone();
-        let worker_cancel = cancel.clone();
-        let worker_runtime = runtime.clone();
+        let seed = WorkerSeed {
+            client: client.clone(),
+            experimental_features,
+            cancel: cancel.clone(),
+            runtime: runtime.clone(),
+        };
         std::thread::Builder::new()
             .name("roughly-engine".to_owned())
-            .spawn(move || {
-                EngineWorker::new(
-                    worker_client,
-                    config,
-                    experimental_features,
-                    worker_cancel,
-                    worker_runtime,
-                )
-                .run(receiver);
-            })
+            .spawn(move || run_worker(seed, receiver))
             .expect("engine worker thread should spawn");
 
         // No `ConcurrencyLayer`: the serial worker IS the concurrency bound, and that layer's poll_ready
@@ -149,6 +136,9 @@ struct EngineWorker {
     // workspace diagnostic refresh) — a `std::thread` worker cannot `.await` directly.
     runtime: tokio::runtime::Handle,
     config: Config,
+    // A config-discovery failure found during `initialize`, surfaced to the client via
+    // `window/showMessage` once `initialized` arrives (the safe point to message every client).
+    pending_config_error: Option<String>,
     experimental_features: ExperimentalFeatures,
     workspace_root: PathBuf,
     open_documents: HashSet<PathBuf>,
@@ -176,50 +166,135 @@ struct EngineWorker {
     client_supports_diagnostic_refresh: bool,
 }
 
-// One LSP operation handed to the worker. A `Read` (a query handler) resets the cancellation token at
-// the start so a newer edit can abandon it; a `Write` (a lifecycle/edit notification, or the mutating
-// `initialize`) runs to completion. Both carry a boxed closure that runs the migrated handler on the
-// worker's `&mut EngineWorker` and (for requests) sends the reply back over a oneshot.
+// One LSP operation handed to the worker. `Initialize` is special: it CONSTRUCTS the worker state
+// from the client's params (the workspace root drives config discovery and stub loading), so it
+// cannot be a closure over `&mut EngineWorker`. A `Read` (a query handler) resets the cancellation
+// token at the start so a newer edit can abandon it; a `Write` (a lifecycle/edit notification) runs
+// to completion. Both carry a boxed closure that runs the migrated handler on the worker's
+// `&mut EngineWorker` and (for requests) sends the reply back over a oneshot.
 enum Job {
+    Initialize(
+        Box<InitializeParams>,
+        oneshot::Sender<Result<InitializeResult, ResponseError>>,
+    ),
     Read(Box<dyn FnOnce(&mut EngineWorker) + Send>),
     Write(Box<dyn FnOnce(&mut EngineWorker) + Send>),
 }
 
+// Everything the worker owns before `initialize` arrives. The full `EngineWorker` exists only after
+// `initialize`, so this seed is what the spawned thread starts from.
+struct WorkerSeed {
+    client: ClientSocket,
+    experimental_features: ExperimentalFeatures,
+    cancel: Arc<AtomicBool>,
+    runtime: tokio::runtime::Handle,
+}
+
 impl EngineWorker {
-    // Built INSIDE the worker thread closure (the engine is `!Send`, so it cannot be constructed on the
-    // runtime thread and moved). The closure captures only `Send` inputs (client, cancel, runtime, config).
-    fn new(
-        client: ClientSocket,
-        config: Config,
-        experimental_features: ExperimentalFeatures,
-        cancel: Arc<AtomicBool>,
-        runtime: tokio::runtime::Handle,
-    ) -> Self {
-        let workspace_root = std::env::current_dir().unwrap();
+    // Constructed on the worker thread by the `Job::Initialize` handler — not at spawn — because the
+    // client's `initialize` params carry the workspace root, and the root drives config discovery,
+    // project-stub loading (folded into the engine at construction), and the package scan. The
+    // engine is `!Send`, so this still runs on the worker thread itself.
+    fn initialize(seed: WorkerSeed, params: InitializeParams) -> (Self, InitializeResult) {
+        let WorkerSeed {
+            client,
+            experimental_features,
+            cancel,
+            runtime,
+        } = seed;
+
+        tracing::info!(?experimental_features, "initialize");
+
+        let workspace_root = workspace_root_from(&params);
+        tracing::info!(?workspace_root, "workspace root");
+
+        // A malformed config must not take the server down: analysis works without it, so fall back
+        // to the defaults and surface the error once the client is ready for messages.
+        let (config, pending_config_error) = match Config::discover(&workspace_root) {
+            Ok(config) => (config, None),
+            Err(error) => (
+                Config::default(),
+                Some(format!("{error}; using the default configuration")),
+            ),
+        };
+
+        let client_encodings = params
+            .capabilities
+            .general
+            .as_ref()
+            .and_then(|general| general.position_encodings.as_deref());
+        let position_encoding = PositionEncoding::negotiate(client_encodings);
+        tracing::info!(?position_encoding, "negotiated position encoding");
+
+        let client_supports_pull_diagnostics = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|text_document| text_document.diagnostic.as_ref())
+            .is_some();
+        let client_supports_diagnostic_refresh = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.diagnostic.as_ref())
+            .and_then(|diagnostic| diagnostic.refresh_support)
+            .unwrap_or(false);
+        tracing::info!(
+            pull_diagnostics = client_supports_pull_diagnostics,
+            diagnostic_refresh = client_supports_diagnostic_refresh,
+            "negotiated diagnostics delivery"
+        );
 
         // A project may ship its own `.Rtypes` stubs under `<root>/stubs/` to override or extend the
         // shipped standard-library corpus. They are read once here and folded into the engine's set-once
         // stub library; they are never re-read on an edit.
         let project_stub_sources = analysis::stdlib::discover_project_stub_sources(&workspace_root);
 
-        Self {
+        let mut worker = Self {
             client,
             cancel,
             runtime,
             config,
+            pending_config_error,
             experimental_features,
             workspace_root: workspace_root.clone(),
             open_documents: HashSet::new(),
             engine: Engine::new(RoughlyQueries::with_project_stubs(project_stub_sources)),
-            paths: PathTable::new(workspace_root.clone()),
+            paths: PathTable::new(workspace_root),
             file_ids: HashMap::new(),
             next_file_id: 0,
             documents: HashMap::new(),
             parser: analysis::tree::new_parser().expect("server parser should initialize"),
-            position_encoding: PositionEncoding::Utf16,
-            client_supports_pull_diagnostics: false,
-            client_supports_diagnostic_refresh: false,
+            position_encoding,
+            client_supports_pull_diagnostics,
+            client_supports_diagnostic_refresh,
+        };
+
+        let workspace_r_path = worker.workspace_r_path();
+        if workspace_r_path.is_dir() {
+            match index::source_file_paths(&workspace_r_path) {
+                Ok(paths) => {
+                    for path in paths {
+                        let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+                            panic!("failed to read package source {}: {error}", path.display())
+                        });
+                        worker.set_source_input(&path, text, true);
+                    }
+                }
+                Err(IndexError) => {
+                    panic!(
+                        "failed to list package source files in {}",
+                        workspace_r_path.display()
+                    );
+                }
+            }
         }
+
+        worker.rebuild_project_files();
+        worker.engine.set_input(Key::Config, worker.engine_config());
+
+        let result = initialize_result(worker.position_encoding, worker.experimental_features);
+        (worker, result)
     }
 
     fn workspace_r_path(&self) -> PathBuf {
@@ -456,127 +531,51 @@ impl EngineWorker {
             tracing::error!(?error, "failed to send error message to client");
         }
     }
+
+    // Brings every client-visible document current after a change that can move diagnostics in many
+    // documents at once (a save, or a config reload). Precisely detecting which documents moved is
+    // not reliably available — cross-file naming diagnostics move even when type checking is off —
+    // so conservatively refresh everything; these events are infrequent. Pull clients own the
+    // request cadence (push is suppressed for them), so they are asked to re-pull — without that,
+    // their non-visible dependents would go stale; push clients get every open document republished
+    // from the engine.
+    fn refresh_all_diagnostics(&mut self) {
+        if self.client_supports_pull_diagnostics {
+            if self.client_supports_diagnostic_refresh {
+                let mut client = self.client.clone();
+                self.runtime.spawn(async move {
+                    if let Err(error) = client.workspace_diagnostic_refresh(()).await {
+                        tracing::error!(?error, "failed to request workspace diagnostic refresh");
+                    }
+                });
+            }
+            return;
+        }
+
+        for open_path in self.open_documents.clone() {
+            if !self.file_ids.contains_key(&open_path) {
+                continue;
+            }
+            let Ok(open_uri) = Url::from_file_path(&open_path) else {
+                continue;
+            };
+            let diagnostics = self.convert_document_diagnostics(&open_path);
+            if let Err(error) = self
+                .client
+                .publish_diagnostics(PublishDiagnosticsParams::new(open_uri, diagnostics, None))
+            {
+                tracing::error!(?error, "failed to publish diagnostics");
+            }
+        }
+    }
 }
 
 impl EngineWorker {
-    fn initialize(&mut self, params: InitializeParams) -> Result<InitializeResult, ResponseError> {
-        tracing::info!(?self.experimental_features, "initialize");
-
-        let client_encodings = params
-            .capabilities
-            .general
-            .as_ref()
-            .and_then(|general| general.position_encodings.as_deref());
-        self.position_encoding = PositionEncoding::negotiate(client_encodings);
-        tracing::info!(?self.position_encoding, "negotiated position encoding");
-
-        self.client_supports_pull_diagnostics = params
-            .capabilities
-            .text_document
-            .as_ref()
-            .and_then(|text_document| text_document.diagnostic.as_ref())
-            .is_some();
-        self.client_supports_diagnostic_refresh = params
-            .capabilities
-            .workspace
-            .as_ref()
-            .and_then(|workspace| workspace.diagnostic.as_ref())
-            .and_then(|diagnostic| diagnostic.refresh_support)
-            .unwrap_or(false);
-        tracing::info!(
-            pull_diagnostics = self.client_supports_pull_diagnostics,
-            diagnostic_refresh = self.client_supports_diagnostic_refresh,
-            "negotiated diagnostics delivery"
-        );
-
-        let workspace_r_path = self.workspace_r_path();
-
-        if workspace_r_path.is_dir() {
-            match index::source_file_paths(&workspace_r_path) {
-                Ok(paths) => {
-                    for path in paths {
-                        let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-                            panic!("failed to read package source {}: {error}", path.display())
-                        });
-                        self.set_source_input(&path, text, true);
-                    }
-                }
-                Err(IndexError) => {
-                    panic!(
-                        "failed to list package source files in {}",
-                        workspace_r_path.display()
-                    );
-                }
-            }
+    fn initialized(&mut self, _: InitializedParams) {
+        if let Some(message) = self.pending_config_error.take() {
+            self.report_error(message);
         }
 
-        self.rebuild_project_files();
-        self.engine.set_input(Key::Config, self.engine_config());
-
-        Ok(InitializeResult {
-            capabilities: ServerCapabilities {
-                position_encoding: Some(self.position_encoding.kind()),
-                completion_provider: Some(CompletionOptions {
-                    trigger_characters: Some(vec!["$".into(), "@".into(), ":".into()]),
-                    ..Default::default()
-                }),
-                definition_provider: Some(OneOf::Left(true)),
-                diagnostic_provider: Some(DiagnosticServerCapabilities::Options(
-                    DiagnosticOptions {
-                        identifier: Some("roughly".into()),
-                        inter_file_dependencies: true,
-                        workspace_diagnostics: false,
-                        work_done_progress_options: Default::default(),
-                    },
-                )),
-                document_formatting_provider: Some(OneOf::Left(true)),
-                document_range_formatting_provider: Some(OneOf::Left(
-                    self.experimental_features.range_formatting,
-                )),
-                document_symbol_provider: Some(OneOf::Left(true)),
-                hover_provider: Some(HoverProviderCapability::Simple(true)),
-                inlay_hint_provider: Some(OneOf::Left(true)),
-                signature_help_provider: Some(SignatureHelpOptions {
-                    trigger_characters: Some(vec!["(".to_owned(), ",".to_owned()]),
-                    retrigger_characters: None,
-                    work_done_progress_options: Default::default(),
-                }),
-                references_provider: Some(OneOf::Left(true)),
-                rename_provider: Some(OneOf::Left(true)),
-                semantic_tokens_provider: Some(
-                    SemanticTokensServerCapabilities::SemanticTokensOptions(
-                        SemanticTokensOptions {
-                            legend: SemanticTokensLegend {
-                                token_types: semantic_token_legend(),
-                                token_modifiers: Vec::new(),
-                            },
-                            full: Some(SemanticTokensFullOptions::Bool(true)),
-                            range: None,
-                            work_done_progress_options: Default::default(),
-                        },
-                    ),
-                ),
-                text_document_sync: Some(TextDocumentSyncCapability::Options(
-                    TextDocumentSyncOptions {
-                        open_close: Some(true),
-                        change: Some(TextDocumentSyncKind::INCREMENTAL),
-                        save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
-                            include_text: Some(false),
-                        })),
-                        ..Default::default()
-                    },
-                )),
-                workspace_symbol_provider: Some(OneOf::Left(true)),
-                ..Default::default()
-            },
-            server_info: Some(ServerInfo {
-                name: env!("CARGO_PKG_NAME").into(),
-                version: Some(env!("CARGO_PKG_VERSION").into()),
-            }),
-        })
-    }
-
-    fn initialized(&mut self, _: InitializedParams) {
         let workspace_r_path = self.workspace_r_path();
 
         let params = RegistrationParams {
@@ -767,8 +766,7 @@ impl EngineWorker {
     }
 
     fn did_save(&mut self, params: DidSaveTextDocumentParams) {
-        let uri = params.text_document.uri;
-        let path = uri.to_file_path().unwrap();
+        let path = params.text_document.uri.to_file_path().unwrap();
 
         tracing::debug!(?path, "did save");
 
@@ -787,56 +785,18 @@ impl EngineWorker {
             path.display()
         );
 
-        // Pull clients re-request the saved (visible) document on their own cadence, so the server
-        // does not push. But push is suppressed for them, so a save that moved diagnostics in OTHER
-        // (non-visible) documents would leave those dependents stale. Precisely detecting which
-        // dependents moved is not reliably available here — `run_full` reports an affected set only
-        // when type checking is enabled, yet cross-file naming diagnostics (e.g. "could not resolve")
-        // move regardless — so conservatively ask the client to re-pull on every save. Saves are
-        // infrequent and the client only re-pulls the documents it has open.
-        if self.client_supports_pull_diagnostics {
-            if self.client_supports_diagnostic_refresh {
-                let mut client = self.client.clone();
-                self.runtime.spawn(async move {
-                    if let Err(error) = client.workspace_diagnostic_refresh(()).await {
-                        tracing::error!(?error, "failed to request workspace diagnostic refresh");
-                    }
-                });
-            }
-            return;
-        }
-
-        // A package-visible save can move diagnostics in dependent files, and live edits push only the
-        // edited document, so on save every OPEN document is republished from the engine. The engine
-        // already reflects the synced text (the edit inputs were set as the changes arrived), so each open
-        // document's current diagnostics are correct — this is a superset of the old typecheck-affected set
-        // and also catches naming-only dependents the affected set missed.
-        for open_path in self.open_documents.clone() {
-            if !self.file_ids.contains_key(&open_path) {
-                continue;
-            }
-            let open_uri = if open_path == path {
-                uri.clone()
-            } else {
-                match Url::from_file_path(&open_path) {
-                    Ok(open_uri) => open_uri,
-                    Err(()) => continue,
-                }
-            };
-            let diagnostics = self.convert_document_diagnostics(&open_path);
-            if let Err(error) = self
-                .client
-                .publish_diagnostics(PublishDiagnosticsParams::new(open_uri, diagnostics, None))
-            {
-                tracing::error!(?error, "failed to publish diagnostics");
-            }
-        }
+        // A package-visible save can move diagnostics in dependent files, and live edits push only
+        // the edited document, so a save refreshes every client-visible document. The engine already
+        // reflects the synced text (the edit inputs were set as the changes arrived), so each
+        // document's current diagnostics are correct.
+        self.refresh_all_diagnostics();
     }
 
     fn did_change_watched_files(&mut self, params: DidChangeWatchedFilesParams) {
         let config_path = self.workspace_root.join(CONFIG_FILE_NAME);
         let workspace_r_path = self.workspace_r_path();
 
+        let mut config_changed = false;
         for change in params.changes {
             let uri = change.uri;
             let typ = change.typ;
@@ -845,12 +805,15 @@ impl EngineWorker {
             tracing::info!(?path, ?typ, "watched file changed");
 
             if path == config_path {
-                match Config::from_path(&config_path) {
+                // Re-run discovery rather than reading the changed file directly, so a deleted
+                // workspace config correctly falls back to an ancestor config or the defaults.
+                match Config::discover(&self.workspace_root) {
                     Ok(config) => {
+                        config_changed |= config != self.config;
                         self.config = config;
                     }
                     Err(error) => {
-                        self.report_error(format!("failed to reload config: {error}"));
+                        self.report_error(format!("{error}; keeping the previous configuration"));
                     }
                 }
                 continue;
@@ -890,6 +853,11 @@ impl EngineWorker {
         // The file set and/or config may have changed across the batch.
         self.rebuild_project_files();
         self.engine.set_input(Key::Config, self.engine_config());
+        // A config change can move diagnostics in every document (e.g. toggling `[check] strict`),
+        // so apply it to client-visible diagnostics immediately rather than on the next edit.
+        if config_changed {
+            self.refresh_all_diagnostics();
+        }
     }
 
     fn did_change_configuration(&mut self, _params: DidChangeConfigurationParams) {
@@ -1546,30 +1514,52 @@ impl EngineWorker {
     }
 }
 
-impl EngineWorker {
-    // The worker thread's run loop: own the engine, process jobs serially. Each job runs under
-    // `catch_unwind` because no async-lsp layer covers this thread — a non-`Cancelled` panic is a
-    // coherence failure that must become deterministic process death (a silently-dead worker would leave
-    // a zombie server that errors every request and drops every edit).
-    fn run(mut self, receiver: mpsc::Receiver<Job>) {
-        while let Ok(job) = receiver.recv() {
-            let outcome = catch_unwind(AssertUnwindSafe(|| match job {
-                Job::Read(closure) => {
-                    self.cancel.store(false, Ordering::Relaxed);
-                    closure(&mut self);
+// The worker thread's run loop: own the engine, process jobs serially. The first job is
+// `Initialize` (the frontend's `LifecycleLayer` rejects any earlier request), which constructs the
+// full worker state from the client's params. Each job runs under `catch_unwind` because no
+// async-lsp layer covers this thread — a non-`Cancelled` panic is a coherence failure that must
+// become deterministic process death (a silently-dead worker would leave a zombie server that
+// errors every request and drops every edit).
+fn run_worker(seed: WorkerSeed, receiver: mpsc::Receiver<Job>) {
+    let mut seed = Some(seed);
+    let mut worker: Option<EngineWorker> = None;
+    while let Ok(job) = receiver.recv() {
+        let outcome = catch_unwind(AssertUnwindSafe(|| match job {
+            Job::Initialize(params, reply) => {
+                let seed = seed
+                    .take()
+                    .expect("initialize arrives once (LifecycleLayer rejects a second one)");
+                let (state, result) = EngineWorker::initialize(seed, *params);
+                worker = Some(state);
+                if reply.send(Ok(result)).is_err() {
+                    tracing::error!("initialize reply receiver dropped");
                 }
-                Job::Write(closure) => closure(&mut self),
-            }));
-            if outcome.is_err() {
-                // A read closure catches its own `Cancelled` inside `with_cancellation`, which restores the
-                // engine's transient state before returning, so `Cancelled` never escapes a job. Anything
-                // reaching here is therefore a coherence panic (the hook already printed it) — OR, were the
-                // cancellation invariant ever broken, an escaped `Cancelled` whose engine transient state is
-                // now uncleaned. Both are incoherent states, so terminate deterministically rather than
-                // resume the loop on a corrupted engine.
-                tracing::error!("engine worker thread panicked; terminating the language server");
-                std::process::exit(1);
             }
+            Job::Read(closure) => {
+                let worker = worker
+                    .as_mut()
+                    .expect("requests before initialize are rejected by LifecycleLayer");
+                worker.cancel.store(false, Ordering::Relaxed);
+                closure(worker);
+            }
+            // A notification before `initialize` is a client protocol violation the server cannot
+            // recover from (a dropped document-sync edit leaves analysis state incoherent), so it
+            // panics into the deterministic-death path below.
+            Job::Write(closure) => closure(
+                worker
+                    .as_mut()
+                    .expect("notifications must not arrive before initialize"),
+            ),
+        }));
+        if outcome.is_err() {
+            // A read closure catches its own `Cancelled` inside `with_cancellation`, which restores the
+            // engine's transient state before returning, so `Cancelled` never escapes a job. Anything
+            // reaching here is therefore a coherence panic (the hook already printed it) — OR, were the
+            // cancellation invariant ever broken, an escaped `Cancelled` whose engine transient state is
+            // now uncleaned. Both are incoherent states, so terminate deterministically rather than
+            // resume the loop on a corrupted engine.
+            tracing::error!("engine worker thread panicked; terminating the language server");
+            std::process::exit(1);
         }
     }
 }
@@ -1592,22 +1582,6 @@ impl ServerState {
     {
         let (reply, receive) = oneshot::channel();
         let job = Job::Read(Box::new(move |worker| {
-            let _ = reply.send(build(worker));
-        }));
-        if self.sender.send(job).is_err() {
-            return box_future(Err(worker_gone_error()));
-        }
-        Box::pin(async move { receive.await.unwrap_or_else(|_| Err(worker_gone_error())) })
-    }
-
-    // A mutating request (`initialize`): runs to completion (non-cancellable) but still replies.
-    fn write_request<T, F>(&self, build: F) -> BoxFuture<'static, Result<T, ResponseError>>
-    where
-        T: Send + 'static,
-        F: FnOnce(&mut EngineWorker) -> Result<T, ResponseError> + Send + 'static,
-    {
-        let (reply, receive) = oneshot::channel();
-        let job = Job::Write(Box::new(move |worker| {
             let _ = reply.send(build(worker));
         }));
         if self.sender.send(job).is_err() {
@@ -1655,7 +1629,15 @@ impl LanguageServer for ServerState {
         &mut self,
         params: InitializeParams,
     ) -> BoxFuture<'static, Result<InitializeResult, ResponseError>> {
-        self.write_request(move |worker| worker.initialize(params))
+        let (reply, receive) = oneshot::channel();
+        if self
+            .sender
+            .send(Job::Initialize(Box::new(params), reply))
+            .is_err()
+        {
+            return box_future(Err(worker_gone_error()));
+        }
+        Box::pin(async move { receive.await.unwrap_or_else(|_| Err(worker_gone_error())) })
     }
 
     fn initialized(&mut self, params: InitializedParams) -> ControlFlow<async_lsp::Result<()>> {
@@ -1793,6 +1775,91 @@ impl LanguageServer for ServerState {
         params: WorkspaceSymbolParams,
     ) -> BoxFuture<'static, Result<Option<WorkspaceSymbolResponse>, ResponseError>> {
         self.read(move |worker| worker.symbol(params))
+    }
+}
+
+// The workspace root the client announced: the first workspace folder, falling back to the older
+// `root_uri` field, and — only for clients that provide neither — the server process's working
+// directory. This root drives config discovery, the package `R/` scan, the `roughly.toml` watcher,
+// and project stub discovery, so none of them may depend on where the server process was launched.
+#[allow(deprecated)] // `root_uri` is deprecated in LSP but is the standard fallback for older clients
+fn workspace_root_from(params: &InitializeParams) -> PathBuf {
+    params
+        .workspace_folders
+        .as_ref()
+        .and_then(|folders| folders.first())
+        .and_then(|folder| folder.uri.to_file_path().ok())
+        .or_else(|| {
+            params
+                .root_uri
+                .as_ref()
+                .and_then(|uri| uri.to_file_path().ok())
+        })
+        .unwrap_or_else(|| {
+            std::env::current_dir().expect("process working directory should be available")
+        })
+}
+
+fn initialize_result(
+    position_encoding: PositionEncoding,
+    experimental_features: ExperimentalFeatures,
+) -> InitializeResult {
+    InitializeResult {
+        capabilities: ServerCapabilities {
+            position_encoding: Some(position_encoding.kind()),
+            completion_provider: Some(CompletionOptions {
+                trigger_characters: Some(vec!["$".into(), "@".into(), ":".into()]),
+                ..Default::default()
+            }),
+            definition_provider: Some(OneOf::Left(true)),
+            diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
+                identifier: Some("roughly".into()),
+                inter_file_dependencies: true,
+                workspace_diagnostics: false,
+                work_done_progress_options: Default::default(),
+            })),
+            document_formatting_provider: Some(OneOf::Left(true)),
+            document_range_formatting_provider: Some(OneOf::Left(
+                experimental_features.range_formatting,
+            )),
+            document_symbol_provider: Some(OneOf::Left(true)),
+            hover_provider: Some(HoverProviderCapability::Simple(true)),
+            inlay_hint_provider: Some(OneOf::Left(true)),
+            signature_help_provider: Some(SignatureHelpOptions {
+                trigger_characters: Some(vec!["(".to_owned(), ",".to_owned()]),
+                retrigger_characters: None,
+                work_done_progress_options: Default::default(),
+            }),
+            references_provider: Some(OneOf::Left(true)),
+            rename_provider: Some(OneOf::Left(true)),
+            semantic_tokens_provider: Some(
+                SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
+                    legend: SemanticTokensLegend {
+                        token_types: semantic_token_legend(),
+                        token_modifiers: Vec::new(),
+                    },
+                    full: Some(SemanticTokensFullOptions::Bool(true)),
+                    range: None,
+                    work_done_progress_options: Default::default(),
+                }),
+            ),
+            text_document_sync: Some(TextDocumentSyncCapability::Options(
+                TextDocumentSyncOptions {
+                    open_close: Some(true),
+                    change: Some(TextDocumentSyncKind::INCREMENTAL),
+                    save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
+                        include_text: Some(false),
+                    })),
+                    ..Default::default()
+                },
+            )),
+            workspace_symbol_provider: Some(OneOf::Left(true)),
+            ..Default::default()
+        },
+        server_info: Some(ServerInfo {
+            name: env!("CARGO_PKG_NAME").into(),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
+        }),
     }
 }
 

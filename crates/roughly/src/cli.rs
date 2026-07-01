@@ -65,7 +65,7 @@ pub fn check(maybe_files: Option<&[PathBuf]>) -> Result<(), CheckError> {
     let targets_with_config = files
         .iter()
         .map(|file| {
-            let config = match config::Config::for_target(file) {
+            let config = match config::Config::discover(file) {
                 Ok(config) => config,
                 Err(err) => {
                     error(&err.to_string());
@@ -283,7 +283,7 @@ pub fn fmt(
     let paths_with_config = files
         .iter()
         .map(|file| {
-            let config = config::Config::for_target(file).map_err(|err| {
+            let config = config::Config::discover(file).map_err(|err| {
                 error(&err.to_string());
                 FmtError
             })?;

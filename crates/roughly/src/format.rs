@@ -11,8 +11,8 @@ use {
     tree_sitter::{Node, TreeCursor},
 };
 
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(default, rename_all = "kebab-case")]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Config {
     pub indent_width: usize,
     pub line_ending: LineEnding,

@@ -50,13 +50,10 @@ Update `typing-reference.md` **first** for each item (contract-first), then impl
 
 ## Phase 3 — Trust & UX (config, strict, lints, CLI)
 
-- **Config subsystem rebuild** (all verified):
-  - LSP resolves `roughly.toml` from **process CWD**; `InitializeParams.root_uri`/`workspace_folders` never read (`server.rs`) — the root cause of "strict doesn't work". Use the client-supplied root; ancestor search to match the CLI and `configuration.md` (whose described behavior currently exists only in the CLI).
-  - CLI discovery varies by argument shape (verified: `check file.R` vs `check .` differ in the same directory) — unify on nearest-ancestor-of-target.
-  - **Unknown keys = errors with spans** (no `deny_unknown_fields` anywhere today; typo = silence). Render toml spans; today `ConfigError` Display collapses everything to "invalid config file" and the LSP **panics at startup** on malformed toml (crash loop). Errors surface as diagnostics on `roughly.toml` itself + window message; never panic.
-  - After a config reload, **refresh diagnostics** (push: republish open docs; pull: `workspace/diagnostic/refresh`) — today toggling strict looks dead until the next keystroke.
+- **Config subsystem rebuild** — core landed: the workspace root comes from `InitializeParams` (`workspace_folders`, then `root_uri`, cwd only when the client sends neither; the worker is constructed by the `Job::Initialize` handler so nothing reads config before the root is known); discovery is one nearest-ancestor search (`Config::discover`, target absolutized first) shared by the LSP (from the client root) and the CLI (from each target argument); unknown keys and type errors are errors with file + 1-based line:column (`deny_unknown_fields` on `ConfigToml`/`FormatConfig`/`CheckConfig`/`LintConfig`; `ConfigParseError` renders the toml span) — the server never panics on a malformed config (defaults at startup, previous config on reload, `window/showMessage` both times; the CLI prints the rendered error and exits non-zero); a successful reload refreshes diagnostics (push: republish open documents; pull: `workspace/diagnostic/refresh`; shared `refresh_all_diagnostics`). Still open:
   - Collapse the four parallel config representations (`ConfigToml`/`Config`/engine `Config`/`CheckConfig`+`LintConfig`) — adding a key currently requires touching ~6 places and missing one is silent.
   - `workspace/didChangeConfiguration` is a no-op stub; editor-settings configuration is silently discarded — either support or reject loudly.
+  - Config errors should additionally surface as diagnostics on `roughly.toml` itself (the decision record asks for both; only the window message exists).
 - **Strict mode (settled semantics, `decisions.md`):** strict = Unknown origins **and unresolved-name references are errors**; explicit `Any` stays the escape hatch; recursion-Unknown becomes an origin. **Per-file toggle:** top-of-file `#: @strict` / `#: @strict off` directive overriding config (gates are already per-file in both pipelines; derive from the parse so incrementality holds).
 - **Unused rebuilt on reaching definitions** (falls out of the Phase-1 slot model): a write no read reaches = unused. Report **assignments**, not bindings. Add: unused function **parameters** (default off or hint-level), unused `library()`/`require()` once imports are modeled. Own diagnostic code (`unused`, not `naming`), `DiagnosticTag::UNNECESSARY` so editors fade it.
 - **One lint framework:** `lint.rs` (tree-walk style lints) and the naming-integrated unused check are two disconnected systems. Unify: every lint has a stable code, per-lint severity config, and suppression comments (`# roughly: allow(unused)`-style); duplicated name-style logic collapsed.
@@ -98,10 +95,9 @@ Formatter (all verified):
 
 ## Independent track (anytime, small)
 
-- Doc/impl mismatches: `DESIGN.md` §3 "typecheck never reads project_files" false for scripts; `stdlib_stubs` listed as an engine input it isn't; stale round-caching comment on `analysis.rs` fixed-point; `linter.md` "two further checks" (there are three); `configuration.md` discovery claims (Phase 3 fixes the code — align the page); `stdlib-stubs.md` claims `identity`/`Map` have generic schemes (identity absent, Map is `Any`); undocumented `debug` config key the CLI actively recommends.
+- Doc/impl mismatches: `DESIGN.md` §3 "typecheck never reads project_files" false for scripts; `stdlib_stubs` listed as an engine input it isn't; stale round-caching comment on `analysis.rs` fixed-point; `linter.md` "two further checks" (there are three); `stdlib-stubs.md` claims `identity`/`Map` have generic schemes (identity absent, Map is `Any`).
 - MEMORY.md corrections: type-notation cursor features are *partial* (see Phase 4); the malformed-input differential claim ("generator is well-formed") is stale — the generator emits malformed sources.
 - `roughly check` on a directory: exit code is 1 when only warnings are present in some invocations and 0 in others (verify + document severity→exit mapping).
-- Legacy `case`/`spaces` top-level config keys override the new keys when both present — surprising precedence, undocumented; decide + document.
 
 ## Post-beta (explicitly out of beta scope)
 

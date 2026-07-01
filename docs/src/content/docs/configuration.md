@@ -7,7 +7,12 @@ Roughly is deliberately opinionated and minimal in its configuration options. It
 
 ## Configuration File
 
-Configure Roughly with a `roughly.toml` file in your project. Roughly uses the nearest one, searching the target file's directory and then its ancestors; if none is found, the defaults below apply.
+Configure Roughly with a `roughly.toml` file in your project. Roughly uses the nearest one: it searches a starting directory and then each of its ancestors, and the first `roughly.toml` found wins. If none is found, the defaults below apply.
+
+The starting directory depends on how Roughly runs:
+
+- **Editor (language server):** the search starts at the workspace root your editor announces when it starts the server — never at the server process's working directory. Edits to the workspace's `roughly.toml` are picked up live, and diagnostics refresh immediately so toggles like `[check] strict` apply without further edits.
+- **CLI:** the search starts at each file or directory argument (a file's own directory), so `roughly check R/utils.R` and `roughly check .` inside the same project resolve the same configuration.
 
 ```toml
 [format]
@@ -46,6 +51,27 @@ Type *inference* always runs — it powers editor features such as hover types, 
 - `typing` — report `type-error` diagnostics, including function-call argument mismatches. See the [Type Checker](/type-checker). Default `false`.
 - `unused` — report unused local variables and parameters. Default `false`.
 - `strict` — report each site with a genuinely undetermined (`Unknown`) type — an unsupported construct or a reference to a binding with no known type. See [strict mode](/typing-reference#strict-mode). Default `false`.
+
+## Debugging — top-level `debug`
+
+- `debug` — surface internal analysis facts, such as a "Debug" section in editor hovers showing the lowered representation. A developer aid for working on Roughly itself. Default `false`.
+
+## Invalid Configuration
+
+`roughly.toml` is validated strictly: an unknown key, a misspelled key (for example `naming_style` instead of `naming-style`), or a value of the wrong type is an error. The message names the file and points at the offending line and column, for example:
+
+```
+invalid config in /path/to/roughly.toml at line 2, column 1: unknown field `naming_style`, expected `naming-style`
+```
+
+Where the error surfaces:
+
+- **Editor:** the language server never crashes on a malformed config. At startup it falls back to the defaults; on a live edit to `roughly.toml` it keeps the previous configuration. Either way it reports the error as an editor error message.
+- **CLI:** `roughly check` and `roughly fmt` print the error to stderr and exit non-zero.
+
+## Legacy Keys
+
+The top-level `case` and `spaces` keys are deprecated spellings of `lint.naming-style` and `format.indent-width`. They still parse, and take precedence over the section keys when both are present.
 
 ## Default Behavior
 
