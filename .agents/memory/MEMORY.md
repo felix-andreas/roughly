@@ -11,7 +11,8 @@ Companion documents (kept separate only because they are larger in scope): `back
 ## Short-term
 
 - CI is green on branch `feat/hm-type-checker` (the active gate, scoped to the `crates/roughly` default member).
-- The landing-page rework is live on the branch; awaiting the user's aesthetic verdict before it is considered done.
+- The landing-page hero animation was restored to the liked load-intro→types→scroll-morph-into-heading behavior (particle-formed heading, no text overlay); live on the branch, awaiting the user's aesthetic verdict.
+- Working a large user task batch (`backlog.md` "Incoming user batch"): hover UX landed (readable `<T,U>` generics, `Unknown` on hover, origin-package on hover); the **type-syntax per-node-span keystone** (unlocks local type-error ranges + goto/hover on types in `#:` comments) is the next big item; the rest queue behind it.
 - The widened whole-workspace CI is staged in `.github/pending-ci.yml`; a human must `git mv` it into `.github/workflows/` (an automated session's token lacks GitHub `workflow` scope).
 
 ## Mid-term
@@ -73,3 +74,5 @@ The ignored perf/memory/fuzz benches must be gated to *these* budgets in CI, not
 - `Pair` is a reserved builtin type name — do not use it in type fixtures.
 - tree-sitter parses `#:` annotation comments as ordinary comments, so annotation-*syntax* errors surface only in lowering (not in the parse tree).
 - The formatter emits raw string literals (`r"(...)"` / `R"[...]"`) byte-for-byte; a string node starting with `r`/`R` must not be reconstructed as `"`+content+`"`.
+- **Stub-origin / project-override tests need an absolute `base_path`.** The IDE `.test` runner constructs `Analysis::new(PathBuf::new(), …)`, so `discover_project_stub_sources` resolves a relative `stubs/` against the test CWD (`crates/analysis/`), where the shipped `stubs/*.Rtypes` live — they re-harvest as "project overrides" (`namespace: None`) and shadow the shipped namespace tag. Production uses an absolute workspace root, so it doesn't arise; test stub-origin/override behavior with a temp absolute `base_path`, not a fixture.
+- **UI design guideline:** no `border-l` / left-border accent rail on rounded elements (reads as generic "every other AI" design) — use a full ring, fill, underline, or weight change for selected/active states instead. (First recorded design rule; grow into a design-guidelines doc if more accumulate.)
