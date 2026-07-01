@@ -10,6 +10,7 @@ Companion documents (kept separate only because they are larger in scope): `back
 
 ## Short-term
 
+- **Operating model (user-directed): the lead agent acts as CEO — delegate, verify, stay unbiased.** Implementation slices go to implementer subagents against a written spec; a *separate* adversarial reviewer agent attacks each diff (implementer never verifies its own work; the reviewer may challenge the spec too); the lead gates (build + full tests + fixture-diff review + spot probes), commits, and keeps memory current every slice so compaction loses nothing.
 - **Beta program defined and user-ratified** after a full adversarial audit (checker core, LSP, formatter, config, stubs, engine; every recorded finding was reproduced before recording). Plan: `backlog.md` (phases, beta bar); settled direction: `decisions.md` §Beta-semantics. **Next up: Phase 1** — update `typing-reference.md` contract-first, then multi-member unions + the mutable-slot variable model.
 - The landing-page hero animation was restored to the liked load-intro→types→scroll-morph-into-heading behavior (particle-formed heading, no text overlay); live on the branch, awaiting the user's aesthetic verdict.
 - The widened whole-workspace CI is staged in `.github/pending-ci.yml`; a human must `git mv` it into `.github/workflows/` (an automated session's token lacks GitHub `workflow` scope).
