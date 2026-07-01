@@ -150,13 +150,24 @@ functions degrade to `Any` (see [Overloads and generics](#overloads-and-generics
 Stubs are **immutable, set-once inputs** — analogous to rust-analyzer's `Durability::HIGH`. They are
 loaded, parsed, and interned once, and are never invalidated by user edits.
 
-- Store as an immutable `StubLibrary`: `namespaces: namespace -> {Symbol -> scheme}`, plus a base
-  `TypeDefinitionEnvironment`.
-- Default-attached namespaces (`base` + R defaults) fold into the template environment, so their names
-  resolve as bare globals.
-- `library(pkg)` attaches more namespaces (follow-up work).
-- `pkg::name` resolves against `StubLibrary.namespaces`. Today `NAMESPACE_OPERATOR` lowers to
-  `Unsupported`; this requires adding a `NamespaceGet` node.
+The `StubLibrary` is a **flat set-once map**: `values: Symbol -> scheme` (each entry pairs the harvested
+`TypeScheme` with the declaration's source range). It is not keyed by namespace.
+
+- Every shipped `.Rti` file (`base.Rti`, `stats.Rti`, `utils.Rti`, `methods.Rti`) is harvested into the
+  one flat map, folded in file order — a later declaration of a name overrides an earlier one (last-wins,
+  the same rule that governs project overrides). All shipped namespaces are thus attached to the base
+  scope together; there is no per-namespace partition.
+- The flat map is seeded into the per-document inference template, so every stub name resolves as a bare
+  global regardless of which shipped file declared it.
+
+**Not yet built (future namespacing):**
+
+- A per-namespace map (`namespace -> {Symbol -> scheme}`) that keeps the shipped packages separate rather
+  than folded flat.
+- `library(pkg)` attaching a namespace on demand (see §7).
+- `pkg::name` resolution against a per-namespace map. Today `NAMESPACE_OPERATOR` lowers to `Unsupported`;
+  resolving it needs a `NamespaceGet` node (see §9). Until then a `pkg::name` reference is unsupported and
+  the flat map cannot answer it.
 
 ### Incremental hygiene
 
@@ -360,10 +371,10 @@ as a future slice, in dependency order:
    the curated stubs (embedded corpus *and* curated CRAN overrides) against the live signatures,
    flagging drift. Also R-dependent; runs in CI where R is installed, not in the unit suite.
 3. **`NamespaceGet` HIR node for `pkg::name`** — today `NAMESPACE_OPERATOR` lowers to `Unsupported`;
-   resolving `pkg::name` against `StubLibrary.namespaces` needs a real `NamespaceGet` node carrying the
-   namespace + name. This is the one piece buildable without R (it is pure lowering/resolution), but it
-   is only *useful* once a namespace has stubs to resolve against, so it is sequenced with the tier it
-   serves.
+   resolving `pkg::name` needs a real `NamespaceGet` node carrying the namespace + name, plus a
+   per-namespace stub map to resolve against (the flat `StubLibrary` of §3 has no namespace partition).
+   The `NamespaceGet` node is buildable without R (it is pure lowering/resolution), but it is only
+   *useful* once a namespace has stubs to resolve against, so it is sequenced with the tier it serves.
 
 Until this slice lands, `pkg::name` stays `Unsupported` and third-party names resolve to `Any` — the
 safe, non-erroring degrade from §7.
