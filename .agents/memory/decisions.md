@@ -204,3 +204,50 @@ Stdlib type information ships as **dedicated declaration-only stub files**, not 
 **Syntax highlighting:** LSP semantic tokens first (one server implementation colours both inline `#:` annotations and the stub files, in every LSP client, reusing spans the server already computes); a tree-sitter/TextMate grammar for offline/static highlighting is a later nice-to-have that reuses the declaration grammar.
 
 **Open questions routed to the CTO design pass:** (1) does `type_syntax` already expose a parse-a-bare-type entry point, or must one be extracted (effort driver); (2) per-namespace vs per-item stub file granularity, and whether editing a project stub live triggers a coarse (non-incremental) re-seed vs a restart; (3) `pkg::name` needs a real `NamespaceGet` HIR node (currently `Unsupported`) for re-exports — confirm deferral to the CRAN tier. The full Expert proposal (ecosystem precedent from `.pyi`/`.d.ts`, worked format examples, the precedence stack) should be folded into `docs/.../stdlib-stubs.md` when the format is built.
+
+# Decision record: beta semantics & quality program
+
+**Status: DECIDED (user-ratified).** Direction chosen after a full adversarial audit of the type checker core, LSP surface, formatter, config, stub corpus, and engine, with findings verified empirically. The prioritized execution list is `backlog.md`; the user chose **semantics-first sequencing** and delegated the flow-model and strict-mode calls ("do what is necessary to achieve best quality"; "we want a sound type checker; it is okay to not support every R construct"). The contract page (`typing-reference.md`) is updated contract-first per Phase-1 item as it is implemented.
+
+## R variable model — mutable slots with union joins
+
+The fresh-binding-per-`<-` (let-shadowing) model is retired: it is not R. R assignment mutates the current function-scope environment, so a branch or loop assignment must be visible after the construct. Decided model:
+
+- A function scope holds **mutable variable slots**; each `<-`/`=`/`->` writes the slot, `<<-`/`->>` walks the lexical chain to the nearest enclosing slot.
+- A read sees the **union of reaching definitions** at that point (a conditional write joins with the prior type; a loop-body write joins across iterations).
+- Unused detection falls out: a **write** that no read reaches is unused (report assignments, not bindings).
+- Flow-sensitive *narrowing* (`if (is.null(x))`) is a later layer on the same model, not part of this decision.
+
+Rationale: the old model was verified unsound (`x <- 1L; if (f) x <- "two"; x + 1L` typechecked clean and crashes at runtime) and produced unused-lint false positives on the two most idiomatic R patterns (conditional update, loop accumulator). No lint-local fix existed.
+
+## Multi-member unions — join/annotation-only, never in unification variables
+
+General unions `A | B | C` (normalized: flat, deduped, order-insensitive; `T | NULL` becomes the special case) are adopted for joins and annotations. **The HM-speed guardrail:** a union is never *bound into* a unification variable and imposes no union constraints on inference variables — unification stays syntactic (a union unifies only with a structurally equal union); all member-wise directional logic lives in `check_compatibility`. This keeps inference decidable and fast and matches the existing unification-is-the-invariant-floor split. Tags/discriminated-union `match` (post-beta) builds on these unions.
+
+## Overload sets — bounded ordered probes
+
+Functions whose result type depends on the argument type get **ordered overload sets** (stub surface first; the `.Rtypes` grammar already permits repeated declarations). Call sites try schemes in declaration order using the existing probe-then-rollback machinery; first compatible match wins; all-fail = one diagnostic listing the candidates. Principal-type purity is knowingly relaxed *at overload sites only* (declaration order is semantic — the TS/mypy model). Traits/typeclasses remain the possible long-term subsumer; overloads are the pragmatic bridge and must not block a later trait design.
+
+## `T[]` — atomic-element constraint, not traits
+
+The core vector generalizes to carry an element *type* (so it can hold a variable), with a new **atomic-element constraint** kind on inference variables — the same mechanism as the existing numeric constraint (`<T: numeric>`), rendered e.g. `<T: atomic>`. This resolves the former open question (typing-design §1) in favor of option (a): the constraint mechanism is already built, proven, and fast; a trait system is not justified by this need alone.
+
+## Coercion policy at parameter positions
+
+Three verified false-positive factories are fixed at the compatibility level: whole-number `double` literals are accepted at `integer` parameters (generalizing the rule `:` already had); `integer` widens to `double` at parameter positions; vectorized stdlib stubs declare `T[]` parameters so scalars coerce up (instead of scalar parameters falsely rejecting vectors). Rationale: with the old policy, the *more precise* a stub was, the more false positives it produced (`seq_len(10)`, `toupper(c("a","b"))`, `round(x, 2)` all errored) — which pressure-cooked the corpus toward `Any`.
+
+## Signature matching is name-aware
+
+Annotation-vs-definition parameter matching by flat position (spec'd and implemented) was an accepts-then-crashes soundness hole: R call sites match by **name**, so a positional zip routes values to wrongly-typed formals. Both the contract and the implementation switch to name-aware matching where names exist.
+
+## Strict mode
+
+Strict = **Unknown origins are errors AND unresolved-name references are errors** (they stop being plain naming warnings under strict); a recursion-induced `Unknown` return is an origin. Explicit `Any` remains the sanctioned escape hatch — "allowed unknown" is expressed by annotating, never silently. **Per-file toggle:** a top-of-file `#: @strict` / `#: @strict off` directive overrides the config default in both pipelines (the gates are already per-file; derive the directive from the parse so incrementality holds). Sound-by-refusal is acceptable policy: an unsupported construct may be refused loudly; it must never be silently mistyped.
+
+## Annotation formatter — parse, then pretty-print
+
+The per-line re-indent walk (no bracket matching, lines never split) is replaced: join the `#:` block, parse it with the real `type_syntax` parser, pretty-print with **per-bracket hug bits** (an opener followed by content on its own line stays hugged; its closer mirrors it), honoring `indent_width`; on parse failure the block is left verbatim (which also ends prose corruption, and removes the drifted duplicate tokenizer). Both the fully expanded and the hugged style are stable fixed points; mixed shapes normalize.
+
+## Config subsystem
+
+Workspace root comes from `InitializeParams` (never process CWD); discovery = nearest `roughly.toml` ancestor of the target, identical in LSP and CLI; unknown keys are **errors with toml spans**, surfaced as diagnostics on `roughly.toml` plus a window message — never a startup panic; config reload triggers a diagnostics refresh; one config struct chain end-to-end (the four parallel representations collapse).

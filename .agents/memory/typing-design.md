@@ -2,33 +2,48 @@
 
 Forward-looking design space for Roughly's type system: questions that are **not yet decided** and the options on the table, with the current stopgap and why. This is distinct from `decisions.md` (the log of what has been *settled*) — entries here are live deliberations. When one is resolved, move the decision + rationale to `decisions.md` and delete it here. The settled contract is always `docs/src/content/docs/typing-reference.md`; nothing here is contract until it lands there.
 
-## 1. Generic / array-like element types (`T[]`)
+*(Resolved and moved to `decisions.md` §Beta-semantics: generic vector element types → atomic-element constraint on the existing constraint mechanism; ad-hoc overloading → ordered overload sets with probe-then-rollback, traits deferred; multi-member unions → join/annotation-only, never bound into unification variables; R variable model → mutable slots with union-at-join reads.)*
 
-**Question.** Should the type system express a shape-preserving generic over vectors — `<T> fn(x: T[]) -> T[]` (for `rev`, `sort`, `head`, `tail`, `unique`, `abs`, `sqrt`, …) — and if so, how?
+## 1. Tags / discriminated unions via a Roughly stdlib
 
-**Why it is not trivial.**
-- The core type cannot represent it today: `CoreType::Vector(Atomic)` / `NamedVector(Atomic)` store a bare `Atomic` enum, not a type, so "vector of `T`" has nowhere to land after lowering. The surface parser deliberately rejects `T[]` (`type_syntax.rs`, "generic atomic vector suffix types are not supported yet").
-- **`T[]` is not sound for an arbitrary `T`.** Not every R type is array-like: atomic vectors hold atomic scalars; lists, closures, environments, S4 objects are not vector elements in the same sense. A naive `T[]` over any `T` would admit ill-formed element types. Whatever we adopt must constrain `T` to the things that *can* be a vector element.
+**Question.** How to provide Roc-style tags (OCaml polymorphic variants) for R: a compiler-known Roughly library exposing tag **constructors** and a **`match`** function with exhaustive-pattern checking.
 
-**Options.**
-- **(a) Generalize the core vector + an atomic-element constraint.** `CoreType::Vector(Box<CoreType>)` (and `NamedVector`) so an element can be a variable, plus a new constraint kind (analogous to the existing `<T: numeric>`) that proves `T` is an admissible element. High blast radius: touches every construction/match on `Vector(Atomic)` in `typecheck.rs`, compatibility, unification, variance, rendering, and a large fixture sweep; reopens element-variance questions the reference only partly settled.
-- **(b) A trait / typeclass mechanism.** A general "is a vector element" (and more broadly, capability) predicate. Heavier machinery, but see §2 — one trait mechanism could serve both this and ad-hoc overloading, which argues for designing them together rather than bolting on (a).
-- **(c) Status quo — concrete element types only.** Keep the fixed atomic element vectors (`numeric[]`, `character[]`, …); shape-preserving stdlib functions stay `Any` (their calls are already safe — never a false error).
+**Direction (user):** provide them through a stdlib the checker knows specially, not through new R syntax — annotated R stays ordinary R. Post-beta.
 
-**Current stopgap:** (c). The affected functions are `Any` in the stdlib corpus. Chosen because (a) is a broad, regression-prone change to the core type relation for low corpus yield, and (b) deserves a deliberate design rather than being forced by a handful of functions.
+**Design space to work out before building:**
+- representation: a tagged value is presumably `list(tag = "Name", value = ...)` at runtime — does the type system model it as `union` of nominal-ish tag types, or as a new core form?
+- exhaustiveness: `match(x, Some = fn, None = fn)` — checking that the named arguments cover the union members needs literal argument-name awareness at one blessed callee; how special is that call form allowed to be?
+- do general unions (already decided) + literal discriminant fields suffice, or do tags need their own type former?
+- interaction with strict mode and with narrowing (a `match` arm should see the narrowed member type).
 
-## 2. Ad-hoc overloading vs traits
+## 2. S3 dispatch
 
-**Question.** How do we type functions whose result type depends on the argument type — `abs`, `rep`, `seq`, `range`, and similar — where a single scheme can't be precise?
+**Question.** How to type S3 generics (`print`, `summary`, `plot`, `format`, `predict`, …) where the result depends on the class of the first argument.
 
-**Options.**
-- **Overload sets.** Allow multiple type schemes per name; resolve a call by the first argument-compatible scheme. The `.Rtypes` grammar already permits repeated declarations of one name (loader last-wins) so a corpus need not be rewritten when this lands.
-- **Traits / typeclasses.** A class mechanism (e.g. a `Numeric`-like class carrying `abs`/arithmetic) with associated method types; a call resolves through the class. More expressive and composable; larger design.
+**Options.** Per-class overload sets on the generic's stub (cheap once overloads land — `print : fn(x: data.frame) -> data.frame` etc.); a real class-hierarchy model with `UseMethod` awareness (heavier, needed for user-defined S3 classes); or leave generics `Any` until traits.
 
-**Interaction with §1.** The user's steer was explicitly open between "a generic vector type or a trait or whatever." A trait/typeclass system could subsume both the array-element constraint (§1) *and* ad-hoc overloading (§2) under one mechanism. Before committing to overload sets, evaluate whether a single trait design pays for both — that is the more likely world-class shape.
+**Current stopgap:** S3 generics are `Any`/missing in the corpus. Revisit once overload sets are in use — overloads may cover the stdlib need without a dispatch model.
 
-**Current stopgap:** ad-hoc-overloaded functions are `Any` for v1; genuinely parametric higher-order functions (`lapply`, `Map`, `Reduce`, `identity`) keep real `<T> fn(...)` generics (already supported).
+## 3. data.frame / matrix modeling
 
-## Landed (no longer open)
+**Question.** Column-level typing for `data.frame` (`df$col`, `df[, "col"]`) and dimensionality for matrices.
 
-- **Variadic `...` in annotations/stubs** and **dotted parameter names** (`na.rm`) are implemented; their semantics are in `typing-reference.md`. Variadic is effectively stub/declaration-only for now — annotating a rest parameter over an R `function(...)` body reports a spurious mismatch because inference still lowers `...` as an ordinary named parameter; whether to bridge that (an inference change, or a compat special-case for a trailing `...` parameter) is a deferred decision noted in `backlog.md`, not yet a committed design.
+**Notes.** Beta ships `data.frame` as an opaque nominal (via `@type` in `.Rtypes`) — honest but shallow. Column typing likely wants row-polymorphic records over an opaque carrier; matrix wants an element type without dimension tracking first. Both interact with `[`/`[[` semantics and with the `x[i, j]` lowering. Design after the beta semantics settle.
+
+## 4. Traits / typeclasses
+
+**Question.** A general capability mechanism (numeric, atomic-element, comparable, `+`-overloadable/S3) that could subsume the ad-hoc constraint kinds and overload sets.
+
+**Notes.** Two constraint kinds (numeric, atomic-element) and stub overload sets will exist post-beta; if a third constraint kind or user-facing overloading pressure appears, that is the tripwire to design traits properly instead of accreting. Keep overload sets and constraints shaped so a trait system can absorb them (constraints already quantify in schemes; overloads are per-name lists).
+
+## 5. Variadic inference bridging
+
+**Question.** `function(x, ...)` bodies: inference now needs to lower a trailing `...` as a rest parameter (decided direction in `backlog.md` Phase 1) — but what type does `...` have *inside* the body (`list(...)`, `..1`, forwarding to another variadic)?
+
+**Current stopgap:** `...` uses inside a body stay `Unknown`; only the signature-level rest parameter is bridged. Full `...` semantics (forwarding compat, `..N` access) is open.
+
+## 6. NAMESPACE / import model
+
+**Question.** How library scoping should work: `library(pkg)` attaches, `importFrom` in NAMESPACE, search-path order, masking warnings.
+
+**Notes.** Beta ships `pkg::name` resolution against namespace-partitioned stubs. The attach/import model (what `library(dplyr)` makes visible, masking diagnostics) is undesigned; it determines when an unresolved name is *really* unresolved, so it directly feeds strict mode's usefulness on real projects.
