@@ -1,0 +1,35 @@
+# Changelog
+
+All notable changes to Roughly are recorded here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to follow
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+This file starts from the type-checker work; earlier history lives in the git log.
+
+## [Unreleased]
+
+### Added
+
+- **Static type checker for R.** A Hindley–Milner core with union-find inference, numeric
+  constraints, and prenex generics, checking R annotated in `#:` comments (a JSDoc-like notation that
+  keeps annotated code compatible with ordinary R tooling). Type-error diagnostics are opt-in via
+  `[check] typing`; hover types, inlay hints, and signature help are on by default. The typing
+  semantics are specified in `docs/typing-reference.md`.
+- **Standard-library type stubs.** Declaration-only `.Rti` stub files (`name : <type-expr>`) for the
+  base/stats/utils/methods libraries, compiled into the binary and overridable per project
+  (`stubs/*.Rti` win over the shipped set). Parametric higher-order functions (`lapply`, `Map`,
+  `Reduce`, …) carry real generics.
+- **Type-annotation syntax extensions**: variadic rest parameters (`fn(...: T)`) and dotted parameter
+  names (`na.rm`).
+- **Semantic-token highlighting** for the `#:` type notation in `.R` files.
+- Editor tooling: hover, completion, goto-definition, references, rename, document/workspace symbols
+  (including S4 `setClass`/`setGeneric`/`setMethod` and R6 classes), inlay hints, and an unused-local
+  lint.
+
+### Changed
+
+- Analysis runs on a single in-house red–green memoized query engine with latest-edit-wins
+  cancellation; per-edit output is verified byte-identical to a from-scratch rebuild.
+- The R grammar tracks the published `tree-sitter-r` 1.3.0.
+
+[Unreleased]: https://github.com/felix-andreas/roughly/compare/main...HEAD
