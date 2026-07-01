@@ -1,10 +1,18 @@
 [package]
 name = "roughly"
 edition = "2024"
+# Minimum supported Rust: the code uses `if let ... && let ...` let-chains, stabilized in 1.88 — the
+# binding floor above edition 2024's own 1.85 requirement.
+rust-version = "1.88"
 version.workspace = true
 description = "A language tool for R: a language server and CLI providing a static type checker, formatter, and linter."
+# `license` is the SPDX metadata; the LICENSE file is copied into this crate so a published tarball
+# ships the text (the tarball only includes files under the crate directory).
 license.workspace = true
 repository.workspace = true
+readme = "README.md"
+keywords = ["r", "language-server", "lsp", "formatter", "linter"]
+categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
 clap.workspace = true
