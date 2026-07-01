@@ -293,11 +293,21 @@ pub struct RoughlyQueries {
 
 impl RoughlyQueries {
     pub fn new() -> RoughlyQueries {
+        Self::with_project_stubs(Vec::new())
+    }
+
+    // Builds the query group with project-supplied `.Rti` override sources folded over the shipped stub
+    // corpus, so a project stub overrides a shipped one of the same name. The stubs load through the very
+    // interner every body interns through, so a user reference to a base name and the stub's own binding
+    // share one `Symbol` id (no cross-interner mismatch is representable), mirroring
+    // `Analysis::new_with_stub_library`. The assembled library stays a set-once input — it is read once
+    // at construction and never re-read on an edit.
+    pub fn with_project_stubs(project_stub_sources: Vec<String>) -> RoughlyQueries {
         let lowering = RefCell::new(LoweringContext::new());
-        // Load the stubs through the very interner every body interns through, so a user reference to a
-        // base name and the stub's own binding share one `Symbol` id (no cross-interner mismatch is
-        // representable), mirroring `Analysis::new_with_stub_library`.
-        let stubs = StubLibrary::load(lowering.borrow_mut().interner_mut());
+        let stubs = StubLibrary::load_with_overrides(
+            lowering.borrow_mut().interner_mut(),
+            &project_stub_sources,
+        );
         RoughlyQueries {
             lowering,
             parser: RefCell::new(new_parser().expect("engine query group: R grammar should load")),

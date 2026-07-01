@@ -186,6 +186,12 @@ impl EngineWorker {
     ) -> Self {
         let workspace_root = std::env::current_dir().unwrap();
 
+        // A project may ship its own `.Rti` stubs under `<root>/stubs/` to override or extend the
+        // shipped standard-library corpus. They are read once here and folded into the engine's set-once
+        // stub library; they are never re-read on an edit.
+        let project_stub_sources =
+            analysis::stdlib::discover_project_stub_sources(&workspace_root);
+
         Self {
             client,
             cancel,
@@ -194,7 +200,7 @@ impl EngineWorker {
             experimental_features,
             workspace_root: workspace_root.clone(),
             open_documents: HashSet::new(),
-            engine: Engine::new(RoughlyQueries::new()),
+            engine: Engine::new(RoughlyQueries::with_project_stubs(project_stub_sources)),
             paths: PathTable::new(workspace_root.clone()),
             file_ids: HashMap::new(),
             next_file_id: 0,

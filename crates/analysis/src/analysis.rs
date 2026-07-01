@@ -142,7 +142,13 @@ struct PackageOutput<T> {
 
 impl Analysis {
     pub fn new(base_path: PathBuf, lint_config: LintConfig, check_config: CheckConfig) -> Self {
-        Self::new_with_stub_library(base_path, lint_config, check_config, StubLibrary::load)
+        // A project may ship its own `.Rti` stubs under `<base_path>/stubs/` that override or extend the
+        // shipped corpus. They are discovered and folded in once here; the assembled library is a
+        // set-once base-environment input.
+        let overrides = crate::stdlib::discover_project_stub_sources(&base_path);
+        Self::new_with_stub_library(base_path, lint_config, check_config, move |interner| {
+            StubLibrary::load_with_overrides(interner, &overrides)
+        })
     }
 
     // Builds an `Analysis` whose base environment comes from the stub library the `load_stubs` closure
@@ -1343,6 +1349,53 @@ mod tests {
         );
 
         remove_workspace_path(&workspace_path);
+    }
+
+    #[test]
+    fn project_stub_overrides_shipped_stub_of_the_same_name() {
+        // The shipped corpus types `nchar` as `fn(x: character) -> integer`, so annotating its result
+        // as `character` is a type error. A project stub that redeclares `nchar` to return `character`
+        // must win, making the same document type-check clean — proving project overrides are wired
+        // through construction end to end.
+        let typing = CheckConfig {
+            typing: true,
+            ..CheckConfig::default()
+        };
+        let source = "#: character\nresult <- nchar(\"hi\")\n";
+        let document_relative = "R/main.R";
+
+        let shipped_workspace = unique_temp_workspace_path();
+        fs::create_dir_all(shipped_workspace.join("R")).expect("package root");
+        let mut shipped = Analysis::new(shipped_workspace.clone(), LintConfig::default(), typing);
+        let shipped_document = shipped
+            .add_document_from_source(shipped_workspace.join(document_relative), source)
+            .expect("document should parse");
+        run_full(&mut shipped);
+        assert!(
+            !shipped.document_diagnostics(shipped_document).is_empty(),
+            "shipped `nchar` returns integer, so the character annotation must be a type error"
+        );
+        remove_workspace_path(&shipped_workspace);
+
+        let override_workspace = unique_temp_workspace_path();
+        fs::create_dir_all(override_workspace.join("R")).expect("package root");
+        fs::create_dir_all(override_workspace.join("stubs")).expect("stubs dir");
+        fs::write(
+            override_workspace.join("stubs/overrides.Rti"),
+            "nchar : fn(x: character) -> character\n",
+        )
+        .expect("override stub should be written");
+        let mut overridden =
+            Analysis::new(override_workspace.clone(), LintConfig::default(), typing);
+        let override_document = overridden
+            .add_document_from_source(override_workspace.join(document_relative), source)
+            .expect("document should parse");
+        run_full(&mut overridden);
+        assert!(
+            overridden.document_diagnostics(override_document).is_empty(),
+            "project stub redeclaring `nchar` to return character must win, so the annotation holds"
+        );
+        remove_workspace_path(&override_workspace);
     }
 
     #[test]
