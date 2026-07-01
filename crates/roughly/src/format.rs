@@ -1157,9 +1157,10 @@ fn same_line(a: Node, b: Node) -> bool {
     end_position(a).row == b.start_position().row
 }
 
-// HACK: tree-sitter-r has wrong ending_position for extract with newlines before ths rhs:
-// it only includes the newline but not the rhs. this hack uses at least the correct end_position
-// see: https://github.com/users/felix-andreas/projects/5?pane=issue&itemId=100962575
+// The grammar mis-reports the end of an extract operator (`x$y`) when a newline separates the operator
+// from its right-hand side: the node's own end lands on the newline and excludes the right-hand side, so
+// `node.end_position()` would place the extract's end before its `y`. Use the right-hand side's end (or
+// the operator's, if the grammar detached the right-hand side entirely) to recover the true end.
 fn end_position(node: Node) -> tree_sitter::Point {
     if node.kind_id() != kind::EXTRACT_OPERATOR {
         return node.end_position();
@@ -1168,7 +1169,6 @@ fn end_position(node: Node) -> tree_sitter::Point {
     field_optional(node, field::RHS)
         .map(|rhs| rhs.end_position())
         .or_else(|| field_optional(node, field::OPERATOR).map(|operator| operator.end_position()))
-        // note: this case is unexpected
         .unwrap_or_else(|| node.end_position())
 }
 
