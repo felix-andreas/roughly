@@ -1,3 +1,8 @@
+//! An experimental interactive R REPL built on `extendr` (embeds a real R interpreter) with
+//! tree-sitter syntax highlighting and validation. It is a standalone exploration binary, not part of
+//! the language-tool pipeline (parsing, analysis, formatting, the language server), and it requires a
+//! local R installation to build and run. It is excluded from the workspace CI gate and not published.
+
 use {
     extendr_api::Rinternals,
     nu_ansi_term::{Color as AnsiColor, Style},
