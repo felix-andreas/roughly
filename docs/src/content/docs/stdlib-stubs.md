@@ -1,72 +1,108 @@
 ---
-title: Stdlib Stubs (Proposal)
-description: Design note proposing a standard-library stub framework so the type checker knows base/stats/utils instead of resolving them to Unknown
+title: Stdlib Stubs
+description: The standard-library stub format (.Rti declaration files) that teaches the type checker base/stats/utils instead of resolving them to Unknown
 ---
 
-:::caution[Status: partially implemented]
-A first increment of the standard library ships: `T`/`F`/`pi` plus a curated set of base functions
-are declaration-only `#:` stubs under `crates/analysis/stubs/` (`base.R`, `stats.R`, `utils.R`,
-`methods.R`), loaded by the stub loader and bound into the checker as a **set-once input** that never
-invalidates a package edit (see [Incremental hygiene](#incremental-hygiene)). Still **proposed / not
-yet built**: the CRAN tier (per-project introspection, §7), R-version keying of the embedded corpus
-(§8), the stubtest CI validator, and `pkg::name` (`NamespaceGet`). Sections below mark which is which.
-The authoritative typing contract remains the [Typing Reference](/typing-reference); this note
-describes how the standard library feeds that contract.
+:::note[Status]
+The standard-library stub format ships. `T`/`F`/`pi` plus a curated set of base functions are
+declaration-only `.Rti` stub files under `crates/analysis/stubs/` (`base.Rti`, `stats.Rti`,
+`utils.Rti`, `methods.Rti`), loaded and bound into the checker as a **set-once input** that never
+invalidates a package edit (see [Incremental hygiene](#incremental-hygiene)). Project
+[overrides](#override-precedence) are supported. Still **proposed / not yet built**: the CRAN tier
+(per-project introspection, §7), R-version keying of the embedded corpus (§8), the stubtest CI
+validator, and `pkg::name` (`NamespaceGet`). Sections below mark which is which. The authoritative
+typing contract remains the [Typing Reference](/typing-reference); this note describes how the
+standard library feeds that contract.
 :::
 
 ## Problem
 
-The checker's only "library" today is roughly 19 hardcoded `BuiltinKind` entries: the operators plus
-`c` and `list`. Everything else in the standard library resolves to `Unknown`. `T`/`F`/`pi` are
+The checker's only hardcoded "library" is roughly 19 `BuiltinKind` entries: the operators plus `c` and
+`list`. Without stubs, everything else in the standard library resolves to `Unknown`: `T`/`F`/`pi` are
 untyped, and base functions (`length`, `nchar`, `seq_len`, `paste`, ...) have no signatures, so calls
 through them lose all type information.
 
-This note proposes a **stub framework**: declaration-only descriptions of base and other R packages,
-loaded as immutable inputs, so the checker knows the standard library the same way rust-analyzer knows
+The **stub format** closes that gap: declaration-only descriptions of base and other R packages, loaded
+as immutable inputs, so the checker knows the standard library the same way rust-analyzer knows
 `core`/`std`.
 
 ## 1. Stub format
 
-**Decision: reuse the existing `#:` annotation syntax in declaration-only `.R` stub files.**
+Stub files are **dedicated declaration-only files** with the extension `.Rti` ("R type information").
+Each non-blank, non-comment line is a declaration:
 
-A stub file is ordinary R source whose bindings carry `#:` annotations. A loader harvests each
-annotation directly into a `TypeScheme` and **does not run body inference** — the placeholder body is
-ignored, so it can be `0L`, `NULL`, or anything parseable.
-
-Three declaration shapes cover the standard library:
-
-```r
-# function signature — annotation becomes the scheme; body `0L` is never inferred
-#: fn(x: Any) -> integer
-length <- function(x) 0L
-
-# plain value binding
-#: logical
-T <- TRUE
-
-#: double
-pi <- 0
-
-# type / class declaration
-#: @type factor {integer[]}
+```
+name : <type-expr>
 ```
 
-### Why reuse `#:` instead of a bespoke format
+The type expression reuses the `#:` annotation type grammar verbatim (parsed by the same
+`parse_surface_type` entry point), so there is no second type notation to build or keep from drifting.
+A stub file has no place to write a function body, so "declaration-only" is enforced *structurally* —
+the way TypeScript `.d.ts` and Python `.pyi` are declaration-only by construction, not by convention.
+Blank lines and `#` comments (whole-line or trailing) are ignored. The loader harvests each type
+expression directly into a `TypeScheme`.
 
-A separate `.d.R` / JSON / TOML stub grammar was considered and rejected:
+```
+# base.Rti — a fragment
 
-- reuses the existing `type_syntax` parser and the `Definition` pipeline — no second type grammar to
-  build and keep from drifting;
-- human-readable, and loadable / lintable / formattable by Roughly *and* by ordinary R tooling;
-- one source of truth for type notation across user code and stubs.
+# plain value bindings
+T : logical
+F : logical
+pi : double
+
+# a fixed-arity function signature
+length : fn(x: Any) -> integer
+
+# a parametric higher-order function — a real generic scheme, not Any
+lapply : <T, U> fn(x: list[T], f: fn(T) -> U) -> list[U]
+```
+
+### Why a dedicated declaration format
+
+The earlier approach shipped stubs as ordinary R files with placeholder bodies
+(`length <- function(x) 0L`) whose `#:` annotation was harvested while the body was ignored. That let a
+stub carry a meaningless, unreachable function body and required a full parse plus lowering just to
+reach the annotation. A dedicated declaration file removes both problems: a body is unrepresentable, so
+a stub cannot drift into carrying one, and the loader parses only declarations.
+
+The extension `.Rti` evokes R's own `.Rd` documentation convention (R-something) without colliding with
+`.Rd`, `.Rmd`, or `.Rda`/`.RData`. A JSON / TOML stub grammar was rejected because it would need a
+second type notation; reusing the `#:` type grammar keeps one source of truth for type syntax across
+inline annotations and stub files.
+
+A declaration binds a **value** name (a function or a constant) to a type. Nominal **type/class**
+declarations in stub files (the `@type` form described in §2/§4) are not yet expressible in `.Rti`;
+until they are, the shipped corpus is value bindings only.
 
 ### Cross-ecosystem note
 
-Statically-typed hosts that publish types for foreign code use **separate** stub files — TypeScript
-`.d.ts`, Python `.pyi`, Sorbet `.rbi`. Dynamically-typed hosts retrofitting types onto their *own*
-source put them **inline** — Elixir/Erlang `@spec`. R parallels the latter for its own source, so
-inline `#:` is primary; separate stub files exist only for foreign packages that cannot be annotated
-at the source (base and CRAN).
+Statically-typed hosts that publish types for foreign code use **separate** declaration files —
+TypeScript `.d.ts`, Python `.pyi`, Sorbet `.rbi`. Dynamically-typed hosts retrofitting types onto their
+*own* source put them **inline** — Elixir/Erlang `@spec`. R does both: inline `#:` is primary for a
+project's own source, and separate `.Rti` files exist for foreign packages (base and CRAN) that cannot
+be annotated at the source. `.Rti` reuses the same type grammar as the inline form, so the two are one
+notation in two carriers.
+
+### Overloads and generics
+
+The declaration grammar permits **repeated declarations of one name**, so overload sets can be adopted
+later without rewriting the corpus. Until the type system gains overload sets (or traits — that choice
+is deferred), a repeated name is resolved last-wins by the loader. Two rules govern the current corpus:
+
+- **Genuinely parametric functions get real generics.** Higher-order helpers whose result is a function
+  of the argument *type* (`lapply`, `Map`, `Reduce`, `identity`, ...) are written with `<T> fn(...)`
+  binders and keep precise polymorphic schemes.
+- **Ad-hoc overloads fall back to `Any`.** A function whose return type varies by argument *value* or
+  by arity (`abs`, `rep`, `seq`, `is`) is given `Any` rather than a falsely-precise signature, so a
+  call yields `Any` and never a spurious type or arity error. The name still resolves.
+
+## Override precedence
+
+A project can override or extend the shipped stubs by dropping `.Rti` files under `<project>/stubs/`.
+The loader folds project sources over the shipped corpus in sorted path order, so a declaration a
+project supplies **replaces** the shipped declaration of the same name — a project can correct a return
+type or add a name the shipped corpus omits. A missing directory, an unreadable file, or a malformed
+line is skipped: overrides are optional and one bad line must never block analysis.
 
 ## 2. Base-environment model
 
@@ -96,11 +132,13 @@ Faithfully stubbing base requires type-syntax extensions:
 | Gap | Example that fails today | Extension needed |
 |-----|--------------------------|------------------|
 | Variadics (highest value) | `paste`, `sum`, `c` | `...args: T` parameter form |
-| Dotted parameter names | `na.rm`, `length.out` | allow `.` in the identifier grammar |
+| Dotted parameter names | `na.rm`, `length.out` | allow `.` in the parameter-name grammar |
 | Generic atomic suffix | `rev`, `head`, shape-threading | accept `T[]` (type variable + suffix) |
-| Overloading | one name today = one scheme | multiple schemes per name |
+| Overloading | one name resolves last-wins | overload sets or traits in the type system |
 
-Until these land, affected functions degrade to `Any` / `@trust`.
+The declaration grammar already permits repeated declarations of one name, so adopting overload sets
+later needs no corpus rewrite; until then, and until the other extensions land, affected functions
+degrade to `Any` (see [Overloads and generics](#overloads-and-generics)).
 
 ## 3. Loading and namespacing
 
@@ -165,26 +203,15 @@ stubs first-class and improvable, and lets tooling find what still needs work �
 
 ## 5. Worked example
 
-A base stub fragment in the proposed format:
+A base stub fragment:
 
-```r
-#: logical
-T <- TRUE
-
-#: logical
-F <- FALSE
-
-#: double
-pi <- 0
-
-#: fn(x: Any) -> integer
-length <- function(x) 0L
-
-#: fn(x: character) -> integer
-nchar <- function(x) 0L
-
-#: fn(length_out: integer) -> integer[]
-seq_len <- function(length_out) 0L
+```
+T : logical
+F : logical
+pi : double
+length : fn(x: Any) -> integer
+nchar : fn(x: character) -> integer
+seq_len : fn(length_out: integer) -> integer[]
 ```
 
 The schemes each produces:
@@ -224,7 +251,7 @@ cost: its revision never advances, and a file that references a stub records tha
 other input it reads.
 
 **Smallest first increment:** seed `T`/`F`/`pi` plus ~12 high-frequency base functions, parsed once
-from an embedded `base.R`, behind the template-seeding path — before any namespace / `::` / `library()`
+from an embedded `base.Rti`, behind the template-seeding path — before any namespace / `::` / `library()`
 machinery. This closes the `T`/`F`/`pi` gap with only the two integration edits from §3.
 
 ### Risks
@@ -285,7 +312,7 @@ mistakes while staying sound (never claiming a false-precise return).
 - **Cached per package version.** A generated stub is a pure function of `(package, version)`, so it is
   cached on that key and regenerated only when the installed version changes — the same immutability
   the embedded corpus enjoys, just keyed per project.
-- **Optional curated overrides** (the typeshed third-party model): a hand-written `#:` stub for a
+- **Optional curated overrides** (the typeshed third-party model): a hand-written `.Rti` stub for a
   high-value package (or specific functions) layers over the generated shallow stub, supplying precise
   returns the introspection cannot. Curated overrides win where present; generation fills the rest.
 - **Unstubbed → `Any`, never a hard error.** A package with no generated and no curated stub (R not
@@ -322,7 +349,7 @@ the stubtest validator both need a **real R installation available to run** (`ge
 as a future slice, in dependency order:
 
 1. **Introspection generator** — the tool that runs R, harvests `getNamespaceExports()` + `formals()`
-   into shallow `#:` stubs (returns `Any`/`Incomplete`), and caches them per package version. Gated on
+   into shallow `.Rti` stubs (returns `Any`/`Incomplete`), and caches them per package version. Gated on
    an available R; ships as offline tooling that writes a cache the checker consumes.
 2. **stubtest validator (LT5)** — a stubtest-equivalent CI check that introspects real R and **diffs**
    the curated stubs (embedded corpus *and* curated CRAN overrides) against the live signatures,
