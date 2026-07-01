@@ -157,41 +157,10 @@ out
 
 ## tree-sitter-r vs R parser
 
-### No default for parameter
-
-Accept by `tree-sitter-r` but rejected by R.
-
-```R
-function(parameter =) {}
-```
-
-See https://github.com/r-lib/tree-sitter-r/issues/161
-
-### line break after `else`
-
-This is valid R but cannot be parsed by `tree-sitter-r`
-
-```R
-if (TRUE) {
-  1
-} else
-{
-  2
-}
-```
-
-### Two line breaks after `extract_operator`
-
-
-This is valid R but cannot be parsed by `tree-sitter-r`
-
-```R
-foo$
-
-bar
-```
-
-See https://github.com/r-lib/tree-sitter-r/issues/166
+No known parsing divergences between `tree-sitter-r` and R as of `tree-sitter-r` 1.3.0.
+Earlier divergences — a parameter with no default (`function(parameter =) {}`), a line break after
+`else`, and two line breaks after the extract operator (`foo$\n\nbar`) — are resolved in 1.3.0: the
+first is now an error node (matching R's rejection), and the other two parse cleanly.
 
 ## Linting ideas
 
