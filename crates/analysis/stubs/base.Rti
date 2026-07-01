@@ -1,0 +1,85 @@
+# Standard-library stubs: base package.
+#
+# Declaration-only stub file (`.Rti`): each line is `name : <type-expr>`, reusing the `#:` annotation
+# type grammar. There is no function body to write, so these files are declarations only.
+#
+# A "widened to Any" note marks a binding whose precise type the annotation grammar cannot yet express
+# (variadic `...`, optional arguments, or a result shape that mirrors the argument). Such a binding is
+# deliberately given `Any` rather than a falsely-precise signature: a call then yields `Any`, which never
+# produces a spurious type or arity error. The name still resolves, so it is never reported as undefined
+# and never flagged by strict mode.
+#
+# The arithmetic and comparison operators and the `c` / `list` constructors are NOT stubbed here: their
+# result type is an algorithm over the argument types (numeric promotion, `NULL`-dropping combination,
+# record synthesis) that a single declaration cannot describe, so they are modeled directly in the
+# checker instead.
+
+# Reserved value constants.
+T : logical
+F : logical
+pi : double
+
+# Length and sequence helpers: the result type is fixed by the function, independent of the argument's
+# element type or shape.
+length : fn(x: Any) -> integer
+seq_len : fn(length_out: integer) -> integer[]
+seq_along : fn(along_with: Any) -> integer[]
+
+# Type predicates: always return a single logical.
+is.null : fn(x: Any) -> logical
+is.na : fn(x: Any) -> logical
+is.numeric : fn(x: Any) -> logical
+is.character : fn(x: Any) -> logical
+is.logical : fn(x: Any) -> logical
+is.function : fn(x: Any) -> logical
+is.list : fn(x: Any) -> logical
+
+# Coercions: the target atomic type is fixed by the function, not by the argument.
+as.integer : fn(x: Any) -> integer
+as.numeric : fn(x: Any) -> double
+as.character : fn(x: Any) -> character
+as.logical : fn(x: Any) -> logical
+
+# Character scalars: the result atomic type is character (real R vectorizes over the input, but the
+# element type is still fixed).
+nchar : fn(x: character) -> integer
+toupper : fn(x: character) -> character
+tolower : fn(x: character) -> character
+substr : fn(x: character, start: integer, stop: integer) -> character
+startsWith : fn(x: character, prefix: character) -> logical
+endsWith : fn(x: character, suffix: character) -> logical
+
+# widened to Any: the result shape mirrors the argument shape, which the grammar cannot express as a
+# type variable, so any concrete return type would be falsely precise.
+rev : fn(x: Any) -> Any
+abs : fn(x: Any) -> Any
+sqrt : fn(x: Any) -> Any
+sort : fn(x: Any) -> Any
+unique : fn(x: Any) -> Any
+
+# widened to Any: variadic (`...`); the argument list cannot be expressed, so the whole binding is
+# `Any` and a call yields `Any`.
+paste : Any
+paste0 : Any
+sum : Any
+prod : Any
+min : Any
+max : Any
+range : Any
+
+# widened to Any: optional arguments (`na.rm`, `fixed`, `ignore.case`, `which`, ...) cannot yet be
+# expressed, so a fixed-arity signature would wrongly reject valid calls.
+mean : Any
+trimws : Any
+substring : Any
+gsub : Any
+sub : Any
+grepl : Any
+grep : Any
+strsplit : Any
+round : Any
+seq : Any
+rep : Any
+vapply : Any
+lapply : Any
+sapply : Any

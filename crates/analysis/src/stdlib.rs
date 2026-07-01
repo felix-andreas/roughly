@@ -1,31 +1,32 @@
 use {
     crate::{
         Interner,
-        document::Document,
-        hir::ExpressionKind,
         interner::Symbol,
-        lower::lower_with_shared_interner,
-        tree,
+        stub::parse_stub_declarations,
         typecheck::{InferenceState, TypeDefinitionEnvironment},
-        types::{Annotation, TypeScheme},
+        types::TypeScheme,
     },
     std::{collections::BTreeMap, path::Path},
-    tree_sitter::{Parser, Range},
+    tree_sitter::Range,
 };
 
-// The shipped standard-library stub corpus: one declaration-only R file per namespace. Each file's
-// top-level bindings carry `#:` annotations the loader harvests into type schemes; the placeholder bodies
-// are never inferred. All shipped namespaces are attached to the base environment, so their names resolve
-// as bare globals. See `stubs/base.R` for the format.
+// The shipped standard-library stub corpus: one declaration-only `.Rti` file per namespace. Each file is
+// a flat list of `name : <type-expr>` declarations the loader harvests into type schemes. All shipped
+// namespaces are attached to the base environment, so their names resolve as bare globals. See
+// `stubs/base.Rti` for the format.
 const SHIPPED_STUBS: &[&str] = &[
-    include_str!("../stubs/base.R"),
-    include_str!("../stubs/stats.R"),
-    include_str!("../stubs/utils.R"),
-    include_str!("../stubs/methods.R"),
+    include_str!("../stubs/base.Rti"),
+    include_str!("../stubs/stats.Rti"),
+    include_str!("../stubs/utils.Rti"),
+    include_str!("../stubs/methods.Rti"),
 ];
 
+// The extension of a stub file: R type information, declaration-only. The name mirrors R's own `.Rd`
+// documentation convention without colliding with it.
+pub const STUB_EXTENSION: &str = "Rti";
+
 // An immutable description of the standard library's value bindings: each base name mapped to the
-// `TypeScheme` harvested from its `#:` annotation. Built once when an analysis session starts and never
+// `TypeScheme` harvested from its declaration. Built once when an analysis session starts and never
 // invalidated by user edits.
 //
 // A stub is a base-environment binding only. Its schemes are seeded into the per-document inference
@@ -60,18 +61,17 @@ impl StubLibrary {
     // omits). Every stub name is interned through the caller's interner, so a user reference and the stub
     // share one symbol id.
     pub fn load_with_overrides(interner: &mut Interner, override_sources: &[String]) -> Self {
-        let mut parser = tree::new_parser().expect("stub parser should initialize");
         let mut values = BTreeMap::new();
         for source in SHIPPED_STUBS {
-            harvest_stub_source(&mut parser, interner, source, &mut values);
+            harvest_stub_source(interner, source, &mut values);
         }
         for source in override_sources {
-            harvest_stub_source(&mut parser, interner, source, &mut values);
+            harvest_stub_source(interner, source, &mut values);
         }
 
         debug_assert!(
             !values.is_empty(),
-            "shipped stub corpus yielded no schemes; a stub file failed to parse or lower"
+            "shipped stub corpus yielded no schemes; a stub file failed to parse"
         );
         Self { values }
     }
@@ -93,8 +93,8 @@ impl StubLibrary {
     }
 }
 
-// Reads a project's override stub files from `<root>/stubs/*.R`, in sorted path order, returning their
-// source text. A project drops declaration-only `#:` R there to override or extend the shipped
+// Reads a project's override stub files from `<root>/stubs/*.Rti`, in sorted path order, returning their
+// source text. A project drops declaration-only stub files there to override or extend the shipped
 // standard-library stubs. A missing directory or an unreadable file is silently skipped: overrides are
 // optional, and a malformed override must never block analysis.
 pub fn discover_project_stub_sources(root: &Path) -> Vec<String> {
@@ -107,7 +107,7 @@ pub fn discover_project_stub_sources(root: &Path) -> Vec<String> {
         .map(|entry| entry.path())
         .filter(|path| {
             path.extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("r"))
+                .is_some_and(|extension| extension.eq_ignore_ascii_case(STUB_EXTENSION))
         })
         .collect::<Vec<_>>();
     paths.sort();
@@ -117,45 +117,30 @@ pub fn discover_project_stub_sources(root: &Path) -> Vec<String> {
         .collect()
 }
 
-// Parses one declaration-only stub source and harvests each annotated top-level binding's `#:` annotation
-// into a scheme keyed by the binding name (a later source overrides an earlier one for the same name). A
-// binding without a value-type annotation is skipped; a source that fails to parse or whose annotation
-// fails to lower is skipped rather than aborting, so a malformed project override degrades gracefully.
+// Parses one stub source and harvests each declaration's type expression into a scheme keyed by the
+// declared name (a later source overrides an earlier one for the same name, and — until overload sets
+// exist — so does a later declaration of the same name within one source). A declaration whose type
+// expression fails to lower into a scheme is skipped, and lines that fail to parse are dropped by the
+// declaration parser, so a malformed project override degrades gracefully rather than aborting analysis.
 fn harvest_stub_source(
-    parser: &mut Parser,
     interner: &mut Interner,
     source: &str,
     values: &mut BTreeMap<Symbol, StubValue>,
 ) {
-    let Ok(document) = Document::parse(parser, source) else {
-        return;
-    };
-    let module = lower_with_shared_interner(&document, interner).module;
+    let (declarations, _errors) = parse_stub_declarations(source, interner);
     let mut inference_state = InferenceState::new();
     let type_definitions = TypeDefinitionEnvironment::default();
-    for expression_id in &module.expressions {
-        let expression = module.arena.get(*expression_id);
-        let ExpressionKind::Assign { target, .. } = &expression.kind else {
-            continue;
-        };
-        let Some(annotation) = &expression.annotation else {
-            continue;
-        };
-        if !annotation.applies_to_binding() {
-            continue;
-        }
-        let Annotation::Type { surface_type, .. } = annotation.annotation() else {
-            continue;
-        };
-        let Ok(scheme) = inference_state.harvest_annotation_scheme(surface_type, &type_definitions)
+    for declaration in declarations {
+        let Ok(scheme) =
+            inference_state.harvest_annotation_scheme(&declaration.surface_type, &type_definitions)
         else {
             continue;
         };
         values.insert(
-            *target,
+            declaration.name,
             StubValue {
                 scheme,
-                range: expression.range,
+                range: declaration.range,
             },
         );
     }

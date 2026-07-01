@@ -8,6 +8,7 @@ pub mod lint;
 pub mod lower;
 pub mod naming;
 pub mod stdlib;
+pub mod stub;
 pub mod text;
 pub mod tree;
 pub mod type_syntax;

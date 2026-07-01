@@ -1,0 +1,17 @@
+# Standard-library stubs: utils package.
+#
+# Declaration-only stub file (`.Rti`); see base.Rti for the format. These helpers either take optional
+# arguments or return a value whose shape mirrors their input, so most are widened to `Any`; stubbing
+# them still makes the names resolve and keeps strict mode from flagging them.
+
+# widened to Any: the result is a prefix/suffix of the argument, so its shape mirrors the input.
+head : Any
+tail : Any
+
+# widened to Any: structure-dependent or side-effecting, with optional arguments.
+str : Any
+read.csv : Any
+write.csv : Any
+install.packages : Any
+modifyList : Any
+help : fn(object: Any) -> NULL

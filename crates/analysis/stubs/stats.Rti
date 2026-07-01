@@ -1,0 +1,31 @@
+# Standard-library stubs: stats package.
+#
+# Declaration-only stub file (`.Rti`); see base.Rti for the format. Most statistical functions take
+# optional arguments (`na.rm`, `trim`, `probs`, ...) or return data-dependent structures (model objects,
+# data frames), neither of which the annotation grammar can describe yet, so they are widened to `Any`.
+# Stubbing them anyway means the names resolve (never reported as undefined, never flagged by strict
+# mode) and a call yields `Any` rather than a falsely-precise type.
+sd : Any
+var : Any
+median : Any
+quantile : Any
+cor : Any
+cov : Any
+fivenum : Any
+weighted.mean : Any
+
+# Model fitting and prediction: the result is a model object whose shape depends on the formula and
+# data, so it is not statically typeable.
+lm : Any
+glm : Any
+predict : Any
+residuals : Any
+fitted : Any
+coef : Any
+
+# Random generation and distributions: a numeric vector whose length is a runtime value, with optional
+# distribution parameters, so widened to Any.
+rnorm : Any
+runif : Any
+dnorm : Any
+pnorm : Any
