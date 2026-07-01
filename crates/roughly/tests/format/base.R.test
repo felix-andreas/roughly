@@ -1308,31 +1308,25 @@ function() call(
 )
 
 #---- comments_all_positions
-# hack: only parses correctly with surrounding parentheses
-(
-    function # function
-    # 1
-    ( # (
-        # 2
-        parameter # parameter
-        # 3
-    ) # )
-    # 4
-    {}
-)
-#++++
-# hack: only parses correctly with surrounding parentheses
-(
-  function # function
-  # 1
-  ( # (
+function # function
+# 1
+( # (
     # 2
     parameter # parameter
     # 3
-  ) # )
-  # 4
-  {}
-)
+) # )
+# 4
+{}
+#++++
+function # function
+# 1
+( # (
+  # 2
+  parameter # parameter
+  # 3
+) # )
+# 4
+{}
 
 #==== if_statement
 #---- basic
