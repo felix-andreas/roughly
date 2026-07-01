@@ -1156,7 +1156,7 @@ fn push_call_s4_occurrences(call: Node<'_>, rope: &Rope, out: &mut Vec<S4Occurre
     let Some(constructor) = s4::s4_constructor(call, rope) else {
         return;
     };
-    let Some(arguments) = call.child_by_field_name("arguments") else {
+    let Some(arguments) = call.child_by_field_id(crate::tree::field::ARGUMENTS) else {
         return;
     };
 
@@ -1440,8 +1440,11 @@ fn local_completion_items(
         .filter(|current| current.kind_id() == crate::tree::kind::FUNCTION_DEFINITION)
     {
         if let Some(parameters) = function_node.child_by_field_id(crate::tree::field::PARAMETERS) {
-            for parameter in parameters.children_by_field_name("parameter", &mut parameters.walk())
-            {
+            for parameter in crate::tree::children_by_field(
+                parameters,
+                crate::tree::field::PARAMETER,
+                &mut parameters.walk(),
+            ) {
                 let Some(name) = parameter.child_by_field_id(crate::tree::field::NAME) else {
                     continue;
                 };

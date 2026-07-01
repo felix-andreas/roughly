@@ -27,7 +27,7 @@ Companion documents (kept separate only because they are larger in scope): `back
   - **Nested generic-nominal arguments are treated conservatively invariant** (sound but over-restrictive); precise variance *composition* would re-admit sound nested covariant cases.
   - **Structural constraints on inferred parameters are missing:** `function(x) x$name` / `x[[1L]]` / `c(x, 1L)` leak or error instead of constraining `x` to a record / indexable / atomic. Needs row/shape constraints on inference variables, analogous to the numeric constraint.
   - **S4 follow-ups:** `@` slot access lowers to `Unsupported` (needs a `Slot` HIR node + lowering/typing); slots-as-class-children in the outline.
-  - **Tree-sitter access is string-based** (`kind()` / `child_by_field_name()`) in the `analysis` front end but id-based (`kind_id()` / `field_id()`) in `roughly`; consolidate on id-based, and dedupe the shared rope/tree helpers and the symbol indexer.
+  - **Tree-sitter access:** `analysis`'s front end is now id-based (`kind_id()` / `child_by_field_id` via `tree::field`/`tree::kind`; `tree::children_by_field` wraps the `NonZero` field-id conversion) — the string→id conversion is done. Remaining: dedupe the shared rope/tree helpers and the symbol indexer between `analysis` and `roughly` (separate item). Node-name strings survive only in lowering *diagnostic messages* (human-readable), not control flow.
   - **Diagnostic wording:** annotation-semantic errors render under `syntax-error` with a doubled `Syntax Error:` prefix; alias-cycle is not reported on unused declarations.
 
 ## Long-term

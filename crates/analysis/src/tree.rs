@@ -155,3 +155,16 @@ pub mod field {
     pub const VALUE: u16 = 19; // "value"
     pub const VARIABLE: u16 = 20; // "variable"
 }
+
+// Iterates a node's children in the given field. `tree_sitter::Node::children_by_field_id` takes a
+// `NonZero<u16>`, but the `field` constants are plain `u16`; every field id is nonzero (the grammar
+// numbers fields from 1), so the conversion cannot fail. Wrapping it here keeps callers on the id-based
+// `field::*` constants without repeating the `NonZero` dance.
+pub fn children_by_field<'tree, 'cursor>(
+    node: tree_sitter::Node<'tree>,
+    field_id: u16,
+    cursor: &'cursor mut tree_sitter::TreeCursor<'tree>,
+) -> impl Iterator<Item = tree_sitter::Node<'tree>> + 'cursor {
+    let field_id = std::num::NonZero::new(field_id).expect("tree-sitter field ids are nonzero");
+    node.children_by_field_id(field_id, cursor)
+}

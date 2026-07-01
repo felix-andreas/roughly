@@ -10,7 +10,11 @@
 //! Everything here returns borrowed tree nodes rather than owned strings, so it stays allocation-light
 //! for the hot goto/references/rename path.
 
-use {crate::tree::kind, ropey::Rope, tree_sitter::Node};
+use {
+    crate::tree::{children_by_field, field, kind},
+    ropey::Rope,
+    tree_sitter::Node,
+};
 
 /// The S4 constructor a call invokes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,11 +44,11 @@ pub fn s4_constructor(call: Node<'_>, rope: &Rope) -> Option<S4Constructor> {
 /// The bare name of a call's callee: the identifier for `f(...)`, or the right-hand side for a
 /// namespace-qualified `pkg::f(...)`. Returns `None` for any other callee shape.
 pub fn call_function_name(call: Node<'_>, rope: &Rope) -> Option<String> {
-    let function = call.child_by_field_name("function")?;
+    let function = call.child_by_field_id(field::FUNCTION)?;
     match function.kind_id() {
         kind::IDENTIFIER => Some(rope.byte_slice(function.byte_range()).to_string()),
         kind::NAMESPACE_OPERATOR => {
-            let rhs = function.child_by_field_name("rhs")?;
+            let rhs = function.child_by_field_id(field::RHS)?;
             (rhs.kind_id() == kind::IDENTIFIER)
                 .then(|| rope.byte_slice(rhs.byte_range()).to_string())
         }
@@ -61,19 +65,18 @@ pub fn call_argument<'tree>(
     index: usize,
 ) -> Option<Node<'tree>> {
     let mut cursor = arguments.walk();
-    for argument in arguments.children_by_field_name("argument", &mut cursor) {
-        if let Some(argument_name) = argument.child_by_field_name("name")
+    for argument in children_by_field(arguments, field::ARGUMENT, &mut cursor) {
+        if let Some(argument_name) = argument.child_by_field_id(field::NAME)
             && rope.byte_slice(argument_name.byte_range()) == name
         {
-            return argument.child_by_field_name("value");
+            return argument.child_by_field_id(field::VALUE);
         }
     }
 
-    arguments
-        .children_by_field_name("argument", &mut arguments.walk())
+    children_by_field(arguments, field::ARGUMENT, &mut arguments.walk())
         .nth(index)
-        .filter(|argument| argument.child_by_field_name("name").is_none())
-        .and_then(|argument| argument.child_by_field_name("value"))
+        .filter(|argument| argument.child_by_field_id(field::NAME).is_none())
+        .and_then(|argument| argument.child_by_field_id(field::VALUE))
 }
 
 /// Like [`call_argument`], but only yields the argument when its value is a string literal.
@@ -89,7 +92,7 @@ pub fn string_argument<'tree>(
 
 /// The `content` node (the text between the quotes) of a string-literal node, if present.
 pub fn string_content(string_node: Node<'_>) -> Option<Node<'_>> {
-    string_node.child_by_field_name("content")
+    string_node.child_by_field_id(field::CONTENT)
 }
 
 /// The class-name string nodes in a `setMethod` signature: either the single string `"Class"`, or the
@@ -99,12 +102,11 @@ pub fn signature_class_strings<'tree>(signature: Node<'tree>) -> Vec<Node<'tree>
         return vec![signature];
     }
     if signature.kind_id() == kind::CALL
-        && let Some(arguments) = signature.child_by_field_name("arguments")
+        && let Some(arguments) = signature.child_by_field_id(field::ARGUMENTS)
     {
         let mut cursor = arguments.walk();
-        return arguments
-            .children_by_field_name("argument", &mut cursor)
-            .filter_map(|argument| argument.child_by_field_name("value"))
+        return children_by_field(arguments, field::ARGUMENT, &mut cursor)
+            .filter_map(|argument| argument.child_by_field_id(field::VALUE))
             .filter(|value| value.kind_id() == kind::STRING)
             .collect();
     }
