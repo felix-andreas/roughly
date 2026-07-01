@@ -609,12 +609,24 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
         .iter()
         .map(|(document_id, output)| (*document_id, output.output.clone()))
         .collect::<HashMap<_, _>>();
+    // The package-naming diagnostics narrow a type-reference error to the offending name by re-lexing
+    // the document, so the rebuild needs each document's text. Rope clones share structure, so this is cheap.
+    let ropes = analysis_state
+        .all_document_ids()
+        .into_iter()
+        .filter_map(|document_id| {
+            analysis_state
+                .document_by_id(document_id)
+                .map(|document| (document_id, document.rope().clone()))
+        })
+        .collect::<HashMap<_, _>>();
 
     let (package_type_index, duplicate_type_names) = build_type_index(&package_modules);
     let computation = rebuild_package_naming(
         &package_modules,
         &extra_modules,
         &naming_locals,
+        &ropes,
         analysis_state.interner(),
         &analysis_state.stub_library,
     );

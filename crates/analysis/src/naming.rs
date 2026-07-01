@@ -8,8 +8,10 @@ use {
         },
         interner::{Interner, Symbol},
         stdlib::StubLibrary,
+        type_syntax::type_name_token_range,
         types::{Annotation, AttachedAnnotation, NamedTypeRef, SurfaceType},
     },
+    ropey::Rope,
     std::collections::{BTreeMap, BTreeSet, HashMap},
     tree_sitter::Range,
 };
@@ -81,6 +83,7 @@ pub(crate) fn rebuild_package_naming(
     package_modules: &[(DocumentId, &Module)],
     extra_modules: &[(DocumentId, &Module)],
     locals: &HashMap<DocumentId, NamesLocal>,
+    ropes: &HashMap<DocumentId, Rope>,
     interner: &Interner,
     stub_library: &StubLibrary,
 ) -> PackageNamingComputation {
@@ -91,10 +94,12 @@ pub(crate) fn rebuild_package_naming(
     let mut diagnostics = HashMap::<DocumentId, Vec<Diagnostic>>::new();
     for (document_id, module) in package_modules {
         let local_naming = expect_local_naming(locals, *document_id);
+        let rope = expect_rope(ropes, *document_id);
         let document_diagnostics =
             package_document_diagnostics(&PackageDocumentDiagnosticContext {
                 document_id: *document_id,
                 module,
+                rope,
                 local_naming,
                 is_script: false,
                 types: &types,
@@ -112,11 +117,13 @@ pub(crate) fn rebuild_package_naming(
     // same name, so a script can declare and use a nominal/alias that the package does not define.
     for (document_id, module) in extra_modules {
         let local_naming = expect_local_naming(locals, *document_id);
+        let rope = expect_rope(ropes, *document_id);
         let script_types = build_script_local_type_index(&types, module);
         let document_diagnostics =
             package_document_diagnostics(&PackageDocumentDiagnosticContext {
                 document_id: *document_id,
                 module,
+                rope,
                 local_naming,
                 is_script: true,
                 types: &script_types,
@@ -146,6 +153,9 @@ pub(crate) fn rebuild_package_naming(
 pub(crate) struct PackageDocumentDiagnosticContext<'a> {
     pub document_id: DocumentId,
     pub module: &'a Module,
+    // The document's text, used to narrow a type-reference diagnostic from the whole annotation down to
+    // the offending type name by re-lexing the `#:` notation.
+    pub rope: &'a Rope,
     pub local_naming: &'a NamesLocal,
     pub is_script: bool,
     pub types: &'a BTreeMap<Symbol, TypeInfo>,
@@ -269,6 +279,7 @@ pub(crate) fn package_document_diagnostics(
     {
         let mut type_resolver = TypeResolver {
             interner,
+            rope: context.rope,
             types: context.types,
             diagnostics: &mut type_diagnostics,
         };
@@ -473,6 +484,12 @@ fn expect_local_naming(
     })
 }
 
+fn expect_rope(ropes: &HashMap<DocumentId, Rope>, document_id: DocumentId) -> &Rope {
+    ropes
+        .get(&document_id)
+        .unwrap_or_else(|| panic!("missing rope for module {document_id:?} during package rebuild"))
+}
+
 fn resolve_module_type_references(
     type_resolver: &mut TypeResolver<'_>,
     document_id: DocumentId,
@@ -643,6 +660,7 @@ fn is_builtin_symbol(interner: &Interner, symbol: Symbol) -> bool {
 
 struct TypeResolver<'a> {
     interner: &'a Interner,
+    rope: &'a Rope,
     types: &'a BTreeMap<Symbol, TypeInfo>,
     diagnostics: &'a mut HashMap<DocumentId, Vec<Diagnostic>>,
 }
@@ -840,6 +858,9 @@ impl<'a> TypeResolver<'a> {
             .resolve(symbol)
             .unwrap_or("<unknown>")
             .to_owned();
+        // Narrow the underline from the whole annotation to the offending type name when it can be
+        // located in the `#:` notation; fall back to the annotation range otherwise.
+        let range = type_name_token_range(self.rope, range, &name).unwrap_or(range);
         push_diagnostic(
             self.diagnostics,
             document_id,

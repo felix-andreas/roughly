@@ -406,6 +406,7 @@ name = "engine"
 version = "0.2.4-alpha"
 dependencies = [
  "analysis",
+ "ropey",
  "tree-sitter",
 ]
 

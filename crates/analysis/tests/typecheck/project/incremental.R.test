@@ -79,7 +79,7 @@ warning[naming] I could not resolve `double_count` in this package, its imports,
 value <- list(name = "bob")
 #++++
 error[naming] I could not resolve type `Person`.
---> 1:1-1:10
+--> 1:4-1:10
 | #: Person
 #.... v1
 #---- R/b.R

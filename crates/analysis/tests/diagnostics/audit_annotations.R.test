@@ -159,7 +159,7 @@ error[syntax-error] Syntax Error: generic type `Box` expects 1 type argument(s),
 person <- list(name = "bob")
 #++++
 error[naming] I could not resolve type `Person`.
---> 1:1-1:15
+--> 1:9-1:15
 | #: @new Person
 
 #---- new_already_nominal
@@ -237,7 +237,7 @@ error[type-error] expected `list[integer]`, found `list{integer, character}`
 value <- some_unknown
 #++++
 error[naming] I could not resolve type `user_id`.
---> 1:1-1:23
+--> 1:16-1:23
 | #: @if-unknown user_id
 
 warning[naming] I could not resolve `some_unknown` in this package, its imports, or builtins.

@@ -473,6 +473,17 @@ pub fn type_tokens_in_range(rope: &Rope, annotation_range: Range) -> Vec<Documen
     tokens
 }
 
+// The document range of the first type-name token spelled `name` inside the `#:` annotation covered by
+// `annotation_range`. Diagnostics about an offending type name (an unresolved name, for instance) use
+// this to underline just that name rather than the whole annotation. `None` when the annotation does not
+// mention the name as a type name (it should, since the diagnostic was raised from the same notation).
+pub fn type_name_token_range(rope: &Rope, annotation_range: Range, name: &str) -> Option<Range> {
+    type_tokens_in_range(rope, annotation_range)
+        .into_iter()
+        .find(|token| token.role == TypeTokenRole::TypeName && token.text == name)
+        .map(|token| token.range)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BlockItemKind {
     Compact,

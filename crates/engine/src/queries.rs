@@ -39,6 +39,7 @@ use {
         },
         stdlib::StubLibrary,
         tree::new_parser,
+        type_syntax::type_name_token_range,
         typecheck::{
             BUILTINS, ExportedValue, InferenceError, ModuleCheck, StrictOriginKind,
             StrictUnknownOrigin, TypeDefinitionEnvironment,
@@ -46,6 +47,7 @@ use {
         },
         types::{Annotation, CoreType, NamedTypeRef, SurfaceType, TypeScheme},
     },
+    ropey::Rope,
     std::{
         cell::{Cell, Ref, RefCell},
         collections::{BTreeMap, BTreeSet, HashMap},
@@ -1201,6 +1203,9 @@ fn package_naming_diagnostics(
     file: FileId,
 ) -> Vec<Diagnostic> {
     let module = engine.fetch::<Module>(Key::Lower(file));
+    // The type-reference diagnostic narrows to the offending name by re-lexing the document, so the
+    // parse (its rope) is fetched up front with the other cross-file facts, before the interner borrow.
+    let parsed = engine.fetch::<ParsedDocument>(Key::Parse(file));
     let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(file));
     let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(file));
     let local_naming = &naming.naming;
@@ -1382,6 +1387,7 @@ fn package_naming_diagnostics(
         &module,
         local_naming,
         &resolved_types,
+        parsed.0.rope(),
         interner,
         &mut diagnostics,
     );
@@ -1415,6 +1421,7 @@ fn resolve_module_type_references(
     module: &Module,
     local_naming: &NamesLocal,
     resolved: &BTreeMap<Symbol, EngineTypeInfo>,
+    rope: &Rope,
     interner: &Interner,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -1430,6 +1437,7 @@ fn resolve_module_type_references(
             &local_type_parameters,
             definition.range,
             resolved,
+            rope,
             interner,
             diagnostics,
         );
@@ -1444,6 +1452,7 @@ fn resolve_module_type_references(
                 &BTreeSet::new(),
                 annotation.range(),
                 resolved,
+                rope,
                 interner,
                 diagnostics,
             ),
@@ -1451,6 +1460,7 @@ fn resolve_module_type_references(
                 nominal_type,
                 annotation.range(),
                 resolved,
+                rope,
                 interner,
                 diagnostics,
             ),
@@ -1462,6 +1472,7 @@ fn resolve_nominal_type_reference(
     nominal_type: &NamedTypeRef,
     range: Range,
     resolved: &BTreeMap<Symbol, EngineTypeInfo>,
+    rope: &Rope,
     interner: &Interner,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -1482,6 +1493,7 @@ fn resolve_nominal_type_reference(
                         &BTreeSet::new(),
                         range,
                         resolved,
+                        rope,
                         interner,
                         diagnostics,
                     );
@@ -1499,7 +1511,7 @@ fn resolve_nominal_type_reference(
                 ),
             ));
         }
-        None => push_unknown_type_diagnostic(nominal_type.name, range, interner, diagnostics),
+        None => push_unknown_type_diagnostic(nominal_type.name, range, rope, interner, diagnostics),
     }
 
     for type_argument in &nominal_type.type_arguments {
@@ -1508,6 +1520,7 @@ fn resolve_nominal_type_reference(
             &BTreeSet::new(),
             range,
             resolved,
+            rope,
             interner,
             diagnostics,
         );
@@ -1519,6 +1532,7 @@ fn resolve_surface_type(
     local_type_parameters: &BTreeSet<Symbol>,
     range: Range,
     resolved: &BTreeMap<Symbol, EngineTypeInfo>,
+    rope: &Rope,
     interner: &Interner,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -1537,7 +1551,7 @@ fn resolve_surface_type(
                     diagnostics,
                 );
             } else {
-                push_unknown_type_diagnostic(*name, range, interner, diagnostics);
+                push_unknown_type_diagnostic(*name, range, rope, interner, diagnostics);
             }
             for argument in arguments {
                 resolve_surface_type(
@@ -1545,6 +1559,7 @@ fn resolve_surface_type(
                     local_type_parameters,
                     range,
                     resolved,
+                    rope,
                     interner,
                     diagnostics,
                 );
@@ -1559,6 +1574,7 @@ fn resolve_surface_type(
             local_type_parameters,
             range,
             resolved,
+            rope,
             interner,
             diagnostics,
         ),
@@ -1569,6 +1585,7 @@ fn resolve_surface_type(
                     local_type_parameters,
                     range,
                     resolved,
+                    rope,
                     interner,
                     diagnostics,
                 );
@@ -1581,6 +1598,7 @@ fn resolve_surface_type(
                     local_type_parameters,
                     range,
                     resolved,
+                    rope,
                     interner,
                     diagnostics,
                 );
@@ -1593,6 +1611,7 @@ fn resolve_surface_type(
                     local_type_parameters,
                     range,
                     resolved,
+                    rope,
                     interner,
                     diagnostics,
                 );
@@ -1603,6 +1622,7 @@ fn resolve_surface_type(
                     local_type_parameters,
                     range,
                     resolved,
+                    rope,
                     interner,
                     diagnostics,
                 );
@@ -1612,6 +1632,7 @@ fn resolve_surface_type(
                 local_type_parameters,
                 range,
                 resolved,
+                rope,
                 interner,
                 diagnostics,
             );
@@ -1623,6 +1644,7 @@ fn resolve_surface_type(
                     local_type_parameters,
                     range,
                     resolved,
+                    rope,
                     interner,
                     diagnostics,
                 );
@@ -1630,7 +1652,15 @@ fn resolve_surface_type(
             }
             let mut nested = local_type_parameters.clone();
             nested.extend(type_parameters.iter().copied());
-            resolve_surface_type(inner_type, &nested, range, resolved, interner, diagnostics);
+            resolve_surface_type(
+                inner_type,
+                &nested,
+                range,
+                resolved,
+                rope,
+                interner,
+                diagnostics,
+            );
         }
         SurfaceType::Any | SurfaceType::Unknown | SurfaceType::Null | SurfaceType::Scalar(_) => {}
     }
@@ -1639,10 +1669,14 @@ fn resolve_surface_type(
 fn push_unknown_type_diagnostic(
     symbol: Symbol,
     range: Range,
+    rope: &Rope,
     interner: &Interner,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let name = interner.resolve(symbol).unwrap_or("<unknown>").to_owned();
+    // Narrow the underline from the whole annotation to the offending type name when it can be located
+    // in the `#:` notation; fall back to the annotation range otherwise. Matches production exactly.
+    let range = type_name_token_range(rope, range, &name).unwrap_or(range);
     diagnostics.push(Diagnostic::naming_error(
         range,
         format!("I could not resolve type `{name}`."),

@@ -33,7 +33,7 @@ Assign(value@b1)
   Integer(1L)
 
 error[naming] I could not resolve type `Person`.
---> 1:1-1:10
+--> 1:4-1:10
 | #: Person
 #---- R/c.R
 #: @type Person {double}
@@ -137,7 +137,7 @@ Assign(value@b0)
   Integer(1L)
 
 error[naming] I could not resolve type `Widget`.
---> 1:1-1:10
+--> 1:4-1:10
 | #: Widget
 #.... defined_later
 #---- R/a.R

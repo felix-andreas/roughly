@@ -69,7 +69,7 @@ error[syntax-error] Syntax Error: type syntax error: expected `}` to close `list
 value <- 1L
 #++++
 error[naming] I could not resolve type `user_id`.
---> 1:1-1:11
+--> 1:4-1:11
 | #: user_id
 
 #==== expanded_typing_comments
@@ -110,7 +110,7 @@ error[syntax-error] Syntax Error: type syntax error: missing closing delimiter }
 render <- function(count) count
 #++++
 error[naming] I could not resolve type `user_id`.
---> 1:1-1:26
+--> 1:12-1:19
 | #: @param {user_id} count
 
 #---- expanded_multiple_returns
@@ -164,7 +164,7 @@ No diagnostics.
 value <- 1L
 #++++
 error[naming] I could not resolve type `Person`.
---> 1:1-1:36
+--> 1:28-1:34
 | #: @type Team {list{owner: Person}}
 
 #---- nominal_introduction_rejects_alias

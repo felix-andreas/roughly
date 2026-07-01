@@ -270,7 +270,7 @@ error[type-error] expected `list{name: character}`, found `list{name: integer}`
 value <- list(name = "bob")
 #++++
 error[naming] I could not resolve type `Missing`.
---> 1:1-1:16
+--> 1:9-1:16
 | #: @new Missing
 
 #---- assignment_list_field_mismatch

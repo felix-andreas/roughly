@@ -78,7 +78,7 @@ Assign(value@b0)
   Integer(1L)
 
 error[naming] I could not resolve type `Person`.
---> 1:1-1:10
+--> 1:4-1:10
 | #: Person
 
 #---- script_type_does_not_contribute_to_other_script
@@ -94,7 +94,7 @@ Assign(value@b0)
   Integer(1L)
 
 error[naming] I could not resolve type `Person`.
---> 1:1-1:10
+--> 1:4-1:10
 | #: Person
 
 #---- package_and_script_same_type_name_do_not_conflict

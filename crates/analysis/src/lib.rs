@@ -43,7 +43,7 @@ pub use crate::{
     type_syntax::{
         TypeParseError, TypeSyntax, TypeToken, TypeTokenRole, parse_surface_type,
         parse_type_syntax, render_surface_type, render_type_syntax,
-        semantic_tokens as type_semantic_tokens,
+        semantic_tokens as type_semantic_tokens, type_name_token_range,
     },
     types::{Atomic, CoreType, InferenceVariableId, SurfaceType, TypeScheme},
 };

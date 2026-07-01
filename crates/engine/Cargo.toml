@@ -12,4 +12,5 @@ path = "src/engine.rs"
 # The R query bodies reuse `analysis`'s public phase functions (parse, lower, naming, inference) verbatim;
 # the generic engine core in `engine.rs` stays analysis-free, the R layer lives in `queries.rs`.
 analysis = { path = "../analysis" }
+ropey.workspace = true
 tree-sitter.workspace = true

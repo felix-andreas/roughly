@@ -85,7 +85,7 @@ Assign(value@b0)
   Integer(1L)
 
 error[naming] I could not resolve type `Person`.
---> 1:1-1:36
+--> 1:28-1:34
 | #: @type Team {list{owner: Person}}
 
 #---- duplicate_nominal_type_name_across_files
@@ -152,8 +152,23 @@ Assign(value@b0)
   Integer(1L)
 
 error[naming] I could not resolve type `Person`.
---> 1:1-1:10
+--> 1:4-1:10
 | #: Person
+
+#---- annotation_unknown_field_type_underlines_only_the_name
+#---- R/main.R
+#: list{age: intgr}
+record <- list(age = 1L)
+#++++
+Assign(record@b0)
+  Call
+    Symbol(list@?)
+    Argument(age)
+      Integer(1L)
+
+error[naming] I could not resolve type `intgr`.
+--> 1:14-1:19
+| #: list{age: intgr}
 
 #---- annotation_unknown_type_nested_in_generic_argument
 #---- R/main.R
@@ -259,7 +274,7 @@ Assign(value@b0)
       Character("\"bob\"")
 
 error[naming] I could not resolve type `Person`.
---> 1:1-1:15
+--> 1:9-1:15
 | #: @new Person
 
 #---- nominal_introduction_rejects_missing_type_arguments
