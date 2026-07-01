@@ -432,7 +432,6 @@ const year = new Date().getFullYear()
                       <div class="fmt-layer fmt-before">
                         <div class="fln" style="--i:0"><span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-id">attempts</span> <span class="tok-op">&gt;</span> <span class="tok-id">max</span><span class="tok-op">)</span> <span class="tok-fn">stop</span><span class="tok-op">(</span><span class="tok-str">"give up"</span><span class="tok-op">)</span></div>
                         <div class="fln" style="--i:1"><span class="tok-kw">for</span> <span class="tok-op">(</span><span class="tok-id">i</span> <span class="tok-kw">in</span> <span class="tok-id">seq</span><span class="tok-op">)</span> <span class="tok-fn">log</span><span class="tok-op">(</span><span class="tok-id">i</span><span class="tok-op">)</span></div>
-                        <div class="fln" style="--i:2"><span class="tok-kw">while</span> <span class="tok-op">(</span><span class="tok-id">ok</span><span class="tok-op">)</span> <span class="tok-id">ok</span> <span class="tok-op">&lt;-</span> <span class="tok-fn">step</span><span class="tok-op">()</span></div>
                       </div>
                       <div class="fmt-layer fmt-after">
                         <div class="fln" style="--i:0"><span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-id">attempts</span> <span class="tok-op">&gt;</span> <span class="tok-id">max</span><span class="tok-op">)</span> <span class="tok-op">{'{'}</span></div>
@@ -441,12 +440,9 @@ const year = new Date().getFullYear()
                         <div class="fln" style="--i:3"><span class="tok-kw">for</span> <span class="tok-op">(</span><span class="tok-id">i</span> <span class="tok-kw">in</span> <span class="tok-id">seq</span><span class="tok-op">)</span> <span class="tok-op">{'{'}</span></div>
                         <div class="fln" style="--i:4"><span class="tab-in">  </span><span class="tok-fn">log</span><span class="tok-op">(</span><span class="tok-id">i</span><span class="tok-op">)</span></div>
                         <div class="fln" style="--i:5"><span class="tok-op">{'}'}</span></div>
-                        <div class="fln" style="--i:6"><span class="tok-kw">while</span> <span class="tok-op">(</span><span class="tok-id">ok</span><span class="tok-op">)</span> <span class="tok-op">{'{'}</span></div>
-                        <div class="fln" style="--i:7"><span class="tab-in">  </span><span class="tok-id">ok</span> <span class="tok-op">&lt;-</span> <span class="tok-fn">step</span><span class="tok-op">()</span></div>
-                        <div class="fln" style="--i:8"><span class="tok-op">{'}'}</span></div>
                       </div>
                     </div>
-                    <span class="sr-only">Before: if (attempts &gt; max) stop("give up"); for (i in seq) log(i); while (ok) ok &lt;- step(). After: each one-line body is wrapped in braces and indented.</span>
+                    <span class="sr-only">Before: if (attempts &gt; max) stop("give up"); for (i in seq) log(i). After: each one-line body is wrapped in braces and indented.</span>
                   </div>
                 </div>
               </div>
@@ -745,8 +741,8 @@ roughly check .</code></pre>
             return []
           }
           return sampleAlpha(data, off.width, off.height, SS, (sx, sy) => ({
-            x: left + sx / SS + (Math.random() - 0.5) * 2.4,
-            y: top + sy / SS + (Math.random() - 0.5) * 2.4,
+            x: left + sx / SS + (Math.random() - 0.5) * 1.5,
+            y: top + sy / SS + (Math.random() - 0.5) * 1.5,
           }))
         }
 
@@ -802,13 +798,15 @@ roughly check .</code></pre>
           const count = particleCount()
           particles = []
           for (let i = 0; i < count; i++) {
-            // Ambient home: scattered across the full hero, biased away from the
-            // dead centre so the resting field spreads to both edges instead of
-            // clustering behind the glyph.
+            // Ambient home: scattered as a surrounding halo, held out of the
+            // centre so ambient dots never fill the glyph or its negative space
+            // (which would blur the R). The radius rides an annulus — no closer
+            // than ~0.42 of the half-extent — so the field spreads toward the
+            // edges while the R core stays readable.
             const ang = Math.random() * Math.PI * 2
-            const rad = Math.sqrt(Math.random())
-            const ax = cssW * (0.5 + Math.cos(ang) * rad * 0.52)
-            const ay = cssH * (0.5 + Math.sin(ang) * rad * 0.46)
+            const rad = Math.sqrt(0.42 + Math.random() * 0.58)
+            const ax = cssW * (0.5 + Math.cos(ang) * rad * 0.55)
+            const ay = cssH * (0.5 + Math.sin(ang) * rad * 0.48)
             particles.push({
               x: Math.random() * cssW,
               y: Math.random() * cssH,
@@ -818,9 +816,11 @@ roughly check .</code></pre>
               hy: 0,
               ax,
               ay,
-              // ~70% of particles settle onto the glyph; the rest stay as an
-              // ambient cloud so the logo reads as organic, not a solid block.
-              logoness: Math.random() < 0.7 ? 0.78 + Math.random() * 0.22 : 0,
+              // ~80% of particles settle (almost) fully onto the glyph so the R
+              // reads clearly at rest — a small residual keeps the strokes from
+              // looking mechanically stamped; the other ~20% stay a pure ambient
+              // cloud so the field still feels organic.
+              logoness: Math.random() < 0.8 ? 0.96 + Math.random() * 0.04 : 0,
               depth: 0.35 + Math.random() * 0.65,
               seed: Math.random() * Math.PI * 2,
             })
@@ -918,11 +918,18 @@ roughly check .</code></pre>
             }
             p.x = x
             p.y = y
-            const size = (p.depth > 0.6 ? 2.9 : 2.1) + flux * 0.7
+            // Glyph particles are drawn a touch larger and stay opaque so the R
+            // reads as a solid brand at rest; ambient drifters keep the smaller,
+            // softer size that makes the surrounding field feel like a cloud.
+            const glyphBoost = 0.55 * (1 - morph) * p.logoness
+            const size = (p.depth > 0.6 ? 2.9 : 2.1) + flux * 0.7 + glyphBoost
             // Ambient drifters are fainter at rest but rise to full as they join
             // the headline (morph 1), so the text reads crisp as it forms.
             const ambientFade = p.logoness > 0 ? 1 : 0.24 + 0.76 * morph
-            const alpha = (0.5 + p.depth * 0.5) * (1 - flux * 0.42) * ambientFade
+            // Lift the on-glyph dots' floor at rest so thin strokes of the R stay
+            // legible; the boost fades out as the field morphs into the headline.
+            const glyphAlpha = 1 + 0.35 * (1 - morph) * p.logoness
+            const alpha = (0.5 + p.depth * 0.5) * (1 - flux * 0.42) * ambientFade * glyphAlpha
             context.globalAlpha = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha
             blit(x, y, size)
           }
@@ -1927,8 +1934,8 @@ roughly check .</code></pre>
         pointer-events: none;
         background: radial-gradient(
           ellipse 72% 62% at 50% 42%,
-          oklch(0.145 0 0 / 0.64) 0%,
-          oklch(0.145 0 0 / 0.32) 45%,
+          oklch(0.145 0 0 / 0.32) 0%,
+          oklch(0.145 0 0 / 0.2) 45%,
           transparent 100%
         );
       }
@@ -3000,7 +3007,15 @@ roughly check .</code></pre>
       .fmt-body {
         font-size: clamp(0.85rem, 1.7vw, 1rem);
         line-height: 2;
-        min-height: 300px;
+        /* All three panels share one grid cell sized to the tallest (the 9-line
+           "Braces & indentation" example), so switching tabs never reflows the
+           page. Center the shorter examples in that fixed box so their leftover
+           room splits evenly above and below instead of pooling as dead space
+           beneath the code. */
+        min-height: 200px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
       }
       .fln {
         white-space: pre;
