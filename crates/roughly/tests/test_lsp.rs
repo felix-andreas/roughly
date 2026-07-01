@@ -543,7 +543,7 @@ async fn requests_for_non_file_uris_return_gracefully() {
 
 #[tokio::test]
 async fn hover_returns_debug_section_when_debug_enabled() {
-    let mut context = setup_test_with_features(&[], &["debug"]).await;
+    let mut context = setup_test(&[("roughly.toml", "debug = true\n")]).await;
 
     let file_uri = context.file_uri("R/test_debug.R");
     context.open_file(&file_uri, "variable_name <- 1\n").await;

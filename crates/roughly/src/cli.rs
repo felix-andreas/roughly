@@ -544,10 +544,13 @@ pub fn parse_experimental_flags(flags: &[impl AsRef<str>]) -> ExperimentalFeatur
     for flag in flags.iter().flat_map(|flag| flag.as_ref().split(' ')) {
         match flag {
             "all" => {
-                features.debug = true;
                 features.range_formatting = true;
             }
-            "debug" => features.debug = true,
+            "debug" => {
+                warn(
+                    "The 'debug' feature is no longer experimental. Enable it with `debug = true` in roughly.toml.",
+                );
+            }
             "range_formatting" => features.range_formatting = true,
             "typing" => {
                 warn(

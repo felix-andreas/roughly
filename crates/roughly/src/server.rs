@@ -1088,7 +1088,7 @@ impl EngineWorker {
             return Ok(None);
         };
 
-        let value = ide::render_hover_markdown(&hover_info, self.experimental_features.debug);
+        let value = ide::render_hover_markdown(&hover_info, self.config.debug);
 
         let hover = Hover {
             contents: HoverContents::Markup(MarkupContent {

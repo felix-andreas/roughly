@@ -11,6 +11,8 @@ pub struct Config {
     pub format: FormatConfig,
     pub lint: LintConfig,
     pub check: CheckConfig,
+    // Surfaces internal analysis facts (the hover debug sections). A developer aid, off by default.
+    pub debug: bool,
 }
 
 impl Config {
@@ -74,6 +76,7 @@ pub struct ConfigToml {
     pub format: FormatConfig,
     pub lint: LintConfig,
     pub check: CheckConfig,
+    pub debug: bool,
 }
 
 impl ConfigToml {
@@ -90,6 +93,7 @@ impl ConfigToml {
             format: self.format,
             lint: self.lint,
             check: self.check,
+            debug: self.debug,
         }
     }
 }
@@ -100,7 +104,6 @@ impl ConfigToml {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ExperimentalFeatures {
-    pub debug: bool,
     pub range_formatting: bool,
 }
 
@@ -162,5 +165,12 @@ mod tests {
         assert_eq!(config.lint.naming_style, None);
         assert!(!config.check.unused);
         assert!(!config.check.typing);
+        assert!(!config.debug);
+    }
+
+    #[test]
+    fn debug_toggle() {
+        assert!(parse("debug = true\n").debug);
+        assert!(!parse("debug = false\n").debug);
     }
 }
