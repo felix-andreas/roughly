@@ -489,6 +489,17 @@ fn lower_call(
         return ExpressionKind::Unsupported;
     };
 
+    // R's `local(expr)` is a scope-introducing form, not an ordinary call: it evaluates `expr` in a
+    // fresh child environment and returns its value. Recognize the syntactic single-argument call to the
+    // bare name `local` and lower it to a `Local` node so naming scopes its body and typecheck takes the
+    // body's type. This treats the *syntactic* `local(...)` as the construct; a user who rebinds `local`
+    // to their own function would still get this scoping (a v1 caveat, noted in the stdlib stub for
+    // `local`), which matches the common intent and is the safe direction (extra scoping, never a leak).
+    if let Some(body) = single_local_argument(node, function, rope) {
+        let body = lower_node_with_rope(body, rope, lowering_context);
+        return ExpressionKind::Local { body };
+    }
+
     let callee = lower_node_with_rope(function, rope, lowering_context);
     let arguments = node
         .child_by_field_id(field::ARGUMENTS)
@@ -496,6 +507,28 @@ fn lower_call(
         .unwrap_or_default();
 
     ExpressionKind::Call { callee, arguments }
+}
+
+// The body node of a `local(<expr>)` call: `Some` only when `function` is the bare identifier `local`
+// and the call has exactly one positional (unnamed) argument carrying a value. Any other shape
+// (`local(a, b)`, `local(x = e)`, `local()`, or `pkg::local(e)`) is left as an ordinary call.
+fn single_local_argument<'tree>(
+    call: Node<'tree>,
+    function: Node<'_>,
+    rope: &Rope,
+) -> Option<Node<'tree>> {
+    if function.kind_id() != kind::IDENTIFIER || node_text(function, rope) != "local" {
+        return None;
+    }
+    let arguments = call.child_by_field_id(field::ARGUMENTS)?;
+    let mut argument_nodes = (0..arguments.named_child_count())
+        .filter_map(|index| arguments.named_child(index))
+        .filter(|child| child.kind_id() == kind::ARGUMENT);
+    let argument = argument_nodes.next()?;
+    if argument_nodes.next().is_some() || argument.child_by_field_id(field::NAME).is_some() {
+        return None;
+    }
+    argument.child_by_field_id(field::VALUE)
 }
 
 fn lower_subset(

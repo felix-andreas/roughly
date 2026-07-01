@@ -1053,6 +1053,16 @@ impl<'a> DocumentNamingContext<'a> {
                 self.local_scopes.pop();
                 self.maybe_defined_scopes.pop();
             }
+            ExpressionKind::Local { body } => {
+                // `local(expr)` introduces a fresh child scope like a function body (no parameters), so
+                // an assignment inside is local and does not leak, while references still see the
+                // enclosing scope's names because `resolve_local_symbol` walks outward.
+                self.local_scopes.push(BTreeMap::new());
+                self.maybe_defined_scopes.push(BTreeMap::new());
+                self.resolve_expression(*body);
+                self.local_scopes.pop();
+                self.maybe_defined_scopes.pop();
+            }
             ExpressionKind::If {
                 condition,
                 consequence,

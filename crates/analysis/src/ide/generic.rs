@@ -540,6 +540,7 @@ fn render_expression_hover(database: &dyn IdeDatabase, expression: &Expression) 
                 .join(", ");
             format!("Function({parameters})")
         }
+        ExpressionKind::Local { .. } => "Local".to_owned(),
         ExpressionKind::If { alternative, .. } => {
             format!("If(alternative: {})", alternative.is_some())
         }

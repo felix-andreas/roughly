@@ -1,3 +1,30 @@
+#==== local_expression
+#---- local_block_result_is_last_expression
+x <- local({
+  a <- 1L
+  a + 1L
+})
+x
+#++++
+integer
+integer
+
+#---- local_of_bare_expression_is_its_type
+y <- local("hi")
+y
+#++++
+character
+character
+
+#---- local_sees_enclosing_binding
+n <- 2L
+m <- local(n + 1L)
+m
+#++++
+integer
+integer
+integer
+
 #==== shadowing
 #---- global_access
 x <- 1L

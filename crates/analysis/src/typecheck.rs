@@ -1266,6 +1266,15 @@ impl InferenceState {
                 resolution_context,
                 type_definitions,
             ),
+            // `local(expr)` evaluates its body in a fresh scope and returns its value, so the expression's
+            // type is the body's type. Scope isolation is a naming concern (inner assignments bind locally
+            // and do not leak); inference just threads the body's value type through.
+            ExpressionKind::Local { body } => self.infer_expression_with_context(
+                arena.get(*body),
+                arena,
+                resolution_context,
+                type_definitions,
+            ),
             ExpressionKind::If {
                 condition,
                 consequence,

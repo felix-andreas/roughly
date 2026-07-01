@@ -39,6 +39,7 @@ is.null
 is.numeric
 lapply
 length
+local
 mapply
 max
 mean

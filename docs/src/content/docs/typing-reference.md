@@ -112,6 +112,11 @@ Inside executable code, value naming remains lexical.
 - local bindings shadow outer and package-global bindings of the same name
 - ordinary braced blocks do not introduce a new value scope by themselves
 - `for` introduces a loop-local binding for the iteration variable
+- `local(expr)` evaluates `expr` in a fresh child scope and takes its value as the whole expression's
+  type (for the common `local({ ... })`, the block's last-expression type); assignments inside are
+  local and do not leak to the enclosing scope, while references still see enclosing names. The
+  syntactic single-argument `local(...)` call is treated as this construct; rebinding `local` to a
+  user function does not change that (a current limitation)
 
 ### Type names
 

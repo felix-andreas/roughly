@@ -117,6 +117,13 @@ Find : <T> fn(f: fn(T) -> logical, x: list[T]) -> T | NULL
 Position : <T> fn(f: fn(T) -> logical, x: list[T]) -> integer | NULL
 Reduce : <T> fn(f: fn(T, T) -> T, x: list[T]) -> T
 
+# `local(expr)` is recognized syntactically during lowering as a scope-introducing form (a fresh child
+# environment; its type is the body's value), so a call in that shape never reaches this scheme. This
+# binding only makes the bare name `local` resolve in other shapes (e.g. `local(expr, envir)` or an
+# unapplied reference); its return is value-dependent, hence `Any`. Caveat: a user who rebinds `local`
+# to their own function still gets the syntactic scoping treatment in v1.
+local : Any
+
 # widened to Any: a result whose shape or type varies by argument value, or optional arguments beyond
 # what is modeled, which the grammar cannot yet express.
 # - `grep` returns indices or matched values depending on `value=`.

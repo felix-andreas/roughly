@@ -368,6 +368,10 @@ fn render_named_expression(
             lines.push(format!("{prefix}Function({rendered_parameters})"));
             render_nested(*body, indent + 1, lines);
         }
+        ExpressionKind::Local { body } => {
+            lines.push(format!("{prefix}Local"));
+            render_nested(*body, indent + 1, lines);
+        }
         ExpressionKind::If {
             condition,
             consequence,
@@ -531,6 +535,10 @@ fn render_locally_named_expression(
                 .collect::<Vec<_>>()
                 .join(", ");
             lines.push(format!("{prefix}Function({rendered_parameters})"));
+            render_nested(*body, indent + 1, lines);
+        }
+        ExpressionKind::Local { body } => {
+            lines.push(format!("{prefix}Local"));
             render_nested(*body, indent + 1, lines);
         }
         ExpressionKind::If {

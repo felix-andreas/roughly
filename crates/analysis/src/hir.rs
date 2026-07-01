@@ -158,6 +158,13 @@ pub enum ExpressionKind {
         parameters: Vec<Parameter>,
         body: ExpressionId,
     },
+    // R's `local(expr)`: evaluates `expr` in a fresh child environment and returns its value. It is a
+    // scope-introducing form (an assignment inside does not leak to the enclosing scope), but unlike a
+    // function it takes no parameters and its type is the body's value, so it is its own node rather than
+    // an immediately-invoked `Function`.
+    Local {
+        body: ExpressionId,
+    },
     If {
         condition: ExpressionId,
         consequence: ExpressionId,
@@ -367,6 +374,10 @@ impl Module {
                     .collect::<Vec<_>>()
                     .join(", ");
                 out.push_str(&format!("{prefix}Function ({params})\n"));
+                self.render_expression(*body, indent + 1, out, interner);
+            }
+            ExpressionKind::Local { body } => {
+                out.push_str(&format!("{prefix}Local\n"));
                 self.render_expression(*body, indent + 1, out, interner);
             }
             ExpressionKind::If {
