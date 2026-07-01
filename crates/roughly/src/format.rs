@@ -929,12 +929,8 @@ fn traverse(
                 let maybe_prev = child.prev_sibling();
                 if enabled {
                     match child.kind_id() {
-                        kind::COMMENT => {
-                            if maybe_prev.is_some_and(|prev| same_line(prev, child)) {
-                                space(out);
-                            } else {
-                                newlines(out, child, maybe_prev);
-                            }
+                        kind::COMMENT if maybe_prev.is_some_and(|prev| same_line(prev, child)) => {
+                            space(out);
                         }
                         _ => {
                             newlines(out, child, maybe_prev);

@@ -889,12 +889,12 @@ fn for_each_expanded_annotation_directive(
         for character in content.chars() {
             match character {
                 '(' | '[' | '{' => delimiter_stack.push(character),
-                ')' | ']' | '}' => {
-                    if !utils::pop_matching_delimiter(&mut delimiter_stack, character) {
-                        return Err(invalid_syntax(format!(
-                            "unexpected closing delimiter {character}"
-                        )));
-                    }
+                ')' | ']' | '}'
+                    if !utils::pop_matching_delimiter(&mut delimiter_stack, character) =>
+                {
+                    return Err(invalid_syntax(format!(
+                        "unexpected closing delimiter {character}"
+                    )));
                 }
                 _ => {}
             }

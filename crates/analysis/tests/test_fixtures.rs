@@ -848,7 +848,7 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
                 Ok((start, end, edit.replacement_text.clone()))
             })
             .collect::<Result<Vec<_>, String>>()?;
-        replacements.sort_by(|left, right| right.0.cmp(&left.0));
+        replacements.sort_by_key(|replacement| std::cmp::Reverse(replacement.0));
 
         let mut rendered = source.to_owned();
         for (start, end, replacement_text) in replacements {
