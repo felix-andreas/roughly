@@ -67,6 +67,12 @@ pub(crate) struct PackageNamingComputation {
     pub diagnostics: HashMap<DocumentId, Vec<Diagnostic>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TypeInfo {
+    kind: DefinitionKind,
+    arity: usize,
+}
+
 // The from-scratch package-naming pass: `analysis`'s sole path, computing `global_bindings` and every
 // package-document naming diagnostic in one fold over the current modules. The engine crate provides
 // incrementality; `analysis` is the from-scratch checker behind `run_full` (the CLI batch check) and the
@@ -1218,10 +1224,4 @@ fn collect_new_symbols(
     }
 
     introduced_symbols
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TypeInfo {
-    kind: DefinitionKind,
-    arity: usize,
 }
