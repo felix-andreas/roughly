@@ -157,10 +157,16 @@ out
 
 ## tree-sitter-r vs R parser
 
-No known parsing divergences between `tree-sitter-r` and R as of `tree-sitter-r` 1.3.0.
-Earlier divergences — a parameter with no default (`function(parameter =) {}`), a line break after
-`else`, and two line breaks after the extract operator (`foo$\n\nbar`) — are resolved in 1.3.0: the
-first is now an error node (matching R's rejection), and the other two parse cleanly.
+Most earlier divergences are resolved as of `tree-sitter-r` 1.3.0: a parameter with no default
+(`function(parameter =) {}`) is now an error node (matching R's rejection), and a line break after
+`else` (`} else\n{ ... }`) parses cleanly.
+
+One limitation remains around the extract operator with a blank line before its right-hand side
+(`foo$\n\nbar`): the source now parses without an error node, but the `extract_operator` node's `rhs`
+field is left detached (its `end_position` lands on the newline and `rhs` is absent). The formatter
+compensates for this when reconstructing such an expression (see the `extract_operator` handling in
+`crates/roughly/src/format.rs`); a fixture for the blank-line form stays disabled until the grammar
+attaches the right-hand side.
 
 ## Linting ideas
 
