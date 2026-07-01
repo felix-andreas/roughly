@@ -1897,7 +1897,14 @@ mod semantic_token_tests {
     fn classifies_named_parameters_and_return_arrow() {
         assert_eq!(
             rendered("fn(count: integer) -> logical"),
-            ["fn=type", "count=param", ":=sep", "integer=type", "->=op", "logical=type"]
+            [
+                "fn=type",
+                "count=param",
+                ":=sep",
+                "integer=type",
+                "->=op",
+                "logical=type"
+            ]
         );
     }
 
@@ -1923,7 +1930,15 @@ mod semantic_token_tests {
     fn classifies_type_parameters_at_binder_and_use() {
         assert_eq!(
             rendered("<T> fn(x: T) -> T"),
-            ["T=typeparam", "fn=type", "x=param", ":=sep", "T=type", "->=op", "T=type"]
+            [
+                "T=typeparam",
+                "fn=type",
+                "x=param",
+                ":=sep",
+                "T=type",
+                "->=op",
+                "T=type"
+            ]
         );
     }
 
@@ -1931,7 +1946,14 @@ mod semantic_token_tests {
     fn classifies_variadic_rest_parameter() {
         assert_eq!(
             rendered("fn(...: character) -> character"),
-            ["fn=type", "...=variadic", ":=sep", "character=type", "->=op", "character=type"]
+            [
+                "fn=type",
+                "...=variadic",
+                ":=sep",
+                "character=type",
+                "->=op",
+                "character=type"
+            ]
         );
     }
 

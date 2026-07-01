@@ -994,10 +994,7 @@ impl InferenceState {
     // (which quantifies only level-scoped unbound variables) would leave it un-quantified and the
     // resulting scheme monomorphic-but-open. Here every rigid variable in the lowered type is a
     // universally quantified parameter, so quantify them alongside the normally generalizable ones.
-    fn generalize_annotation(
-        &mut self,
-        core_type: CoreType,
-    ) -> Result<TypeScheme, InferenceError> {
+    fn generalize_annotation(&mut self, core_type: CoreType) -> Result<TypeScheme, InferenceError> {
         let resolved_type = self.resolve(core_type)?;
         let type_variables = self.free_type_variables_in_core_type(&resolved_type)?;
 
@@ -4584,7 +4581,8 @@ impl InferenceState {
         // A variadic function accepts a caller shape a fixed function does not, so the two are never the
         // same type. Treat a variadic/fixed mismatch as an arity mismatch (the rest parameter counts as
         // one interface slot the other side lacks).
-        if left_total != right_total || left_function.variadic.is_some() != right_function.variadic.is_some()
+        if left_total != right_total
+            || left_function.variadic.is_some() != right_function.variadic.is_some()
         {
             return Err(InferenceError::FunctionArityMismatch {
                 expected: left_total + usize::from(left_function.variadic.is_some()),

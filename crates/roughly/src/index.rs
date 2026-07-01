@@ -317,8 +317,8 @@ fn index_call(call: Node, rope: &Rope, nested: bool) -> Option<Item> {
         }
         "setGeneric" => {
             // setGeneric("foo", function(x) standardGeneric("foo"))
-            let generic_name = s4_string_name(arguments, rope, "name", 0)
-                .unwrap_or_else(|| "Unknown".to_string());
+            let generic_name =
+                s4_string_name(arguments, rope, "name", 0).unwrap_or_else(|| "Unknown".to_string());
             Some(Item::new(
                 generic_name,
                 None,

@@ -24,8 +24,7 @@ use {
             SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
             ServerCapabilities, ServerInfo, ShowMessageParams, SignatureHelp, SignatureHelpOptions,
             SignatureHelpParams, SignatureInformation, TextDocumentSyncCapability,
-            TextDocumentSyncKind,
-            TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
+            TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
             UnchangedDocumentDiagnosticReport, Url, WorkspaceEdit, WorkspaceSymbolParams,
             WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
@@ -201,8 +200,7 @@ impl EngineWorker {
         // A project may ship its own `.Rti` stubs under `<root>/stubs/` to override or extend the
         // shipped standard-library corpus. They are read once here and folded into the engine's set-once
         // stub library; they are never re-read on an edit.
-        let project_stub_sources =
-            analysis::stdlib::discover_project_stub_sources(&workspace_root);
+        let project_stub_sources = analysis::stdlib::discover_project_stub_sources(&workspace_root);
 
         Self {
             client,
@@ -546,15 +544,17 @@ impl EngineWorker {
                 references_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
-                    SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
-                        legend: SemanticTokensLegend {
-                            token_types: semantic_token_legend(),
-                            token_modifiers: Vec::new(),
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            legend: SemanticTokensLegend {
+                                token_types: semantic_token_legend(),
+                                token_modifiers: Vec::new(),
+                            },
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            range: None,
+                            work_done_progress_options: Default::default(),
                         },
-                        full: Some(SemanticTokensFullOptions::Bool(true)),
-                        range: None,
-                        work_done_progress_options: Default::default(),
-                    }),
+                    ),
                 ),
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
                     TextDocumentSyncOptions {

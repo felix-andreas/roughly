@@ -1392,7 +1392,9 @@ mod tests {
             .expect("document should parse");
         run_full(&mut overridden);
         assert!(
-            overridden.document_diagnostics(override_document).is_empty(),
+            overridden
+                .document_diagnostics(override_document)
+                .is_empty(),
             "project stub redeclaring `nchar` to return character must win, so the annotation holds"
         );
         remove_workspace_path(&override_workspace);

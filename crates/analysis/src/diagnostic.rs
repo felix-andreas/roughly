@@ -630,7 +630,8 @@ impl<'a> TypeRenderer<'a> {
                 let mut rendered_parts = rendered_parameters;
                 rendered_parts.extend(rendered_named_parameters);
                 if let Some(variadic_element) = &function_type.variadic {
-                    rendered_parts.push(format!("...: {}", self.render_core_type(variadic_element)));
+                    rendered_parts
+                        .push(format!("...: {}", self.render_core_type(variadic_element)));
                 }
                 format!(
                     "fn({}) -> {}",
