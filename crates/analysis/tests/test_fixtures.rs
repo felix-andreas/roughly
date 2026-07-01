@@ -15,9 +15,10 @@ use {
         naming::{DocumentKind, resolve_document_locally},
         render_diagnostics, render_hover_markdown, render_type_scheme, resolve_package,
         stdlib::StubLibrary,
+        stub::parse_stub_declarations,
         text::line_character_to_byte_index,
         tree::new_parser,
-        type_syntax::{parse_type_syntax, render_type_syntax},
+        type_syntax::{parse_type_syntax, render_surface_type, render_type_syntax},
         typecheck::{TypeDefinitionEnvironment, inference_state_with_builtins},
     },
     fixture_renderers::{
@@ -69,6 +70,11 @@ fn naming_local() {
 #[test]
 fn type_syntax() {
     run_fixture_suite("tests/type_syntax", run_type_syntax_fixture);
+}
+
+#[test]
+fn stub() {
+    run_fixture_suite("tests/stub", run_stub_fixture);
 }
 
 #[test]
@@ -1137,6 +1143,49 @@ fn run_type_syntax_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>
             Ok(item) => render_type_syntax(&item, &interner),
             Err(error) => format!("{error:?}"),
         },
+    }]])
+}
+
+// Renders a stub source's declarations and parse errors in source-line order: a parsed declaration as
+// `name : <type>` (the type re-rendered from the reused type-expression parser) and a malformed line as
+// `error[line N]: message`. This exposes name extraction, generic binders, value declarations, repeated
+// declarations, and malformed lines as one ordered listing.
+fn run_stub_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String> {
+    let FixtureKind::Simple(case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+
+    let mut interner = Interner::new();
+    let (declarations, errors) = parse_stub_declarations(&case.input, &mut interner);
+
+    let mut lines: Vec<(usize, String)> = declarations
+        .iter()
+        .map(|declaration| {
+            let name = interner
+                .resolve(declaration.name)
+                .expect("declaration name is interned");
+            let rendered_type = render_surface_type(&declaration.surface_type, &interner);
+            (
+                declaration.range.start_point.row,
+                format!("{name} : {rendered_type}"),
+            )
+        })
+        .chain(errors.iter().map(|error| {
+            (
+                error.line,
+                format!("error[line {}]: {}", error.line, error.message),
+            )
+        }))
+        .collect();
+    lines.sort_by_key(|(line, _)| *line);
+
+    Ok(vec![vec![FixtureRunFile {
+        path: PathBuf::new(),
+        output: lines
+            .into_iter()
+            .map(|(_, rendered)| rendered)
+            .collect::<Vec<_>>()
+            .join("\n"),
     }]])
 }
 
