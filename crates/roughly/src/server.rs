@@ -852,10 +852,22 @@ impl EngineWorker {
             if path.starts_with(&workspace_r_path) && !self.open_documents.contains(&path) {
                 match change.typ {
                     FileChangeType::CREATED | FileChangeType::CHANGED => {
-                        let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-                            panic!("failed to read package source {}: {error}", path.display())
-                        });
-                        self.set_source_input(&path, text, true);
+                        // A watcher event can race the filesystem (the file is renamed or removed
+                        // between the notification and this read). That is recoverable — the engine
+                        // keeps its previous text and a later watcher event re-syncs — so skip the
+                        // file rather than crashing the server. This is unlike a `did_change` buffer
+                        // edit, whose failure would leave analysis state incoherent.
+                        match std::fs::read_to_string(&path) {
+                            Ok(text) => self.set_source_input(&path, text, true),
+                            Err(error) => {
+                                tracing::warn!(
+                                    ?path,
+                                    ?error,
+                                    "failed to read watched package source; skipping"
+                                );
+                                continue;
+                            }
+                        }
                     }
                     FileChangeType::DELETED => {
                         self.retract_source_input(&path);

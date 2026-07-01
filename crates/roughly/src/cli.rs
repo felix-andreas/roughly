@@ -142,12 +142,13 @@ pub fn check(maybe_files: Option<&[PathBuf]>) -> Result<(), CheckError> {
                 ));
                 continue;
             };
+            let document = analysis_state
+                .document(&path)
+                .unwrap_or_else(|| panic!("analysis document missing for {}", path.display()));
+            let rope = document.rope();
             let diagnostics = diagnostics::convert_diagnostics(
                 analysis_state.document_diagnostics(document_id),
-                analysis_state
-                    .document(&path)
-                    .unwrap_or_else(|| panic!("analysis document missing for {}", path.display()))
-                    .rope(),
+                rope,
                 PositionEncoding::Utf8,
             );
 
@@ -174,10 +175,6 @@ pub fn check(maybe_files: Option<&[PathBuf]>) -> Result<(), CheckError> {
                 );
 
                 let line_start = usize::max(1, range.start.line as usize) - 1;
-                let document = analysis_state
-                    .document(&path)
-                    .unwrap_or_else(|| panic!("analysis document missing for {}", path.display()));
-                let rope = document.rope();
                 let lines = {
                     let start = rope.line_to_char(line_start);
                     let end =
