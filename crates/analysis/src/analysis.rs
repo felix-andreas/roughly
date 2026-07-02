@@ -457,18 +457,23 @@ impl Analysis {
         {
             diagnostics.extend(package_diagnostics.iter().cloned());
         }
+        // A file's own `#: @strict` directive overrides the configured default.
+        let strict_enabled = self
+            .lowering_outputs
+            .get(&document_id)
+            .and_then(|lowering| lowering.output.strict_override)
+            .unwrap_or(self.check_config.strict);
         if let Some(output) = self.document_typecheck_outputs.get(&document_id) {
             if self.check_config.typing {
                 diagnostics.extend(output.diagnostics.iter().cloned());
             }
-            // A file's own `#: @strict` directive overrides the configured default.
-            let strict_enabled = self
-                .lowering_outputs
-                .get(&document_id)
-                .and_then(|lowering| lowering.output.strict_override)
-                .unwrap_or(self.check_config.strict);
             if strict_enabled {
                 diagnostics.extend(output.strict_diagnostics.iter().cloned());
+            }
+        }
+        if strict_enabled {
+            for diagnostic in &mut diagnostics {
+                diagnostic.escalate_unresolved_to_error();
             }
         }
         diagnostics

@@ -226,8 +226,13 @@ fn engine_diagnostics(
             }
         });
     }
-    if config.strict {
+    // Mirrors production's per-file strict gate (`strict_override` wins over the config), including
+    // the escalation of unresolved references to errors under strict.
+    if file_diagnostics.strict_override.unwrap_or(config.strict) {
         rendered.extend(file_diagnostics.strict_diagnostics.iter().cloned());
+        for diagnostic in &mut rendered {
+            diagnostic.escalate_unresolved_to_error();
+        }
     }
     rendered
 }
@@ -247,6 +252,7 @@ fn code_rank(code: DiagnosticCode) -> u8 {
         DiagnosticCode::AnnotationError => 4,
         DiagnosticCode::Strict => 5,
         DiagnosticCode::Unused => 6,
+        DiagnosticCode::Unresolved => 7,
     }
 }
 

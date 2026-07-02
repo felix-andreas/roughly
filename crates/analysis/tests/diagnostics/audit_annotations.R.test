@@ -92,7 +92,7 @@ No diagnostics.
 #: @trust integer
 value <- some_unknown
 #++++
-warning[naming] I could not resolve `some_unknown` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `some_unknown` in this package, its imports, or builtins.
 --> 2:10-2:22
 | value <- some_unknown
 
@@ -107,7 +107,7 @@ No diagnostics.
 #: @if-unknown integer
 value <- some_unknown
 #++++
-warning[naming] I could not resolve `some_unknown` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `some_unknown` in this package, its imports, or builtins.
 --> 2:10-2:22
 | value <- some_unknown
 
@@ -240,7 +240,7 @@ error[naming] I could not resolve type `user_id`.
 --> 1:16-1:23
 | #: @if-unknown user_id
 
-warning[naming] I could not resolve `some_unknown` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `some_unknown` in this package, its imports, or builtins.
 --> 2:10-2:22
 | value <- some_unknown
 

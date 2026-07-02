@@ -1585,13 +1585,17 @@ apply_renderer <- function(render_count, count) { render_count(count) }
 ## Strict mode
 
 Strict mode is an opt-in check controlled by the `[check] strict` switch (default off). It does not
-change inference or introduce any new typing rules; it only adds diagnostics. The typecheck phase
-already runs to produce the inferred types — strict mode reads those types and reports the places
-where the checker genuinely could not determine a type.
+change inference or introduce any new typing rules; it adds diagnostics and escalates one existing
+class. The typecheck phase already runs to produce the inferred types — strict mode reads those
+types and reports the places where the checker genuinely could not determine a type.
 
-> Note: this is the recorded interpretation of strict mode, pending final user confirmation. The
-> phrasing in the backlog was deliberately broad; this section is the contract strict mode
-> implements unless the user revises it.
+### Unresolved references escalate to errors
+
+Unresolved references carry the `unresolved` diagnostic code: a bare name the resolver cannot find
+in the package, its imports, or builtins; an unknown package namespace in `pkg::name`; and a name a
+known namespace does not export. Outside strict mode these are warnings. Under strict (configured,
+or via the per-file directive) they are **errors**: a name the checker cannot see is a hole in the
+checked surface, not a hint.
 
 ### Per-file directive
 

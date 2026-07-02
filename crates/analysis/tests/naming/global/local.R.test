@@ -14,7 +14,7 @@ Local
     Symbol(a@b0)
 Symbol(a@?)
 
-warning[naming] I could not resolve `a` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `a` in this package, its imports, or builtins.
 --> 5:1-5:2
 | a
 

@@ -68,14 +68,14 @@ error[type-error] expected function, found `character`
 #---- unknown_name_reference
 nonexistent
 #++++
-warning[naming] I could not resolve `nonexistent` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `nonexistent` in this package, its imports, or builtins.
 --> 1:1-1:12
 | nonexistent
 
 #---- unknown_name_in_arithmetic_no_cascade
 nonexistent + 1L
 #++++
-warning[naming] I could not resolve `nonexistent` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `nonexistent` in this package, its imports, or builtins.
 --> 1:1-1:12
 | nonexistent + 1L
 
@@ -244,7 +244,7 @@ error[type-error] expected `integer`, found `character`
 y <- nonexistent + 1L
 z <- y + 2L
 #++++
-warning[naming] I could not resolve `nonexistent` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `nonexistent` in this package, its imports, or builtins.
 --> 1:6-1:17
 | y <- nonexistent + 1L
 
@@ -511,7 +511,7 @@ f <- function(x) {
   k
 }
 #++++
-warning[naming] I could not resolve `switch` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `switch` in this package, its imports, or builtins.
 --> 2:3-2:9
 |   switch(x, a = (k <- 1L))
 

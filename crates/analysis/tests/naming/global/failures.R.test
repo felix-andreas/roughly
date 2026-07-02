@@ -5,7 +5,7 @@ x
 #++++
 Symbol(x@?)
 
-warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `x` in this package, its imports, or builtins.
 --> 1:1-1:2
 | x
 
@@ -17,7 +17,7 @@ Assign(f@b0)
   Function()
     Symbol(x@?)
 
-warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `x` in this package, its imports, or builtins.
 --> 1:17-1:18
 | f <- function() x
 
@@ -37,7 +37,7 @@ x
 #++++
 Symbol(x@?)
 
-warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `x` in this package, its imports, or builtins.
 --> 1:1-1:2
 | x
 #==== global_warnings
@@ -189,7 +189,7 @@ x
 #++++
 Symbol(x@?)
 
-warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `x` in this package, its imports, or builtins.
 --> 1:1-1:2
 | x
 #---- inst/scripts/helper.R
@@ -231,7 +231,7 @@ Assign(result@b0)
     Argument
       Integer(1L)
 
-warning[naming] unknown package namespace `foobar`.
+warning[unresolved] unknown package namespace `foobar`.
 --> 1:11-1:25
 | result <- foobar::bazqux(1L)
 
@@ -245,6 +245,6 @@ Assign(result@b0)
     Argument
       Integer(1L)
 
-warning[naming] `bazqux` is not exported by `stats`.
+warning[unresolved] `bazqux` is not exported by `stats`.
 --> 1:11-1:24
 | result <- stats::bazqux(1L)

@@ -356,7 +356,7 @@ pub(crate) fn package_document_diagnostics(
         }
         let name = interner.resolve(*symbol).unwrap_or("<unknown>");
         let range = context.module.arena.get(*expression_id).range;
-        diagnostics.push(Diagnostic::naming_warning(
+        diagnostics.push(Diagnostic::unresolved_warning(
             range,
             format!("I could not resolve `{name}` in this package, its imports, or builtins."),
         ));
@@ -366,13 +366,13 @@ pub(crate) fn package_document_diagnostics(
         let range = context.module.arena.get(read.expression_id).range;
         let namespace = interner.resolve(read.namespace).unwrap_or("<unknown>");
         if !context.stub_library.is_known_namespace(namespace) {
-            diagnostics.push(Diagnostic::naming_warning(
+            diagnostics.push(Diagnostic::unresolved_warning(
                 range,
                 format!("unknown package namespace `{namespace}`."),
             ));
         } else if !context.stub_library.namespace_exports(namespace, read.name) {
             let name = interner.resolve(read.name).unwrap_or("<unknown>");
-            diagnostics.push(Diagnostic::naming_warning(
+            diagnostics.push(Diagnostic::unresolved_warning(
                 range,
                 format!("`{name}` is not exported by `{namespace}`."),
             ));

@@ -309,7 +309,7 @@ Assign(f@b2)
         Block
           Symbol(x@?)
 
-warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `x` in this package, its imports, or builtins.
 --> 5:5-5:6
 |     x
 

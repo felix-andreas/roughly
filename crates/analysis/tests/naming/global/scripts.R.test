@@ -21,7 +21,7 @@ x
 #++++
 Symbol(x@?)
 
-warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `x` in this package, its imports, or builtins.
 --> 1:1-1:2
 | x
 
@@ -36,7 +36,7 @@ x
 #++++
 Symbol(x@?)
 
-warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `x` in this package, its imports, or builtins.
 --> 1:1-1:2
 | x
 

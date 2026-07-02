@@ -293,7 +293,7 @@ fn malformed_edit_suppresses_then_restores_diagnostics() {
     lifecycle.did_open(PATH, "y <- undefined_fn(1L)\n");
     let opened = lifecycle.diagnostics(PATH);
     assert!(
-        has_code(&opened, DiagnosticCode::Naming),
+        has_code(&opened, DiagnosticCode::Unresolved),
         "the opened well-formed file resolves the reference and reports it unresolved: {opened:#?}"
     );
 
@@ -302,7 +302,7 @@ fn malformed_edit_suppresses_then_restores_diagnostics() {
     lifecycle.did_change(PATH, line_range(0, 20, 21), "");
     let broken = lifecycle.diagnostics(PATH);
     assert!(
-        !has_code(&broken, DiagnosticCode::Naming)
+        !has_code(&broken, DiagnosticCode::Unresolved)
             && !has_code(&broken, DiagnosticCode::TypeError)
             && !has_code(&broken, DiagnosticCode::Strict),
         "a malformed edit lowers to an empty module and emits no semantic diagnostics: {broken:#?}"
@@ -312,7 +312,7 @@ fn malformed_edit_suppresses_then_restores_diagnostics() {
     lifecycle.did_change(PATH, line_range(0, 20, 20), ")");
     let restored = lifecycle.diagnostics(PATH);
     assert!(
-        has_code(&restored, DiagnosticCode::Naming),
+        has_code(&restored, DiagnosticCode::Unresolved),
         "restoring the well-formed source restores the diagnostic: {restored:#?}"
     );
 }
@@ -330,7 +330,7 @@ fn watched_file_add_then_delete_changes_cross_file_resolution() {
     lifecycle.did_open(USER, "x <- helper(1L)\n");
     let before = lifecycle.diagnostics(USER);
     assert!(
-        has_code(&before, DiagnosticCode::Naming),
+        has_code(&before, DiagnosticCode::Unresolved),
         "with no definer, the cross-file reference is unresolved: {before:#?}"
     );
 
@@ -339,7 +339,7 @@ fn watched_file_add_then_delete_changes_cross_file_resolution() {
     lifecycle.watched_write(DEF, "helper <- function(n) n\n");
     let after_add = lifecycle.diagnostics(USER);
     assert!(
-        !has_code(&after_add, DiagnosticCode::Naming),
+        !has_code(&after_add, DiagnosticCode::Unresolved),
         "the added definer resolves the cross-file reference: {after_add:#?}"
     );
 
@@ -348,7 +348,7 @@ fn watched_file_add_then_delete_changes_cross_file_resolution() {
     lifecycle.watched_delete(DEF);
     let after_delete = lifecycle.diagnostics(USER);
     assert!(
-        has_code(&after_delete, DiagnosticCode::Naming),
+        has_code(&after_delete, DiagnosticCode::Unresolved),
         "deleting the definer makes the reference unresolved again: {after_delete:#?}"
     );
 }
@@ -366,7 +366,7 @@ fn close_reverts_unsaved_edits_but_keeps_saved_edits() {
     lifecycle.did_change(PATH, line_range(1, 0, 0), "y <- missing(2L)\n");
     let edited = lifecycle.diagnostics(PATH);
     assert!(
-        has_code(&edited, DiagnosticCode::Naming),
+        has_code(&edited, DiagnosticCode::Unresolved),
         "the unsaved edit introduces an unresolved reference: {edited:#?}"
     );
 
@@ -374,7 +374,7 @@ fn close_reverts_unsaved_edits_but_keeps_saved_edits() {
     lifecycle.did_close(PATH);
     let after_close = lifecycle.diagnostics(PATH);
     assert!(
-        !has_code(&after_close, DiagnosticCode::Naming),
+        !has_code(&after_close, DiagnosticCode::Unresolved),
         "closing an unsaved package file reverts to disk and drops the edit's diagnostic: {after_close:#?}"
     );
 
@@ -386,7 +386,7 @@ fn close_reverts_unsaved_edits_but_keeps_saved_edits() {
     lifecycle.did_close(PATH);
     let after_save_close = lifecycle.diagnostics(PATH);
     assert!(
-        has_code(&after_save_close, DiagnosticCode::Naming),
+        has_code(&after_save_close, DiagnosticCode::Unresolved),
         "a saved edit survives close because disk now carries it: {after_save_close:#?}"
     );
 }

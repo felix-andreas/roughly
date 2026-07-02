@@ -19,7 +19,7 @@ error[syntax-error] Syntax Error: missing rhs for operator <-
 #---- unknown_name
 value
 #++++
-warning[naming] I could not resolve `value` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `value` in this package, its imports, or builtins.
 --> 1:1-1:6
 | value
 

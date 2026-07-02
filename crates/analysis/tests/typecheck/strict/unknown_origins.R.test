@@ -60,3 +60,33 @@ No diagnostics.
 x <- 1L %then% 2L
 #++++
 No diagnostics.
+
+#==== unresolved_escalation
+#---- unresolved_name_is_an_error_under_strict
+#---- R/main.R
+frobnicate(1L)
+#++++
+error[unresolved] I could not resolve `frobnicate` in this package, its imports, or builtins.
+--> 1:1-1:11
+| frobnicate(1L)
+
+#---- unknown_namespace_is_an_error_under_strict
+#---- R/main.R
+foobar::bazqux(1L)
+#++++
+error[unresolved] unknown package namespace `foobar`.
+--> 1:1-1:15
+| foobar::bazqux(1L)
+
+warning[strict] strict mode: could not determine the type of `bazqux`; it has no known type
+--> 1:1-1:15
+| foobar::bazqux(1L)
+
+#---- strict_off_keeps_unresolved_a_warning
+#---- R/main.R
+#: @strict off
+frobnicate(1L)
+#++++
+warning[unresolved] I could not resolve `frobnicate` in this package, its imports, or builtins.
+--> 2:1-2:11
+| frobnicate(1L)

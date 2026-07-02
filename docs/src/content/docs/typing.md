@@ -350,6 +350,10 @@ origin (one per cause, not one per use).
 strict = true
 ```
 
+Strict also escalates **unresolved references** — a name the resolver cannot find, an unknown
+`pkg::` namespace, a name a package does not export — from warnings to errors: under strict, a name
+the checker cannot see is a hole in the checked surface.
+
 Strict is a per-file conversation, too: a `#: @strict` comment at the top of a file
 opts that file in regardless of the config, and `#: @strict off` opts it out. That
 makes it practical to hold your typed core to the strict bar while legacy files

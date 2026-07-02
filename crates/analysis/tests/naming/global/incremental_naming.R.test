@@ -130,7 +130,7 @@ g
 #++++
 Symbol(g@?)
 
-warning[naming] I could not resolve `g` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `g` in this package, its imports, or builtins.
 --> 1:1-1:2
 | g
 
@@ -191,7 +191,7 @@ bar
 Symbol(foo@?)
 Symbol(bar@b0)
 
-warning[naming] I could not resolve `foo` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `foo` in this package, its imports, or builtins.
 --> 1:1-1:4
 | foo
 
@@ -206,7 +206,7 @@ g
 #++++
 Symbol(g@?)
 
-warning[naming] I could not resolve `g` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `g` in this package, its imports, or builtins.
 --> 1:1-1:2
 | g
 #.... a_defines_g
@@ -230,6 +230,6 @@ g
 #++++
 Symbol(g@?)
 
-warning[naming] I could not resolve `g` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `g` in this package, its imports, or builtins.
 --> 1:1-1:2
 | g

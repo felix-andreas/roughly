@@ -198,6 +198,23 @@ impl Diagnostic {
         }
     }
 
+    pub fn unresolved_warning(range: Range, message: impl Into<String>) -> Self {
+        Self {
+            severity: Severity::Warning,
+            code: DiagnosticCode::Unresolved,
+            message: message.into(),
+            range,
+        }
+    }
+
+    // Strict mode escalates unresolved references from warnings to errors: under strict, a name
+    // the resolver cannot see is a hole in the checked surface, not a hint.
+    pub fn escalate_unresolved_to_error(&mut self) {
+        if self.code == DiagnosticCode::Unresolved {
+            self.severity = Severity::Error;
+        }
+    }
+
     pub fn naming_error(range: Range, message: impl Into<String>) -> Self {
         Self {
             severity: Severity::Error,
@@ -643,6 +660,10 @@ impl fmt::Display for Severity {
 pub enum DiagnosticCode {
     Lint,
     Naming,
+    // A reference the resolver could not resolve: an unknown bare name, an unknown package
+    // namespace, or a name a known namespace does not export. Its own code (rather than `Naming`)
+    // because strict mode escalates exactly this class to errors.
+    Unresolved,
     // The unused (dead-store) check: an assignment whose value is never read.
     Unused,
     SyntaxError,
@@ -655,6 +676,7 @@ impl fmt::Display for DiagnosticCode {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Lint => formatter.write_str("lint"),
+            Self::Unresolved => formatter.write_str("unresolved"),
             Self::Naming => formatter.write_str("naming"),
             Self::Unused => formatter.write_str("unused"),
             Self::SyntaxError => formatter.write_str("syntax-error"),

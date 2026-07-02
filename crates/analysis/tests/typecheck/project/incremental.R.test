@@ -69,7 +69,7 @@ No diagnostics.
 #.... v1
 #---- delete R/a.R
 #++++ R/b.R
-warning[naming] I could not resolve `double_count` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `double_count` in this package, its imports, or builtins.
 --> 1:11-1:23
 | result <- double_count(2L)
 

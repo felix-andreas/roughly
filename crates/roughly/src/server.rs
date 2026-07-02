@@ -499,6 +499,9 @@ impl EngineWorker {
         }
         if file_diagnostics.strict_override.unwrap_or(config.strict) {
             rendered.extend(file_diagnostics.strict_diagnostics.iter().cloned());
+            for diagnostic in &mut rendered {
+                diagnostic.escalate_unresolved_to_error();
+            }
         }
 
         let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(file));

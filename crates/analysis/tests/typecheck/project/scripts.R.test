@@ -18,7 +18,7 @@ No diagnostics.
 #---- R/a.R
 result <- helper(1L)
 #++++
-warning[naming] I could not resolve `helper` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `helper` in this package, its imports, or builtins.
 --> 1:11-1:17
 | result <- helper(1L)
 
