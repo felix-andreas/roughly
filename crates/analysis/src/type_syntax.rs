@@ -302,7 +302,7 @@ pub fn parse_annotation_type(
         )));
     }
 
-    validate_surface_type(&surface_type, interner)?;
+    validate_surface_type(&surface_type)?;
 
     Ok(surface_type)
 }
@@ -701,47 +701,44 @@ fn parse_compact_annotation(
     Ok(TypeSyntax::Annotation(Annotation::checked(surface_type)))
 }
 
-fn validate_surface_type(
-    surface_type: &SurfaceType,
-    interner: &Interner,
-) -> Result<(), TypeParseError> {
+fn validate_surface_type(surface_type: &SurfaceType) -> Result<(), TypeParseError> {
     match surface_type {
         SurfaceType::Named(_, args) => {
             // Arity against the declaration is a resolution-time check (`typecheck` has the
             // definition environment); the parser validates only structure.
             for arg in args {
-                validate_surface_type(arg, interner)?;
+                validate_surface_type(arg)?;
             }
         }
         SurfaceType::Union(members) => {
             for member in members {
-                validate_surface_type(member, interner)?;
+                validate_surface_type(member)?;
             }
         }
         SurfaceType::Vector(inner)
         | SurfaceType::NamedVector(inner)
         | SurfaceType::List(inner)
-        | SurfaceType::NamedList(inner) => validate_surface_type(inner, interner)?,
+        | SurfaceType::NamedList(inner) => validate_surface_type(inner)?,
         SurfaceType::Record(fields) => {
             for field in fields {
-                validate_surface_type(&field.value, interner)?;
+                validate_surface_type(&field.value)?;
             }
         }
         SurfaceType::Tuple(items) => {
             for item in items {
-                validate_surface_type(item, interner)?;
+                validate_surface_type(item)?;
             }
         }
         SurfaceType::Function(func) => {
             for param in &func.parameters {
-                validate_surface_type(param, interner)?;
+                validate_surface_type(param)?;
             }
             for param in &func.named_parameters {
-                validate_surface_type(&param.value, interner)?;
+                validate_surface_type(&param.value)?;
             }
-            validate_surface_type(&func.return_type, interner)?;
+            validate_surface_type(&func.return_type)?;
         }
-        SurfaceType::Binders(_, inner) => validate_surface_type(inner, interner)?,
+        SurfaceType::Binders(_, inner) => validate_surface_type(inner)?,
         SurfaceType::Any | SurfaceType::Unknown | SurfaceType::Null | SurfaceType::Scalar(_) => {}
     }
     Ok(())

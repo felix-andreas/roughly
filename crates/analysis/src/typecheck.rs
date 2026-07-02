@@ -3466,6 +3466,14 @@ impl InferenceState {
                     return Err(InferenceError::UnresolvedAnnotationType { symbol: *name });
                 };
 
+                // A wrong type-argument count is already a naming diagnostic; lowering the
+                // misapplication anyway would check the value against a malformed type and
+                // cascade a second error, so it degrades to the same silent skip an unresolved
+                // name gets.
+                if type_definition.type_parameters.len() != lowered_arguments.len() {
+                    return Err(InferenceError::UnresolvedAnnotationType { symbol: *name });
+                }
+
                 match type_definition.kind {
                     DefinitionKind::Type => Ok(CoreType::Nominal(*name, lowered_arguments)),
                     DefinitionKind::Alias => {
