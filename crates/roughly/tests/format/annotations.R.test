@@ -112,10 +112,10 @@
 #++++
 #: Map<K, List<V>>
 
-#---- generic_vector
+#---- generic_vector_unsupported_stays_verbatim
 #: Foo< A > [ ]
 #++++
-#: Foo<A>[]
+#: Foo< A > [ ]
 
 #---- binder
 #: < T >fn( x : T )->T
@@ -378,6 +378,26 @@
 #: @type Cat {integer}
 #:
 #: @type Dog {integer}
+
+#==== annotation_gate_verbatim
+#---- prose_after_unsupported_prefix_verbatim
+#: T[] not supported, see docs (someday)
+#++++
+#: T[] not supported, see docs (someday)
+
+#---- param_description_verbatim
+#: @param {integer} x (defaults to one)
+#++++
+#: @param {integer} x (defaults to one)
+
+#---- interior_empty_line_before_closer_kept
+#: list{a: integer,
+#:
+#: b: double}
+#++++
+#: list{a: integer,
+#:
+#: b: double}
 
 #==== annotation_block_normalization
 #---- expanded_closers_move_to_own_lines

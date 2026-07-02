@@ -5,7 +5,8 @@ use {
     },
     analysis::{
         interner::Interner,
-        type_syntax::{TypeParseError, parse_type_syntax},
+        type_syntax::{TypeSyntax, parse_type_syntax},
+        types::{Annotation, SurfaceType},
     },
     itertools::Itertools,
     ropey::Rope,
@@ -1296,18 +1297,36 @@ fn annotation_body(node: Node, rope: &Rope) -> Option<String> {
 
 // Whether `node` is a non-first line of an annotation block: the previous sibling is a `#:` comment
 // on the row directly above. A first line exempted by `# fmt: skip` is emitted raw and cannot render
-// the block, so the block restarts at the line after it.
+// the block, so the block restarts at the line after it — and the same applies to a head that trails
+// code on its own line (it is emitted inline at the code's position, so it cannot carry the block's
+// continuation indentation; see `is_trailing_annotation_head`).
 fn is_annotation_continuation(node: Node, rope: &Rope) -> bool {
     node.prev_sibling().is_some_and(|previous| {
         annotation_body(previous, rope).is_some()
             && node.start_position().row <= previous.end_position().row + 1
             && !skipped_by_fmt_directive(previous, rope)
+            && !is_trailing_annotation_head(previous, rope)
     })
 }
 
-// The bodies of every line of the annotation block starting at `node`, in order.
+// Whether `node` is a `#:` comment that trails other code on its own line. Such a comment is
+// emitted inline after the code, so it renders only itself; the `#:` lines below it form their own
+// block at their own indentation.
+fn is_trailing_annotation_head(node: Node, rope: &Rope) -> bool {
+    annotation_body(node, rope).is_some()
+        && node.prev_sibling().is_some_and(|previous| {
+            previous.end_position().row == node.start_position().row
+                && annotation_body(previous, rope).is_none()
+        })
+}
+
+// The bodies of every line of the annotation block starting at `node`, in order. A head that trails
+// code renders alone (its continuations restart as their own block).
 fn annotation_block_bodies(node: Node, rope: &Rope) -> Vec<String> {
     let mut bodies = vec![annotation_body(node, rope).unwrap_or_default()];
+    if is_trailing_annotation_head(node, rope) {
+        return bodies;
+    }
     let mut current = node;
     while let Some(next) = current.next_sibling() {
         let Some(body) = annotation_body(next, rope) else {
@@ -1363,12 +1382,13 @@ fn verbatim_annotation_line(body: &str) -> String {
 // verbatim.
 fn render_annotation_block(bodies: &[String], indent: &str) -> Option<Vec<String>> {
     let joined = bodies.iter().map(|body| body.trim()).join("\n");
-    match parse_type_syntax(&joined, &mut Interner::new()) {
-        // A structurally well-formed type using a construct the checker deliberately refuses
-        // ("not supported yet", e.g. a generic vector suffix `Foo<A>[]`) is still an annotation;
-        // normalize it so its layout does not change once the checker gains support.
-        Ok(_) | Err(TypeParseError::UnsupportedConstruct { .. }) => {}
-        Err(_) => return None,
+    let mut interner = Interner::new();
+    match parse_type_syntax(&joined, &mut interner) {
+        // Only a full, clean parse is trusted. `UnsupportedConstruct` is NOT admitted: the parser
+        // can return it before consuming the whole input, so arbitrary prose after an unsupported
+        // prefix would slip through and be reflowed as if it were type tokens.
+        Ok(parsed) if annotation_parameter_names_are_plain(&parsed, &interner) => {}
+        Ok(_) | Err(_) => return None,
     }
     let token_lines = bodies
         .iter()
@@ -1402,6 +1422,10 @@ fn render_annotation_block(bodies: &[String], indent: &str) -> Option<Vec<String
 
             let break_before = if !started {
                 false
+            } else if index == 0 && pending_empty_lines > 0 {
+                // interior empty `#:` lines are author-intentional separators: the following
+                // content always starts its own line, even a closer that would otherwise glue
+                true
             } else if index == 0 {
                 // an author line break is kept, unless a hugged bracket's closer glues back up
                 !closer || closes_expanded
@@ -1459,12 +1483,83 @@ struct OpenDelimiter {
     opener_level: usize,
 }
 
+// Guards the render gate against the one place the annotation grammar is looser than it looks: an
+// expanded `@param {TYPE} name` swallows everything after the type as the parameter name, so a
+// JSDoc-style trailing description ("x (defaults to one)") parses cleanly with the prose inside the
+// name. Reflowing such a block would corrupt the prose; a block whose function-parameter names are
+// not plain identifiers is emitted verbatim instead.
+fn annotation_parameter_names_are_plain(parsed: &TypeSyntax, interner: &Interner) -> bool {
+    fn is_plain_name(name: &str) -> bool {
+        // The optional-name form `[ label ]` may intern surrounding padding with the name; padding
+        // is not prose, so it is trimmed before the shape check.
+        let name = name.trim();
+        let mut characters = name.chars();
+        characters.next().is_some_and(|first| first.is_alphabetic() || first == '_' || first == '.')
+            && characters.all(|character| {
+                character.is_alphanumeric() || character == '_' || character == '.'
+            })
+    }
+
+    fn surface_type_is_plain(surface_type: &SurfaceType, interner: &Interner) -> bool {
+        match surface_type {
+            SurfaceType::Function(function_type) => {
+                function_type.named_parameters.iter().all(|parameter| {
+                    interner
+                        .resolve(parameter.name)
+                        .is_some_and(is_plain_name)
+                        && surface_type_is_plain(&parameter.value, interner)
+                }) && function_type
+                    .parameters
+                    .iter()
+                    .all(|parameter| surface_type_is_plain(parameter, interner))
+                    && function_type
+                        .variadic
+                        .as_deref()
+                        .is_none_or(|variadic| surface_type_is_plain(variadic, interner))
+                    && surface_type_is_plain(&function_type.return_type, interner)
+            }
+            SurfaceType::Union(members) | SurfaceType::Tuple(members) => members
+                .iter()
+                .all(|member| surface_type_is_plain(member, interner)),
+            SurfaceType::Named(_, arguments) => arguments
+                .iter()
+                .all(|argument| surface_type_is_plain(argument, interner)),
+            SurfaceType::Record(fields) => fields
+                .iter()
+                .all(|field| surface_type_is_plain(&field.value, interner)),
+            SurfaceType::Vector(inner)
+            | SurfaceType::NamedVector(inner)
+            | SurfaceType::List(inner)
+            | SurfaceType::NamedList(inner)
+            | SurfaceType::Binders(_, inner) => surface_type_is_plain(inner, interner),
+            SurfaceType::Any
+            | SurfaceType::Unknown
+            | SurfaceType::Null
+            | SurfaceType::Scalar(_) => true,
+        }
+    }
+
+    fn annotation_is_plain(annotation: &Annotation, interner: &Interner) -> bool {
+        match annotation {
+            Annotation::Type { surface_type, .. } => surface_type_is_plain(surface_type, interner),
+            Annotation::New { .. } => true,
+        }
+    }
+
+    match parsed {
+        TypeSyntax::Annotation(annotation) => annotation_is_plain(annotation, interner),
+        TypeSyntax::Definitions(_) => true,
+    }
+}
+
 fn annotation_line(level: usize, content: &str, indent: &str) -> String {
     format!("#: {}{content}", indent.repeat(level))
 }
 
 // Whether a single space separates two adjacent annotation tokens, reproducing the canonical
 // surface-type spacing (the same form `analysis::type_syntax::render_surface_type` produces).
+// (A vector suffix after `}` never reaches here: `list{...}[]` is an unsupported construct, and
+// unsupported constructs go down the verbatim path.)
 fn annotation_space_between(previous: &AnnotationToken, current: &AnnotationToken) -> bool {
     use AnnotationTokenKind::*;
 

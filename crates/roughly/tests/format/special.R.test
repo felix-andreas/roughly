@@ -595,3 +595,19 @@ setMethod(
     x
   }
 )
+
+#==== annotation_trailing_head
+#---- trailing_head_renders_alone_continuations_keep_indent
+f <- function() {
+  x <- 1 #: list{
+  #: a: integer
+  #: }
+  x
+}
+#++++
+f <- function() {
+  x <- 1 #: list{
+  #: a: integer
+  #: }
+  x
+}
