@@ -8,24 +8,25 @@ use {
             CodeActionProviderCapability, CodeActionResponse, CompletionItem, CompletionItemKind,
             CompletionItemLabelDetails, CompletionList, CompletionOptions, CompletionParams,
             CompletionResponse, Diagnostic, DiagnosticOptions, DiagnosticServerCancellationData,
-            DiagnosticServerCapabilities, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
-            DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
-            DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
-            DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentFormattingParams,
-            DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
-            DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
+            DiagnosticServerCapabilities, DiagnosticSeverity, DidChangeTextDocumentParams,
+            DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
+            DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+            DocumentDiagnosticParams, DocumentDiagnosticReport, DocumentDiagnosticReportResult,
+            DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol,
+            DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
             FullDocumentDiagnosticReport, GlobPattern, Hover, HoverContents, HoverParams,
             HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
             InlayHint, InlayHintKind, InlayHintLabel, InlayHintParams, Location, MarkupContent,
-            MarkupKind, MessageType, OneOf, ParameterInformation, ParameterLabel, Position,
-            PublishDiagnosticsParams, Range, ReferenceParams, Registration, RegistrationParams,
-            RelatedFullDocumentDiagnosticReport, RelatedUnchangedDocumentDiagnosticReport,
-            RelativePattern, RenameParams, SaveOptions, SemanticToken, SemanticTokenType,
-            SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
-            SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
-            ServerCapabilities, ServerInfo, ShowMessageParams, SignatureHelp, SignatureHelpOptions,
-            SignatureHelpParams, SignatureInformation, SymbolKind, TextDocumentSyncCapability,
-            TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
+            MarkupKind, MessageType, NumberOrString, OneOf, ParameterInformation, ParameterLabel,
+            Position, PublishDiagnosticsParams, Range, ReferenceParams, Registration,
+            RegistrationParams, RelatedFullDocumentDiagnosticReport,
+            RelatedUnchangedDocumentDiagnosticReport, RelativePattern, RenameParams, SaveOptions,
+            SemanticToken, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
+            SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams,
+            SemanticTokensResult, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
+            ShowMessageParams, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+            SignatureInformation, SymbolKind, TextDocumentSyncCapability, TextDocumentSyncKind,
+            TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
             TypeDefinitionProviderCapability, UnchangedDocumentDiagnosticReport, Url,
             WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
@@ -158,6 +159,10 @@ struct EngineWorker {
     // change's range against this evolving buffer. Closed package documents are not buffered here — they
     // exist only as engine `SourceText` inputs read from disk.
     documents: HashMap<PathBuf, Document>,
+    // Open `.Rtypes` stub documents, served entirely server-side: the stub corpus is a set-once
+    // engine input, so live stub edits publish parse diagnostics from their own buffer and never
+    // route through the engine's document inputs.
+    stub_documents: HashMap<PathBuf, ropey::Rope>,
     // Open documents with non-`file:` URIs (untitled buffers, virtual editor documents) are served
     // as standalone script documents, keyed internally by a synthetic path (`document_path`) so the
     // path-keyed host and engine tables can track them. This maps each synthetic path back to the
@@ -287,6 +292,7 @@ impl EngineWorker {
             file_ids: HashMap::new(),
             next_file_id: 0,
             documents: HashMap::new(),
+            stub_documents: HashMap::new(),
             virtual_document_uris: HashMap::new(),
             parser: analysis::tree::new_parser().expect("server parser should initialize"),
             position_encoding,
@@ -721,6 +727,23 @@ impl EngineWorker {
 
         tracing::debug!(?path, "did open");
 
+        if is_stub_document(&path) {
+            let rope = ropey::Rope::from_str(text);
+            let diagnostics = stub_document_diagnostics(&rope, self.position_encoding);
+            self.stub_documents.insert(path, rope);
+            if let Err(error) = self
+                .client
+                .publish_diagnostics(PublishDiagnosticsParams::new(
+                    uri,
+                    diagnostics,
+                    Some(params.text_document.version),
+                ))
+            {
+                tracing::error!(?error, "failed to publish stub diagnostics");
+            }
+            return;
+        }
+
         let document = Document::parse(&mut self.parser, text)
             .unwrap_or_else(|_| panic!("failed to parse open document buffer {}", path.display()));
         self.documents.insert(path.clone(), document);
@@ -752,6 +775,10 @@ impl EngineWorker {
         };
 
         tracing::debug!(?path, "did close");
+
+        if self.stub_documents.remove(&path).is_some() {
+            return;
+        }
 
         self.open_documents.remove(&path);
         self.documents.remove(&path);
@@ -789,6 +816,44 @@ impl EngineWorker {
         let content_changes = params.content_changes;
 
         tracing::debug!(?path, "did change");
+
+        if let Some(rope) = self.stub_documents.get_mut(&path) {
+            for change in content_changes {
+                match change.range {
+                    None => *rope = ropey::Rope::from_str(&change.text),
+                    Some(range) => {
+                        let start = position::lsp_position_to_internal(
+                            rope,
+                            self.position_encoding,
+                            range.start,
+                        );
+                        let end = position::lsp_position_to_internal(
+                            rope,
+                            self.position_encoding,
+                            range.end,
+                        );
+                        let start_char =
+                            rope.line_to_char(start.line_index) + start.character_index;
+                        let end_char = rope.line_to_char(end.line_index) + end.character_index;
+                        rope.remove(start_char..end_char);
+                        rope.insert(start_char, &change.text);
+                    }
+                }
+            }
+            let rope = self.stub_documents[&path].clone();
+            let diagnostics = stub_document_diagnostics(&rope, self.position_encoding);
+            if let Err(error) = self
+                .client
+                .publish_diagnostics(PublishDiagnosticsParams::new(
+                    uri,
+                    diagnostics,
+                    Some(params.text_document.version),
+                ))
+            {
+                tracing::error!(?error, "failed to publish stub diagnostics");
+            }
+            return;
+        }
 
         let start = Instant::now();
 
@@ -2240,6 +2305,56 @@ fn diagnostics_result_id(items: &[Diagnostic]) -> String {
 
 // The semantic-token legend: the token types the server emits, in the order their indices reference.
 // The type notation maps onto four standard token types (there are no modifiers).
+fn is_stub_document(path: &std::path::Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension == "Rtypes")
+}
+
+// Parse diagnostics for one `.Rtypes` stub buffer. The parse runs against a throwaway interner:
+// stub buffers must never touch the engine's shared interner or its inputs (the loaded corpus is a
+// set-once ambient input; the live buffer is only a document being edited).
+fn stub_document_diagnostics(rope: &ropey::Rope, encoding: PositionEncoding) -> Vec<Diagnostic> {
+    let text = rope.to_string();
+    let mut interner = analysis::Interner::new();
+    let (_declarations, errors) = analysis::stub::parse_stub_declarations(&text, &mut interner);
+    errors
+        .into_iter()
+        .map(|error| {
+            let line_length = rope
+                .get_line(error.line)
+                .map(|line| line.len_chars().saturating_sub(1))
+                .unwrap_or(0);
+            let start = position::internal_position_to_lsp(
+                rope,
+                encoding,
+                TextPosition {
+                    line_index: error.line,
+                    character_index: 0,
+                },
+            );
+            let end = position::internal_position_to_lsp(
+                rope,
+                encoding,
+                TextPosition {
+                    line_index: error.line,
+                    character_index: line_length,
+                },
+            );
+            Diagnostic {
+                range: Range { start, end },
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: Some(NumberOrString::String("stub".to_owned())),
+                code_description: None,
+                source: Some("roughly".into()),
+                message: error.message,
+                related_information: None,
+                tags: None,
+                data: None,
+            }
+        })
+        .collect()
+}
+
 fn semantic_token_legend() -> Vec<SemanticTokenType> {
     vec![
         SemanticTokenType::TYPE,

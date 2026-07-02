@@ -85,7 +85,7 @@ type MemoTable<K> = RefCell<HashMap<K, Slot<K>>>;
 
 /// The engine's logical clock. Bumped once per [`Engine::set_input`]; memos are validated against it.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct Revision(u32);
+pub struct Revision(u64);
 
 impl Revision {
     /// The clock value before any input is set. No real memo is ever verified at `START`, so it is also

@@ -2666,3 +2666,41 @@ async fn config_reload_failure_keeps_previous_config_and_reports() {
 
     context.shutdown().await;
 }
+
+#[tokio::test]
+async fn stub_documents_are_served_with_parse_diagnostics() {
+    let mut context = setup_test(&[]).await;
+
+    let stub_uri = context.file_uri("stubs/project.Rtypes");
+    context
+        .open_file(
+            &stub_uri,
+            "length : fn(x: Any) -> integer\nbroken line without colon\n",
+        )
+        .await;
+
+    let published = recv_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
+    assert_eq!(
+        published.diagnostics.len(),
+        1,
+        "one malformed line, one diagnostic: {:?}",
+        published.diagnostics
+    );
+    assert_eq!(published.diagnostics[0].range.start.line, 1);
+
+    // Fixing the line republishes empty diagnostics.
+    context.change_file(
+        &stub_uri,
+        1,
+        Range::new(Position::new(1, 0), Position::new(1, 25)),
+        "nchar : fn(x: character) -> integer",
+    );
+    let after_fix = recv_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
+    assert!(
+        after_fix.diagnostics.is_empty(),
+        "fixed stub publishes no diagnostics, got: {:?}",
+        after_fix.diagnostics
+    );
+
+    context.shutdown().await;
+}
