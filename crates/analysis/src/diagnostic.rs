@@ -159,6 +159,15 @@ impl Diagnostic {
         }
     }
 
+    pub fn unused_warning(range: Range, message: impl Into<String>) -> Self {
+        Self {
+            severity: Severity::Warning,
+            code: DiagnosticCode::Unused,
+            message: message.into(),
+            range,
+        }
+    }
+
     pub fn syntax_error(range: Range, message: impl Into<String>) -> Self {
         let mut message = message.into();
         if !message.starts_with("Syntax Error: ") {
@@ -529,6 +538,8 @@ impl fmt::Display for Severity {
 pub enum DiagnosticCode {
     Lint,
     Naming,
+    // The unused (dead-store) check: an assignment whose value is never read.
+    Unused,
     SyntaxError,
     TypeError,
     AnnotationError,
@@ -540,6 +551,7 @@ impl fmt::Display for DiagnosticCode {
         match self {
             Self::Lint => formatter.write_str("lint"),
             Self::Naming => formatter.write_str("naming"),
+            Self::Unused => formatter.write_str("unused"),
             Self::SyntaxError => formatter.write_str("syntax-error"),
             Self::TypeError => formatter.write_str("type-error"),
             Self::AnnotationError => formatter.write_str("annotation-error"),

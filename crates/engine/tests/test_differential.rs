@@ -246,6 +246,7 @@ fn code_rank(code: DiagnosticCode) -> u8 {
         DiagnosticCode::TypeError => 3,
         DiagnosticCode::AnnotationError => 4,
         DiagnosticCode::Strict => 5,
+        DiagnosticCode::Unused => 6,
     }
 }
 

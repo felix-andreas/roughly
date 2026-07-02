@@ -246,7 +246,7 @@ f <- function(cond) {
   x
 }
 #++++
-Assign(f@b4)
+Assign(f@b2)
   Function(cond@b0)
     Block
       Assign(x@b1)
@@ -254,10 +254,10 @@ Assign(f@b4)
       If
         Symbol(cond@b0)
         Block
-          Assign(x@b2)
+          Assign(x@b1)
             Integer(1L)
         Block
-          Assign(x@b3)
+          Assign(x@b1)
             Integer(2L)
       Symbol(x@b1)
 

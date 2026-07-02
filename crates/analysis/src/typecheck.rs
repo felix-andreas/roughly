@@ -213,6 +213,13 @@ pub struct InferenceState {
     // returning — so the derived `Clone`/`PartialEq` stay correct.
     undo_log: Vec<UndoStep>,
     snapshot_depth: usize,
+    // Undo log for the *environment map*, the same shape as `undo_log` for the union-find: while an
+    // environment snapshot is active every `set_environment_entry` records the key's prior value so
+    // a control-flow region (a branch, a loop pass, a function body) can be reverted without
+    // cloning the whole environment (which holds every stdlib stub scheme). Empty (and depth 0) at
+    // every clone/compare point: regions always roll back before returning.
+    environment_log: Vec<(EnvironmentKey, Option<Binding>)>,
+    environment_snapshot_depth: usize,
 }
 
 // A single reversible union-find write: `previous` is the entry that existed before the write
@@ -239,6 +246,14 @@ enum UndoStep {
 pub struct Snapshot {
     log_len: usize,
     next_variable_id: u32,
+}
+
+// A marker into the environment log (see `environment_log`). Rolling back restores every
+// environment entry written since the snapshot and hands the caller the region's final values, so
+// control-flow joins can merge them with the pre-state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EnvironmentSnapshot {
+    log_length: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -610,13 +625,20 @@ impl InferenceState {
     // Records a strict-mode `Unknown` origin, but only while expression-type recording is on (the
     // authoritative round-2 check). The interface rounds discard their `ModuleCheck`, so collecting
     // origins there would be wasted work and would leave the buffer non-empty in cloned states.
+    // Idempotent per expression: loop bodies are re-inferred to a control-flow fixed point, so the
+    // same origin site can be visited more than once but must yield one diagnostic.
     fn record_strict_origin(
         &mut self,
         expression_id: ExpressionId,
         range: Range,
         kind: StrictOriginKind,
     ) {
-        if self.record_expression_types {
+        if self.record_expression_types
+            && !self
+                .strict_origins
+                .iter()
+                .any(|origin| origin.expression_id == expression_id)
+        {
             self.strict_origins.push(StrictUnknownOrigin {
                 expression_id,
                 range,
@@ -835,9 +857,9 @@ impl InferenceState {
     }
 
     pub fn bind_global_scheme(&mut self, symbol: Symbol, type_scheme: TypeScheme, range: Range) {
-        self.environment.insert(
+        self.set_environment_entry(
             EnvironmentKey::Global(symbol),
-            Binding { type_scheme, range },
+            Some(Binding { type_scheme, range }),
         );
     }
 
@@ -850,10 +872,124 @@ impl InferenceState {
     }
 
     fn bind_local_scheme(&mut self, binding_id: BindingId, type_scheme: TypeScheme, range: Range) {
-        self.environment.insert(
+        self.set_environment_entry(
             EnvironmentKey::Local(binding_id),
-            Binding { type_scheme, range },
+            Some(Binding { type_scheme, range }),
         );
+    }
+
+    // The single chokepoint for environment writes: records the key's prior value while an
+    // environment snapshot is active so a control-flow region can be reverted.
+    fn set_environment_entry(&mut self, key: EnvironmentKey, entry: Option<Binding>) {
+        let previous = match entry {
+            Some(binding) => self.environment.insert(key, binding),
+            None => self.environment.remove(&key),
+        };
+        if self.environment_snapshot_depth > 0 {
+            self.environment_log.push((key, previous));
+        }
+    }
+
+    // Begins an environment region (a branch, a loop pass, or a function body) whose writes will
+    // be reverted by `environment_rollback`. Nested regions compose like unification snapshots.
+    fn environment_snapshot(&mut self) -> EnvironmentSnapshot {
+        self.environment_snapshot_depth += 1;
+        EnvironmentSnapshot {
+            log_length: self.environment_log.len(),
+        }
+    }
+
+    // Reverts every environment write recorded since `snapshot` and returns each touched key's
+    // value at the moment of rollback — the region's final values (`None` = the region removed the
+    // entry) — so a control-flow join can merge them with the restored pre-state.
+    fn environment_rollback(
+        &mut self,
+        snapshot: EnvironmentSnapshot,
+    ) -> BTreeMap<EnvironmentKey, Option<Binding>> {
+        debug_assert!(
+            self.environment_snapshot_depth > 0,
+            "environment rollback without an open snapshot"
+        );
+        self.environment_snapshot_depth -= 1;
+        let recorded = self.environment_log.split_off(snapshot.log_length);
+        let mut region_values = BTreeMap::new();
+        for (key, _) in &recorded {
+            region_values
+                .entry(*key)
+                .or_insert_with(|| self.environment.get(key).cloned());
+        }
+        for (key, previous) in recorded.into_iter().rev() {
+            match previous {
+                Some(binding) => {
+                    self.environment.insert(key, binding);
+                }
+                None => {
+                    self.environment.remove(&key);
+                }
+            }
+        }
+        region_values
+    }
+
+    // Merges the environment effects of two alternative control-flow paths (both already rolled
+    // back, so the environment currently holds the shared pre-state): every key either path
+    // touched gets the join of its two path-final values, with an untouched path contributing the
+    // pre-state value.
+    fn join_branch_environments(
+        &mut self,
+        mut left: BTreeMap<EnvironmentKey, Option<Binding>>,
+        mut right: BTreeMap<EnvironmentKey, Option<Binding>>,
+        expression: &Expression,
+    ) -> Result<(), InferenceError> {
+        let keys: BTreeSet<EnvironmentKey> = left.keys().chain(right.keys()).copied().collect();
+        for key in keys {
+            let pre_state = self.environment.get(&key).cloned();
+            let left_value = left.remove(&key).unwrap_or_else(|| pre_state.clone());
+            let right_value = right.remove(&key).unwrap_or(pre_state);
+            let joined = self.join_environment_entries(left_value, right_value, expression)?;
+            self.set_environment_entry(key, joined);
+        }
+        Ok(())
+    }
+
+    // The binding a variable slot holds after two control paths merge. Identical entries stay; a
+    // slot written on only one path optimistically keeps the written binding (a read on the
+    // unwritten path is covered by the naming-level maybe-undefined warning); genuinely different
+    // entries join into a monotype via `join_types` — a polymorphic scheme survives only while a
+    // single write reaches (the generalization rule in the control-flow-joins section of the
+    // typing reference).
+    fn join_environment_entries(
+        &mut self,
+        left: Option<Binding>,
+        right: Option<Binding>,
+        expression: &Expression,
+    ) -> Result<Option<Binding>, InferenceError> {
+        match (left, right) {
+            (None, None) => Ok(None),
+            (Some(binding), None) | (None, Some(binding)) => Ok(Some(binding)),
+            (Some(left), Some(right)) => {
+                if left == right {
+                    return Ok(Some(left));
+                }
+                let range = left.range;
+                let left_type = self.instantiate_type_scheme(&left.type_scheme)?;
+                let right_type = self.instantiate_type_scheme(&right.type_scheme)?;
+                let left_type = self.resolve(left_type)?;
+                let right_type = self.resolve(right_type)?;
+                // An unmodelled path makes the merged slot unmodelled, matching how `Unknown`
+                // absorbs unions everywhere else in the checker.
+                let joined = if left_type == CoreType::Unknown || right_type == CoreType::Unknown {
+                    CoreType::Unknown
+                } else {
+                    let joined = self.join_types(left_type, right_type, expression)?;
+                    self.resolve(joined)?
+                };
+                Ok(Some(Binding {
+                    type_scheme: TypeScheme::monomorphic(joined),
+                    range,
+                }))
+            }
+        }
     }
 
     pub fn bind_builtin(&mut self, symbol: Symbol, builtin_kind: BuiltinKind) {
@@ -1245,7 +1381,7 @@ impl InferenceState {
                         return Ok(binding_type);
                     }
 
-                    self.environment.remove(&EnvironmentKey::Global(*target));
+                    self.set_environment_entry(EnvironmentKey::Global(*target), None);
                     let generalized_scheme = self.generalize(binding_type.clone())?;
                     self.bind_global_scheme(*target, generalized_scheme, expression.range);
                     return Ok(binding_type);
@@ -1306,7 +1442,7 @@ impl InferenceState {
                 *variable,
                 arena.get(*sequence),
                 arena.get(*body),
-                expression.range,
+                expression,
                 arena,
                 resolution_context,
                 type_definitions,
@@ -1314,12 +1450,14 @@ impl InferenceState {
             ExpressionKind::While { condition, body } => self.infer_while_expression(
                 arena.get(*condition),
                 arena.get(*body),
+                expression,
                 arena,
                 resolution_context,
                 type_definitions,
             ),
             ExpressionKind::Repeat { body } => self.infer_repeat_expression(
                 arena.get(*body),
+                expression,
                 arena,
                 resolution_context,
                 type_definitions,
@@ -1489,10 +1627,65 @@ impl InferenceState {
         resolution_context: Option<&ResolutionContext<'_>>,
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<CoreType, InferenceError> {
-        let parent_environment = self.environment.clone();
+        // The body's parameter and local slot bindings live in an environment region that is rolled
+        // back once the signature is inferred, so nothing the body binds leaks into the enclosing
+        // scope (and the enclosing environment needs no wholesale clone).
+        let environment_snapshot = self.environment_snapshot();
+        let signature_result = self.infer_function_signature(
+            function_expression_id,
+            parameters,
+            body,
+            expected_function_type.as_ref(),
+            expression,
+            arena,
+            resolution_context,
+            type_definitions,
+        );
+        self.environment_rollback(environment_snapshot);
+        let inferred_function_type = signature_result?;
 
+        // The annotation is the source of truth for the binding's interface. With the return already
+        // checked, this whole-function compatibility catches parameter shape mismatches (positional
+        // vs named, arity, optional vs required) and reports them against the full signature. On
+        // success the binding takes the annotation's exact type, so a `<T>` binder generalizes back
+        // into the declared polymorphic scheme.
+        let Some(expected_function_type) = expected_function_type else {
+            return Ok(CoreType::Function(inferred_function_type));
+        };
+        let compatible = self.check_compatibility(
+            CoreType::Function(inferred_function_type.clone()),
+            CoreType::Function(expected_function_type.clone()),
+            type_definitions,
+            Some(expression),
+        )?;
+        if !compatible {
+            return Err(InferenceError::TypeMismatch {
+                expected: Box::new(
+                    self.display_with_rigid_names(&CoreType::Function(expected_function_type)),
+                ),
+                actual: Box::new(
+                    self.display_with_rigid_names(&CoreType::Function(inferred_function_type)),
+                ),
+                range: Some(expression.range),
+                expression_id: Some(expression.id),
+            });
+        }
+        Ok(CoreType::Function(expected_function_type))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn infer_function_signature(
+        &mut self,
+        function_expression_id: ExpressionId,
+        parameters: &[crate::hir::Parameter],
+        body: ExpressionId,
+        expected_function_type: Option<&FunctionType<CoreType>>,
+        expression: &Expression,
+        arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<FunctionType<CoreType>, InferenceError> {
         let expected_parameter_types = expected_function_type
-            .as_ref()
             .map(flatten_expected_parameter_types)
             .filter(|types| types.len() == parameters.len());
         let parameter_binding_ids = resolution_context.and_then(|context| {
@@ -1590,7 +1783,7 @@ impl InferenceState {
         // like an argument against a parameter), so a body returning `integer` satisfies a declared
         // `integer | NULL` or `integer[]`. A `<T>` return is a rigid skolem, so a body returning a
         // concrete type fails here. This is checked separately to report a focused return message.
-        if let Some(expected_function_type) = &expected_function_type {
+        if let Some(expected_function_type) = expected_function_type {
             let expected_return_type = (*expected_function_type.return_type).clone();
             let compatible = self.check_compatibility(
                 inferred_return_type.clone(),
@@ -1622,38 +1815,11 @@ impl InferenceState {
                 )
             })
             .collect();
-        let inferred_function_type =
-            FunctionType::new(Vec::new(), named_parameter_types, inferred_return_type);
-
-        self.environment = parent_environment;
-
-        // The annotation is the source of truth for the binding's interface. With the return already
-        // checked, this whole-function compatibility catches parameter shape mismatches (positional
-        // vs named, arity, optional vs required) and reports them against the full signature. On
-        // success the binding takes the annotation's exact type, so a `<T>` binder generalizes back
-        // into the declared polymorphic scheme.
-        let Some(expected_function_type) = expected_function_type else {
-            return Ok(CoreType::Function(inferred_function_type));
-        };
-        let compatible = self.check_compatibility(
-            CoreType::Function(inferred_function_type.clone()),
-            CoreType::Function(expected_function_type.clone()),
-            type_definitions,
-            Some(expression),
-        )?;
-        if !compatible {
-            return Err(InferenceError::TypeMismatch {
-                expected: Box::new(
-                    self.display_with_rigid_names(&CoreType::Function(expected_function_type)),
-                ),
-                actual: Box::new(
-                    self.display_with_rigid_names(&CoreType::Function(inferred_function_type)),
-                ),
-                range: Some(expression.range),
-                expression_id: Some(expression.id),
-            });
-        }
-        Ok(CoreType::Function(expected_function_type))
+        Ok(FunctionType::new(
+            Vec::new(),
+            named_parameter_types,
+            inferred_return_type,
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1669,24 +1835,35 @@ impl InferenceState {
     ) -> Result<CoreType, InferenceError> {
         self.expect_scalar_logical(condition, arena, resolution_context, type_definitions)?;
 
-        let inferred_consequence = self.infer_expression_with_context(
+        let snapshot = self.environment_snapshot();
+        let consequence_result = self.infer_expression_with_context(
             consequence,
             arena,
             resolution_context,
             type_definitions,
-        )?;
-        let consequence_type = self.resolve(inferred_consequence)?;
+        );
+        let consequence_bindings = self.environment_rollback(snapshot);
+        let consequence_type = self.resolve(consequence_result?)?;
+
         let Some(alternative) = alternative else {
+            // Without an `else`, the construct may fall through untouched: each slot the branch
+            // wrote joins with its pre-state value (pre-state first, so a union reads in
+            // execution order: `integer | character` for an `integer` slot a branch retypes).
+            self.join_branch_environments(BTreeMap::new(), consequence_bindings, expression)?;
             return Ok(nullable_type(consequence_type));
         };
 
-        let inferred_alternative = self.infer_expression_with_context(
+        let snapshot = self.environment_snapshot();
+        let alternative_result = self.infer_expression_with_context(
             alternative,
             arena,
             resolution_context,
             type_definitions,
-        )?;
-        let alternative_type = self.resolve(inferred_alternative)?;
+        );
+        let alternative_bindings = self.environment_rollback(snapshot);
+        let alternative_type = self.resolve(alternative_result?)?;
+
+        self.join_branch_environments(consequence_bindings, alternative_bindings, expression)?;
 
         // An unmodelled branch makes the result unmodelled rather than claiming the other branch's
         // type, matching how `Unknown` propagates (and absorbs unions) through the rest of the
@@ -1698,6 +1875,101 @@ impl InferenceState {
         self.join_types(consequence_type, alternative_type, expression)
     }
 
+    // A loop body may run zero or more times, so the types flowing around the back edge join into
+    // the body's entry environment: `iterate` is re-run until that entry stabilizes, starting from
+    // the plain pre-state (real code stabilizes on the second pass). At the pass cap, any slot
+    // whose type is still changing (for example one growing structurally each iteration) is
+    // widened to `Unknown` as a termination safety net. Afterwards the loop's exit state is
+    // applied: `join(pre, out)` for `for`/`while` (zero iterations possible), the final out-state
+    // for `repeat` (runs at least once). The loop variable's entry, re-seeded from the iterable on
+    // every pass, is loop-scoped and excluded from the exit state.
+    fn infer_loop_to_fixed_point(
+        &mut self,
+        expression: &Expression,
+        loop_variable: Option<(EnvironmentKey, CoreType, Range)>,
+        runs_at_least_once: bool,
+        mut iterate: impl FnMut(&mut Self) -> Result<(), InferenceError>,
+    ) -> Result<(), InferenceError> {
+        const LOOP_JOIN_PASSES: usize = 3;
+
+        let mut entry: BTreeMap<EnvironmentKey, Option<Binding>> = BTreeMap::new();
+        let mut exit: BTreeMap<EnvironmentKey, Option<Binding>> = BTreeMap::new();
+        let mut still_changing: BTreeSet<EnvironmentKey> = BTreeSet::new();
+        let mut converged = false;
+        for _pass in 0..LOOP_JOIN_PASSES {
+            let snapshot = self.environment_snapshot();
+            for (key, value) in &entry {
+                self.set_environment_entry(*key, value.clone());
+            }
+            if let Some((key, item_type, range)) = &loop_variable {
+                self.set_environment_entry(
+                    *key,
+                    Some(Binding {
+                        type_scheme: TypeScheme::monomorphic(item_type.clone()),
+                        range: *range,
+                    }),
+                );
+            }
+            let result = iterate(self);
+            exit = self.environment_rollback(snapshot);
+            result?;
+
+            let mut next_entry = entry.clone();
+            for (key, exit_value) in &exit {
+                let pre_state = self.environment.get(key).cloned();
+                let joined =
+                    self.join_environment_entries(pre_state, exit_value.clone(), expression)?;
+                next_entry.insert(*key, joined);
+            }
+            if let Some((key, _, _)) = &loop_variable {
+                next_entry.remove(key);
+            }
+            still_changing = next_entry
+                .iter()
+                .filter(|(key, value)| entry.get(*key) != Some(*value))
+                .map(|(key, _)| *key)
+                .collect();
+            if still_changing.is_empty() {
+                converged = true;
+                break;
+            }
+            entry = next_entry;
+        }
+        if !converged {
+            for key in &still_changing {
+                let range = entry
+                    .get(key)
+                    .and_then(|value| value.as_ref())
+                    .map(|binding| binding.range)
+                    .unwrap_or(expression.range);
+                entry.insert(
+                    *key,
+                    Some(Binding {
+                        type_scheme: TypeScheme::monomorphic(CoreType::Unknown),
+                        range,
+                    }),
+                );
+            }
+        }
+
+        if runs_at_least_once && converged {
+            for (key, value) in exit {
+                if loop_variable
+                    .as_ref()
+                    .is_some_and(|(variable_key, _, _)| *variable_key == key)
+                {
+                    continue;
+                }
+                self.set_environment_entry(key, value);
+            }
+        } else {
+            for (key, value) in entry {
+                self.set_environment_entry(key, value);
+            }
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn infer_for_expression(
         &mut self,
@@ -1705,11 +1977,14 @@ impl InferenceState {
         variable: Symbol,
         sequence: &Expression,
         body: &Expression,
-        range: Range,
+        expression: &Expression,
         arena: &HirArena,
         resolution_context: Option<&ResolutionContext<'_>>,
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<CoreType, InferenceError> {
+        let range = expression.range;
+        // The sequence is evaluated once, before any iteration, so it stays outside the loop
+        // region.
         let inferred_sequence = self.infer_expression_with_context(
             sequence,
             arena,
@@ -1727,29 +2002,26 @@ impl InferenceState {
             });
         };
 
-        if let Some(binding_id) = resolution_context.and_then(|context| {
+        let variable_key = match resolution_context.and_then(|context| {
             find_binding(context.local_naming, context.document_id, variable, range)
         }) {
-            self.bind_local_name(binding_id, item_type, range);
-            self.infer_expression_with_context(body, arena, resolution_context, type_definitions)?;
-            self.environment.remove(&EnvironmentKey::Local(binding_id));
-            return Ok(CoreType::Null);
-        }
-
-        let previous_binding = self
-            .environment
-            .get(&EnvironmentKey::Global(variable))
-            .cloned();
-        self.bind_global_name(variable, item_type, range);
-        self.infer_expression_with_context(body, arena, resolution_context, type_definitions)?;
-
-        if let Some(previous_binding) = previous_binding {
-            self.environment
-                .insert(EnvironmentKey::Global(variable), previous_binding);
-        } else {
-            self.environment.remove(&EnvironmentKey::Global(variable));
-        }
-
+            Some(binding_id) => EnvironmentKey::Local(binding_id),
+            None => EnvironmentKey::Global(variable),
+        };
+        self.infer_loop_to_fixed_point(
+            expression,
+            Some((variable_key, item_type, range)),
+            false,
+            |state| {
+                state.infer_expression_with_context(
+                    body,
+                    arena,
+                    resolution_context,
+                    type_definitions,
+                )?;
+                Ok(())
+            },
+        )?;
         Ok(CoreType::Null)
     }
 
@@ -1757,23 +2029,33 @@ impl InferenceState {
         &mut self,
         condition: &Expression,
         body: &Expression,
+        expression: &Expression,
         arena: &HirArena,
         resolution_context: Option<&ResolutionContext<'_>>,
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<CoreType, InferenceError> {
-        self.expect_scalar_logical(condition, arena, resolution_context, type_definitions)?;
-        self.infer_expression_with_context(body, arena, resolution_context, type_definitions)?;
+        // The condition re-evaluates before every iteration, so it belongs to the iterated region:
+        // a read in it sees the types flowing around the back edge.
+        self.infer_loop_to_fixed_point(expression, None, false, |state| {
+            state.expect_scalar_logical(condition, arena, resolution_context, type_definitions)?;
+            state.infer_expression_with_context(body, arena, resolution_context, type_definitions)?;
+            Ok(())
+        })?;
         Ok(CoreType::Null)
     }
 
     fn infer_repeat_expression(
         &mut self,
         body: &Expression,
+        expression: &Expression,
         arena: &HirArena,
         resolution_context: Option<&ResolutionContext<'_>>,
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<CoreType, InferenceError> {
-        self.infer_expression_with_context(body, arena, resolution_context, type_definitions)?;
+        self.infer_loop_to_fixed_point(expression, None, true, |state| {
+            state.infer_expression_with_context(body, arena, resolution_context, type_definitions)?;
+            Ok(())
+        })?;
         Ok(CoreType::Null)
     }
 
@@ -1861,7 +2143,6 @@ impl InferenceState {
         }
 
         match (actual_type, expected_type) {
-            (CoreType::Unknown, CoreType::Any) => Ok(true),
             // A union value must be accepted in every shape it can take, so each actual member is
             // checked against the expected type. This arm comes first so union-vs-union reduces to
             // "every actual member fits somewhere in the expected union".
@@ -3252,25 +3533,19 @@ impl InferenceState {
             return Ok(CoreType::Unknown);
         }
 
-        let result_shape = if left.is_vector() || right.is_vector() {
-            OperandShape::Vector
-        } else {
-            OperandShape::Scalar
-        };
-
         // Constrain every flexible operand to be numeric, collapsing them onto one representative
         // variable so `x + y` ties the two operands together.
         let mut flexible_variable: Option<InferenceVariableId> = None;
-        for operand in [left, right] {
+        for operand in [&left, &right] {
             if let NumericOperand::Variable(variable) = operand {
                 flexible_variable = Some(match flexible_variable {
                     Some(existing) => match self
-                        .unify(CoreType::Variable(existing), CoreType::Variable(variable))?
+                        .unify(CoreType::Variable(existing), CoreType::Variable(*variable))?
                     {
                         CoreType::Variable(unified) => unified,
                         _ => existing,
                     },
-                    None => variable,
+                    None => *variable,
                 });
             }
         }
@@ -3282,29 +3557,66 @@ impl InferenceState {
             )?;
         }
 
-        if let NumericResultAtomic::AlwaysDouble = numeric_result_atomic {
-            return Ok(core_type_for_shape(result_shape, Atomic::Double));
-        }
+        match (left.concrete_parts(), right.concrete_parts()) {
+            // Member-wise: the operation applies to every pair of operand members, and the result
+            // is the join of the per-pair results. A single concrete operand is the one-member
+            // case, so this arm also carries the ordinary concrete/concrete path: both-`integer`
+            // pairs stay `integer`, any `double` promotes the pair, and a vector member makes the
+            // pair's result a vector.
+            (Some(left_parts), Some(right_parts)) => Ok(CoreType::union_of(
+                member_wise_numeric_results(&left_parts, &right_parts, numeric_result_atomic),
+            )),
+            (left_parts, right_parts) => {
+                let variable = flexible_variable
+                    .expect("a non-concrete numeric operand classifies as a variable");
+                let concrete_parts = left_parts.or(right_parts);
+                if let Some(parts) = &concrete_parts
+                    && parts.len() > 1
+                {
+                    // A union operand cannot promote into a variable member-wise, so the flexible
+                    // side is pinned to the default numeric scalar (`double`) — the same default a
+                    // vector result applies below — and the operation continues member-wise.
+                    self.bind_variable(
+                        variable,
+                        CoreType::Scalar(Atomic::Double),
+                        Some(expression),
+                    )?;
+                    return Ok(CoreType::union_of(member_wise_numeric_results(
+                        &[(OperandShape::Scalar, Atomic::Double)],
+                        parts,
+                        numeric_result_atomic,
+                    )));
+                }
 
-        // Promote: a concrete `double` anywhere forces `double`.
-        if left.concrete_atomic() == Some(Atomic::Double)
-            || right.concrete_atomic() == Some(Atomic::Double)
-        {
-            return Ok(core_type_for_shape(result_shape, Atomic::Double));
-        }
-
-        match (result_shape, flexible_variable) {
-            // `x + 1L` (and `x + y`) stay polymorphic over the numeric operand: integer promotes
-            // to whatever the variable resolves to, so the scalar result is the variable itself.
-            (OperandShape::Scalar, Some(variable)) => Ok(CoreType::Variable(variable)),
-            // A vector result cannot carry an unresolved atomic, so a flexible operand defaults to
-            // `double` here.
-            (OperandShape::Vector, Some(variable)) => {
-                self.bind_variable(variable, CoreType::Scalar(Atomic::Double), Some(expression))?;
-                Ok(CoreType::Vector(Atomic::Double))
+                let concrete = concrete_parts.and_then(|parts| parts.first().copied());
+                let result_shape = match concrete {
+                    Some((OperandShape::Vector, _)) => OperandShape::Vector,
+                    _ => OperandShape::Scalar,
+                };
+                if let NumericResultAtomic::AlwaysDouble = numeric_result_atomic {
+                    return Ok(core_type_for_shape(result_shape, Atomic::Double));
+                }
+                // Promote: a concrete `double` anywhere forces `double`.
+                if concrete.map(|(_, atomic)| atomic) == Some(Atomic::Double) {
+                    return Ok(core_type_for_shape(result_shape, Atomic::Double));
+                }
+                match result_shape {
+                    // `x + 1L` (and `x + y`) stay polymorphic over the numeric operand: integer
+                    // promotes to whatever the variable resolves to, so the scalar result is the
+                    // variable itself.
+                    OperandShape::Scalar => Ok(CoreType::Variable(variable)),
+                    // A vector result cannot carry an unresolved atomic, so a flexible operand
+                    // defaults to `double` here.
+                    OperandShape::Vector => {
+                        self.bind_variable(
+                            variable,
+                            CoreType::Scalar(Atomic::Double),
+                            Some(expression),
+                        )?;
+                        Ok(CoreType::Vector(Atomic::Double))
+                    }
+                }
             }
-            // Both operands were concrete integers.
-            (shape, None) => Ok(core_type_for_shape(shape, Atomic::Integer)),
         }
     }
 
@@ -3322,6 +3634,14 @@ impl InferenceState {
 
         match classify_numeric_operand(&resolved_type) {
             NumericOperand::Concrete(shape, atomic) => Ok(core_type_for_shape(shape, atomic)),
+            // Member-wise over a union operand: negation preserves each member's shape and atomic,
+            // so the result is the same union.
+            NumericOperand::ConcreteUnion(parts) => Ok(CoreType::union_of(
+                parts
+                    .into_iter()
+                    .map(|(shape, atomic)| core_type_for_shape(shape, atomic))
+                    .collect(),
+            )),
             NumericOperand::Variable(variable) => {
                 self.constrain_type(
                     CoreType::Variable(variable),
@@ -3403,8 +3723,8 @@ impl InferenceState {
             return Ok(CoreType::Unknown);
         }
 
-        let left_parts = comparison_operand_parts(&resolved_left);
-        let right_parts = comparison_operand_parts(&resolved_right);
+        let left_parts = comparison_operand_parts_list(&resolved_left);
+        let right_parts = comparison_operand_parts_list(&resolved_right);
         let left_is_variable = matches!(resolved_left, CoreType::Variable(_));
         let right_is_variable = matches!(resolved_right, CoreType::Variable(_));
 
@@ -3425,9 +3745,14 @@ impl InferenceState {
             });
         }
 
-        // Two concrete operands must belong to the same comparison family.
-        if let (Some((_, left_family)), Some((_, right_family))) = (left_parts, right_parts)
-            && left_family != right_family
+        // Two concrete operands must belong to the same comparison family, member-wise: every
+        // shape the left union can take must be comparable with every shape of the right.
+        if let (Some(left_parts), Some(right_parts)) = (&left_parts, &right_parts)
+            && left_parts.iter().any(|(_, left_family)| {
+                right_parts
+                    .iter()
+                    .any(|(_, right_family)| left_family != right_family)
+            })
         {
             return Err(InferenceError::TypeMismatch {
                 expected: Box::new(resolved_left),
@@ -3440,21 +3765,39 @@ impl InferenceState {
         // A flexible operand compared against a concrete numeric operand is constrained numeric;
         // comparison against a non-numeric family leaves it free, since the type system has no
         // character-or-logical constraint.
-        if left_is_variable && matches!(right_parts, Some((_, ComparisonFamily::Numeric))) {
+        let all_numeric = |parts: &Option<Vec<(OperandShape, ComparisonFamily)>>| {
+            parts.as_ref().is_some_and(|parts| {
+                parts
+                    .iter()
+                    .all(|(_, family)| *family == ComparisonFamily::Numeric)
+            })
+        };
+        if left_is_variable && all_numeric(&right_parts) {
             self.constrain_type(resolved_left.clone(), Constraint::Numeric, Some(arg0))?;
         }
-        if right_is_variable && matches!(left_parts, Some((_, ComparisonFamily::Numeric))) {
+        if right_is_variable && all_numeric(&left_parts) {
             self.constrain_type(resolved_right.clone(), Constraint::Numeric, Some(arg1))?;
         }
 
-        let result_shape = if matches!(left_parts, Some((OperandShape::Vector, _)))
-            || matches!(right_parts, Some((OperandShape::Vector, _)))
-        {
-            OperandShape::Vector
-        } else {
-            OperandShape::Scalar
-        };
-        Ok(core_type_for_shape(result_shape, Atomic::Logical))
+        // Member-wise result: a pair with a vector member compares element-wise (`logical[]`), a
+        // scalar-scalar pair compares to `logical`; a union operand mixing shapes therefore yields
+        // the join of both.
+        let left_shapes = shapes_or_scalar(&left_parts);
+        let right_shapes = shapes_or_scalar(&right_parts);
+        let mut results = Vec::new();
+        for left_shape in &left_shapes {
+            for right_shape in &right_shapes {
+                let result_shape = if *left_shape == OperandShape::Vector
+                    || *right_shape == OperandShape::Vector
+                {
+                    OperandShape::Vector
+                } else {
+                    OperandShape::Scalar
+                };
+                results.push(core_type_for_shape(result_shape, Atomic::Logical));
+            }
+        }
+        Ok(CoreType::union_of(results))
     }
 
     fn infer_builtin_colon(
@@ -3794,11 +4137,32 @@ impl InferenceState {
         let arg0_expr = arena.get(arguments[0].expression);
         self.infer_expression_with_context(arg0_expr, arena, resolution_context, type_definitions)?;
 
-        let unsupported = |actual: CoreType| InferenceError::UnsupportedSubset {
-            actual: Box::new(actual),
-            range: expression.range,
-            expression_id: expression.id,
-        };
+        self.subset_result_type(value_type, value, expression, type_definitions)
+    }
+
+    fn subset_result_type(
+        &mut self,
+        value_type: CoreType,
+        value: &Expression,
+        expression: &Expression,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<CoreType, InferenceError> {
+        // Member-wise over a union subject: `[` must be valid on every shape the subject can take,
+        // and the slice's type is the join of the per-member results.
+        if let CoreType::Union(members) = value_type {
+            let mut results = Vec::with_capacity(members.len());
+            for member in members {
+                let member = self.resolve_structural(member, type_definitions, Some(value))?;
+                results.push(self.subset_result_type(
+                    member,
+                    value,
+                    expression,
+                    type_definitions,
+                )?);
+            }
+            return Ok(CoreType::union_of(results));
+        }
+
         match value_type {
             CoreType::Unknown => Ok(CoreType::Unknown),
             CoreType::Any => Ok(CoreType::Any),
@@ -3806,12 +4170,16 @@ impl InferenceState {
             CoreType::NamedList(item_type) => Ok(CoreType::NamedList(item_type)),
             // A `[` slice of a fixed-shape list is a sub-list that can contain any of the item
             // types, so the element type is their union (collapsing back to the single item type
-            // for a homogeneous list).
+            // for a homogeneous list; slicing the empty list yields `list[NULL]`).
             CoreType::Tuple(items) => Ok(CoreType::List(Box::new(CoreType::union_of(items)))),
             CoreType::Record(fields) => Ok(CoreType::NamedList(Box::new(CoreType::union_of(
                 fields.iter().map(|field| field.value.clone()).collect(),
             )))),
-            other_type => Err(unsupported(other_type)),
+            other_type => Err(InferenceError::UnsupportedSubset {
+                actual: Box::new(other_type),
+                range: expression.range,
+                expression_id: expression.id,
+            }),
         }
     }
 
@@ -3843,6 +4211,34 @@ impl InferenceState {
             resolution_context,
             type_definitions,
         )?;
+
+        self.subset2_result_type(value_type, value, index_expression, expression, type_definitions)
+    }
+
+    fn subset2_result_type(
+        &mut self,
+        value_type: CoreType,
+        value: &Expression,
+        index_expression: &Expression,
+        expression: &Expression,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<CoreType, InferenceError> {
+        // Member-wise over a union subject: `[[` must be valid on every shape the subject can
+        // take, and the element's type is the join of the per-member results.
+        if let CoreType::Union(members) = value_type {
+            let mut results = Vec::with_capacity(members.len());
+            for member in members {
+                let member = self.resolve_structural(member, type_definitions, Some(value))?;
+                results.push(self.subset2_result_type(
+                    member,
+                    value,
+                    index_expression,
+                    expression,
+                    type_definitions,
+                )?);
+            }
+            return Ok(CoreType::union_of(results));
+        }
 
         match value_type {
             CoreType::Unknown => Ok(CoreType::Unknown),
@@ -3926,6 +4322,34 @@ impl InferenceState {
         let inferred_value =
             self.infer_expression_with_context(value, arena, resolution_context, type_definitions)?;
         let value_type = self.resolve_structural(inferred_value, type_definitions, Some(value))?;
+
+        self.dollar_result_type(value_type, value, name, expression, type_definitions)
+    }
+
+    fn dollar_result_type(
+        &mut self,
+        value_type: CoreType,
+        value: &Expression,
+        name: Symbol,
+        expression: &Expression,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<CoreType, InferenceError> {
+        // Member-wise over a union subject: the field must exist on every shape the subject can
+        // take, and its type is the join of the per-member results.
+        if let CoreType::Union(members) = value_type {
+            let mut results = Vec::with_capacity(members.len());
+            for member in members {
+                let member = self.resolve_structural(member, type_definitions, Some(value))?;
+                results.push(self.dollar_result_type(
+                    member,
+                    value,
+                    name,
+                    expression,
+                    type_definitions,
+                )?);
+            }
+            return Ok(CoreType::union_of(results));
+        }
 
         match value_type {
             CoreType::Unknown => Ok(CoreType::Unknown),
@@ -4791,6 +5215,61 @@ enum ComparisonFamily {
     Logical,
 }
 
+// The per-pair result of an arithmetic operator over the member shapes of its two operands: a
+// vector member makes the pair's result a vector, both-`integer` pairs stay `integer`, and any
+// `double` (or an always-`double` operator like `/`) promotes the pair. The caller joins the pairs
+// into the operation's result, so `(integer | double) + integer` is `integer | double`.
+fn member_wise_numeric_results(
+    left_parts: &[(OperandShape, Atomic)],
+    right_parts: &[(OperandShape, Atomic)],
+    numeric_result_atomic: NumericResultAtomic,
+) -> Vec<CoreType> {
+    let mut results = Vec::with_capacity(left_parts.len() * right_parts.len());
+    for (left_shape, left_atomic) in left_parts {
+        for (right_shape, right_atomic) in right_parts {
+            let shape = if *left_shape == OperandShape::Vector
+                || *right_shape == OperandShape::Vector
+            {
+                OperandShape::Vector
+            } else {
+                OperandShape::Scalar
+            };
+            let atomic = match numeric_result_atomic {
+                NumericResultAtomic::AlwaysDouble => Atomic::Double,
+                NumericResultAtomic::Promote => {
+                    if *left_atomic == Atomic::Integer && *right_atomic == Atomic::Integer {
+                        Atomic::Integer
+                    } else {
+                        Atomic::Double
+                    }
+                }
+            };
+            results.push(core_type_for_shape(shape, atomic));
+        }
+    }
+    results
+}
+
+// A comparison operand's member shapes: one for a concrete operand, all of them for a union
+// (member-wise acceptance: every member must be comparable). `None` when any member is not.
+fn comparison_operand_parts_list(
+    core_type: &CoreType,
+) -> Option<Vec<(OperandShape, ComparisonFamily)>> {
+    match core_type {
+        CoreType::Union(members) => members.iter().map(comparison_operand_parts).collect(),
+        other => comparison_operand_parts(other).map(|parts| vec![parts]),
+    }
+}
+
+// The shapes a comparison operand can take; a still-flexible operand (`None` parts) behaves as a
+// scalar, matching the pre-union result rule.
+fn shapes_or_scalar(parts: &Option<Vec<(OperandShape, ComparisonFamily)>>) -> Vec<OperandShape> {
+    match parts {
+        Some(parts) => parts.iter().map(|(shape, _)| *shape).collect(),
+        None => vec![OperandShape::Scalar],
+    }
+}
+
 fn comparison_operand_parts(core_type: &CoreType) -> Option<(OperandShape, ComparisonFamily)> {
     let (shape, atomic) = match core_type {
         CoreType::Scalar(atomic) => (OperandShape::Scalar, *atomic),
@@ -4808,25 +5287,27 @@ fn comparison_operand_parts(core_type: &CoreType) -> Option<(OperandShape, Compa
     Some((shape, family))
 }
 
-// How an operand of an arithmetic operator classifies: a concrete numeric shape, a still-flexible
-// inference variable (which becomes numeric-constrained), an `Any`/`Unknown` short-circuit, or a
-// hard error.
-#[derive(Debug, Clone, Copy)]
+// How an operand of an arithmetic operator classifies: a concrete numeric shape, a union whose
+// members are all concrete numeric shapes (accepted member-wise), a still-flexible inference
+// variable (which becomes numeric-constrained), an `Any`/`Unknown` short-circuit, or a hard error.
+#[derive(Debug, Clone)]
 enum NumericOperand {
     Concrete(OperandShape, Atomic),
+    // Every member of a union operand, in member order. The operation applies to each member and
+    // the result is the join of the per-member results (see "Operators over union operands" in the
+    // typing reference).
+    ConcreteUnion(Vec<(OperandShape, Atomic)>),
     Variable(InferenceVariableId),
     AnyUnknown,
     Invalid,
 }
 
 impl NumericOperand {
-    fn is_vector(self) -> bool {
-        matches!(self, NumericOperand::Concrete(OperandShape::Vector, _))
-    }
-
-    fn concrete_atomic(self) -> Option<Atomic> {
+    // The operand's member shapes: one for a concrete operand, all of them for a union.
+    fn concrete_parts(&self) -> Option<Vec<(OperandShape, Atomic)>> {
         match self {
-            NumericOperand::Concrete(_, atomic) => Some(atomic),
+            NumericOperand::Concrete(shape, atomic) => Some(vec![(*shape, *atomic)]),
+            NumericOperand::ConcreteUnion(parts) => Some(parts.clone()),
             _ => None,
         }
     }
@@ -4837,6 +5318,20 @@ fn classify_numeric_operand(core_type: &CoreType) -> NumericOperand {
         return NumericOperand::Concrete(shape, atomic);
     }
     match core_type {
+        // A union operand is numeric when every member is: `Any`/`Unknown`/nested unions cannot
+        // appear as members (union normalization absorbs or flattens them) and inference variables
+        // cannot either (a join binds a variable rather than uniting over it), so any non-numeric
+        // member makes the whole operand invalid — the error then shows the full union type.
+        CoreType::Union(members) => {
+            let mut parts = Vec::with_capacity(members.len());
+            for member in members {
+                match numeric_operand_parts(member) {
+                    Some(part) => parts.push(part),
+                    None => return NumericOperand::Invalid,
+                }
+            }
+            NumericOperand::ConcreteUnion(parts)
+        }
         CoreType::Variable(variable) => NumericOperand::Variable(*variable),
         CoreType::Any | CoreType::Unknown => NumericOperand::AnyUnknown,
         _ => NumericOperand::Invalid,
@@ -4950,11 +5445,20 @@ fn iterable_item_type(core_type: &CoreType) -> Option<CoreType> {
         CoreType::List(item_type) | CoreType::NamedList(item_type) => Some((**item_type).clone()),
         // A fixed-shape list iterates every element, so the loop variable can hold any of the item
         // types: the element type is their union (which collapses back to the single item type for
-        // a homogeneous list).
+        // a homogeneous list; the empty list's element type is `NULL`, the union of zero members).
         CoreType::Tuple(items) => Some(CoreType::union_of(items.clone())),
         CoreType::Record(fields) => Some(CoreType::union_of(
             fields.iter().map(|field| field.value.clone()).collect(),
         )),
+        // Member-wise over a union iterable: every member must itself be iterable, and the loop
+        // variable can hold any member's element type.
+        CoreType::Union(members) => {
+            let mut item_types = Vec::with_capacity(members.len());
+            for member in members {
+                item_types.push(iterable_item_type(member)?);
+            }
+            Some(CoreType::union_of(item_types))
+        }
         _ => None,
     }
 }

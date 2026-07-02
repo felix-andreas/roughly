@@ -233,9 +233,9 @@ impl PartialEq for TypeDefinitionsModule {
 /// source of truth for the type-error set. The lowering-phase classes (`AnnotationError` and
 /// lowering-originated `SyntaxError`) are unreachable: the public `lower` returns only the `Module` and
 /// drops its diagnostics, so they live outside this value and the comparison (see the harness module doc).
-/// `unused` holds the local-naming "assigned but never used" warnings (`DiagnosticCode::Naming`),
-/// synthesized from `NamesLocal::unused_bindings`. Like `strict_diagnostics` and `type_errors` it is
-/// computed unconditionally and gated by the consumer (production's `check_config.unused`), so it is kept
+/// `unused` holds the "assigned but never used" warnings (`DiagnosticCode::Unused`), synthesized from
+/// `NamesLocal::unused_assignments`. Like `strict_diagnostics` and `type_errors` it is computed
+/// unconditionally and gated by the consumer (production's `check_config.unused`), so it is kept
 /// out of the always-emitted `naming` field — which stays the verbatim `resolve_document_locally` output.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileDiagnostics {
@@ -1918,21 +1918,21 @@ fn strict_origin_diagnostics(
         .collect()
 }
 
-// The local-naming "unused binding" warnings, ported verbatim from `analysis.rs`'s `document_diagnostics`:
-// one warning per `unused_bindings` entry, phrased against the bound name. All the eligibility rules
-// (only `LocalAssignment`, never a read binding, and `.`/`_`-prefixed throwaways skipped) already ran in
-// `resolve_document_locally` when it populated `unused_bindings`, so this only resolves the name and renders.
-// The message string is mirrored from `analysis.rs` (the analysis subsystem is unreachable across the crate
-// boundary) and must stay byte-identical for the differential comparison.
+// The "assigned but never used" warnings, ported verbatim from `analysis.rs`'s `document_diagnostics`:
+// one warning per `unused_assignments` entry, phrased against the assigned name at the assignment site.
+// All the eligibility rules (reaching-write reachability, top-level/parameter/for-variable exclusions,
+// and `.`/`_`-prefixed throwaways skipped) already ran in `resolve_document_locally` when it populated
+// `unused_assignments`, so this only resolves the name and renders. The message string is mirrored from
+// `analysis.rs` (the analysis subsystem is unreachable across the crate boundary) and must stay
+// byte-identical for the differential comparison.
 fn unused_diagnostics(local_naming: &NamesLocal, interner: &Interner) -> Vec<Diagnostic> {
     local_naming
-        .unused_bindings
+        .unused_assignments
         .iter()
-        .filter_map(|binding_id| local_naming.bindings.get(binding_id))
-        .map(|binding| {
-            let name = interner.resolve(binding.symbol).unwrap_or("<unknown>");
-            Diagnostic::naming_warning(
-                binding.range,
+        .map(|unused| {
+            let name = interner.resolve(unused.symbol).unwrap_or("<unknown>");
+            Diagnostic::unused_warning(
+                unused.range,
                 format!("`{name}` is assigned but never used."),
             )
         })

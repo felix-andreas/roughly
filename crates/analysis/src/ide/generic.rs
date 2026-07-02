@@ -705,12 +705,30 @@ pub fn definition(
 
     let occurrences =
         symbol_occurrences_at(database, path, position, OccurrenceScope::Declaration)?;
-    let definitions = occurrences
+    let mut definitions = occurrences
         .into_iter()
         .filter(|occurrence| occurrence.is_declaration)
         .map(|occurrence| occurrence.location)
         .collect::<Vec<_>>();
+    // A local variable slot counts every write as a declaration; goto-definition targets the
+    // slot's first write for a deterministic single answer (offering every reaching write is a
+    // possible later refinement). Occurrences come in tree order, so the first is the first write.
+    if cursor_is_local_slot(database, path, position) {
+        definitions.truncate(1);
+    }
     (!definitions.is_empty()).then_some(definitions)
+}
+
+fn cursor_is_local_slot(database: &dyn IdeDatabase, path: &Path, position: TextPosition) -> bool {
+    let Some(document_id) = database.document_id_for_path(path) else {
+        return false;
+    };
+    let Some(document) = database.document_by_id(document_id) else {
+        return false;
+    };
+    identifier_at_position(document.tree(), position)
+        .and_then(|identifier| symbol_target_for_identifier(database, document_id, identifier))
+        .is_some_and(|target| matches!(target, SymbolTarget::Local { .. }))
 }
 
 fn type_name_definition_at(

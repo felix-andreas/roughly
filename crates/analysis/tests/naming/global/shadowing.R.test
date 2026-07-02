@@ -35,12 +35,12 @@ f <- function(x) {
   x
 }
 #++++
-Assign(f@b2)
+Assign(f@b1)
   Function(x@b0)
     Block
-      Assign(x@b1)
+      Assign(x@b0)
         Character("\"ok\"")
-      Symbol(x@b1)
+      Symbol(x@b0)
 
 #==== nested_functions
 #---- nested_function_parameter_shadows_enclosing_binding
@@ -115,12 +115,12 @@ f <- function(x) {
 #++++
 Assign(x@b0)
   Integer(1L)
-Assign(f@b3)
+Assign(f@b2)
   Function(x@b1)
     Block
-      Assign(x@b2)
+      Assign(x@b1)
         Character("\"ok\"")
-      Symbol(x@b2)
+      Symbol(x@b1)
 
 #==== for_loops
 #---- for_variable_shadows_outer_binding_inside_loop

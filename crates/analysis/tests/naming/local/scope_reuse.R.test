@@ -101,9 +101,9 @@ For(x@b1)
       Integer(1L)
   Block
     Block
-      Assign(x@b2)
+      Assign(x@b1)
         Integer(2L)
-    Symbol(x@b2)
+    Symbol(x@b1)
 Symbol(x@?)
 
 No diagnostics.

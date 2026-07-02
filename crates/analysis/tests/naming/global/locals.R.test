@@ -21,14 +21,14 @@ f <- function() {
   value
 }
 #++++
-Assign(f@b2)
+Assign(f@b1)
   Function()
     Block
       Assign(value@b0)
         Integer(1L)
-      Assign(value@b1)
+      Assign(value@b0)
         Character("\"ok\"")
-      Symbol(value@b1)
+      Symbol(value@b0)
 
 #---- assignment_rhs_sees_outer_parameter_before_local_rebinding
 #---- R/main.R
@@ -37,12 +37,12 @@ f <- function(x) {
   x
 }
 #++++
-Assign(f@b2)
+Assign(f@b1)
   Function(x@b0)
     Block
-      Assign(x@b1)
+      Assign(x@b0)
         Symbol(x@b0)
-      Symbol(x@b1)
+      Symbol(x@b0)
 
 #---- local_assignment_shadows_top_level_binding
 #---- R/main.R
@@ -68,12 +68,12 @@ f <- function(x) {
   x
 }
 #++++
-Assign(f@b2)
+Assign(f@b1)
   Function(x@b0)
     Block
-      Assign(x@b1)
+      Assign(x@b0)
         Character("\"ok\"")
-      Symbol(x@b1)
+      Symbol(x@b0)
 
 #---- assignment_rhs_can_use_other_outer_binding_while_rebinding_different_name
 #---- R/main.R

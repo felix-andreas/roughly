@@ -47,9 +47,9 @@ For(x@b1)
     Argument
       Integer(1L)
   Block
-    Assign(x@b2)
+    Assign(x@b1)
       Symbol(x@b1)
-    Symbol(x@b2)
+    Symbol(x@b1)
 Symbol(x@b0)
 
 #---- assignment_inside_loop_rhs_can_use_other_outer_binding
@@ -71,7 +71,7 @@ For(x@b1)
   Block
     Assign(y@b2)
       Symbol(y@b0)
-    Symbol(y@b2)
+    Symbol(y@b0)
 Symbol(y@b0)
 
 #---- nested_closure_inside_loop_captures_loop_binding

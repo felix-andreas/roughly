@@ -213,7 +213,7 @@ y
 #++++
 integer
 character | NULL
-character
+integer | character
 
 #==== audit_control_flow_explore
 #---- while_value_assigned_null

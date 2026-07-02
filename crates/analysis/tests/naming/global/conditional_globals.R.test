@@ -159,8 +159,8 @@ warning[naming] I could not resolve `x` in this package, its imports, or builtin
 --> 1:1-1:2
 | x
 
-#==== conditional_top_level_reference_is_not_a_local
-#---- reference_within_top_level_if_body_is_not_a_local
+#==== conditional_top_level_slots
+#---- reference_within_top_level_if_body_resolves_to_slot
 #---- R/a.R
 if (TRUE) {
   x <- 1L
@@ -172,8 +172,39 @@ If
   Block
     Assign(x@b0)
       Integer(1L)
-    Symbol(x@?)
+    Symbol(x@b0)
 
-warning[naming] I could not resolve `x` in this package, its imports, or builtins.
---> 3:3-3:4
-|   x
+#---- reference_after_top_level_if_resolves_with_warning
+#---- R/a.R
+if (TRUE) {
+  x <- 1L
+}
+x
+#++++
+If
+  Logical(true)
+  Block
+    Assign(x@b0)
+      Integer(1L)
+Symbol(x@b0)
+
+warning[naming] `x` might be undefined here because it is introduced only in conditionally executed code.
+--> 4:1-4:2
+| x
+
+#---- conditional_reassignment_of_global_keeps_global_resolution
+#---- R/a.R
+x <- 1L
+if (TRUE) {
+  x <- 2L
+}
+x
+#++++
+Assign(x@b0)
+  Integer(1L)
+If
+  Logical(true)
+  Block
+    Assign(x@b1)
+      Integer(2L)
+Symbol(x@b0)

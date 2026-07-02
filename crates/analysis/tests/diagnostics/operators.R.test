@@ -57,3 +57,35 @@ error[type-error] expected a scalar numeric value (`integer` or `double`), found
 error[type-error] expected a numeric value (`integer` or `double`), found `character`
 --> 1:1-1:4
 | "a" %% 2L
+
+#==== union_operands
+#---- conditional_retype_makes_arithmetic_unsound
+f <- function(flag) {
+  x <- 1L
+  if (flag) x <- "two"
+  x + 1L
+}
+#++++
+error[type-error] expected a numeric value (`integer` or `double`), found `integer | character`
+--> 4:3-4:4
+|   x + 1L
+
+#---- numeric_union_arithmetic_is_clean
+f <- function(flag) {
+  x <- 1L
+  if (flag) x <- 2.5
+  x + 1L
+}
+#++++
+No diagnostics.
+
+#---- union_with_character_member_fails_comparison
+f <- function(flag) {
+  x <- 1L
+  if (flag) x <- "two"
+  x > 0L
+}
+#++++
+error[type-error] expected `integer | character`, found `integer`
+--> 4:3-4:9
+|   x > 0L

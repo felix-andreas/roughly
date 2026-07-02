@@ -425,17 +425,15 @@ impl Analysis {
         if let Some(output) = self.document_naming_outputs.get(&document_id) {
             diagnostics.extend(output.diagnostics.iter().cloned());
             if self.check_config.unused {
-                for binding_id in &output.output.unused_bindings {
-                    if let Some(binding) = output.output.bindings.get(binding_id) {
-                        let name = self
-                            .interner()
-                            .resolve(binding.symbol)
-                            .unwrap_or("<unknown>");
-                        diagnostics.push(Diagnostic::naming_warning(
-                            binding.range,
-                            format!("`{name}` is assigned but never used."),
-                        ));
-                    }
+                for unused in &output.output.unused_assignments {
+                    let name = self
+                        .interner()
+                        .resolve(unused.symbol)
+                        .unwrap_or("<unknown>");
+                    diagnostics.push(Diagnostic::unused_warning(
+                        unused.range,
+                        format!("`{name}` is assigned but never used."),
+                    ));
                 }
             }
         }

@@ -73,12 +73,12 @@ f <- function(x) {
   x
 }
 #++++
-Assign(f@b2)
+Assign(f@b1)
   Function(x@b0)
     Block
-      Assign(x@b1)
+      Assign(x@b0)
         Character("\"ok\"")
-      Symbol(x@b1)
+      Symbol(x@b0)
 
 #---- function_body_uses_global_when_parameter_does_not_match
 #---- R/main.R

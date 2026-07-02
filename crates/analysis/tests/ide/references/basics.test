@@ -80,10 +80,14 @@ R/main.R:2:3
 #++++
 R/main.R:2:3..2:8 [declaration]
 R/main.R:3:3..3:8
+R/main.R:4:3..4:8
+R/main.R:5:3..5:8
 #!!!! references second_binding.references
 R/main.R:4:3
 #++++
-R/main.R:4:3..4:8 [declaration]
+R/main.R:2:3..2:8 [declaration]
+R/main.R:3:3..3:8
+R/main.R:4:3..4:8
 R/main.R:5:3..5:8
 
 #==== references_globals

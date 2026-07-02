@@ -48,9 +48,9 @@ For(x@b1)
     Argument
       Integer(1L)
   Block
-    Assign(x@b2)
+    Assign(x@b1)
       Symbol(x@b1)
-    Symbol(x@b2)
+    Symbol(x@b1)
 Symbol(x@?)
 
 No diagnostics.
@@ -73,7 +73,7 @@ For(x@b1)
   Block
     Assign(y@b2)
       Symbol(y@?)
-    Symbol(y@b2)
+    Symbol(y@?)
 Symbol(y@?)
 
 No diagnostics.

@@ -207,3 +207,83 @@ if (TRUE) 1L else u
 #++++
 Unknown
 Unknown
+
+#==== variable_joins
+#---- conditional_retype_joins_with_prior_state
+flag <- TRUE
+x <- 1L
+if (flag) x <- "a"
+x
+#++++
+logical
+integer
+character | NULL
+integer | character
+
+#---- both_branches_retype_join_without_prior_state_member
+flag <- TRUE
+x <- 1L
+if (flag) x <- "a" else x <- 2L
+x
+#++++
+logical
+integer
+character | integer
+character | integer
+
+#---- same_type_rewrite_keeps_single_type
+flag <- TRUE
+x <- 1L
+if (flag) x <- 2L
+x
+#++++
+logical
+integer
+integer | NULL
+integer
+
+#---- loop_accumulator_stays_integer
+total <- 0L
+for (i in 1:3) {
+  total <- total + i
+}
+total
+#++++
+integer
+NULL
+integer
+
+#---- loop_rewrite_joins_across_iterations
+flag <- TRUE
+x <- 1L
+while (flag) {
+  x <- "a"
+}
+x
+#++++
+logical
+integer
+NULL
+integer | character
+
+#---- repeat_division_widens_to_double
+x <- 1L
+repeat {
+  x <- x / 2
+}
+x
+#++++
+integer
+NULL
+double
+
+#---- structurally_growing_loop_slot_widens_to_unknown
+x <- 1L
+repeat {
+  x <- list(x)
+}
+x
+#++++
+integer
+NULL
+Unknown
