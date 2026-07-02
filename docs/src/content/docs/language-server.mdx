@@ -33,6 +33,9 @@ marked ⚠️ are planned but not yet available.
   - Rename variables across the whole workspace
   - Signature help
   - Inlay hints for inferred types
+  - Semantic highlighting of `#:` type annotations — types, type parameters, parameter names,
+    operators, and `@`-directives get distinct, theme-respecting colors (see the editor sections
+    below for setup)
 
 - **Formatting**
   - Format an entire document
@@ -66,7 +69,6 @@ receiving pushed diagnostics. Workspace-wide pull (`workspace/diagnostic`) is no
 Not yet available:
 
 - Completion for symbols from external packages
-- Semantic highlighting
 - Code actions and quick fixes
 
 ## Supported Editors
@@ -74,7 +76,8 @@ Not yet available:
 Roughly is a standard LSP implementation and works with any editor that speaks LSP:
 
 - **VS Code** — full support via the [dedicated extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
-- **Zed** — via the [Zed extension](https://zed.dev/extensions/roughly)
+- **Zed** — via the [Zed extension](https://zed.dev/extensions/roughly), alongside the R extension
+  (see [Zed Extension](#zed-extension))
 - **Other editors** — point your LSP client at `roughly server`
 
 ## VS Code Extension
@@ -125,6 +128,21 @@ You can customize the Roughly extension in VS Code through the following setting
 }
 ```
 
+### Annotation highlighting
+
+Inside `#:` comments, types, type parameters, parameter names, operators, and `@`-directives are
+colored distinctly instead of rendering as plain comment text. This needs no configuration and
+respects your color theme.
+
+Two mechanisms cooperate:
+
+- **LSP semantic tokens** (on by default in VS Code): the server classifies the annotation notation
+  and emits the standard `type`, `typeParameter`, `parameter`, `operator`, and `decorator` token
+  types.
+- **A TextMate injection grammar** bundled with the extension colors the same notation wherever
+  semantic tokens don't reach — for example when a theme disables semantic highlighting — and adds
+  colors for punctuation the semantic tokens skip (union `|`, brackets, commas).
+
 ### VS Code Commands
 
 Roughly's VS Code extension provides several commands to manage the language server:
@@ -134,3 +152,44 @@ Roughly's VS Code extension provides several commands to manage the language ser
 - **Restart Language Server**: Restart the language server (useful after configuration changes)
 - **Open Logs**: View the language server logs for troubleshooting
 - **Status Bar Integration**: Shows the current status of the language server and allows quick access to commands by clicking on the status indicator
+
+## Zed Extension
+
+The [Roughly extension for Zed](https://zed.dev/extensions/roughly) provides the language server for
+R files.
+
+Zed has no built-in R support, so install the [R extension](https://zed.dev/extensions/r) first — it
+registers the R language and its tree-sitter grammar, and Roughly's extension attaches the language
+server to that language. The `roughly` binary is found on your `PATH` or downloaded automatically
+from GitHub Releases; to use a specific binary, set it in your `settings.json`:
+
+```json
+{
+  "lsp": {
+    "roughly": {
+      "binary": { "path": "/path/to/roughly" }
+    }
+  }
+}
+```
+
+### Annotation highlighting in Zed
+
+Zed highlights code with tree-sitter, which treats a `#:` annotation as an ordinary comment. The
+distinct colors for types, type parameters, parameter names, operators, and `@`-directives come from
+the server via **LSP semantic tokens**, which Zed supports but leaves off by default. Enable them
+for R in your `settings.json`:
+
+```json
+{
+  "languages": {
+    "R": {
+      "semantic_tokens": "combined"
+    }
+  }
+}
+```
+
+`"combined"` layers the server's tokens over Zed's tree-sitter highlighting. Since Roughly emits
+semantic tokens only inside `#:` comments, everything else keeps its regular colors, and the
+annotation colors follow your theme through Zed's standard semantic-token rules.

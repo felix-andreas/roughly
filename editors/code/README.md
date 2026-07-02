@@ -35,6 +35,11 @@ Roughly aims to support the following language server features (some are experim
   - Rename global variables *(⚠️ missing)*
   - Signature help *(🔨 work in progress)*
 
+- **Highlighting**
+  - Distinct, theme-respecting colors inside `#:` type annotations — types, type parameters,
+    parameter names, operators, and `@`-directives (via semantic tokens, with a bundled TextMate
+    fallback for when semantic highlighting is off)
+
 ## Usage
 
 The extension will automatically start the Roughly language server for R files. You can also use the built-in commands to start, stop, or restart the server, or open logs.

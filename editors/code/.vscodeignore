@@ -6,6 +6,7 @@
 !README.md
 !LICENSE
 !language-configuration.json
+!r-annotation.tmLanguage.json
 !out/*.js
 !bin/roughly
 !bin/roughly.exe

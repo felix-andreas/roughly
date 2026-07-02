@@ -1,0 +1,144 @@
+{
+	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+	"name": "Roughly type annotation (injection)",
+	"scopeName": "roughly.type-annotation.injection",
+	"injectionSelector": "L:source.r -comment -string",
+	"patterns": [
+		{
+			"include": "#annotation-comment"
+		}
+	],
+	"repository": {
+		"annotation-comment": {
+			"name": "comment.line.number-sign.type-annotation.r",
+			"begin": "(#:)",
+			"beginCaptures": {
+				"1": {
+					"name": "punctuation.definition.comment.r"
+				}
+			},
+			"end": "$",
+			"patterns": [
+				{
+					"include": "#annotation-body"
+				}
+			]
+		},
+		"annotation-body": {
+			"patterns": [
+				{
+					"include": "#directive"
+				},
+				{
+					"include": "#type-parameters"
+				},
+				{
+					"include": "#variadic"
+				},
+				{
+					"include": "#arrow"
+				},
+				{
+					"include": "#parameter-name"
+				},
+				{
+					"include": "#builtin-type-name"
+				},
+				{
+					"include": "#type-name"
+				},
+				{
+					"include": "#separator"
+				},
+				{
+					"include": "#union"
+				},
+				{
+					"include": "#punctuation"
+				}
+			]
+		},
+		"directive": {
+			"name": "entity.name.function.decorator.r",
+			"match": "@[a-zA-Z_][\\w.-]*"
+		},
+		"type-parameters": {
+			"begin": "<",
+			"end": ">|(?=$)",
+			"beginCaptures": {
+				"0": {
+					"name": "punctuation.definition.typeparameters.begin.r"
+				}
+			},
+			"endCaptures": {
+				"0": {
+					"name": "punctuation.definition.typeparameters.end.r"
+				}
+			},
+			"patterns": [
+				{
+					"include": "#type-parameters"
+				},
+				{
+					"name": "entity.name.type.parameter.r",
+					"match": "[a-zA-Z_][\\w.]*"
+				},
+				{
+					"include": "#separator"
+				},
+				{
+					"name": "punctuation.separator.comma.r",
+					"match": ","
+				}
+			]
+		},
+		"variadic": {
+			"name": "keyword.operator.rest.r",
+			"match": "\\.{3}"
+		},
+		"arrow": {
+			"name": "keyword.operator.arrow.r",
+			"match": "->"
+		},
+		"parameter-name": {
+			"name": "variable.parameter.r",
+			"match": "[a-zA-Z_][\\w.]*(?=\\s*:)"
+		},
+		"builtin-type-name": {
+			"name": "support.type.primitive.r",
+			"match": "(?:logical|integer|double|complex|character|raw|NULL|Any|Unknown|fn|list)(?![\\w.])"
+		},
+		"type-name": {
+			"name": "entity.name.type.r",
+			"match": "[a-zA-Z_][\\w.]*"
+		},
+		"separator": {
+			"name": "keyword.operator.type.annotation.r",
+			"match": ":"
+		},
+		"union": {
+			"name": "keyword.operator.union.r",
+			"match": "\\|"
+		},
+		"punctuation": {
+			"patterns": [
+				{
+					"name": "punctuation.separator.comma.r",
+					"match": ","
+				},
+				{
+					"name": "punctuation.section.brackets.r",
+					"match": "[\\[\\]]"
+				},
+				{
+					"name": "punctuation.section.braces.r",
+					"match": "[{}]"
+				},
+				{
+					"name": "punctuation.section.parens.r",
+					"match": "[()]"
+				}
+			]
+		}
+	}
+}

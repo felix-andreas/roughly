@@ -75,6 +75,15 @@
 				"configuration": "language-configuration.json"
 			}
 		],
+		"grammars": [
+			{
+				"scopeName": "roughly.type-annotation.injection",
+				"path": "./r-annotation.tmLanguage.json",
+				"injectTo": [
+					"source.r"
+				]
+			}
+		],
 		"commands": [
 			{
 				"title": "Roughly: Restart Server",
