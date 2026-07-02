@@ -82,6 +82,23 @@ impl StubLibrary {
         Self { values }
     }
 
+    // Whether `namespace` is one the shipped corpus models (`base`, `stats`, …). An unknown
+    // namespace is a diagnostic at `pkg::name` sites; a known one gates the export check below.
+    pub fn is_known_namespace(&self, namespace: &str) -> bool {
+        SHIPPED_STUBS
+            .iter()
+            .any(|(shipped_namespace, _)| *shipped_namespace == namespace)
+    }
+
+    // Whether the corpus declares `symbol` in `namespace`. The corpus folds flat (one winner per
+    // name), so a name declared by a different shipped namespace does not count for this one.
+    pub fn namespace_exports(&self, namespace: &str, symbol: Symbol) -> bool {
+        self.values
+            .get(&symbol)
+            .and_then(|value| value.namespace)
+            .is_some_and(|shipped_namespace| shipped_namespace == namespace)
+    }
+
     pub fn contains(&self, symbol: Symbol) -> bool {
         self.values.contains_key(&symbol)
     }
@@ -184,6 +201,14 @@ fn harvest_stub_source(
         else {
             continue;
         };
+        // A project override of a shipped name replaces the scheme but keeps the shipped
+        // namespace tag: the override refines the type of `stats::sd`, it does not move `sd`
+        // out of `stats` — dropping the tag would make `stats::sd` warn "not exported".
+        let namespace = namespace.or_else(|| {
+            values
+                .get(&declaration.name)
+                .and_then(|existing| existing.namespace)
+        });
         values.insert(
             declaration.name,
             StubValue {

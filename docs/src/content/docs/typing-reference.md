@@ -934,6 +934,18 @@ Examples:
 - if the name is not bound, the checker reports an unknown-name diagnostic
 - after an unknown-name diagnostic, the reference expression is treated as `Unknown` so checking can continue without cascading secondary type errors
 
+### Namespace access
+
+`pkg::name` (and `pkg:::name`) reads one name directly from a package namespace, bypassing
+lexical scoping.
+
+- when the standard-library stubs declare `name` in `pkg`, the qualified read has the stub's
+  type, exactly like the bare name
+- an unknown namespace warns (`unknown package namespace `foobar``); a known namespace that does
+  not declare the name warns (``bazqux` is not exported by `stats``)
+- an unvalidated qualified read types as `Unknown`, and that reference is a strict origin
+- `::` and `:::` are not distinguished: the checker does not model the exported/internal split
+
 ### Function calls
 
 - a function call evaluates to the callee's return type

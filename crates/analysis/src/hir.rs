@@ -207,6 +207,13 @@ pub enum ExpressionKind {
     },
     Break,
     Next,
+    // `pkg::name` / `pkg:::name`: a direct read of one name from a package namespace, bypassing
+    // lexical scoping. Both operators lower identically — the checker does not model the
+    // exported/internal distinction.
+    NamespaceGet {
+        namespace: Symbol,
+        name: Symbol,
+    },
     Unsupported,
 }
 
@@ -289,6 +296,7 @@ pub fn replacement_base(arena: &HirArena, lhs: ExpressionId) -> Option<(Expressi
 pub fn contains_loop_exit(arena: &HirArena, root: ExpressionId) -> bool {
     match &arena.get(root).kind {
         ExpressionKind::Break | ExpressionKind::Next => true,
+        ExpressionKind::NamespaceGet { .. } => false,
         ExpressionKind::Block { expressions, .. } => expressions
             .iter()
             .any(|expression| contains_loop_exit(arena, *expression)),
@@ -619,6 +627,9 @@ impl Module {
                 let name_str = interner.resolve(*name).unwrap_or("<unknown>");
                 out.push_str(&format!("{prefix}Dollar {name_str}\n"));
                 self.render_expression(*value, indent + 1, out, interner);
+            }
+            ExpressionKind::NamespaceGet { namespace, name } => {
+                out.push_str(&format!("{prefix}NamespaceGet({namespace:?}, {name:?})\n"))
             }
             ExpressionKind::Break => out.push_str(&format!("{prefix}Break\n")),
             ExpressionKind::Next => out.push_str(&format!("{prefix}Next\n")),

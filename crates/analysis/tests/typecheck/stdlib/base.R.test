@@ -662,3 +662,14 @@ assign("count", 1L)
 logical
 Any
 Any
+
+#==== namespace_qualified_access
+#---- qualified_stub_call_types_like_the_bare_name
+deviation <- stats::sd(c(1, 2, 3))
+#++++
+double
+
+#---- unknown_namespace_read_is_unknown
+mystery <- foobar::bazqux
+#++++
+Unknown

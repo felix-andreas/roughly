@@ -1648,6 +1648,22 @@ impl InferenceState {
             // loops they belong to, they type as `NULL`. They are fully understood constructs, so
             // they are not strict origins.
             ExpressionKind::Break | ExpressionKind::Next => Ok(CoreType::Null),
+            // `pkg::name` resolves against the seeded stub corpus by name. Whether the name really
+            // belongs to `pkg` is validated by naming (which owns the corpus's namespace facts and
+            // warns there); typing degrades to `Unknown` when nothing is seeded, and that gap is a
+            // strict origin at this reference.
+            ExpressionKind::NamespaceGet { name, .. } => {
+                if let Some(binding) = self.lookup_global_name(*name) {
+                    let type_scheme = binding.type_scheme.clone();
+                    return self.instantiate_type_scheme(&type_scheme);
+                }
+                self.record_strict_origin(
+                    expression.id,
+                    expression.range,
+                    StrictOriginKind::UndeterminedReference(*name),
+                );
+                Ok(CoreType::Unknown)
+            }
             ExpressionKind::Unsupported => {
                 self.record_strict_origin(
                     expression.id,

@@ -204,6 +204,7 @@ fn lower_node_inner(
         kind::SUBSET => lower_subset(node, rope, lowering_context),
         kind::SUBSET2 => lower_subset2(node, rope, lowering_context),
         kind::EXTRACT_OPERATOR => lower_extract_operator(node, rope, lowering_context),
+        kind::NAMESPACE_OPERATOR => lower_namespace_operator(node, rope, lowering_context),
         kind::PARENTHESIZED_EXPRESSION => {
             if let Some(inner) = first_named_child(node) {
                 return lower_node_with_rope(inner, rope, lowering_context);
@@ -214,6 +215,28 @@ fn lower_node_inner(
     };
 
     lowering_context.annotated_expression(node.range(), None, kind)
+}
+
+// `pkg::name` / `pkg:::name`. Only the plain identifier-on-both-sides shape is modeled; string
+// or computed sides stay unsupported.
+fn lower_namespace_operator(
+    node: Node<'_>,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
+) -> ExpressionKind {
+    let Some(lhs) = node.child_by_field_id(field::LHS) else {
+        return ExpressionKind::Unsupported;
+    };
+    let Some(rhs) = node.child_by_field_id(field::RHS) else {
+        return ExpressionKind::Unsupported;
+    };
+    if lhs.kind_id() != kind::IDENTIFIER || rhs.kind_id() != kind::IDENTIFIER {
+        return ExpressionKind::Unsupported;
+    }
+    ExpressionKind::NamespaceGet {
+        namespace: intern_node_text(lhs, rope, lowering_context),
+        name: intern_node_text(rhs, rope, lowering_context),
+    }
 }
 
 fn lower_binary_operator(

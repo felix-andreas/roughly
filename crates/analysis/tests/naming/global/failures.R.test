@@ -202,3 +202,49 @@ Assign(value@b0)
 error[naming] I could not resolve type `Person`.
 --> 1:4-1:10
 | #: Person
+
+#==== namespace_reads
+#---- known_namespace_and_export_is_clean
+#---- R/main.R
+deviation <- stats::sd(c(1, 2, 3))
+#++++
+Assign(deviation@b0)
+  Call
+    NamespaceGet(Symbol(847), Symbol(545))
+    Argument
+      Call
+        Symbol(c@?)
+        Argument
+          Double(1)
+        Argument
+          Double(2)
+        Argument
+          Double(3)
+
+#---- unknown_namespace_warns
+#---- R/main.R
+result <- foobar::bazqux(1L)
+#++++
+Assign(result@b0)
+  Call
+    NamespaceGet(Symbol(847), Symbol(848))
+    Argument
+      Integer(1L)
+
+warning[naming] unknown package namespace `foobar`.
+--> 1:11-1:25
+| result <- foobar::bazqux(1L)
+
+#---- known_namespace_unknown_export_warns
+#---- R/main.R
+result <- stats::bazqux(1L)
+#++++
+Assign(result@b0)
+  Call
+    NamespaceGet(Symbol(847), Symbol(848))
+    Argument
+      Integer(1L)
+
+warning[naming] `bazqux` is not exported by `stats`.
+--> 1:11-1:24
+| result <- stats::bazqux(1L)

@@ -1417,6 +1417,24 @@ fn package_naming_diagnostics(
         ));
     }
 
+    // `pkg::name` validation, mirroring production's namespace-read loop byte-for-byte.
+    for read in &local_naming.namespace_reads {
+        let range = module.arena.get(read.expression_id).range;
+        let namespace = interner.resolve(read.namespace).unwrap_or("<unknown>");
+        if !group.stubs.is_known_namespace(namespace) {
+            diagnostics.push(Diagnostic::naming_warning(
+                range,
+                format!("unknown package namespace `{namespace}`."),
+            ));
+        } else if !group.stubs.namespace_exports(namespace, read.name) {
+            let name = interner.resolve(read.name).unwrap_or("<unknown>");
+            diagnostics.push(Diagnostic::naming_warning(
+                range,
+                format!("`{name}` is not exported by `{namespace}`."),
+            ));
+        }
+    }
+
     diagnostics
 }
 

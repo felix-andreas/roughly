@@ -708,6 +708,14 @@ fn render_expression_hover(database: &dyn IdeDatabase, expression: &Expression) 
             let name = database.interner().resolve(*name).unwrap_or("<unknown>");
             format!("Dollar({name})")
         }
+        ExpressionKind::NamespaceGet { namespace, name } => format!(
+            "NamespaceGet({}::{})",
+            database
+                .interner()
+                .resolve(*namespace)
+                .unwrap_or("<unknown>"),
+            database.interner().resolve(*name).unwrap_or("<unknown>")
+        ),
         ExpressionKind::Break => "Break".to_owned(),
         ExpressionKind::Next => "Next".to_owned(),
         ExpressionKind::Unsupported => "Unsupported".to_owned(),

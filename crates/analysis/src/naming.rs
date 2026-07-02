@@ -16,6 +16,13 @@ use {
     tree_sitter::Range,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NamespaceRead {
+    pub expression_id: ExpressionId,
+    pub namespace: Symbol,
+    pub name: Symbol,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NamesGlobal {
     pub global_bindings: BTreeMap<Symbol, DocumentId>,
@@ -30,6 +37,9 @@ pub struct NamesLocal {
     pub expression_resolutions: BTreeMap<ExpressionId, BindingId>,
     pub maybe_undefined_expressions: BTreeSet<ExpressionId>,
     pub non_locals: BTreeMap<ExpressionId, Symbol>,
+    // `pkg::name` reads, in tree order. Validity against the stub corpus is a package-level fact
+    // (the corpus lives there), so the local walk only records the raw triple.
+    pub namespace_reads: Vec<NamespaceRead>,
     pub named_type_annotations: Vec<ExpressionId>,
     // Assignment writes whose value no read can reach on any control-flow path (dead stores).
     // Computed from the reaching-write sets during resolution; surfaced as diagnostics only when
@@ -350,6 +360,23 @@ pub(crate) fn package_document_diagnostics(
             range,
             format!("I could not resolve `{name}` in this package, its imports, or builtins."),
         ));
+    }
+
+    for read in &context.local_naming.namespace_reads {
+        let range = context.module.arena.get(read.expression_id).range;
+        let namespace = interner.resolve(read.namespace).unwrap_or("<unknown>");
+        if !context.stub_library.is_known_namespace(namespace) {
+            diagnostics.push(Diagnostic::naming_warning(
+                range,
+                format!("unknown package namespace `{namespace}`."),
+            ));
+        } else if !context.stub_library.namespace_exports(namespace, read.name) {
+            let name = interner.resolve(read.name).unwrap_or("<unknown>");
+            diagnostics.push(Diagnostic::naming_warning(
+                range,
+                format!("`{name}` is not exported by `{namespace}`."),
+            ));
+        }
     }
 
     diagnostics
@@ -1318,6 +1345,13 @@ impl<'a> DocumentNamingContext<'a> {
             }
             ExpressionKind::Dollar { value, .. } => {
                 self.resolve_expression(*value);
+            }
+            ExpressionKind::NamespaceGet { namespace, name } => {
+                self.document_naming.namespace_reads.push(NamespaceRead {
+                    expression_id,
+                    namespace: *namespace,
+                    name: *name,
+                });
             }
             ExpressionKind::Null
             | ExpressionKind::Logical(_)

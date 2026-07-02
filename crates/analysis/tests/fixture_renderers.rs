@@ -452,6 +452,9 @@ fn render_named_expression(
             lines.push(format!("{prefix}Dollar({rendered_name})"));
             render_nested(*value, indent + 1, lines);
         }
+        ExpressionKind::NamespaceGet { namespace, name } => {
+            lines.push(format!("{prefix}NamespaceGet({namespace:?}, {name:?})"));
+        }
         ExpressionKind::Break => lines.push(format!("{prefix}Break")),
         ExpressionKind::Next => lines.push(format!("{prefix}Next")),
         ExpressionKind::Unsupported => lines.push(format!("{prefix}Unsupported")),
@@ -631,6 +634,9 @@ fn render_locally_named_expression(
             let rendered_name = interner.resolve(*name).unwrap_or("<unknown>");
             lines.push(format!("{prefix}Dollar({rendered_name})"));
             render_nested(*value, indent + 1, lines);
+        }
+        ExpressionKind::NamespaceGet { namespace, name } => {
+            lines.push(format!("{prefix}NamespaceGet({namespace:?}, {name:?})"));
         }
         ExpressionKind::Break => lines.push(format!("{prefix}Break")),
         ExpressionKind::Next => lines.push(format!("{prefix}Next")),
