@@ -252,3 +252,57 @@ render <- function(value) value
 apply_transform(render)
 #++++
 error: type mismatch
+
+#==== parameter_coercions
+#---- whole_number_literal_accepted_at_integer_parameter
+#: fn(n: integer) -> integer
+f <- function(n) n
+f(10)
+#++++
+fn(n: integer) -> integer
+integer
+
+#---- fractional_literal_rejected_at_integer_parameter
+#: fn(n: integer) -> integer
+f <- function(n) n
+f(2.5)
+#++++
+error: type mismatch
+
+#---- double_variable_rejected_at_integer_parameter
+#: fn(n: integer) -> integer
+f <- function(n) n
+x <- 10
+f(x)
+#++++
+error: type mismatch
+
+#---- integer_widens_at_double_parameter
+#: fn(x: double) -> double
+g <- function(x) x
+g(1L)
+#++++
+fn(x: double) -> double
+double
+
+#---- integer_vector_widens_at_double_vector_parameter
+#: fn(x: double[]) -> double
+h <- function(x) 1.0
+h(c(1L, 2L))
+#++++
+fn(x: double[]) -> double
+double
+
+#---- double_rejected_at_integer_annotation
+#: integer
+value <- 1.5
+#++++
+error: type mismatch
+
+#---- whole_number_literal_accepted_at_integer_annotation
+#: fn(n: integer, m: integer) -> integer
+add2 <- function(n, m) n
+add2(3, m = 4)
+#++++
+fn(n: integer, m: integer) -> integer
+integer

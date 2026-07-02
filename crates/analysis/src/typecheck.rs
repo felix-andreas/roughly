@@ -2992,10 +2992,28 @@ impl InferenceState {
                 )
             }
             (CoreType::Scalar(actual_atomic), CoreType::Vector(expected_atomic)) => {
-                Ok(actual_atomic == expected_atomic)
+                Ok(atomic_widens_to(actual_atomic, expected_atomic))
             }
             (CoreType::NamedVector(actual_atomic), CoreType::Vector(expected_atomic)) => {
-                Ok(actual_atomic == expected_atomic)
+                Ok(atomic_widens_to(actual_atomic, expected_atomic))
+            }
+            // `integer` widens to `double` in compatibility (a directional check only — unification
+            // never widens): R freely promotes integers in numeric contexts, and without this every
+            // numeric parameter in the stub corpus had to be `Any` to avoid rejecting `mean(1L)`.
+            (CoreType::Scalar(actual_atomic), CoreType::Scalar(expected_atomic))
+                if atomic_widens_to(actual_atomic, expected_atomic) =>
+            {
+                Ok(true)
+            }
+            (CoreType::Vector(actual_atomic), CoreType::Vector(expected_atomic))
+                if atomic_widens_to(actual_atomic, expected_atomic) =>
+            {
+                Ok(true)
+            }
+            (CoreType::NamedVector(actual_atomic), CoreType::NamedVector(expected_atomic))
+                if atomic_widens_to(actual_atomic, expected_atomic) =>
+            {
+                Ok(true)
             }
             // Fixed-shape structural compatibility, checked covariantly per element/field. This is
             // what lets `@new` and checked annotations on a `list(...)` accept (and unify) a value
@@ -4821,6 +4839,22 @@ impl InferenceState {
             return Ok(());
         }
 
+        // R programmers write `seq_len(10)`, not `seq_len(10L)`: a whole-number double literal
+        // counts as an integer at a parameter position, the same rule `:` applies to its
+        // endpoints. The retry goes through full compatibility, so integer-expecting unions and
+        // vector parameters admit the literal too.
+        if resolved_argument == CoreType::Scalar(Atomic::Double)
+            && is_whole_number_double_literal(argument_expression)
+            && self.check_compatibility(
+                CoreType::Scalar(Atomic::Integer),
+                parameter_type.clone(),
+                type_definitions,
+                Some(argument_expression),
+            )?
+        {
+            return Ok(());
+        }
+
         // A numeric-constrained parameter rejected the argument because it is not numeric; report
         // that directly rather than rendering the bare inference variable as the expected type.
         let resolved_parameter = self.resolve(parameter_type)?;
@@ -6171,6 +6205,12 @@ fn core_type_for_shape(shape: OperandShape, atomic: Atomic) -> CoreType {
 
 fn nullable_type(core_type: CoreType) -> CoreType {
     CoreType::union_of(vec![core_type, CoreType::Null])
+}
+
+// The one atomic widening compatibility admits: `integer` fits where `double` is expected. All
+// other atomic pairs must match exactly.
+fn atomic_widens_to(actual: Atomic, expected: Atomic) -> bool {
+    actual == expected || (actual == Atomic::Integer && expected == Atomic::Double)
 }
 
 // Replaces every inference variable in an (already-resolved) type with `Unknown`, for values that

@@ -354,9 +354,17 @@ value
 list[list[list[integer]]]
 list[list[list[integer]]]
 
-#---- tuple_int_double_to_double_array
+#---- tuple_int_double_widens_to_double_array
 #: list[double]
 value <- list(1L, 2.0)
+value
+#++++
+list[double]
+list[double]
+
+#---- tuple_double_to_integer_array_still_rejected
+#: list[integer]
+value <- list(1L, 2.5)
 value
 #++++
 error: type mismatch

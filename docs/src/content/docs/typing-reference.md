@@ -409,6 +409,7 @@ Examples:
 
 - scalar-like vectors `T` can coerce to array-like vectors `T[]`
 - map-like vectors `T[named]` can coerce to array-like vectors `T[]`
+- `integer` shapes coerce to the corresponding `double` shapes (`integer` to `double`, `integer[]` to `double[]`, `integer[named]` to `double[named]`, and compositions such as scalar `integer` to `double[]`); the reverse never holds
 - reverse coercions are not allowed unless explicitly stated by another rule
 
 Whether a coercion changes the resulting type depends on the construct using it.
@@ -949,6 +950,8 @@ A function call is a type error when:
 Argument checking is compatibility-based, not exact-equality-based:
 
 - the ordinary coercions defined in this document apply at parameter positions, for example scalar-like `T` into array-like `T[]` and `T` or `NULL` into `T | NULL`
+- `integer` is compatible where `double` is expected (scalar-like, array-like, and map-like alike): R freely promotes integers in numeric contexts, so `mean(1L)` and `sd(c(1L, 2L))` are not errors. The widening is directional — `double` is never accepted where `integer` is expected, and unification does not widen
+- a **whole-number `double` literal** such as `10` or `3` counts as `integer` at a parameter position — `seq_len(10)` and `substr(x, 1, 3)` are as valid as their `10L`/`1L`/`3L` spellings, generalizing the rule the `:` operator already applies to its endpoints. A fractional literal (`2.5`) and a `double`-typed *variable* holding a whole number are still rejected at an `integer` parameter
 - an argument whose type is `Unknown` is accepted at any parameter; the reason the value became `Unknown` was already diagnosed where it happened, and repeating it at every later use would only cascade noise
 
 A **rest parameter** (`...: TYPE`) changes how surplus arguments are handled:
