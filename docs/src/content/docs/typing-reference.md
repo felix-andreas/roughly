@@ -629,14 +629,28 @@ Examples:
 - `fn(T) -> T`
 - `T | NULL`
 
-For now, type parameters are not allowed in atomic vector suffix forms.
-
-This is deferred because forms like `T[]` and `T[named]` would imply that `T` is restricted to atomic vector element types. The generic system does not yet model that kind of constraint, so these forms remain disallowed for now instead of implicitly introducing one.
-
-Not allowed:
+Type parameters are also allowed in the atomic vector suffix forms:
 
 - `T[]`
 - `T[named]`
+
+Using a type parameter as a vector element restricts it: `T` in `T[]` carries the **atomic-element
+bound** and can only instantiate to one of the six atomic types (`logical`, `integer`, `double`,
+`complex`, `character`, `raw`). This is what makes element-preserving signatures expressible —
+`sort : <T> fn(x: T[]) -> T[]` types `sort(c("b", "a"))` as `character[]` and `sort(c(1L))` as
+`integer[]`, while `sort(list(1))` is a type error because a list is not an atomic element type.
+
+- a scalar argument coerces into a generic vector parameter and binds the element (`<T> fn(x: T[])`
+  called with `2.5` binds `T := double`)
+- `[[` on a generic vector `T[]` extracts `T`
+- an arithmetic operator over a `T[]` operand additionally requires the element to be numeric (the
+  variable then holds both bounds: a scalar `integer` or `double`); the result keeps the element —
+  `sort(x) + 1L` is still `T[]` — unless a `double` operand promotes the result to `double[]`
+- a comparison over a `T[]` operand yields `logical[]`; a numeric partner constrains the element
+  numeric
+
+A bound that can no longer be satisfied — binding an element variable to a non-atomic type, or
+requiring a `character` element to be numeric — is a type error at the expression that imposed it.
 
 Named generic aliases and nominal types are applied with angle brackets.
 
@@ -1066,6 +1080,13 @@ Some indexing forms remain unsupported for now. In particular, this document doe
 
 An unannotated value used as a numeric operand is constrained to be numeric rather than rejected.
 A numeric constraint restricts an inference variable to `integer` or `double` (any vector shape).
+
+Two other bounds exist alongside it. The **atomic-element** bound restricts a variable to a scalar
+atomic type; it is introduced by using a type parameter as a vector element (`T[]` — see
+[Type parameters and generic application](#type-parameters-and-generic-application)) and renders
+`<T: atomic>`. A variable that acquires both bounds — a generic vector element used arithmetically —
+holds their meet, rendered `<T: scalar numeric>`: a scalar `integer` or `double`. It defaults to
+`double` at a binding boundary exactly like a plain numeric variable.
 
 - when the constraint reaches a binding boundary still unresolved and abstracted by a function
   parameter, it generalizes into a numeric-constrained type parameter, rendered `<T: numeric>`

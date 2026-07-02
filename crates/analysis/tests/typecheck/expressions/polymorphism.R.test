@@ -130,3 +130,45 @@ apply_once(render, 1L)
 fn(transform: fn(?1) -> ?2, value: ?1) -> ?2
 fn(count: integer) -> character
 character
+
+#==== generic_vector_elements
+#---- forall_vector_element_preserves_atomic
+#: <T> fn(x: T[]) -> T[]
+same <- function(x) x
+same(c(1L, 2L))
+same(c("a", "b"))
+#++++
+fn(x: ?1[]) -> ?1[]
+integer[]
+character[]
+
+#---- forall_vector_element_accepts_scalar_coercion
+#: <T> fn(x: T[]) -> T[]
+same <- function(x) x
+same(2.5)
+#++++
+fn(x: ?1[]) -> ?1[]
+double[]
+
+#---- forall_vector_element_rejects_list
+#: <T> fn(x: T[]) -> T[]
+same <- function(x) x
+same(list(1L, 2L))
+#++++
+error: type mismatch
+
+#---- forall_vector_element_used_arithmetically
+#: <T> fn(x: T[]) -> T[]
+same <- function(x) x
+same(c(1L, 2L)) + 1L
+#++++
+fn(x: ?1[]) -> ?1[]
+integer[]
+
+#---- forall_vector_element_extraction
+#: <T> fn(x: T[]) -> T
+first_of <- function(x) x[[1L]]
+first_of(c("a", "b"))
+#++++
+fn(x: ?1[]) -> ?1
+character

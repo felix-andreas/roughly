@@ -5,13 +5,32 @@ pub struct InferenceVariableId(pub u32);
 
 // A type-class-style bound carried by an inference variable. `Numeric` restricts a variable to
 // `integer` or `double` (any vector shape), so an unannotated parameter used arithmetically stays
-// polymorphic over numeric types instead of being rejected. The ordering is the constraint lattice:
-// merging two constraints takes the more restrictive one.
+// polymorphic over numeric types instead of being rejected. `AtomicElement` restricts a variable to
+// a scalar atomic type — it is the bound a vector element carries (`T[]` requires `T` to be one of
+// the six atomics). A variable that acquires both (a `T[]` element used arithmetically) holds their
+// meet, `ScalarNumeric`: a scalar `integer` or `double`. Merge through `join`, not `Ord` — the
+// lattice is not a chain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum Constraint {
     #[default]
     Unconstrained,
     Numeric,
+    AtomicElement,
+    ScalarNumeric,
+}
+
+impl Constraint {
+    pub fn join(self, other: Constraint) -> Constraint {
+        use Constraint::*;
+        match (self, other) {
+            (Unconstrained, constraint) | (constraint, Unconstrained) => constraint,
+            (left, right) if left == right => left,
+            (Numeric, AtomicElement) | (AtomicElement, Numeric) => ScalarNumeric,
+            (ScalarNumeric, _) | (_, ScalarNumeric) => ScalarNumeric,
+            // Unreachable: every distinct pair is covered above, but the compiler cannot see it.
+            (left, _) => left,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

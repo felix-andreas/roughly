@@ -1,8 +1,8 @@
 #==== utils_structure
-#---- head_stays_any
+#---- head_preserves_the_element_type
 head(c(1L, 2L, 3L))
 #++++
-Any
+integer[]
 
 #---- head_accepts_count
 head(c(1L, 2L, 3L), 2)
@@ -12,7 +12,7 @@ Any
 #---- tail_accepts_named_count
 tail(c(1L, 2L), n = 1L)
 #++++
-Any
+integer[]
 
 #---- str_is_null
 str(list(1L, 2L))

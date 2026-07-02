@@ -141,12 +141,12 @@ logical
 #---- sort_accepts_decreasing_by_name
 sort(c(2L, 1L), decreasing = TRUE)
 #++++
-Any
+integer[]
 
 #---- unique_accepts_fromLast
 unique(c(1L, 1L), fromLast = TRUE)
 #++++
-Any
+integer[]
 
 #==== precise_variadic_calls
 #---- paste_of_many_arguments_is_character
@@ -270,11 +270,26 @@ isTRUE(TRUE)
 #++++
 logical
 
-#==== degradation
-#---- shape_polymorphic_rev_degrades_to_any
+#==== generic_element_preservation
+#---- rev_preserves_the_element_type
 rev(c(1L, 2L, 3L))
 #++++
-Any
+integer[]
+
+#---- sort_of_characters_is_character_vector
+sort(c("b", "a"))
+#++++
+character[]
+
+#---- setdiff_threads_the_element_type
+setdiff(c("a", "b"), c("b"))
+#++++
+character[]
+
+#---- rev_of_list_preserves_the_item_type
+rev(list(1L, 2L))
+#++++
+list[integer]
 
 #==== overloaded_shape_preservation
 #---- abs_of_integer_scalar_is_integer

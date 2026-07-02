@@ -1,14 +1,4 @@
 #==== unsupported_generics
-#---- generic_atomic_array_suffix_not_supported
-T[]
-#++++
-UnsupportedConstruct { message: "generic atomic vector suffix types are not supported yet. `T[]` would require constraining `T` to atomic element types." }
-
-#---- generic_atomic_named_suffix_not_supported
-T[named]
-#++++
-UnsupportedConstruct { message: "generic named atomic vector suffix types are not supported yet. `T[named]` would require constraining `T` to atomic element types." }
-
 #---- higher_rank_function_parameter_not_supported
 fn(transform: <T> fn(T) -> T) -> integer
 #++++

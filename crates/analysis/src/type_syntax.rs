@@ -1481,23 +1481,11 @@ impl<'a> TypeParser<'a> {
             self.skip_ascii_whitespace();
 
             if self.consume_atomic_vector_suffix() {
-                if let SurfaceType::Named(name, _) = surface_type {
-                    let name_str = self.interner.resolve(name).unwrap_or("<unknown>");
-                    return Err(unsupported_construct(format!(
-                        "generic atomic vector suffix types are not supported yet. `{name_str}[]` would require constraining `{name_str}` to atomic element types."
-                    )));
-                }
                 surface_type = SurfaceType::Vector(Box::new(surface_type));
                 continue;
             }
 
             if self.consume_atomic_named_vector_suffix() {
-                if let SurfaceType::Named(name, _) = surface_type {
-                    let name_str = self.interner.resolve(name).unwrap_or("<unknown>");
-                    return Err(unsupported_construct(format!(
-                        "generic named atomic vector suffix types are not supported yet. `{name_str}[named]` would require constraining `{name_str}` to atomic element types."
-                    )));
-                }
                 surface_type = SurfaceType::NamedVector(Box::new(surface_type));
                 continue;
             }

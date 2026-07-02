@@ -12,8 +12,7 @@ The standard-library stub format ships. The corpus is ~530 declarations across s
 [overload sets](#overloads-and-generics), and `pkg::name` qualified access (with unknown-namespace
 and not-exported warnings) are supported. Still **proposed / not yet built**: the CRAN tier
 (per-project introspection, §7), R-version keying of the embedded corpus (§8), the stubtest CI
-validator, `@type` declarations in `.Rtypes`, and the generic `T[]` suffix. Sections below mark
-which is which. The authoritative typing contract remains the
+validator, and `@type` declarations in `.Rtypes`. Sections below mark which is which. The authoritative typing contract remains the
 [Typing Reference](/typing-reference); this note describes how the standard library feeds that
 contract.
 :::
@@ -111,14 +110,19 @@ Three rules govern the current corpus:
 
 - **Genuinely parametric functions get real generics.** Higher-order helpers whose result is a function
   of the argument *type* (`lapply`, `Reduce`, `print`, `invisible`, `setNames`, `suppressWarnings`, ...)
-  are written with `<T> fn(...)` binders and keep precise polymorphic schemes.
-- **Type-preserving functions get overload sets.** The reductions whose result's atomic type follows
-  the input's (`sum`/`min`/`max`/`range`/`pmin`/`pmax`, `cumsum`/`cummax`/`cummin`, `abs`) declare
-  one candidate per atomic family plus the `Any` fallback.
+  are written with `<T> fn(...)` binders and keep precise polymorphic schemes. Element-preserving
+  vector functions (`rev`, `sort`, `unique`, `head`, `tail`, `sample`, `rep`, set operations) use
+  `<T> fn(x: T[]) -> T[]` — the element parameter is constrained to atomic types — usually as the
+  first candidates of an overload set whose list form threads `list[T]` and whose `Any` fallback
+  covers the rest.
+- **Type-preserving reductions get overload sets.** The reductions whose result's atomic type follows
+  R's coercion order rather than one input's (`sum`/`min`/`max`/`range`/`pmin`/`pmax`,
+  `cumsum`/`cummax`/`cummin`, `abs` with its integer/double split) declare one candidate per atomic
+  family plus the `Any` fallback.
 - **Value-dependent results fall back to `Any`.** A function whose return type varies by argument
-  *value* or by arity (`rep`, `seq`, `is`, `grep(value =)`) is given `Any` rather than a
-  falsely-precise signature, so a call yields `Any` and never a spurious type or arity error. The
-  name still resolves.
+  *value* or by arity (`seq`, `is`, `grep(value =)`) is given `Any` rather than a falsely-precise
+  signature, so a call yields `Any` and never a spurious type or arity error. The name still
+  resolves.
 
 ## Override precedence
 
@@ -162,16 +166,19 @@ The gaps below remain; each caps how precise the affected declarations can be:
 
 | Gap | Example | Extension needed |
 |-----|---------|------------------|
-| Generic atomic suffix | `rev`, `head`, shape-threading | accept `T[]` (type variable + suffix) |
 | Trailing-dot parameter names | `stop(call. =)`, `warning(immediate. =)` | parameter names currently allow interior dots only |
 | Named-into-rest absorption | `data.frame(x = 1)`, `Sys.setenv(VAR = "v")`, `par(mfrow = ...)` | the checker never routes a named argument into `...`, so arbitrary-named-argument sinks must stay `Any` values |
 | Extra-optional-tolerant function compatibility | `lapply(words, nchar)` breaks if `nchar` declares its optional formals | function compatibility requires matching parameter counts, so callback-idiom stubs must stay single-parameter |
 | `Never` type | `stop`, `q` | without it, a `NULL` return claim would poison `x <- if (ok) v else stop(...)` joins, so these stay `Any` |
 | Nullable results under member-wise operators | `names`, `dim`, `nrow` | `T | NULL` returns false-positive on `1:nrow(df)` / `for (nm in names(x))` until flow narrowing or NULL-tolerant joins exist, so these return `Any` |
 
-Overloading closed its row in this table: the type-preserving reductions now declare
-[overload sets](#overloads-and-generics). Until the generic-vector design lands, the remaining
-shape-mirroring functions (`rev`, `head`, `sort`, ...) still degrade to `Any`.
+Two former rows of this table have closed: the type-preserving reductions declare
+[overload sets](#overloads-and-generics), and the element-preserving functions (`rev`, `sort`,
+`unique`, `head`, `tail`, `sample`, `rep`, the set operations) declare generic `T[]` signatures —
+the `T[]` suffix carries the atomic-element bound specified in the Typing Reference under
+[Type parameters](/typing-reference#type-parameters-and-generic-application). Shape-mirroring
+functions whose *atomic changes* with the input (`nchar`, `toupper` returning the input's shape)
+remain scalar-claim.
 
 ## 3. Loading and namespacing
 
@@ -315,9 +322,11 @@ the operator kernel promotes `pi / 2`, and the `T` value binding types `flag`.
 `paste`'s variadics, its `sep`/`collapse` named formals, and `length.out`'s dotted parameter name are
 expressible directly
 (`paste : fn([sep]: character, [collapse]: character | NULL, [recycle0]: logical, ...: Any) -> character`).
-One gap remains, degrading returns to the scalar-claim or `Any` until the generic-vector design lands:
+One gap remains, degrading returns to the scalar-claim:
 
-- `nchar`'s / `rev`'s shape polymorphism (the result shape should track the input vector shape).
+- `nchar`-style shape mirroring where the result *atomic* differs from the input's (the result
+  shape should track the input vector shape); `rev`-style element preservation is covered by the
+  generic `T[]` suffix.
 
 ## 6. Sequencing and risks
 
@@ -333,9 +342,9 @@ machinery. This closes the `T`/`F`/`pi` gap with only the two integration edits 
 
 ### Risks
 
-- **Type-syntax expressiveness.** Variadics, dotted parameter names, and overload sets have landed;
-  the generic `T[]` suffix remains, so shape-mirroring functions still degrade to `Any` until that
-  design lands.
+- **Type-syntax expressiveness.** Variadics, dotted parameter names, overload sets, and the generic
+  `T[]` suffix have landed; functions whose result *atomic* changes with the input's shape
+  (`nchar`) remain scalar-claim.
 - **The operator/`c` kernel cannot migrate.** One-source-of-truth is necessarily partial.
 - **Corpus size.** Base alone is ~1400 exports. Curate a high-value subset; treat stubs as living
   docs with real drift risk. The full validation tool is a **stubtest-equivalent** that introspects real

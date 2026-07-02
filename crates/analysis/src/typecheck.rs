@@ -908,7 +908,7 @@ impl InferenceState {
                         constraint: existing,
                     }) => Some(InferenceEntry::Unbound {
                         level: *level,
-                        constraint: (*existing).max(constraint),
+                        constraint: (*existing).join(constraint),
                     }),
                     _ => None,
                 };
@@ -3457,6 +3457,37 @@ impl InferenceState {
         )
     }
 
+    // How a lowered `T[]` / `T[named]` element becomes a core type. A concrete atomic or a
+    // statically untracked element (`Any`/`Unknown`) forms a vector directly. A type *variable*
+    // element — a `<T>` binder used as `T[]` — also forms a vector, and the variable acquires the
+    // atomic-element bound. The bound is recorded straight on the entry (not via `constrain_type`)
+    // because the element may be a rigid binder: the annotation itself makes the atomic promise
+    // here, unlike a function body, which must not add bounds the annotation never declared. Every
+    // other element shape keeps the historical reading of `X[]` as `list[X]`.
+    fn lower_vector_element(
+        &mut self,
+        element: CoreType,
+        vector: impl Fn(Box<CoreType>) -> CoreType,
+        list: impl Fn(Box<CoreType>) -> CoreType,
+    ) -> CoreType {
+        match element {
+            CoreType::Scalar(_) | CoreType::Any | CoreType::Unknown => vector(Box::new(element)),
+            CoreType::Variable(variable) => {
+                if let Some(InferenceEntry::Unbound { level, constraint }) =
+                    self.entries.get(&variable)
+                {
+                    let raised = InferenceEntry::Unbound {
+                        level: *level,
+                        constraint: constraint.join(Constraint::AtomicElement),
+                    };
+                    self.set_entry(variable, raised);
+                }
+                vector(Box::new(CoreType::Variable(variable)))
+            }
+            other_type => list(Box::new(other_type)),
+        }
+    }
+
     fn lower_surface_type_with_substitutions(
         &mut self,
         surface_type: &SurfaceType,
@@ -3579,28 +3610,24 @@ impl InferenceState {
                 }
             }
             SurfaceType::Vector(inner_type) => {
-                match self.lower_surface_type_with_substitutions(
+                let element = self.lower_surface_type_with_substitutions(
                     inner_type,
                     substitutions,
                     expanding_aliases,
                     type_definitions,
                     expression,
-                )? {
-                    CoreType::Scalar(atomic) => Ok(CoreType::vector(atomic)),
-                    other_type => Ok(CoreType::List(Box::new(other_type))),
-                }
+                )?;
+                Ok(self.lower_vector_element(element, CoreType::Vector, CoreType::List))
             }
             SurfaceType::NamedVector(inner_type) => {
-                match self.lower_surface_type_with_substitutions(
+                let element = self.lower_surface_type_with_substitutions(
                     inner_type,
                     substitutions,
                     expanding_aliases,
                     type_definitions,
                     expression,
-                )? {
-                    CoreType::Scalar(atomic) => Ok(CoreType::named_vector(atomic)),
-                    other_type => Ok(CoreType::NamedList(Box::new(other_type))),
-                }
+                )?;
+                Ok(self.lower_vector_element(element, CoreType::NamedVector, CoreType::NamedList))
             }
             SurfaceType::List(item_type) => Ok(CoreType::List(Box::new(
                 self.lower_surface_type_with_substitutions(
@@ -4434,6 +4461,56 @@ impl InferenceState {
             )?;
         }
 
+        // A generic vector element (`T[]`) used arithmetically must be numeric; joined with the
+        // atomic-element bound it already carries, the element becomes scalar-numeric.
+        for operand in [&left, &right] {
+            if let NumericOperand::FlexibleVector(Some(element_variable)) = operand {
+                self.constrain_type(
+                    CoreType::Variable(*element_variable),
+                    Constraint::Numeric,
+                    Some(expression),
+                )?;
+            }
+        }
+
+        // A flexible-element vector operand fixes the result shape (vector) without fixing the
+        // atomic. Mirroring the scalar flexible-operand rules: an always-double operation or a
+        // concrete `double` (or union) partner promotes to `double[]`; an integer partner promotes
+        // *into* the element, so the result keeps the element variable; two generic elements are
+        // unified; an untracked (`Any`/`Unknown`) element stays untracked.
+        let flexible_vector_present = matches!(left, NumericOperand::FlexibleVector(_))
+            || matches!(right, NumericOperand::FlexibleVector(_));
+        if flexible_vector_present {
+            if let NumericResultAtomic::AlwaysDouble = numeric_result_atomic {
+                return Ok(CoreType::vector(Atomic::Double));
+            }
+            let concrete_parts = left.concrete_parts().or_else(|| right.concrete_parts());
+            if let Some(parts) = &concrete_parts
+                && (parts.len() > 1 || parts.iter().any(|(_, atomic)| *atomic == Atomic::Double))
+            {
+                return Ok(CoreType::vector(Atomic::Double));
+            }
+            let element = match (&left, &right) {
+                (
+                    NumericOperand::FlexibleVector(Some(left_element)),
+                    NumericOperand::FlexibleVector(Some(right_element)),
+                ) => Some(self.unify(
+                    CoreType::Variable(*left_element),
+                    CoreType::Variable(*right_element),
+                )?),
+                (NumericOperand::FlexibleVector(None), _)
+                | (_, NumericOperand::FlexibleVector(None)) => None,
+                (NumericOperand::FlexibleVector(Some(element)), _)
+                | (_, NumericOperand::FlexibleVector(Some(element))) => {
+                    Some(CoreType::Variable(*element))
+                }
+                _ => None,
+            };
+            return Ok(CoreType::Vector(Box::new(
+                element.unwrap_or(CoreType::Unknown),
+            )));
+        }
+
         match (left.concrete_parts(), right.concrete_parts()) {
             // Member-wise: the operation applies to every pair of operand members, and the result
             // is the join of the per-pair results. A single concrete operand is the one-member
@@ -4527,6 +4604,18 @@ impl InferenceState {
                 )?;
                 Ok(CoreType::Variable(variable))
             }
+            // Negation is elementwise and type-preserving, so a generic-element vector keeps its
+            // element (constrained numeric) and an untracked element stays untracked.
+            NumericOperand::FlexibleVector(element_variable) => {
+                if let Some(element_variable) = element_variable {
+                    self.constrain_type(
+                        CoreType::Variable(element_variable),
+                        Constraint::Numeric,
+                        Some(value),
+                    )?;
+                }
+                Ok(resolved_type)
+            }
             NumericOperand::AnyUnknown => Ok(CoreType::Unknown),
             NumericOperand::Invalid => Err(InferenceError::InvalidOperand {
                 expected: OperandExpectation::Numeric,
@@ -4551,8 +4640,14 @@ impl InferenceState {
 
         match resolved_type {
             CoreType::Scalar(Atomic::Logical) => Ok(CoreType::Scalar(Atomic::Logical)),
-            CoreType::Vector(element) | CoreType::NamedVector(element)
-                if *element == CoreType::Scalar(Atomic::Logical) =>
+            CoreType::Vector(ref element) | CoreType::NamedVector(ref element)
+                if matches!(
+                    element.as_ref(),
+                    CoreType::Scalar(Atomic::Logical)
+                        | CoreType::Variable(_)
+                        | CoreType::Any
+                        | CoreType::Unknown
+                ) =>
             {
                 Ok(CoreType::vector(Atomic::Logical))
             }
@@ -4604,8 +4699,10 @@ impl InferenceState {
 
         let left_parts = comparison_operand_parts_list(&resolved_left);
         let right_parts = comparison_operand_parts_list(&resolved_right);
-        let left_is_variable = matches!(resolved_left, CoreType::Variable(_));
-        let right_is_variable = matches!(resolved_right, CoreType::Variable(_));
+        let left_flexible = flexible_comparison_operand(&resolved_left);
+        let right_flexible = flexible_comparison_operand(&resolved_right);
+        let left_is_variable = left_flexible.is_some();
+        let right_is_variable = right_flexible.is_some();
 
         if left_parts.is_none() && !left_is_variable {
             return Err(InferenceError::InvalidOperand {
@@ -4651,18 +4748,33 @@ impl InferenceState {
                     .all(|(_, family)| *family == ComparisonFamily::Numeric)
             })
         };
-        if left_is_variable && all_numeric(&right_parts) {
-            self.constrain_type(resolved_left.clone(), Constraint::Numeric, Some(arg0))?;
+        if let Some(flexible) = &left_flexible
+            && all_numeric(&right_parts)
+            && let Some(variable) = flexible.variable()
+        {
+            self.constrain_type(
+                CoreType::Variable(variable),
+                Constraint::Numeric,
+                Some(arg0),
+            )?;
         }
-        if right_is_variable && all_numeric(&left_parts) {
-            self.constrain_type(resolved_right.clone(), Constraint::Numeric, Some(arg1))?;
+        if let Some(flexible) = &right_flexible
+            && all_numeric(&left_parts)
+            && let Some(variable) = flexible.variable()
+        {
+            self.constrain_type(
+                CoreType::Variable(variable),
+                Constraint::Numeric,
+                Some(arg1),
+            )?;
         }
 
         // Member-wise result: a pair with a vector member compares element-wise (`logical[]`), a
         // scalar-scalar pair compares to `logical`; a union operand mixing shapes therefore yields
-        // the join of both.
-        let left_shapes = shapes_or_scalar(&left_parts);
-        let right_shapes = shapes_or_scalar(&right_parts);
+        // the join of both. A flexible-element vector operand has no concrete parts but a known
+        // vector shape.
+        let left_shapes = shapes_for_operand(&left_parts, &left_flexible);
+        let right_shapes = shapes_for_operand(&right_parts, &right_flexible);
         let mut results = Vec::new();
         for left_shape in &left_shapes {
             for right_shape in &right_shapes {
@@ -5819,7 +5931,7 @@ impl InferenceState {
         let merged_survivor = match self.entries.get(&survivor) {
             Some(InferenceEntry::Unbound { level, constraint }) => Some(InferenceEntry::Unbound {
                 level: (*level).min(redirected_level),
-                constraint: (*constraint).max(redirected_constraint),
+                constraint: (*constraint).join(redirected_constraint),
             }),
             _ => None,
         };
@@ -5980,7 +6092,7 @@ impl InferenceState {
                     self.entries.get(&variable),
                     Some(InferenceEntry::Unbound {
                         level,
-                        constraint: Constraint::Numeric,
+                        constraint: Constraint::Numeric | Constraint::ScalarNumeric,
                     }) if *level > self.current_level
                 ) {
                     self.bind_variable(variable, CoreType::Scalar(Atomic::Double), None)?;
@@ -6389,12 +6501,49 @@ fn comparison_operand_parts_list(
     }
 }
 
-// The shapes a comparison operand can take; a still-flexible operand (`None` parts) behaves as a
-// scalar, matching the pre-union result rule.
-fn shapes_or_scalar(parts: &Option<Vec<(OperandShape, ComparisonFamily)>>) -> Vec<OperandShape> {
-    match parts {
-        Some(parts) => parts.iter().map(|(shape, _)| *shape).collect(),
-        None => vec![OperandShape::Scalar],
+// The shapes a comparison operand can take; a still-flexible bare variable behaves as a scalar
+// (matching the pre-union result rule), while a flexible-element vector is known to be a vector.
+fn shapes_for_operand(
+    parts: &Option<Vec<(OperandShape, ComparisonFamily)>>,
+    flexible: &Option<FlexibleComparisonOperand>,
+) -> Vec<OperandShape> {
+    match (parts, flexible) {
+        (Some(parts), _) => parts.iter().map(|(shape, _)| *shape).collect(),
+        (None, Some(FlexibleComparisonOperand::VectorElement(_))) => vec![OperandShape::Vector],
+        _ => vec![OperandShape::Scalar],
+    }
+}
+
+// A comparison operand whose family is not yet known: a bare inference variable, or a vector whose
+// element is a still-generic variable (carried, so a numeric partner can constrain it) or is
+// statically untracked (`Any`/`Unknown` element, nothing to constrain).
+enum FlexibleComparisonOperand {
+    Bare(InferenceVariableId),
+    VectorElement(Option<InferenceVariableId>),
+}
+
+impl FlexibleComparisonOperand {
+    fn variable(&self) -> Option<InferenceVariableId> {
+        match self {
+            FlexibleComparisonOperand::Bare(variable) => Some(*variable),
+            FlexibleComparisonOperand::VectorElement(variable) => *variable,
+        }
+    }
+}
+
+fn flexible_comparison_operand(core_type: &CoreType) -> Option<FlexibleComparisonOperand> {
+    match core_type {
+        CoreType::Variable(variable) => Some(FlexibleComparisonOperand::Bare(*variable)),
+        CoreType::Vector(element) | CoreType::NamedVector(element) => match element.as_ref() {
+            CoreType::Variable(variable) => {
+                Some(FlexibleComparisonOperand::VectorElement(Some(*variable)))
+            }
+            CoreType::Any | CoreType::Unknown => {
+                Some(FlexibleComparisonOperand::VectorElement(None))
+            }
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -6428,6 +6577,10 @@ enum NumericOperand {
     // typing reference).
     ConcreteUnion(Vec<(OperandShape, Atomic)>),
     Variable(InferenceVariableId),
+    // A vector whose element is not yet concrete: a generic element variable (`T[]`, carrying the
+    // variable to constrain) or a statically untracked element (`Any`/`Unknown`, carrying `None`).
+    // The shape is known — vector — even though the atomic is not.
+    FlexibleVector(Option<InferenceVariableId>),
     AnyUnknown,
     Invalid,
 }
@@ -6463,6 +6616,11 @@ fn classify_numeric_operand(core_type: &CoreType) -> NumericOperand {
             NumericOperand::ConcreteUnion(parts)
         }
         CoreType::Variable(variable) => NumericOperand::Variable(*variable),
+        CoreType::Vector(element) | CoreType::NamedVector(element) => match element.as_ref() {
+            CoreType::Variable(variable) => NumericOperand::FlexibleVector(Some(*variable)),
+            CoreType::Any | CoreType::Unknown => NumericOperand::FlexibleVector(None),
+            _ => NumericOperand::Invalid,
+        },
         CoreType::Any | CoreType::Unknown => NumericOperand::AnyUnknown,
         _ => NumericOperand::Invalid,
     }
@@ -6472,6 +6630,11 @@ fn constraint_is_satisfied(constraint: Constraint, core_type: &CoreType) -> bool
     match constraint {
         Constraint::Unconstrained => true,
         Constraint::Numeric => is_numeric_core_type(core_type),
+        Constraint::AtomicElement => matches!(core_type, CoreType::Scalar(_)),
+        Constraint::ScalarNumeric => matches!(
+            core_type,
+            CoreType::Scalar(Atomic::Integer | Atomic::Double)
+        ),
     }
 }
 

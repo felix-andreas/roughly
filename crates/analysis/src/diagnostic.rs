@@ -404,6 +404,10 @@ impl Diagnostic {
                 let expected_description = match constraint {
                     Constraint::Unconstrained => "a value",
                     Constraint::Numeric => "a numeric value (`integer` or `double`)",
+                    Constraint::AtomicElement => {
+                        "an atomic value (`logical`, `integer`, `double`, `complex`, `character`, or `raw`)"
+                    }
+                    Constraint::ScalarNumeric => "a scalar numeric value (`integer` or `double`)",
                 };
                 (
                     range.unwrap_or(fallback_range),
@@ -746,6 +750,8 @@ impl<'a> TypeRenderer<'a> {
                 match quantified.constraint {
                     Constraint::Unconstrained => name,
                     Constraint::Numeric => format!("{name}: numeric"),
+                    Constraint::AtomicElement => format!("{name}: atomic"),
+                    Constraint::ScalarNumeric => format!("{name}: scalar numeric"),
                 }
             })
             .collect::<Vec<_>>();

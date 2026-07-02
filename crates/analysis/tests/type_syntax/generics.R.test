@@ -117,3 +117,14 @@ list{owner: Person<integer>}
 @return {list[T]}
 #++++
 <T> fn(values: list[T]) -> list[T]
+
+#==== generic_vector_suffixes
+#---- generic_atomic_array_suffix
+<T> fn(x: T[]) -> T[]
+#++++
+<T> fn(x: T[]) -> T[]
+
+#---- generic_atomic_named_suffix
+<T> fn(x: T[named]) -> T[]
+#++++
+<T> fn(x: T[named]) -> T[]

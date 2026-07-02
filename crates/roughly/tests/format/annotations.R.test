@@ -112,10 +112,10 @@
 #++++
 #: Map<K, List<V>>
 
-#---- generic_vector_unsupported_stays_verbatim
+#---- generic_vector_suffix_formats
 #: Foo< A > [ ]
 #++++
-#: Foo< A > [ ]
+#: Foo<A>[]
 
 #---- binder
 #: < T >fn( x : T )->T

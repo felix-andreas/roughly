@@ -4,7 +4,11 @@
 # vocabulary (Any-param, scalar-claim, type-preserving, NULL-hybrid, named-formals).
 
 # Prefix/suffix of the argument: type-preserving returns, but the arity and `n =` formal are real.
+head : <T> fn(x: T[], [n]: integer) -> T[]
+head : <T> fn(x: list[T], [n]: integer) -> list[T]
 head : fn(x: Any, [n]: Any) -> Any
+tail : <T> fn(x: T[], [n]: integer) -> T[]
+tail : <T> fn(x: list[T], [n]: integer) -> list[T]
 tail : fn(x: Any, [n]: Any) -> Any
 
 # `str` prints a structure summary and returns NULL invisibly. Its first argument is a bare positional

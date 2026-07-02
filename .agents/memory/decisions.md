@@ -238,7 +238,9 @@ All-fail = one `NoMatchingOverload` diagnostic naming the callee and candidate c
 
 ## `T[]` — atomic-element constraint, not traits
 
-The core vector generalizes to carry an element *type* (so it can hold a variable), with a new **atomic-element constraint** kind on inference variables — the same mechanism as the existing numeric constraint (`<T: numeric>`), rendered e.g. `<T: atomic>`. This resolves the former open question (typing-design §1) in favor of option (a): the constraint mechanism is already built, proven, and fast; a trait system is not justified by this need alone.
+The core vector generalizes to carry an element *type* (so it can hold a variable), with a new **atomic-element constraint** kind on inference variables — the same mechanism as the existing numeric constraint (`<T: numeric>`), rendered `<T: atomic>`. This resolves the former open question (typing-design §1) in favor of option (a): the constraint mechanism is already built, proven, and fast; a trait system is not justified by this need alone.
+
+Implementation notes: valid vector elements are `Scalar(_)`, a constrained `Variable(_)`, and `Any`/`Unknown` (statically untracked element). `Constraint` became a proper lattice merged via `join` (not `Ord`): numeric ∧ atomic-element = `ScalarNumeric` (a scalar `integer`/`double`, rendered `<T: scalar numeric>`), which defaults to `double` at binding boundaries like plain numeric. Annotation lowering records the atomic-element bound directly on the element variable's entry rather than through `constrain_type`, because the element may be a rigid `<T>` binder — the annotation itself makes the promise there, while a function body must not add bounds the annotation never declared.
 
 ## Coercion policy at parameter positions
 
