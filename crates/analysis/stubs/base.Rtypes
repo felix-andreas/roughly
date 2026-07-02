@@ -208,23 +208,48 @@ isTRUE : fn(x: Any) -> logical
 isFALSE : fn(x: Any) -> logical
 xor : fn(x: Any, y: Any) -> logical
 
-# Variadic numeric reductions. `sum`/`min`/`max`/`range` are type-preserving (integer stays integer;
-# `min`/`max`/`range` even work on character), so their returns are `Any` until overload sets — a
-# `double` claim would be wrong for `sum(1L, 2L)`. `prod` genuinely always returns double. `mean`'s
-# second positional is `trim`, not `na.rm`.
+# Variadic numeric reductions, declared as overload sets: repeating a name adds its next candidate,
+# a call commits the first candidate that accepts the arguments, and a call whose argument types are
+# still undetermined uses the last (most general) candidate. They follow R's coercion order —
+# logical and integer inputs reduce to integer, doubles to double, and `min`/`max`/`range` also
+# order characters — with `Any` as the fallback for mixtures the candidates cannot express. `prod`
+# genuinely always returns double. `mean`'s second positional is `trim`, not `na.rm`.
+sum : fn([na.rm]: logical, ...: integer[] | logical[]) -> integer
+sum : fn([na.rm]: logical, ...: double[]) -> double
 sum : fn([na.rm]: logical, ...: Any) -> Any
+min : fn([na.rm]: logical, ...: integer[] | logical[]) -> integer
+min : fn([na.rm]: logical, ...: double[]) -> double
+min : fn([na.rm]: logical, ...: character[]) -> character
 min : fn([na.rm]: logical, ...: Any) -> Any
+max : fn([na.rm]: logical, ...: integer[] | logical[]) -> integer
+max : fn([na.rm]: logical, ...: double[]) -> double
+max : fn([na.rm]: logical, ...: character[]) -> character
 max : fn([na.rm]: logical, ...: Any) -> Any
+range : fn([na.rm]: logical, ...: integer[] | logical[]) -> integer[]
+range : fn([na.rm]: logical, ...: double[]) -> double[]
+range : fn([na.rm]: logical, ...: character[]) -> character[]
 range : fn([na.rm]: logical, ...: Any) -> Any
+pmin : fn([na.rm]: logical, ...: integer[] | logical[]) -> integer[]
+pmin : fn([na.rm]: logical, ...: double[]) -> double[]
 pmin : fn([na.rm]: logical, ...: Any) -> Any
+pmax : fn([na.rm]: logical, ...: integer[] | logical[]) -> integer[]
+pmax : fn([na.rm]: logical, ...: double[]) -> double[]
 pmax : fn([na.rm]: logical, ...: Any) -> Any
 prod : fn([na.rm]: logical, ...: Any) -> double
 mean : fn(x: Any, [trim]: Any, [na.rm]: logical) -> double
 
-# Cumulative reductions: type-preserving, so `Any`.
+# Cumulative reductions: elementwise type-preserving (logical/integer input gives an integer
+# vector, double gives double), overloaded per atomic family. `cumprod` always returns double —
+# R computes it in double to dodge integer overflow.
+cumsum : fn(x: integer[] | logical[]) -> integer[]
+cumsum : fn(x: double[]) -> double[]
 cumsum : fn(x: Any) -> Any
-cumprod : fn(x: Any) -> Any
+cumprod : fn(x: Any) -> double[]
+cummax : fn(x: integer[] | logical[]) -> integer[]
+cummax : fn(x: double[]) -> double[]
 cummax : fn(x: Any) -> Any
+cummin : fn(x: integer[] | logical[]) -> integer[]
+cummin : fn(x: double[]) -> double[]
 cummin : fn(x: Any) -> Any
 
 # Math with a fixed double result (elementwise, scalar-claim, Any-param). `abs` is type-preserving.
@@ -245,6 +270,12 @@ atan2 : fn(y: Any, x: Any) -> double
 sign : fn(x: Any) -> double
 choose : fn(n: Any, k: Any) -> double
 factorial : fn(x: Any) -> double
+# `abs` is shape- and type-preserving on numerics (integer stays integer, scalar stays scalar), so
+# each shape gets a candidate; logical input (which R coerces to integer) falls to `Any`.
+abs : fn(x: integer) -> integer
+abs : fn(x: integer[]) -> integer[]
+abs : fn(x: double) -> double
+abs : fn(x: double[]) -> double[]
 abs : fn(x: Any) -> Any
 
 # Rounding: the result is a double regardless of the (numeric) input; `digits` is Any-param.

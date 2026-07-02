@@ -367,6 +367,26 @@ impl Diagnostic {
                     format!("I could not resolve type `{name}`."),
                 )
             }
+            InferenceError::NoMatchingOverload {
+                symbol,
+                candidate_count,
+                range,
+                expression_id: _,
+                first_error,
+            } => {
+                let name = interner.resolve(*symbol).unwrap_or("<unknown>");
+                let mut message = format!(
+                    "no overload of `{name}` matches these arguments — I tried all {candidate_count} declared signatures"
+                );
+                if let Some(first_error) = first_error {
+                    let inner = Self::from_inference_error(first_error, *range, interner);
+                    message.push_str(&format!(
+                        "; the first candidate fails with: {}",
+                        inner.message
+                    ));
+                }
+                (*range, message)
+            }
             InferenceError::AnnotationParameterNameMismatch { name, range } => {
                 let name = interner.resolve(*name).unwrap_or("<unknown>");
                 (

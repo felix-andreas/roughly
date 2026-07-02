@@ -226,7 +226,15 @@ General unions `A | B | C` (normalized: flat, deduped, order-insensitive; `T | N
 
 ## Overload sets — bounded ordered probes
 
-Functions whose result type depends on the argument type get **ordered overload sets** (stub surface first; the `.Rtypes` grammar already permits repeated declarations). Call sites try schemes in declaration order using the existing probe-then-rollback machinery; first compatible match wins; all-fail = one diagnostic listing the candidates. Principal-type purity is knowingly relaxed *at overload sites only* (declaration order is semantic — the TS/mypy model). Traits/typeclasses remain the possible long-term subsumer; overloads are the pragmatic bridge and must not block a later trait design.
+Functions whose result type depends on the argument type get **ordered overload sets** (stub surface first; repeating a name within one `.Rtypes` source appends a candidate; a later source replaces a name's whole set). Call sites try schemes in declaration order using the existing probe-then-rollback machinery; first compatible match wins. Principal-type purity is knowingly relaxed *at overload sites only* (declaration order is semantic — the TS/mypy model). Traits/typeclasses remain the possible long-term subsumer; overloads are the pragmatic bridge and must not block a later trait design.
+
+Three call-site rules keep selection sound (implemented in `infer_overloaded_call`):
+
+- **Arguments are inferred once, before any probe.** Expression inference writes environment/recorded-type state the probe snapshot does not reverse, so probes run only instantiation + argument *matching* (the signature-matching half of the old `infer_function_call` is split out as `match_call_arguments` for exactly this reason).
+- **Unresolved arguments skip selection.** If any argument type still contains a free inference variable, the first candidate would capture it by unification (over-committing `function(x) sum(x)` wrappers); such calls use the last, most-general candidate — the corpus convention is to end every set with an `Any` fallback.
+- **Strict-then-courtesy rounds.** The whole-number-literal-as-integer courtesy is disabled in the first selection round (`sum(1, 2)` must pick the double candidate — R computes a double) and re-enabled in a second round only when nothing matched strictly (a name whose only fitting candidate wants `integer` still accepts `foo(1)`). Exact matches outrank conversions.
+
+All-fail = one `NoMatchingOverload` diagnostic naming the callee and candidate count, carrying the first candidate's failure as the concrete hint.
 
 ## `T[]` — atomic-element constraint, not traits
 

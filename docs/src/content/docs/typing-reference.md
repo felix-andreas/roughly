@@ -973,6 +973,33 @@ A **rest parameter** (`...: TYPE`) changes how surplus arguments are handled:
 - surplus positional arguments never fill an optional named parameter of a variadic function; a named parameter after `...` is matched by name only (as in R), so `sum(1, 2, na.rm = TRUE)` sends `1` and `2` to the rest and `na.rm` by name
 - an unmatched **named** argument is still a named-parameter error even when the callee is variadic; named arguments are never routed into the rest parameter
 
+### Overload sets
+
+A standard-library stub name may declare **several signatures** (an ordered overload set — see the
+[stdlib stubs page](/stdlib-stubs) for the declaration surface). Calls to such a name resolve per
+call site:
+
+- candidates are tried **in declaration order**, and the call commits the **first** candidate whose
+  parameters accept the arguments; that candidate's return type is the call's type
+  (`sum(1L, 2L)` is `integer`, `sum(1.5, 2.5)` is `double`)
+- each failed candidate is probed in isolation: nothing it bound leaks into the next candidate or
+  into the committed result
+- selection needs concrete argument types. When any argument's type is still an undetermined
+  inference variable (an unannotated parameter of an enclosing function, for example), selection is
+  skipped and the **last** declaration — by corpus convention the most general — is used, so a
+  wrapper like `function(x) sum(x)` keeps its parameter unconstrained
+- the [whole-number literal rule](#function-calls) does not steer selection: candidates are first
+  tried against the arguments' true types (`sum(1, 2)` selects the `double` candidate, matching what
+  R computes), and only if no candidate accepts them is the set retried with the literal-as-integer
+  courtesy — so a name whose only fitting candidate wants `integer` still accepts `foo(1)`
+- when no candidate accepts the arguments, the call is a type error naming the overloaded callee and
+  how many signatures were tried, with the first candidate's failure as the concrete hint
+- every non-call use of an overloaded name (passing it as a value, hover) sees the **first**
+  declaration
+
+Only a plain or namespace-qualified stub name can be overloaded. A local or package binding that
+shadows the name disables its overload set — the binding wins everywhere, calls included.
+
 ### Indexing
 
 `[[` is single-element extraction.

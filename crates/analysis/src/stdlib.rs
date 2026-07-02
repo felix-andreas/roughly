@@ -6,7 +6,10 @@ use {
         typecheck::{InferenceState, TypeDefinitionEnvironment},
         types::TypeScheme,
     },
-    std::{collections::BTreeMap, path::Path},
+    std::{
+        collections::{BTreeMap, BTreeSet},
+        path::Path,
+    },
     tree_sitter::Range,
 };
 
@@ -43,7 +46,11 @@ pub struct StubLibrary {
 
 #[derive(Debug, Clone)]
 struct StubValue {
-    scheme: TypeScheme,
+    // The name's ordered overload set: one scheme per declaration of the name within its source, in
+    // declaration order. Most names declare exactly one. The first scheme is the primary signature
+    // (bound as the plain global, shown on hover/completion); a call to a multi-scheme name probes
+    // the set in order and commits the first scheme that accepts the arguments.
+    schemes: Vec<TypeScheme>,
     range: Range,
     // The R namespace the stub was declared in (`base`, `stats`, …), or `None` for a project override.
     // Shown on hover so a stdlib name reads as coming from its package; it does not affect resolution.
@@ -113,8 +120,18 @@ impl StubLibrary {
     // monomorphic scheme has no variables, so importing is a no-op for it.
     pub fn seed_into(&self, inference_state: &mut InferenceState) {
         for (symbol, value) in &self.values {
-            let imported = inference_state.import_scheme(&value.scheme);
-            inference_state.bind_global_scheme(*symbol, imported, value.range);
+            let imported = value
+                .schemes
+                .iter()
+                .map(|scheme| inference_state.import_scheme(scheme))
+                .collect::<Vec<_>>();
+            let Some(first) = imported.first() else {
+                continue;
+            };
+            inference_state.bind_global_scheme(*symbol, first.clone(), value.range);
+            if imported.len() > 1 {
+                inference_state.bind_overload_set(*symbol, imported);
+            }
         }
     }
 
@@ -122,10 +139,12 @@ impl StubLibrary {
         self.values.keys().copied()
     }
 
+    // One `(symbol, scheme)` pair per stub name, using the primary (first-declared) scheme of an
+    // overloaded name — the display surfaces (completion detail, corpus audits) want one signature.
     pub fn schemes(&self) -> impl Iterator<Item = (Symbol, &TypeScheme)> + '_ {
         self.values
             .iter()
-            .map(|(symbol, value)| (*symbol, &value.scheme))
+            .filter_map(|(symbol, value)| value.schemes.first().map(|scheme| (*symbol, scheme)))
     }
 
     // The R namespace a stub name was declared in (`base`, `stats`, …), for display on hover. `None`
@@ -182,9 +201,10 @@ pub fn discover_project_stub_sources(root: &Path) -> Vec<String> {
 }
 
 // Parses one stub source and harvests each declaration's type expression into a scheme keyed by the
-// declared name (a later source overrides an earlier one for the same name, and — until overload sets
-// exist — so does a later declaration of the same name within one source). A declaration whose type
-// expression fails to lower into a scheme is skipped, and lines that fail to parse are dropped by the
+// declared name. Declaring the same name more than once *within one source* builds an ordered
+// overload set; a later *source* (a project override) still replaces the whole set for that name, so
+// an override that wants overloads declares all of them itself. A declaration whose type expression
+// fails to lower into a scheme is skipped, and lines that fail to parse are dropped by the
 // declaration parser, so a malformed project override degrades gracefully rather than aborting analysis.
 fn harvest_stub_source(
     interner: &mut Interner,
@@ -195,12 +215,20 @@ fn harvest_stub_source(
     let (declarations, _errors) = parse_stub_declarations(source, interner);
     let mut inference_state = InferenceState::new();
     let type_definitions = TypeDefinitionEnvironment::default();
+    let mut declared_in_this_source = BTreeSet::new();
     for declaration in declarations {
         let Ok(scheme) =
             inference_state.harvest_annotation_scheme(&declaration.surface_type, &type_definitions)
         else {
             continue;
         };
+        if declared_in_this_source.contains(&declaration.name) {
+            if let Some(value) = values.get_mut(&declaration.name) {
+                value.schemes.push(scheme);
+            }
+            continue;
+        }
+        declared_in_this_source.insert(declaration.name);
         // A project override of a shipped name replaces the scheme but keeps the shipped
         // namespace tag: the override refines the type of `stats::sd`, it does not move `sd`
         // out of `stats` — dropping the tag would make `stats::sd` warn "not exported".
@@ -212,7 +240,7 @@ fn harvest_stub_source(
         values.insert(
             declaration.name,
             StubValue {
-                scheme,
+                schemes: vec![scheme],
                 range: declaration.range,
                 namespace,
             },

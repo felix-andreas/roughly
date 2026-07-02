@@ -203,3 +203,99 @@ fn mutations_without_an_active_snapshot_are_permanent() {
     );
     assert_eq!(inference_state.entry(speculative), None);
 }
+
+// Overload sets declared by repeating a name in a stub source: a call commits the first candidate
+// that accepts the arguments, and a call no candidate accepts reports every candidate as tried.
+// The shipped corpus always ends a set with an `Any` fallback, so the no-match error is only
+// reachable through a project override — which is why this lives here and not in a fixture.
+mod overload_sets {
+    use analysis::{
+        Document,
+        diagnostic::Diagnostic,
+        lower::{self, LoweringContext},
+        stdlib::StubLibrary,
+        tree::new_parser,
+        typecheck::{TypeDefinitionEnvironment, inference_state_with_builtins},
+        types::{Atomic, CoreType},
+    };
+
+    const OVERRIDE_SOURCE: &str =
+        "wrap : fn(x: integer) -> integer\nwrap : fn(x: character) -> character\n";
+
+    fn infer_last_type(source: &str) -> Result<CoreType, String> {
+        let mut parser = new_parser().expect("parser should build");
+        let document = Document::parse(&mut parser, source).expect("source should parse");
+        let mut lowering_context = LoweringContext::new();
+        let module = lower::lower(&document, &mut lowering_context);
+        let mut inference_state = inference_state_with_builtins(&mut lowering_context);
+        let stub_library = StubLibrary::load_with_overrides(
+            lowering_context.interner_mut(),
+            &[OVERRIDE_SOURCE.to_owned()],
+        );
+        stub_library.seed_into(&mut inference_state);
+        let type_definitions = TypeDefinitionEnvironment::from_module(&module);
+        match inference_state.infer_module(&module, &type_definitions) {
+            Ok(mut inferred_types) => {
+                let last = inferred_types
+                    .pop()
+                    .expect("module should have a statement");
+                Ok(inference_state
+                    .resolve(last)
+                    .expect("inferred type should resolve"))
+            }
+            Err(error) => {
+                let fallback_range = module
+                    .arena
+                    .get(*module.expressions.first().expect("statement"))
+                    .range;
+                let diagnostic = Diagnostic::from_inference_error(
+                    &error,
+                    fallback_range,
+                    lowering_context.interner(),
+                );
+                Err(diagnostic.message)
+            }
+        }
+    }
+
+    #[test]
+    fn call_commits_the_first_candidate_that_accepts_the_arguments() {
+        assert_eq!(
+            infer_last_type("wrap(1L)\n").expect("integer candidate should match"),
+            CoreType::Scalar(Atomic::Integer)
+        );
+        assert_eq!(
+            infer_last_type("wrap(\"a\")\n").expect("character candidate should match"),
+            CoreType::Scalar(Atomic::Character)
+        );
+    }
+
+    #[test]
+    fn call_no_candidate_accepts_reports_the_overload_set() {
+        let message = infer_last_type("wrap(TRUE)\n").expect_err("no candidate accepts a logical");
+        assert!(
+            message.contains("no overload of `wrap` matches these arguments"),
+            "message should name the overloaded callee: {message}"
+        );
+        assert!(
+            message.contains("2 declared signatures"),
+            "message should count the candidates: {message}"
+        );
+    }
+
+    #[test]
+    fn whole_number_literal_selects_by_courtesy_only_when_nothing_matches_exactly() {
+        // `wrap` has no double candidate, so the literal courtesy admits `wrap(1)` through the
+        // integer candidate on the second selection round.
+        assert_eq!(
+            infer_last_type("wrap(1)\n").expect("courtesy round should admit the literal"),
+            CoreType::Scalar(Atomic::Integer)
+        );
+        // `sum` has a double candidate, so `sum(1, 2)` must select it — the courtesy must not let
+        // the integer candidate win the strict round and misstate R's double result.
+        assert_eq!(
+            infer_last_type("sum(1, 2)\n").expect("sum should accept doubles"),
+            CoreType::Scalar(Atomic::Double)
+        );
+    }
+}

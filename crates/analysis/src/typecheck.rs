@@ -107,6 +107,15 @@ pub enum InferenceError {
     UnresolvedAnnotationType {
         symbol: Symbol,
     },
+    // A call to an overloaded stub name that no declared scheme accepts. `first_error` carries
+    // the first candidate's failure for a concrete hint.
+    NoMatchingOverload {
+        symbol: Symbol,
+        candidate_count: usize,
+        range: Range,
+        expression_id: ExpressionId,
+        first_error: Option<Box<InferenceError>>,
+    },
     // An indexing form the checker does not model: multiple indexes (`m[i, j]`), an empty index
     // (`x[]`), or a named index argument. The subject was already inferred; this is about the
     // index shape, so the message must name indexing rather than a function call.
@@ -242,6 +251,15 @@ pub struct InferenceState {
     // function's definition site (and again at each further enclosing definition site — the join
     // is idempotent). Cleared per top-level statement.
     pending_enclosing_writes: Vec<(EnvironmentKey, CoreType, Range)>,
+    // Ordered overload sets for stub names (declaration order). A call whose callee is one of
+    // these names tries each scheme with a probe and commits the first that accepts the
+    // arguments; every non-call use of the name sees the first scheme (the environment binding).
+    overload_sets: BTreeMap<Symbol, Vec<TypeScheme>>,
+    // Non-zero while matching arguments against a probed overload candidate. The whole-number
+    // literal courtesy (`1` accepted where `integer` is expected) is disabled during probes: the
+    // literal is genuinely a double at runtime, so letting it match an integer candidate would
+    // select a signature whose return type misstates what R computes.
+    overload_probe_depth: usize,
     // Per captured slot flagged for the discovery re-pass: the running join of every write's type
     // (variables erased to `Unknown` so entries survive unification rollbacks). Captured reads of
     // such slots resolve here instead of the definition-point environment entry, making them sound
@@ -1096,6 +1114,10 @@ impl InferenceState {
 
     fn lookup_local_name(&self, binding_id: BindingId) -> Option<&Binding> {
         self.environment.get(&EnvironmentKey::Local(binding_id))
+    }
+
+    pub fn bind_overload_set(&mut self, symbol: Symbol, schemes: Vec<TypeScheme>) {
+        self.overload_sets.insert(symbol, schemes);
     }
 
     pub fn lookup_global_name(&self, symbol: Symbol) -> Option<&Binding> {
@@ -4694,6 +4716,26 @@ impl InferenceState {
         resolution_context: Option<&ResolutionContext<'_>>,
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<CoreType, InferenceError> {
+        // An overloaded stub callee resolves per call site: each scheme is probed in declaration
+        // order and the first whose parameters accept the arguments wins (its return is the call's
+        // type). Only a plain or namespace-qualified name can be overloaded, and a local binding
+        // shadowing the name disables the set (the local wins, as everywhere).
+        if let Some(overload_symbol) = callee_overload_symbol(callee, resolution_context)
+            && let Some(schemes) = self.overload_sets.get(&overload_symbol).cloned()
+            && schemes.len() > 1
+        {
+            return self.infer_overloaded_call(
+                overload_symbol,
+                &schemes,
+                arguments,
+                callee,
+                expression,
+                arena,
+                resolution_context,
+                type_definitions,
+            );
+        }
+
         let inferred_callee = self.infer_expression_with_context(
             callee,
             arena,
@@ -4752,6 +4794,129 @@ impl InferenceState {
         }
     }
 
+    // Probes each scheme of an overloaded name in declaration order and commits the first one whose
+    // signature accepts the arguments; its return type is the call's type. Arguments are inferred
+    // exactly once, before any probe: expression inference writes fields the probe snapshot does not
+    // reverse (`environment`, `recorded_expression_types`), so running it inside a probe would leak
+    // bindings that reference rolled-back variable ids. The probes themselves run only the
+    // instantiation and argument-matching paths, which stay within the snapshot contract.
+    #[allow(clippy::too_many_arguments)]
+    fn infer_overloaded_call(
+        &mut self,
+        symbol: Symbol,
+        schemes: &[TypeScheme],
+        arguments: &[Argument],
+        callee: &Expression,
+        expression: &Expression,
+        arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<CoreType, InferenceError> {
+        let argument_types =
+            self.infer_call_arguments(arguments, arena, resolution_context, type_definitions)?;
+
+        // Selection needs concrete argument types. Probing against an argument whose type still
+        // contains a free inference variable would let the first candidate bind it — committing a
+        // wrapper function's parameter (`function(x) sum(x)`) to the first scheme's parameter type
+        // and rejecting calls R accepts. Such a call skips selection and uses the final
+        // declaration, by corpus convention the most general one.
+        let mut has_unresolved_argument = false;
+        for argument_type in &argument_types {
+            if !self.free_type_variables(argument_type)?.is_empty() {
+                has_unresolved_argument = true;
+                break;
+            }
+        }
+        let schemes = match (has_unresolved_argument, schemes.split_last()) {
+            (true, Some((last, _))) => std::slice::from_ref(last),
+            _ => schemes,
+        };
+
+        // Selection runs strict first, then (only if nothing matched and a whole-number double
+        // literal is present) once more with the literal-as-integer courtesy. During the strict
+        // round the courtesy is off (`overload_probe_depth`): `1` is genuinely a double at runtime,
+        // so letting it match an integer candidate would pick a signature whose return type
+        // misstates what R computes (`sum(1, 2)` is a double, not an integer). The courtesy round
+        // keeps a name whose only fitting candidate wants `integer` callable as `foo(1)` — exact
+        // matches outrank conversions.
+        let literal_courtesy_rounds: &[bool] = if arguments
+            .iter()
+            .any(|argument| is_whole_number_double_literal(arena.get(argument.expression)))
+        {
+            &[false, true]
+        } else {
+            &[false]
+        };
+
+        let mut first_error = None;
+        for &allow_literal_courtesy in literal_courtesy_rounds {
+            for scheme in schemes {
+                let snapshot = self.snapshot();
+                let function_type = match self
+                    .instantiate_type_scheme(scheme)
+                    .and_then(|instantiated| self.resolve(instantiated))
+                {
+                    Ok(CoreType::Function(function_type)) => function_type,
+                    Ok(_) => {
+                        self.rollback_to(snapshot);
+                        continue;
+                    }
+                    Err(error) => {
+                        self.rollback_to(snapshot);
+                        return Err(error);
+                    }
+                };
+                if !allow_literal_courtesy {
+                    self.overload_probe_depth += 1;
+                }
+                let outcome = self.match_call_arguments(
+                    function_type,
+                    arguments,
+                    &argument_types,
+                    callee,
+                    expression,
+                    arena,
+                    type_definitions,
+                );
+                if !allow_literal_courtesy {
+                    self.overload_probe_depth -= 1;
+                }
+                match outcome {
+                    Ok(result) => {
+                        self.commit(snapshot);
+                        return Ok(result);
+                    }
+                    Err(InferenceError::RecursionLimitExceeded) => {
+                        self.rollback_to(snapshot);
+                        return Err(InferenceError::RecursionLimitExceeded);
+                    }
+                    Err(error) => {
+                        self.rollback_to(snapshot);
+                        if first_error.is_none() {
+                            first_error = Some(error);
+                        }
+                    }
+                }
+            }
+        }
+
+        // The unresolved-argument fallback probes a single scheme; failing it is an ordinary call
+        // mismatch, so the underlying error reads better than a one-candidate overload report.
+        if schemes.len() == 1
+            && let Some(error) = first_error
+        {
+            return Err(error);
+        }
+
+        Err(InferenceError::NoMatchingOverload {
+            symbol,
+            candidate_count: schemes.len(),
+            range: expression.range,
+            expression_id: expression.id,
+            first_error: first_error.map(Box::new),
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn infer_function_call(
         &mut self,
@@ -4761,6 +4926,54 @@ impl InferenceState {
         expression: &Expression,
         arena: &HirArena,
         resolution_context: Option<&ResolutionContext<'_>>,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<CoreType, InferenceError> {
+        let argument_types =
+            self.infer_call_arguments(arguments, arena, resolution_context, type_definitions)?;
+        self.match_call_arguments(
+            function_type,
+            arguments,
+            &argument_types,
+            callee,
+            expression,
+            arena,
+            type_definitions,
+        )
+    }
+
+    fn infer_call_arguments(
+        &mut self,
+        arguments: &[Argument],
+        arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<Vec<CoreType>, InferenceError> {
+        arguments
+            .iter()
+            .map(|argument| {
+                self.infer_expression_with_context(
+                    arena.get(argument.expression),
+                    arena,
+                    resolution_context,
+                    type_definitions,
+                )
+            })
+            .collect()
+    }
+
+    // Matches already-inferred argument types against a concrete signature: positionals in order,
+    // named arguments by name, surplus positionals into optional named parameters or `...`. Kept
+    // free of expression inference so an overload probe can run it inside a snapshot (see
+    // `infer_overloaded_call`). `argument_types` is parallel to `arguments`.
+    #[allow(clippy::too_many_arguments)]
+    fn match_call_arguments(
+        &mut self,
+        function_type: FunctionType<CoreType>,
+        arguments: &[Argument],
+        argument_types: &[CoreType],
+        callee: &Expression,
+        expression: &Expression,
+        arena: &HirArena,
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<CoreType, InferenceError> {
         let total_parameters =
@@ -4787,14 +5000,9 @@ impl InferenceState {
         let mut next_positional_index = 0;
         let mut remaining_named_parameters = function_type.named_parameters;
 
-        for argument in arguments {
+        for (argument, inferred_argument) in arguments.iter().zip(argument_types) {
             let arg_expr = arena.get(argument.expression);
-            let inferred_argument = self.infer_expression_with_context(
-                arg_expr,
-                arena,
-                resolution_context,
-                type_definitions,
-            )?;
+            let inferred_argument = inferred_argument.clone();
             if let Some(name) = argument.name {
                 let Some(parameter_index) = remaining_named_parameters
                     .iter()
@@ -4909,8 +5117,10 @@ impl InferenceState {
         // R programmers write `seq_len(10)`, not `seq_len(10L)`: a whole-number double literal
         // counts as an integer at a parameter position, the same rule `:` applies to its
         // endpoints. The retry goes through full compatibility, so integer-expecting unions and
-        // vector parameters admit the literal too.
-        if resolved_argument == CoreType::Scalar(Atomic::Double)
+        // vector parameters admit the literal too. Off during a strict overload probe — the
+        // courtesy must not decide which candidate wins (see `infer_overloaded_call`).
+        if self.overload_probe_depth == 0
+            && resolved_argument == CoreType::Scalar(Atomic::Double)
             && is_whole_number_double_literal(argument_expression)
             && self.check_compatibility(
                 CoreType::Scalar(Atomic::Integer),
@@ -6600,6 +6810,34 @@ fn alias_cycle_error(symbol: Symbol, expression: Option<&Expression>) -> Inferen
 // function compatibility will diagnose (an arity mismatch); a named parameter that matches no
 // formal is its own hard error, because the annotation would otherwise promise callers a name the
 // runtime rejects.
+// The overloadable name a call's callee spells, when it is a bare or namespace-qualified name
+// that does NOT resolve to a local slot or package global (an overload set never shadows user
+// code — only base-environment stub names participate).
+fn callee_overload_symbol(
+    callee: &Expression,
+    resolution_context: Option<&ResolutionContext<'_>>,
+) -> Option<Symbol> {
+    match &callee.kind {
+        ExpressionKind::Symbol(symbol) => {
+            if let Some(context) = resolution_context {
+                if context
+                    .local_naming
+                    .expression_resolutions
+                    .contains_key(&callee.id)
+                {
+                    return None;
+                }
+                if context.package_naming.global_bindings.contains_key(symbol) {
+                    return None;
+                }
+            }
+            Some(*symbol)
+        }
+        ExpressionKind::NamespaceGet { name, .. } => Some(*name),
+        _ => None,
+    }
+}
+
 fn align_expected_parameter_types(
     function_type: &FunctionType<CoreType>,
     parameters: &[crate::hir::Parameter],

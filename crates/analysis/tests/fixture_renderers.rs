@@ -37,6 +37,7 @@ pub fn render_expression_error_kind(error: &InferenceError) -> &'static str {
             "error: annotation names a missing parameter"
         }
         InferenceError::UnsupportedIndexShape { .. } => "error: unsupported index shape",
+        InferenceError::NoMatchingOverload { .. } => "error: no matching overload",
     }
 }
 

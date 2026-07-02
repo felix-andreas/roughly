@@ -194,28 +194,48 @@ sprintf("%d-%s", 1L, "a")
 character
 
 #==== type_preserving_reductions
-#---- sum_is_type_preserving_any
+#---- sum_of_integers_is_integer
 sum(1L, 2L, 3L)
 #++++
-Any
+integer
 
 #---- sum_accepts_named_na_rm_with_rest_arguments
 sum(1, 2, na.rm = TRUE)
 #++++
-Any
+double
+
+#---- sum_of_mixed_integer_and_double_is_double
+sum(1L, 2.5)
+#++++
+double
+
+#---- sum_of_logicals_is_integer
+sum(TRUE, FALSE)
+#++++
+integer
+
+#---- sum_of_vector_and_scalar_is_integer
+sum(c(1L, 2L), 3L)
+#++++
+integer
 
 #---- min_accepts_character_arguments
 min("a", "z")
 #++++
-Any
+character
 
-#---- max_is_type_preserving_any
+#---- max_of_integers_is_integer
 max(1L, 2L, na.rm = TRUE)
 #++++
-Any
+integer
 
-#---- range_is_type_preserving_any
+#---- range_of_integers_is_integer_vector
 range(1L, 2L, 3L)
+#++++
+integer[]
+
+#---- reduction_of_mixed_character_and_numeric_falls_back_to_any
+min(1L, "a")
 #++++
 Any
 
@@ -256,9 +276,27 @@ rev(c(1L, 2L, 3L))
 #++++
 Any
 
-#---- shape_polymorphic_abs_degrades_to_any
+#==== overloaded_shape_preservation
+#---- abs_of_integer_scalar_is_integer
 abs(1L)
 #++++
+integer
+
+#---- abs_of_double_vector_is_double_vector
+abs(c(1.5, -2.5))
+#++++
+double[]
+
+#---- cumsum_of_integer_vector_is_integer_vector
+cumsum(c(1L, 2L, 3L))
+#++++
+integer[]
+
+#---- unresolved_argument_selects_general_fallback
+f <- function(x) sum(x)
+f(c("a", "b"))
+#++++
+fn(x: ?1) -> Any
 Any
 
 #==== precise_strings

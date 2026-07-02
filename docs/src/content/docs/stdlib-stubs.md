@@ -5,15 +5,17 @@ description: The standard-library stub format (.Rtypes declaration files) that t
 
 :::note[Status]
 The standard-library stub format ships. The corpus is ~530 declarations across six declaration-only
-`.Rtypes` stub files under `crates/analysis/stubs/` — `base.Rtypes` (~340 names), `stats.Rtypes`,
-`utils.Rtypes`, `methods.Rtypes` are loaded and bound into the checker as a **set-once input** that
-never invalidates a package edit (see [Incremental hygiene](#incremental-hygiene));
-`graphics.Rtypes` and `grDevices.Rtypes` exist but await their two-line `SHIPPED_STUBS` entries in
-`stdlib.rs`. Project [overrides](#override-precedence) are supported. Still **proposed / not yet
-built**: the CRAN tier (per-project introspection, §7), R-version keying of the embedded corpus (§8),
-the stubtest CI validator, and `pkg::name` (`NamespaceGet`). Sections below mark which is which. The
-authoritative typing contract remains the [Typing Reference](/typing-reference); this note describes
-how the standard library feeds that contract.
+`.Rtypes` stub files under `crates/analysis/stubs/` (`base.Rtypes`, `stats.Rtypes`, `utils.Rtypes`,
+`methods.Rtypes`, `graphics.Rtypes`, `grDevices.Rtypes`), all loaded and bound into the checker as a
+**set-once input** that never invalidates a package edit (see
+[Incremental hygiene](#incremental-hygiene)). Project [overrides](#override-precedence),
+[overload sets](#overloads-and-generics), and `pkg::name` qualified access (with unknown-namespace
+and not-exported warnings) are supported. Still **proposed / not yet built**: the CRAN tier
+(per-project introspection, §7), R-version keying of the embedded corpus (§8), the stubtest CI
+validator, `@type` declarations in `.Rtypes`, and the generic `T[]` suffix. Sections below mark
+which is which. The authoritative typing contract remains the
+[Typing Reference](/typing-reference); this note describes how the standard library feeds that
+contract.
 :::
 
 ## Problem
@@ -86,18 +88,37 @@ notation in two carriers.
 
 ### Overloads and generics
 
-The declaration grammar permits **repeated declarations of one name**, so overload sets can be adopted
-later without rewriting the corpus. Until the type system gains overload sets (or traits — that choice
-is deferred), a repeated name is resolved last-wins by the loader. Two rules govern the current corpus:
+**Repeating a name declares an ordered overload set.** Each further declaration of the same name
+*within one source* appends a candidate:
+
+```
+sum : fn([na.rm]: logical, ...: integer[] | logical[]) -> integer
+sum : fn([na.rm]: logical, ...: double[]) -> double
+sum : fn([na.rm]: logical, ...: Any) -> Any
+```
+
+A call to the name commits the **first candidate that accepts the arguments** (so `sum(1L, 2L)` is
+`integer` and `sum(1.5, 2.5)` is `double`); the call-site selection rules — probe isolation, the
+unresolved-argument fallback to the last candidate, the two-round literal courtesy, and the no-match
+error — are specified in the Typing Reference under
+[Overload sets](/typing-reference#overload-sets). Non-call uses of the name (hover, passing it as a
+value) see the first candidate, so the corpus orders each set most-specific first and ends it with
+the most general candidate — conventionally an `Any` fallback, which also keeps mixtures the
+candidates cannot express (`sum(TRUE, 1L)`) from erroring. A project override that redeclares a name
+**replaces its whole set**; an override that wants overloads declares all of them itself.
+
+Three rules govern the current corpus:
 
 - **Genuinely parametric functions get real generics.** Higher-order helpers whose result is a function
   of the argument *type* (`lapply`, `Reduce`, `print`, `invisible`, `setNames`, `suppressWarnings`, ...)
   are written with `<T> fn(...)` binders and keep precise polymorphic schemes.
+- **Type-preserving functions get overload sets.** The reductions whose result's atomic type follows
+  the input's (`sum`/`min`/`max`/`range`/`pmin`/`pmax`, `cumsum`/`cummax`/`cummin`, `abs`) declare
+  one candidate per atomic family plus the `Any` fallback.
 - **Value-dependent results fall back to `Any`.** A function whose return type varies by argument
-  *value* or by arity (`rep`, `seq`, `is`, `grep(value =)`) — including the **type-preserving**
-  reductions (`sum`/`min`/`max` keep integer input integer; `min`/`max` even work on character), whose
-  faithful typing needs overload sets — is given `Any` rather than a falsely-precise signature, so a
-  call yields `Any` and never a spurious type or arity error. The name still resolves.
+  *value* or by arity (`rep`, `seq`, `is`, `grep(value =)`) is given `Any` rather than a
+  falsely-precise signature, so a call yields `Any` and never a spurious type or arity error. The
+  name still resolves.
 
 ## Override precedence
 
@@ -142,41 +163,45 @@ The gaps below remain; each caps how precise the affected declarations can be:
 | Gap | Example | Extension needed |
 |-----|---------|------------------|
 | Generic atomic suffix | `rev`, `head`, shape-threading | accept `T[]` (type variable + suffix) |
-| Overloading | `sum`/`min`/`max` type-preserving returns; `cor` vector-vs-matrix | overload sets or traits in the type system |
 | Trailing-dot parameter names | `stop(call. =)`, `warning(immediate. =)` | parameter names currently allow interior dots only |
 | Named-into-rest absorption | `data.frame(x = 1)`, `Sys.setenv(VAR = "v")`, `par(mfrow = ...)` | the checker never routes a named argument into `...`, so arbitrary-named-argument sinks must stay `Any` values |
 | Extra-optional-tolerant function compatibility | `lapply(words, nchar)` breaks if `nchar` declares its optional formals | function compatibility requires matching parameter counts, so callback-idiom stubs must stay single-parameter |
 | `Never` type | `stop`, `q` | without it, a `NULL` return claim would poison `x <- if (ok) v else stop(...)` joins, so these stay `Any` |
 | Nullable results under member-wise operators | `names`, `dim`, `nrow` | `T | NULL` returns false-positive on `1:nrow(df)` / `for (nm in names(x))` until flow narrowing or NULL-tolerant joins exist, so these return `Any` |
 
-The declaration grammar already permits repeated declarations of one name, so adopting overload sets
-later needs no corpus rewrite; until then, and until the generic-vector design lands, the shape-mirroring
-functions degrade to `Any` (see [Overloads and generics](#overloads-and-generics)).
+Overloading closed its row in this table: the type-preserving reductions now declare
+[overload sets](#overloads-and-generics). Until the generic-vector design lands, the remaining
+shape-mirroring functions (`rev`, `head`, `sort`, ...) still degrade to `Any`.
 
 ## 3. Loading and namespacing
 
 Stubs are **immutable, set-once inputs** — analogous to rust-analyzer's `Durability::HIGH`. They are
 loaded, parsed, and interned once, and are never invalidated by user edits.
 
-The `StubLibrary` is a **flat set-once map**: `values: Symbol -> scheme` (each entry pairs the harvested
-`TypeScheme` with the declaration's source range). It is not keyed by namespace.
+The `StubLibrary` is a **flat set-once map**: `values: Symbol -> StubValue`, where each entry pairs
+the name's ordered scheme list (one scheme per declaration — see
+[overload sets](#overloads-and-generics)) with the declaration's source range and the shipped
+namespace it came from (`base`, `stats`, ... — `None` for a project override, which inherits the
+shipped tag when it overrides a shipped name). It is not partitioned by namespace.
 
-- Every shipped `.Rtypes` file (`base.Rtypes`, `stats.Rtypes`, `utils.Rtypes`, `methods.Rtypes`; the
-  `graphics.Rtypes`/`grDevices.Rtypes` files await their `SHIPPED_STUBS` entries) is harvested into the
-  one flat map, folded in file order — a later declaration of a name overrides an earlier one (last-wins,
-  the same rule that governs project overrides). All shipped namespaces are thus attached to the base
-  scope together; there is no per-namespace partition.
-- The flat map is seeded into the per-document inference template, so every stub name resolves as a bare
-  global regardless of which shipped file declared it.
+- Every shipped `.Rtypes` file (all six) is harvested into the one flat map, folded in file order —
+  a later *source* redeclaring a name replaces its whole entry (the same rule that governs project
+  overrides), while repeated declarations *within* one source build the name's overload set. All
+  shipped namespaces are thus attached to the base scope together.
+- The flat map is seeded into the per-document inference template, so every stub name resolves as a
+  bare global regardless of which shipped file declared it. A name's first scheme becomes its plain
+  environment binding; a multi-scheme name additionally registers its overload set for call-site
+  selection.
+- `pkg::name` resolves against the same flat map: the qualified read has the stub's type exactly
+  like the bare name, and the retained namespace tag powers the validation warnings (unknown
+  namespace; name not exported by that namespace) specified in the Typing Reference under
+  [Namespace access](/typing-reference#namespace-access).
 
 **Not yet built (future namespacing):**
 
 - A per-namespace map (`namespace -> {Symbol -> scheme}`) that keeps the shipped packages separate rather
-  than folded flat.
+  than folded flat (today two shipped packages cannot declare the same name with different types).
 - `library(pkg)` attaching a namespace on demand (see §7).
-- `pkg::name` resolution against a per-namespace map. Today `NAMESPACE_OPERATOR` lowers to `Unsupported`;
-  resolving it needs a `NamespaceGet` node (see §9). Until then a `pkg::name` reference is unsupported and
-  the flat map cannot answer it.
 
 ### Incremental hygiene
 
@@ -226,15 +251,17 @@ values or classes), omit it or give `Any`.
 The corpus optimizes for (1) zero false errors on idiomatic calls, then (2) the most precise sound
 return. The recurring compromises are named once in the `base.Rtypes` header and referenced per entry:
 
-- **Any-param** — a parameter is `Any` although R documents a type: the checker does not widen
-  `integer` to `double` at parameter positions, whole-number double literals are not accepted at
-  `integer` parameters, and R itself coerces argument types (`nchar(42)` is legal). The `T[]` generic
-  design restores parameter precision.
+- **Any-param** — a parameter is `Any` although R documents a type: R itself coerces argument types
+  (`nchar(42)` is legal), so a declared type would reject calls R accepts. The checker's coercions
+  (`integer` widens to `double` at parameter positions, whole-number double literals count as
+  `integer`, scalars coerce into vector positions) shrink the need for this, and the `T[]` generic
+  design restores the rest of the parameter precision.
 - **scalar-claim** — an elementwise (vectorized) function declares its scalar result form
   (`character`, not `character[]`): a scalar claim coerces into every vector position and can never
   false-positive downstream, while a vector claim would break `if (grepl(...))`.
 - **type-preserving** — the result's atomic type follows the input's (`sum`, `sort`, `rev`); the
-  return is `Any` until overload sets, never a falsely-precise `double`.
+  reductions declare [overload sets](#overloads-and-generics), and shape-mirroring names still
+  return `Any` (never a falsely-precise `double`) until the `T[]` generic design lands.
 - **NULL-hybrid** — the result is `T`-or-`NULL` depending on the runtime value (`names`, `dim`,
   `nrow`); returns `Any` (see the gaps table).
 - **named-formals** — a variadic function's named formals must all be declared (`paste`'s
@@ -306,9 +333,9 @@ machinery. This closes the `T`/`F`/`pi` gap with only the two integration edits 
 
 ### Risks
 
-- **Type-syntax expressiveness.** Variadics and dotted parameter names have landed; the generic `T[]`
-  suffix (and overload sets) remain, so shape-mirroring and ad-hoc-overloaded functions still degrade
-  to `Any` until that design lands.
+- **Type-syntax expressiveness.** Variadics, dotted parameter names, and overload sets have landed;
+  the generic `T[]` suffix remains, so shape-mirroring functions still degrade to `Any` until that
+  design lands.
 - **The operator/`c` kernel cannot migrate.** One-source-of-truth is necessarily partial.
 - **Corpus size.** Base alone is ~1400 exports. Curate a high-value subset; treat stubs as living
   docs with real drift risk. The full validation tool is a **stubtest-equivalent** that introspects real
@@ -416,11 +443,9 @@ as a future slice, in dependency order:
 2. **stubtest validator (LT5)** — a stubtest-equivalent CI check that introspects real R and **diffs**
    the curated stubs (embedded corpus *and* curated CRAN overrides) against the live signatures,
    flagging drift. Also R-dependent; runs in CI where R is installed, not in the unit suite.
-3. **`NamespaceGet` HIR node for `pkg::name`** — today `NAMESPACE_OPERATOR` lowers to `Unsupported`;
-   resolving `pkg::name` needs a real `NamespaceGet` node carrying the namespace + name, plus a
-   per-namespace stub map to resolve against (the flat `StubLibrary` of §3 has no namespace partition).
-   The `NamespaceGet` node is buildable without R (it is pure lowering/resolution), but it is only
-   *useful* once a namespace has stubs to resolve against, so it is sequenced with the tier it serves.
 
-Until this slice lands, `pkg::name` stays `Unsupported` and third-party names resolve to `Any` — the
-safe, non-erroring degrade from §7.
+The `NamespaceGet` HIR node for `pkg::name` has landed: a qualified read resolves against the flat
+corpus with namespace-tag validation (§3). What this slice would add on top is a *per-namespace*
+stub map for third-party packages, so a CRAN package's names resolve only through its own namespace.
+Until it lands, third-party names resolve to `Unknown` with the unknown-namespace warning — the
+non-erroring degrade from §7.
