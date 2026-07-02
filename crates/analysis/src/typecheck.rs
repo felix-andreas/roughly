@@ -107,6 +107,13 @@ pub enum InferenceError {
     UnresolvedAnnotationType {
         symbol: Symbol,
     },
+    // An annotation names a parameter the annotated function does not define. R matches call
+    // arguments against the definition's formal names, so such an annotation promises callers a
+    // name the runtime would reject.
+    AnnotationParameterNameMismatch {
+        name: Symbol,
+        range: Option<Range>,
+    },
     ConstraintViolation {
         constraint: Constraint,
         actual: Box<CoreType>,
@@ -2227,9 +2234,12 @@ impl InferenceState {
         resolution_context: Option<&ResolutionContext<'_>>,
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<FunctionType<CoreType>, InferenceError> {
-        let expected_parameter_types = expected_function_type
-            .map(flatten_expected_parameter_types)
-            .filter(|types| types.len() == parameters.len());
+        let expected_parameter_types = match expected_function_type {
+            Some(function_type) => {
+                align_expected_parameter_types(function_type, parameters, expression.range)?
+            }
+            None => None,
+        };
         let parameter_binding_ids = resolution_context.and_then(|context| {
             (!parameters.is_empty()).then(|| {
                 parameters
@@ -3122,32 +3132,57 @@ impl InferenceState {
                     _ => return Ok(false),
                 }
 
+                // Parameters pair by NAME where both sides name them (R matches call arguments
+                // against formal names, so `fn(a: integer, b: character)` and a function defined
+                // `function(b, a)` pair a-with-a and b-with-b regardless of order); unnamed
+                // (positional) parameters consume the remaining slots left to right. A named
+                // expected parameter with no same-named actual falls back to positional pairing —
+                // interface names that do not exist on the actual function are the annotation
+                // path's hard error, while plain value flow stays permissive for unnamed shapes.
                 let mut actual_parameters = actual_function
                     .parameters
                     .into_iter()
-                    .map(|parameter| (parameter, false))
+                    .map(|parameter| (None, parameter, false))
                     .collect::<Vec<_>>();
                 actual_parameters.extend(
                     actual_function
                         .named_parameters
                         .into_iter()
-                        .map(|parameter| (parameter.value, parameter.optional)),
+                        .map(|parameter| {
+                            (Some(parameter.name), parameter.value, parameter.optional)
+                        }),
                 );
 
-                let mut expected_parameters = expected_function
+                let mut paired: Vec<Option<(CoreType, bool)>> = vec![None; actual_parameters.len()];
+                let mut positional_expected: Vec<(CoreType, bool)> = Vec::new();
+                for parameter in expected_function.named_parameters {
+                    match actual_parameters
+                        .iter()
+                        .position(|(name, ..)| *name == Some(parameter.name))
+                    {
+                        Some(index) if paired[index].is_none() => {
+                            paired[index] = Some((parameter.value, parameter.optional));
+                        }
+                        _ => positional_expected.push((parameter.value, parameter.optional)),
+                    }
+                }
+                let mut positional_expected = expected_function
                     .parameters
                     .into_iter()
                     .map(|parameter| (parameter, false))
-                    .collect::<Vec<_>>();
-                expected_parameters.extend(
-                    expected_function
-                        .named_parameters
-                        .into_iter()
-                        .map(|parameter| (parameter.value, parameter.optional)),
-                );
+                    .chain(positional_expected);
+                for slot in paired.iter_mut() {
+                    if slot.is_none() {
+                        *slot = positional_expected.next();
+                    }
+                }
 
-                for ((actual_param, actual_optional), (expected_param, expected_optional)) in
-                    actual_parameters.into_iter().zip(expected_parameters)
+                for ((_, actual_param, actual_optional), (expected_param, expected_optional)) in
+                    actual_parameters
+                        .into_iter()
+                        .zip(paired.into_iter().map(|slot| {
+                            slot.expect("parameter counts were checked equal before pairing")
+                        }))
                 {
                     // An expected-optional parameter promises callers they may omit it, so
                     // the actual function must have a default for that parameter.
@@ -6497,17 +6532,48 @@ fn alias_cycle_error(symbol: Symbol, expression: Option<&Expression>) -> Inferen
     }
 }
 
-fn flatten_expected_parameter_types(function_type: &FunctionType<CoreType>) -> Vec<CoreType> {
-    let mut parameter_types =
-        Vec::with_capacity(function_type.parameters.len() + function_type.named_parameters.len());
-    parameter_types.extend(function_type.parameters.iter().cloned());
-    parameter_types.extend(
-        function_type
-            .named_parameters
+// Aligns an expected (annotated) function type's parameter types to the definition's formals.
+// R call sites match arguments against the *definition's* formal names, so a named annotation
+// parameter must bind to the same-named formal — a positional zip would type the body's formals
+// against the wrong slots whenever the annotation and definition order them differently, and a
+// by-name call would then route a value into a formal checked at a different type.
+//
+// Named annotation parameters bind by name; unnamed (positional) annotation parameters fill the
+// remaining formals left to right. `Ok(None)` means the shapes cannot align for a reason ordinary
+// function compatibility will diagnose (an arity mismatch); a named parameter that matches no
+// formal is its own hard error, because the annotation would otherwise promise callers a name the
+// runtime rejects.
+fn align_expected_parameter_types(
+    function_type: &FunctionType<CoreType>,
+    parameters: &[crate::hir::Parameter],
+    annotation_range: Range,
+) -> Result<Option<Vec<CoreType>>, InferenceError> {
+    if function_type.parameters.len() + function_type.named_parameters.len() != parameters.len() {
+        return Ok(None);
+    }
+    let mut aligned: Vec<Option<CoreType>> = vec![None; parameters.len()];
+    for named_parameter in &function_type.named_parameters {
+        let Some(index) = parameters
             .iter()
-            .map(|parameter| parameter.value.clone()),
-    );
-    parameter_types
+            .position(|parameter| parameter.symbol == named_parameter.name)
+        else {
+            return Err(InferenceError::AnnotationParameterNameMismatch {
+                name: named_parameter.name,
+                range: Some(annotation_range),
+            });
+        };
+        if aligned[index].is_some() {
+            return Ok(None);
+        }
+        aligned[index] = Some(named_parameter.value.clone());
+    }
+    let mut positional = function_type.parameters.iter();
+    for slot in aligned.iter_mut() {
+        if slot.is_none() {
+            *slot = positional.next().cloned();
+        }
+    }
+    Ok(aligned.into_iter().collect())
 }
 
 #[cfg(test)]

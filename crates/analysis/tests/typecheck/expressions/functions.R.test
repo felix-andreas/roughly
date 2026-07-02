@@ -306,3 +306,32 @@ add2(3, m = 4)
 #++++
 fn(n: integer, m: integer) -> integer
 integer
+
+#==== annotation_name_matching
+#---- swapped_names_align_to_formals
+#: fn(a: integer, b: character) -> integer
+swapped <- function(b, a) b + 1L
+#++++
+error: invalid operand
+
+#---- swapped_names_accept_when_body_matches
+#: fn(a: integer, b: character) -> character
+swapped <- function(b, a) b
+swapped(a = 1L, b = "x")
+#++++
+fn(a: integer, b: character) -> character
+character
+
+#---- annotation_renaming_a_parameter_is_rejected
+#: fn(count: integer) -> integer
+f <- function(n) n
+#++++
+error: annotation names a missing parameter
+
+#---- positional_annotation_needs_no_names
+#: fn(integer) -> integer
+f <- function(n) n
+f(1L)
+#++++
+fn(integer) -> integer
+integer

@@ -367,6 +367,15 @@ impl Diagnostic {
                     format!("I could not resolve type `{name}`."),
                 )
             }
+            InferenceError::AnnotationParameterNameMismatch { name, range } => {
+                let name = interner.resolve(*name).unwrap_or("<unknown>");
+                (
+                    range.unwrap_or(fallback_range),
+                    format!(
+                        "this annotation names a parameter `{name}`, but the function does not define one — annotation parameter names must match the function's parameter names"
+                    ),
+                )
+            }
             InferenceError::ConstraintViolation {
                 constraint,
                 actual,

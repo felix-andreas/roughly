@@ -1451,10 +1451,15 @@ The leading character must still be a letter or `_`, and the dot is interior onl
 
 ### Function type compatibility
 
-Parameter names describe the call interface, not the identity of a function type. Two function types match by position across the flattened parameter list:
+Parameter names are part of the call interface, and R matches call arguments against the
+definition's formal names — so names participate in compatibility:
 
-- `fn(count: integer) -> NULL` and `fn(integer) -> NULL` are mutually compatible
-- an annotation `fn(count: integer) -> integer` accepts a function defined as `function(n) n`, and calls through the annotated binding use the annotation's interface
+- named parameters pair **by name**: `fn(a: integer, b: character)` accepts a function defined
+  `function(b, a)`, and each annotation type binds to the same-named formal regardless of order
+- unnamed (positional) parameter types pair with the remaining parameters left to right, so
+  `fn(count: integer) -> NULL` and `fn(integer) -> NULL` are mutually compatible
+- an annotation may not *rename* a parameter: `fn(count: integer) -> integer` over
+  `function(n) n` is an error, because it would promise callers a name the runtime rejects
 - parameter counts must match
 - an expected-optional parameter promises callers they may omit it, so the actual function must have a default for that parameter:
   - `fn(count: integer, [label]: character) -> integer` does not accept `function(count, label) count`

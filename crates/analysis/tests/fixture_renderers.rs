@@ -33,6 +33,9 @@ pub fn render_expression_error_kind(error: &InferenceError) -> &'static str {
         InferenceError::NonLiteralSubscript { .. } => "error: non-literal subscript",
         InferenceError::UnsupportedSubset { .. } => "error: unsupported `[` subset",
         InferenceError::RecursionLimitExceeded => "error: recursion limit exceeded",
+        InferenceError::AnnotationParameterNameMismatch { .. } => {
+            "error: annotation names a missing parameter"
+        }
     }
 }
 
