@@ -1,6 +1,6 @@
 use {
     crate::{
-        lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString},
+        lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString},
         position::{self, PositionEncoding},
     },
     ropey::Rope,
@@ -22,6 +22,10 @@ pub fn convert_diagnostic(
     rope: &Rope,
     encoding: PositionEncoding,
 ) -> Diagnostic {
+    // The unnecessary tag lets editors render dead code faded instead of (or alongside) squiggled —
+    // the conventional presentation for an assignment whose value is never read.
+    let tags = (diagnostic.code == analysis::DiagnosticCode::Unused)
+        .then(|| vec![DiagnosticTag::UNNECESSARY]);
     Diagnostic {
         range: position::tree_sitter_range_to_lsp(rope, encoding, diagnostic.range),
         severity: Some(convert_severity(diagnostic.severity)),
@@ -30,7 +34,7 @@ pub fn convert_diagnostic(
         source: Some("roughly".into()),
         message: diagnostic.message,
         related_information: None,
-        tags: None,
+        tags,
         data: None,
     }
 }
