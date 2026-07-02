@@ -44,12 +44,23 @@ call(
 #++++
 call(
   # fmt: skip
-  a = c(
+    a = c(
         1, 2,
         3, 4
     ),
   b = 0
 )
+
+#---- fmt_skip_keeps_first_line_column
+f <- function() {
+    m <- rbind(c(1,  2),
+               c(30, 4)) # fmt: skip
+}
+#++++
+f <- function() {
+    m <- rbind(c(1,  2),
+               c(30, 4)) # fmt: skip
+}
 
 #---- fmt_skip_file
 # fmt: skip-file
@@ -74,6 +85,44 @@ x+y
 
 # fmt: on
 x + y
+
+#---- fmt_off_preserves_columns
+# fmt: off
+x  <-  c(1,   2,
+         30,  4)
+# fmt: on
+y<-1
+#++++
+# fmt: off
+x  <-  c(1,   2,
+         30,  4)
+# fmt: on
+y <- 1
+
+#---- fmt_off_in_function
+f <- function() {
+  # fmt: off
+    x+y
+  # fmt: on
+  z+1
+}
+#++++
+f <- function() {
+  # fmt: off
+    x+y
+  # fmt: on
+  z + 1
+}
+
+#==== quarto
+#---- cell_options_verbatim
+#| echo: false
+#|message: true
+x <- 1
+#++++
+#| echo: false
+#|message: true
+x <- 1
 
 #==== complex_expressions
 #---- mixed_unary_binary

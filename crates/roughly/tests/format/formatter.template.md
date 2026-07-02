@@ -425,19 +425,25 @@ Additional exceptions to this rule are:
 
 - Commented-out strings such as `#'string'` are left unchanged, since inserting a space (e.g., `#' string'`) would alter the content of the string.
 - [Shebangs](https://en.wikipedia.org/wiki/Shebang_(Unix)), for example `#!/usr/bin/env Rscript`, remain unchanged.
+- [Quarto](https://quarto.org/docs/computations/execution-options.html) and knitr cell options, for example `#| echo: false`, are kept verbatim, since their `key: value` payload is read by machines.
 
 ### Type Annotations
 
-Roughly's type annotations are written in `#:` comments. The formatter normalizes the spacing inside an annotation to the canonical surface-type form used throughout the [typing reference](/typing-reference): one space after `#:`, no space before `,` or `:` and one space after, spaces around `|` and `->`, and no padding inside `(`, `[`, `{`, or generic `<...>`. A leading type-parameter binder such as `<T>` is followed by a space.
+Roughly's type annotations are written in `#:` comments. The formatter treats each block of consecutive `#:` lines as one unit: the block is parsed with the same annotation grammar the type checker uses, and — only when it parses — re-rendered with the canonical spacing used throughout the [typing reference](/typing-reference): one space after `#:`, no space before `,` or `:` and one space after, spaces around `|` and `->`, and no padding inside `(`, `[`, `{`, or generic `<...>`. A leading type-parameter binder such as `<T>` is followed by a space.
 
 ```r
 # type_annotations_compact : compare
 #:fn( x:integer,y:double )->character
+render <- function(x, y) as.character(x + y)
 #: list[ named : double ]
+weights <- list(a = 1.0)
 #: Either< E , A >|NULL
+outcome <- NULL
 ```
 
-The reformat is deliberately non-invasive: it only adjusts whitespace. Token order, identifier casing, and your line breaks are preserved, so a multi-line expanded annotation (one written with `@param` / `@return` lines) keeps its shape rather than being collapsed into a compact `fn(...)`.
+Anything that does not parse as an annotation — prose, a dotted type name, a `pkg::fun` reference, a malformed type — is left verbatim beyond ensuring the single space after `#:`, so the formatter never corrupts a comment it does not understand. Consecutive `#:` lines form one annotation block (exactly as the type checker groups them), so a block that is not a single valid annotation — for example two compact annotations with no blank line between them — is also left as written.
+
+The reformat is deliberately non-invasive: token order, identifier casing, and your line breaks are preserved. A single-line annotation stays on one line, an expanded annotation (one written with `@param` / `@return` lines) keeps one directive per line rather than being collapsed into a compact `fn(...)`, and content lines are never rejoined.
 
 ```r
 # type_annotations_expanded : compare
@@ -446,18 +452,37 @@ The reformat is deliberately non-invasive: it only adjusts whitespace. Token ord
 #: @returns { character }
 ```
 
-When a single annotation wraps across several `#:` lines, the formatter keeps your line breaks but normalizes the continuation indentation: one level of break is one indent step (`indent-width` spaces). A line that ends still open adds one step however many brackets it opened, and a line that begins by closing brackets dedents one step — so a wrapper that opens several brackets before breaking (for example `@type Instrument {list{`) hugs its inner content to a single level, and its matching closers (`}}`) line up with the opener rather than stair-stepping one indent per bracket. A blank line, a non-`#:` comment, or ordinary code ends the block, so unrelated comments never inherit this indentation.
+When an annotation wraps across several `#:` lines, indentation and closing brackets are normalized from the shape of the opening brackets. An opening bracket followed by more content on its own line is *hugged*: its closer stays glued to the token before it. An opening bracket that ends its line is *expanded*: its closer gets a line of its own, aligned with the line that opened it. Each line is indented one step (`indent-width` spaces) per enclosing expanded bracket. Both canonical styles are stable:
 
 ```r
-# type_annotations_multiline : compare
-#: @param {fn(
-#: integer,
-#: character
-#: ) -> double} callback
-#: @return {logical}
+# type_annotations_two_styles : format
+# expanded
+#: @type Future {
+#:   list{
+#:     instrument: Instrument,
+#:     maturity: integer
+#:   }
+#: }
+
+# hugged
+#: @type Future {list{
+#:   instrument: Instrument,
+#:   maturity: integer
+#: }}
 ```
 
-Anything that is not a well-formed annotation — prose, or a type containing characters outside the annotation alphabet (for example a dotted name) — is left untouched beyond ensuring the single space after `#:`, so the formatter never corrupts a comment it does not understand.
+and mixed closer shapes normalize to the nearest consistent style:
+
+```r
+# type_annotations_mixed : compare
+#: @type Future {
+#:   list{
+#:     instrument: Instrument,
+#:     maturity: integer
+#: }}
+```
+
+A blank line, a non-`#:` comment, or ordinary code ends an annotation block, so unrelated comments are never pulled into one. Trailing empty `#:` lines at the end of a block are dropped.
 
 ### Line Spacing
 
@@ -478,7 +503,7 @@ The formatter automatically detects and preserves the line ending style (`LF` or
 
 ## Format Suppression
 
-You can disable formatting for specific code sections using the `# fmt: skip` comment directive. This is useful when you want to preserve specific formatting for readability, such as aligned data structures.
+You can disable formatting for specific code sections using the `# fmt: skip` comment directive. This is useful when you want to preserve specific formatting for readability, such as aligned data structures. The skipped expression is preserved byte-exactly, including the column of its first line, so hand-aligned constructs keep their alignment.
 
 The `fmt: skip` directive can be placed before any expression to skip formatting for it:
 
@@ -500,6 +525,19 @@ Or, at the end of a line to skip the previous expression:
 # the entire matrix(..) call won't be reformatted
 matrix(c(1, 2,
          3, 4), nrow=2) # fmt: skip
+```
+
+For a whole region, use `# fmt: off` and re-enable formatting with `# fmt: on`. The region between the directives is preserved byte-exactly — original indentation, columns, and blank lines. The directives work at the top level as well as inside functions and `{ ... }` blocks; a region left open runs to the end of its enclosing block.
+
+```r
+# format_suppression_off_on : format
+f <- function() {
+  # fmt: off
+    x  <-  c(1,   2,
+             30,  4)
+  # fmt: on
+  x
+}
 ```
 
 You can also skip formatting for an entire file by placing `# fmt: skip-file` at the top of the file. This directive must be placed at the very beginning of the file to take effect.

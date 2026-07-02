@@ -86,6 +86,21 @@
 #++++
 #: fn(cb: fn(integer) -> character) -> integer
 
+#---- dotted_member_names
+#: fn( na.rm : logical , data.frame : integer )->double
+#++++
+#: fn(na.rm: logical, data.frame: integer) -> double
+
+#---- variadic_rest
+#: fn( x : integer , ... : character )->character
+#++++
+#: fn(x: integer, ...: character) -> character
+
+#---- variadic_named_rest
+#: fn( ...args : integer )->NULL
+#++++
+#: fn(...args: integer) -> NULL
+
 #==== annotation_generics_binders
 #---- generic
 #: Map< K , V >
@@ -298,13 +313,28 @@
 #==== annotation_multiline_definitions
 #---- type_definition_across_lines
 #: @type Person {
+#: list{
+#: name : character ,
+#: age : double
+#: }
+#: }
+#++++
+#: @type Person {
+#:   list{
+#:     name: character,
+#:     age: double
+#:   }
+#: }
+
+#---- invalid_definition_body_verbatim
+#: @type Person {
 #: name : character ,
 #: age : double
 #: }
 #++++
 #: @type Person {
-#:   name: character,
-#:   age: double
+#: name : character ,
+#: age : double
 #: }
 
 #---- generic_alias_across_lines
@@ -332,6 +362,67 @@
 #:   id: integer,
 #:   name: character
 #: }}
+
+#---- definition_block_two_lines
+#: @type Cat { list{ name : character } }
+#: @type Dog { list{ name : character } }
+#++++
+#: @type Cat {list{name: character}}
+#: @type Dog {list{name: character}}
+
+#---- definition_block_interior_gap_kept
+#: @type Cat {integer}
+#:
+#: @type Dog {integer}
+#++++
+#: @type Cat {integer}
+#:
+#: @type Dog {integer}
+
+#==== annotation_block_normalization
+#---- expanded_closers_move_to_own_lines
+#: @type Future {
+#:     list{
+#:         instrument: Instrument,
+#:         maturity: integer
+#:     }}
+#:
+#++++
+#: @type Future {
+#:   list{
+#:     instrument: Instrument,
+#:     maturity: integer
+#:   }
+#: }
+
+#---- hugged_closers_stay_glued
+#: @type Future {list{
+#:   instrument: Instrument,
+#:   maturity: integer
+#: }}
+#++++
+#: @type Future {list{
+#:   instrument: Instrument,
+#:   maturity: integer
+#: }}
+
+#---- dangling_closer_glues_to_hugged_opener
+#: @type Future {list{
+#:   id: integer
+#: }
+#: }
+#++++
+#: @type Future {list{
+#:   id: integer
+#: }}
+
+#---- trailing_empty_line_dropped
+#: integer
+#:
+x <- 1L
+#++++
+#: integer
+x <- 1L
 
 #==== annotation_multiline_hug
 #---- record_value_across_lines
@@ -387,10 +478,39 @@
 #++++
 #: see http://example.com
 
-#---- double_colon_is_spaced
+#---- double_colon_verbatim
 #: a::b
 #++++
-#: a:: b
+#: a::b
+
+#---- prose_comparison_verbatim
+#: value < ten
+#++++
+#: value < ten
+
+#---- prose_namespace_verbatim
+#: see base::sum for details
+#++++
+#: see base::sum for details
+
+#---- multiline_prose_verbatim
+#: this block explains the code below
+#: and continues here
+#++++
+#: this block explains the code below
+#: and continues here
+
+#---- prose_missing_space_gets_prefix
+#:not a type!
+#++++
+#: not a type!
+
+#---- unbalanced_block_verbatim
+#: fn(integer
+#: -> double
+#++++
+#: fn(integer
+#: -> double
 
 #==== annotation_inline
 #---- after_assignment

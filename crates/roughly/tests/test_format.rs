@@ -134,9 +134,9 @@ fn annotation_formatting_is_idempotent() {
 
 #[test]
 fn annotation_continuation_honors_indent_width() {
-    // The continuation indent of a wrapped `#:` annotation is `depth * indent_width` spaces after
-    // `#: `, so a non-default width scales the steps (here one hugged level renders as four spaces,
-    // and the closing `}}` dedents fully).
+    // A line of a wrapped `#:` annotation indents one `indent_width` step per enclosing expanded
+    // bracket, so a non-default width scales the steps (here the hugged `{list{` opens a single
+    // expanded level rendered as four spaces, and the glued closers `}}` dedent fully).
     let input = "#: @type Instrument {list{\n#: id: integer\n#: }}\n";
     let formatted = format(
         tree::parse(&mut tree::new_parser(), input, None).root_node(),
@@ -156,6 +156,15 @@ fn annotation_continuation_honors_indent_width() {
 #[test]
 fn trailing_spaces_in_comments() {
     assert_eq!(format_str("#' \n#' comment  ").unwrap(), "#'\n#' comment\n");
+}
+
+#[test]
+fn empty_input_stays_empty() {
+    // A 0-byte file must format to 0 bytes so `roughly fmt` reports it unchanged; the fixture
+    // harness trims trailing whitespace, so the exact bytes are asserted here.
+    assert_eq!(format_str("").unwrap(), "");
+    // A file that already ends in a bare newline keeps it.
+    assert_eq!(format_str("\n").unwrap(), "\n");
 }
 
 #[test]

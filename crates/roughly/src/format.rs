@@ -3,6 +3,10 @@ use {
         tree::{self, field, kind},
         utils,
     },
+    analysis::{
+        interner::Interner,
+        type_syntax::{TypeParseError, parse_type_syntax},
+    },
     itertools::Itertools,
     ropey::Rope,
     serde::Deserialize,
@@ -62,7 +66,7 @@ pub fn format(node: Node, rope: &Rope, config: Config) -> Result<String, FormatE
     let start = Instant::now();
 
     if node.has_error() {
-        let error = tree::find_next_error(node).unwrap();
+        let error = tree::find_next_error(node).unwrap_or(node);
 
         let line = error.start_position().row;
         let col = error.start_position().column;
@@ -180,6 +184,13 @@ fn traverse(
     let node = cursor.node();
     let kind_id = node.kind_id();
 
+    let unknown = |child: Node| -> Result<(), FormatError> {
+        Err(FormatError::UnknownKind {
+            kind: child.kind(),
+            raw: get_raw(child, context.rope),
+        })
+    };
+
     if node.is_error() {
         return Err(FormatError::SyntaxError {
             kind: node.kind(),
@@ -196,26 +207,21 @@ fn traverse(
         });
     }
 
-    // handle skip directives
-    {
-        let is_fmt_skip_comment = |node: Node| {
-            node.kind_id() == kind::COMMENT
-                && parse_directive(&get_raw(node, context.rope))
-                    .is_some_and(|directive| directive == Directive::Skip)
-        };
-        let prev_is_fmt_skip = node.prev_sibling().is_some_and(|prev| {
-            is_fmt_skip_comment(prev)
-                && prev
-                    .prev_sibling()
-                    .is_none_or(|before_prev| !same_line(before_prev, prev))
-        });
-        let next_is_fmt_skip = node
-            .next_sibling()
-            .is_some_and(|next| is_fmt_skip_comment(next) && same_line(node, next));
-
-        if prev_is_fmt_skip || next_is_fmt_skip {
-            return fmt_raw(out, node);
+    if skipped_by_fmt_directive(node, context.rope) {
+        // `# fmt: skip` preserves the node byte-exactly, including the column of its first line:
+        // when only whitespace precedes the node on its line, the indentation the container just
+        // emitted is replaced by the original leading whitespace, so column-aligned constructs
+        // (aligned matrices, for instance) survive unchanged.
+        let line_start = node.start_byte() - node.start_position().column;
+        let leading = raw_between(context.rope, line_start, node.start_byte());
+        if leading.chars().all(char::is_whitespace) {
+            let content_length = out.trim_end_matches(' ').len();
+            if content_length == 0 || out[..content_length].ends_with(context.line_ending) {
+                out.truncate(content_length);
+                out.push_str(&leading);
+            }
         }
+        return fmt_raw(out, node);
     }
 
     if !node.is_named() {
@@ -233,8 +239,8 @@ fn traverse(
             let _ = chars.next(); // Skip the '#'
             // reformat comments like #foo to # foo but keep #' foo
             match chars.next() {
-                // `#:` introduces a Roughly type annotation; reformat its body to canonical spacing.
-                Some(':') => format_type_annotation_comment(out, raw, node, context),
+                // `#:` introduces a Roughly type annotation; format the whole annotation block.
+                Some(':') => format_annotation_comment(out, node, context, level),
                 Some(char @ ('\'' | '*')) => {
                     match chars.next() {
                         Some(' ') | None => out.push_str(raw),
@@ -251,8 +257,9 @@ fn traverse(
                         }
                     }
                 }
-                // ! is for shebang (e.g. !#/usr/bin/env Rscript)
-                Some('#' | '!' | ' ') | None => out.push_str(raw),
+                // `!` is for shebangs (e.g. #!/usr/bin/env Rscript); `|` is for Quarto/knitr cell
+                // options (e.g. #| echo: false), whose YAML payload must stay untouched.
+                Some('#' | '!' | '|' | ' ') | None => out.push_str(raw),
                 Some(other) => {
                     out.push_str("# ");
                     out.push(other);
@@ -298,7 +305,7 @@ fn traverse(
         }
         kind::NA => fmt_raw(out, node)?,
         // both handled by STRING
-        kind::ESCAPE_SEQUENCE | kind::STRING_CONTENT => unreachable!(),
+        kind::ESCAPE_SEQUENCE | kind::STRING_CONTENT => unknown(node)?,
         // KEYWORDS
         kind::DOTS => out.push_str("..."),
         kind::DOT_DOT_I => fmt_raw(out, node)?,
@@ -323,7 +330,7 @@ fn traverse(
                             out.push_str(" =");
                             Ok(())
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                     Some(field_id) => match field_id {
                         field::NAME => fmt(out, cursor),
@@ -338,7 +345,7 @@ fn traverse(
                                 fmt(out, cursor)
                             }
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                 }
             })?;
@@ -391,14 +398,16 @@ fn traverse(
                             } else if maybe_prev.is_some_and(|prev| {
                                 [kind::ARGUMENT, kind::PARAMETER].contains(&prev.kind_id())
                                     && prev
-                                        .child(prev.child_count() - 1)
+                                        .child_count()
+                                        .checked_sub(1)
+                                        .and_then(|last_index| prev.child(last_index))
                                         .is_some_and(|last| last.kind_id() == kind::EQUAL)
                             }) {
                                 space(out);
                             }
                             fmt(out, cursor)
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                     Some(field_id) => match field_id {
                         field::OPEN => fmt(out, cursor),
@@ -429,7 +438,7 @@ fn traverse(
                             }
                             fmt(out, cursor)
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                 }
             })?;
@@ -453,7 +462,7 @@ fn traverse(
                                 fmt_indent(out, cursor)
                             }
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                     Some(field_id) => match field_id {
                         field::LHS => fmt(out, cursor),
@@ -479,7 +488,7 @@ fn traverse(
                                 fmt(out, cursor)
                             }
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                 }
             })?;
@@ -495,8 +504,36 @@ fn traverse(
             let is_multiline = !hug || make_multiline;
             let is_empty = node.child_count() == 2;
 
+            let mut enabled = true;
+            let mut maybe_directive = None;
             tree::for_each_child(cursor, |i, child, field_id, cursor| {
+                // Delay toggling the `enabled` flag until after handling newlines.
+                // This ensures that any preceding newlines are attributed to the previous child
+                match maybe_directive {
+                    Some(Directive::On) => enabled = true,
+                    Some(Directive::Off) => enabled = false,
+                    _ => {}
+                }
+
+                maybe_directive = match child.kind_id() {
+                    kind::COMMENT => parse_directive(&get_raw(child, context.rope)),
+                    _ => None,
+                };
+
                 let maybe_prev = child.prev_sibling();
+
+                if !enabled {
+                    // A `# fmt: off` region is preserved byte-exactly (original line endings,
+                    // blank lines, and columns); only directive comments themselves are formatted.
+                    let start = maybe_prev.map_or(child.start_byte(), |prev| prev.end_byte());
+                    return if maybe_directive.is_some() {
+                        out.push_str(&raw_between(context.rope, start, child.start_byte()));
+                        fmt(out, cursor)
+                    } else {
+                        out.push_str(&raw_between(context.rope, start, child.end_byte()));
+                        Ok(())
+                    };
+                }
 
                 match field_id {
                     None => match child.kind_id() {
@@ -509,7 +546,7 @@ fn traverse(
                                 fmt_indent(out, cursor)
                             }
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                     Some(field_id) => match field_id {
                         field::OPEN => fmt(out, cursor),
@@ -540,7 +577,7 @@ fn traverse(
                             }
                             fmt(out, cursor)
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                 }
             })?;
@@ -570,7 +607,7 @@ fn traverse(
                             fmt_indent(out, cursor)
                         }
                     }
-                    _ => unreachable!(),
+                    _ => unknown(child),
                 },
                 Some(field_id) => match field_id {
                     field::FUNCTION => fmt(out, cursor),
@@ -581,7 +618,7 @@ fn traverse(
                             fmt(out, cursor)
                         }
                     }
-                    _ => unreachable!(),
+                    _ => unknown(child),
                 },
             })?;
         }
@@ -604,7 +641,7 @@ fn traverse(
                                 fmt_indent(out, cursor)
                             }
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                     Some(field_id) => match field_id {
                         field::LHS => fmt(out, cursor),
@@ -617,7 +654,7 @@ fn traverse(
                                 fmt(out, cursor)
                             }
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                 }
             })?;
@@ -661,7 +698,7 @@ fn traverse(
                             }
                             fmt(out, cursor)
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                     Some(field_id) => match field_id {
                         field::OPEN => {
@@ -713,7 +750,7 @@ fn traverse(
                                 fmt_braces(out, cursor)
                             }
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                 }
             })?;
@@ -736,7 +773,7 @@ fn traverse(
                             }
                             fmt(out, cursor)
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                     Some(field_id) => match field_id {
                         field::NAME => fmt(out, cursor),
@@ -762,7 +799,7 @@ fn traverse(
                                 fmt(out, cursor)
                             }
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                 }
             })?;
@@ -805,7 +842,7 @@ fn traverse(
                             }
                             fmt(out, cursor)
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                     Some(field_id) => match field_id {
                         field::OPEN => {
@@ -851,7 +888,7 @@ fn traverse(
                                 fmt(out, cursor)
                             }
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                 }
             })?;
@@ -878,7 +915,7 @@ fn traverse(
                             }
                             fmt(out, cursor)
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                     Some(field_id) => match field_id {
                         field::OPEN => fmt(out, cursor),
@@ -896,7 +933,7 @@ fn traverse(
                             }
                             fmt(out, cursor)
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                 }
             })?;
@@ -938,23 +975,24 @@ fn traverse(
                     }
                     fmt(out, cursor)
                 } else {
-                    if let Some(prev) = maybe_prev {
-                        out.push_str(
-                            &context
-                                .line_ending
-                                .repeat(child.start_position().row - prev.end_position().row),
-                        )
-                    }
-                    // we also want to format current directive comment
+                    // A `# fmt: off` region is preserved byte-exactly (original line endings,
+                    // blank lines, and columns); only directive comments themselves are formatted.
+                    let start = maybe_prev.map_or(child.start_byte(), |prev| prev.end_byte());
                     if maybe_directive.is_some() {
+                        out.push_str(&raw_between(context.rope, start, child.start_byte()));
                         fmt(out, cursor)
                     } else {
-                        fmt_raw(out, child)
+                        out.push_str(&raw_between(context.rope, start, child.end_byte()));
+                        Ok(())
                     }
                 }
             })?;
 
-            newline(out);
+            // An empty file stays empty instead of gaining a newline (and thus being reported as
+            // reformatted); a file that merely has no expressions keeps its single newline.
+            if node.child_count() > 0 || context.rope.len_bytes() > 0 {
+                newline(out);
+            }
         }
         kind::REPEAT_STATEMENT => {
             tree::for_each_child(cursor, |_, child, field_id, cursor| {
@@ -972,7 +1010,7 @@ fn traverse(
                             }
                             fmt(out, cursor)
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                     Some(field_id) => {
                         if prev_is_comment {
@@ -988,7 +1026,7 @@ fn traverse(
                                     fmt_braces(out, cursor)
                                 }
                             }
-                            _ => unreachable!(),
+                            _ => unknown(child),
                         }
                     }
                 }
@@ -1016,7 +1054,7 @@ fn traverse(
                                 fmt_indent(out, cursor)
                             }
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                     Some(field_id) => match field_id {
                         field::OPERATOR => fmt(out, cursor),
@@ -1031,7 +1069,7 @@ fn traverse(
                                 fmt(out, cursor)
                             }
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                 }
             })?;
@@ -1064,7 +1102,7 @@ fn traverse(
                             }
                             fmt(out, cursor)
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                     Some(field_id) => match field_id {
                         field::OPEN => {
@@ -1103,7 +1141,7 @@ fn traverse(
                                 fmt_braces(out, cursor)
                             }
                         }
-                        _ => unreachable!(),
+                        _ => unknown(child),
                     },
                 }
             })?;
@@ -1128,6 +1166,10 @@ fn traverse(
 
 fn get_raw(node: Node, rope: &Rope) -> String {
     rope.byte_slice(node.byte_range()).to_string()
+}
+
+fn raw_between(rope: &Rope, start_byte: usize, end_byte: usize) -> String {
+    rope.byte_slice(start_byte..end_byte).to_string()
 }
 
 fn field<'a>(node: Node<'a>, field_id: u16) -> Result<Node<'a>, FormatError> {
@@ -1181,275 +1223,344 @@ fn parse_directive(text: &str) -> Option<Directive> {
         })
 }
 
-// Reformats a `#:` type-annotation comment in place. The body is tokenized over the surface-type
-// alphabet and re-emitted with the canonical spacing of the typing reference (the same spacing
-// `analysis::type_syntax::render_surface_type` produces). Only whitespace is adjusted, so token
-// order, identifier casing, and the user's line breaks are all preserved; in particular expanded
-// `@param`/`@return` blocks are never collapsed into a compact `fn(...)`. When a single annotation
-// wraps across several `#:` lines, continuation lines are indented by the bracket nesting carried in
-// from the earlier lines of the block (see `annotation_continuation_indent`), so the only cross-line
-// input is the leading whitespace of preceding sibling `#:` comments. If the body contains anything
-// outside the annotation alphabet the comment is left untouched (beyond ensuring a single space after
-// `#:`), so prose and malformed annotations are never corrupted.
-fn format_type_annotation_comment(out: &mut String, raw: &str, node: Node, context: Context) {
-    let body = &raw[2..];
-    match normalize_annotation_body(body) {
-        Some(normalized) if normalized.is_empty() => out.push_str("#:"),
-        Some(normalized) => {
-            out.push_str("#: ");
-            // Block-aware continuation indent: when one type expression wraps across several `#:`
-            // lines, indent each line by the bracket nesting carried in from the earlier lines of
-            // the same annotation block, so wrapped `fn(...)`, `list{...}`, and `@param` bodies read
-            // as a nested structure instead of every line flattening to one space after `#:`.
-            for _ in 0..annotation_continuation_indent(node, context.rope, body) {
-                out.push_str(context.indent);
-            }
-            out.push_str(&normalized);
+// Whether a `# fmt: skip` directive exempts `node` from formatting: either a skip comment on its
+// own line directly above the node, or a trailing skip comment on the node's last line.
+fn skipped_by_fmt_directive(node: Node, rope: &Rope) -> bool {
+    let is_fmt_skip_comment = |node: Node| {
+        node.kind_id() == kind::COMMENT
+            && parse_directive(&get_raw(node, rope))
+                .is_some_and(|directive| directive == Directive::Skip)
+    };
+    let prev_is_fmt_skip = node.prev_sibling().is_some_and(|prev| {
+        is_fmt_skip_comment(prev)
+            && prev
+                .prev_sibling()
+                .is_none_or(|before_prev| !same_line(before_prev, prev))
+    });
+    let next_is_fmt_skip = node
+        .next_sibling()
+        .is_some_and(|next| is_fmt_skip_comment(next) && same_line(node, next));
+
+    prev_is_fmt_skip || next_is_fmt_skip
+}
+
+//
+// `#:` TYPE-ANNOTATION COMMENTS
+//
+
+// Formats the `#:` annotation block that starts at `node`; for a continuation line of a block the
+// first comment already rendered, it removes the container's line separator and emits nothing.
+//
+// A block is a maximal run of sibling `#:` comments on adjacent rows — the same grouping the
+// analysis uses when it attaches annotations. The joined block is parsed with the real annotation
+// grammar (`analysis::type_syntax`); on success the whole block is re-rendered from its tokens (see
+// `render_annotation_block`), and on failure every line is kept verbatim apart from ensuring a
+// single space after `#:`, so prose and malformed annotations are never corrupted.
+fn format_annotation_comment(out: &mut String, node: Node, context: Context, level: usize) {
+    if is_annotation_continuation(node, context.rope) {
+        // Rendering can merge, split, or drop block lines, so there is no fixed line-per-comment
+        // mapping; the block's first comment emits everything and later comments must retract the
+        // separator (line ending plus indentation) the container emitted for them.
+        rewind_annotation_separator(out, context.line_ending);
+        return;
+    }
+
+    let bodies = annotation_block_bodies(node, context.rope);
+    let lines = render_annotation_block(&bodies, context.indent).unwrap_or_else(|| {
+        bodies
+            .iter()
+            .map(|body| verbatim_annotation_line(body))
+            .collect()
+    });
+
+    for (index, line) in lines.iter().enumerate() {
+        if index > 0 {
+            out.push_str(context.line_ending);
+            out.push_str(&context.indent.repeat(level));
         }
-        None => match body.chars().next() {
-            Some(' ') | None => out.push_str(raw),
-            Some(_) => {
-                out.push_str("#: ");
-                out.push_str(body.trim_start());
-            }
-        },
+        out.push_str(line);
     }
 }
 
-// Indent steps for a `#:` line inside a multi-line annotation block: the visual nesting level carried
-// in from the earlier lines of its block, minus one step when this line itself begins by closing a
-// bracket so the closer aligns with its opener's line.
-fn annotation_continuation_indent(node: Node, rope: &Rope, body: &str) -> usize {
-    let carried = carried_annotation_depth(node, rope);
-    carried.saturating_sub(usize::from(annotation_first_is_closer(body)))
+// The body of a `#:` comment (the text after the marker, right-trimmed), or `None` for any other
+// node.
+fn annotation_body(node: Node, rope: &Rope) -> Option<String> {
+    if node.kind_id() != kind::COMMENT {
+        return None;
+    }
+    get_raw(node, rope)
+        .trim_end()
+        .strip_prefix("#:")
+        .map(str::to_owned)
 }
 
-// Visual nesting level opened by the consecutive `#:` annotation lines immediately preceding `node`
-// (the same block: comment siblings on adjacent rows). One line of break equals one level: a line
-// that ends still open (a hanging opener) adds a single level however many brackets it opened, and a
-// line that begins by closing brackets drops a single level — so a wrapper that opens several brackets
-// before breaking (`@type X {list{`) and its matching closers (`}}`) read as one hugged level, not one
-// per bracket. Walking stops at a blank line, a non-comment, a non-`#:` comment, or a line that does
-// not tokenize as an annotation, so unrelated comments never bleed indentation into a following
-// annotation.
-fn carried_annotation_depth(node: Node, rope: &Rope) -> usize {
-    let mut preceding_bodies = Vec::new();
+// Whether `node` is a non-first line of an annotation block: the previous sibling is a `#:` comment
+// on the row directly above. A first line exempted by `# fmt: skip` is emitted raw and cannot render
+// the block, so the block restarts at the line after it.
+fn is_annotation_continuation(node: Node, rope: &Rope) -> bool {
+    node.prev_sibling().is_some_and(|previous| {
+        annotation_body(previous, rope).is_some()
+            && node.start_position().row <= previous.end_position().row + 1
+            && !skipped_by_fmt_directive(previous, rope)
+    })
+}
+
+// The bodies of every line of the annotation block starting at `node`, in order.
+fn annotation_block_bodies(node: Node, rope: &Rope) -> Vec<String> {
+    let mut bodies = vec![annotation_body(node, rope).unwrap_or_default()];
     let mut current = node;
-    while let Some(previous) = current.prev_sibling() {
-        if previous.kind_id() != kind::COMMENT
-            || previous.start_position().row + 1 != current.start_position().row
-        {
-            break;
-        }
-        let raw = get_raw(previous, rope);
-        let Some(previous_body) = raw.trim_end().strip_prefix("#:") else {
+    while let Some(next) = current.next_sibling() {
+        let Some(body) = annotation_body(next, rope) else {
             break;
         };
-        if annotation_net_delta(previous_body).is_none() {
+        if next.start_position().row > current.end_position().row + 1 {
             break;
         }
-        preceding_bodies.push(previous_body.to_owned());
-        current = previous;
+        bodies.push(body);
+        current = next;
+    }
+    bodies
+}
+
+// Retracts the line separator (line ending plus indentation) that the enclosing node emitted before
+// a continuation comment. Best effort: if the buffer does not end in a separator — no current
+// container produces that — it is left untouched; the block content was already rendered by the
+// block's first line, so nothing is lost either way.
+fn rewind_annotation_separator(out: &mut String, line_ending: &str) {
+    if let Some(position) = out.rfind(line_ending)
+        && out[position + line_ending.len()..]
+            .bytes()
+            .all(|byte| byte == b' ')
+    {
+        out.truncate(position);
+    }
+}
+
+// A line of an annotation block that did not parse: verbatim, except that a single space is ensured
+// after `#:`.
+fn verbatim_annotation_line(body: &str) -> String {
+    match body.chars().next() {
+        None => "#:".to_owned(),
+        Some(character) if character.is_whitespace() => format!("#:{body}"),
+        Some(_) => format!("#: {body}"),
+    }
+}
+
+// Renders a parse-valid annotation block as `#:` lines. The author's line breaks are preserved;
+// everything else is re-derived:
+//
+// - Token spacing is canonical (the typing reference's rendered form): `,` and `:` hug their left
+//   neighbor, `|` and `->` are surrounded by spaces, and brackets hug what they apply to.
+// - Every bracket carries a hug bit read off the input. An opener followed by content on its own
+//   line is hugged: its closer glues to the token before it (`@type F {list{` … `}}`). An opener
+//   that ends its line is expanded: its closer gets its own line at the opener's line indent.
+// - A content line is indented one `indent` step per enclosing expanded bracket, so both the fully
+//   hugged and the fully expanded style are fixed points and mixed closer shapes normalize.
+// - Trailing empty `#:` lines are dropped; leading and interior ones are kept.
+//
+// `None` when the joined block does not parse as annotation syntax (or a character falls outside
+// the token alphabet, which the parse gate makes unlikely); the caller then emits the block
+// verbatim.
+fn render_annotation_block(bodies: &[String], indent: &str) -> Option<Vec<String>> {
+    let joined = bodies.iter().map(|body| body.trim()).join("\n");
+    match parse_type_syntax(&joined, &mut Interner::new()) {
+        // A structurally well-formed type using a construct the checker deliberately refuses
+        // ("not supported yet", e.g. a generic vector suffix `Foo<A>[]`) is still an annotation;
+        // normalize it so its layout does not change once the checker gains support.
+        Ok(_) | Err(TypeParseError::UnsupportedConstruct { .. }) => {}
+        Err(_) => return None,
+    }
+    let token_lines = bodies
+        .iter()
+        .map(|body| lex_annotation_line(body))
+        .collect::<Option<Vec<_>>>()?;
+
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_level = 0;
+    let mut open_delimiters: Vec<OpenDelimiter> = Vec::new();
+    let mut previous_token: Option<&AnnotationToken> = None;
+    let mut pending_empty_lines = 0;
+    let mut started = false;
+
+    for tokens in &token_lines {
+        if tokens.is_empty() {
+            if started {
+                pending_empty_lines += 1;
+            } else {
+                lines.push("#:".to_owned());
+            }
+            continue;
+        }
+
+        for (index, token) in tokens.iter().enumerate() {
+            let closer = is_closer(token.kind);
+            let closes_expanded = closer
+                && open_delimiters
+                    .last()
+                    .is_none_or(|delimiter| delimiter.expanded);
+
+            let break_before = if !started {
+                false
+            } else if index == 0 {
+                // an author line break is kept, unless a hugged bracket's closer glues back up
+                !closer || closes_expanded
+            } else {
+                // an expanded bracket's closer never shares a line with the content before it
+                closes_expanded
+            };
+
+            if break_before {
+                lines.push(annotation_line(current_level, &current, indent));
+                current.clear();
+                for _ in 0..pending_empty_lines {
+                    lines.push("#:".to_owned());
+                }
+                current_level = match open_delimiters.last() {
+                    Some(delimiter) if closer => delimiter.opener_level,
+                    Some(delimiter) => delimiter.opener_level + usize::from(delimiter.expanded),
+                    None => 0,
+                };
+                previous_token = None;
+            }
+            pending_empty_lines = 0;
+
+            if let Some(previous) = previous_token
+                && annotation_space_between(previous, token)
+            {
+                current.push(' ');
+            }
+            current.push_str(token.text);
+            previous_token = Some(token);
+            started = true;
+
+            if is_opener(token.kind) {
+                open_delimiters.push(OpenDelimiter {
+                    expanded: index + 1 == tokens.len(),
+                    opener_level: current_level,
+                });
+            } else if closer {
+                open_delimiters.pop();
+            }
+        }
     }
 
-    let mut depth: usize = 0;
-    for body in preceding_bodies.iter().rev() {
-        if annotation_first_is_closer(body) {
-            depth = depth.saturating_sub(1);
-        }
-        if annotation_last_is_opener(body) {
-            depth += 1;
-        }
+    if started {
+        lines.push(annotation_line(current_level, &current, indent));
     }
-    depth
+    Some(lines)
 }
 
-// The net bracket balance of an annotation line (openers minus closers), used only to reject lines
-// that are not well-formed annotations (returns `None`); depth is tracked one level per line.
-fn annotation_net_delta(body: &str) -> Option<i32> {
-    use AnnotationTokenKind::*;
-    let mut depth = 0;
-    for token in tokenize_annotation(body)? {
-        match token.kind {
-            OpenParen | OpenBracket | OpenBrace | GenericOpen | BinderOpen => depth += 1,
-            CloseParen | CloseBracket | CloseBrace | AngleClose => depth -= 1,
-            _ => {}
-        }
-    }
-    Some(depth)
+// A bracket that is still open at the current point of the render walk. `expanded` is its hug bit
+// (see `render_annotation_block`) and `opener_level` the indent level of the line its opener sits
+// on, which is where an expanded closer's own line goes.
+struct OpenDelimiter {
+    expanded: bool,
+    opener_level: usize,
 }
 
-fn annotation_last_is_opener(body: &str) -> bool {
-    use AnnotationTokenKind::*;
-    let Some(tokens) = tokenize_annotation(body) else {
-        return false;
-    };
-    matches!(
-        tokens.last().map(|token| &token.kind),
-        Some(OpenParen | OpenBracket | OpenBrace | GenericOpen | BinderOpen)
-    )
+fn annotation_line(level: usize, content: &str, indent: &str) -> String {
+    format!("#: {}{content}", indent.repeat(level))
 }
 
-fn annotation_first_is_closer(body: &str) -> bool {
-    use AnnotationTokenKind::*;
-    let Some(tokens) = tokenize_annotation(body) else {
-        return false;
-    };
-    matches!(
-        tokens.first().map(|token| &token.kind),
-        Some(CloseParen | CloseBracket | CloseBrace | AngleClose)
-    )
-}
-
-fn normalize_annotation_body(body: &str) -> Option<String> {
-    let tokens = tokenize_annotation(body)?;
-    let mut out = String::new();
-    for (index, token) in tokens.iter().enumerate() {
-        if index > 0 && annotation_space_between(&tokens[index - 1], token) {
-            out.push(' ');
-        }
-        out.push_str(&token.text);
-    }
-    Some(out)
-}
-
-// Decides whether a single space separates two adjacent annotation tokens, reproducing the canonical
-// surface-type spacing: `,` and `:` hug their left neighbor, `|` and `->` are surrounded by spaces,
-// brackets/braces/parens/generic angle brackets hug what they apply to, and a leading `<...>` binder
-// is followed by a space.
+// Whether a single space separates two adjacent annotation tokens, reproducing the canonical
+// surface-type spacing (the same form `analysis::type_syntax::render_surface_type` produces).
 fn annotation_space_between(previous: &AnnotationToken, current: &AnnotationToken) -> bool {
     use AnnotationTokenKind::*;
 
     match current.kind {
-        Comma | Colon | CloseParen | CloseBracket | CloseBrace | AngleClose | GenericOpen => {
-            return false;
-        }
-        OpenParen if matches!(previous.kind, Word) => return false,
-        OpenBracket if matches!(previous.kind, Word | AngleClose) => return false,
-        OpenBrace if matches!(previous.kind, Word) && previous.text == "list" => return false,
-        Pipe | Arrow => return true,
+        // separators and closers hug their left neighbor
+        Comma | Colon | CloseParen | CloseBracket | CloseBrace | CloseAngle => return false,
+        // brackets hug what they apply to: `fn(`, `Foo<`, `list[`/`T[]`, `list{`
+        OpenParen => return false,
+        OpenAngle if previous.kind == Word => return false,
+        OpenBracket if matches!(previous.kind, Word | CloseAngle | CloseBracket) => return false,
+        OpenBrace if previous.kind == Word && previous.text == "list" => return false,
+        // a named rest parameter keeps its name attached: `...args`
+        Word if previous.kind == Dots => return false,
         _ => {}
     }
 
+    // nothing follows an opening bracket with a space
     !matches!(
         previous.kind,
-        OpenParen | OpenBracket | OpenBrace | GenericOpen | BinderOpen
+        OpenParen | OpenBracket | OpenBrace | OpenAngle
     )
 }
 
-// Tokenizes an annotation body over the surface-type alphabet. Returns `None` (so the caller leaves
-// the comment verbatim) on any byte outside that alphabet, which keeps prose and malformed
-// annotations untouched.
-fn tokenize_annotation(body: &str) -> Option<Vec<AnnotationToken>> {
-    let bytes = body.as_bytes();
-    let mut tokens: Vec<AnnotationToken> = Vec::new();
-    let mut index = 0;
+// Lexes one annotation line over the surface-type token alphabet. `None` on any character outside
+// it, which sends the block down the verbatim path.
+fn lex_annotation_line(body: &str) -> Option<Vec<AnnotationToken<'_>>> {
+    use AnnotationTokenKind::*;
 
-    while index < bytes.len() {
-        let byte = bytes[index];
-
-        if byte.is_ascii_whitespace() {
-            index += 1;
+    let mut tokens = Vec::new();
+    let mut position = 0;
+    while position < body.len() {
+        let remaining = &body[position..];
+        let character = remaining.chars().next()?;
+        if character.is_whitespace() {
+            position += character.len_utf8();
             continue;
         }
 
-        let (kind, text) = match byte {
-            b'(' => (AnnotationTokenKind::OpenParen, "("),
-            b')' => (AnnotationTokenKind::CloseParen, ")"),
-            b'[' => (AnnotationTokenKind::OpenBracket, "["),
-            b']' => (AnnotationTokenKind::CloseBracket, "]"),
-            b'{' => (AnnotationTokenKind::OpenBrace, "{"),
-            b'}' => (AnnotationTokenKind::CloseBrace, "}"),
-            b',' => (AnnotationTokenKind::Comma, ","),
-            b':' => (AnnotationTokenKind::Colon, ":"),
-            b'|' => (AnnotationTokenKind::Pipe, "|"),
-            b'>' => (AnnotationTokenKind::AngleClose, ">"),
-            b'<' => {
-                // A `<` that follows a type name is a generic application (`Foo<...>`); otherwise it
-                // opens a leading type-parameter binder (`<T> ...`).
-                let kind = if matches!(
-                    tokens.last().map(|token| &token.kind),
-                    Some(AnnotationTokenKind::Word)
-                ) {
-                    AnnotationTokenKind::GenericOpen
-                } else {
-                    AnnotationTokenKind::BinderOpen
-                };
-                tokens.push(AnnotationToken {
-                    kind,
-                    text: "<".to_owned(),
-                });
-                index += 1;
-                continue;
+        let (kind, length) = match character {
+            '(' => (OpenParen, 1),
+            ')' => (CloseParen, 1),
+            '[' => (OpenBracket, 1),
+            ']' => (CloseBracket, 1),
+            '{' => (OpenBrace, 1),
+            '}' => (CloseBrace, 1),
+            '<' => (OpenAngle, 1),
+            '>' => (CloseAngle, 1),
+            ',' => (Comma, 1),
+            ':' => (Colon, 1),
+            '|' => (Pipe, 1),
+            '-' if remaining.starts_with("->") => (Arrow, 2),
+            '.' if remaining.starts_with("...") => (Dots, 3),
+            '@' => {
+                let length = remaining[1..]
+                    .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+                    .map_or(remaining.len(), |end| end + 1);
+                (Directive, length)
             }
-            b'-' => {
-                if bytes.get(index + 1) == Some(&b'>') {
-                    tokens.push(AnnotationToken {
-                        kind: AnnotationTokenKind::Arrow,
-                        text: "->".to_owned(),
-                    });
-                    index += 2;
-                    continue;
-                }
-                return None;
-            }
-            b'@' => {
-                let start = index;
-                index += 1;
-                while index < bytes.len() && is_directive_byte(bytes[index]) {
-                    index += 1;
-                }
-                tokens.push(AnnotationToken {
-                    kind: AnnotationTokenKind::Directive,
-                    text: body[start..index].to_owned(),
-                });
-                continue;
-            }
-            _ if is_identifier_start_byte(byte) => {
-                let start = index;
-                index += 1;
-                while index < bytes.len() && is_identifier_continue_byte(bytes[index]) {
-                    index += 1;
-                }
-                tokens.push(AnnotationToken {
-                    kind: AnnotationTokenKind::Word,
-                    text: body[start..index].to_owned(),
-                });
-                continue;
+            // the grammar's identifiers are unicode-alphabetic, and member names admit interior dots
+            c if c == '_' || c.is_alphabetic() => {
+                let length = remaining
+                    .find(|c: char| !(c == '_' || c == '.' || c.is_alphanumeric()))
+                    .unwrap_or(remaining.len());
+                (Word, length)
             }
             _ => return None,
         };
-
         tokens.push(AnnotationToken {
             kind,
-            text: text.to_owned(),
+            text: &remaining[..length],
         });
-        index += 1;
+        position += length;
     }
-
     Some(tokens)
 }
 
-fn is_directive_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
+fn is_opener(kind: AnnotationTokenKind) -> bool {
+    use AnnotationTokenKind::*;
+    matches!(kind, OpenParen | OpenBracket | OpenBrace | OpenAngle)
 }
 
-fn is_identifier_start_byte(byte: u8) -> bool {
-    byte.is_ascii_alphabetic() || byte == b'_'
+fn is_closer(kind: AnnotationTokenKind) -> bool {
+    use AnnotationTokenKind::*;
+    matches!(kind, CloseParen | CloseBracket | CloseBrace | CloseAngle)
 }
 
-fn is_identifier_continue_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_'
-}
-
-struct AnnotationToken {
+struct AnnotationToken<'a> {
     kind: AnnotationTokenKind,
-    text: String,
+    text: &'a str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AnnotationTokenKind {
     Word,
     Directive,
+    Dots,
     Arrow,
     Pipe,
     Comma,
@@ -1460,9 +1571,8 @@ enum AnnotationTokenKind {
     CloseBracket,
     OpenBrace,
     CloseBrace,
-    GenericOpen,
-    BinderOpen,
-    AngleClose,
+    OpenAngle,
+    CloseAngle,
 }
 
 #[cfg(test)]
