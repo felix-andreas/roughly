@@ -543,7 +543,7 @@ fn hover_type_line(interner: &Interner, name: Option<&str>, core_type: &CoreType
                 broken.push_str(&signature.label[parameter.clone()]);
                 broken.push_str(",\n");
             }
-            broken.push_str(&signature.label[last_parameter_end..].trim_start_matches(", "));
+            broken.push_str(signature.label[last_parameter_end..].trim_start_matches(", "));
             return broken;
         }
         return format!("{prefix}{}", signature.label);
