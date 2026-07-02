@@ -349,6 +349,11 @@ enum EnvironmentKey {
 pub struct ModuleCheck {
     pub expression_types: Vec<CoreType>,
     pub expression_types_by_id: BTreeMap<ExpressionId, CoreType>,
+    // The constraint of every still-unbound inference variable occurring in the recorded types.
+    // Display-time generalization (hover, inlay hints, signature help) quantifies those variables
+    // and needs the bound to render `<T: numeric>` rather than a bare `<T>`; the inference state
+    // that knows it is gone by the time the IDE layer reads the stored types.
+    pub variable_constraints: BTreeMap<InferenceVariableId, Constraint>,
     pub errors: Vec<InferenceError>,
     // Origins of genuine `Unknown` types, each already confirmed to resolve to `Unknown` in the
     // final substitution. Strict mode turns each into one diagnostic; non-strict checks ignore them.
@@ -1280,9 +1285,28 @@ impl InferenceState {
                     || expression_types_by_id.get(&origin.expression_id) == Some(&CoreType::Unknown)
             })
             .collect();
+        let mut variable_constraints = BTreeMap::new();
+        for core_type in expression_types_by_id
+            .values()
+            .chain(expression_types.iter())
+            .cloned()
+            .collect::<Vec<_>>()
+        {
+            if let Ok(free_variables) = self.free_type_variables(&core_type) {
+                for variable in free_variables {
+                    if let Some(InferenceEntry::Unbound { constraint, .. }) =
+                        self.entries.get(&variable)
+                        && *constraint != Constraint::Unconstrained
+                    {
+                        variable_constraints.insert(variable, *constraint);
+                    }
+                }
+            }
+        }
         ModuleCheck {
             expression_types,
             expression_types_by_id,
+            variable_constraints,
             errors,
             strict_origins,
         }

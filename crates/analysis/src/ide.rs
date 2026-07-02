@@ -18,7 +18,7 @@ use {
         interner::{Interner, Symbol},
         naming::{DocumentKind, NamesGlobal, NamesLocal},
         text::{TextPosition, TextRange},
-        types::{CoreType, TypeScheme},
+        types::{Constraint, CoreType, InferenceVariableId, TypeScheme},
     },
     std::{
         collections::BTreeMap,
@@ -45,6 +45,13 @@ pub trait IdeDatabase {
         document_id: DocumentId,
         expression_id: ExpressionId,
     ) -> Option<&CoreType>;
+    // The constraint of a still-unbound inference variable in a stored expression type, so
+    // display-time generalization renders `<T: numeric>` rather than a bare `<T>`.
+    fn variable_constraint(
+        &self,
+        document_id: DocumentId,
+        variable: InferenceVariableId,
+    ) -> Constraint;
     fn all_document_ids(&self) -> Vec<DocumentId>;
     // Whether the document participates in the package (top-level bindings are package globals) or is
     // a standalone script (top-level bindings are document-local slots). Completion offers a script's
@@ -99,6 +106,14 @@ impl IdeDatabase for Analysis {
         expression_id: ExpressionId,
     ) -> Option<&CoreType> {
         self.checked_expression_type(document_id, expression_id)
+    }
+
+    fn variable_constraint(
+        &self,
+        document_id: DocumentId,
+        variable: InferenceVariableId,
+    ) -> Constraint {
+        self.variable_constraint(document_id, variable)
     }
 
     fn all_document_ids(&self) -> Vec<DocumentId> {

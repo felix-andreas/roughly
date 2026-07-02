@@ -15,8 +15,8 @@ use {
     },
     crate::{
         diagnostic::{
-            RenderedSignature, render_function_signature, render_generalized_type,
-            render_user_facing_scheme,
+            RenderedSignature, render_function_signature_with_constraints, render_generalized_type,
+            render_generalized_type_with_constraints, render_user_facing_scheme,
         },
         document::{Document, DocumentId},
         hir::{
@@ -34,7 +34,10 @@ use {
             DocumentTypeToken, TypeTokenRole, render_named_type_ref, render_surface_type,
             type_tokens_in_range,
         },
-        types::{Annotation, CoreType, FunctionType, RecordField, TypeAnnotationKind},
+        types::{
+            Annotation, Constraint, CoreType, FunctionType, InferenceVariableId, RecordField,
+            TypeAnnotationKind,
+        },
     },
     ropey::{Rope, iter::Chunks},
     std::{
@@ -74,6 +77,7 @@ pub fn hover(database: &dyn IdeDatabase, path: &Path, position: TextPosition) ->
                     database.interner(),
                     hovered_name(database, expression),
                     core_type,
+                    &|variable| database.variable_constraint(document_id, variable),
                 )));
             }
             if let Some(summary) = variable_definition_summary(database, document_id, expression_id)
@@ -280,7 +284,9 @@ pub fn inlay_hints(
 
         let label = format!(
             ": {}",
-            render_generalized_type(database.interner(), core_type)
+            render_generalized_type_with_constraints(database.interner(), core_type, &|variable| {
+                database.variable_constraint(document_id, variable)
+            })
         );
         hints.push(InlayHint {
             position: TextPosition {
@@ -407,7 +413,11 @@ pub fn signature_help(
         return None;
     };
 
-    let signature = render_function_signature(database.interner(), function_type);
+    let signature = render_function_signature_with_constraints(
+        database.interner(),
+        function_type,
+        &|variable| database.variable_constraint(document_id, variable),
+    );
     let active_parameter = active_parameter(function_type, &signature, arguments, module, point);
 
     Some(SignatureHelp {
@@ -527,12 +537,18 @@ fn hovered_name<'d>(database: &'d dyn IdeDatabase, expression: &Expression) -> O
 // notation) and the bare type otherwise. A function signature whose one-line render is long is
 // broken across lines — one parameter per line, the same shape the `#:` formatter gives long
 // annotations — so wide stub signatures stay readable in the hover popup.
-fn hover_type_line(interner: &Interner, name: Option<&str>, core_type: &CoreType) -> String {
+fn hover_type_line(
+    interner: &Interner,
+    name: Option<&str>,
+    core_type: &CoreType,
+    constraint_of: &dyn Fn(InferenceVariableId) -> Constraint,
+) -> String {
     const ONE_LINE_LIMIT: usize = 72;
 
     let prefix = name.map(|name| format!("{name} : ")).unwrap_or_default();
     if let CoreType::Function(function_type) = core_type {
-        let signature = render_function_signature(interner, function_type);
+        let signature =
+            render_function_signature_with_constraints(interner, function_type, constraint_of);
         if prefix.len() + signature.label.len() > ONE_LINE_LIMIT && !signature.parameters.is_empty()
         {
             let first_parameter_start = signature.parameters[0].start;
@@ -548,7 +564,10 @@ fn hover_type_line(interner: &Interner, name: Option<&str>, core_type: &CoreType
         }
         return format!("{prefix}{}", signature.label);
     }
-    format!("{prefix}{}", render_generalized_type(interner, core_type))
+    format!(
+        "{prefix}{}",
+        render_generalized_type_with_constraints(interner, core_type, constraint_of)
+    )
 }
 
 fn render_range(range: Range) -> String {

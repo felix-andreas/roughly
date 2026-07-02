@@ -1,5 +1,5 @@
 #==== unresolved
-#---- numeric_constraint_not_yet_displayed
+#---- numeric_constraint_is_displayed
 #---- R/main.R
 add_one <- function(x) x + 1L
 add_one
@@ -8,7 +8,7 @@ add_one
 R/main.R:2:1
 #++++
 ```
-add_one : <T> fn(x: T) -> T
+add_one : <T: numeric> fn(x: T) -> T
 ```
 
 Package global, defined at `R/main.R:1:1`

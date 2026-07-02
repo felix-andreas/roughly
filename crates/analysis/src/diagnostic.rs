@@ -57,8 +57,20 @@ pub fn render_user_facing_scheme(interner: &Interner, type_scheme: &TypeScheme) 
 // about inference. A non-function type never shows a binder (a `<T> T` hover on a parameter use would
 // misread as a polymorphic scheme); its variables still render with the user-facing `T`, `U`, … names.
 pub fn render_generalized_type(interner: &Interner, core_type: &CoreType) -> String {
+    render_generalized_type_with_constraints(interner, core_type, &|_| Constraint::Unconstrained)
+}
+
+// Like [`render_generalized_type`], but the caller supplies each display-quantified variable's
+// constraint (looked up from the stored typecheck output), so a numeric parameter renders
+// `<T: numeric>` instead of a bare `<T>`.
+pub fn render_generalized_type_with_constraints(
+    interner: &Interner,
+    core_type: &CoreType,
+    constraint_of: &dyn Fn(InferenceVariableId) -> Constraint,
+) -> String {
     if let CoreType::Function(function_type) = core_type {
-        return render_function_signature(interner, function_type).label;
+        return render_function_signature_with_constraints(interner, function_type, constraint_of)
+            .label;
     }
     let mut renderer = TypeRenderer::user_facing(interner);
     renderer.render_core_type(core_type)
@@ -80,6 +92,16 @@ pub fn render_function_signature(
     interner: &Interner,
     function_type: &FunctionType<CoreType>,
 ) -> RenderedSignature {
+    render_function_signature_with_constraints(interner, function_type, &|_| {
+        Constraint::Unconstrained
+    })
+}
+
+pub fn render_function_signature_with_constraints(
+    interner: &Interner,
+    function_type: &FunctionType<CoreType>,
+    constraint_of: &dyn Fn(InferenceVariableId) -> Constraint,
+) -> RenderedSignature {
     let mut renderer = TypeRenderer::user_facing(interner);
 
     // One renderer spans binder, parameters, and return type, so a type variable keeps a single name
@@ -89,7 +111,7 @@ pub fn render_function_signature(
     collect_function_free_variables(function_type, &mut free_variables);
     let quantified_variables = free_variables
         .into_iter()
-        .map(|variable| QuantifiedVariable::new(variable, Constraint::Unconstrained))
+        .map(|variable| QuantifiedVariable::new(variable, constraint_of(variable)))
         .collect::<Vec<_>>();
     let binder = renderer.register_quantified(&quantified_variables);
 

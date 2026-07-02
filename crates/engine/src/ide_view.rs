@@ -40,7 +40,7 @@ use {
         stdlib::StubLibrary,
         text::{TextPosition, TextRange},
         typecheck::ModuleCheck,
-        types::{CoreType, TypeScheme},
+        types::{Constraint, CoreType, InferenceVariableId, TypeScheme},
     },
     std::{
         collections::{BTreeMap, BTreeSet, HashMap},
@@ -548,6 +548,19 @@ impl<'a> IdeDatabase for EngineIdeRef<'a> {
             .get(&document_id)?
             .expression_types_by_id
             .get(&expression_id)
+    }
+
+    fn variable_constraint(
+        &self,
+        document_id: DocumentId,
+        variable: InferenceVariableId,
+    ) -> Constraint {
+        self.caches
+            .checks
+            .get(&document_id)
+            .and_then(|check| check.variable_constraints.get(&variable))
+            .copied()
+            .unwrap_or(Constraint::Unconstrained)
     }
 
     fn all_document_ids(&self) -> Vec<DocumentId> {

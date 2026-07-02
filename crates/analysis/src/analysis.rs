@@ -16,7 +16,7 @@ use {
             ExportedValue, StrictOriginKind, StrictUnknownOrigin, TypeDefinitionEnvironment,
             inference_state_with_builtins_in_interner,
         },
-        types::{CoreType, TypeScheme},
+        types::{Constraint, CoreType, InferenceVariableId, TypeScheme},
     },
     ropey::Rope,
     std::{
@@ -147,6 +147,7 @@ struct TypecheckDocumentOutput {
     // `[check] typing` is on.
     strict_diagnostics: Vec<Diagnostic>,
     expression_types: HashMap<ExpressionId, CoreType>,
+    variable_constraints: BTreeMap<InferenceVariableId, Constraint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -510,6 +511,20 @@ impl Analysis {
             .get(&document_id)?
             .expression_types
             .get(&expression_id)
+    }
+
+    // The constraint carried by a still-unbound inference variable in a stored expression type,
+    // for display-time generalization (`<T: numeric>` on hover).
+    pub fn variable_constraint(
+        &self,
+        document_id: DocumentId,
+        variable: InferenceVariableId,
+    ) -> Constraint {
+        self.document_typecheck_outputs
+            .get(&document_id)
+            .and_then(|output| output.variable_constraints.get(&variable))
+            .copied()
+            .unwrap_or(Constraint::Unconstrained)
     }
 }
 
@@ -981,6 +996,7 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 diagnostics,
                 strict_diagnostics,
                 expression_types,
+                variable_constraints: module_check.variable_constraints,
             },
         ));
         checked_document_ids.push(*document_id);
