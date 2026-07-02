@@ -86,6 +86,8 @@ Formatter (all verified):
 - ~25 `unreachable!()` arms keyed to grammar shape = process panics on a tree-sitter-r bump; route to the existing `FormatError::UnknownKind` path.
 - Empty file becomes `\n` and is reported "reformatted".
 
+- **Formatter follow-ups (from adversarial review):** `# fmt: skip` trailing a non-last call argument is silently ignored (the comma intervenes in the sibling check); `# fmt: off` is inert inside call-argument lists with no diagnostic for the no-op directive; expanded `@param` should support a JSDoc-style trailing description as a first-class parse (parser stores it, checker validates the name, hover can show it, formatter re-emits it verbatim) — today such blocks are simply left verbatim.
+
 ## Phase 5 — Perf honesty
 
 - **Single parse per edit:** the engine re-parses from scratch every keystroke (the worker's incrementally-maintained tree is discarded; whole buffer re-materialized as `String` and compared). Feed the edited document/tree into the engine input.
