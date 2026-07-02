@@ -106,6 +106,11 @@ Formatter (all verified):
 - Doc/impl mismatches: `DESIGN.md` §3 "typecheck never reads project_files" false for scripts; `stdlib_stubs` listed as an engine input it isn't; stale round-caching comment on `analysis.rs` fixed-point; `linter.md` "two further checks" (there are three); `stdlib-stubs.md` claims `identity`/`Map` have generic schemes (identity absent, Map is `Any`).
 - MEMORY.md corrections: type-notation cursor features are *partial* (see Phase 4); the malformed-input differential claim ("generator is well-formed") is stale — the generator emits malformed sources.
 
+## Website / docs-site track (parallel to the beta program, user-facing)
+
+- Landing page: hero animation restored (particle heading) — awaiting the user's aesthetic verdict; "IDE features in your editor" tabs look bad + layout shift on click (reserve dimensions); formatting-section examples not distinct enough (show inconsistently-formatted code morphing into consistent shape; pick genuinely distinct examples like auto-bracing/alignment).
+- Full docs-site accuracy + clarity pass once the beta semantics land (the typing pages are being rewritten continuously by the semantics slices; sweep the rest for stale claims afterwards).
+
 ## Post-beta (explicitly out of beta scope)
 
 - **Tags / discriminated unions via a Roughly stdlib** (user direction): a compiler-known library providing tag constructors + a `match` function with exhaustive-pattern checking over tagged unions (Roc-style tags / OCaml polymorphic variants). Design after general unions land — tags become `union` + literal discriminants; record the design in `typing-design.md` first.
