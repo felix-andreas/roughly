@@ -142,23 +142,10 @@ fn traverse(
                 && [kind::LEFT_ASSIGN, kind::EQUAL].contains(&operator.kind_id())
             {
                 let actual_name = node_text(left_hand_side, rope);
-                let expected_name = match name_style {
-                    NameStyle::Camel => to_camel_case(&actual_name),
-                    NameStyle::Snake => to_snake_case(&actual_name),
-                };
-
-                if actual_name != expected_name {
-                    diagnostics.push(Diagnostic::lint_warning(
-                        Lint::NamingStyle,
-                        node.range(),
-                        format!(
-                            "Variable `{actual_name}` should have {} name, e.g. {expected_name}",
-                            match name_style {
-                                NameStyle::Camel => "camelCase",
-                                NameStyle::Snake => "snake_case",
-                            },
-                        ),
-                    ));
+                if let Some((range, message)) =
+                    naming_style_finding(&actual_name, name_style, "Variable", node.range())
+                {
+                    diagnostics.push(Diagnostic::lint_warning(Lint::NamingStyle, range, message));
                 }
             }
 
@@ -207,23 +194,10 @@ fn traverse(
                 && name.kind_id() == kind::IDENTIFIER
             {
                 let actual_name = node_text(name, rope);
-                let expected_name = match name_style {
-                    NameStyle::Camel => to_camel_case(&actual_name),
-                    NameStyle::Snake => to_snake_case(&actual_name),
-                };
-
-                if actual_name != expected_name {
-                    diagnostics.push(Diagnostic::lint_warning(
-                        Lint::NamingStyle,
-                        name.range(),
-                        format!(
-                            "Parameter `{actual_name}` should have {} name, e.g. {expected_name}",
-                            match name_style {
-                                NameStyle::Camel => "camelCase",
-                                NameStyle::Snake => "snake_case",
-                            },
-                        ),
-                    ));
+                if let Some((range, message)) =
+                    naming_style_finding(&actual_name, name_style, "Parameter", name.range())
+                {
+                    diagnostics.push(Diagnostic::lint_warning(Lint::NamingStyle, range, message));
                 }
             }
         }
@@ -240,6 +214,31 @@ fn traverse(
             }
         }
     }
+}
+
+// The naming-style finding for one identifier, shared by the variable and parameter sites: `None`
+// when the name already matches the configured style.
+fn naming_style_finding(
+    actual_name: &str,
+    name_style: NameStyle,
+    subject: &str,
+    range: tree_sitter::Range,
+) -> Option<(tree_sitter::Range, String)> {
+    let expected_name = match name_style {
+        NameStyle::Camel => to_camel_case(actual_name),
+        NameStyle::Snake => to_snake_case(actual_name),
+    };
+    if actual_name == expected_name {
+        return None;
+    }
+    let style = match name_style {
+        NameStyle::Camel => "camelCase",
+        NameStyle::Snake => "snake_case",
+    };
+    Some((
+        range,
+        format!("{subject} `{actual_name}` should have {style} name, e.g. {expected_name}"),
+    ))
 }
 
 fn node_text(node: Node<'_>, rope: &Rope) -> String {
