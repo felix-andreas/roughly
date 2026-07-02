@@ -385,6 +385,16 @@ impl Diagnostic {
                 }
                 (*range, message)
             }
+            InferenceError::InvalidVectorElement { element } => {
+                let mut type_renderer = TypeRenderer::user_facing(interner);
+                let rendered = type_renderer.render(element);
+                (
+                    fallback_range,
+                    format!(
+                        "the element of a `[]` vector type must be an atomic type, found `{rendered}` — for a list of these, write `list[{rendered}]`"
+                    ),
+                )
+            }
             InferenceError::AnnotationParameterNameMismatch { name, range } => {
                 let name = interner.resolve(*name).unwrap_or("<unknown>");
                 (

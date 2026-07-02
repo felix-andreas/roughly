@@ -116,6 +116,12 @@ pub enum InferenceError {
         expression_id: ExpressionId,
         first_error: Option<Box<InferenceError>>,
     },
+    // A `X[]` / `X[named]` annotation whose element is not an atomic type (or a type parameter):
+    // vectors hold atomic elements only, and silently reading the annotation as `list[X]` hid the
+    // mistake, so it is refused with a pointer at the list spelling.
+    InvalidVectorElement {
+        element: Box<CoreType>,
+    },
     // An indexing form the checker does not model: multiple indexes (`m[i, j]`), an empty index
     // (`x[]`), or a named index argument. The subject was already inferred; this is about the
     // index shape, so the message must name indexing rather than a function call.
@@ -3482,15 +3488,17 @@ impl InferenceState {
     // atomic-element bound. The bound is recorded straight on the entry (not via `constrain_type`)
     // because the element may be a rigid binder: the annotation itself makes the atomic promise
     // here, unlike a function body, which must not add bounds the annotation never declared. Every
-    // other element shape keeps the historical reading of `X[]` as `list[X]`.
+    // other element shape is refused: vectors hold atomic elements only, and the historical silent
+    // reading of `X[]` as `list[X]` hid the mistake.
     fn lower_vector_element(
         &mut self,
         element: CoreType,
         vector: impl Fn(Box<CoreType>) -> CoreType,
-        list: impl Fn(Box<CoreType>) -> CoreType,
-    ) -> CoreType {
+    ) -> Result<CoreType, InferenceError> {
         match element {
-            CoreType::Scalar(_) | CoreType::Any | CoreType::Unknown => vector(Box::new(element)),
+            CoreType::Scalar(_) | CoreType::Any | CoreType::Unknown => {
+                Ok(vector(Box::new(element)))
+            }
             CoreType::Variable(variable) => {
                 if let Some(InferenceEntry::Unbound { level, constraint }) =
                     self.entries.get(&variable)
@@ -3501,9 +3509,11 @@ impl InferenceState {
                     };
                     self.set_entry(variable, raised);
                 }
-                vector(Box::new(CoreType::Variable(variable)))
+                Ok(vector(Box::new(CoreType::Variable(variable))))
             }
-            other_type => list(Box::new(other_type)),
+            other_type => Err(InferenceError::InvalidVectorElement {
+                element: Box::new(other_type),
+            }),
         }
     }
 
@@ -3644,7 +3654,7 @@ impl InferenceState {
                     type_definitions,
                     expression,
                 )?;
-                Ok(self.lower_vector_element(element, CoreType::Vector, CoreType::List))
+                self.lower_vector_element(element, CoreType::Vector)
             }
             SurfaceType::NamedVector(inner_type) => {
                 let element = self.lower_surface_type_with_substitutions(
@@ -3654,7 +3664,7 @@ impl InferenceState {
                     type_definitions,
                     expression,
                 )?;
-                Ok(self.lower_vector_element(element, CoreType::NamedVector, CoreType::NamedList))
+                self.lower_vector_element(element, CoreType::NamedVector)
             }
             SurfaceType::List(item_type) => Ok(CoreType::List(Box::new(
                 self.lower_surface_type_with_substitutions(

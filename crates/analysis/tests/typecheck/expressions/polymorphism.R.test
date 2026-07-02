@@ -172,3 +172,11 @@ first_of(c("a", "b"))
 #++++
 fn(x: ?1[]) -> ?1
 character
+
+#---- vector_suffix_rejects_non_atomic_element
+#: @alias Person {list{name: character}}
+
+#: fn(x: Person[]) -> NULL
+f <- function(x) NULL
+#++++
+error: invalid vector element

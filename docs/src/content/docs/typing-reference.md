@@ -652,6 +652,10 @@ bound** and can only instantiate to one of the six atomic types (`logical`, `int
 A bound that can no longer be satisfied — binding an element variable to a non-atomic type, or
 requiring a `character` element to be numeric — is a type error at the expression that imposed it.
 
+Writing `X[]` where `X` is neither an atomic type nor a type parameter (a record, a function, a
+nominal type) is an annotation error: vectors hold atomic elements only, and the diagnostic points
+at the `list[X]` spelling for a list of such values.
+
 Named generic aliases and nominal types are applied with angle brackets.
 
 Examples:

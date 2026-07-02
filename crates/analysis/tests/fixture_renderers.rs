@@ -38,6 +38,7 @@ pub fn render_expression_error_kind(error: &InferenceError) -> &'static str {
         }
         InferenceError::UnsupportedIndexShape { .. } => "error: unsupported index shape",
         InferenceError::NoMatchingOverload { .. } => "error: no matching overload",
+        InferenceError::InvalidVectorElement { .. } => "error: invalid vector element",
     }
 }
 
