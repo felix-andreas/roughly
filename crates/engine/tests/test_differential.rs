@@ -756,12 +756,14 @@ fn directive_mix_lowering_error_matches_production() {
     );
 }
 
-// GAP #4: unused-local warnings (`DiagnosticCode::Naming`, "`{name}` is assigned but never used."),
-// synthesized from `NamesLocal::unused_bindings` and gated by the `unused` check. The randomized stream
-// emits no unused locals, so this curated `unused: true` pass is the only coverage of the reported case. It
-// exercises the eligibility rules from production's `compute_unused_bindings`: a reported local, a used
-// local, a `.`-prefixed throwaway, a parameter, a `for` variable, and a top-level binding (only the first
-// reported). The final step toggles the check off, asserting the warnings clear at parity.
+// Unused-assignment warnings (`DiagnosticCode::Unused`, "`{name}` is assigned but never used."),
+// synthesized from `NamesLocal::unused_assignments` and gated by the `unused` check. The randomized
+// stream emits no unused assignments, so this curated `unused: true` pass is the only coverage of the
+// reported case. It exercises the reaching-write eligibility rules from `resolve_document_locally`: a
+// reported dead local, a used local, a `.`-prefixed throwaway, a parameter, a `for` variable, a
+// top-level binding, a conditional update and a loop accumulator that later reads keep alive, and a
+// dead store killed by a rewrite. The final step toggles the check off, asserting the warnings clear
+// at parity.
 #[test]
 fn unused_local_warnings_match_production() {
     let mut driver = Driver::new(typing_unused_config());
@@ -782,6 +784,13 @@ fn unused_local_warnings_match_production() {
         "params-for-and-top-level",
         2,
         "top_level <- 1L\nh <- function(unused_param) {\n  for (item in 1:3) 1L\n}",
+    );
+    // A conditional update and a loop accumulator both reach a later read -> not reported; the
+    // pre-rewrite dead store is -> reported. Also exercises the loop/branch join paths under typing.
+    driver.set_package(
+        "reaching-writes",
+        3,
+        "k <- function(flag) {\n  x <- 1L\n  if (flag) {\n    x <- 2L\n  }\n  total <- 0L\n  for (i in 1:3) {\n    total <- total + i\n  }\n  dead <- 1L\n  dead <- 2L\n  x + total + dead\n}",
     );
     // Toggling the check off clears the warnings on both sides (the unused-off oracle path).
     driver.step("unused-off", |workspace| workspace.config.unused = false);

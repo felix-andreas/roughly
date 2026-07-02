@@ -2038,7 +2038,12 @@ impl InferenceState {
         // a read in it sees the types flowing around the back edge.
         self.infer_loop_to_fixed_point(expression, None, false, |state| {
             state.expect_scalar_logical(condition, arena, resolution_context, type_definitions)?;
-            state.infer_expression_with_context(body, arena, resolution_context, type_definitions)?;
+            state.infer_expression_with_context(
+                body,
+                arena,
+                resolution_context,
+                type_definitions,
+            )?;
             Ok(())
         })?;
         Ok(CoreType::Null)
@@ -2053,7 +2058,12 @@ impl InferenceState {
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<CoreType, InferenceError> {
         self.infer_loop_to_fixed_point(expression, None, true, |state| {
-            state.infer_expression_with_context(body, arena, resolution_context, type_definitions)?;
+            state.infer_expression_with_context(
+                body,
+                arena,
+                resolution_context,
+                type_definitions,
+            )?;
             Ok(())
         })?;
         Ok(CoreType::Null)
@@ -4212,7 +4222,13 @@ impl InferenceState {
             type_definitions,
         )?;
 
-        self.subset2_result_type(value_type, value, index_expression, expression, type_definitions)
+        self.subset2_result_type(
+            value_type,
+            value,
+            index_expression,
+            expression,
+            type_definitions,
+        )
     }
 
     fn subset2_result_type(
@@ -5227,13 +5243,12 @@ fn member_wise_numeric_results(
     let mut results = Vec::with_capacity(left_parts.len() * right_parts.len());
     for (left_shape, left_atomic) in left_parts {
         for (right_shape, right_atomic) in right_parts {
-            let shape = if *left_shape == OperandShape::Vector
-                || *right_shape == OperandShape::Vector
-            {
-                OperandShape::Vector
-            } else {
-                OperandShape::Scalar
-            };
+            let shape =
+                if *left_shape == OperandShape::Vector || *right_shape == OperandShape::Vector {
+                    OperandShape::Vector
+                } else {
+                    OperandShape::Scalar
+                };
             let atomic = match numeric_result_atomic {
                 NumericResultAtomic::AlwaysDouble => Atomic::Double,
                 NumericResultAtomic::Promote => {

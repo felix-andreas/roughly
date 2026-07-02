@@ -1078,9 +1078,7 @@ impl<'a> DocumentNamingContext<'a> {
         let expression = self.arena.get(expression_id);
         if let Some(annotation) = &expression.annotation
             && annotation_contains_named_type(annotation)
-            && self
-                .named_type_annotation_expressions
-                .insert(expression_id)
+            && self.named_type_annotation_expressions.insert(expression_id)
         {
             self.document_naming
                 .named_type_annotations
@@ -1328,10 +1326,7 @@ impl<'a> DocumentNamingContext<'a> {
             let Some(reach) = self.flow.get(&binding_id) else {
                 continue;
             };
-            if !reach
-                .iter()
-                .any(|element| *element != Reach::Unassigned)
-            {
+            if !reach.iter().any(|element| *element != Reach::Unassigned) {
                 continue;
             }
             let unassigned_reachable = reach.contains(&Reach::Unassigned);
@@ -1413,7 +1408,9 @@ impl<'a> DocumentNamingContext<'a> {
             return WriteTarget::TopLevelSite(binding_id);
         }
         let binding_id = self.binding(symbol, range, BindingKind::TopLevelAssignment);
-        self.scopes[top_level_index].slots.insert(symbol, binding_id);
+        self.scopes[top_level_index]
+            .slots
+            .insert(symbol, binding_id);
         WriteTarget::Slot {
             binding_id,
             reportable: false,
@@ -1431,7 +1428,8 @@ impl<'a> DocumentNamingContext<'a> {
         }
         let index = u32::try_from(self.assignment_writes.len())
             .unwrap_or_else(|_| panic!("assignment write count exceeds u32 for {expression_id:?}"));
-        self.write_indexes_by_expression.insert(expression_id, index);
+        self.write_indexes_by_expression
+            .insert(expression_id, index);
         self.assignment_writes.push(AssignmentWrite {
             symbol,
             range,

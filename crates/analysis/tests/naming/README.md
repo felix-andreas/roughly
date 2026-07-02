@@ -28,6 +28,16 @@ The expected difference in mirrored cases is:
 
 Mirrored local/global cases should preserve the same `group__case` names where possible.
 
+## Variable model
+
+Naming resolves through **mutable variable slots** (the R environment model, specified in the
+typing reference's "Value names" and "Control-flow joins" sections): every assignment to one name
+in one frame writes the same slot, so rebinding, conditional writes, and loop writes all resolve
+to a single binding identity. Fixture output renders this as repeated `Assign(x@bN)`/`Symbol(x@bN)`
+lines sharing one `bN`. Package top level is the exception: each unconditional top-level
+assignment keeps a per-site binding (winner semantics), and only conditionally executed top-level
+code gets document slots.
+
 Mirrored global cases should use `MultiFile`, even when the package has one file.
 
 Type-name coverage belongs in `global`, not a dedicated local type suite, because type names are
@@ -80,8 +90,10 @@ The naming suite should explicitly cover:
 fresh value scope. `shadowing.R.test` is for cases where several binders exist and we need to prove
 which one wins.
 
-`maybe_undefined.R.test` is the explicit home for proving that names introduced only by
-conditionally executed code remain locally resolved but should warn as maybe undefined afterward.
+`maybe_undefined.R.test` is the explicit home for proving when a read of a variable slot warns as
+maybe undefined: some path reaches the read with no prior write. It also proves the negative
+space — a slot no write can reach does not capture the read (the lookup continues outward), and a
+write flowing around a loop back edge does reach reads earlier in the body.
 
 ## Local files
 
@@ -132,9 +144,10 @@ Required coverage:
 - one local assignment followed by one use
 - local assignment shadows top-level binding
 - local assignment shadows parameter
-- two local assignments with the same name create two bindings
-- later local use resolves to the latest local binding
-- assignment RHS sees the pre-existing binding, not the new one
+- two local assignments with the same name write one variable slot
+- later local use resolves to that slot
+- assignment RHS resolution: a parameter and a local assignment of the same name share the frame's
+  slot, so the RHS reads the same slot the assignment writes
 - assignment RHS can refer to another outer binding while rebinding a different name
 
 ### `closures.R.test`
@@ -205,6 +218,11 @@ Required coverage:
 - nested conditional introduction still warns after the outer construct
 - nested loop introduction still warns after the outer construct
 - no warning is produced when an already-defined local name is assigned in all branches
+- no warning is produced when a fresh name is assigned in both branches of an `if ... else`
+- an `else` branch cannot read a name introduced only in the `then` branch (the read resolves
+  outward instead of to the slot)
+- a read before the write inside a `while` body resolves to the slot through the loop back edge,
+  with the maybe-undefined warning
 
 ### `shadowing.R.test`
 

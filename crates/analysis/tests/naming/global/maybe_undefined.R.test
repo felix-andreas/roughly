@@ -263,3 +263,82 @@ Assign(f@b2)
           Assign(x@b1)
             Integer(2L)
       Symbol(x@b1)
+
+#---- no_warning_when_fresh_name_is_assigned_in_all_branches
+#---- R/main.R
+f <- function(cond) {
+  if (cond) {
+    x <- 1L
+  } else {
+    x <- 2L
+  }
+  x
+}
+#++++
+Assign(f@b2)
+  Function(cond@b0)
+    Block
+      If
+        Symbol(cond@b0)
+        Block
+          Assign(x@b1)
+            Integer(1L)
+        Block
+          Assign(x@b1)
+            Integer(2L)
+      Symbol(x@b1)
+
+#---- else_branch_cannot_read_then_branch_introduction
+#---- R/main.R
+f <- function(cond) {
+  if (cond) {
+    x <- 1L
+  } else {
+    x
+  }
+}
+#++++
+Assign(f@b2)
+  Function(cond@b0)
+    Block
+      If
+        Symbol(cond@b0)
+        Block
+          Assign(x@b1)
+            Integer(1L)
+        Block
+          Symbol(x@?)
+
+warning[naming] I could not resolve `x` in this package, its imports, or builtins.
+--> 5:5-5:6
+|     x
+
+#---- while_body_read_sees_write_around_back_edge
+#---- R/main.R
+f <- function(cond) {
+  while (cond) {
+    y <- x
+    x <- 1L
+  }
+  y
+}
+#++++
+Assign(f@b3)
+  Function(cond@b0)
+    Block
+      While
+        Symbol(cond@b0)
+        Block
+          Assign(y@b1)
+            Symbol(x@b2)
+          Assign(x@b2)
+            Integer(1L)
+      Symbol(y@b1)
+
+warning[naming] `x` might be undefined here because it is introduced only in conditionally executed code.
+--> 3:10-3:11
+|     y <- x
+
+warning[naming] `y` might be undefined here because it is introduced only in conditionally executed code.
+--> 6:3-6:4
+|   y

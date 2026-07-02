@@ -45,7 +45,8 @@ Keep it focused on the file split and the role of each file.
   - syntax-to-HIR lowering
 
 - `naming.rs`
-  - scopes, bindings, use-site resolution
+  - scopes, variable slots, use-site resolution, and the reaching-write flow analysis
+    (definite-assignment warnings and the unused dead-store check)
   - `resolve_document_locally` (file-local naming) and package-global resolution
 
 - `typecheck.rs`

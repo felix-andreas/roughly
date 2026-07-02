@@ -434,7 +434,10 @@ mod tests {
             super::normalize_lexically(Path::new("/a/b/../c/./d.R")),
             Path::new("/a/c/d.R")
         );
-        assert_eq!(super::normalize_lexically(Path::new("/../a")), Path::new("/a"));
+        assert_eq!(
+            super::normalize_lexically(Path::new("/../a")),
+            Path::new("/a")
+        );
         assert_eq!(
             super::normalize_lexically(Path::new("../../a")),
             Path::new("../../a")

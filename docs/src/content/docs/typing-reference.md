@@ -104,19 +104,81 @@ Cross-file references are scheme-based:
 - within one file, top-level names also resolve to the final exported scheme of that name, so a
   use placed before the definition still sees the definition's type
 
-Inside executable code, value naming remains lexical.
+Inside executable code, value naming is lexical over **mutable variable slots**, matching R's
+environment semantics: a scope holds one variable per name, and assignment mutates it.
 
-- function parameters introduce local bindings
-- local assignments introduce local bindings in the current lexical scope
-- later assignments in the same scope rebind that name in that scope
-- local bindings shadow outer and package-global bindings of the same name
-- ordinary braced blocks do not introduce a new value scope by themselves
-- `for` introduces a loop-local binding for the iteration variable
+- a function body, `local(expr)`, and a script's top level each form one variable scope (a frame)
+- function parameters introduce a variable slot in the function's frame; assigning to a parameter
+  name writes that same slot
+- the first `<-`/`=` assignment to a name in a frame creates its variable slot; every later
+  assignment to that name in the same frame **writes the same slot** — it does not create a new
+  shadowing binding
+- an assignment inside a conditional branch or loop body writes the enclosing frame's slot,
+  exactly like an unconditional assignment (braces and control flow do not introduce scopes)
+- variable slots shadow outer and package-global bindings of the same name; a slot that cannot
+  have been assigned yet at a read (no write reaches it on any path) does not shadow — the read
+  resolves outward, as R's runtime lookup would
+- `for` introduces a loop-local slot for the iteration variable, re-initialized from the iterable
+  on every iteration; assigning to the loop variable inside the body writes that slot
 - `local(expr)` evaluates `expr` in a fresh child scope and takes its value as the whole expression's
   type (for the common `local({ ... })`, the block's last-expression type); assignments inside are
   local and do not leak to the enclosing scope, while references still see enclosing names. The
   syntactic single-argument `local(...)` call is treated as this construct; rebinding `local` to a
   user function does not change that (a current limitation)
+
+At a package document's top level, conditionally executed assignments (inside a top-level `if`,
+`for`, `while`, or `repeat`) are not package-visible, but within the same document they behave
+like a variable slot: a later top-level read resolves to it, with the maybe-undefined warning
+below when an unassigned path also reaches. A conditional reassignment of a name that already has
+an unconditional top-level definition keeps resolving to the package-global winner.
+
+### Control-flow joins
+
+A read of a variable sees every write that can reach it, so control flow **joins** the states a
+variable can be in:
+
+- after `if` without `else`, a variable written in the branch has the join of its pre-`if` type
+  and the branch's written type
+- after `if ... else`, a variable has the join of the two branch outcomes (a branch that does not
+  write contributes the pre-`if` state)
+- a loop body may run zero or more times: reads inside the body and after the loop see the join of
+  the pre-loop state and the state flowing around the loop's back edge (the body is re-checked
+  until this stabilizes; a variable whose type keeps growing structurally is widened to `Unknown`)
+- `repeat` runs at least once, so after the loop the variable has the body's resulting state (back
+  edges still join inside the body)
+- joining equal types keeps the type; genuinely different types join into their union, exactly as
+  `if ... else` result values do; joining with `Unknown` is `Unknown`
+
+Joins and generalization:
+
+- a variable with exactly one reaching write keeps that write's generalized (possibly polymorphic)
+  scheme, so `f <- function(x) x` inside a body stays `<T> fn(x: T) -> T`
+- when writes merge at a join, the variable holds the join of the written types as a **monotype**
+  (a scheme-producing write contributes its instantiated body); conditional reassignment therefore
+  monomorphizes
+
+Definite assignment:
+
+- a read some path can reach with **no** prior write to the variable keeps resolving to the
+  variable but warns that the name might be undefined (introduced only in conditionally executed
+  code)
+- a read no write can reach at all does not resolve to the variable (see the shadowing rule above)
+
+Unused (dead-store) analysis follows from the same reaching sets when the `unused` check is
+enabled: an assignment whose written value no read can observe on any path warns
+``warning[unused] `x` is assigned but never used.`` at the assignment site. Package-visible
+top-level assignments, parameters, `for` variables, and `.`/`_`-prefixed names are not reported.
+
+Examples:
+
+- `f <- function(flag) { x <- 1L; if (flag) { x <- 2L }; x }` is clean: both writes reach the
+  read, and `x` reads as `integer`
+- `f <- function() { total <- 0L; for (i in 1:3) { total <- total + i }; total }` is clean: the
+  accumulator write is read on the next iteration and after the loop, and `total` stays `integer`
+- `f <- function(flag) { x <- 1L; if (flag) x <- "two"; x + 1L }` is a type error: `x` reads as
+  `integer | character`, and `+` rejects the `character` member
+- `f <- function() { x <- 1L; x <- 2L; y <- x; y }` warns that the first write to `x` is unused
+  (a dead store)
 
 ### Type names
 
@@ -804,6 +866,27 @@ Unification (used where two types must become one representative type, such as i
 
 ## Operators
 
+### Operators over union operands
+
+Control-flow joins and heterogeneous containers produce union-typed operands, so every operator
+below accepts unions **member-wise**:
+
+- a union operand is accepted where **every** member is accepted; one unacceptable member rejects
+  the whole operand (the diagnostic shows the full union type)
+- the result is the **join of the per-member results** (for a binary operator, over every pair of
+  left and right members)
+
+Examples:
+
+- `(integer | double) + integer` is `integer | double` (each member is numeric; `integer + integer`
+  is `integer`, `double + integer` is `double`)
+- `(integer | double) > 0L` is `logical`
+- `(integer | character) + 1L` is a type error: the `character` member is not numeric
+- `(integer | NULL) + 1L` is a type error: the `NULL` member is not numeric
+- `rec$a` on `list{a: integer} | list{a: character}` is `integer | character`; the access is an
+  error if any member lacks the field
+- `for` over `integer[] | character[]` binds the loop variable as `integer | character`
+
 ### `if` expressions
 
 #### `if` without `else`
@@ -931,6 +1014,7 @@ Use `[[` for supported vector indexing instead.
 - for map-like `list[named: T]`, `[` returns `list[named: T]`
 - for a tuple-like list, `[` returns `list[T]` where `T` is the **union of the item types**; `list(1L, "foo")[1L]` is `list[integer | character]`
 - for a record-like list, `[` returns `list[named: T]` where `T` is the union of the field value types
+- slicing the empty list yields `list[NULL]` (`T` is the union of zero item types, `NULL`)
 
 For a homogeneous fixed-shape list the union collapses, so the result matches the plain coercion to the array-like or map-like shape.
 
@@ -1115,16 +1199,19 @@ Examples:
 
 ### Assignment operator `<-`
 
-- `name <- expr` binds `name` to the type of `expr` in the current scope
+- `name <- expr` writes the type of `expr` into `name`'s variable slot in the current scope,
+  creating the slot on the first write (see `Value names` for the slot model)
 - if the assignment has an attached typing annotation, the assigned expression is checked using the annotation rules from this document
 - the assignment expression itself has the type of the assigned expression
-- later assignments in the same scope rebind the name
-- the new binding uses the new assigned type
+- a later assignment in the same scope writes the same variable: on a straight-line path the new
+  write replaces the old type, and writes merging from different control-flow paths join (see
+  `Control-flow joins`)
 
 Examples:
 
 - after `x <- 1L`, `x` has type `integer`
 - after `x <- 1L; x <- "foo"`, later uses of `x` have type `character`
+- after `x <- 1L; if (flag) x <- "foo"`, later uses of `x` have type `integer | character`
 - `y <- (x <- 1L)` gives both `x` and `y` type `integer`
 
 ### Boolean operators `&&` and `||`
@@ -1145,6 +1232,9 @@ Examples:
 
 `for`, `while`, and `repeat` all evaluate to `NULL`.
 
+Loop bodies are checked to a control-flow fixed point: variables written in the body join across
+iterations and with the pre-loop state (see `Control-flow joins`).
+
 ### `for`
 
 - has the form `for (name in value) body`
@@ -1152,17 +1242,27 @@ Examples:
   - scalar-like, array-like, and map-like vectors iterate with the scalar element type
   - array-like `list[T]` and map-like `list[named: T]` iterate with element type `T`
   - tuple-like and record-like lists iterate with the **union of their item types** (which collapses to the single item type for a homogeneous list), so heterogeneous fixed-shape lists are iterable: `for (item in list(a = 1L, b = "two")) ...` binds `item` as `integer | character`
+  - the empty list `list()` is iterable with element type `NULL` (the union of zero item types)
+  - a union of iterables iterates member-wise: `integer[] | character[]` binds the loop variable
+    as `integer | character`
+- the iteration source is evaluated once, before any iteration
 - does not itself change the type of the iterated value outside the loop
-- inside the loop body, the bound name has the iterated element type
+- inside the loop body, the bound name has the iterated element type; it is re-initialized from
+  the iterable on every iteration, so an assignment to it inside the body does not survive into
+  the next iteration's start
+- the loop variable is not visible after the loop
 
 ### `while`
 
 - requires a scalar `logical` condition
+- the condition is re-evaluated before every iteration, so reads in it also see the loop's joined
+  state
 - the whole `while` expression evaluates to `NULL`
 
 ### `repeat`
 
 - has no condition
+- the body runs at least once, so variables written in it are definitely assigned after the loop
 - currently evaluates to `NULL`
 - in the future, it may infer as `Never` when the checker can infer that the loop body does not contain a `break`
 

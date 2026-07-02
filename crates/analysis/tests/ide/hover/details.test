@@ -155,6 +155,64 @@ Local variable, defined at `R/main.R:2:13`
 
 _May be undefined on some paths._
 
+#==== hover_joins
+#---- conditional_update_joins_to_single_type
+#---- R/main.R
+f <- function(flag) {
+  x <- 1L
+  if (flag) {
+    x <- 2L
+  }
+  x
+}
+#++++ any
+#!!!! hover joined_read.hover
+R/main.R:6:3
+#++++
+```
+integer
+```
+
+Local variable, defined at `R/main.R:2:3`
+
+#---- conditional_retype_joins_to_union
+#---- R/main.R
+f <- function(flag) {
+  x <- 1L
+  if (flag) {
+    x <- "two"
+  }
+  x
+}
+#++++ any
+#!!!! hover union_read.hover
+R/main.R:6:3
+#++++
+```
+integer | character
+```
+
+Local variable, defined at `R/main.R:2:3`
+
+#---- loop_accumulator_hovers_integer
+#---- R/main.R
+f <- function() {
+  total <- 0L
+  for (i in 1:3) {
+    total <- total + i
+  }
+  total
+}
+#++++ any
+#!!!! hover accumulator_read.hover
+R/main.R:6:3
+#++++
+```
+integer
+```
+
+Local variable, defined at `R/main.R:2:3`
+
 #==== hover_none
 #---- outside_expressions
 #---- R/main.R
