@@ -706,14 +706,9 @@ fn validate_surface_type(
     interner: &Interner,
 ) -> Result<(), TypeParseError> {
     match surface_type {
-        SurfaceType::Named(name, args) => {
-            let name_str = interner.resolve(*name).unwrap_or("");
-            if name_str == "Pair" && args.len() != 2 {
-                return Err(invalid_semantics(format!(
-                    "generic type `Pair` expects 2 type argument(s), but found {}.",
-                    args.len()
-                )));
-            }
+        SurfaceType::Named(_, args) => {
+            // Arity against the declaration is a resolution-time check (`typecheck` has the
+            // definition environment); the parser validates only structure.
             for arg in args {
                 validate_surface_type(arg, interner)?;
             }

@@ -24,35 +24,10 @@ InvalidSemantics { message: "cannot use multiple compact annotations in the same
 #++++
 InvalidSemantics { message: "`@param` directives must appear before `@return` or `@returns` in the same `#:` block." }
 
-#---- wrong_generic_arity_too_few_arguments
+#---- generic_arity_is_not_a_parse_error
 Pair<integer>
 #++++
-InvalidSemantics { message: "generic type `Pair` expects 2 type argument(s), but found 1." }
-
-#---- wrong_generic_arity_too_many_arguments
-Pair<integer, character, logical>
-#++++
-InvalidSemantics { message: "generic type `Pair` expects 2 type argument(s), but found 3." }
-
-#---- wrong_generic_arity_nested_in_record
-list{value: Pair<integer>}
-#++++
-InvalidSemantics { message: "generic type `Pair` expects 2 type argument(s), but found 1." }
-
-#---- wrong_generic_arity_nested_in_function_parameter
-fn(Pair<integer>) -> integer
-#++++
-InvalidSemantics { message: "generic type `Pair` expects 2 type argument(s), but found 1." }
-
-#---- wrong_generic_arity_nested_in_function_return
-fn(integer) -> Pair<integer>
-#++++
-InvalidSemantics { message: "generic type `Pair` expects 2 type argument(s), but found 1." }
-
-#---- wrong_generic_arity_in_nominal_introduction
-@new Pair<integer>
-#++++
-InvalidSemantics { message: "generic type `Pair` expects 2 type argument(s), but found 1." }
+Pair<integer>
 
 #==== record_semantic_errors
 #---- duplicate_record_field_name

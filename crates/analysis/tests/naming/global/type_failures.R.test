@@ -204,7 +204,7 @@ Assign(value@b0)
     Argument(right)
       Integer(2L)
 
-error[syntax-error] Syntax Error: invalid semantics: generic type `Pair` expects 2 type argument(s), but found 1.
+error[syntax-error] Syntax Error: generic type `Pair` expects 2 type argument(s), but found 1.
 --> 3:1-3:17
 | #: Pair<integer>
 
