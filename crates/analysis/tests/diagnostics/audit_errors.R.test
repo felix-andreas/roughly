@@ -213,7 +213,7 @@ error[type-error] expected `integer`, found `integer | NULL`
 #---- occurs_check_self_application
 f <- function(x) x(x)
 #++++
-error[type-error] I cannot construct an infinite type: type1 occurs inside `fn(type1) -> type2`.
+error[type-error] I cannot construct an infinite type: T occurs inside `fn(T) -> U`.
 --> 1:18-1:22
 | f <- function(x) x(x)
 

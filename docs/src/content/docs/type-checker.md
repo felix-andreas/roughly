@@ -365,6 +365,13 @@ A numeric-constrained variable that is not abstracted by a parameter defaults to
 `double`, matching R's treatment of bare numbers. Calling such a function with a
 non-numeric argument is an error at the call site.
 
+Everywhere types are shown — hover, inlay hints, signature help, and error messages —
+a not-yet-resolved inference variable displays as a type-parameter name (`T`, `U`, `V`,
+… in reading order), never as a raw internal id. A function type additionally binds its
+variables up front (`<T, U> fn(x: list[T], f: fn(T) -> U) -> list[U]` for `lapply`), and
+one rendering spans the whole type, so the same variable keeps the same name across
+parameters, return type, and both sides of an `expected …, found …` message.
+
 ## Control flow
 
 - `if` without `else` produces `T | NULL` (or `NULL` if the branch is `NULL`); the

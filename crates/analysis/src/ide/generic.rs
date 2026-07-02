@@ -14,11 +14,11 @@ use {
         RenameResult, SignatureHelp,
     },
     crate::{
-        diagnostic::{render_core_type, render_generalized_type},
+        diagnostic::{RenderedSignature, render_function_signature, render_generalized_type},
         document::{Document, DocumentId},
         hir::{
-            DefinitionId, DefinitionItem, DefinitionKind, Expression, ExpressionId, ExpressionKind,
-            Module,
+            Argument, DefinitionId, DefinitionItem, DefinitionKind, Expression, ExpressionId,
+            ExpressionKind, Module,
         },
         interner::Symbol,
         naming::{
@@ -31,7 +31,7 @@ use {
             DocumentTypeToken, TypeTokenRole, render_named_type_ref, render_surface_type,
             type_tokens_in_range,
         },
-        types::{Annotation, CoreType, TypeAnnotationKind},
+        types::{Annotation, CoreType, FunctionType, TypeAnnotationKind},
     },
     ropey::{Rope, iter::Chunks},
     std::{
@@ -231,14 +231,15 @@ pub fn inlay_hints(
         let Some(core_type) = database.checked_expression_type(document_id, expression.id) else {
             continue;
         };
-        // Only concrete types make useful inline hints; a polymorphic or unknown binding would
-        // render an internal type variable, which is noise shown on every line.
-        if !is_concrete_type(core_type) {
+        if !is_hintable_type(core_type) {
             continue;
         }
 
         let name = database.interner().resolve(*target).unwrap_or_default();
-        let label = format!(": {}", render_core_type(database.interner(), core_type));
+        let label = format!(
+            ": {}",
+            render_generalized_type(database.interner(), core_type)
+        );
         hints.push(InlayHint {
             position: TextPosition {
                 line_index: expression.range.start_point.row,
@@ -264,23 +265,54 @@ fn expression_overlaps_viewport(range: Range, viewport: &TextRange) -> bool {
     expression_start <= viewport_end && viewport_start <= expression_end
 }
 
-fn is_concrete_type(core_type: &CoreType) -> bool {
+// Whether an inferred binding type makes a useful inline hint. A function type is hinted whenever it
+// contains no `Unknown`: its free inference variables generalize into `<T>` binder names in the label,
+// so `identity <- function(x) x` reads `<T> fn(x: T) -> T` exactly as hover shows it, keeping
+// polymorphic and concrete function bindings consistently hinted. Any other type must be fully
+// resolved — a loose type variable would render an unanchored type parameter as the whole hint, and
+// `Unknown` carries no information — so partially-inferred values show nothing rather than noise.
+fn is_hintable_type(core_type: &CoreType) -> bool {
     match core_type {
-        CoreType::Variable(_) | CoreType::Unknown => false,
+        CoreType::Function(_) => is_hint_renderable(core_type, true),
+        _ => is_hint_renderable(core_type, false),
+    }
+}
+
+// Whether every leaf of the type is presentable in a hint. `variables_allowed` is true only under a
+// top-level function type, whose variables the hint label generalizes into binder names.
+fn is_hint_renderable(core_type: &CoreType, variables_allowed: bool) -> bool {
+    match core_type {
+        CoreType::Unknown => false,
+        CoreType::Variable(_) => variables_allowed,
         CoreType::List(inner_type) | CoreType::NamedList(inner_type) => {
-            is_concrete_type(inner_type)
+            is_hint_renderable(inner_type, variables_allowed)
         }
-        CoreType::Union(members) => members.iter().all(is_concrete_type),
-        CoreType::Nominal(_, type_arguments) => type_arguments.iter().all(is_concrete_type),
-        CoreType::Record(fields) => fields.iter().all(|field| is_concrete_type(&field.value)),
-        CoreType::Tuple(items) => items.iter().all(is_concrete_type),
+        CoreType::Union(members) => members
+            .iter()
+            .all(|member| is_hint_renderable(member, variables_allowed)),
+        CoreType::Nominal(_, type_arguments) => type_arguments
+            .iter()
+            .all(|type_argument| is_hint_renderable(type_argument, variables_allowed)),
+        CoreType::Record(fields) => fields
+            .iter()
+            .all(|field| is_hint_renderable(&field.value, variables_allowed)),
+        CoreType::Tuple(items) => items
+            .iter()
+            .all(|item| is_hint_renderable(item, variables_allowed)),
         CoreType::Function(function_type) => {
-            function_type.parameters.iter().all(is_concrete_type)
+            function_type
+                .parameters
+                .iter()
+                .all(|parameter| is_hint_renderable(parameter, variables_allowed))
                 && function_type
                     .named_parameters
                     .iter()
-                    .all(|parameter| is_concrete_type(&parameter.value))
-                && is_concrete_type(&function_type.return_type)
+                    .all(|parameter| is_hint_renderable(&parameter.value, variables_allowed))
+                && function_type
+                    .variadic
+                    .as_ref()
+                    .is_none_or(|variadic| is_hint_renderable(variadic, variables_allowed))
+                && is_hint_renderable(&function_type.return_type, variables_allowed)
         }
         CoreType::Any
         | CoreType::Null
@@ -294,9 +326,12 @@ fn is_concrete_type(core_type: &CoreType) -> bool {
 // Signature help
 //
 
-// Shows the inferred signature of the function being called at the cursor, with the active
-// parameter derived from how many arguments precede the cursor. Needs checked types, so it is a
-// no-op unless typing is enabled and the callee resolved to a function type.
+// Shows the inferred signature of the function being called at the cursor, rendered as its
+// generalized scheme (one renderer across the whole signature, so a polymorphic callee reads
+// `<T, U> fn(x: list[T], f: fn(T) -> U) -> list[U]` rather than leaking raw inference variables).
+// The active parameter follows R's argument matching: a named argument consumes the parameter it
+// names, and a positional argument fills the first parameter not yet consumed. Needs checked types,
+// so it is a no-op unless the callee resolved to a function type.
 pub fn signature_help(
     database: &dyn IdeDatabase,
     path: &Path,
@@ -331,49 +366,103 @@ pub fn signature_help(
         return None;
     };
 
-    let mut parameters = Vec::new();
-    for parameter in &function_type.parameters {
-        parameters.push(render_core_type(database.interner(), parameter));
-    }
-    for parameter in &function_type.named_parameters {
-        let name = database.interner().resolve(parameter.name).unwrap_or("");
-        let rendered_name = if parameter.optional {
-            format!("[{name}]")
-        } else {
-            name.to_owned()
-        };
-        parameters.push(format!(
-            "{rendered_name}: {}",
-            render_core_type(database.interner(), &parameter.value)
-        ));
-    }
-
-    let label = format!(
-        "fn({}) -> {}",
-        parameters.join(", "),
-        render_core_type(database.interner(), &function_type.return_type)
-    );
-
-    let active_parameter = if parameters.is_empty() {
-        None
-    } else {
-        let preceding = arguments
-            .iter()
-            .filter(|argument| {
-                module
-                    .arena
-                    .try_get(argument.expression)
-                    .is_some_and(|expression| expression.range.end_point < point)
-            })
-            .count();
-        Some(preceding.min(parameters.len() - 1))
-    };
+    let signature = render_function_signature(database.interner(), function_type);
+    let active_parameter = active_parameter(function_type, &signature, arguments, module, point);
 
     Some(SignatureHelp {
-        label,
-        parameters,
+        label: signature.label,
+        parameters: signature.parameters,
         active_parameter,
     })
+}
+
+// The rendered parameter the cursor's argument targets, following the call-matching rules of the
+// typing reference (which mirror R). The display slots mirror `RenderedSignature::parameters`:
+// positional parameters, then named parameters, then the `...` slot when the function is variadic.
+// A named argument targets the parameter it names; a positional argument fills the first open
+// positionally-fillable slot — every parameter, except that an optional named parameter of a
+// variadic function is matched by name only (it stands in for an R parameter declared after `...`,
+// so surplus positional arguments flow to `...` instead). Arguments before the cursor consume their
+// slots first, so `f(label = "x", <cursor>)` highlights the parameter `label` skipped over. With
+// every slot taken and no `...`, the highlight stays on the last parameter rather than wrapping to
+// a wrong one.
+fn active_parameter(
+    function_type: &FunctionType<CoreType>,
+    signature: &RenderedSignature,
+    arguments: &[Argument],
+    module: &Module,
+    point: Point,
+) -> Option<usize> {
+    if signature.parameters.is_empty() {
+        return None;
+    }
+
+    let positional_count = function_type.parameters.len();
+    let matchable_count = positional_count + function_type.named_parameters.len();
+    let variadic_slot = function_type.variadic.is_some().then_some(matchable_count);
+    let slot_for_name = |name: Symbol| {
+        function_type
+            .named_parameters
+            .iter()
+            .position(|parameter| parameter.name == name)
+            .map(|index| positional_count + index)
+    };
+    let positionally_fillable = |slot: usize| {
+        slot < positional_count
+            || function_type
+                .named_parameters
+                .get(slot - positional_count)
+                .is_some_and(|parameter| !(function_type.variadic.is_some() && parameter.optional))
+    };
+    let first_open_slot = |consumed: &[bool]| {
+        consumed
+            .iter()
+            .enumerate()
+            .find(|(slot, taken)| !**taken && positionally_fillable(*slot))
+            .map(|(slot, _)| slot)
+    };
+
+    // The argument the cursor is at: every argument that ends before the cursor is complete, so the
+    // cursor sits on the next one (which may not be written yet, e.g. right after a comma).
+    let cursor_index = arguments
+        .iter()
+        .filter(|argument| {
+            module
+                .arena
+                .try_get(argument.expression)
+                .is_some_and(|expression| expression.range.end_point < point)
+        })
+        .count();
+
+    let mut consumed = vec![false; matchable_count];
+    for argument in arguments.iter().take(cursor_index) {
+        match argument.name {
+            // A name that matches no parameter is a named-parameter error per the typing reference
+            // (named arguments are never routed into `...`); it consumes no slot either way.
+            Some(name) => {
+                if let Some(slot) = slot_for_name(name) {
+                    consumed[slot] = true;
+                }
+            }
+            None => {
+                if let Some(slot) = first_open_slot(&consumed) {
+                    consumed[slot] = true;
+                }
+            }
+        }
+    }
+
+    let named_target = arguments
+        .get(cursor_index)
+        .and_then(|argument| argument.name)
+        .and_then(slot_for_name);
+
+    Some(
+        named_target
+            .or_else(|| first_open_slot(&consumed))
+            .or(variadic_slot)
+            .unwrap_or(signature.parameters.len() - 1),
+    )
 }
 
 fn code_block(body: &str) -> String {

@@ -3,7 +3,8 @@ use {
         interner::{Interner, Symbol},
         typecheck::{InferenceError, OperandExpectation, RECURSION_LIMIT, SubscriptKind},
         types::{
-            Atomic, Constraint, CoreType, InferenceVariableId, QuantifiedVariable, TypeScheme,
+            Atomic, Constraint, CoreType, FunctionType, InferenceVariableId, QuantifiedVariable,
+            TypeScheme,
         },
     },
     std::{collections::BTreeMap, fmt},
@@ -40,32 +41,68 @@ pub fn render_type_scheme(interner: &Interner, type_scheme: &TypeScheme) -> Stri
     renderer.render_type_scheme(type_scheme)
 }
 
-// Renders a `CoreType` for display, presenting its free inference variables as a quantified scheme so a
-// generalized binding reads with a readable `<T, U>` binder and named type parameters (`<T> fn(x: T) ->
-// T`) rather than raw variable ids. The IDE layer records a binding's inferred type as a `CoreType`
-// (not a `TypeScheme`), so the free variables are collected here in first-occurrence order and quantified
-// for the render only — this changes nothing about inference.
+// Renders a `CoreType` for display in user-facing surfaces (hover, inlay hints), presenting a function
+// type's free inference variables as a quantified scheme so a generalized binding reads with a readable
+// `<T, U>` binder and named type parameters (`<T> fn(x: T) -> T`) rather than raw variable ids. The IDE
+// layer records a binding's inferred type as a `CoreType` (not a `TypeScheme`), so the free variables are
+// collected here in first-occurrence order and quantified for the render only — this changes nothing
+// about inference. A non-function type never shows a binder (a `<T> T` hover on a parameter use would
+// misread as a polymorphic scheme); its variables still render with the user-facing `T`, `U`, … names.
 pub fn render_generalized_type(interner: &Interner, core_type: &CoreType) -> String {
-    // Only a function type reads naturally with a `<T>` binder — it scopes the whole signature, turning
-    // `fn(x: ?1) -> ?1` into `<T> fn(x: T) -> T`. A bare type variable at a use site (a parameter use, an
-    // unresolved inference variable) is not a polymorphic scheme, so it renders plainly rather than as a
-    // misleading `<T> T`.
-    if !matches!(core_type, CoreType::Function(_)) {
-        return render_core_type(interner, core_type);
+    if let CoreType::Function(function_type) = core_type {
+        return render_function_signature(interner, function_type).label;
     }
+    let mut renderer = TypeRenderer::user_facing(interner);
+    renderer.render_core_type(core_type)
+}
+
+/// A function type rendered as a signature-help label, with the byte span of each parameter
+/// (positional, then named, then the trailing `...` element when variadic) inside [`label`]. The label
+/// is exactly what [`render_generalized_type`] produces for the same function type; spans are recorded
+/// during that one render so the LSP layer can emit precise parameter-label offsets that can never
+/// drift from the label text.
+///
+/// [`label`]: RenderedSignature::label
+pub struct RenderedSignature {
+    pub label: String,
+    pub parameters: Vec<std::ops::Range<usize>>,
+}
+
+pub fn render_function_signature(
+    interner: &Interner,
+    function_type: &FunctionType<CoreType>,
+) -> RenderedSignature {
+    let mut renderer = TypeRenderer::user_facing(interner);
+
+    // One renderer spans binder, parameters, and return type, so a type variable keeps a single name
+    // across the whole signature (`<T, U> fn(x: list[T], f: fn(T) -> U) -> list[U]`); rendering the
+    // fragments with separate renderers would restart the naming and collapse distinct variables.
     let mut free_variables = Vec::new();
-    collect_free_variables(core_type, &mut free_variables);
-    if free_variables.is_empty() {
-        return render_core_type(interner, core_type);
+    collect_function_free_variables(function_type, &mut free_variables);
+    let quantified_variables = free_variables
+        .into_iter()
+        .map(|variable| QuantifiedVariable::new(variable, Constraint::Unconstrained))
+        .collect::<Vec<_>>();
+    let binder = renderer.register_quantified(&quantified_variables);
+
+    let mut label = binder;
+    if !label.is_empty() {
+        label.push(' ');
     }
-    let scheme = TypeScheme {
-        quantified_variables: free_variables
-            .into_iter()
-            .map(|variable| QuantifiedVariable::new(variable, Constraint::Unconstrained))
-            .collect(),
-        body: core_type.clone(),
-    };
-    render_type_scheme(interner, &scheme)
+    label.push_str("fn(");
+    let mut parameters = Vec::new();
+    for part in renderer.render_function_parts(function_type) {
+        if !parameters.is_empty() {
+            label.push_str(", ");
+        }
+        let start = label.len();
+        label.push_str(&part);
+        parameters.push(start..label.len());
+    }
+    label.push_str(") -> ");
+    label.push_str(&renderer.render_core_type(&function_type.return_type));
+
+    RenderedSignature { label, parameters }
 }
 
 // Collects a type's inference variables in first-occurrence order (deduplicated), so the display
@@ -93,18 +130,7 @@ fn collect_free_variables(core_type: &CoreType, out: &mut Vec<InferenceVariableI
                 collect_free_variables(&field.value, out);
             }
         }
-        CoreType::Function(function_type) => {
-            for parameter in &function_type.parameters {
-                collect_free_variables(parameter, out);
-            }
-            for parameter in &function_type.named_parameters {
-                collect_free_variables(&parameter.value, out);
-            }
-            if let Some(variadic) = &function_type.variadic {
-                collect_free_variables(variadic, out);
-            }
-            collect_free_variables(&function_type.return_type, out);
-        }
+        CoreType::Function(function_type) => collect_function_free_variables(function_type, out),
         CoreType::Any
         | CoreType::Unknown
         | CoreType::Null
@@ -112,6 +138,22 @@ fn collect_free_variables(core_type: &CoreType, out: &mut Vec<InferenceVariableI
         | CoreType::Vector(_)
         | CoreType::NamedVector(_) => {}
     }
+}
+
+fn collect_function_free_variables(
+    function_type: &FunctionType<CoreType>,
+    out: &mut Vec<InferenceVariableId>,
+) {
+    for parameter in &function_type.parameters {
+        collect_free_variables(parameter, out);
+    }
+    for parameter in &function_type.named_parameters {
+        collect_free_variables(&parameter.value, out);
+    }
+    if let Some(variadic) = &function_type.variadic {
+        collect_free_variables(variadic, out);
+    }
+    collect_free_variables(&function_type.return_type, out);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -269,7 +311,7 @@ impl Diagnostic {
                 range,
                 expression_id: _,
             } => {
-                let mut type_renderer = TypeRenderer::diagnostic(interner);
+                let mut type_renderer = TypeRenderer::user_facing(interner);
                 (
                     *range,
                     format!(
@@ -284,7 +326,7 @@ impl Diagnostic {
                 range,
                 expression_id: _,
             } => {
-                let mut type_renderer = TypeRenderer::diagnostic(interner);
+                let mut type_renderer = TypeRenderer::user_facing(interner);
                 let variable_name = type_renderer.render_variable(*variable);
                 (
                     range.unwrap_or(fallback_range),
@@ -300,7 +342,7 @@ impl Diagnostic {
                 range,
                 expression_id: _,
             } => {
-                let mut type_renderer = TypeRenderer::diagnostic(interner);
+                let mut type_renderer = TypeRenderer::user_facing(interner);
                 (
                     range.unwrap_or(fallback_range),
                     format!(
@@ -323,7 +365,7 @@ impl Diagnostic {
                 range,
                 expression_id: _,
             } => {
-                let mut type_renderer = TypeRenderer::diagnostic(interner);
+                let mut type_renderer = TypeRenderer::user_facing(interner);
                 let expected_description = match constraint {
                     Constraint::Unconstrained => "a value",
                     Constraint::Numeric => "a numeric value (`integer` or `double`)",
@@ -342,7 +384,7 @@ impl Diagnostic {
                 range,
                 expression_id: _,
             } => {
-                let mut type_renderer = TypeRenderer::diagnostic(interner);
+                let mut type_renderer = TypeRenderer::user_facing(interner);
                 let expected_description = match expected {
                     OperandExpectation::Numeric => "a numeric value (`integer` or `double`)",
                     OperandExpectation::ScalarNumeric => {
@@ -422,7 +464,7 @@ impl Diagnostic {
                 range,
                 expression_id: _,
             } => {
-                let mut type_renderer = TypeRenderer::diagnostic(interner);
+                let mut type_renderer = TypeRenderer::user_facing(interner);
                 (
                     *range,
                     format!("expected a list, found `{}`", type_renderer.render(actual)),
@@ -435,7 +477,7 @@ impl Diagnostic {
                 expression_id: _,
             } => {
                 let name = interner.resolve(*field).unwrap_or("<unknown>");
-                let mut type_renderer = TypeRenderer::diagnostic(interner);
+                let mut type_renderer = TypeRenderer::user_facing(interner);
                 (
                     *range,
                     format!(
@@ -450,7 +492,7 @@ impl Diagnostic {
                 range,
                 expression_id: _,
             } => {
-                let mut type_renderer = TypeRenderer::diagnostic(interner);
+                let mut type_renderer = TypeRenderer::user_facing(interner);
                 (
                     *range,
                     format!(
@@ -469,7 +511,7 @@ impl Diagnostic {
                     SubscriptKind::Position => "position",
                     SubscriptKind::FieldName => "field name",
                 };
-                let mut type_renderer = TypeRenderer::diagnostic(interner);
+                let mut type_renderer = TypeRenderer::user_facing(interner);
                 (
                     *range,
                     format!(
@@ -483,7 +525,7 @@ impl Diagnostic {
                 range,
                 expression_id: _,
             } => {
-                let mut type_renderer = TypeRenderer::diagnostic(interner);
+                let mut type_renderer = TypeRenderer::user_facing(interner);
                 (
                     *range,
                     format!("`[` is not supported on `{}`", type_renderer.render(actual)),
@@ -587,6 +629,13 @@ fn render_symbols(symbols: &[Symbol], interner: &Interner) -> String {
         .join(", ")
 }
 
+// The one type-display renderer every surface goes through. Two styles exist for inference
+// variables the render does not quantify: `UserFacing` names them from the same `T`, `U`, `V`, …
+// pool as scheme binders (internal ids like `?1`/`type1` must never reach a user — diagnostics,
+// hover, inlay hints, and signature help all use this style), while `Fixture` keeps the raw `?N`
+// numbering that the internal typecheck fixture suites pin. Variable names are per-renderer state,
+// so one renderer must span everything that has to share names (both sides of an expected/found
+// message, a whole function signature) — a fresh renderer restarts the numbering.
 struct TypeRenderer<'a> {
     interner: &'a Interner,
     variable_style: VariableRenderStyle,
@@ -597,15 +646,15 @@ struct TypeRenderer<'a> {
 
 #[derive(Clone, Copy)]
 enum VariableRenderStyle {
-    Diagnostic,
+    UserFacing,
     Fixture,
 }
 
 impl<'a> TypeRenderer<'a> {
-    fn diagnostic(interner: &'a Interner) -> Self {
+    fn user_facing(interner: &'a Interner) -> Self {
         Self {
             interner,
-            variable_style: VariableRenderStyle::Diagnostic,
+            variable_style: VariableRenderStyle::UserFacing,
             variable_names: BTreeMap::new(),
             quantified_variable_names: BTreeMap::new(),
             next_variable_index: 0,
@@ -623,12 +672,26 @@ impl<'a> TypeRenderer<'a> {
     }
 
     fn render_type_scheme(&mut self, type_scheme: &TypeScheme) -> String {
-        let quantified_names = type_scheme
-            .quantified_variables
+        let binder = self.register_quantified(&type_scheme.quantified_variables);
+        let rendered_body = self.render_core_type(&type_scheme.body);
+
+        if binder.is_empty() {
+            rendered_body
+        } else {
+            format!("{binder} {rendered_body}")
+        }
+    }
+
+    // Names the quantified variables and returns the rendered binder (`<T, U: numeric>`, or `""` when
+    // there is nothing to quantify). The binder names come from the same pool as loose user-facing
+    // variables and advance the shared counter, so a variable the binder does not cover can never
+    // collide with a binder name later in the same render.
+    fn register_quantified(&mut self, quantified_variables: &[QuantifiedVariable]) -> String {
+        let quantified_names = quantified_variables
             .iter()
-            .enumerate()
-            .map(|(index, quantified)| {
-                let name = quantified_variable_name(index);
+            .map(|quantified| {
+                let name = quantified_variable_name(self.next_variable_index);
+                self.next_variable_index += 1;
                 self.quantified_variable_names
                     .insert(quantified.variable, name.clone());
                 match quantified.constraint {
@@ -637,12 +700,11 @@ impl<'a> TypeRenderer<'a> {
                 }
             })
             .collect::<Vec<_>>();
-        let rendered_body = self.render_core_type(&type_scheme.body);
 
         if quantified_names.is_empty() {
-            rendered_body
+            String::new()
         } else {
-            format!("<{}> {rendered_body}", quantified_names.join(", "))
+            format!("<{}>", quantified_names.join(", "))
         }
     }
 
@@ -705,36 +767,9 @@ impl<'a> TypeRenderer<'a> {
                 format!("list{{{rendered_items}}}")
             }
             CoreType::Function(function_type) => {
-                let rendered_parameters = function_type
-                    .parameters
-                    .iter()
-                    .map(|parameter| self.render_core_type(parameter))
-                    .collect::<Vec<_>>();
-                let rendered_named_parameters = function_type
-                    .named_parameters
-                    .iter()
-                    .map(|parameter| {
-                        let name = self.interner.resolve(parameter.name).unwrap_or("<unknown>");
-                        let rendered_name = if parameter.optional {
-                            format!("[{name}]")
-                        } else {
-                            name.to_owned()
-                        };
-                        format!(
-                            "{rendered_name}: {}",
-                            self.render_core_type(&parameter.value)
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let mut rendered_parts = rendered_parameters;
-                rendered_parts.extend(rendered_named_parameters);
-                if let Some(variadic_element) = &function_type.variadic {
-                    rendered_parts
-                        .push(format!("...: {}", self.render_core_type(variadic_element)));
-                }
                 format!(
                     "fn({}) -> {}",
-                    rendered_parts.join(", "),
+                    self.render_function_parts(function_type).join(", "),
                     self.render_core_type(&function_type.return_type)
                 )
             }
@@ -742,27 +777,52 @@ impl<'a> TypeRenderer<'a> {
         }
     }
 
+    // The rendered parameter parts of a function type, in display order: positional, named (optional
+    // names bracketed), then the trailing `...` element when variadic. Shared by the plain `fn(...)`
+    // render and the signature-help render, which additionally records each part's span in the label.
+    fn render_function_parts(&mut self, function_type: &FunctionType<CoreType>) -> Vec<String> {
+        let mut parts = Vec::new();
+        for parameter in &function_type.parameters {
+            parts.push(self.render_core_type(parameter));
+        }
+        for parameter in &function_type.named_parameters {
+            let name = self.interner.resolve(parameter.name).unwrap_or("<unknown>");
+            let rendered_name = if parameter.optional {
+                format!("[{name}]")
+            } else {
+                name.to_owned()
+            };
+            parts.push(format!(
+                "{rendered_name}: {}",
+                self.render_core_type(&parameter.value)
+            ));
+        }
+        if let Some(variadic_element) = &function_type.variadic {
+            parts.push(format!("...: {}", self.render_core_type(variadic_element)));
+        }
+        parts
+    }
+
     fn render_variable(&mut self, variable: InferenceVariableId) -> String {
         if let Some(name) = self.quantified_variable_names.get(&variable) {
             return name.clone();
         }
-
-        if !self.variable_names.contains_key(&variable) {
-            let name = match self.variable_style {
-                VariableRenderStyle::Diagnostic => format!("type{}", self.next_variable_index + 1),
-                VariableRenderStyle::Fixture => format!("?{}", self.next_variable_index + 1),
-            };
-            self.next_variable_index += 1;
-            self.variable_names.insert(variable, name);
+        if let Some(name) = self.variable_names.get(&variable) {
+            return name.clone();
         }
 
-        self.variable_names
-            .get(&variable)
-            .cloned()
-            .unwrap_or_else(|| match self.variable_style {
-                VariableRenderStyle::Diagnostic => "type".to_owned(),
-                VariableRenderStyle::Fixture => "?".to_owned(),
-            })
+        let name = match self.variable_style {
+            VariableRenderStyle::UserFacing => {
+                let name = quantified_variable_name(self.next_variable_index);
+                self.next_variable_index += 1;
+                name
+            }
+            // Fixture numbering counts only the loose variables themselves, so a raw-metavariable
+            // snapshot is unaffected by how many binder names a scheme registered before it.
+            VariableRenderStyle::Fixture => format!("?{}", self.variable_names.len() + 1),
+        };
+        self.variable_names.insert(variable, name.clone());
+        name
     }
 
     fn render(&mut self, core_type: &CoreType) -> String {

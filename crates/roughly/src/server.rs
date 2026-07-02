@@ -171,6 +171,10 @@ struct EngineWorker {
     // moves diagnostics in OTHER documents asks the client to re-pull. Push is suppressed for pull
     // clients, so without this their non-visible dependents would go stale after such a save.
     client_supports_diagnostic_refresh: bool,
+    // When the client can process `[start, end)` parameter-label offsets, signature help sends them
+    // (unambiguous even when two parameters render to the same text); otherwise it falls back to
+    // the parameter's label substring, which such clients locate in the signature label themselves.
+    client_supports_parameter_label_offsets: bool,
 }
 
 // One LSP operation handed to the worker. `Initialize` is special: it CONSTRUCTS the worker state
@@ -252,6 +256,16 @@ impl EngineWorker {
             "negotiated diagnostics delivery"
         );
 
+        let client_supports_parameter_label_offsets = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|text_document| text_document.signature_help.as_ref())
+            .and_then(|signature_help| signature_help.signature_information.as_ref())
+            .and_then(|signature_information| signature_information.parameter_information.as_ref())
+            .and_then(|parameter_information| parameter_information.label_offset_support)
+            .unwrap_or(false);
+
         // A project may ship its own `.Rtypes` stubs under `<root>/stubs/` to override or extend the
         // shipped standard-library corpus. They are read once here and folded into the engine's set-once
         // stub library; they are never re-read on an edit.
@@ -276,6 +290,7 @@ impl EngineWorker {
             position_encoding,
             client_supports_pull_diagnostics,
             client_supports_diagnostic_refresh,
+            client_supports_parameter_label_offsets,
         };
 
         let workspace_r_path = worker.workspace_r_path();
@@ -1354,10 +1369,29 @@ impl EngineWorker {
         let active_parameter = help.active_parameter.map(|index| index as u32);
         let parameters = help
             .parameters
-            .into_iter()
-            .map(|label| ParameterInformation {
-                label: ParameterLabel::Simple(label),
-                documentation: None,
+            .iter()
+            .map(|span| {
+                let text = help
+                    .label
+                    .get(span.clone())
+                    .expect("parameter span should lie within the signature label");
+                // Label offsets are UTF-16 code units per the LSP spec (independent of the
+                // negotiated document position encoding, which governs only document positions).
+                let label = if self.client_supports_parameter_label_offsets {
+                    let prefix = help
+                        .label
+                        .get(..span.start)
+                        .expect("parameter span should start on a label character boundary");
+                    let start = utf16_length(prefix);
+                    let end = start + utf16_length(text);
+                    ParameterLabel::LabelOffsets([start, end])
+                } else {
+                    ParameterLabel::Simple(text.to_owned())
+                };
+                ParameterInformation {
+                    label,
+                    documentation: None,
+                }
             })
             .collect();
 
@@ -2087,6 +2121,10 @@ fn path_not_found_error(path: &Path) -> ResponseError {
         ErrorCode::REQUEST_FAILED,
         format!("path not found '{}'", path.display()),
     )
+}
+
+fn utf16_length(text: &str) -> u32 {
+    text.encode_utf16().count() as u32
 }
 
 #[cfg(test)]

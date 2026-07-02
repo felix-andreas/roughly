@@ -20,6 +20,16 @@ Use `MultiFile` fixtures with `#!!!!` actions:
   - request body: `path:line:column`
   - output: every occurrence as `path:line:column..line:column`, declarations marked with
     ` [declaration]`, or `no references`
+- `signature_help`
+  - request body: `path:line:column`
+  - output: the signature label (the callee's type rendered as a generalized scheme, so a
+    polymorphic callee reads `<T, U> fn(...) -> ...`), one `param N: <text>` line per parameter
+    — the text is sliced out of the label through the recorded byte span, so these lines pin
+    that the LSP parameter offsets align with the label — then `active parameter: N` (or
+    `none`), or `no signature help`
+- `inlay_hints`
+  - request body: `path` (the whole file)
+  - output: one `line:column: <label>` hint per line in document order, or `no inlay hints`
 
 Group names must be unique across the whole `ide` suite, so prefix them with the feature
 (`definition_locals`, `references_globals`, ...) when the same semantic grouping exists for
@@ -51,6 +61,15 @@ Completion covers prefix matching from parameters, locals, globals, and keywords
 shapes, the `$`/`@`/`::` trigger contexts (including the empty query and the single-colon
 non-context), case-insensitive prefixes, keyword/local/global source ordering, global
 function-versus-variable kinds, and the no-completions case.
+
+Signature help covers the generalized-scheme label (stdlib generics such as `lapply` and
+user-defined polymorphic functions), the resolved instantiation once arguments pin the type
+variables, variadic `...` display, and R-style active-parameter matching (named arguments consume
+the parameter they name; surplus positional arguments target `...`, never an optional named
+parameter of a variadic function). Inlay hints cover concrete bindings, generalized function
+schemes, suppression of loose-variable and `Unknown` types, and per-write hints on multi-write
+slots. Hover, inlay hints, signature help, and diagnostics must never render a raw inference
+variable (`?1`, `type1`); each suite pins at least one would-leak case.
 
 When the symbol-target machinery gains a capability (new binding form, new scope rule), add the
 case to definition, references, and rename together so the suites stay aligned.

@@ -179,7 +179,10 @@ pub fn inlay_hints(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignatureHelp {
     pub label: String,
-    pub parameters: Vec<String>,
+    // Byte spans into `label`, one per parameter in display order (positional, named, then `...`
+    // when variadic). Spans rather than copied strings keep the label the single source of truth,
+    // so the LSP layer's parameter-label offsets can never drift from the rendered signature.
+    pub parameters: Vec<std::ops::Range<usize>>,
     pub active_parameter: Option<usize>,
 }
 

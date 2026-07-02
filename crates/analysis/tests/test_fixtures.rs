@@ -631,11 +631,21 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
                     let request = parse_position_request(contents, "signature_help")?;
                     match ide::signature_help(analysis_state, &request.path, request.position) {
                         Some(help) => {
+                            let mut rendered = help.label.clone();
+                            // Parameters are byte spans into the label; rendering the extracted
+                            // text pins that the offsets line up with the rendered signature.
+                            for (index, span) in help.parameters.iter().enumerate() {
+                                let text = help.label.get(span.clone()).ok_or_else(|| {
+                                    "signature parameter span outside its label".to_owned()
+                                })?;
+                                rendered.push_str(&format!("\nparam {index}: {text}"));
+                            }
                             let active = match help.active_parameter {
                                 Some(index) => index.to_string(),
                                 None => "none".to_owned(),
                             };
-                            format!("{}\nactive parameter: {active}", help.label)
+                            rendered.push_str(&format!("\nactive parameter: {active}"));
+                            rendered
                         }
                         None => "no signature help".to_owned(),
                     }

@@ -145,9 +145,9 @@ Rules:
 - the shared fixture parser only records the action name and path; the suite runner defines what
   each action means
 - use this shape for focused IDE suites such as `hover`
-- the shared `ide` runner currently implements `hover`, `completion`, `rename`,
-  `goto_definition`, and `references`; keep new IDE actions in that one runner rather than
-  per-action suite-specific conventions
+- the shared `ide` runner currently implements `hover` (and `hover_debug`), `completion`,
+  `rename`, `goto_definition`, `references`, `signature_help`, and `inlay_hints`; keep new IDE
+  actions in that one runner rather than per-action suite-specific conventions
 - the per-action request and output formats are documented in `tests/ide/README.md`
 
 ### Current migration status

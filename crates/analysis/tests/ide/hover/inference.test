@@ -1,0 +1,41 @@
+#==== unresolved
+#---- numeric_constraint_not_yet_displayed
+#---- R/main.R
+add_one <- function(x) x + 1L
+add_one
+#++++ any
+#!!!! hover binding.hover
+R/main.R:2:1
+#++++
+```
+<T> fn(x: T) -> T
+```
+
+Package global, defined at `R/main.R:1:1`
+
+#---- partially_inferred_function
+#---- R/main.R
+make <- function(x) list(x, 1L)
+make
+#++++ any
+#!!!! hover binding.hover
+R/main.R:2:1
+#++++
+```
+<T> fn(x: T) -> list{T, integer}
+```
+
+Package global, defined at `R/main.R:1:1`
+
+#---- parameter_use_never_shows_raw_variable
+#---- R/main.R
+wrap <- function(first, second) second
+#++++ any
+#!!!! hover second_use.hover
+R/main.R:1:33
+#++++
+```
+T
+```
+
+Local variable, defined at `R/main.R:1:25`

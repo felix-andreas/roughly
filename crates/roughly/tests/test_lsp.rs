@@ -12,12 +12,13 @@ use {
             FormattingOptions, GeneralClientCapabilities, GotoDefinitionParams,
             GotoDefinitionResponse, HoverContents, HoverParams, HoverProviderCapability,
             InitializeParams, InitializeResult, InitializedParams, InlayHintParams, MessageType,
-            PartialResultParams, Position, PositionEncodingKind, PublishDiagnosticsParams, Range,
-            ReferenceContext, ReferenceParams, RenameParams, ShowMessageParams,
-            SignatureHelpParams, TextDocumentClientCapabilities, TextDocumentContentChangeEvent,
-            TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
-            VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceClientCapabilities,
-            WorkspaceFolder,
+            ParameterInformationSettings, ParameterLabel, PartialResultParams, Position,
+            PositionEncodingKind, PublishDiagnosticsParams, Range, ReferenceContext,
+            ReferenceParams, RenameParams, ShowMessageParams, SignatureHelpClientCapabilities,
+            SignatureHelpParams, SignatureInformationSettings, TextDocumentClientCapabilities,
+            TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+            TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
+            WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceFolder,
             notification::{PublishDiagnostics, ShowMessage},
             request::{RegisterCapability, WorkspaceDiagnosticRefresh},
         },
@@ -266,6 +267,25 @@ async fn setup_test_with_pull_diagnostics(initial_files: &[(&str, &str)]) -> Tes
     let capabilities = ClientCapabilities {
         text_document: Some(TextDocumentClientCapabilities {
             diagnostic: Some(DiagnosticClientCapabilities::default()),
+            ..TextDocumentClientCapabilities::default()
+        }),
+        ..ClientCapabilities::default()
+    };
+    setup_test_inner(true, initial_files, &[], capabilities).await
+}
+
+async fn setup_test_with_parameter_label_offsets(initial_files: &[(&str, &str)]) -> TestContext {
+    let capabilities = ClientCapabilities {
+        text_document: Some(TextDocumentClientCapabilities {
+            signature_help: Some(SignatureHelpClientCapabilities {
+                signature_information: Some(SignatureInformationSettings {
+                    parameter_information: Some(ParameterInformationSettings {
+                        label_offset_support: Some(true),
+                    }),
+                    ..SignatureInformationSettings::default()
+                }),
+                ..SignatureHelpClientCapabilities::default()
+            }),
             ..TextDocumentClientCapabilities::default()
         }),
         ..ClientCapabilities::default()
@@ -1925,6 +1945,101 @@ async fn completion_out_of_bounds_position_is_safe() {
             .await
             .expect("completion request must not panic the server");
     }
+
+    context.shutdown().await;
+}
+
+// The signature label must be the generalized scheme (internal inference variables never reach the
+// client), and each parameter must arrive as `[start, end)` offsets that slice exactly that
+// parameter out of the label when the client advertises label-offset support.
+#[tokio::test]
+async fn signature_help_sends_generalized_label_with_parameter_offsets() {
+    let mut context = setup_test_with_parameter_label_offsets(&[]).await;
+    let file_uri = context.file_uri("R/sig.R");
+    context.open_file(&file_uri, "result <- lapply()\n").await;
+
+    let help = context
+        .server
+        .signature_help(SignatureHelpParams {
+            context: None,
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(0, 17),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("signature_help request failed")
+        .expect("signature help expected inside the call");
+
+    let signature = &help.signatures[0];
+    assert_eq!(
+        signature.label,
+        "<T, U> fn(x: list[T], f: fn(T) -> U) -> list[U]"
+    );
+    let parameters = signature
+        .parameters
+        .as_ref()
+        .expect("signature parameters expected");
+    let parameter_texts = parameters
+        .iter()
+        .map(|parameter| match parameter.label {
+            ParameterLabel::LabelOffsets([start, end]) => signature
+                .label
+                .get(start as usize..end as usize)
+                .expect("parameter offsets must slice the label"),
+            ParameterLabel::Simple(_) => {
+                panic!("offset-capable client must receive label offsets")
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(parameter_texts, ["x: list[T]", "f: fn(T) -> U"]);
+    assert_eq!(help.active_parameter, Some(0));
+
+    context.shutdown().await;
+}
+
+// Without the label-offset capability each parameter falls back to its exact substring of the
+// label, which substring-matching clients locate themselves.
+#[tokio::test]
+async fn signature_help_falls_back_to_substring_parameter_labels() {
+    let mut context = setup_test(&[]).await;
+    let file_uri = context.file_uri("R/sig.R");
+    context.open_file(&file_uri, "result <- lapply()\n").await;
+
+    let help = context
+        .server
+        .signature_help(SignatureHelpParams {
+            context: None,
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(0, 17),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("signature_help request failed")
+        .expect("signature help expected inside the call");
+
+    let signature = &help.signatures[0];
+    let parameters = signature
+        .parameters
+        .as_ref()
+        .expect("signature parameters expected");
+    let parameter_texts = parameters
+        .iter()
+        .map(|parameter| match &parameter.label {
+            ParameterLabel::Simple(text) => text.as_str(),
+            ParameterLabel::LabelOffsets(_) => {
+                panic!("client without offset support must receive substring labels")
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(parameter_texts, ["x: list[T]", "f: fn(T) -> U"]);
 
     context.shutdown().await;
 }

@@ -9,11 +9,15 @@ result <- describe(1L, "x")
 R/main.R:3:20
 #++++
 fn(count: integer, label: character) -> integer
+param 0: count: integer
+param 1: label: character
 active parameter: 0
 #!!!! signature_help second.sig
 R/main.R:3:24
 #++++
 fn(count: integer, label: character) -> integer
+param 0: count: integer
+param 1: label: character
 active parameter: 1
 
 #---- no_help_outside_call
@@ -24,3 +28,46 @@ value <- 1L
 R/main.R:1:1
 #++++
 no signature help
+
+#==== named_arguments
+#---- cursor_in_named_argument_targets_its_parameter
+#---- R/main.R
+#: fn(count: integer, label: character) -> integer
+describe <- function(count, label) count
+result <- describe(label = "x", 1L)
+#++++ any
+#!!!! signature_help named.sig
+R/main.R:3:29
+#++++
+fn(count: integer, label: character) -> integer
+param 0: count: integer
+param 1: label: character
+active parameter: 1
+
+#---- positional_slot_skips_name_consumed_parameter
+#---- R/main.R
+#: fn(count: integer, label: character) -> integer
+describe <- function(count, label) count
+result <- describe(label = "x", 1L)
+#++++ any
+#!!!! signature_help positional.sig
+R/main.R:3:34
+#++++
+fn(count: integer, label: character) -> integer
+param 0: count: integer
+param 1: label: character
+active parameter: 0
+
+#---- surplus_positional_targets_rest_not_optional_named
+#---- R/main.R
+#: @trust fn([quiet]: logical, ...: character) -> character
+join <- function(...) ""
+text <- join("a", "b")
+#++++ any
+#!!!! signature_help rest.sig
+R/main.R:3:16
+#++++
+fn([quiet]: logical, ...: character) -> character
+param 0: [quiet]: logical
+param 1: ...: character
+active parameter: 1

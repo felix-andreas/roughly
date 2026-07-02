@@ -25,7 +25,7 @@ compute <- function(x) {
 #!!!! inlay_hints hints.inlay
 R/main.R
 #++++
-no inlay hints
+1:8: <T> fn(x: T) -> T
 
 #---- concrete_function_binding_is_hinted
 #---- R/main.R
