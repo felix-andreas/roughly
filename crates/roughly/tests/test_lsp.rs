@@ -2702,5 +2702,29 @@ async fn stub_documents_are_served_with_parse_diagnostics() {
         after_fix.diagnostics
     );
 
+    // A declaration that parses but names an unresolvable type fails to harvest; the loader would
+    // drop it silently, so the served diagnostics must call it out.
+    context.change_file(
+        &stub_uri,
+        2,
+        Range::new(Position::new(1, 0), Position::new(1, 35)),
+        "bad : Frobnicate",
+    );
+    let after_harvest_failure =
+        recv_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
+    assert_eq!(
+        after_harvest_failure.diagnostics.len(),
+        1,
+        "one unharvestable declaration, one diagnostic: {:?}",
+        after_harvest_failure.diagnostics
+    );
+    assert!(
+        after_harvest_failure.diagnostics[0]
+            .message
+            .contains("does not load"),
+        "message should say the declaration does not load: {:?}",
+        after_harvest_failure.diagnostics[0].message
+    );
+
     context.shutdown().await;
 }

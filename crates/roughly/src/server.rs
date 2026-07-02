@@ -2316,10 +2316,53 @@ fn is_stub_document(path: &std::path::Path) -> bool {
 fn stub_document_diagnostics(rope: &ropey::Rope, encoding: PositionEncoding) -> Vec<Diagnostic> {
     let text = rope.to_string();
     let mut interner = analysis::Interner::new();
-    let (_declarations, errors) = analysis::stub::parse_stub_declarations(&text, &mut interner);
-    errors
+    let (declarations, errors) = analysis::stub::parse_stub_declarations(&text, &mut interner);
+    // A declaration can parse and still fail to harvest into a scheme (an unresolvable type name,
+    // for example); the loader would drop it silently, so report it here where the author can see
+    // it. Harvest uses the same entry point the loader does.
+    let mut inference_state = analysis::typecheck::InferenceState::new();
+    let type_definitions = analysis::typecheck::TypeDefinitionEnvironment::default();
+    let harvest_diagnostics = declarations.iter().filter_map(|declaration| {
+        let error = inference_state
+            .harvest_annotation_scheme(&declaration.surface_type, &type_definitions)
+            .err()?;
+        let rendered = analysis::diagnostic::Diagnostic::from_inference_error(
+            &error,
+            declaration.range,
+            &interner,
+        );
+        let start = position::internal_position_to_lsp(
+            rope,
+            encoding,
+            TextPosition {
+                line_index: declaration.range.start_point.row,
+                character_index: declaration.range.start_point.column,
+            },
+        );
+        let end = position::internal_position_to_lsp(
+            rope,
+            encoding,
+            TextPosition {
+                line_index: declaration.range.end_point.row,
+                character_index: declaration.range.end_point.column,
+            },
+        );
+        Some(Diagnostic {
+            range: Range { start, end },
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::String("stub".to_owned())),
+            code_description: None,
+            source: Some("roughly".into()),
+            message: format!("this declaration does not load: {}", rendered.message),
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+    });
+    harvest_diagnostics
+        .collect::<Vec<_>>()
         .into_iter()
-        .map(|error| {
+        .chain(errors.into_iter().map(|error| {
             let line_length = rope
                 .get_line(error.line)
                 .map(|line| line.len_chars().saturating_sub(1))
@@ -2351,7 +2394,7 @@ fn stub_document_diagnostics(rope: &ropey::Rope, encoding: PositionEncoding) -> 
                 tags: None,
                 data: None,
             }
-        })
+        }))
         .collect()
 }
 
