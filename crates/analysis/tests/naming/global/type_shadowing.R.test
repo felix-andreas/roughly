@@ -59,6 +59,6 @@ value <- 1L
 Assign(value@b0)
   Integer(1L)
 
-error[syntax-error] Syntax Error: invalid semantics: duplicate type parameter name `T` in named type definition.
+error[annotation-error] invalid semantics: duplicate type parameter name `T` in named type definition.
 --> 1:1-1:36
 | #: @type Box<T, T> {list{value: T}}

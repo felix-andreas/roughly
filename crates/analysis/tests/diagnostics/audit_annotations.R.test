@@ -258,7 +258,7 @@ error[syntax-error] Syntax Error: generic type `Box` expects 1 type argument(s),
 #: @new integer
 value <- 1L
 #++++
-error[syntax-error] Syntax Error: type syntax error: expected a nominal type reference after `@new`.
+error[annotation-error] type syntax error: expected a nominal type reference after `@new`.
 --> 1:1-1:16
 | #: @new integer
 
@@ -456,7 +456,7 @@ error[type-error] expected `double`, found `character`
 #: @return {T}
 f <- function(value) value
 #++++
-error[syntax-error] Syntax Error: invalid semantics: duplicate type parameter name `T` in expanded function annotation.
+error[annotation-error] invalid semantics: duplicate type parameter name `T` in expanded function annotation.
 --> 1:1-4:15
 | #: @forall T
 

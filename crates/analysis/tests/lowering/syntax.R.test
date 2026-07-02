@@ -181,14 +181,14 @@ error[syntax-error] Syntax Error: unexpected ","
 #:
 value <- 1L
 #++++
-error[syntax-error] Syntax Error: A `#:` typing comment must include a type expression.
+error[annotation-error] A `#:` typing comment must include a type expression.
 --> 1:1-1:3
 | #:
 
 #---- missing_following_expression
 #: integer
 #++++
-error[syntax-error] Syntax Error: A `#:` typing comment must be followed immediately by an expression.
+error[annotation-error] A `#:` typing comment must be followed immediately by an expression.
 --> 1:1-1:11
 | #: integer
 
@@ -197,7 +197,7 @@ error[syntax-error] Syntax Error: A `#:` typing comment must be followed immedia
   #: integer
 }
 #++++
-error[syntax-error] Syntax Error: A `#:` typing comment must be followed immediately by an expression.
+error[annotation-error] A `#:` typing comment must be followed immediately by an expression.
 --> 2:3-2:13
 |   #: integer
 
@@ -206,7 +206,7 @@ error[syntax-error] Syntax Error: A `#:` typing comment must be followed immedia
 # regular comment
 value <- 1L
 #++++
-error[syntax-error] Syntax Error: A `#:` typing comment must be followed immediately by an expression.
+error[annotation-error] A `#:` typing comment must be followed immediately by an expression.
 --> 1:1-1:11
 | #: integer
 
@@ -215,7 +215,7 @@ error[syntax-error] Syntax Error: A `#:` typing comment must be followed immedia
 
 value <- 1L
 #++++
-error[syntax-error] Syntax Error: A `#:` typing comment cannot be separated from its expression by an empty line.
+error[annotation-error] A `#:` typing comment cannot be separated from its expression by an empty line.
 --> 1:1-1:11
 | #: integer
 
@@ -225,7 +225,7 @@ error[syntax-error] Syntax Error: A `#:` typing comment cannot be separated from
 # regular comment
 value <- 1L
 #++++
-error[syntax-error] Syntax Error: A `#:` typing comment cannot be separated from its expression by an empty line.
+error[annotation-error] A `#:` typing comment cannot be separated from its expression by an empty line.
 --> 1:1-1:11
 | #: integer
 
@@ -235,6 +235,6 @@ error[syntax-error] Syntax Error: A `#:` typing comment cannot be separated from
 #: character
 value <- 1L
 #++++
-error[syntax-error] Syntax Error: A `#:` typing comment cannot be separated from its expression by an empty line.
+error[annotation-error] A `#:` typing comment cannot be separated from its expression by an empty line.
 --> 1:1-1:11
 | #: integer

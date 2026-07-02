@@ -405,7 +405,7 @@ error[syntax-error] Syntax Error: generic type `Pair` expects 2 type argument(s)
 #: @return {T}
 f <- function(x) x
 #++++
-error[syntax-error] Syntax Error: invalid semantics: duplicate type parameter name `T` in expanded function annotation.
+error[annotation-error] invalid semantics: duplicate type parameter name `T` in expanded function annotation.
 --> 1:1-4:15
 | #: @forall T
 

@@ -914,7 +914,7 @@ fn lower_sequence(
                 let parsed_annotation = match parsed_annotation {
                     AnnotationParseOutcome::Definitions(definitions) => {
                         if matches!(sequence_context, SequenceContext::Block) {
-                            lowering_context.diagnostics.push(Diagnostic::syntax_error(
+                            lowering_context.diagnostics.push(Diagnostic::annotation_error(
                                 block_range,
                                 "Type definition blocks are only allowed at the top level of a file.",
                             ));
@@ -954,13 +954,13 @@ fn lower_sequence(
 
                 if let Some(expr_child) = next_named_child {
                     if expr_child.range().start_point.row > block_range.end_point.row + 1 {
-                        lowering_context.diagnostics.push(Diagnostic::syntax_error(
+                        lowering_context.diagnostics.push(Diagnostic::annotation_error(
                             block_range,
                             "A `#:` typing comment cannot be separated from its expression by an empty line.",
                         ));
                         child_index = next_index;
                     } else if expr_child.kind_id() == kind::COMMENT {
-                        lowering_context.diagnostics.push(Diagnostic::syntax_error(
+                        lowering_context.diagnostics.push(Diagnostic::annotation_error(
                             block_range,
                             "A `#:` typing comment must be followed immediately by an expression.",
                         ));
@@ -978,10 +978,12 @@ fn lower_sequence(
                                 );
                             }
                             AnnotationParseOutcome::MissingTypeExpression => {
-                                lowering_context.diagnostics.push(Diagnostic::syntax_error(
-                                    block_range,
-                                    "A `#:` typing comment must include a type expression.",
-                                ));
+                                lowering_context
+                                    .diagnostics
+                                    .push(Diagnostic::annotation_error(
+                                        block_range,
+                                        "A `#:` typing comment must include a type expression.",
+                                    ));
                             }
                             AnnotationParseOutcome::Error(error) => {
                                 lowering_context
@@ -995,10 +997,12 @@ fn lower_sequence(
                         child_index = next_index + 1;
                     }
                 } else {
-                    lowering_context.diagnostics.push(Diagnostic::syntax_error(
-                        block_range,
-                        "A `#:` typing comment must be followed immediately by an expression.",
-                    ));
+                    lowering_context
+                        .diagnostics
+                        .push(Diagnostic::annotation_error(
+                            block_range,
+                            "A `#:` typing comment must be followed immediately by an expression.",
+                        ));
                     child_index = next_index;
                 }
                 continue;
@@ -1059,18 +1063,18 @@ fn attach_annotation_to_expression(
 fn annotation_parse_diagnostic(range: Range, error: TypeParseError) -> Diagnostic {
     match error {
         TypeParseError::InvalidSyntax { message } => {
-            Diagnostic::syntax_error(range, format!("type syntax error: {message}"))
+            Diagnostic::annotation_error(range, format!("type syntax error: {message}"))
         }
         TypeParseError::UnsupportedConstruct { message } => {
-            Diagnostic::syntax_error(range, format!("unsupported syntax: {message}"))
+            Diagnostic::annotation_error(range, format!("unsupported syntax: {message}"))
         }
         TypeParseError::InvalidSemantics { message } => {
-            Diagnostic::syntax_error(range, format!("invalid semantics: {message}"))
+            Diagnostic::annotation_error(range, format!("invalid semantics: {message}"))
         }
         TypeParseError::UnknownType { name } => {
-            Diagnostic::syntax_error(range, format!("type syntax error: unknown type `{name}`"))
+            Diagnostic::annotation_error(range, format!("type syntax error: unknown type `{name}`"))
         }
-        TypeParseError::RecursionLimitExceeded { limit } => Diagnostic::syntax_error(
+        TypeParseError::RecursionLimitExceeded { limit } => Diagnostic::annotation_error(
             range,
             format!(
                 "This type annotation is nested too deeply to parse (more than {limit} levels)."

@@ -749,7 +749,8 @@ fn malformed_sources_are_detected_and_reach_parity() {
 #[test]
 fn directive_mix_lowering_error_matches_production() {
     // `@alias Count` (a *definition* directive) merged with `#: integer` (an *annotation* directive) into one
-    // `#:` block, which lowering rejects. Non-vacuity: assert the oracle really emits the lowering SyntaxError.
+    // `#:` block, which lowering rejects. Non-vacuity: assert the oracle really emits the lowering
+    // annotation error.
     let source = "#: @alias Count {integer}\n#: integer\nvalue <- 1L";
     let mut workspace = Workspace::new(typing_strict_config());
     workspace.files.insert(
@@ -763,8 +764,8 @@ fn directive_mix_lowering_error_matches_production() {
     assert!(
         oracle_diagnostics(&oracle, 0, true)
             .iter()
-            .any(|diagnostic| diagnostic.code == DiagnosticCode::SyntaxError),
-        "the directive-mix scenario must produce a lowering SyntaxError on the oracle"
+            .any(|diagnostic| diagnostic.code == DiagnosticCode::AnnotationError),
+        "the directive-mix scenario must produce a lowering annotation error on the oracle"
     );
 
     let mut driver = Driver::new(typing_strict_config());
