@@ -48,7 +48,7 @@ strict = false
 
 Type *inference* always runs — it powers editor features such as hover types, inlay hints, and signature help regardless of these settings. The `[check]` flags only control which diagnostics `roughly check` and your editor surface, so a project that has not adopted annotations is not flooded with messages.
 
-- `typing` — report `type-error` diagnostics, including function-call argument mismatches. See the [Type Checker](/typing). Default `false`.
+- `typing` — report `type-error` diagnostics, including function-call argument mismatches. See the [Typing guide](/typing). Default `false`.
 - `unused` — report assignments whose value is never read (`unused` diagnostics). Default `false`.
 - `strict` — report each site with a genuinely undetermined (`Unknown`) type — an unsupported construct or a reference to a binding with no known type. See [strict mode](/typing-reference#strict-mode). Default `false`.
 

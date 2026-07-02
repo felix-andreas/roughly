@@ -86,7 +86,7 @@ strict = true   # report expressions whose type the checker could not determine
   `.` or `_` are never reported.
 - **Type checking**: Reports type errors and argument mismatches from Roughly's static type
   checker. Type *inference* is always on (it powers editor features); this setting controls whether
-  `roughly check` surfaces type-error diagnostics. See [Type Checker](/typing).
+  `roughly check` surfaces type-error diagnostics. See the [Typing guide](/typing).
 - **Strict mode**: Reports the places where the checker genuinely could not determine a type. See
   the [typing reference](/typing-reference#strict-mode) for exactly what strict mode flags.
 

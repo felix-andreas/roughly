@@ -24,12 +24,14 @@ marked ⚠️ are planned but not yet available.
   - Index of global variables and S4 / R6 classes and methods
   - Document symbol search — <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd> *in VS Code*
   - Workspace symbol search — <kbd>Ctrl</kbd> + <kbd>T</kbd> *in VS Code*
-  - Go to definition
+  - Go to definition, including type names inside `#:` annotations
+  - Go to type definition
   - Find all references
 
 - **Editing**
   - Completion for local and global variables
-  - Completion for symbols from other packages *(⚠️ planned)*
+  - Completion for standard-library names, with their typed signatures as detail
+  - Completion for record fields after `$` and for field strings inside `[["..."]]`
   - Rename variables across the whole workspace
   - Signature help
   - Inlay hints for inferred types
@@ -50,8 +52,8 @@ marked ⚠️ are planned but not yet available.
 
 Type *inference* runs by default and powers hover and inlay hints with no configuration. The two
 opt-in diagnostics above only control what `roughly check` reports. See the
-[Type Checker](/typing) for the inference model — nominal and structural types, function
-types, nullable unions, and numeric constraints, all written in [`#:` comments](/typing).
+[Typing guide](/typing) for the inference model — structural and nominal types, function
+types, unions, and generics with bounds, all written in [`#:` comments](/typing).
 
 ### Diagnostics delivery
 
