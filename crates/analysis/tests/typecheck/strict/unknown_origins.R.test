@@ -52,3 +52,11 @@ warning[strict] strict mode: could not determine the type of `x`; add a type ann
 y <- x
 #++++
 No diagnostics.
+
+#==== per_file_directive
+#---- strict_off_directive_silences_a_strict_file
+#---- R/main.R
+#: @strict off
+x <- 1L %then% 2L
+#++++
+No diagnostics.

@@ -55,6 +55,9 @@ pub struct Module {
     pub arena: HirArena,
     pub definitions: Vec<DefinitionItem>,
     pub expressions: Vec<ExpressionId>,
+    // A top-level `#: @strict` / `#: @strict off` directive overriding the configured strict
+    // switch for this file (last directive wins). `None` when the file has no directive.
+    pub strict_override: Option<bool>,
     // Derived from `arena` once at construction so IDE range lookups are O(log n) instead of a
     // linear arena scan. Keyed by (start_byte, end_byte).
     span_index: BTreeMap<(usize, usize), ExpressionId>,
@@ -65,6 +68,15 @@ impl Module {
         arena: HirArena,
         definitions: Vec<DefinitionItem>,
         expressions: Vec<ExpressionId>,
+    ) -> Self {
+        Self::with_strict_override(arena, definitions, expressions, None)
+    }
+
+    pub fn with_strict_override(
+        arena: HirArena,
+        definitions: Vec<DefinitionItem>,
+        expressions: Vec<ExpressionId>,
+        strict_override: Option<bool>,
     ) -> Self {
         let mut span_index = BTreeMap::new();
         // Expressions are allocated in ascending ExpressionId order, so `or_insert` keeps the
@@ -79,6 +91,7 @@ impl Module {
             arena,
             definitions,
             expressions,
+            strict_override,
             span_index,
         }
     }

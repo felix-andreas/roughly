@@ -20,6 +20,7 @@ use {
 pub struct LoweringContext {
     arena: HirArena,
     diagnostics: Vec<Diagnostic>,
+    strict_override: Option<bool>,
     interner: Interner,
     // Current expression-nesting depth, bounded by `LOWER_RECURSION_LIMIT` so a pathologically nested
     // (but otherwise valid) tree cannot overflow the stack during the recursive lowering walk.
@@ -43,6 +44,7 @@ impl LoweringContext {
         Self {
             arena: HirArena::new(),
             diagnostics: Vec::new(),
+            strict_override: None,
             interner: Interner::new(),
             depth: 0,
         }
@@ -52,6 +54,7 @@ impl LoweringContext {
         Self {
             arena: HirArena::new(),
             diagnostics: Vec::new(),
+            strict_override: None,
             interner,
             depth: 0,
         }
@@ -100,13 +103,19 @@ impl LoweringContext {
 pub fn lower(document: &Document, lowering_context: &mut LoweringContext) -> Module {
     lowering_context.arena = HirArena::new();
     lowering_context.diagnostics.clear();
+    lowering_context.strict_override = None;
 
     let root = document.tree().root_node();
     let rope = document.rope();
     let (definitions, expressions) = lower_module(root, rope, lowering_context);
 
     let arena = std::mem::take(&mut lowering_context.arena);
-    Module::new(arena, definitions, expressions)
+    Module::with_strict_override(
+        arena,
+        definitions,
+        expressions,
+        lowering_context.strict_override,
+    )
 }
 
 pub fn lower_with_diagnostics(
@@ -868,6 +877,25 @@ fn lower_sequence(
                     })
                     .collect::<Vec<_>>();
                 let stripped_text = stripped_lines.join("\n");
+
+                // A top-level `#: @strict` / `#: @strict off` block is a per-file switch for
+                // the strict check, not type syntax; it overrides the configured default for
+                // this file (last directive wins).
+                if matches!(sequence_context, SequenceContext::Module) {
+                    match stripped_text.trim() {
+                        "@strict" | "@strict on" => {
+                            lowering_context.strict_override = Some(true);
+                            child_index = next_index;
+                            continue;
+                        }
+                        "@strict off" => {
+                            lowering_context.strict_override = Some(false);
+                            child_index = next_index;
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
 
                 let parsed_annotation = if stripped_text.trim().is_empty() {
                     AnnotationParseOutcome::MissingTypeExpression

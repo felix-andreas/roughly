@@ -1541,6 +1541,13 @@ where the checker genuinely could not determine a type.
 > phrasing in the backlog was deliberately broad; this section is the contract strict mode
 > implements unless the user revises it.
 
+### Per-file directive
+
+A top-level `#: @strict` comment block switches strict mode on for its file regardless of the
+configured default; `#: @strict off` switches it off. The last directive in the file wins. The
+directive changes only whether strict diagnostics are published for that file — inference and every
+other check are untouched.
+
 ### What strict mode flags
 
 In strict mode, an expression or binding whose inferred type is `Unknown` at the point it is

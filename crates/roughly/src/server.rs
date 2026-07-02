@@ -491,7 +491,7 @@ impl EngineWorker {
                 }
             });
         }
-        if config.strict {
+        if file_diagnostics.strict_override.unwrap_or(config.strict) {
             rendered.extend(file_diagnostics.strict_diagnostics.iter().cloned());
         }
 

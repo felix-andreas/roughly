@@ -114,3 +114,19 @@ w <- list(size = 3L)
 s <- w$size
 #++++
 No diagnostics.
+
+#==== per_file_strict_directive
+#---- strict_directive_enables_for_one_file
+#---- R/main.R
+#: @strict
+x <- 1L %then% 2L
+#++++
+warning[strict] strict mode: could not determine the type of `x`; add a type annotation
+--> 2:6-2:18
+| x <- 1L %then% 2L
+
+#---- without_directive_strict_stays_off
+#---- R/main.R
+x <- 1L %then% 2L
+#++++
+No diagnostics.

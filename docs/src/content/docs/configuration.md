@@ -79,3 +79,6 @@ The top-level `case` and `spaces` keys are deprecated spellings of `lint.naming-
 If no `roughly.toml` is found, Roughly uses 2-space indentation, automatic line endings, no naming check, and all `[check]` diagnostics off.
 
 Roughly's formatter and linter are opinionated tools that don't aim to support every possible coding style. Instead, they enforce a consistent, readable style based on R community practices.
+
+
+A single file can override the `strict` switch with a top-level `#: @strict` or `#: @strict off` comment; see the typing reference.

@@ -461,7 +461,13 @@ impl Analysis {
             if self.check_config.typing {
                 diagnostics.extend(output.diagnostics.iter().cloned());
             }
-            if self.check_config.strict {
+            // A file's own `#: @strict` directive overrides the configured default.
+            let strict_enabled = self
+                .lowering_outputs
+                .get(&document_id)
+                .and_then(|lowering| lowering.output.strict_override)
+                .unwrap_or(self.check_config.strict);
+            if strict_enabled {
                 diagnostics.extend(output.strict_diagnostics.iter().cloned());
             }
         }

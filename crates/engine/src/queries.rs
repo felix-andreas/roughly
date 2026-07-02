@@ -243,6 +243,9 @@ pub struct FileDiagnostics {
     pub package_naming: Vec<Diagnostic>,
     pub type_errors: Vec<InferenceError>,
     pub strict_diagnostics: Vec<Diagnostic>,
+    // The file's own `#: @strict` directive, overriding the configured strict switch for this
+    // file at the consumer's gate.
+    pub strict_override: Option<bool>,
     pub unused: Vec<Diagnostic>,
     // Lowering-phase (syntax) and lint diagnostics: like production's `document_diagnostics`, both are
     // emitted *unconditionally* (not config-gated), so the consumer renders them directly.
@@ -795,6 +798,7 @@ impl QueryGroup for RoughlyQueries {
                     package_naming: (*package_naming).clone(),
                     type_errors: check.errors.clone(),
                     strict_diagnostics,
+                    strict_override: module.strict_override,
                     unused,
                     lowering: (*lowering_diagnostics).clone(),
                     lint: (*lint).clone(),
