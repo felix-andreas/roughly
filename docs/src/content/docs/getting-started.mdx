@@ -90,6 +90,7 @@ roughly fmt --diff         # show the diff without writing
 roughly check              # check files in the current directory
 roughly check path/to/files
 roughly check --output json  # one JSON object per diagnostic (for CI)
+roughly check --min-severity error  # only errors render and affect the exit code
 
 # Run the language server (for editors that speak LSP)
 roughly server

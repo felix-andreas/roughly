@@ -30,7 +30,11 @@ fn main() -> ExitCode {
     );
 
     match cli.command {
-        Command::Check { files, output } => exit_code(cli::check(files.as_deref(), output)),
+        Command::Check {
+            files,
+            output,
+            min_severity,
+        } => exit_code(cli::check(files.as_deref(), output, min_severity)),
         Command::Fmt {
             files,
             check,
@@ -92,6 +96,9 @@ enum Command {
         /// Diagnostic output format
         #[clap(long, value_enum, default_value = "human")]
         output: OutputFormat,
+        /// Only report diagnostics at or above this severity (and only they affect the exit code)
+        #[clap(long, value_enum, default_value = "warning")]
+        min_severity: cli::MinSeverity,
     },
     /// Run the formatter on the given files or directories
     #[clap(alias = "format")]

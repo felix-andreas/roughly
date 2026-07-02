@@ -162,6 +162,22 @@ fn check_json_output_maps_warning_severity() {
 }
 
 #[test]
+fn check_min_severity_error_ignores_warnings() {
+    let directory = project(&[("warn.R", "x = 1\n")]);
+
+    let filtered = roughly(
+        directory.path(),
+        &["check", "--min-severity", "error", "warn.R"],
+    );
+    assert_eq!(exit_code(&filtered), 0, "stderr: {}", stderr(&filtered));
+    assert!(
+        stdout(&filtered).trim().is_empty(),
+        "warnings must not render under --min-severity error: {}",
+        stdout(&filtered)
+    );
+}
+
+#[test]
 fn check_invalid_config_exits_two() {
     let directory = project(&[("clean.R", "x <- 1\n"), ("roughly.toml", "debug = 1\n")]);
 

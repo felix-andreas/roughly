@@ -75,9 +75,18 @@ pub enum OutputFormat {
     Json,
 }
 
+// The severity floor for `check` output: diagnostics below it are neither rendered nor counted
+// toward the exit code, so `--min-severity error` makes warnings-only trees exit clean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum MinSeverity {
+    Warning,
+    Error,
+}
+
 pub fn check(
     maybe_files: Option<&[PathBuf]>,
     output: OutputFormat,
+    min_severity: MinSeverity,
 ) -> Result<Outcome, CommandError> {
     let root: Vec<PathBuf> = vec![".".into()];
     let files = maybe_files.unwrap_or(&root);
@@ -174,6 +183,11 @@ pub fn check(
             );
 
             for diagnostic in diagnostics {
+                if min_severity == MinSeverity::Error
+                    && diagnostic.severity != Some(DiagnosticSeverity::ERROR)
+                {
+                    continue;
+                }
                 n_diagnostics += 1;
                 match output {
                     OutputFormat::Human => render_human_diagnostic(&path, rope, &diagnostic),
