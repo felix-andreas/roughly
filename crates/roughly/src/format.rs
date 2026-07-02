@@ -1494,7 +1494,9 @@ fn annotation_parameter_names_are_plain(parsed: &TypeSyntax, interner: &Interner
         // is not prose, so it is trimmed before the shape check.
         let name = name.trim();
         let mut characters = name.chars();
-        characters.next().is_some_and(|first| first.is_alphabetic() || first == '_' || first == '.')
+        characters
+            .next()
+            .is_some_and(|first| first.is_alphabetic() || first == '_' || first == '.')
             && characters.all(|character| {
                 character.is_alphanumeric() || character == '_' || character == '.'
             })
@@ -1504,9 +1506,7 @@ fn annotation_parameter_names_are_plain(parsed: &TypeSyntax, interner: &Interner
         match surface_type {
             SurfaceType::Function(function_type) => {
                 function_type.named_parameters.iter().all(|parameter| {
-                    interner
-                        .resolve(parameter.name)
-                        .is_some_and(is_plain_name)
+                    interner.resolve(parameter.name).is_some_and(is_plain_name)
                         && surface_type_is_plain(&parameter.value, interner)
                 }) && function_type
                     .parameters
