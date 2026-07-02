@@ -122,9 +122,11 @@ fn build_new_engine(file_count: usize) -> Engine<RoughlyQueries> {
     engine.set_input(
         Key::Config,
         Config {
-            typing: true,
-            strict: false,
-            unused: false,
+            check: CheckConfig {
+                typing: true,
+                strict: false,
+                unused: false,
+            },
             lint: LintConfig::default(),
         },
     );

@@ -359,6 +359,7 @@ fn run_lint_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, Strin
         &document,
         LintConfig {
             naming_style: Some(NameStyle::Snake),
+            ..LintConfig::default()
         },
     );
     // Suppression comments are applied at diagnostic assembly in production; the runner mirrors

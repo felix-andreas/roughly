@@ -45,9 +45,11 @@ fn build_single_file_engine() -> (Engine<RoughlyQueries>, PathTable, PathBuf) {
     engine.set_input(
         Key::Config,
         Config {
-            typing: true,
-            strict: false,
-            unused: false,
+            check: analysis::CheckConfig {
+                typing: true,
+                strict: false,
+                unused: false,
+            },
             lint: LintConfig::default(),
         },
     );

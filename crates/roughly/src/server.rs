@@ -485,10 +485,10 @@ impl EngineWorker {
         rendered.extend(file_diagnostics.package_naming.iter().cloned());
         rendered.extend(file_diagnostics.lowering.iter().cloned());
         rendered.extend(file_diagnostics.lint.iter().cloned());
-        if config.unused {
+        if config.check.unused {
             rendered.extend(file_diagnostics.unused.iter().cloned());
         }
-        if config.typing {
+        if config.check.typing {
             self.engine.group().with_interner(|interner| {
                 for error in &file_diagnostics.type_errors {
                     rendered.push(analysis::Diagnostic::from_inference_error(
@@ -497,7 +497,10 @@ impl EngineWorker {
                 }
             });
         }
-        if file_diagnostics.strict_override.unwrap_or(config.strict) {
+        if file_diagnostics
+            .strict_override
+            .unwrap_or(config.check.strict)
+        {
             rendered.extend(file_diagnostics.strict_diagnostics.iter().cloned());
             for diagnostic in &mut rendered {
                 diagnostic.escalate_unresolved_to_error();
@@ -540,9 +543,7 @@ impl EngineWorker {
 
     fn engine_config(&self) -> EngineConfig {
         EngineConfig {
-            typing: self.config.check.typing,
-            strict: self.config.check.strict,
-            unused: self.config.check.unused,
+            check: self.config.check,
             lint: self.config.lint,
         }
     }

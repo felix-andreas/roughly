@@ -26,7 +26,7 @@
 use {
     crate::{Engine, QueryGroup, Shared, Stored},
     analysis::{
-        LintConfig,
+        CheckConfig, LintConfig,
         diagnostic::{Diagnostic, render_type_scheme},
         document::{Document, DocumentId},
         hir::{DefinitionKind, ExpressionId, ExpressionKind, HirArena, Module},
@@ -194,9 +194,7 @@ pub enum Key {
 /// trade — a config change is rare, and keystroke edits touch `SourceText`, never this.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Config {
-    pub typing: bool,
-    pub strict: bool,
-    pub unused: bool,
+    pub check: CheckConfig,
     pub lint: LintConfig,
 }
 

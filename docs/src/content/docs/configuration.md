@@ -43,6 +43,17 @@ strict = false
 ## Linting — `[lint]`
 
 - `naming-style` — enforce `"snake_case"` or `"camelCase"` for variable and parameter names. Omit the key to disable the naming check entirely.
+- Per-lint levels — every other lint is keyed by its stable code and takes `"off"`, `"warn"`, or `"error"` (omit the key to keep the lint's built-in severity):
+
+```toml
+[lint]
+assignment-operator = "off"
+boolean-shorthand = "error"
+missing-comma = "warn"
+trailing-comma = "warn"
+```
+
+For one-off exceptions, prefer a [suppression comment](/linter#suppressing-diagnostics) over turning a lint off project-wide.
 
 ## Checking — `[check]`
 

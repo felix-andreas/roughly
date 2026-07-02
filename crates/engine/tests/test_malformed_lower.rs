@@ -22,9 +22,11 @@ fn diagnostics_for(source: &str) -> std::rc::Rc<FileDiagnostics> {
     engine.set_input(
         Key::Config,
         Config {
-            typing: true,
-            strict: false,
-            unused: false,
+            check: analysis::CheckConfig {
+                typing: true,
+                strict: false,
+                unused: false,
+            },
             lint: Default::default(),
         },
     );

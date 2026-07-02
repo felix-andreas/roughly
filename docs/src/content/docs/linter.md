@@ -82,7 +82,8 @@ scratch <- compute_debug_info()
 ```
 
 Use suppressions for genuine exceptions; a file that needs many of them is usually asking for a
-configuration change instead.
+configuration change instead — every lint's level can be set project-wide in
+[`roughly.toml`](/configuration#linting--lint) (`assignment-operator = "off"`).
 
 ### Opt-in Checks
 

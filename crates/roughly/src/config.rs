@@ -223,6 +223,18 @@ mod tests {
     }
 
     #[test]
+    fn per_lint_levels() {
+        let config = parse(indoc! {r#"
+            [lint]
+            assignment-operator = "off"
+            boolean-shorthand = "error"
+        "#});
+        assert_eq!(config.lint.assignment_operator, analysis::LintLevel::Off);
+        assert_eq!(config.lint.boolean_shorthand, analysis::LintLevel::Error);
+        assert_eq!(config.lint.missing_comma, analysis::LintLevel::Default);
+    }
+
+    #[test]
     fn all_fields() {
         let toml = indoc! {r#"
             [format]

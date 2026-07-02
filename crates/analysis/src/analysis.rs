@@ -76,6 +76,22 @@ pub enum AnalysisError {
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct LintConfig {
     pub naming_style: Option<NameStyle>,
+    pub assignment_operator: LintLevel,
+    pub boolean_shorthand: LintLevel,
+    pub missing_comma: LintLevel,
+    pub trailing_comma: LintLevel,
+}
+
+// A lint's configured level: keep its default severity, force a severity, or disable it. The
+// `[lint]` table keys each level by the lint's stable code (`assignment-operator = "off"`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LintLevel {
+    #[default]
+    Default,
+    Off,
+    Warn,
+    Error,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
@@ -1265,6 +1281,7 @@ mod tests {
             PathBuf::from("/workspace"),
             LintConfig {
                 naming_style: Some(NameStyle::Snake),
+                ..LintConfig::default()
             },
             CheckConfig::default(),
         );
@@ -1278,6 +1295,7 @@ mod tests {
         analysis.set_configs(
             LintConfig {
                 naming_style: Some(NameStyle::Camel),
+                ..LintConfig::default()
             },
             CheckConfig::default(),
         );

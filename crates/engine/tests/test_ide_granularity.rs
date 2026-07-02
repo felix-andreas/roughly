@@ -23,7 +23,10 @@ fn package_path(id: FileId) -> PathBuf {
 
 fn typing_config() -> Config {
     Config {
-        typing: true,
+        check: analysis::CheckConfig {
+            typing: true,
+            ..Default::default()
+        },
         ..Config::default()
     }
 }

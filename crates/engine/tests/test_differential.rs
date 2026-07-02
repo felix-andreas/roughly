@@ -130,9 +130,9 @@ fn project_files_order(workspace: &Workspace) -> Vec<FileId> {
 
 fn check_config(config: &Config) -> CheckConfig {
     CheckConfig {
-        unused: config.unused,
-        typing: config.typing,
-        strict: config.strict,
+        unused: config.check.unused,
+        typing: config.check.typing,
+        strict: config.check.strict,
     }
 }
 
@@ -214,10 +214,10 @@ fn engine_diagnostics(
     // Unused-local warnings (`DiagnosticCode::Naming`) are config-gated in production's
     // `document_diagnostics` (`check_config.unused`), so the engine computes them unconditionally and the
     // consumer gates them here — the same shape as the type/strict classes below.
-    if config.unused {
+    if config.check.unused {
         rendered.extend(file_diagnostics.unused.iter().cloned());
     }
-    if config.typing {
+    if config.check.typing {
         // Render the raw inference errors against the engine's own interner + fallback range, exactly as
         // production's `typecheck` renders them.
         engine.group().with_interner(|interner| {
@@ -228,7 +228,10 @@ fn engine_diagnostics(
     }
     // Mirrors production's per-file strict gate (`strict_override` wins over the config), including
     // the escalation of unresolved references to errors under strict.
-    if file_diagnostics.strict_override.unwrap_or(config.strict) {
+    if file_diagnostics
+        .strict_override
+        .unwrap_or(config.check.strict)
+    {
         rendered.extend(file_diagnostics.strict_diagnostics.iter().cloned());
         for diagnostic in &mut rendered {
             diagnostic.escalate_unresolved_to_error();
@@ -368,25 +371,29 @@ impl Driver {
 
     fn set_strict(&mut self, label: &str, strict: bool) {
         self.step(label, |workspace| {
-            workspace.config.strict = strict;
+            workspace.config.check.strict = strict;
         });
     }
 }
 
 fn typing_config() -> Config {
     Config {
-        typing: true,
-        strict: false,
-        unused: false,
+        check: CheckConfig {
+            typing: true,
+            strict: false,
+            unused: false,
+        },
         lint: LintConfig::default(),
     }
 }
 
 fn typing_strict_config() -> Config {
     Config {
-        typing: true,
-        strict: true,
-        unused: false,
+        check: CheckConfig {
+            typing: true,
+            strict: true,
+            unused: false,
+        },
         lint: LintConfig::default(),
     }
 }
@@ -397,18 +404,22 @@ fn typing_strict_config() -> Config {
 // variant for the reported-warning cases.
 fn typing_strict_unused_config() -> Config {
     Config {
-        typing: true,
-        strict: true,
-        unused: true,
+        check: CheckConfig {
+            typing: true,
+            strict: true,
+            unused: true,
+        },
         lint: LintConfig::default(),
     }
 }
 
 fn typing_unused_config() -> Config {
     Config {
-        typing: true,
-        strict: false,
-        unused: true,
+        check: CheckConfig {
+            typing: true,
+            strict: false,
+            unused: true,
+        },
         lint: LintConfig::default(),
     }
 }
@@ -418,9 +429,11 @@ fn typing_unused_config() -> Config {
 // in that distinct oracle code path, since the randomized stream always keeps typing on.
 fn naming_only_config() -> Config {
     Config {
-        typing: false,
-        strict: false,
-        unused: false,
+        check: CheckConfig {
+            typing: false,
+            strict: false,
+            unused: false,
+        },
         lint: LintConfig::default(),
     }
 }
@@ -801,7 +814,9 @@ fn unused_local_warnings_match_production() {
         "k <- function(flag) {\n  x <- 1L\n  if (flag) {\n    x <- 2L\n  }\n  total <- 0L\n  for (i in 1:3) {\n    total <- total + i\n  }\n  dead <- 1L\n  dead <- 2L\n  x + total + dead\n}",
     );
     // Toggling the check off clears the warnings on both sides (the unused-off oracle path).
-    driver.step("unused-off", |workspace| workspace.config.unused = false);
+    driver.step("unused-off", |workspace| {
+        workspace.config.check.unused = false
+    });
 }
 
 // A NON-EMPTY strict-origin case. The randomized stream and the other curated cases never force a genuine
@@ -1045,7 +1060,7 @@ fn run_randomized_stream(seed: u64, steps: usize) {
         match rng.below(10) {
             // Toggle strict mode (a config edit exercised mid-stream).
             0 => {
-                let strict = !driver.workspace.config.strict;
+                let strict = !driver.workspace.config.check.strict;
                 driver.set_strict(&label, strict);
             }
             // Delete an existing slot, else add one.

@@ -237,17 +237,17 @@ impl Lifecycle {
         rendered.extend(file_diagnostics.package_naming.iter().cloned());
         rendered.extend(file_diagnostics.lowering.iter().cloned());
         rendered.extend(file_diagnostics.lint.iter().cloned());
-        if self.config.unused {
+        if self.config.check.unused {
             rendered.extend(file_diagnostics.unused.iter().cloned());
         }
-        if self.config.typing {
+        if self.config.check.typing {
             self.engine.group().with_interner(|interner| {
                 for error in &file_diagnostics.type_errors {
                     rendered.push(Diagnostic::from_inference_error(error, fallback, interner));
                 }
             });
         }
-        if self.config.strict {
+        if self.config.check.strict {
             rendered.extend(file_diagnostics.strict_diagnostics.iter().cloned());
         }
         rendered
@@ -256,9 +256,11 @@ impl Lifecycle {
 
 fn typing_config() -> Config {
     Config {
-        typing: true,
-        strict: false,
-        unused: false,
+        check: analysis::CheckConfig {
+            typing: true,
+            strict: false,
+            unused: false,
+        },
         lint: Default::default(),
     }
 }

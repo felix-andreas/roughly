@@ -69,9 +69,9 @@ fn project_files_order(workspace: &Workspace) -> Vec<FileId> {
 
 fn check_config(config: &Config) -> CheckConfig {
     CheckConfig {
-        unused: config.unused,
-        typing: config.typing,
-        strict: config.strict,
+        unused: config.check.unused,
+        typing: config.check.typing,
+        strict: config.check.strict,
     }
 }
 
@@ -262,9 +262,11 @@ fn sweep_parity(label: &str, workspace: &Workspace, oracle: &mut Analysis, engin
 
 fn typing_config() -> Config {
     Config {
-        typing: true,
-        strict: false,
-        unused: false,
+        check: CheckConfig {
+            typing: true,
+            strict: false,
+            unused: false,
+        },
         lint: LintConfig::default(),
     }
 }

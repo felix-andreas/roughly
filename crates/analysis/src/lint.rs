@@ -1,7 +1,8 @@
 use {
     crate::{
         analysis::LintConfig,
-        diagnostic::{Diagnostic, Lint},
+        analysis::LintLevel,
+        diagnostic::{Diagnostic, DiagnosticCode, Lint, Severity},
         document::Document,
         tree::{field, kind},
     },
@@ -35,6 +36,38 @@ pub fn analyze(document: &Document, config: LintConfig) -> Vec<Diagnostic> {
     diagnostics
 }
 
+// Pushes one lint finding, honoring its configured level: `off` drops it, `warn`/`error` force the
+// severity, and the default keeps the lint's built-in severity. `naming-style` is configured by its
+// style value instead (`None` disables it), so it always passes `Default` here.
+fn push_lint(
+    diagnostics: &mut Vec<Diagnostic>,
+    config: LintConfig,
+    lint: Lint,
+    default_severity: Severity,
+    range: tree_sitter::Range,
+    message: impl Into<String>,
+) {
+    let level = match lint {
+        Lint::MissingComma => config.missing_comma,
+        Lint::TrailingComma => config.trailing_comma,
+        Lint::AssignmentOperator => config.assignment_operator,
+        Lint::BooleanShorthand => config.boolean_shorthand,
+        Lint::NamingStyle => LintLevel::Default,
+    };
+    let severity = match level {
+        LintLevel::Off => return,
+        LintLevel::Default => default_severity,
+        LintLevel::Warn => Severity::Warning,
+        LintLevel::Error => Severity::Error,
+    };
+    diagnostics.push(Diagnostic {
+        severity,
+        code: DiagnosticCode::Lint(lint),
+        message: message.into(),
+        range,
+    });
+}
+
 fn traverse(
     cursor: &mut TreeCursor<'_>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -59,11 +92,14 @@ fn traverse(
                             if let Some(previous_argument) = last_argument
                                 && last_comma.is_none()
                             {
-                                diagnostics.push(Diagnostic::lint_error(
+                                push_lint(
+                                    diagnostics,
+                                    config,
                                     Lint::MissingComma,
+                                    Severity::Error,
                                     previous_argument.range(),
                                     "Expected comma after argument",
-                                ));
+                                );
                             }
 
                             last_argument = Some(child);
@@ -84,11 +120,14 @@ fn traverse(
                 if let Some(trailing_comma) = last_comma
                     && state.check_trailing_commas
                 {
-                    diagnostics.push(Diagnostic::lint_error(
+                    push_lint(
+                        diagnostics,
+                        config,
                         Lint::TrailingComma,
+                        Severity::Error,
                         trailing_comma.range(),
                         "Unexpected comma after last argument",
-                    ));
+                    );
                 }
             }
 
@@ -126,11 +165,14 @@ fn traverse(
             if let Some(operator) = node.child_by_field_id(field::OPERATOR)
                 && operator.kind_id() == kind::EQUAL
             {
-                diagnostics.push(Diagnostic::lint_warning(
+                push_lint(
+                    diagnostics,
+                    config,
                     Lint::AssignmentOperator,
+                    Severity::Warning,
                     node.range(),
                     "Use <-, not =, for assignment",
-                ));
+                );
             }
         }
         kind::CALL => {
@@ -148,11 +190,14 @@ fn traverse(
             };
 
             if let Some(message) = message {
-                diagnostics.push(Diagnostic::lint_warning(
+                push_lint(
+                    diagnostics,
+                    config,
                     Lint::BooleanShorthand,
+                    Severity::Warning,
                     node.range(),
                     message,
-                ));
+                );
             }
         }
         kind::PARAMETER => {
@@ -245,4 +290,50 @@ fn to_snake_case(name: &str) -> String {
     }
 
     snake_name
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::analyze,
+        crate::{
+            analysis::{LintConfig, LintLevel},
+            diagnostic::Severity,
+            document::Document,
+            tree::new_parser,
+        },
+    };
+
+    fn lint_with(config: LintConfig, source: &str) -> Vec<crate::diagnostic::Diagnostic> {
+        let mut parser = new_parser().expect("parser");
+        let document = Document::parse(&mut parser, source).expect("parse");
+        analyze(&document, config)
+    }
+
+    #[test]
+    fn a_lint_level_disables_and_escalates() {
+        let source = "x = 1\n";
+        let default_run = lint_with(LintConfig::default(), source);
+        assert_eq!(default_run.len(), 1, "{default_run:?}");
+        assert_eq!(default_run[0].severity, Severity::Warning);
+
+        let off = lint_with(
+            LintConfig {
+                assignment_operator: LintLevel::Off,
+                ..LintConfig::default()
+            },
+            source,
+        );
+        assert!(off.is_empty(), "{off:?}");
+
+        let escalated = lint_with(
+            LintConfig {
+                assignment_operator: LintLevel::Error,
+                ..LintConfig::default()
+            },
+            source,
+        );
+        assert_eq!(escalated.len(), 1);
+        assert_eq!(escalated[0].severity, Severity::Error);
+    }
 }
