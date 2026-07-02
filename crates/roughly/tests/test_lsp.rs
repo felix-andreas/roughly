@@ -8,8 +8,8 @@ use {
             DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
             DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
             DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentFormattingParams,
-            DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileEvent,
-            FormattingOptions, GeneralClientCapabilities, GotoDefinitionParams,
+            DocumentHighlightParams, DocumentSymbolParams, DocumentSymbolResponse, FileChangeType,
+            FileEvent, FormattingOptions, GeneralClientCapabilities, GotoDefinitionParams,
             GotoDefinitionResponse, HoverContents, HoverParams, HoverProviderCapability,
             InitializeParams, InitializeResult, InitializedParams, InlayHintParams, MessageType,
             ParameterInformationSettings, ParameterLabel, PartialResultParams, Position,
@@ -1178,6 +1178,42 @@ async fn inlay_hints_respect_requested_viewport() {
         lines,
         vec![1],
         "only the in-viewport hint should be returned"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn document_highlight_marks_all_occurrences_in_the_file() {
+    let mut context =
+        setup_test_with_features(&[("R/a.R", "value <- 1L\nresult <- value + value\n")], &[]).await;
+
+    let file_uri = context.file_uri("R/a.R");
+    context
+        .open_file(&file_uri, "value <- 1L\nresult <- value + value\n")
+        .await;
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    let highlights = context
+        .server
+        .document_highlight(DocumentHighlightParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: file_uri.clone(),
+                },
+                position: Position::new(0, 1),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("document highlight failed")
+        .expect("expected highlights");
+
+    assert_eq!(
+        highlights.len(),
+        3,
+        "declaration + two reads: {highlights:?}"
     );
 
     context.shutdown().await;

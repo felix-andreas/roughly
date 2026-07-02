@@ -12,8 +12,9 @@ use {
             DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
             DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
             DocumentDiagnosticParams, DocumentDiagnosticReport, DocumentDiagnosticReportResult,
-            DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol,
-            DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
+            DocumentFormattingParams, DocumentHighlight, DocumentHighlightParams,
+            DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
+            DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
             FullDocumentDiagnosticReport, GlobPattern, Hover, HoverContents, HoverParams,
             HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
             InlayHint, InlayHintKind, InlayHintLabel, InlayHintParams, Location, MarkupContent,
@@ -1636,6 +1637,44 @@ impl EngineWorker {
         Ok(references)
     }
 
+    fn document_highlight(
+        &mut self,
+        params: DocumentHighlightParams,
+    ) -> Result<Option<Vec<DocumentHighlight>>, ResponseError> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let Some(path) = self.document_path(&uri) else {
+            return Ok(None);
+        };
+        let position = params.text_document_position_params.position;
+
+        if self.document(&path).is_none() {
+            return Err(path_not_found_error(&path));
+        }
+
+        let internal_position = self
+            .to_internal_position(&path, position)
+            .expect("opened document rope available for document highlight");
+        // Highlights are the current document's slice of the references answer: every read and
+        // write of the slot under the cursor, declaration included.
+        let highlights = self
+            .cancellable(|| {
+                EngineIde::new(&self.engine, &self.paths).references(&path, internal_position, true)
+            })
+            .unwrap_or_default()
+            .map(|locations| {
+                locations
+                    .into_iter()
+                    .filter(|location| location.path == path)
+                    .map(|location| DocumentHighlight {
+                        range: self.to_lsp_range_in(&location.path, location.range),
+                        kind: None,
+                    })
+                    .collect()
+            });
+
+        Ok(highlights)
+    }
+
     //
     // RENAME
     //
@@ -2153,6 +2192,13 @@ impl LanguageServer for ServerState {
         self.read(move |worker| worker.rename(params))
     }
 
+    fn document_highlight(
+        &mut self,
+        params: DocumentHighlightParams,
+    ) -> BoxFuture<'static, Result<Option<Vec<DocumentHighlight>>, ResponseError>> {
+        self.read(move |worker| worker.document_highlight(params))
+    }
+
     fn document_symbol(
         &mut self,
         params: DocumentSymbolParams,
@@ -2227,6 +2273,7 @@ fn initialize_result(
                 work_done_progress_options: Default::default(),
             }),
             references_provider: Some(OneOf::Left(true)),
+            document_highlight_provider: Some(OneOf::Left(true)),
             rename_provider: Some(OneOf::Left(true)),
             semantic_tokens_provider: Some(
                 SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
