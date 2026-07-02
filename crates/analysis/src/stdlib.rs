@@ -105,6 +105,12 @@ impl StubLibrary {
         self.values.keys().copied()
     }
 
+    pub fn schemes(&self) -> impl Iterator<Item = (Symbol, &TypeScheme)> + '_ {
+        self.values
+            .iter()
+            .map(|(symbol, value)| (*symbol, &value.scheme))
+    }
+
     // The R namespace a stub name was declared in (`base`, `stats`, …), for display on hover. `None`
     // when the symbol is not a stub, or when it comes from a project override (no shipped namespace).
     pub fn namespace_of(&self, symbol: Symbol) -> Option<&'static str> {

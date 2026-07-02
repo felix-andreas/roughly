@@ -221,7 +221,9 @@ value <- 1L
 #!!!! hover after_expression.hover
 R/main.R:1:12
 #++++
-no hover
+```
+integer
+```
 
 #==== generalized_functions
 #---- one_type_variable

@@ -9,20 +9,23 @@
 //! identifier-resolution machinery, and one `// Utils` block for remaining shared helpers.
 use {
     super::{
-        COMPLETION_LIMIT, CompletionItem, CompletionItemKind, CompletionItemSource,
-        CompletionResult, DebugSection, HoverInfo, IdeDatabase, InlayHint, Location, RenameEdit,
-        RenameResult, SignatureHelp,
+        COMPLETION_LIMIT, CodeAction, CodeActionKind, CompletionItem, CompletionItemKind,
+        CompletionItemSource, CompletionResult, DebugSection, HoverInfo, IdeDatabase, InlayHint,
+        Location, RenameResult, SignatureHelp, TextEdit,
     },
     crate::{
-        diagnostic::{RenderedSignature, render_function_signature, render_generalized_type},
+        diagnostic::{
+            RenderedSignature, render_function_signature, render_generalized_type,
+            render_user_facing_scheme,
+        },
         document::{Document, DocumentId},
         hir::{
-            Argument, DefinitionId, DefinitionItem, DefinitionKind, Expression, ExpressionId,
-            ExpressionKind, Module,
+            Argument, AssignTarget, AssignmentScope, DefinitionId, DefinitionItem, DefinitionKind,
+            Expression, ExpressionId, ExpressionKind, Module,
         },
         interner::Symbol,
         naming::{
-            BindingId, BindingInfo, NamesLocal, find_exported_binding,
+            BindingId, BindingInfo, DocumentKind, NamesLocal, find_exported_binding,
             is_maybe_undefined_expression,
         },
         s4::{self, S4Constructor},
@@ -31,7 +34,7 @@ use {
             DocumentTypeToken, TypeTokenRole, render_named_type_ref, render_surface_type,
             type_tokens_in_range,
         },
-        types::{Annotation, CoreType, FunctionType, TypeAnnotationKind},
+        types::{Annotation, CoreType, FunctionType, RecordField, TypeAnnotationKind},
     },
     ropey::{Rope, iter::Chunks},
     std::{
@@ -57,8 +60,7 @@ pub fn hover(database: &dyn IdeDatabase, path: &Path, position: TextPosition) ->
         return Some(info);
     }
 
-    let target = smallest_expression_hover_target(module, point)
-        .or_else(|| smallest_definition_hover_target(module, point))?;
+    let target = hover_target_near(module, point)?;
 
     let mut contents = Vec::new();
     let mut debug = Vec::new();
@@ -132,8 +134,18 @@ fn type_annotation_hover(
     document: &Document,
     point: Point,
 ) -> Option<HoverInfo> {
-    let token = type_token_at(module, document, point)?;
+    let token = type_token_at(document, point)?;
     if token.role != TypeTokenRole::TypeName {
+        return None;
+    }
+
+    // The name token of the `@type`/`@alias` declaration itself keeps the richer definition-target
+    // hover (with the debug sections), so fall through when the cursor sits inside a definition the
+    // token names.
+    if module.definitions.iter().any(|definition| {
+        range_contains_position(definition.range, point)
+            && database.interner().resolve(definition.definition.name) == Some(token.text.as_str())
+    }) {
         return None;
     }
 
@@ -157,31 +169,55 @@ fn type_annotation_hover(
     })
 }
 
-// The type-notation token under the cursor, if the cursor is inside a `#:` annotation. The containing
-// annotation is found first (it carries a document range), then its notation is re-lexed to locate the
-// individual token the cursor points at.
-fn type_token_at(module: &Module, document: &Document, point: Point) -> Option<DocumentTypeToken> {
-    let annotation_range = annotation_range_at(module, point)?;
+// The type-notation token under the cursor, if the cursor is inside a `#:` annotation block. The
+// containing block is located textually (contiguous `#:` comment lines), then its notation is re-lexed
+// to find the individual token the cursor points at. Locating the block from the text rather than from
+// lowered annotation ranges covers every annotation position — expression-attached annotations,
+// `@type`/`@alias` definition bodies (which attach to no expression), and blocks that fail to parse.
+// Containment accepts the token's right edge, so a cursor sitting just after a name still hits it.
+fn type_token_at(document: &Document, point: Point) -> Option<DocumentTypeToken> {
+    let annotation_range = annotation_block_range_at(document.rope(), point)?;
     type_tokens_in_range(document.rope(), annotation_range)
         .into_iter()
-        .find(|token| range_contains_position(token.range, point))
+        .find(|token| token_contains_position(token.range, point))
 }
 
-// The range of the `#:` expression annotation containing the cursor. Only expression annotations are
-// considered: a `@type`/`@alias` declaration keeps its richer definition-target hover (with the debug
-// sections), whereas a *use* of a type name inside an annotation has no other hover to offer.
-fn annotation_range_at(module: &Module, point: Point) -> Option<Range> {
-    module
-        .arena
-        .expressions()
-        .iter()
-        .filter_map(|expression| {
-            expression
-                .annotation
-                .as_ref()
-                .map(|annotation| annotation.range())
-        })
-        .find(|range| range_contains_position(*range, point))
+// The document range of the whole `#:` comment block containing the cursor: the cursor's own `#:`
+// line extended over the contiguous `#:` lines above and below it (a multi-line annotation is one
+// block; the type-notation re-lexer skips any line without the prefix, so over-approximation is safe).
+fn annotation_block_range_at(rope: &Rope, point: Point) -> Option<Range> {
+    if !is_annotation_line(rope, point.row) {
+        return None;
+    }
+
+    let mut first_row = point.row;
+    while first_row > 0 && is_annotation_line(rope, first_row - 1) {
+        first_row -= 1;
+    }
+    let mut last_row = point.row;
+    while is_annotation_line(rope, last_row + 1) {
+        last_row += 1;
+    }
+
+    annotation_block_range(rope, first_row, last_row)
+}
+
+fn annotation_block_range(rope: &Rope, first_row: usize, last_row: usize) -> Option<Range> {
+    let start_byte = rope.try_line_to_byte(first_row).ok()?;
+    let last_line_start = rope.try_line_to_byte(last_row).ok()?;
+    let last_line_length = rope.get_line(last_row)?.len_bytes();
+    let end_byte = last_line_start + last_line_length;
+    Some(Range {
+        start_byte,
+        end_byte,
+        start_point: Point::new(first_row, 0),
+        end_point: Point::new(last_row, last_line_length),
+    })
+}
+
+fn is_annotation_line(rope: &Rope, row: usize) -> bool {
+    rope.get_line(row)
+        .is_some_and(|line| line.to_string().trim_start().starts_with("#:"))
 }
 
 // The `@type`/`@alias` declaration of `name` within a single module. `None` when the module declares no
@@ -217,7 +253,13 @@ pub fn inlay_hints(
 
     let mut hints = Vec::new();
     for expression in module.arena.expressions() {
-        let ExpressionKind::Assign { target, .. } = &expression.kind else {
+        // Only plain variable bindings are hinted; a replacement form (`x[i] <- v`) updates an
+        // existing value whose binding is hinted at its own definition.
+        let ExpressionKind::Assign {
+            target: AssignTarget::Variable { range: target, .. },
+            ..
+        } = &expression.kind
+        else {
             continue;
         };
         if let Some(viewport) = &viewport
@@ -235,15 +277,14 @@ pub fn inlay_hints(
             continue;
         }
 
-        let name = database.interner().resolve(*target).unwrap_or_default();
         let label = format!(
             ": {}",
             render_generalized_type(database.interner(), core_type)
         );
         hints.push(InlayHint {
             position: TextPosition {
-                line_index: expression.range.start_point.row,
-                character_index: expression.range.start_point.column + name.len(),
+                line_index: target.end_point.row,
+                character_index: target.end_point.column,
             },
             label,
         });
@@ -612,9 +653,18 @@ fn render_expression_hover(database: &dyn IdeDatabase, expression: &Expression) 
             "Block(expressions: {}, trailing_semicolon: {has_trailing_semicolon})",
             expressions.len()
         ),
-        ExpressionKind::Assign { target, .. } => {
-            let name = database.interner().resolve(*target).unwrap_or("<unknown>");
-            format!("Assign({name})")
+        ExpressionKind::Assign { target, scope, .. } => {
+            let scope_suffix = match scope {
+                AssignmentScope::Local => "",
+                AssignmentScope::Enclosing => ", enclosing",
+            };
+            match target {
+                AssignTarget::Variable { symbol, .. } => {
+                    let name = database.interner().resolve(*symbol).unwrap_or("<unknown>");
+                    format!("Assign({name}{scope_suffix})")
+                }
+                AssignTarget::Replacement { .. } => format!("Assign(<replacement>{scope_suffix})"),
+            }
         }
         ExpressionKind::Function { parameters, .. } => {
             let parameters = parameters
@@ -658,6 +708,8 @@ fn render_expression_hover(database: &dyn IdeDatabase, expression: &Expression) 
             let name = database.interner().resolve(*name).unwrap_or("<unknown>");
             format!("Dollar({name})")
         }
+        ExpressionKind::Break => "Break".to_owned(),
+        ExpressionKind::Next => "Next".to_owned(),
         ExpressionKind::Unsupported => "Unsupported".to_owned(),
     });
 
@@ -786,12 +838,6 @@ pub fn definition(
     path: &Path,
     position: TextPosition,
 ) -> Option<Vec<Location>> {
-    // A type name inside a `#:` annotation is invisible to the naming analysis, so it is resolved to
-    // its `@type`/`@alias` declaration structurally before the identifier path runs.
-    if let Some(location) = type_name_definition_at(database, path, position) {
-        return Some(vec![location]);
-    }
-
     let occurrences =
         symbol_occurrences_at(database, path, position, OccurrenceScope::Declaration)?;
     let mut definitions = occurrences
@@ -818,48 +864,6 @@ fn cursor_is_local_slot(database: &dyn IdeDatabase, path: &Path, position: TextP
     identifier_at_position(document.tree(), position)
         .and_then(|identifier| symbol_target_for_identifier(database, document_id, identifier))
         .is_some_and(|target| matches!(target, SymbolTarget::Local { .. }))
-}
-
-fn type_name_definition_at(
-    database: &dyn IdeDatabase,
-    path: &Path,
-    position: TextPosition,
-) -> Option<Location> {
-    let document_id = database.document_id_for_path(path)?;
-    let module = database.module(document_id)?;
-    let document = database.document_by_id(document_id)?;
-    let point = Point::new(position.line_index, position.character_index);
-
-    let token = type_token_at(module, document, point)?;
-    if token.role != TypeTokenRole::TypeName {
-        return None;
-    }
-
-    let name = database.interner().symbol_for(&token.text)?;
-    let (definition_document_id, definition) = type_definition_site(database, name)?;
-    let definition_path = database
-        .path_for_document_id(definition_document_id)?
-        .to_path_buf();
-    Some(Location {
-        path: definition_path,
-        range: text_range(definition.range),
-    })
-}
-
-// The document and `@type`/`@alias` `DefinitionItem` that declares `name`, searched across every package
-// module. Goto-definition on a type name resolves cross-file, so this scans all modules the database
-// holds rather than a single one.
-fn type_definition_site(
-    database: &dyn IdeDatabase,
-    name: Symbol,
-) -> Option<(DocumentId, DefinitionItem)> {
-    database
-        .all_document_ids()
-        .into_iter()
-        .find_map(|document_id| {
-            let module = database.module(document_id)?;
-            type_definition_in(module, name).map(|definition| (document_id, definition.clone()))
-        })
 }
 
 //
@@ -892,19 +896,275 @@ pub fn rename(
     new_name: &str,
 ) -> Option<RenameResult> {
     let occurrences = symbol_occurrences_at(database, path, position, OccurrenceScope::All)?;
-    let mut edits = BTreeMap::<PathBuf, Vec<RenameEdit>>::new();
+    let mut edits = BTreeMap::<PathBuf, Vec<TextEdit>>::new();
 
     for occurrence in occurrences {
         edits
             .entry(occurrence.location.path)
             .or_default()
-            .push(RenameEdit {
+            .push(TextEdit {
                 range: occurrence.location.range,
                 replacement_text: new_name.to_owned(),
             });
     }
 
     (!edits.is_empty()).then_some(RenameResult { edits })
+}
+
+//
+// Code actions
+//
+
+// The static quickfixes and source actions for a document range: removing or dot-prefixing an unused
+// assignment (from the same reaching-write facts the `unused` diagnostic reports), and inserting an
+// inferred `#:` type annotation above an unannotated binding (the text the inlay hint shows). All
+// edits are computed eagerly — no resolve round-trip.
+pub fn code_actions(database: &dyn IdeDatabase, path: &Path, range: TextRange) -> Vec<CodeAction> {
+    let Some(document_id) = database.document_id_for_path(path) else {
+        return Vec::new();
+    };
+    let Some(document) = database.document_by_id(document_id) else {
+        return Vec::new();
+    };
+    let Some(module) = database.module(document_id) else {
+        return Vec::new();
+    };
+
+    let mut actions = Vec::new();
+
+    if let Some(naming) = database.document_naming(document_id) {
+        for unused in &naming.unused_assignments {
+            if !expression_overlaps_viewport(unused.range, &range) {
+                continue;
+            }
+            let Some(name) = database.interner().resolve(unused.symbol) else {
+                continue;
+            };
+            let Some((assignment_range, target_range)) =
+                unused_assignment_ranges(module, unused.range)
+            else {
+                continue;
+            };
+
+            actions.push(CodeAction {
+                title: format!("Remove unused assignment of `{name}`"),
+                kind: CodeActionKind::RemoveUnusedAssignment,
+                edits: single_file_edit(
+                    path,
+                    removal_edit_range(document.rope(), assignment_range),
+                    String::new(),
+                ),
+            });
+            actions.push(CodeAction {
+                title: format!("Prefix `{name}` with `.` to keep it"),
+                kind: CodeActionKind::PrefixDot,
+                edits: single_file_edit(
+                    path,
+                    collapsed_range(target_range.start_point),
+                    ".".to_owned(),
+                ),
+            });
+        }
+    }
+
+    // Annotation inserts: the cursor's binding as a quickfix, plus one whole-file source action
+    // covering every eligible binding.
+    let mut all_annotation_edits = Vec::new();
+    for expression in module.arena.expressions() {
+        let Some(edit) = annotation_insert_edit(database, document_id, document, expression) else {
+            continue;
+        };
+        all_annotation_edits.push(edit.clone());
+        if expression_overlaps_viewport(expression.range, &range)
+            && let ExpressionKind::Assign {
+                target: AssignTarget::Variable { symbol, .. },
+                ..
+            } = &expression.kind
+        {
+            let name = database.interner().resolve(*symbol).unwrap_or("<unknown>");
+            actions.push(CodeAction {
+                title: format!("Add inferred type annotation for `{name}`"),
+                kind: CodeActionKind::InsertInferredAnnotation,
+                edits: BTreeMap::from([(path.to_path_buf(), vec![edit])]),
+            });
+        }
+    }
+    if !all_annotation_edits.is_empty() {
+        actions.push(CodeAction {
+            title: "Add inferred type annotations for the whole file".to_owned(),
+            kind: CodeActionKind::AddMissingAnnotations,
+            edits: BTreeMap::from([(path.to_path_buf(), all_annotation_edits)]),
+        });
+    }
+
+    actions
+}
+
+// The assignment expression an unused-write range points at, tolerating either the whole-assignment
+// range or the target-name range as the recorded site. Returns the whole assignment's range and the
+// written name's own range.
+fn unused_assignment_ranges(module: &Module, unused_range: Range) -> Option<(Range, Range)> {
+    module.arena.expressions().iter().find_map(|expression| {
+        let ExpressionKind::Assign {
+            target: AssignTarget::Variable { range, .. },
+            ..
+        } = &expression.kind
+        else {
+            return None;
+        };
+        (expression.range == unused_range || *range == unused_range)
+            .then_some((expression.range, *range))
+    })
+}
+
+// The range removing an assignment deletes: the whole line(s) — trailing newline included — when the
+// assignment is the only content on them, otherwise exactly the assignment's own range.
+fn removal_edit_range(rope: &Rope, range: Range) -> TextRange {
+    let only_content_on_lines = line_prefix_is_blank(rope, range.start_point)
+        && line_suffix_is_blank(rope, range.end_point);
+    if !only_content_on_lines {
+        return text_range(range);
+    }
+
+    let last_row = rope.len_lines().saturating_sub(1);
+    if range.end_point.row < last_row {
+        return TextRange {
+            start: TextPosition {
+                line_index: range.start_point.row,
+                character_index: 0,
+            },
+            end: TextPosition {
+                line_index: range.end_point.row + 1,
+                character_index: 0,
+            },
+        };
+    }
+    TextRange {
+        start: TextPosition {
+            line_index: range.start_point.row,
+            character_index: 0,
+        },
+        end: TextPosition {
+            line_index: range.end_point.row,
+            character_index: rope
+                .get_line(range.end_point.row)
+                .map(|line| line.len_bytes())
+                .unwrap_or(range.end_point.column),
+        },
+    }
+}
+
+fn line_prefix_is_blank(rope: &Rope, point: Point) -> bool {
+    rope.get_line(point.row).is_some_and(|line| {
+        line.to_string()
+            .get(..point.column)
+            .is_some_and(|prefix| prefix.trim().is_empty())
+    })
+}
+
+fn line_suffix_is_blank(rope: &Rope, point: Point) -> bool {
+    rope.get_line(point.row).is_some_and(|line| {
+        line.to_string()
+            .get(point.column..)
+            .is_some_and(|suffix| suffix.trim().is_empty())
+    })
+}
+
+// The `#: <inferred type>` line inserted above an unannotated binding, indented like the binding's
+// line. `None` when the binding is annotated, is not a plain variable binding, does not start its
+// line (inserting a line above would detach it), or has no hintable checked type — the same
+// hintability rule the inlay hints use, so the inserted text is exactly the hint's.
+fn annotation_insert_edit(
+    database: &dyn IdeDatabase,
+    document_id: DocumentId,
+    document: &Document,
+    expression: &Expression,
+) -> Option<TextEdit> {
+    let ExpressionKind::Assign {
+        target: AssignTarget::Variable { .. },
+        ..
+    } = &expression.kind
+    else {
+        return None;
+    };
+    if expression.annotation.is_some() {
+        return None;
+    }
+    if !line_prefix_is_blank(document.rope(), expression.range.start_point) {
+        return None;
+    }
+    let core_type = database.checked_expression_type(document_id, expression.id)?;
+    if !is_hintable_type(core_type) {
+        return None;
+    }
+
+    let line = document.rope().get_line(expression.range.start_point.row)?;
+    let indentation = line
+        .to_string()
+        .get(..expression.range.start_point.column)?
+        .to_owned();
+    let rendered = render_generalized_type(database.interner(), core_type);
+    Some(TextEdit {
+        range: collapsed_range(Point::new(expression.range.start_point.row, 0)),
+        replacement_text: format!("{indentation}#: {rendered}\n"),
+    })
+}
+
+fn single_file_edit(
+    path: &Path,
+    range: TextRange,
+    replacement_text: String,
+) -> BTreeMap<PathBuf, Vec<TextEdit>> {
+    BTreeMap::from([(
+        path.to_path_buf(),
+        vec![TextEdit {
+            range,
+            replacement_text,
+        }],
+    )])
+}
+
+fn collapsed_range(point: Point) -> TextRange {
+    let position = TextPosition {
+        line_index: point.row,
+        character_index: point.column,
+    };
+    TextRange {
+        start: position,
+        end: position,
+    }
+}
+
+//
+// Type definition
+//
+
+// Goto-type-definition: the nominal (`@type`-declared) type of the expression under the cursor,
+// resolved to its declaration. Only a directly nominal checked type navigates — a structural type
+// has no declaration to go to.
+pub fn type_definition(
+    database: &dyn IdeDatabase,
+    path: &Path,
+    position: TextPosition,
+) -> Option<Vec<Location>> {
+    let document_id = database.document_id_for_path(path)?;
+    let module = database.module(document_id)?;
+    let point = Point::new(position.line_index, position.character_index);
+
+    let HoverTarget::Expression(expression_id, _) = hover_target_near(module, point)? else {
+        return None;
+    };
+    let core_type = database.checked_expression_type(document_id, expression_id)?;
+    let CoreType::Nominal(name, _) = core_type else {
+        return None;
+    };
+    let name = database.interner().resolve(*name)?.to_owned();
+
+    let declarations = type_name_occurrences(database, &name, OccurrenceScope::Declaration)
+        .into_iter()
+        .map(|occurrence| occurrence.location)
+        .collect::<Vec<_>>();
+    (!declarations.is_empty()).then_some(declarations)
 }
 
 //
@@ -948,6 +1208,16 @@ fn symbol_occurrences_at(
 ) -> Option<Vec<SymbolOccurrence>> {
     let document_id = database.document_id_for_path(path)?;
     let document = database.document_by_id(document_id)?;
+    let point = Point::new(position.line_index, position.character_index);
+
+    // A type name inside a `#:` annotation is invisible to the naming analysis, so it resolves
+    // structurally against the project's `@type`/`@alias` declarations and every annotation's re-lexed
+    // notation — one occurrence path shared by goto-definition, references, and rename.
+    if let Some(token) = type_token_at(document, point)
+        && token.role == TypeTokenRole::TypeName
+    {
+        return Some(type_name_occurrences(database, &token.text, scope));
+    }
 
     // Identifiers resolve through the naming analysis (the common case).
     if let Some(identifier) = identifier_at_position(document.tree(), position)
@@ -959,7 +1229,6 @@ fn symbol_occurrences_at(
     // S4 class/generic/method names are string literals, invisible to the naming analysis, so they
     // are resolved structurally instead. This keeps goto-definition, references, and rename on a
     // single occurrence-scanning path.
-    let point = Point::new(position.line_index, position.character_index);
     if let Some(target) = s4_symbol_at(document.tree(), document.rope(), point) {
         return Some(s4_occurrences(database, &target, scope));
     }
@@ -1154,6 +1423,93 @@ fn symbol_target_for_binding(
 }
 
 //
+// Annotation type names
+//
+// A `@type`/`@alias` name and its uses live inside `#:` comments, so the identifier machinery never
+// sees them. Occurrences come from re-lexing every annotation block of every document: the declaration
+// is the name token following a `@type`/`@alias` directive, and every other same-spelled type-name
+// token is a reference. A block that binds the name as a type parameter (a `<T>` binder) shadows it,
+// so that block's matching tokens are skipped — rename must never rewrite a shadowed use.
+
+fn type_name_occurrences(
+    database: &dyn IdeDatabase,
+    name: &str,
+    scope: OccurrenceScope,
+) -> Vec<SymbolOccurrence> {
+    let mut occurrences = Vec::new();
+    for document_id in database.all_document_ids() {
+        let path = database
+            .path_for_document_id(document_id)
+            .unwrap_or_else(|| panic!("missing path for document {document_id:?}"))
+            .to_path_buf();
+        let document = database
+            .document_by_id(document_id)
+            .unwrap_or_else(|| panic!("missing document {document_id:?}"));
+
+        for block in annotation_blocks(document.rope()) {
+            let tokens = type_tokens_in_range(document.rope(), block);
+            if tokens
+                .iter()
+                .any(|token| token.role == TypeTokenRole::TypeParameter && token.text == name)
+            {
+                continue;
+            }
+
+            // The token right after a `@type`/`@alias` directive is the declared name.
+            let mut declaration_pending = false;
+            for token in tokens {
+                match token.role {
+                    TypeTokenRole::Directive => {
+                        declaration_pending = matches!(token.text.as_str(), "@type" | "@alias");
+                    }
+                    TypeTokenRole::TypeName => {
+                        let is_declaration = declaration_pending;
+                        declaration_pending = false;
+                        if token.text != name
+                            || (scope == OccurrenceScope::Declaration && !is_declaration)
+                        {
+                            continue;
+                        }
+                        occurrences.push(SymbolOccurrence {
+                            location: Location {
+                                path: path.clone(),
+                                range: text_range(token.range),
+                            },
+                            is_declaration,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    occurrences
+}
+
+// Every `#:` comment block of the document (maximal runs of contiguous `#:` lines), for the
+// whole-document annotation scans (type-name references, rename).
+fn annotation_blocks(rope: &Rope) -> Vec<Range> {
+    let mut blocks = Vec::new();
+    let mut row = 0;
+    let total_lines = rope.len_lines();
+    while row < total_lines {
+        if !is_annotation_line(rope, row) {
+            row += 1;
+            continue;
+        }
+        let first_row = row;
+        while row + 1 < total_lines && is_annotation_line(rope, row + 1) {
+            row += 1;
+        }
+        if let Some(range) = annotation_block_range(rope, first_row, row) {
+            blocks.push(range);
+        }
+        row += 1;
+    }
+    blocks
+}
+
+//
 // S4 symbols
 //
 // S4 class, generic, and method names are written as string literals inside `setClass`/`setGeneric`/
@@ -1169,16 +1525,12 @@ pub fn cursor_is_s4_symbol(document: &Document, position: TextPosition) -> bool 
     s4_symbol_at(document.tree(), document.rope(), point).is_some()
 }
 
-// Whether the cursor sits on a type name inside a `#:` annotation. Goto-definition on such a name
-// resolves cross-file, so the engine uses this to widen its definition prime to every package module.
-pub fn cursor_on_annotation_type_name(
-    module: &Module,
-    document: &Document,
-    position: TextPosition,
-) -> bool {
+// Whether the cursor sits on a type name inside a `#:` annotation. Goto-definition, references, and
+// rename on such a name resolve cross-file over re-lexed annotation text, so the engine uses this to
+// widen its prime to every document's parse.
+pub fn cursor_on_annotation_type_name(document: &Document, position: TextPosition) -> bool {
     let point = Point::new(position.line_index, position.character_index);
-    type_token_at(module, document, point)
-        .is_some_and(|token| token.role == TypeTokenRole::TypeName)
+    type_token_at(document, point).is_some_and(|token| token.role == TypeTokenRole::TypeName)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1353,6 +1705,20 @@ pub fn completion(
     let document = database.document_by_id(document_id)?;
     let rope = document.rope();
     let tree = document.tree();
+    let point = Point::new(position.line_index, position.character_index);
+
+    // A cursor inside a `#:` annotation completes type names, not R values.
+    if cursor_in_annotation_body(document, position) {
+        return annotation_completion(database, rope, point);
+    }
+
+    // A cursor inside a string literal completes typed record fields when the string subscripts a
+    // record (`x[["…"]]`) and is otherwise silent — R value names never resolve inside string
+    // content, so the default namespace would be pure noise there.
+    if string_node_at(tree, point).is_some() {
+        return subset2_string_completion(database, document_id, point);
+    }
+
     let (context, query) = extract_completion_context(position, rope)?;
 
     match context {
@@ -1366,9 +1732,7 @@ pub fn completion(
             )));
         }
         CompletionContext::Item => {
-            return Some(complete_result(rendered_query_matches(
-                tree, rope, ITEM_QUERY, &query,
-            )));
+            return Some(dollar_completion(database, document_id, position, &query));
         }
         CompletionContext::Namespace => {
             return Some(complete_result(rendered_query_matches(
@@ -1391,6 +1755,7 @@ pub fn completion(
                 label: (*keyword).to_owned(),
                 kind: CompletionItemKind::Keyword,
                 source: CompletionItemSource::Keyword,
+                detail: None,
             });
         }
     }
@@ -1413,8 +1778,29 @@ pub fn completion(
                 label: label.to_owned(),
                 kind,
                 source: CompletionItemSource::Global,
+                detail: None,
             });
         }
+    }
+
+    // The standard-library corpus, with each stub's scheme as the item detail. A project global of
+    // the same name outranks its stub at the deduplication step, mirroring how resolution shadows.
+    for (symbol, scheme) in database.stub_schemes() {
+        let Some(label) = database.interner().resolve(symbol) else {
+            continue;
+        };
+        if !query_matches(label, &query) {
+            continue;
+        }
+        items.push(CompletionItem {
+            label: label.to_owned(),
+            kind: match scheme.body {
+                CoreType::Function(_) => CompletionItemKind::Function,
+                _ => CompletionItemKind::Variable,
+            },
+            source: CompletionItemSource::Stdlib,
+            detail: Some(render_user_facing_scheme(database.interner(), scheme)),
+        });
     }
 
     deduplicate_completion_items(items, &query)
@@ -1473,6 +1859,11 @@ fn extract_completion_context(
                 || (!query.is_empty() && character.is_numeric())
             {
                 query.push(character);
+                // A name after a single `:` is the range operator's operand (`1:n`), not a pending
+                // namespace access, so completion resumes; only a bare trailing `:` stays undecided.
+                if context == CompletionContext::MaybeNamespace {
+                    context = CompletionContext::Default;
+                }
             } else {
                 context = match character {
                     '@' => CompletionContext::Field,
@@ -1492,6 +1883,261 @@ fn extract_completion_context(
             (context, query)
         },
     ))
+}
+
+//
+// Typed field completion (`record$…` and `record[["…"]]`)
+//
+
+// `subject$…` completion: when the subject's checked type is a record, its fields complete with
+// their rendered types; otherwise fall back to the textual scan over the document's other `$`
+// accesses. A bare `subject$` (no field character yet) parses with no `$` expression to type, so
+// the fallback marks itself incomplete — the client then re-queries on the next keystroke, when the
+// partially-typed field name makes the subject typeable.
+fn dollar_completion(
+    database: &dyn IdeDatabase,
+    document_id: DocumentId,
+    position: TextPosition,
+    query: &str,
+) -> CompletionResult {
+    if let Some(items) = typed_dollar_field_items(database, document_id, position, query) {
+        return complete_result(items);
+    }
+
+    let Some(document) = database.document_by_id(document_id) else {
+        return complete_result(Vec::new());
+    };
+    let mut result = complete_result(rendered_query_matches(
+        document.tree(),
+        document.rope(),
+        ITEM_QUERY,
+        query,
+    ));
+    result.is_incomplete = query.is_empty();
+    result
+}
+
+fn typed_dollar_field_items(
+    database: &dyn IdeDatabase,
+    document_id: DocumentId,
+    position: TextPosition,
+    query: &str,
+) -> Option<Vec<CompletionItem>> {
+    let document = database.document_by_id(document_id)?;
+    let module = database.module(document_id)?;
+
+    // The `$` sits directly before the query characters; the innermost `$` expression covering it
+    // owns the field position, and that expression's subject is what must be record-typed
+    // (`a$b$…` completes the fields of `a$b`, not of `a`).
+    let line_start = document.rope().try_line_to_byte(position.line_index).ok()?;
+    let operator_byte = (line_start + position.character_index).checked_sub(query.len() + 1)?;
+    let dollar = module
+        .arena
+        .expressions()
+        .iter()
+        .filter(|expression| {
+            matches!(expression.kind, ExpressionKind::Dollar { .. })
+                && expression.range.start_byte <= operator_byte
+                && operator_byte < expression.range.end_byte
+        })
+        .min_by_key(|expression| expression.range.end_byte - expression.range.start_byte)?;
+    let ExpressionKind::Dollar { value, .. } = &dollar.kind else {
+        return None;
+    };
+
+    let subject_type = database.checked_expression_type(document_id, *value)?;
+    let fields = record_fields(subject_type)?;
+    Some(field_completion_items(database, fields, query))
+}
+
+// Completion inside the string subscript of `subject[["…"]]`: the subject's record fields complete
+// as string contents. Inside any other string there is nothing to offer, so the answer is `None`.
+fn subset2_string_completion(
+    database: &dyn IdeDatabase,
+    document_id: DocumentId,
+    point: Point,
+) -> Option<CompletionResult> {
+    let document = database.document_by_id(document_id)?;
+    let string_node = string_node_at(document.tree(), point)?;
+
+    let argument = string_node.parent()?;
+    if argument.kind_id() != crate::tree::kind::ARGUMENT {
+        return None;
+    }
+    let arguments = argument.parent()?;
+    if arguments.kind_id() != crate::tree::kind::ARGUMENTS {
+        return None;
+    }
+    let subset2 = arguments.parent()?;
+    if subset2.kind_id() != crate::tree::kind::SUBSET2 {
+        return None;
+    }
+    let subject = subset2.child_by_field_id(crate::tree::field::FUNCTION)?;
+
+    let module = database.module(document_id)?;
+    let subject_id = module.expression_id_by_range(subject.range())?;
+    let subject_type = database.checked_expression_type(document_id, subject_id)?;
+    let fields = record_fields(subject_type)?;
+
+    // The query is the string content already typed before the cursor.
+    let content_start = string_node
+        .child_by_field_id(crate::tree::field::OPEN)
+        .map(|open| open.end_byte())?;
+    let cursor_byte = document.rope().try_line_to_byte(point.row).ok()? + point.column;
+    let query = if cursor_byte > content_start {
+        document
+            .rope()
+            .byte_slice(content_start..cursor_byte)
+            .to_string()
+    } else {
+        String::new()
+    };
+
+    Some(complete_result(field_completion_items(
+        database, fields, &query,
+    )))
+}
+
+// The string literal containing `point`, if any (walking up from the token under the cursor, so a
+// position on the quotes or the content both count).
+fn string_node_at(tree: &Tree, point: Point) -> Option<Node<'_>> {
+    let node = tree.root_node().descendant_for_point_range(point, point)?;
+    std::iter::successors(Some(node), |current| current.parent())
+        .find(|current| current.kind_id() == crate::tree::kind::STRING)
+}
+
+fn record_fields(core_type: &CoreType) -> Option<&[RecordField<CoreType>]> {
+    match core_type {
+        CoreType::Record(fields) => Some(fields),
+        _ => None,
+    }
+}
+
+// Field items keep the record's declared order rather than re-ranking; a record rarely has enough
+// fields for ranking to matter, and declaration order is the order the user wrote.
+fn field_completion_items(
+    database: &dyn IdeDatabase,
+    fields: &[RecordField<CoreType>],
+    query: &str,
+) -> Vec<CompletionItem> {
+    fields
+        .iter()
+        .filter_map(|field| {
+            let label = database.interner().resolve(field.name)?.to_owned();
+            if !query_matches(&label, query) {
+                return None;
+            }
+            Some(CompletionItem {
+                label,
+                kind: CompletionItemKind::Field,
+                source: CompletionItemSource::Field,
+                detail: Some(render_generalized_type(database.interner(), &field.value)),
+            })
+        })
+        .collect()
+}
+
+//
+// Annotation type-name completion
+//
+
+// Whether the cursor sits inside the body of a `#:` annotation comment. The engine's completion
+// priming uses the same predicate to decide it must prime every module (type-name completion lists
+// the project's `@type`/`@alias` declarations, which may live in any file).
+pub fn cursor_in_annotation_body(document: &Document, position: TextPosition) -> bool {
+    annotation_query_at(
+        document.rope(),
+        Point::new(position.line_index, position.character_index),
+    )
+    .is_some()
+}
+
+// The partially-typed word before the cursor inside a `#:` annotation body, or `None` when the
+// cursor is not in one — or is typing a directive (`@…`), which is not a type position.
+fn annotation_query_at(rope: &Rope, point: Point) -> Option<String> {
+    let line = rope.get_line(point.row)?.to_string();
+    let trimmed_start = line.len() - line.trim_start().len();
+    if !line[trimmed_start..].starts_with("#:") {
+        return None;
+    }
+    let body_start = trimmed_start + "#:".len();
+    if point.column < body_start {
+        return None;
+    }
+
+    let prefix = line.get(..point.column)?;
+    let query_start = prefix
+        .char_indices()
+        .rev()
+        .take_while(|(_, character)| {
+            character.is_alphanumeric() || *character == '_' || *character == '.'
+        })
+        .last()
+        .map(|(index, _)| index)
+        .unwrap_or(prefix.len());
+    if prefix[..query_start].ends_with('@') {
+        return None;
+    }
+
+    Some(prefix[query_start..].to_owned())
+}
+
+// The type names a `#:` annotation position can mention: the builtin names plus every project
+// `@type`/`@alias` declaration.
+const BUILTIN_TYPE_NAMES: &[&str] = &[
+    "Any",
+    "NULL",
+    "Unknown",
+    "character",
+    "complex",
+    "double",
+    "fn",
+    "integer",
+    "list",
+    "logical",
+    "raw",
+];
+
+fn annotation_completion(
+    database: &dyn IdeDatabase,
+    rope: &Rope,
+    point: Point,
+) -> Option<CompletionResult> {
+    let query = annotation_query_at(rope, point)?;
+    let mut items = Vec::new();
+
+    for name in BUILTIN_TYPE_NAMES {
+        if query_matches(name, &query) {
+            items.push(CompletionItem {
+                label: (*name).to_owned(),
+                kind: CompletionItemKind::Type,
+                source: CompletionItemSource::Type,
+                detail: None,
+            });
+        }
+    }
+
+    for document_id in database.all_document_ids() {
+        let Some(module) = database.module(document_id) else {
+            continue;
+        };
+        for definition in &module.definitions {
+            let Some(label) = database.interner().resolve(definition.definition.name) else {
+                continue;
+            };
+            if !query_matches(label, &query) {
+                continue;
+            }
+            items.push(CompletionItem {
+                label: label.to_owned(),
+                kind: CompletionItemKind::Type,
+                source: CompletionItemSource::Type,
+                detail: Some(definition.definition.kind.directive_name().to_owned()),
+            });
+        }
+    }
+
+    deduplicate_completion_items(items, &query)
 }
 
 fn rendered_query_matches(
@@ -1525,6 +2171,7 @@ fn rendered_query_matches(
             label,
             kind: CompletionItemKind::Variable,
             source: CompletionItemSource::Local,
+            detail: None,
         })
         .collect()
 }
@@ -1566,6 +2213,7 @@ fn local_completion_items(
                         label,
                         kind: CompletionItemKind::Variable,
                         source: CompletionItemSource::Local,
+                        detail: None,
                     });
                 }
             }
@@ -1574,6 +2222,18 @@ fn local_completion_items(
         if let Some(body) = function_node.child_by_field_id(crate::tree::field::BODY) {
             collect_local_bindings_in_body(document.rope(), body, query, &mut items);
         }
+    }
+
+    // A script's top-level bindings are document-local slots in scope at every position, so they
+    // complete like locals. Package files skip this: their top-level bindings arrive through the
+    // package-global namespace instead.
+    if database.document_kind(document_id) == Some(DocumentKind::Script) {
+        collect_local_bindings_in_body(
+            document.rope(),
+            document.tree().root_node(),
+            query,
+            &mut items,
+        );
     }
 
     items
@@ -1603,10 +2263,20 @@ fn collect_local_bindings_in_body(
 
                 let label = rope.byte_slice(lhs.byte_range()).to_string();
                 if query_matches(&label, query) {
+                    let kind = match child
+                        .child_by_field_id(crate::tree::field::RHS)
+                        .map(|rhs| rhs.kind_id())
+                    {
+                        Some(crate::tree::kind::FUNCTION_DEFINITION) => {
+                            CompletionItemKind::Function
+                        }
+                        _ => CompletionItemKind::Variable,
+                    };
                     items.push(CompletionItem {
                         label,
-                        kind: CompletionItemKind::Variable,
+                        kind,
                         source: CompletionItemSource::Local,
+                        detail: None,
                     });
                 }
             }
@@ -1624,6 +2294,7 @@ fn collect_local_bindings_in_body(
                         label,
                         kind: CompletionItemKind::Variable,
                         source: CompletionItemSource::Local,
+                        detail: None,
                     });
                 }
             }
@@ -1740,6 +2411,30 @@ fn deduplicate_completion_items(
 // Utils
 //
 
+// The hover/type-definition target at the cursor. Ranges are end-exclusive, so a cursor at the very
+// end of an expression (`foo|` at the end of a line) has no containing target; retry one column left
+// and accept only a target that in fact ends at the cursor.
+fn hover_target_near(module: &Module, point: Point) -> Option<HoverTarget> {
+    if let Some(target) = hover_target_at(module, point) {
+        return Some(target);
+    }
+    if point.column == 0 {
+        return None;
+    }
+    let previous = Point::new(point.row, point.column - 1);
+    hover_target_at(module, previous).filter(|target| {
+        let range = match target {
+            HoverTarget::Expression(_, range) | HoverTarget::Definition(_, range) => *range,
+        };
+        range.end_point == point
+    })
+}
+
+fn hover_target_at(module: &Module, point: Point) -> Option<HoverTarget> {
+    smallest_expression_hover_target(module, point)
+        .or_else(|| smallest_definition_hover_target(module, point))
+}
+
 fn smallest_expression_hover_target(module: &Module, position: Point) -> Option<HoverTarget> {
     module
         .arena
@@ -1773,8 +2468,25 @@ fn smallest_definition_hover_target(module: &Module, position: Point) -> Option<
 
 fn identifier_at_position<'tree>(tree: &'tree Tree, position: TextPosition) -> Option<Node<'tree>> {
     let point = Point::new(position.line_index, position.character_index);
-    let node = node_at_position(tree, point)?;
-    (node.kind_id() == crate::tree::kind::IDENTIFIER).then_some(node)
+    if let Some(node) = node_at_position(tree, point)
+        && node.kind_id() == crate::tree::kind::IDENTIFIER
+    {
+        return Some(node);
+    }
+
+    // Ranges are end-exclusive, so a cursor sitting at an identifier's right edge (`foo|`) misses it;
+    // retry one column left and accept only a node that in fact ends at the cursor.
+    if position.character_index > 0 {
+        let previous = Point::new(position.line_index, position.character_index - 1);
+        if let Some(node) = node_at_position(tree, previous)
+            && node.kind_id() == crate::tree::kind::IDENTIFIER
+            && node.end_position() == point
+        {
+            return Some(node);
+        }
+    }
+
+    None
 }
 
 fn node_at_position<'tree>(tree: &'tree Tree, point: Point) -> Option<Node<'tree>> {
@@ -1870,6 +2582,13 @@ fn hover_target_width(range: Range) -> usize {
 
 fn range_contains_position(range: Range, position: Point) -> bool {
     !point_before(position, range.start_point) && point_before(position, range.end_point)
+}
+
+// Containment for token-under-cursor lookups: unlike the end-exclusive range rule, the token's right
+// edge counts, so a cursor just after a type name (`Person|`) still hits it. Between two adjacent
+// tokens the earlier one wins (lookups scan in source order).
+fn token_contains_position(range: Range, position: Point) -> bool {
+    !point_before(position, range.start_point) && !point_before(range.end_point, position)
 }
 
 fn point_before(left: Point, right: Point) -> bool {

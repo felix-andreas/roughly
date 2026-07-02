@@ -151,7 +151,8 @@ pub enum ExpressionKind {
         has_trailing_semicolon: bool,
     },
     Assign {
-        target: Symbol,
+        target: AssignTarget,
+        scope: AssignmentScope,
         value: ExpressionId,
     },
     Function {
@@ -204,7 +205,141 @@ pub enum ExpressionKind {
         value: ExpressionId,
         name: Symbol,
     },
+    Break,
+    Next,
     Unsupported,
+}
+
+// Which environment an assignment writes. R's `<-`/`=`/`->` mutate the current frame; `<<-`/`->>`
+// walk the lexical chain outward past the current frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssignmentScope {
+    Local,
+    Enclosing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssignTarget {
+    // `name <- value`. `range` is the name token itself — for right assignment (`value -> name`)
+    // the name sits at the end of the expression, so the expression range cannot locate it.
+    Variable { symbol: Symbol, range: Range },
+    // A replacement form such as `x[i] <- v`, `x$a <- v`, or `names(x) <- v`. `lhs` is the fully
+    // lowered target expression (the read of the base variable plus every index/argument
+    // expression), so naming and typecheck visit it like ordinary code; the written variable is the
+    // symbol at the root of that expression's accessor spine (`replacement_base`).
+    Replacement { lhs: ExpressionId },
+}
+
+impl ExpressionKind {
+    // The plain `name <- value` / `name = value` / `value -> name` shape: the only assignment form
+    // that defines a package global at top level and exports through winner semantics.
+    // Super-assignments and replacement forms never define package globals, so every walker that
+    // enumerates package definitions must filter through this one helper (the engine crate mirrors
+    // these walks and relies on it staying the single membership rule).
+    pub fn simple_assignment_target(&self) -> Option<Symbol> {
+        match self {
+            ExpressionKind::Assign {
+                target: AssignTarget::Variable { symbol, .. },
+                scope: AssignmentScope::Local,
+                ..
+            } => Some(*symbol),
+            _ => None,
+        }
+    }
+
+    // Any assignment to a plain variable name, regardless of scope — used to phrase diagnostics
+    // against the assigned name (`x` in both `x <- v` and `x <<- v`).
+    pub fn assignment_variable(&self) -> Option<Symbol> {
+        match self {
+            ExpressionKind::Assign {
+                target: AssignTarget::Variable { symbol, .. },
+                ..
+            } => Some(*symbol),
+            _ => None,
+        }
+    }
+}
+
+// The base variable of a replacement-form target: the symbol expression at the root of the
+// accessor spine. `x$a[i] <- v` descends `Subset` → `Dollar` → `Symbol(x)`; a replacement call
+// like `names(x) <- v` mutates its first argument, so `Call` descends there. Returns `None` when
+// the spine does not bottom out in a plain name (for example `f(x)$a <- v`), which R itself
+// rejects at run time; such targets are refused loudly rather than silently mistyped.
+pub fn replacement_base(arena: &HirArena, lhs: ExpressionId) -> Option<(ExpressionId, Symbol)> {
+    let mut current = lhs;
+    loop {
+        match &arena.get(current).kind {
+            ExpressionKind::Symbol(symbol) => return Some((current, *symbol)),
+            ExpressionKind::Subset { value, .. }
+            | ExpressionKind::Subset2 { value, .. }
+            | ExpressionKind::Dollar { value, .. } => current = *value,
+            ExpressionKind::Call { arguments, .. } => {
+                current = arguments.first()?.expression;
+            }
+            _ => return None,
+        }
+    }
+}
+
+// Whether an expression contains a `break` or `next` that targets the enclosing loop. Nested loop
+// bodies are skipped (their `break`/`next` bind to the inner loop), but nested loop headers
+// (sequence, condition) still belong to the enclosing loop's iteration. Function bodies are
+// skipped entirely: a `break` inside a function definition does not exit the loop that lexically
+// contains the definition.
+pub fn contains_loop_exit(arena: &HirArena, root: ExpressionId) -> bool {
+    match &arena.get(root).kind {
+        ExpressionKind::Break | ExpressionKind::Next => true,
+        ExpressionKind::Block { expressions, .. } => expressions
+            .iter()
+            .any(|expression| contains_loop_exit(arena, *expression)),
+        ExpressionKind::Assign { target, value, .. } => {
+            let target_contains = match target {
+                AssignTarget::Variable { .. } => false,
+                AssignTarget::Replacement { lhs } => contains_loop_exit(arena, *lhs),
+            };
+            target_contains || contains_loop_exit(arena, *value)
+        }
+        ExpressionKind::Local { body } => contains_loop_exit(arena, *body),
+        ExpressionKind::If {
+            condition,
+            consequence,
+            alternative,
+        } => {
+            contains_loop_exit(arena, *condition)
+                || contains_loop_exit(arena, *consequence)
+                || alternative.is_some_and(|alternative| contains_loop_exit(arena, alternative))
+        }
+        ExpressionKind::For { sequence, .. } => contains_loop_exit(arena, *sequence),
+        ExpressionKind::While { condition, .. } => contains_loop_exit(arena, *condition),
+        ExpressionKind::Repeat { .. } => false,
+        ExpressionKind::UnaryMinus { value } | ExpressionKind::UnaryNot { value } => {
+            contains_loop_exit(arena, *value)
+        }
+        ExpressionKind::Call { callee, arguments } => {
+            contains_loop_exit(arena, *callee)
+                || arguments
+                    .iter()
+                    .any(|argument| contains_loop_exit(arena, argument.expression))
+        }
+        ExpressionKind::Subset { value, arguments }
+        | ExpressionKind::Subset2 { value, arguments } => {
+            contains_loop_exit(arena, *value)
+                || arguments
+                    .iter()
+                    .any(|argument| contains_loop_exit(arena, argument.expression))
+        }
+        ExpressionKind::Dollar { value, .. } => contains_loop_exit(arena, *value),
+        ExpressionKind::Null
+        | ExpressionKind::Logical(_)
+        | ExpressionKind::Integer(_)
+        | ExpressionKind::Double(_)
+        | ExpressionKind::Character(_)
+        | ExpressionKind::AtomicConstant(_)
+        | ExpressionKind::StringLiteralName(_)
+        | ExpressionKind::Symbol(_)
+        | ExpressionKind::Function { .. }
+        | ExpressionKind::Unsupported => false,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -355,9 +490,25 @@ impl Module {
                     self.render_expression(*e, indent + 1, out, interner);
                 }
             }
-            ExpressionKind::Assign { target, value } => {
-                let name = interner.resolve(*target).unwrap_or("<unknown>");
-                out.push_str(&format!("{prefix}Assign {name}\n"));
+            ExpressionKind::Assign {
+                target,
+                scope,
+                value,
+            } => {
+                let label = match scope {
+                    AssignmentScope::Local => "Assign",
+                    AssignmentScope::Enclosing => "SuperAssign",
+                };
+                match target {
+                    AssignTarget::Variable { symbol, .. } => {
+                        let name = interner.resolve(*symbol).unwrap_or("<unknown>");
+                        out.push_str(&format!("{prefix}{label} {name}\n"));
+                    }
+                    AssignTarget::Replacement { lhs } => {
+                        out.push_str(&format!("{prefix}{label} (replacement)\n"));
+                        self.render_expression(*lhs, indent + 1, out, interner);
+                    }
+                }
                 self.render_expression(*value, indent + 1, out, interner);
             }
             ExpressionKind::Function { parameters, body } => {
@@ -469,6 +620,8 @@ impl Module {
                 out.push_str(&format!("{prefix}Dollar {name_str}\n"));
                 self.render_expression(*value, indent + 1, out, interner);
             }
+            ExpressionKind::Break => out.push_str(&format!("{prefix}Break\n")),
+            ExpressionKind::Next => out.push_str(&format!("{prefix}Next\n")),
             ExpressionKind::Unsupported => out.push_str(&format!("{prefix}Unsupported\n")),
         }
     }

@@ -55,7 +55,7 @@ while (TRUE) {
 While
   Logical(true)
   Block (trailing_semi: false)
-    Unsupported
+    Break
 
 #---- repeat_loop
 repeat {
@@ -64,4 +64,4 @@ repeat {
 #++++
 Repeat
   Block (trailing_semi: false)
-    Unsupported
+    Next

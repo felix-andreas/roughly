@@ -3,8 +3,8 @@ use {
         diagnostic::Diagnostic,
         document::DocumentId,
         hir::{
-            DefinitionItem, DefinitionKind, ExpressionId, ExpressionKind, HirArena, Module,
-            ModuleId,
+            AssignTarget, AssignmentScope, DefinitionItem, DefinitionKind, ExpressionId,
+            ExpressionKind, HirArena, Module, ModuleId, contains_loop_exit, replacement_base,
         },
         interner::{Interner, Symbol},
         stdlib::StubLibrary,
@@ -35,6 +35,20 @@ pub struct NamesLocal {
     // Computed from the reaching-write sets during resolution; surfaced as diagnostics only when
     // the `unused` check is enabled.
     pub unused_assignments: Vec<UnusedAssignment>,
+    // Slots read or super-assigned from inside a function nested below the slot's frame. A closure
+    // can run at any later time, so every write to a captured slot stays observable (never a dead
+    // store) and captured reads must tolerate writes made after the closure's definition.
+    pub captured_slots: BTreeSet<BindingId>,
+    // Reads of captured slots that occur inside the capturing function. Typecheck resolves these
+    // against the join of all the frame's writes to the slot instead of the definition-point state.
+    pub captured_reads: BTreeSet<ExpressionId>,
+    // Captured slots written after (or on a loop path around) their first capture. Only these need
+    // typecheck's second discovery pass: a slot whose writes all precede its captures already has
+    // its full write join by the time the capturing function is checked.
+    pub capture_repass_slots: BTreeSet<BindingId>,
+    // Whether any `capture_repass_slots` slot lives in the document's own top-level frame, which
+    // requires the discovery re-pass at whole-document granularity.
+    pub top_level_capture_repass: bool,
 }
 
 // A dead store: an assignment whose written value is never read. Carries the diagnostic payload
@@ -221,8 +235,12 @@ pub(crate) fn package_document_diagnostics(
         // to the same name in this document. The two are combined below.
         let mut occurrence_totals = BTreeMap::<Symbol, usize>::new();
         for expression_id in &context.module.expressions {
-            if let ExpressionKind::Assign { target, .. } =
-                context.module.arena.get(*expression_id).kind
+            if let Some(target) = context
+                .module
+                .arena
+                .get(*expression_id)
+                .kind
+                .simple_assignment_target()
                 && top_level_binding(context.local_naming, *expression_id).is_some()
             {
                 *occurrence_totals.entry(target).or_default() += 1;
@@ -231,8 +249,12 @@ pub(crate) fn package_document_diagnostics(
 
         let mut occurrences_seen = BTreeMap::<Symbol, usize>::new();
         for expression_id in &context.module.expressions {
-            let ExpressionKind::Assign { target, .. } =
-                context.module.arena.get(*expression_id).kind
+            let Some(target) = context
+                .module
+                .arena
+                .get(*expression_id)
+                .kind
+                .simple_assignment_target()
             else {
                 continue;
             };
@@ -380,16 +402,13 @@ fn collect_package_definitions(
     symbols: &mut BTreeSet<Symbol>,
 ) {
     for expression_id in expressions {
-        match &module.arena.get(*expression_id).kind {
-            ExpressionKind::Assign { target, .. } => {
-                if top_level_binding(local_naming, *expression_id).is_some() {
-                    symbols.insert(*target);
-                }
+        let kind = &module.arena.get(*expression_id).kind;
+        if let Some(target) = kind.simple_assignment_target() {
+            if top_level_binding(local_naming, *expression_id).is_some() {
+                symbols.insert(target);
             }
-            ExpressionKind::Block { expressions, .. } => {
-                collect_package_definitions(module, local_naming, expressions, symbols);
-            }
-            _ => {}
+        } else if let ExpressionKind::Block { expressions, .. } = kind {
+            collect_package_definitions(module, local_naming, expressions, symbols);
         }
     }
 }
@@ -481,19 +500,20 @@ fn find_exported_binding_in(
     expressions: &[ExpressionId],
 ) -> Option<BindingId> {
     expressions.iter().rev().find_map(|expression_id| {
-        match &module.arena.get(*expression_id).kind {
-            ExpressionKind::Assign { target, .. } => (*target == symbol)
+        let kind = &module.arena.get(*expression_id).kind;
+        if let Some(target) = kind.simple_assignment_target() {
+            (target == symbol)
                 .then(|| {
                     local_naming
                         .expression_resolutions
                         .get(expression_id)
                         .copied()
                 })
-                .flatten(),
-            ExpressionKind::Block { expressions, .. } => {
-                find_exported_binding_in(module, local_naming, symbol, expressions)
-            }
-            _ => None,
+                .flatten()
+        } else if let ExpressionKind::Block { expressions, .. } = kind {
+            find_exported_binding_in(module, local_naming, symbol, expressions)
+        } else {
+            None
         }
     })
 }
@@ -927,12 +947,13 @@ impl<'a> TypeResolver<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScopeKind {
-    // A real R environment frame: a function body, `local()`, or a script's top level. `<-` writes
-    // resolve or create their variable slot in the innermost frame.
+    // A function body's frame. It executes when the function is *called* — possibly never, later,
+    // or repeatedly — so reads and super-assignments that cross it from below are captures that
+    // outlive the definition-site walk.
+    Function,
+    // An immediately-executed R environment frame: `local(expr)` or a script's top level. `<-`
+    // writes resolve or create their variable slot in the innermost frame.
     Frame,
-    // The synthetic scope holding only a `for` loop's variable slot. Writes to other names pass
-    // through it into the enclosing frame (the loop body shares the enclosing R environment).
-    Loop,
     // A package document's top level. Direct assignments here are per-site package definitions
     // (no slot); only conditionally executed top-level code creates document slots in this scope.
     TopLevel,
@@ -970,6 +991,7 @@ type FlowState = BTreeMap<BindingId, BTreeSet<Reach>>;
 
 struct AssignmentWrite {
     symbol: Symbol,
+    binding_id: BindingId,
     range: Range,
     used: bool,
 }
@@ -1004,6 +1026,14 @@ struct DocumentNamingContext<'a> {
     // walks: one binding per (site, symbol), keyed by the site's byte range.
     bindings_by_site: HashMap<(usize, usize, Symbol), BindingId>,
     flow: FlowState,
+    // Per loop region: the last (entry, exit) flow pair of a converged run. An enclosing loop's
+    // fixed point re-walks its body per pass, which re-enters nested regions; when a nested
+    // region's entry state is unchanged its previous exit applies directly, keeping nested-loop
+    // cost proportional to depth × passes instead of passes^depth. The region walk is a pure
+    // function of the entry state (binding creation is idempotent by site, used-marking and
+    // capture-marking are monotone and were already applied by the memoized run), so replaying the
+    // exit is exact, not approximate.
+    loop_memo: HashMap<ExpressionId, (FlowState, FlowState)>,
     assignment_writes: Vec<AssignmentWrite>,
     write_indexes_by_expression: HashMap<ExpressionId, u32>,
     // Diagnostics and the maybe-undefined set are recorded only on a loop region's final walk, so
@@ -1026,6 +1056,7 @@ impl<'a> DocumentNamingContext<'a> {
             conditional_depth: 0,
             bindings_by_site: HashMap::new(),
             flow: FlowState::new(),
+            loop_memo: HashMap::new(),
             assignment_writes: Vec::new(),
             write_indexes_by_expression: HashMap::new(),
             emit: true,
@@ -1053,6 +1084,15 @@ impl<'a> DocumentNamingContext<'a> {
     fn collect_unused_assignments(&mut self) {
         for write in &self.assignment_writes {
             if write.used {
+                continue;
+            }
+            // A write to a captured slot stays observable through the capturing closure's later
+            // calls, so it is never a dead store.
+            if self
+                .document_naming
+                .captured_slots
+                .contains(&write.binding_id)
+            {
                 continue;
             }
             // A leading `_` is only writable in R as a backtick-quoted name, so strip backticks
@@ -1086,7 +1126,7 @@ impl<'a> DocumentNamingContext<'a> {
         }
 
         match &expression.kind {
-            ExpressionKind::Symbol(symbol) => match self.resolve_read(*symbol) {
+            ExpressionKind::Symbol(symbol) => match self.resolve_read(expression_id, *symbol) {
                 Some((binding_id, unassigned_reachable)) => {
                     // A loop pre-pass may have filed this read as a non-local before the slot's
                     // write was seen; the later pass's resolution replaces it (and vice versa), so
@@ -1122,38 +1162,33 @@ impl<'a> DocumentNamingContext<'a> {
                     self.resolve_expression(*nested_expression);
                 }
             }
-            ExpressionKind::Assign { target, value, .. } => {
+            ExpressionKind::Assign {
+                target,
+                scope,
+                value,
+            } => {
                 self.resolve_expression(*value);
-                match self.resolve_write(*target, expression.range) {
-                    WriteTarget::Slot {
-                        binding_id,
-                        reportable,
-                    } => {
-                        let reach = if reportable {
-                            let index = self.record_assignment_write(
-                                expression_id,
-                                *target,
-                                expression.range,
-                            );
-                            Reach::Assignment(index)
-                        } else {
-                            Reach::Implicit
-                        };
-                        // A write kills every earlier write to the slot on this path.
-                        self.flow.insert(binding_id, BTreeSet::from([reach]));
-                        self.document_naming
-                            .expression_resolutions
-                            .insert(expression_id, binding_id);
-                    }
-                    WriteTarget::TopLevelSite(binding_id) => {
-                        self.document_naming
-                            .expression_resolutions
-                            .insert(expression_id, binding_id);
+                match target {
+                    AssignTarget::Variable { symbol, .. } => match scope {
+                        AssignmentScope::Local => {
+                            self.resolve_variable_write(expression_id, *symbol, expression.range);
+                        }
+                        AssignmentScope::Enclosing => {
+                            self.resolve_super_write(expression_id, *symbol, expression.range);
+                        }
+                    },
+                    AssignTarget::Replacement { lhs } => {
+                        self.resolve_replacement_write(
+                            expression_id,
+                            *lhs,
+                            *scope,
+                            expression.range,
+                        );
                     }
                 }
             }
             ExpressionKind::Function { parameters, body } => {
-                let mut scope = Scope::new(ScopeKind::Frame);
+                let mut scope = Scope::new(ScopeKind::Function);
                 for parameter in parameters {
                     let binding_id =
                         self.binding(parameter.symbol, parameter.range, BindingKind::Parameter);
@@ -1210,34 +1245,60 @@ impl<'a> DocumentNamingContext<'a> {
                 // The sequence is evaluated once, before any iteration, so it stays outside the
                 // loop region.
                 self.resolve_expression(*sequence);
-                let loop_binding_id =
-                    self.binding(*variable, expression.range, BindingKind::ForVariable);
-                let mut scope = Scope::new(ScopeKind::Loop);
-                scope.slots.insert(*variable, loop_binding_id);
-                self.scopes.push(scope);
+                // R binds the loop variable in the current frame (there is no loop scope): it is
+                // re-initialized from the iterable at each iteration start and keeps its last
+                // value after the loop, joining with the pre-loop state on the zero-iteration path.
+                let loop_binding_id = self.resolve_for_variable(*variable, expression.range);
                 let body = *body;
-                self.resolve_loop_region(Some(loop_binding_id), false, &mut |context| {
-                    context.resolve_expression(body);
-                });
-                self.scopes.pop();
-                // The loop variable is not visible after the loop, so its flow entry is dead.
-                self.flow.remove(&loop_binding_id);
+                self.resolve_loop_region(
+                    expression_id,
+                    Some(loop_binding_id),
+                    false,
+                    None,
+                    &mut |context| {
+                        context.resolve_expression(body);
+                    },
+                );
             }
             ExpressionKind::While { condition, body } => {
-                // The condition re-evaluates before every iteration, so it belongs to the iterated
-                // region: a read in it sees writes flowing around the back edge.
                 let condition = *condition;
                 let body = *body;
-                self.resolve_loop_region(None, false, &mut |context| {
-                    context.resolve_expression(condition);
-                    context.resolve_expression(body);
-                });
+                // The first condition evaluation always executes, so a write inside it
+                // (`while ((k <- n) > 0) ...`) is definitely assigned after the loop: the exit
+                // state joins with the state *after* one condition evaluation, not the pre-loop
+                // state. The iterated region still contains the condition, so reads in it see the
+                // writes flowing around the back edge.
+                let before_condition = self.flow.clone();
+                let saved_emit = self.emit;
+                self.emit = false;
+                self.resolve_expression(condition);
+                self.emit = saved_emit;
+                let after_first_condition = std::mem::replace(&mut self.flow, before_condition);
+                self.resolve_loop_region(
+                    expression_id,
+                    None,
+                    false,
+                    Some(after_first_condition),
+                    &mut |context| {
+                        context.resolve_expression(condition);
+                        context.resolve_expression(body);
+                    },
+                );
             }
             ExpressionKind::Repeat { body } => {
                 let body = *body;
-                self.resolve_loop_region(None, true, &mut |context| {
-                    context.resolve_expression(body);
-                });
+                // `repeat` runs its body at least once, but a `break`/`next` may leave before the
+                // body's end, so only an exit-free body definitely applies all its writes.
+                let runs_to_completion = !contains_loop_exit(self.arena, body);
+                self.resolve_loop_region(
+                    expression_id,
+                    None,
+                    runs_to_completion,
+                    None,
+                    &mut |context| {
+                        context.resolve_expression(body);
+                    },
+                );
             }
             ExpressionKind::UnaryMinus { value } | ExpressionKind::UnaryNot { value } => {
                 self.resolve_expression(*value);
@@ -1265,6 +1326,8 @@ impl<'a> DocumentNamingContext<'a> {
             | ExpressionKind::Character(_)
             | ExpressionKind::AtomicConstant(_)
             | ExpressionKind::StringLiteralName(_)
+            | ExpressionKind::Break
+            | ExpressionKind::Next
             | ExpressionKind::Unsupported => {}
         }
     }
@@ -1272,16 +1335,33 @@ impl<'a> DocumentNamingContext<'a> {
     // A loop body may run zero or more times, so state flowing around the back edge joins into the
     // body's entry state: iterate the region walk until that entry stabilizes (`entry` grows
     // monotonically in the finite reaching-set lattice, so this terminates), then run one final
-    // walk with diagnostics enabled. `repeat` runs at least once, so its exit state is the region's
-    // own out-state instead of a join with the pre-state.
+    // walk with diagnostics enabled. An exit-free `repeat` runs its whole body at least once, so
+    // its exit state is the region's own out-state; every other loop joins the out-state with
+    // `exit_base` (the pre-loop state, or for `while` the state after the first condition
+    // evaluation, which always executes).
     fn resolve_loop_region(
         &mut self,
+        region_id: ExpressionId,
         loop_variable: Option<BindingId>,
         runs_at_least_once: bool,
+        exit_base: Option<FlowState>,
         region: &mut dyn FnMut(&mut Self),
     ) {
-        self.conditional_depth += 1;
         let before = self.flow.clone();
+        // An enclosing loop's fixed point re-walks its body per pass, re-entering this region; when
+        // the entry state is unchanged since the last converged run the previous exit applies
+        // directly (the walk is a pure function of the entry: binding creation is idempotent by
+        // site, used/capture marks are monotone and already applied). This keeps nested loops at
+        // O(depth × passes) region walks instead of passes^depth. The final diagnostics walk
+        // (`emit`) always re-runs.
+        if !self.emit
+            && let Some((memo_entry, memo_exit)) = self.loop_memo.get(&region_id)
+            && *memo_entry == before
+        {
+            self.flow = memo_exit.clone();
+            return;
+        }
+        self.conditional_depth += 1;
         let saved_emit = self.emit;
         self.emit = false;
         let mut entry = before.clone();
@@ -1308,9 +1388,11 @@ impl<'a> DocumentNamingContext<'a> {
         region(self);
         if !runs_at_least_once {
             let exit = std::mem::take(&mut self.flow);
-            self.flow = join_flow(&before, &exit);
+            self.flow = join_flow(exit_base.as_ref().unwrap_or(&before), &exit);
         }
         self.conditional_depth -= 1;
+        self.loop_memo
+            .insert(region_id, (before, self.flow.clone()));
     }
 
     // Resolves a read: the innermost visible slot that can actually be assigned at this point. A
@@ -1318,9 +1400,339 @@ impl<'a> DocumentNamingContext<'a> {
     // creates the frame variable when an assignment executes — so the lookup continues outward
     // (and ultimately to package globals via `non_locals`). Returns whether an unassigned path
     // also reaches, which drives the maybe-undefined warning.
-    fn resolve_read(&mut self, symbol: Symbol) -> Option<(BindingId, bool)> {
-        for scope in self.scopes.iter().rev() {
-            let Some(&binding_id) = scope.slots.get(&symbol) else {
+    fn resolve_read(
+        &mut self,
+        expression_id: ExpressionId,
+        symbol: Symbol,
+    ) -> Option<(BindingId, bool)> {
+        self.resolve_read_from(expression_id, symbol, self.scopes.len())
+    }
+
+    // Whether any function-body frame sits between the current position (top of the scope stack)
+    // and the scope at `slot_scope_index` — the capture criterion. Immediately-executed frames
+    // (`local()`) do not defer execution and so do not capture.
+    fn crosses_function_boundary(&self, slot_scope_index: usize) -> bool {
+        self.scopes[slot_scope_index + 1..]
+            .iter()
+            .any(|scope| scope.kind == ScopeKind::Function)
+    }
+
+    // A plain `name <- value` assignment: resolves the write, records it for the unused check
+    // (killing every earlier write to the slot on this path), and maps the assignment expression
+    // to the written binding.
+    fn resolve_variable_write(
+        &mut self,
+        expression_id: ExpressionId,
+        symbol: Symbol,
+        range: Range,
+    ) {
+        match self.resolve_write(symbol, range) {
+            WriteTarget::Slot {
+                binding_id,
+                reportable,
+            } => {
+                let reach = if reportable {
+                    let index =
+                        self.record_assignment_write(expression_id, symbol, binding_id, range);
+                    Reach::Assignment(index)
+                } else {
+                    Reach::Implicit
+                };
+                // A write kills every earlier write to the slot on this path.
+                self.flow.insert(binding_id, BTreeSet::from([reach]));
+                self.note_captured_slot_write(binding_id);
+                self.document_naming
+                    .expression_resolutions
+                    .insert(expression_id, binding_id);
+            }
+            WriteTarget::TopLevelSite(binding_id) => {
+                self.document_naming
+                    .expression_resolutions
+                    .insert(expression_id, binding_id);
+            }
+        }
+    }
+
+    // Resolves an assignment's target. `<-` writes the current R frame: the innermost scope's slot
+    // (created on first write). At package top level, unconditional writes are per-site package
+    // definitions and conditional writes get document slots (see `ScopeKind::TopLevel`).
+    fn resolve_write(&mut self, symbol: Symbol, range: Range) -> WriteTarget {
+        let index = self.scopes.len() - 1;
+        if let Some(&binding_id) = self.scopes[index].slots.get(&symbol) {
+            match self.scopes[index].kind {
+                ScopeKind::Function | ScopeKind::Frame => {
+                    return WriteTarget::Slot {
+                        binding_id,
+                        reportable: true,
+                    };
+                }
+                ScopeKind::TopLevel => {
+                    if self.conditional_depth > 0 {
+                        return WriteTarget::Slot {
+                            binding_id,
+                            reportable: false,
+                        };
+                    }
+                    // An unconditional top-level assignment takes the name package-global;
+                    // the conditional slot no longer owns later reads.
+                    self.scopes[index].slots.remove(&symbol);
+                    return self.top_level_write(symbol, range, index);
+                }
+            }
+        }
+        match self.scopes[index].kind {
+            ScopeKind::Function | ScopeKind::Frame => {
+                let binding_id = self.binding(symbol, range, BindingKind::LocalAssignment);
+                self.scopes[index].slots.insert(symbol, binding_id);
+                WriteTarget::Slot {
+                    binding_id,
+                    reportable: true,
+                }
+            }
+            ScopeKind::TopLevel => self.top_level_write(symbol, range, index),
+        }
+    }
+
+    // A write to an already-captured slot invalidates the write join a previously-checked closure
+    // saw, so typecheck must re-run the frame's discovery pass. Records where the invalidation is
+    // needed: at the owning document top level or inside a function body.
+    fn note_captured_slot_write(&mut self, binding_id: BindingId) {
+        if !self.document_naming.captured_slots.contains(&binding_id) {
+            return;
+        }
+        self.document_naming.capture_repass_slots.insert(binding_id);
+        let owned_by_document_frame = self.scopes[1..]
+            .iter()
+            .all(|scope| !scope.slots.values().any(|slot| *slot == binding_id))
+            && self.scopes[0]
+                .slots
+                .values()
+                .any(|slot| *slot == binding_id);
+        if owned_by_document_frame {
+            self.document_naming.top_level_capture_repass = true;
+        }
+    }
+
+    // `<<-`/`->>`: R starts the search in the *parent* of the current environment, so the current
+    // frame is skipped even when it has a slot for the name; the nearest enclosing scope with a
+    // slot receives the write. A super-assignment inside a function body executes when the
+    // function is called — possibly never or repeatedly — so it joins into the slot's reaching set
+    // like a conditionally executed write instead of killing earlier writes.
+    fn resolve_super_write(&mut self, expression_id: ExpressionId, symbol: Symbol, range: Range) {
+        let current_frame = self.scopes.len() - 1;
+        for index in (0..current_frame).rev() {
+            if let Some(&binding_id) = self.scopes[index].slots.get(&symbol) {
+                if self.crosses_function_boundary(index) {
+                    let was_captured = !self.document_naming.captured_slots.insert(binding_id);
+                    if was_captured {
+                        self.note_captured_slot_write(binding_id);
+                    }
+                    let entry = self
+                        .flow
+                        .entry(binding_id)
+                        .or_insert_with(|| BTreeSet::from([Reach::Unassigned]));
+                    entry.insert(Reach::Implicit);
+                } else if self.conditional_depth == 0 {
+                    // No function boundary in between (`local(x <<- v)` and the like) means the
+                    // write executes right here, exactly once: it kills like a plain write.
+                    self.flow
+                        .insert(binding_id, BTreeSet::from([Reach::Implicit]));
+                    self.note_captured_slot_write(binding_id);
+                } else {
+                    let entry = self
+                        .flow
+                        .entry(binding_id)
+                        .or_insert_with(|| BTreeSet::from([Reach::Unassigned]));
+                    entry.insert(Reach::Implicit);
+                    self.note_captured_slot_write(binding_id);
+                }
+                self.document_naming
+                    .expression_resolutions
+                    .insert(expression_id, binding_id);
+                return;
+            }
+        }
+
+        // Nothing enclosing defines the name. A name with an unconditional package top-level
+        // definition targets the package global (a per-site binding, like a conditional
+        // reassignment). Otherwise R creates a *new* binding in the outermost environment —
+        // modeled as a document-scope slot — which is almost always an accident worth flagging.
+        if self.scopes[0].kind == ScopeKind::TopLevel && self.top_level_names.contains(&symbol) {
+            let binding_id = self.binding(symbol, range, BindingKind::TopLevelAssignment);
+            self.document_naming
+                .expression_resolutions
+                .insert(expression_id, binding_id);
+            return;
+        }
+        let kind = match self.scopes[0].kind {
+            ScopeKind::TopLevel => BindingKind::TopLevelAssignment,
+            ScopeKind::Function | ScopeKind::Frame => BindingKind::LocalAssignment,
+        };
+        let binding_id = self.binding(symbol, range, kind);
+        self.scopes[0].slots.insert(symbol, binding_id);
+        if self.crosses_function_boundary(0) {
+            self.document_naming.captured_slots.insert(binding_id);
+            let entry = self
+                .flow
+                .entry(binding_id)
+                .or_insert_with(|| BTreeSet::from([Reach::Unassigned]));
+            entry.insert(Reach::Implicit);
+        } else if self.conditional_depth == 0 {
+            self.flow
+                .insert(binding_id, BTreeSet::from([Reach::Implicit]));
+        } else {
+            let entry = self
+                .flow
+                .entry(binding_id)
+                .or_insert_with(|| BTreeSet::from([Reach::Unassigned]));
+            entry.insert(Reach::Implicit);
+        }
+        self.document_naming
+            .expression_resolutions
+            .insert(expression_id, binding_id);
+        if self.emit {
+            let name = self.interner.resolve(symbol).unwrap_or("<unknown>");
+            self.diagnostics.push(Diagnostic::naming_warning(
+                range,
+                format!(
+                    "`{name}` is not defined in any enclosing function, so this super-assignment creates a new top-level binding."
+                ),
+            ));
+        }
+    }
+
+    // A replacement assignment (`x[i] <- v`, `x$a <- v`, `names(x) <- v`, ...) reads the base
+    // variable — using the prior value marks its reaching writes used — evaluates every
+    // index/argument expression, and writes the base variable's slot. The write itself is
+    // `Implicit`: R replaces the object in place, so reporting it as an unused store would flag
+    // side-effect-shaped code (`x[i] <- v` with no later read) that R idiom treats as used.
+    fn resolve_replacement_write(
+        &mut self,
+        expression_id: ExpressionId,
+        lhs: ExpressionId,
+        scope: AssignmentScope,
+        range: Range,
+    ) {
+        let base = replacement_base(self.arena, lhs);
+        self.resolve_replacement_lhs(lhs, base.map(|(base_id, _)| base_id));
+        let Some((base_id, symbol)) = base else {
+            // The accessor spine has no variable at its root (`f(x)$a <- v`); everything was still
+            // visited above, and typecheck refuses the form loudly. There is nothing to write.
+            return;
+        };
+
+        match scope {
+            AssignmentScope::Local => {
+                self.resolve_base_read(base_id, symbol, false);
+                let Some(write_target) = self.resolve_replacement_slot(symbol, range) else {
+                    return;
+                };
+                match write_target {
+                    WriteTarget::Slot { binding_id, .. } => {
+                        self.flow
+                            .insert(binding_id, BTreeSet::from([Reach::Implicit]));
+                        self.note_captured_slot_write(binding_id);
+                        self.document_naming
+                            .expression_resolutions
+                            .insert(expression_id, binding_id);
+                    }
+                    WriteTarget::TopLevelSite(binding_id) => {
+                        self.document_naming
+                            .expression_resolutions
+                            .insert(expression_id, binding_id);
+                    }
+                }
+            }
+            AssignmentScope::Enclosing => {
+                // `x[i] <<- v` reads *and* writes past the current frame.
+                self.resolve_base_read(base_id, symbol, true);
+                self.resolve_super_write(expression_id, symbol, range);
+            }
+        }
+    }
+
+    // The slot a `Local`-scope replacement writes. Unlike a plain assignment, a replacement never
+    // defines a package global: at top level it either mutates an existing document slot, targets
+    // the unconditional package definition (per-site binding), or — with no base anywhere, which R
+    // rejects at run time — writes nothing (the unresolved base read already warned).
+    fn resolve_replacement_slot(&mut self, symbol: Symbol, range: Range) -> Option<WriteTarget> {
+        let index = self.scopes.len() - 1;
+        if let Some(&binding_id) = self.scopes[index].slots.get(&symbol) {
+            return Some(WriteTarget::Slot {
+                binding_id,
+                reportable: false,
+            });
+        }
+        match self.scopes[index].kind {
+            ScopeKind::Function | ScopeKind::Frame => {
+                // R's `x[i] <- v` with `x` from an enclosing scope creates a *local* modified
+                // copy in the current frame.
+                let binding_id = self.binding(symbol, range, BindingKind::LocalAssignment);
+                self.scopes[index].slots.insert(symbol, binding_id);
+                Some(WriteTarget::Slot {
+                    binding_id,
+                    reportable: false,
+                })
+            }
+            ScopeKind::TopLevel => {
+                if self.top_level_names.contains(&symbol) {
+                    let binding_id = self.binding(symbol, range, BindingKind::TopLevelAssignment);
+                    return Some(WriteTarget::TopLevelSite(binding_id));
+                }
+                None
+            }
+        }
+    }
+
+    // The base variable read of a replacement form. `enclosing` skips the current frame, matching
+    // R's complex super-assignment (`x[i] <<- v` fetches `x` from the parent environment).
+    fn resolve_base_read(&mut self, base_id: ExpressionId, symbol: Symbol, enclosing: bool) {
+        let resolution = if enclosing {
+            self.resolve_read_from(base_id, symbol, self.scopes.len() - 1)
+        } else {
+            self.resolve_read(base_id, symbol)
+        };
+        let expression_range = self.arena.get(base_id).range;
+        match resolution {
+            Some((binding_id, unassigned_reachable)) => {
+                self.document_naming.non_locals.remove(&base_id);
+                self.document_naming
+                    .expression_resolutions
+                    .insert(base_id, binding_id);
+                if unassigned_reachable && self.emit {
+                    self.document_naming
+                        .maybe_undefined_expressions
+                        .insert(base_id);
+                    self.diagnostics.push(Diagnostic::naming_warning(
+                        expression_range,
+                        format!(
+                            "`{}` might be undefined here because it is introduced only in conditionally executed code.",
+                            self.interner.resolve(symbol).unwrap_or("<unknown>")
+                        ),
+                    ));
+                }
+            }
+            None => {
+                self.document_naming.expression_resolutions.remove(&base_id);
+                self.document_naming.non_locals.insert(base_id, symbol);
+            }
+        }
+    }
+
+    // The read walk: the innermost visible slot below `bound` that can actually be assigned at
+    // this point (`bound` is the full stack for ordinary reads and excludes the current frame for
+    // a super-assignment's base read). A read that crosses a function boundary additionally
+    // captures the slot: the closure can run at any later time, so the slot's writes stay live and
+    // typecheck must resolve the read against all of the frame's writes, not just those reaching
+    // the definition point.
+    fn resolve_read_from(
+        &mut self,
+        expression_id: ExpressionId,
+        symbol: Symbol,
+        bound: usize,
+    ) -> Option<(BindingId, bool)> {
+        for index in (0..bound).rev() {
+            let Some(&binding_id) = self.scopes[index].slots.get(&symbol) else {
                 continue;
             };
             let Some(reach) = self.flow.get(&binding_id) else {
@@ -1329,13 +1741,17 @@ impl<'a> DocumentNamingContext<'a> {
             if !reach.iter().any(|element| *element != Reach::Unassigned) {
                 continue;
             }
+            if self.crosses_function_boundary(index) {
+                self.document_naming.captured_slots.insert(binding_id);
+                self.document_naming.captured_reads.insert(expression_id);
+            }
             let unassigned_reachable = reach.contains(&Reach::Unassigned);
             for element in reach.clone() {
-                if let Reach::Assignment(index) = element {
+                if let Reach::Assignment(write_index) = element {
                     self.assignment_writes
-                        .get_mut(index as usize)
+                        .get_mut(write_index as usize)
                         .unwrap_or_else(|| {
-                            panic!("reaching set holds an unrecorded write index {index}")
+                            panic!("reaching set holds an unrecorded write index {write_index}")
                         })
                         .used = true;
                 }
@@ -1345,48 +1761,62 @@ impl<'a> DocumentNamingContext<'a> {
         None
     }
 
-    // Resolves an assignment's target. `<-` writes the current R frame: the innermost frame's slot
-    // (created on first write), or the loop variable when the name is the enclosing `for`'s
-    // variable. At package top level, unconditional writes are per-site package definitions and
-    // conditional writes get document slots (see `ScopeKind::TopLevel`).
-    fn resolve_write(&mut self, symbol: Symbol, range: Range) -> WriteTarget {
-        for index in (0..self.scopes.len()).rev() {
-            if let Some(&binding_id) = self.scopes[index].slots.get(&symbol) {
-                match self.scopes[index].kind {
-                    ScopeKind::Frame | ScopeKind::Loop => {
-                        return WriteTarget::Slot {
-                            binding_id,
-                            reportable: true,
-                        };
-                    }
-                    ScopeKind::TopLevel => {
-                        if self.conditional_depth > 0 {
-                            return WriteTarget::Slot {
-                                binding_id,
-                                reportable: false,
-                            };
-                        }
-                        // An unconditional top-level assignment takes the name package-global;
-                        // the conditional slot no longer owns later reads.
-                        self.scopes[index].slots.remove(&symbol);
-                        return self.top_level_write(symbol, range, index);
-                    }
-                }
-            }
-            match self.scopes[index].kind {
-                ScopeKind::Frame => {
-                    let binding_id = self.binding(symbol, range, BindingKind::LocalAssignment);
-                    self.scopes[index].slots.insert(symbol, binding_id);
-                    return WriteTarget::Slot {
-                        binding_id,
-                        reportable: true,
-                    };
-                }
-                ScopeKind::TopLevel => return self.top_level_write(symbol, range, index),
-                ScopeKind::Loop => {}
-            }
+    // Visits every expression in a replacement target except the base variable itself (resolved
+    // separately per assignment scope) and the callee of a replacement call: `names(x) <- v` calls
+    // `names<-`, not `names`, so resolving the callee as an ordinary read would produce a false
+    // unresolved-name warning for a user-defined `foo<-` replacement function.
+    fn resolve_replacement_lhs(
+        &mut self,
+        expression_id: ExpressionId,
+        base_id: Option<ExpressionId>,
+    ) {
+        if Some(expression_id) == base_id {
+            return;
         }
-        unreachable!("the scope stack always ends in a frame or top-level scope")
+        let expression = self.arena.get(expression_id);
+        match &expression.kind {
+            ExpressionKind::Subset { value, arguments }
+            | ExpressionKind::Subset2 { value, arguments } => {
+                self.resolve_replacement_lhs(*value, base_id);
+                for argument in arguments {
+                    self.resolve_expression(argument.expression);
+                }
+            }
+            ExpressionKind::Dollar { value, .. } => {
+                self.resolve_replacement_lhs(*value, base_id);
+            }
+            ExpressionKind::Call { arguments, .. } => {
+                let mut argument_iter = arguments.iter();
+                if let Some(first) = argument_iter.next() {
+                    self.resolve_replacement_lhs(first.expression, base_id);
+                }
+                for argument in argument_iter {
+                    self.resolve_expression(argument.expression);
+                }
+            }
+            _ => self.resolve_expression(expression_id),
+        }
+    }
+
+    // The `for` loop variable's slot. R binds it in the current frame — there is no loop scope —
+    // reusing an existing slot of the same name (the loop overwrites it) or creating one.
+    fn resolve_for_variable(&mut self, symbol: Symbol, range: Range) -> BindingId {
+        let index = self.scopes.len() - 1;
+        if let Some(&binding_id) = self.scopes[index].slots.get(&symbol) {
+            return binding_id;
+        }
+        let binding_id = self.binding(symbol, range, BindingKind::ForVariable);
+        // At package top level a name with an unconditional package definition stays defined on
+        // the zero-iteration path (the loop merely overwrites the package global), so the slot
+        // starts definitely-assigned rather than triggering a maybe-undefined warning after the
+        // loop.
+        if self.scopes[index].kind == ScopeKind::TopLevel && self.top_level_names.contains(&symbol)
+        {
+            self.flow
+                .insert(binding_id, BTreeSet::from([Reach::Implicit]));
+        }
+        self.scopes[index].slots.insert(symbol, binding_id);
+        binding_id
     }
 
     fn top_level_write(
@@ -1421,6 +1851,7 @@ impl<'a> DocumentNamingContext<'a> {
         &mut self,
         expression_id: ExpressionId,
         symbol: Symbol,
+        binding_id: BindingId,
         range: Range,
     ) -> u32 {
         if let Some(&index) = self.write_indexes_by_expression.get(&expression_id) {
@@ -1432,6 +1863,7 @@ impl<'a> DocumentNamingContext<'a> {
             .insert(expression_id, index);
         self.assignment_writes.push(AssignmentWrite {
             symbol,
+            binding_id,
             range,
             used: false,
         });

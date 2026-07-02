@@ -3,8 +3,8 @@ use {
         diagnostic::Diagnostic,
         document::Document,
         hir::{
-            Argument, Definition, DefinitionId, DefinitionItem, Expression, ExpressionId,
-            ExpressionKind, HirArena, Module, Parameter,
+            Argument, AssignTarget, AssignmentScope, Definition, DefinitionId, DefinitionItem,
+            Expression, ExpressionId, ExpressionKind, HirArena, Module, Parameter,
         },
         interner::{Interner, Symbol},
         text,
@@ -198,6 +198,8 @@ fn lower_node_inner(
         kind::FOR_STATEMENT => lower_for_statement(node, rope, lowering_context),
         kind::WHILE_STATEMENT => lower_while_statement(node, rope, lowering_context),
         kind::REPEAT_STATEMENT => lower_repeat_statement(node, rope, lowering_context),
+        kind::BREAK => ExpressionKind::Break,
+        kind::NEXT => ExpressionKind::Next,
         kind::CALL => lower_call(node, rope, lowering_context),
         kind::SUBSET => lower_subset(node, rope, lowering_context),
         kind::SUBSET2 => lower_subset2(node, rope, lowering_context),
@@ -234,15 +236,43 @@ fn lower_binary_operator(
     };
 
     match operator.kind_id() {
-        kind::LEFT_ASSIGN | kind::EQUAL => {
-            if lhs.kind_id() != kind::IDENTIFIER {
-                return ExpressionKind::Unsupported;
+        kind::LEFT_ASSIGN
+        | kind::EQUAL
+        | kind::LEFT_ASSIGN2
+        | kind::RIGHT_ASSIGN
+        | kind::RIGHT_ASSIGN2 => {
+            // Right assignment mirrors left assignment: `value -> name` is `name <- value` and
+            // `value ->> name` is `name <<- value`.
+            let (target_node, value_node) = match operator.kind_id() {
+                kind::RIGHT_ASSIGN | kind::RIGHT_ASSIGN2 => (rhs, lhs),
+                _ => (lhs, rhs),
+            };
+            let scope = match operator.kind_id() {
+                kind::LEFT_ASSIGN2 | kind::RIGHT_ASSIGN2 => AssignmentScope::Enclosing,
+                _ => AssignmentScope::Local,
+            };
+
+            let target = if target_node.kind_id() == kind::IDENTIFIER {
+                AssignTarget::Variable {
+                    symbol: intern_node_text(target_node, rope, lowering_context),
+                    range: target_node.range(),
+                }
+            } else {
+                // Any non-name target is a replacement form (`x[i] <- v`, `names(x) <- v`, ...).
+                // The target lowers as an ordinary expression so the base read and every
+                // index/argument expression stay visible to naming and typecheck; targets whose
+                // accessor spine has no variable at its root are refused there, never silently.
+                AssignTarget::Replacement {
+                    lhs: lower_node_with_rope(target_node, rope, lowering_context),
+                }
+            };
+            let value = lower_node_with_rope(value_node, rope, lowering_context);
+
+            ExpressionKind::Assign {
+                target,
+                scope,
+                value,
             }
-
-            let target = intern_node_text(lhs, rope, lowering_context);
-            let value = lower_node_with_rope(rhs, rope, lowering_context);
-
-            ExpressionKind::Assign { target, value }
         }
         kind::SPECIAL => {
             let operator_text = node_text(operator, rope);

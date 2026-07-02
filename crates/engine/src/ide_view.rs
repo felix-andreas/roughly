@@ -32,15 +32,15 @@ use {
         document::{Document, DocumentId},
         hir::{ExpressionId, Module},
         ide::{
-            CompletionResult, HoverInfo, IdeDatabase, InlayHint, Location, RenameResult,
-            SignatureHelp, generic,
+            CodeAction, CompletionResult, HoverInfo, IdeDatabase, InlayHint, Location,
+            RenameResult, SignatureHelp, generic,
         },
         interner::{Interner, Symbol},
-        naming::{DocumentNamingComputation, NamesGlobal, NamesLocal},
+        naming::{DocumentKind, DocumentNamingComputation, NamesGlobal, NamesLocal},
         stdlib::StubLibrary,
         text::{TextPosition, TextRange},
         typecheck::ModuleCheck,
-        types::CoreType,
+        types::{CoreType, TypeScheme},
     },
     std::{
         collections::{BTreeMap, BTreeSet, HashMap},
@@ -144,7 +144,7 @@ impl<'engine> EngineIde<'engine> {
 
     pub fn completion(&self, path: &Path, position: TextPosition) -> Option<CompletionResult> {
         let target = self.paths.id(path)?;
-        let caches = self.prime_completion(target);
+        let caches = self.prime_completion(target, position);
         let interner = self.engine.group().interner_ref();
         let database =
             EngineIdeRef::new(&caches, &interner, self.paths, self.engine.group().stubs());
@@ -188,6 +188,26 @@ impl<'engine> EngineIde<'engine> {
         generic::rename(&database, path, position, new_name)
     }
 
+    pub fn code_actions(&self, path: &Path, range: TextRange) -> Vec<CodeAction> {
+        let Some(target) = self.paths.id(path) else {
+            return Vec::new();
+        };
+        let caches = self.prime_code_actions(target);
+        let interner = self.engine.group().interner_ref();
+        let database =
+            EngineIdeRef::new(&caches, &interner, self.paths, self.engine.group().stubs());
+        generic::code_actions(&database, path, range)
+    }
+
+    pub fn type_definition(&self, path: &Path, position: TextPosition) -> Option<Vec<Location>> {
+        let target = self.paths.id(path)?;
+        let caches = self.prime_type_definition(target);
+        let interner = self.engine.group().interner_ref();
+        let database =
+            EngineIdeRef::new(&caches, &interner, self.paths, self.engine.group().stubs());
+        generic::type_definition(&database, path, position)
+    }
+
     // ------------------------------------------------------------------------------------------------
     // Prime: fetch a feature's bounded fact scope into an owned `Caches`. The only place fetches happen.
     // ------------------------------------------------------------------------------------------------
@@ -220,12 +240,18 @@ impl<'engine> EngineIde<'engine> {
         caches
     }
 
-    // completion: the target's parse (local bindings + context come from its tree), plus module+naming of
-    // every package file (the global loop computes each matching global's kind from its export file). No
-    // `Typecheck` at all.
-    fn prime_completion(&self, target: DocumentId) -> Caches {
+    // completion: the target's parse (local bindings + context come from its tree), document kind (a
+    // script's top-level bindings complete as locals), module + checked types (typed `$`/`[["` field
+    // completion), plus module+naming of every package file (the global loop computes each matching
+    // global's kind from its export file). A cursor inside a `#:` annotation completes type names
+    // against the project's `@type`/`@alias` declarations, so that position additionally primes every
+    // module — the same predicate the generic completion branches on, so gate and feature agree.
+    fn prime_completion(&self, target: DocumentId, position: TextPosition) -> Caches {
         let mut caches = self.empty_caches();
         self.prime_parse(&mut caches, target);
+        self.prime_document_kind(&mut caches, target);
+        self.prime_module(&mut caches, target);
+        self.prime_check(&mut caches, target);
         let package_naming = self.synthesize_package_naming();
         for export in package_naming
             .global_bindings
@@ -235,6 +261,11 @@ impl<'engine> EngineIde<'engine> {
         {
             self.prime_module(&mut caches, export);
             self.prime_naming(&mut caches, export);
+        }
+        if self.target_is_annotation_body(target, position) {
+            for file in caches.all_ids.clone() {
+                self.prime_module(&mut caches, file);
+            }
         }
         caches.package_naming = Some(package_naming);
         caches
@@ -259,14 +290,40 @@ impl<'engine> EngineIde<'engine> {
                 self.prime_parse(&mut caches, file);
             }
         }
-        // A type name inside a `#:` annotation resolves to its `@type`/`@alias` declaration, which may
-        // live in any package file, so its modules must all be primed for the cross-file search.
+        // A type name inside a `#:` annotation resolves to its `@type`/`@alias` declaration by
+        // re-lexing every document's annotation text, and the declaration may live in any package
+        // file — so every document's parse must be primed for the cross-file scan.
         if self.target_is_annotation_type_name(target, position) {
             for file in caches.all_ids.clone() {
-                self.prime_module(&mut caches, file);
+                self.prime_parse(&mut caches, file);
             }
         }
         caches.package_naming = Some(package_naming);
+        caches
+    }
+
+    // code actions: the target's parse (edit text/indentation), module (assignment shapes), naming
+    // (unused-assignment facts), and checked types (inferred-annotation text) — a single-file scope,
+    // like inlay hints plus naming.
+    fn prime_code_actions(&self, target: DocumentId) -> Caches {
+        let mut caches = self.empty_caches();
+        self.prime_parse(&mut caches, target);
+        self.prime_module(&mut caches, target);
+        self.prime_naming(&mut caches, target);
+        self.prime_check(&mut caches, target);
+        caches
+    }
+
+    // type definition: the target's parse/module/checked types resolve the cursor's nominal type;
+    // the declaration scan re-lexes every document's annotations, so all parses are primed.
+    fn prime_type_definition(&self, target: DocumentId) -> Caches {
+        let mut caches = self.empty_caches();
+        self.prime_parse(&mut caches, target);
+        self.prime_module(&mut caches, target);
+        self.prime_check(&mut caches, target);
+        for file in caches.all_ids.clone() {
+            self.prime_parse(&mut caches, file);
+        }
         caches
     }
 
@@ -322,6 +379,14 @@ impl<'engine> EngineIde<'engine> {
         });
     }
 
+    fn prime_document_kind(&self, caches: &mut Caches, document_id: DocumentId) {
+        caches.document_kinds.entry(document_id).or_insert_with(|| {
+            *self
+                .engine
+                .fetch::<DocumentKind>(Key::DocumentKind(document_id.0))
+        });
+    }
+
     fn project_ids(&self) -> Vec<DocumentId> {
         self.engine
             .fetch::<Vec<FileId>>(Key::ProjectFiles)
@@ -372,8 +437,12 @@ impl<'engine> EngineIde<'engine> {
 
     fn target_is_annotation_type_name(&self, target: DocumentId, position: TextPosition) -> bool {
         let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(target.0));
-        let module = self.engine.fetch::<Module>(Key::Lower(target.0));
-        generic::cursor_on_annotation_type_name(&module, &parsed.0, position)
+        generic::cursor_on_annotation_type_name(&parsed.0, position)
+    }
+
+    fn target_is_annotation_body(&self, target: DocumentId, position: TextPosition) -> bool {
+        let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(target.0));
+        generic::cursor_in_annotation_body(&parsed.0, position)
     }
 }
 
@@ -386,6 +455,7 @@ struct Caches {
     modules: BTreeMap<DocumentId, Shared<Module>>,
     namings: BTreeMap<DocumentId, Shared<DocumentNamingComputation>>,
     checks: BTreeMap<DocumentId, Shared<ModuleCheck>>,
+    document_kinds: BTreeMap<DocumentId, DocumentKind>,
     package_naming: Option<NamesGlobal>,
     all_ids: Vec<DocumentId>,
 }
@@ -484,7 +554,19 @@ impl<'a> IdeDatabase for EngineIdeRef<'a> {
         self.caches.all_ids.clone()
     }
 
+    fn document_kind(&self, document_id: DocumentId) -> Option<DocumentKind> {
+        debug_assert!(
+            self.caches.document_kinds.contains_key(&document_id),
+            "ide: document {document_id:?} not primed for document_kind"
+        );
+        self.caches.document_kinds.get(&document_id).copied()
+    }
+
     fn stub_namespace(&self, symbol: Symbol) -> Option<&'static str> {
         self.stubs.namespace_of(symbol)
+    }
+
+    fn stub_schemes(&self) -> Vec<(Symbol, &TypeScheme)> {
+        self.stubs.schemes().collect()
     }
 }

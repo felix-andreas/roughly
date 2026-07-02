@@ -287,7 +287,7 @@ who <- make_person()
 #!!!! goto_definition type_use.goto_definition
 R/main.R:3:5
 #++++
-R/main.R:1:1..1:40
+R/main.R:1:10..1:16
 
 #---- same_file_alias_use
 #---- R/main.R
@@ -299,7 +299,7 @@ id <- "x"
 #!!!! goto_definition alias_use.goto_definition
 R/main.R:3:5
 #++++
-R/main.R:1:1..1:33
+R/main.R:1:11..1:21
 
 #---- cross_file_type_use
 #---- R/types.R
@@ -312,4 +312,4 @@ who <- make_person()
 #!!!! goto_definition cross_file_use.goto_definition
 R/main.R:1:5
 #++++
-R/types.R:1:1..1:40
+R/types.R:1:10..1:16

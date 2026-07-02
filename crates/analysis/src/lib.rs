@@ -31,9 +31,9 @@ pub use crate::{
         ExpressionId, ExpressionKind, Module, ModuleId, Parameter,
     },
     ide::{
-        CompletionItem, CompletionItemKind, CompletionItemSource, CompletionResult, DebugSection,
-        HoverInfo, InlayHint, Location, RenameEdit, RenameResult, SignatureHelp, inlay_hints,
-        render_hover_markdown, signature_help,
+        CodeAction, CodeActionKind, CompletionItem, CompletionItemKind, CompletionItemSource,
+        CompletionResult, DebugSection, HoverInfo, InlayHint, Location, RenameResult,
+        SignatureHelp, TextEdit, inlay_hints, render_hover_markdown, signature_help,
     },
     interner::{Interner, Symbol},
     lint::NameStyle,

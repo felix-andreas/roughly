@@ -223,6 +223,21 @@ impl Analysis {
         self.stub_library.namespace_of(symbol)
     }
 
+    pub fn stub_schemes(&self) -> Vec<(Symbol, &TypeScheme)> {
+        self.stub_library.schemes().collect()
+    }
+
+    pub fn document_kind(&self, document_id: DocumentId) -> Option<DocumentKind> {
+        if !self.documents.contains_key(&document_id) {
+            return None;
+        }
+        Some(if self.non_package_documents.contains(&document_id) {
+            DocumentKind::Script
+        } else {
+            DocumentKind::Package
+        })
+    }
+
     pub fn base_path(&self) -> &Path {
         &self.base_path
     }
@@ -951,14 +966,22 @@ fn strict_origin_diagnostics(
     }
     let mut assignment_targets = HashMap::new();
     for expression in module.arena.expressions() {
-        if let ExpressionKind::Assign { target, value } = &expression.kind {
-            assignment_targets.insert(*value, *target);
+        if let ExpressionKind::Assign { value, .. } = &expression.kind
+            && let Some(target) = expression.kind.assignment_variable()
+        {
+            assignment_targets.insert(*value, target);
         }
     }
     strict_origins
         .iter()
         .map(|origin| {
-            let message = if let Some(target) = assignment_targets.get(&origin.expression_id) {
+            // A loop-widened origin is about the named variable, never about the expression the
+            // loop happens to be the value of, so it skips the assignment-value phrasing.
+            let assignment_target = match &origin.kind {
+                StrictOriginKind::LoopWidened(_) => None,
+                _ => assignment_targets.get(&origin.expression_id),
+            };
+            let message = if let Some(target) = assignment_target {
                 let name = interner.resolve(*target).unwrap_or("<unknown>");
                 format!("strict mode: could not determine the type of `{name}`; add a type annotation")
             } else {
@@ -970,6 +993,12 @@ fn strict_origin_diagnostics(
                         let name = interner.resolve(*symbol).unwrap_or("<unknown>");
                         format!(
                             "strict mode: could not determine the type of `{name}`; it has no known type"
+                        )
+                    }
+                    StrictOriginKind::LoopWidened(symbol) => {
+                        let name = interner.resolve(*symbol).unwrap_or("<unknown>");
+                        format!(
+                            "strict mode: could not determine the type of `{name}`; its type does not stabilize across loop iterations — add a type annotation"
                         )
                     }
                 }

@@ -15,6 +15,7 @@ R/main.R:3:8
 al [local variable]
 alpha [local variable]
 beta [local variable]
+[truncated]
 
 #---- at_field_completion
 #---- R/main.R
@@ -45,7 +46,8 @@ pkg:al
 #!!!! completion maybe_namespace.completion
 R/main.R:1:7
 #++++
-no completions
+all [stdlib function]
+all.equal [stdlib function]
 
 #==== completion_matching
 #---- case_insensitive_prefix
@@ -71,10 +73,27 @@ wrapper <- function() {
 R/main.R:4:6
 #++++
 helper [global function]
+help [stdlib function]
+heat.colors [stdlib function]
 #!!!! completion variable_kind.completion
 R/main.R:5:6
 #++++
 constant [global variable]
+conditionCall [stdlib function]
+conditionMessage [stdlib function]
+confint [stdlib variable]
+contour [stdlib variable]
+iconv [stdlib function]
+textConnection [stdlib variable]
+colMeans [stdlib function]
+colnames [stdlib function]
+combn [stdlib function]
+commandArgs [stdlib function]
+Encoding [stdlib function]
+packageVersion [stdlib function]
+as.function [stdlib variable]
+is.function [stdlib function]
+sys.function [stdlib variable]
 
 #---- source_ordering_keyword_local_global
 #---- R/main.R
@@ -89,6 +108,11 @@ R/main.R:3:5
 for [keyword keyword]
 fortune [local variable]
 forwarded [global variable]
+force [stdlib function]
+formals [stdlib function]
+format [stdlib function]
+formatC [stdlib function]
+formula [stdlib variable]
 
 #==== completion_none
 #---- no_matching_prefix

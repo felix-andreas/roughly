@@ -346,13 +346,42 @@ pub struct TypeToken {
 // text directly. Classification is heuristic where the grammar is context-sensitive (an identifier is a
 // parameter name when a `:` follows it, otherwise a type name), which is sufficient for coloring.
 pub fn semantic_tokens(text: &str) -> Vec<TypeToken> {
+    // What a `<...>` group means for the identifiers directly inside it. A type-parameter *binder*
+    // (`<T> fn(...)`, `@type Wrapper<T> {...}`) declares type parameters; a generic *application*'s
+    // argument list (`Wrapper<Person>`) holds ordinary type positions. Which one a `<` opens is decided
+    // by what precedes it: after an identifier it is an application (except right after a `@type`/
+    // `@alias` definition name, whose `<...>` declares that definition's parameters); anywhere else —
+    // the start of the notation, after a stub declaration's `name :` separator — it is a binder.
+    #[derive(Clone, Copy, PartialEq)]
+    enum AngleContext {
+        Binder,
+        Application,
+    }
+
+    // The previous classified token, reduced to what the `<` decision and the `@type`-name tracking
+    // need.
+    #[derive(Clone, Copy, PartialEq)]
+    enum PreviousToken {
+        None,
+        // A `@type`/`@alias` directive: the next identifier is the definition's name.
+        DefinitionDirective,
+        // The definition name right after `@type`/`@alias`: a following `<...>` binds its parameters.
+        DefinitionName,
+        Identifier,
+        Separator,
+        Other,
+    }
+
     let bytes = text.as_bytes();
     let mut tokens = Vec::new();
     let mut position = 0;
-    // Depth inside a leading `<...>` binder: identifiers lexed while this is positive are type
-    // parameters. Their later uses are colored as type names, matching how an editor without full type
-    // resolution would treat a bare identifier.
-    let mut binder_depth: usize = 0;
+    let mut angle_stack: Vec<AngleContext> = Vec::new();
+    let mut previous = PreviousToken::None;
+    // Inside a `@param` directive, an identifier outside the braced `{TYPE}` is the parameter name
+    // being annotated, not a type. Tracking the brace depth (rather than the position relative to the
+    // braces) keeps this correct for both `@param {TYPE} name` and a flipped `@param name {TYPE}`.
+    let mut in_param_directive = false;
+    let mut brace_depth: usize = 0;
 
     while position < bytes.len() {
         let byte = bytes[position];
@@ -362,17 +391,22 @@ pub fn semantic_tokens(text: &str) -> Vec<TypeToken> {
             continue;
         }
 
-        // An `@`-directive: the `@` plus the identifier that names the directive (`@type`, `@param`, …).
-        // The name after `@` is lexed with the member-name lexer, so the whole `@name` is one token.
+        // An `@`-directive: the `@` plus the name of the directive, admitting interior `-` so
+        // `@if-unknown` is a single token (the member-name lexer would stop at the dash).
         if byte == b'@' {
-            let name_end = utils::member_name_span_at(text, position + 1)
-                .map(|(_, end)| end)
-                .unwrap_or(position + 1);
+            let name_end = directive_name_end(text, position + 1);
+            let name = &text[position + 1..name_end];
             tokens.push(TypeToken {
                 start: position,
                 end: name_end,
                 role: TypeTokenRole::Directive,
             });
+            in_param_directive = name == "param";
+            previous = if name == "type" || name == "alias" {
+                PreviousToken::DefinitionDirective
+            } else {
+                PreviousToken::Other
+            };
             position = name_end;
             continue;
         }
@@ -383,6 +417,7 @@ pub fn semantic_tokens(text: &str) -> Vec<TypeToken> {
                 end: position + 3,
                 role: TypeTokenRole::Variadic,
             });
+            previous = PreviousToken::Other;
             position += 3;
             continue;
         }
@@ -393,17 +428,23 @@ pub fn semantic_tokens(text: &str) -> Vec<TypeToken> {
                 end: position + 2,
                 role: TypeTokenRole::Operator,
             });
+            previous = PreviousToken::Other;
             position += 2;
             continue;
         }
 
         if byte == b'<' {
-            binder_depth += 1;
+            angle_stack.push(match previous {
+                PreviousToken::Identifier => AngleContext::Application,
+                _ => AngleContext::Binder,
+            });
+            previous = PreviousToken::Other;
             position += 1;
             continue;
         }
         if byte == b'>' {
-            binder_depth = binder_depth.saturating_sub(1);
+            let _ = angle_stack.pop();
+            previous = PreviousToken::Other;
             position += 1;
             continue;
         }
@@ -414,30 +455,62 @@ pub fn semantic_tokens(text: &str) -> Vec<TypeToken> {
                 end: position + 1,
                 role: TypeTokenRole::Separator,
             });
+            previous = PreviousToken::Separator;
             position += 1;
             continue;
         }
 
         // A member-name lexer admits interior dots, so a dotted parameter name (`na.rm`) is one token.
         if let Some((start, end)) = utils::member_name_span_at(text, position) {
-            let role = if binder_depth > 0 {
+            let role = if angle_stack.last() == Some(&AngleContext::Binder) {
                 TypeTokenRole::TypeParameter
-            } else if next_non_space_byte(bytes, end) == Some(b':') {
+            } else if (in_param_directive && brace_depth == 0)
+                || next_non_space_byte(bytes, end) == Some(b':')
+            {
+                // A `@param` name outside the type braces, or any name directly before `:`
+                // (parameter and record-field positions), is a parameter name, not a type.
                 TypeTokenRole::ParameterName
             } else {
                 TypeTokenRole::TypeName
             };
             tokens.push(TypeToken { start, end, role });
+            previous = match (previous, role) {
+                (PreviousToken::DefinitionDirective, TypeTokenRole::TypeName) => {
+                    PreviousToken::DefinitionName
+                }
+                _ => PreviousToken::Identifier,
+            };
             position = end;
             continue;
         }
 
+        if byte == b'{' {
+            brace_depth += 1;
+        }
+        if byte == b'}' {
+            brace_depth = brace_depth.saturating_sub(1);
+        }
         // Any other byte (a delimiter such as `(`, `)`, `[`, `]`, `{`, `}`, `,`, or `|`) carries no
         // highlight; skip it.
+        previous = PreviousToken::Other;
         position += 1;
     }
 
     tokens
+}
+
+// The end of a directive name starting at `start` (just past the `@`). Like an identifier but with
+// interior `-` permitted, so `@if-unknown` lexes as one directive token; a trailing `-` is excluded.
+fn directive_name_end(text: &str, start: usize) -> usize {
+    let mut end = start;
+    for (index, character) in text[start..].char_indices() {
+        if character.is_alphanumeric() || character == '_' {
+            end = start + index + character.len_utf8();
+        } else if character != '-' {
+            break;
+        }
+    }
+    end
 }
 
 fn next_non_space_byte(bytes: &[u8], mut position: usize) -> Option<u8> {
@@ -2064,10 +2137,100 @@ mod semantic_token_tests {
                 "character=type",
             ]
         );
-        assert_eq!(
-            rendered("@param x integer"),
-            ["@param=directive", "x=type", "integer=type"]
-        );
         assert_eq!(rendered("@new Person"), ["@new=directive", "Person=type"]);
+    }
+
+    #[test]
+    fn classifies_generic_application_arguments_as_type_names() {
+        assert_eq!(rendered("Wrapper<Person>"), ["Wrapper=type", "Person=type"]);
+        assert_eq!(
+            rendered("fn(x: Wrapper<Pair<integer, character>>) -> Person"),
+            [
+                "fn=type",
+                "x=param",
+                ":=sep",
+                "Wrapper=type",
+                "Pair=type",
+                "integer=type",
+                "character=type",
+                "->=op",
+                "Person=type"
+            ]
+        );
+    }
+
+    #[test]
+    fn classifies_definition_type_parameters_as_binders() {
+        assert_eq!(
+            rendered("@type Wrapper<T> {list{value: T}}"),
+            [
+                "@type=directive",
+                "Wrapper=type",
+                "T=typeparam",
+                "list=type",
+                "value=param",
+                ":=sep",
+                "T=type",
+            ]
+        );
+    }
+
+    #[test]
+    fn classifies_binder_after_stub_declaration_separator() {
+        assert_eq!(
+            rendered("lapply : <T, U> fn(x: list[T], f: fn(T) -> U) -> list[U]"),
+            [
+                "lapply=param",
+                ":=sep",
+                "T=typeparam",
+                "U=typeparam",
+                "fn=type",
+                "x=param",
+                ":=sep",
+                "list=type",
+                "T=type",
+                "f=param",
+                ":=sep",
+                "fn=type",
+                "T=type",
+                "->=op",
+                "U=type",
+                "->=op",
+                "list=type",
+                "U=type",
+            ]
+        );
+    }
+
+    #[test]
+    fn classifies_param_directive_name_as_parameter_in_either_order() {
+        assert_eq!(
+            rendered("@param {integer} count"),
+            ["@param=directive", "integer=type", "count=param"]
+        );
+        assert_eq!(
+            rendered("@param {list{name: character}} [record]"),
+            [
+                "@param=directive",
+                "list=type",
+                "name=param",
+                ":=sep",
+                "character=type",
+                "record=param"
+            ]
+        );
+        // The queued syntax flip puts the name first; the brace-depth rule classifies it the same way.
+        assert_eq!(
+            rendered("@param count {integer}"),
+            ["@param=directive", "count=param", "integer=type"]
+        );
+    }
+
+    #[test]
+    fn lexes_if_unknown_as_one_directive_token() {
+        assert_eq!(
+            rendered("@if-unknown integer"),
+            ["@if-unknown=directive", "integer=type"]
+        );
     }
 }

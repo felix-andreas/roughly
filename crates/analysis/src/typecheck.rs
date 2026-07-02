@@ -2,7 +2,8 @@ use {
     crate::{
         document::DocumentId,
         hir::{
-            Argument, DefinitionKind, Expression, ExpressionId, ExpressionKind, HirArena, Module,
+            Argument, AssignTarget, AssignmentScope, DefinitionKind, Expression, ExpressionId,
+            ExpressionKind, HirArena, Module, contains_loop_exit, replacement_base,
         },
         interner::{Interner, Symbol},
         lower::LoweringContext,
@@ -220,6 +221,49 @@ pub struct InferenceState {
     // every clone/compare point: regions always roll back before returning.
     environment_log: Vec<(EnvironmentKey, Option<Binding>)>,
     environment_snapshot_depth: usize,
+    // Super-assignment (`<<-`) writes recorded while checking a function body. The body's
+    // environment region rolls back when the signature is done, but a super-assignment mutates an
+    // *enclosing* frame's slot, so the recorded writes re-join into the environment at the
+    // function's definition site (and again at each further enclosing definition site — the join
+    // is idempotent). Cleared per top-level statement.
+    pending_enclosing_writes: Vec<(EnvironmentKey, CoreType, Range)>,
+    // Per captured slot flagged for the discovery re-pass: the running join of every write's type
+    // (variables erased to `Unknown` so entries survive unification rollbacks). Captured reads of
+    // such slots resolve here instead of the definition-point environment entry, making them sound
+    // for closure calls that happen after later writes.
+    captured_write_joins: BTreeMap<BindingId, CoreType>,
+    // Set when the current walk wrote a slot in `NamesLocal::capture_repass_slots`; the innermost
+    // enclosing function body re-runs once so its captured reads see the completed write join.
+    wrote_repass_slot: bool,
+    // Per loop region: the memoized (guard, exit effects) of the last converged run, plus the
+    // stack of read/write logs recording what active loop regions depend on. See
+    // `infer_loop_to_fixed_point`.
+    loop_memos: BTreeMap<ExpressionId, LoopMemo>,
+    loop_access_logs: Vec<LoopAccessLog>,
+}
+
+// The memoized outcome of one loop region's fixed point. `guard` maps every environment key the
+// region's passes read or wrote to its value at region entry; when all guard values match the
+// current environment, re-running the region would unfold identically, so `exit_effects` (the
+// entries the region left behind) applies directly. Regions whose later passes touched keys their
+// first pass did not are not memoized (the guard would under-approximate the read set).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LoopMemo {
+    guard: BTreeMap<EnvironmentKey, Option<Binding>>,
+    exit_effects: BTreeMap<EnvironmentKey, Option<Binding>>,
+    // The strict origins the memoized run recorded (loop widenings and origins inside the body),
+    // replayed through the deduplicating recorder so a discovery pass's truncation cannot lose
+    // them.
+    origins: Vec<StrictUnknownOrigin>,
+}
+
+// Records the environment keys one active loop region has touched, with each key's value at first
+// touch. `complete` turns false when a pass beyond the first touches a new key.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct LoopAccessLog {
+    accesses: BTreeMap<EnvironmentKey, Option<Binding>>,
+    first_pass: bool,
+    complete: bool,
 }
 
 // A single reversible union-find write: `previous` is the entry that existed before the write
@@ -290,6 +334,11 @@ pub enum StrictOriginKind {
     // binding that is itself `Unknown`). Composes with library typing: once the binding is stubbed,
     // it resolves to a real type and is no longer an origin.
     UndeterminedReference(Symbol),
+    // A variable whose type kept growing across loop iterations and was widened to `Unknown` at
+    // the fixed-point pass cap (the termination safety net). The `Unknown` lives in a variable
+    // slot rather than an expression, so strict mode keeps these origins regardless of the loop
+    // expression's own recorded type.
+    LoopWidened(Symbol),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -633,11 +682,13 @@ impl InferenceState {
         range: Range,
         kind: StrictOriginKind,
     ) {
+        // Deduplication includes the kind: a loop that widens several variables records one
+        // `LoopWidened` origin per variable on the same loop expression.
         if self.record_expression_types
             && !self
                 .strict_origins
                 .iter()
-                .any(|origin| origin.expression_id == expression_id)
+                .any(|origin| origin.expression_id == expression_id && origin.kind == kind)
         {
             self.strict_origins.push(StrictUnknownOrigin {
                 expression_id,
@@ -881,12 +932,30 @@ impl InferenceState {
     // The single chokepoint for environment writes: records the key's prior value while an
     // environment snapshot is active so a control-flow region can be reverted.
     fn set_environment_entry(&mut self, key: EnvironmentKey, entry: Option<Binding>) {
+        self.log_loop_access(key);
         let previous = match entry {
             Some(binding) => self.environment.insert(key, binding),
             None => self.environment.remove(&key),
         };
         if self.environment_snapshot_depth > 0 {
             self.environment_log.push((key, previous));
+        }
+    }
+
+    // Records `key` (with its current value on first touch) in every active loop region's access
+    // log; the logs become the regions' memo guards.
+    fn log_loop_access(&mut self, key: EnvironmentKey) {
+        if self.loop_access_logs.is_empty() {
+            return;
+        }
+        let value = self.environment.get(&key).cloned();
+        for log in &mut self.loop_access_logs {
+            if !log.accesses.contains_key(&key) {
+                if !log.first_pass {
+                    log.complete = false;
+                }
+                log.accesses.insert(key, value.clone());
+            }
         }
     }
 
@@ -902,6 +971,20 @@ impl InferenceState {
     // Reverts every environment write recorded since `snapshot` and returns each touched key's
     // value at the moment of rollback — the region's final values (`None` = the region removed the
     // entry) — so a control-flow join can merge them with the restored pre-state.
+    // Closes an environment region *keeping* its writes: the recorded entries stay in the log so
+    // they revert with the enclosing region instead (at depth zero there is nothing to revert
+    // into, so the log clears). Used when a discovery pass turns out to be the only pass needed.
+    fn environment_commit(&mut self, _snapshot: EnvironmentSnapshot) {
+        debug_assert!(
+            self.environment_snapshot_depth > 0,
+            "environment commit without an open snapshot"
+        );
+        self.environment_snapshot_depth -= 1;
+        if self.environment_snapshot_depth == 0 {
+            self.environment_log.clear();
+        }
+    }
+
     fn environment_rollback(
         &mut self,
         snapshot: EnvironmentSnapshot,
@@ -1033,54 +1116,100 @@ impl InferenceState {
             local_naming,
             package_naming,
         };
-        let mut expression_types = Vec::with_capacity(module.expressions.len());
-        let mut errors = Vec::new();
+        // Loop memos and captured-write joins are keyed by per-module expression/binding ids;
+        // clear them so a state reused across documents cannot alias.
+        self.loop_memos.clear();
+        self.captured_write_joins.clear();
 
-        for expression_id in &module.expressions {
-            let expression = module.arena.get(*expression_id);
-            match self.infer_expression_with_context(
-                expression,
-                &module.arena,
-                Some(&resolution_context),
-                type_definitions,
-            ) {
-                Ok(expression_type) => expression_types.push(expression_type),
-                Err(error) => {
-                    errors.push(error);
-                    expression_types.push(CoreType::Unknown);
-                    if let ExpressionKind::Assign { target, .. } = &expression.kind {
-                        // Later references reach a failed top-level binding through both the
-                        // local and the package-global lookup path, so recovery binds both.
-                        let recovery_scheme = TypeScheme::monomorphic(CoreType::Unknown);
-                        if let Some(binding_id) = local_naming
-                            .expression_resolutions
-                            .get(expression_id)
-                            .copied()
-                        {
-                            self.bind_local_scheme(
-                                binding_id,
-                                recovery_scheme.clone(),
-                                expression.range,
-                            );
-                        }
-                        if package_naming.global_bindings.contains_key(target) {
-                            self.bind_global_scheme(*target, recovery_scheme, expression.range);
+        // When a top-level slot is captured by a closure and written after that capture, the
+        // whole document runs a discovery pass first (the per-function-body re-pass cannot see
+        // top-level writes made after the closure): the first pass completes the captured-write
+        // joins and then rolls back entirely, exactly like the function-body discovery.
+        let passes = if local_naming.top_level_capture_repass {
+            2
+        } else {
+            1
+        };
+        let mut expression_types = Vec::new();
+        let mut errors = Vec::new();
+        for pass in 0..passes {
+            let discovery = pass + 1 < passes;
+            expression_types = Vec::with_capacity(module.expressions.len());
+            errors = Vec::new();
+            let environment_snapshot = discovery.then(|| self.environment_snapshot());
+            let unification_snapshot = discovery.then(|| self.snapshot());
+            for expression_id in &module.expressions {
+                // Super-assign writes propagate to enclosing definition sites within one
+                // statement; they must not leak across statements.
+                self.pending_enclosing_writes.clear();
+                let expression = module.arena.get(*expression_id);
+                match self.infer_expression_with_context(
+                    expression,
+                    &module.arena,
+                    Some(&resolution_context),
+                    type_definitions,
+                ) {
+                    Ok(expression_type) => expression_types.push(expression_type),
+                    Err(error) => {
+                        errors.push(error);
+                        expression_types.push(CoreType::Unknown);
+                        if matches!(expression.kind, ExpressionKind::Assign { .. }) {
+                            // Later references reach a failed top-level binding through both the
+                            // local and the package-global lookup path, so recovery binds both.
+                            let recovery_scheme = TypeScheme::monomorphic(CoreType::Unknown);
+                            if let Some(binding_id) = local_naming
+                                .expression_resolutions
+                                .get(expression_id)
+                                .copied()
+                            {
+                                self.bind_local_scheme(
+                                    binding_id,
+                                    recovery_scheme.clone(),
+                                    expression.range,
+                                );
+                                if local_naming.capture_repass_slots.contains(&binding_id) {
+                                    self.wrote_repass_slot = true;
+                                    self.captured_write_joins
+                                        .insert(binding_id, CoreType::Unknown);
+                                }
+                            }
+                            if let Some(target) = expression.kind.assignment_variable()
+                                && package_naming.global_bindings.contains_key(&target)
+                            {
+                                self.bind_global_scheme(target, recovery_scheme, expression.range);
+                            }
                         }
                     }
                 }
             }
+            if discovery {
+                if let Some(snapshot) = environment_snapshot {
+                    self.environment_rollback(snapshot);
+                }
+                if let Some(snapshot) = unification_snapshot {
+                    self.rollback_to(snapshot);
+                }
+                self.strict_origins.clear();
+                self.recorded_expression_types.clear();
+                self.loop_memos.clear();
+            }
         }
+        self.pending_enclosing_writes.clear();
+        self.wrote_repass_slot = false;
 
         let expression_types_by_id = self.take_recorded_expression_types();
         // Keep only origins whose expression still resolves to `Unknown` in the final substitution.
         // This drops any origin whose `Unknown` was later overridden (for example a `@trust Any`
         // annotation makes the expression `Any`, which strict mode tolerates) and any origin under a
         // top-level statement that failed to type-check (its error is recorded separately and the
-        // failed expression is never recorded here, so no double-report).
+        // failed expression is never recorded here, so no double-report). Loop widenings are kept
+        // unconditionally: their `Unknown` lives in a variable slot, not in the loop expression's
+        // own recorded type.
         let strict_origins = std::mem::take(&mut self.strict_origins)
             .into_iter()
             .filter(|origin| {
-                expression_types_by_id.get(&origin.expression_id) == Some(&CoreType::Unknown)
+                matches!(origin.kind, StrictOriginKind::LoopWidened(_))
+                    || expression_types_by_id.get(&origin.expression_id) == Some(&CoreType::Unknown)
             })
             .collect();
         ModuleCheck {
@@ -1098,10 +1227,14 @@ impl InferenceState {
     ) -> Vec<ExportedValue> {
         let mut symbols_in_order = Vec::new();
         for expression_id in &module.expressions {
-            if let ExpressionKind::Assign { target, .. } = &module.arena.get(*expression_id).kind
-                && !symbols_in_order.contains(target)
+            if let Some(target) = module
+                .arena
+                .get(*expression_id)
+                .kind
+                .simple_assignment_target()
+                && !symbols_in_order.contains(&target)
             {
-                symbols_in_order.push(*target);
+                symbols_in_order.push(target);
             }
         }
 
@@ -1239,6 +1372,24 @@ impl InferenceState {
                         .expression_resolutions
                         .get(&expression.id)
                     {
+                        self.log_loop_access(EnvironmentKey::Local(*binding_id));
+                        // A read captured by a closure must stay sound for calls made after later
+                        // writes to the slot, so it resolves to the accumulated join of all the
+                        // frame's writes rather than the definition-point entry (only slots that
+                        // actually have post-capture writes carry a join; see
+                        // `capture_repass_slots`).
+                        if resolution_context
+                            .local_naming
+                            .captured_reads
+                            .contains(&expression.id)
+                            && resolution_context
+                                .local_naming
+                                .capture_repass_slots
+                                .contains(binding_id)
+                            && let Some(join) = self.captured_write_joins.get(binding_id)
+                        {
+                            return Ok(join.clone());
+                        }
                         // A local reference can resolve to a binding that inference has not bound
                         // yet: a forward or recursive reference, or a binding introduced only in a
                         // conditionally executed branch (if/for/while/repeat). Such a binding has no
@@ -1259,6 +1410,7 @@ impl InferenceState {
                         .non_locals
                         .contains_key(&expression.id)
                     {
+                        self.log_loop_access(EnvironmentKey::Global(*symbol));
                         if resolution_context
                             .package_naming
                             .global_bindings
@@ -1291,6 +1443,7 @@ impl InferenceState {
                     }
                 }
 
+                self.log_loop_access(EnvironmentKey::Global(*symbol));
                 let Some(binding) = self.lookup_global_name(*symbol).cloned() else {
                     return Err(InferenceError::UnknownName {
                         symbol: *symbol,
@@ -1322,85 +1475,39 @@ impl InferenceState {
                 resolution_context,
                 type_definitions,
             ),
-            ExpressionKind::Assign { target, value } => {
-                // Variables created while inferring the assigned value live one level above
-                // the binding boundary, so generalization quantifies exactly the variables
-                // that do not escape into the enclosing scope, with no environment walk.
-                self.enter_level();
-                let binding_type_result = self.infer_assign_binding_type(
+            ExpressionKind::Assign {
+                target,
+                scope,
+                value,
+            } => match (target, scope) {
+                (AssignTarget::Variable { symbol, .. }, AssignmentScope::Local) => self
+                    .infer_local_variable_assign(
+                        *symbol,
+                        *value,
+                        expression,
+                        arena,
+                        resolution_context,
+                        type_definitions,
+                    ),
+                (AssignTarget::Variable { symbol, .. }, AssignmentScope::Enclosing) => self
+                    .infer_super_assign(
+                        *symbol,
+                        *value,
+                        expression,
+                        arena,
+                        resolution_context,
+                        type_definitions,
+                    ),
+                (AssignTarget::Replacement { lhs }, _) => self.infer_replacement_assign(
+                    *lhs,
                     *value,
+                    *scope,
                     expression,
                     arena,
                     resolution_context,
                     type_definitions,
-                );
-                self.exit_level();
-                // Numeric variables that escape a binding without being bound by a function
-                // parameter cannot stay polymorphic, so they default to `double` here. Variables
-                // reachable only inside a function type are left for generalization.
-                let binding_type = self.default_free_numeric(binding_type_result?)?;
-                if let Some(resolution_context) = resolution_context
-                    && resolution_context
-                        .top_level_expression_ids
-                        .contains(&expression.id)
-                {
-                    let is_current_document_winner = resolution_context
-                        .local_naming
-                        .expression_resolutions
-                        .get(&expression.id)
-                        .zip(find_exported_binding(
-                            resolution_context.module,
-                            resolution_context.local_naming,
-                            *target,
-                        ))
-                        .is_some_and(|(binding_id, export_binding_id)| {
-                            *binding_id == export_binding_id
-                        })
-                        && resolution_context
-                            .package_naming
-                            .global_bindings
-                            .get(target)
-                            == Some(&resolution_context.document_id);
-
-                    if !is_current_document_winner {
-                        if let Some(binding_id) = resolution_context
-                            .local_naming
-                            .expression_resolutions
-                            .get(&expression.id)
-                            .copied()
-                        {
-                            let generalized_scheme = self.generalize(binding_type.clone())?;
-                            self.bind_local_scheme(
-                                binding_id,
-                                generalized_scheme,
-                                expression.range,
-                            );
-                            return Ok(binding_type);
-                        }
-
-                        return Ok(binding_type);
-                    }
-
-                    self.set_environment_entry(EnvironmentKey::Global(*target), None);
-                    let generalized_scheme = self.generalize(binding_type.clone())?;
-                    self.bind_global_scheme(*target, generalized_scheme, expression.range);
-                    return Ok(binding_type);
-                }
-
-                let generalized_scheme = self.generalize(binding_type.clone())?;
-                if let Some(resolution_context) = resolution_context
-                    && let Some(binding_id) = resolution_context
-                        .local_naming
-                        .expression_resolutions
-                        .get(&expression.id)
-                        .copied()
-                {
-                    self.bind_local_scheme(binding_id, generalized_scheme, expression.range);
-                } else {
-                    self.bind_global_scheme(*target, generalized_scheme, expression.range);
-                }
-                Ok(binding_type)
-            }
+                ),
+            },
             ExpressionKind::Function { parameters, body } => self.infer_function_expression(
                 expression.id,
                 parameters,
@@ -1522,6 +1629,10 @@ impl InferenceState {
                 resolution_context,
                 type_definitions,
             ),
+            // `break` and `next` transfer control and never produce an observable value; like the
+            // loops they belong to, they type as `NULL`. They are fully understood constructs, so
+            // they are not strict origins.
+            ExpressionKind::Break | ExpressionKind::Next => Ok(CoreType::Null),
             ExpressionKind::Unsupported => {
                 self.record_strict_origin(
                     expression.id,
@@ -1531,6 +1642,428 @@ impl InferenceState {
                 Ok(CoreType::Unknown)
             }
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn infer_local_variable_assign(
+        &mut self,
+        target: Symbol,
+        value: ExpressionId,
+        expression: &Expression,
+        arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<CoreType, InferenceError> {
+        // Variables created while inferring the assigned value live one level above
+        // the binding boundary, so generalization quantifies exactly the variables
+        // that do not escape into the enclosing scope, with no environment walk.
+        self.enter_level();
+        let binding_type_result = self.infer_assign_binding_type(
+            value,
+            expression,
+            arena,
+            resolution_context,
+            type_definitions,
+        );
+        self.exit_level();
+        // Numeric variables that escape a binding without being bound by a function
+        // parameter cannot stay polymorphic, so they default to `double` here. Variables
+        // reachable only inside a function type are left for generalization.
+        let binding_type = self.default_free_numeric(binding_type_result?)?;
+        if let Some(resolution_context) = resolution_context
+            && resolution_context
+                .top_level_expression_ids
+                .contains(&expression.id)
+        {
+            let is_current_document_winner = resolution_context
+                .local_naming
+                .expression_resolutions
+                .get(&expression.id)
+                .zip(find_exported_binding(
+                    resolution_context.module,
+                    resolution_context.local_naming,
+                    target,
+                ))
+                .is_some_and(|(binding_id, export_binding_id)| *binding_id == export_binding_id)
+                && resolution_context
+                    .package_naming
+                    .global_bindings
+                    .get(&target)
+                    == Some(&resolution_context.document_id);
+
+            if !is_current_document_winner {
+                if let Some(binding_id) = resolution_context
+                    .local_naming
+                    .expression_resolutions
+                    .get(&expression.id)
+                    .copied()
+                {
+                    let generalized_scheme = self.generalize(binding_type.clone())?;
+                    self.bind_local_scheme(binding_id, generalized_scheme, expression.range);
+                    self.note_slot_write(
+                        resolution_context.local_naming,
+                        binding_id,
+                        &binding_type,
+                        expression,
+                    )?;
+                    return Ok(binding_type);
+                }
+
+                return Ok(binding_type);
+            }
+
+            self.set_environment_entry(EnvironmentKey::Global(target), None);
+            let generalized_scheme = self.generalize(binding_type.clone())?;
+            self.bind_global_scheme(target, generalized_scheme, expression.range);
+            return Ok(binding_type);
+        }
+
+        let generalized_scheme = self.generalize(binding_type.clone())?;
+        if let Some(resolution_context) = resolution_context
+            && let Some(binding_id) = resolution_context
+                .local_naming
+                .expression_resolutions
+                .get(&expression.id)
+                .copied()
+        {
+            self.bind_local_scheme(binding_id, generalized_scheme, expression.range);
+            self.note_slot_write(
+                resolution_context.local_naming,
+                binding_id,
+                &binding_type,
+                expression,
+            )?;
+        } else {
+            self.bind_global_scheme(target, generalized_scheme, expression.range);
+        }
+        Ok(binding_type)
+    }
+
+    // `name <<- value`: naming resolved the write to the nearest enclosing slot (or the
+    // document-scope creation slot). The write joins into that slot's environment entry as a
+    // monotype — the assignment usually sits in a function body that may run never, later, or
+    // repeatedly, so it can only *add* to what the slot may hold. The join is applied immediately
+    // (reads later in the same body see it) and recorded as pending so it re-applies after the
+    // body's environment region rolls back, making it visible from the definition site onward.
+    #[allow(clippy::too_many_arguments)]
+    fn infer_super_assign(
+        &mut self,
+        target: Symbol,
+        value: ExpressionId,
+        expression: &Expression,
+        arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<CoreType, InferenceError> {
+        self.enter_level();
+        let binding_type_result = self.infer_assign_binding_type(
+            value,
+            expression,
+            arena,
+            resolution_context,
+            type_definitions,
+        );
+        self.exit_level();
+        let binding_type = self.default_free_numeric(binding_type_result?)?;
+
+        let Some(resolution_context) = resolution_context else {
+            let generalized_scheme = self.generalize(binding_type.clone())?;
+            self.bind_global_scheme(target, generalized_scheme, expression.range);
+            return Ok(binding_type);
+        };
+        if let Some(binding_id) = resolution_context
+            .local_naming
+            .expression_resolutions
+            .get(&expression.id)
+            .copied()
+        {
+            let key = EnvironmentKey::Local(binding_id);
+            let written = self.resolve(binding_type.clone())?;
+            self.join_write_into_entry(key, written.clone(), expression)?;
+            self.pending_enclosing_writes
+                .push((key, written, expression.range));
+            self.note_slot_write(
+                resolution_context.local_naming,
+                binding_id,
+                &binding_type,
+                expression,
+            )?;
+        }
+        Ok(binding_type)
+    }
+
+    // A replacement assignment `x[i] <- v` / `x$a <- v` / `names(x) <- v`: reads the base
+    // variable, checks every index/argument expression and the assigned value, and writes the base
+    // variable's slot. The written type is the base's prior type — a replacement mutates the
+    // object in place — except for a direct record field update (`x$a <- v`, `x[["a"]] <- v`),
+    // which produces the record with that field set to the value's type. Element-level checking of
+    // the replacement itself is not yet modeled.
+    #[allow(clippy::too_many_arguments)]
+    fn infer_replacement_assign(
+        &mut self,
+        lhs: ExpressionId,
+        value: ExpressionId,
+        scope: AssignmentScope,
+        expression: &Expression,
+        arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<CoreType, InferenceError> {
+        let base = replacement_base(arena, lhs);
+
+        // Index/argument expressions and the non-variable base position are ordinary reads.
+        self.infer_replacement_lhs_parts(
+            lhs,
+            base.map(|(base_id, _)| base_id),
+            arena,
+            resolution_context,
+            type_definitions,
+        )?;
+
+        self.enter_level();
+        let value_type_result = self.infer_assign_binding_type(
+            value,
+            expression,
+            arena,
+            resolution_context,
+            type_definitions,
+        );
+        self.exit_level();
+        let value_type = self.default_free_numeric(value_type_result?)?;
+
+        let Some((base_id, base_symbol)) = base else {
+            // The accessor spine has no variable at its root (`f(x)$a <- v`); R rejects this shape
+            // at run time, so refuse loudly rather than guess a type.
+            self.record_strict_origin(
+                expression.id,
+                expression.range,
+                StrictOriginKind::UnsupportedConstruct,
+            );
+            return Ok(CoreType::Unknown);
+        };
+
+        let base_expression = arena.get(base_id);
+        let prior_type = self.infer_expression_with_context(
+            base_expression,
+            arena,
+            resolution_context,
+            type_definitions,
+        )?;
+        let prior_type = self.resolve(prior_type)?;
+
+        let written_type =
+            self.replacement_written_type(lhs, base_id, &prior_type, &value_type, arena)?;
+
+        if let Some(resolution_context) = resolution_context
+            && let Some(binding_id) = resolution_context
+                .local_naming
+                .expression_resolutions
+                .get(&expression.id)
+                .copied()
+        {
+            let key = EnvironmentKey::Local(binding_id);
+            match scope {
+                AssignmentScope::Local => {
+                    self.bind_local_name(binding_id, written_type.clone(), expression.range);
+                }
+                AssignmentScope::Enclosing => {
+                    self.join_write_into_entry(key, written_type.clone(), expression)?;
+                    self.pending_enclosing_writes.push((
+                        key,
+                        written_type.clone(),
+                        expression.range,
+                    ));
+                }
+            }
+            self.note_slot_write(
+                resolution_context.local_naming,
+                binding_id,
+                &written_type,
+                expression,
+            )?;
+        } else if resolution_context.is_none() {
+            self.bind_global_name(base_symbol, written_type, expression.range);
+        }
+
+        // The assignment expression evaluates to the assigned value, like every other assignment.
+        Ok(value_type)
+    }
+
+    // Checks the pieces of a replacement target that are ordinary reads: index and argument
+    // expressions, and — when the spine has no variable root — the base position itself. The
+    // callee of a replacement call is skipped (`names(x) <- v` calls `names<-`, not `names`), and
+    // the base variable is skipped (its read supplies the prior type separately).
+    fn infer_replacement_lhs_parts(
+        &mut self,
+        expression_id: ExpressionId,
+        base_id: Option<ExpressionId>,
+        arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<(), InferenceError> {
+        if Some(expression_id) == base_id {
+            return Ok(());
+        }
+        let expression = arena.get(expression_id);
+        match &expression.kind {
+            ExpressionKind::Subset { value, arguments }
+            | ExpressionKind::Subset2 { value, arguments } => {
+                self.infer_replacement_lhs_parts(
+                    *value,
+                    base_id,
+                    arena,
+                    resolution_context,
+                    type_definitions,
+                )?;
+                for argument in arguments {
+                    self.infer_expression_with_context(
+                        arena.get(argument.expression),
+                        arena,
+                        resolution_context,
+                        type_definitions,
+                    )?;
+                }
+            }
+            ExpressionKind::Dollar { value, .. } => {
+                self.infer_replacement_lhs_parts(
+                    *value,
+                    base_id,
+                    arena,
+                    resolution_context,
+                    type_definitions,
+                )?;
+            }
+            ExpressionKind::Call { arguments, .. } => {
+                let mut argument_iter = arguments.iter();
+                if let Some(first) = argument_iter.next() {
+                    self.infer_replacement_lhs_parts(
+                        first.expression,
+                        base_id,
+                        arena,
+                        resolution_context,
+                        type_definitions,
+                    )?;
+                }
+                for argument in argument_iter {
+                    self.infer_expression_with_context(
+                        arena.get(argument.expression),
+                        arena,
+                        resolution_context,
+                        type_definitions,
+                    )?;
+                }
+            }
+            _ => {
+                self.infer_expression_with_context(
+                    expression,
+                    arena,
+                    resolution_context,
+                    type_definitions,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    // The slot type a replacement assignment writes: a direct record field update (`x$a <- v`,
+    // `x[["a"]] <- v` with a literal name, applied to the base variable itself) produces the
+    // record with the field set (or added); every other form keeps the base's prior type.
+    fn replacement_written_type(
+        &mut self,
+        lhs: ExpressionId,
+        base_id: ExpressionId,
+        prior_type: &CoreType,
+        value_type: &CoreType,
+        arena: &HirArena,
+    ) -> Result<CoreType, InferenceError> {
+        let field_name = match &arena.get(lhs).kind {
+            ExpressionKind::Dollar { value, name } if *value == base_id => Some(*name),
+            ExpressionKind::Subset2 { value, arguments } if *value == base_id => {
+                match arguments.as_slice() {
+                    [argument] if argument.name.is_none() => {
+                        match &arena.get(argument.expression).kind {
+                            ExpressionKind::StringLiteralName(name) => Some(*name),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        let (Some(field_name), CoreType::Record(fields)) = (field_name, prior_type) else {
+            return Ok(prior_type.clone());
+        };
+
+        let value_type = self.resolve(value_type.clone())?;
+        let mut updated_fields = fields.clone();
+        match updated_fields
+            .iter_mut()
+            .find(|field| field.name == field_name)
+        {
+            Some(field) => field.value = value_type,
+            None => updated_fields.push(RecordField::new(field_name, value_type)),
+        }
+        Ok(CoreType::Record(updated_fields))
+    }
+
+    // Joins a written type into an environment entry as a monotype (the super-assignment rule).
+    // An absent entry takes the written type directly (the slot may have had no write yet).
+    fn join_write_into_entry(
+        &mut self,
+        key: EnvironmentKey,
+        written: CoreType,
+        expression: &Expression,
+    ) -> Result<(), InferenceError> {
+        self.log_loop_access(key);
+        let current = self.environment.get(&key).cloned();
+        let written_binding = Binding {
+            type_scheme: TypeScheme::monomorphic(written),
+            range: expression.range,
+        };
+        let joined = self.join_environment_entries(current, Some(written_binding), expression)?;
+        self.set_environment_entry(key, joined);
+        Ok(())
+    }
+
+    // Bookkeeping for a write to a captured slot that has post-capture writes: accumulates the
+    // slot's write join (variables erased so the entry survives unification rollbacks) and flags
+    // the discovery re-pass.
+    fn note_slot_write(
+        &mut self,
+        local_naming: &NamesLocal,
+        binding_id: BindingId,
+        written: &CoreType,
+        expression: &Expression,
+    ) -> Result<(), InferenceError> {
+        if !local_naming.capture_repass_slots.contains(&binding_id) {
+            return Ok(());
+        }
+        self.wrote_repass_slot = true;
+        let sanitized = self.erase_inference_variables(written.clone())?;
+        let joined = match self.captured_write_joins.get(&binding_id).cloned() {
+            None => sanitized,
+            Some(existing) => {
+                if existing == CoreType::Unknown || sanitized == CoreType::Unknown {
+                    CoreType::Unknown
+                } else {
+                    let joined = self.join_types(existing, sanitized, expression)?;
+                    self.erase_inference_variables(joined)?
+                }
+            }
+        };
+        self.captured_write_joins.insert(binding_id, joined);
+        Ok(())
+    }
+
+    // Deep-resolves a type and replaces any still-unbound inference variable with `Unknown`, for
+    // values that must survive a later unification rollback (a stored variable id would dangle).
+    fn erase_inference_variables(
+        &mut self,
+        core_type: CoreType,
+    ) -> Result<CoreType, InferenceError> {
+        let resolved = self.resolve(core_type)?;
+        Ok(erase_variables(resolved))
     }
 
     fn infer_assign_binding_type(
@@ -1630,6 +2163,7 @@ impl InferenceState {
         // The body's parameter and local slot bindings live in an environment region that is rolled
         // back once the signature is inferred, so nothing the body binds leaks into the enclosing
         // scope (and the enclosing environment needs no wholesale clone).
+        let pending_writes_mark = self.pending_enclosing_writes.len();
         let environment_snapshot = self.environment_snapshot();
         let signature_result = self.infer_function_signature(
             function_expression_id,
@@ -1642,6 +2176,14 @@ impl InferenceState {
             type_definitions,
         );
         self.environment_rollback(environment_snapshot);
+        // Super-assignments in the body mutate *enclosing* slots, so their joins survive the
+        // body's rollback: re-apply them here, at the function's definition site. They stay
+        // recorded so each further enclosing definition site re-applies them too (the join is
+        // idempotent); the list clears per top-level statement.
+        let pending_writes = self.pending_enclosing_writes[pending_writes_mark..].to_vec();
+        for (key, written, _) in pending_writes {
+            self.join_write_into_entry(key, written, expression)?;
+        }
         let inferred_function_type = signature_result?;
 
         // The annotation is the source of truth for the binding's interface. With the return already
@@ -1728,6 +2270,14 @@ impl InferenceState {
                         )
                     });
                 self.bind_local_name(binding_id, parameter_type.clone(), parameter.range);
+                if let Some(context) = resolution_context {
+                    self.note_slot_write(
+                        context.local_naming,
+                        binding_id,
+                        &parameter_type,
+                        expression,
+                    )?;
+                }
             } else {
                 self.bind_global_name(parameter.symbol, parameter_type.clone(), parameter.range);
             }
@@ -1772,8 +2322,8 @@ impl InferenceState {
             }
         }
 
-        let inferred_return_type = self.infer_expression_with_context(
-            arena.get(body),
+        let inferred_return_type = self.infer_body_with_capture_discovery(
+            body,
             arena,
             resolution_context,
             type_definitions,
@@ -1820,6 +2370,56 @@ impl InferenceState {
             named_parameter_types,
             inferred_return_type,
         ))
+    }
+
+    // Checks a function body, re-running it once when the walk wrote a captured slot flagged for
+    // the discovery re-pass (`capture_repass_slots`): the first run exists to complete the frame's
+    // captured-write joins and is then fully discarded — environment, unification, strict origins,
+    // and pending super-assign writes all roll back — so the second run resolves captured reads
+    // against the completed joins with no stale effects. Bodies that never write such a slot (the
+    // overwhelming majority) pay only two snapshot markers.
+    fn infer_body_with_capture_discovery(
+        &mut self,
+        body: ExpressionId,
+        arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<CoreType, InferenceError> {
+        let saved_wrote_repass_slot = std::mem::replace(&mut self.wrote_repass_slot, false);
+        let environment_snapshot = self.environment_snapshot();
+        let unification_snapshot = self.snapshot();
+        let origins_mark = self.strict_origins.len();
+        let pending_writes_mark = self.pending_enclosing_writes.len();
+        let discovery = self.infer_expression_with_context(
+            arena.get(body),
+            arena,
+            resolution_context,
+            type_definitions,
+        );
+        if !self.wrote_repass_slot {
+            self.environment_commit(environment_snapshot);
+            self.commit(unification_snapshot);
+            self.wrote_repass_slot = saved_wrote_repass_slot;
+            return discovery;
+        }
+
+        self.environment_rollback(environment_snapshot);
+        self.rollback_to(unification_snapshot);
+        self.strict_origins.truncate(origins_mark);
+        self.pending_enclosing_writes.truncate(pending_writes_mark);
+        // The write-join table deliberately survives (its entries carry no inference variables);
+        // memoized loop exits do not — their types may reference just-reclaimed variable ids.
+        self.loop_memos.clear();
+        let result = self.infer_expression_with_context(
+            arena.get(body),
+            arena,
+            resolution_context,
+            type_definitions,
+        );
+        // The re-pass wrote the flagged slot again; keep the flag set so enclosing frames that may
+        // own the slot re-run their own discovery.
+        self.wrote_repass_slot |= saved_wrote_repass_slot;
+        result
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1879,17 +2479,106 @@ impl InferenceState {
     // the body's entry environment: `iterate` is re-run until that entry stabilizes, starting from
     // the plain pre-state (real code stabilizes on the second pass). At the pass cap, any slot
     // whose type is still changing (for example one growing structurally each iteration) is
-    // widened to `Unknown` as a termination safety net. Afterwards the loop's exit state is
-    // applied: `join(pre, out)` for `for`/`while` (zero iterations possible), the final out-state
-    // for `repeat` (runs at least once). The loop variable's entry, re-seeded from the iterable on
-    // every pass, is loop-scoped and excluded from the exit state.
+    // widened to `Unknown` as a termination safety net — a strict origin, since the widening
+    // introduces a genuine `Unknown`. Afterwards the loop's exit state is applied: `join(pre, out)`
+    // for `for`/`while` and for a `repeat` whose body contains `break`/`next` (zero or partial
+    // iterations possible), the final out-state for an exit-free `repeat` (runs to completion at
+    // least once). The loop variable is re-seeded from the iterable on every pass; after the loop
+    // it keeps its final state joined with the pre-loop state (R keeps the last element).
+    //
+    // Nested loops would re-run an inner region's fixed point once per outer pass (passes^depth):
+    // each converged region is memoized by its (read ∪ written keys → entry values) guard, so an
+    // enclosing pass whose entry state is unchanged replays the exit effects in O(touched keys).
     fn infer_loop_to_fixed_point(
         &mut self,
         expression: &Expression,
         loop_variable: Option<(EnvironmentKey, CoreType, Range)>,
         runs_at_least_once: bool,
+        resolution_context: Option<&ResolutionContext<'_>>,
         mut iterate: impl FnMut(&mut Self) -> Result<(), InferenceError>,
     ) -> Result<(), InferenceError> {
+        if let Some(memo) = self.loop_memos.get(&expression.id) {
+            let guard_holds = memo
+                .guard
+                .iter()
+                .all(|(key, value)| self.environment.get(key) == value.as_ref());
+            if guard_holds {
+                let memo = memo.clone();
+                for (key, value) in memo.exit_effects {
+                    self.set_environment_entry(key, value);
+                }
+                // Re-recording is deduplicated, so this only restores origins dropped by a
+                // discovery pass's truncation.
+                for origin in memo.origins {
+                    self.record_strict_origin(origin.expression_id, origin.range, origin.kind);
+                }
+                return Ok(());
+            }
+        }
+
+        let loop_variable_pre_state = loop_variable
+            .as_ref()
+            .map(|(key, _, _)| self.environment.get(key).cloned());
+        let origins_mark = self.strict_origins.len();
+        self.loop_access_logs.push(LoopAccessLog {
+            accesses: BTreeMap::new(),
+            first_pass: true,
+            complete: true,
+        });
+        let outcome = self.run_loop_passes(
+            expression,
+            &loop_variable,
+            runs_at_least_once,
+            resolution_context,
+            &mut iterate,
+        );
+        let access_log = self
+            .loop_access_logs
+            .pop()
+            .unwrap_or_else(|| panic!("loop access log missing for {:?}", expression.id));
+        let mut exit_effects = outcome?;
+
+        // The loop variable stays visible after the loop with its final state joined against the
+        // pre-loop state (zero iterations leave the previous value or, if there was none, the
+        // naming layer's maybe-undefined warning applies).
+        if let Some((key, _, _)) = &loop_variable {
+            let final_state = exit_effects.get(key).cloned().flatten();
+            let joined = self.join_environment_entries(
+                loop_variable_pre_state.flatten(),
+                final_state,
+                expression,
+            )?;
+            exit_effects.insert(*key, joined);
+        }
+
+        for (key, value) in &exit_effects {
+            self.set_environment_entry(*key, value.clone());
+        }
+        if access_log.complete {
+            let origins = self.strict_origins[origins_mark..].to_vec();
+            self.loop_memos.insert(
+                expression.id,
+                LoopMemo {
+                    guard: access_log.accesses,
+                    exit_effects,
+                    origins,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    // The fixed-point passes of `infer_loop_to_fixed_point`, returning the exit effects to apply
+    // (the loop variable's post-state is handled by the caller). Split out so the caller can pop
+    // the access log on both the success and the error path.
+    fn run_loop_passes(
+        &mut self,
+        expression: &Expression,
+        loop_variable: &Option<(EnvironmentKey, CoreType, Range)>,
+        runs_at_least_once: bool,
+        resolution_context: Option<&ResolutionContext<'_>>,
+        iterate: &mut impl FnMut(&mut Self) -> Result<(), InferenceError>,
+    ) -> Result<BTreeMap<EnvironmentKey, Option<Binding>>, InferenceError> {
         const LOOP_JOIN_PASSES: usize = 3;
 
         let mut entry: BTreeMap<EnvironmentKey, Option<Binding>> = BTreeMap::new();
@@ -1901,7 +2590,7 @@ impl InferenceState {
             for (key, value) in &entry {
                 self.set_environment_entry(*key, value.clone());
             }
-            if let Some((key, item_type, range)) = &loop_variable {
+            if let Some((key, item_type, range)) = loop_variable {
                 self.set_environment_entry(
                     *key,
                     Some(Binding {
@@ -1912,6 +2601,9 @@ impl InferenceState {
             }
             let result = iterate(self);
             exit = self.environment_rollback(snapshot);
+            if let Some(log) = self.loop_access_logs.last_mut() {
+                log.first_pass = false;
+            }
             result?;
 
             let mut next_entry = entry.clone();
@@ -1921,7 +2613,7 @@ impl InferenceState {
                     self.join_environment_entries(pre_state, exit_value.clone(), expression)?;
                 next_entry.insert(*key, joined);
             }
-            if let Some((key, _, _)) = &loop_variable {
+            if let Some((key, _, _)) = loop_variable {
                 next_entry.remove(key);
             }
             still_changing = next_entry
@@ -1949,25 +2641,44 @@ impl InferenceState {
                         range,
                     }),
                 );
+                let symbol = match key {
+                    EnvironmentKey::Global(symbol) => Some(*symbol),
+                    EnvironmentKey::Local(binding_id) => resolution_context.and_then(|context| {
+                        context
+                            .local_naming
+                            .bindings
+                            .get(binding_id)
+                            .map(|binding| binding.symbol)
+                    }),
+                };
+                if let Some(symbol) = symbol {
+                    self.record_strict_origin(
+                        expression.id,
+                        range,
+                        StrictOriginKind::LoopWidened(symbol),
+                    );
+                }
             }
         }
 
+        let mut exit_effects = BTreeMap::new();
         if runs_at_least_once && converged {
             for (key, value) in exit {
-                if loop_variable
-                    .as_ref()
-                    .is_some_and(|(variable_key, _, _)| *variable_key == key)
-                {
-                    continue;
-                }
-                self.set_environment_entry(key, value);
+                exit_effects.insert(key, value);
             }
         } else {
             for (key, value) in entry {
-                self.set_environment_entry(key, value);
+                exit_effects.insert(key, value);
+            }
+            if let Some((key, _, _)) = loop_variable
+                && let Some(final_state) = exit.remove(key)
+            {
+                // `entry` excludes the re-seeded loop variable; its region-final state still
+                // feeds the caller's post-loop join.
+                exit_effects.insert(*key, final_state);
             }
         }
-        Ok(())
+        Ok(exit_effects)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2005,13 +2716,19 @@ impl InferenceState {
         let variable_key = match resolution_context.and_then(|context| {
             find_binding(context.local_naming, context.document_id, variable, range)
         }) {
-            Some(binding_id) => EnvironmentKey::Local(binding_id),
+            Some(binding_id) => {
+                if let Some(context) = resolution_context {
+                    self.note_slot_write(context.local_naming, binding_id, &item_type, expression)?;
+                }
+                EnvironmentKey::Local(binding_id)
+            }
             None => EnvironmentKey::Global(variable),
         };
         self.infer_loop_to_fixed_point(
             expression,
             Some((variable_key, item_type, range)),
             false,
+            resolution_context,
             |state| {
                 state.infer_expression_with_context(
                     body,
@@ -2036,7 +2753,7 @@ impl InferenceState {
     ) -> Result<CoreType, InferenceError> {
         // The condition re-evaluates before every iteration, so it belongs to the iterated region:
         // a read in it sees the types flowing around the back edge.
-        self.infer_loop_to_fixed_point(expression, None, false, |state| {
+        self.infer_loop_to_fixed_point(expression, None, false, resolution_context, |state| {
             state.expect_scalar_logical(condition, arena, resolution_context, type_definitions)?;
             state.infer_expression_with_context(
                 body,
@@ -2057,15 +2774,24 @@ impl InferenceState {
         resolution_context: Option<&ResolutionContext<'_>>,
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<CoreType, InferenceError> {
-        self.infer_loop_to_fixed_point(expression, None, true, |state| {
-            state.infer_expression_with_context(
-                body,
-                arena,
-                resolution_context,
-                type_definitions,
-            )?;
-            Ok(())
-        })?;
+        // `repeat` runs its body at least once, but a `break`/`next` may leave before the body's
+        // end, so only an exit-free body definitely applies all its writes.
+        let runs_to_completion = !contains_loop_exit(arena, body.id);
+        self.infer_loop_to_fixed_point(
+            expression,
+            None,
+            runs_to_completion,
+            resolution_context,
+            |state| {
+                state.infer_expression_with_context(
+                    body,
+                    arena,
+                    resolution_context,
+                    type_definitions,
+                )?;
+                Ok(())
+            },
+        )?;
         Ok(CoreType::Null)
     }
 
@@ -4158,17 +4884,17 @@ impl InferenceState {
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<CoreType, InferenceError> {
         // Member-wise over a union subject: `[` must be valid on every shape the subject can take,
-        // and the slice's type is the join of the per-member results.
+        // and the slice's type is the join of the per-member results. A failing member reports the
+        // full union — the subject's actual type — not the single member that failed.
         if let CoreType::Union(members) = value_type {
+            let union_type = CoreType::Union(members.clone());
             let mut results = Vec::with_capacity(members.len());
             for member in members {
                 let member = self.resolve_structural(member, type_definitions, Some(value))?;
-                results.push(self.subset_result_type(
-                    member,
-                    value,
-                    expression,
-                    type_definitions,
-                )?);
+                let result = self
+                    .subset_result_type(member, value, expression, type_definitions)
+                    .map_err(|error| widen_error_container_to_union(error, &union_type))?;
+                results.push(result);
             }
             return Ok(CoreType::union_of(results));
         }
@@ -4240,18 +4966,23 @@ impl InferenceState {
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<CoreType, InferenceError> {
         // Member-wise over a union subject: `[[` must be valid on every shape the subject can
-        // take, and the element's type is the join of the per-member results.
+        // take, and the element's type is the join of the per-member results. A failing member
+        // reports the full union — the subject's actual type — not the single member that failed.
         if let CoreType::Union(members) = value_type {
+            let union_type = CoreType::Union(members.clone());
             let mut results = Vec::with_capacity(members.len());
             for member in members {
                 let member = self.resolve_structural(member, type_definitions, Some(value))?;
-                results.push(self.subset2_result_type(
-                    member,
-                    value,
-                    index_expression,
-                    expression,
-                    type_definitions,
-                )?);
+                let result = self
+                    .subset2_result_type(
+                        member,
+                        value,
+                        index_expression,
+                        expression,
+                        type_definitions,
+                    )
+                    .map_err(|error| widen_error_container_to_union(error, &union_type))?;
+                results.push(result);
             }
             return Ok(CoreType::union_of(results));
         }
@@ -4351,18 +5082,17 @@ impl InferenceState {
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<CoreType, InferenceError> {
         // Member-wise over a union subject: the field must exist on every shape the subject can
-        // take, and its type is the join of the per-member results.
+        // take, and its type is the join of the per-member results. A failing member reports the
+        // full union — the subject's actual type — not the single member that failed.
         if let CoreType::Union(members) = value_type {
+            let union_type = CoreType::Union(members.clone());
             let mut results = Vec::with_capacity(members.len());
             for member in members {
                 let member = self.resolve_structural(member, type_definitions, Some(value))?;
-                results.push(self.dollar_result_type(
-                    member,
-                    value,
-                    name,
-                    expression,
-                    type_definitions,
-                )?);
+                let result = self
+                    .dollar_result_type(member, value, name, expression, type_definitions)
+                    .map_err(|error| widen_error_container_to_union(error, &union_type))?;
+                results.push(result);
             }
             return Ok(CoreType::union_of(results));
         }
@@ -5441,6 +6171,123 @@ fn core_type_for_shape(shape: OperandShape, atomic: Atomic) -> CoreType {
 
 fn nullable_type(core_type: CoreType) -> CoreType {
     CoreType::union_of(vec![core_type, CoreType::Null])
+}
+
+// Replaces every inference variable in an (already-resolved) type with `Unknown`, for values that
+// must survive a later unification rollback: a stored variable id would dangle once the rollback
+// reclaims (and later reuses) the id.
+fn erase_variables(core_type: CoreType) -> CoreType {
+    match core_type {
+        CoreType::Variable(_) => CoreType::Unknown,
+        CoreType::Union(members) => {
+            CoreType::union_of(members.into_iter().map(erase_variables).collect())
+        }
+        CoreType::List(inner) => CoreType::List(Box::new(erase_variables(*inner))),
+        CoreType::NamedList(inner) => CoreType::NamedList(Box::new(erase_variables(*inner))),
+        CoreType::Record(fields) => CoreType::Record(
+            fields
+                .into_iter()
+                .map(|field| {
+                    RecordField::with_optional(
+                        field.name,
+                        erase_variables(field.value),
+                        field.optional,
+                    )
+                })
+                .collect(),
+        ),
+        CoreType::Tuple(items) => CoreType::Tuple(items.into_iter().map(erase_variables).collect()),
+        CoreType::Nominal(name, arguments) => {
+            CoreType::Nominal(name, arguments.into_iter().map(erase_variables).collect())
+        }
+        CoreType::Function(function_type) => CoreType::Function(FunctionType {
+            parameters: function_type
+                .parameters
+                .into_iter()
+                .map(erase_variables)
+                .collect(),
+            named_parameters: function_type
+                .named_parameters
+                .into_iter()
+                .map(|parameter| {
+                    RecordField::with_optional(
+                        parameter.name,
+                        erase_variables(parameter.value),
+                        parameter.optional,
+                    )
+                })
+                .collect(),
+            variadic: function_type
+                .variadic
+                .map(|element| Box::new(erase_variables(*element))),
+            return_type: Box::new(erase_variables(*function_type.return_type)),
+        }),
+        other @ (CoreType::Any
+        | CoreType::Unknown
+        | CoreType::Null
+        | CoreType::Scalar(_)
+        | CoreType::Vector(_)
+        | CoreType::NamedVector(_)) => other,
+    }
+}
+
+// Rewrites an indexing error raised against one union member so it reports the full union — the
+// subject's actual type. Only the container/actual payload changes; range and identity stay.
+fn widen_error_container_to_union(error: InferenceError, union_type: &CoreType) -> InferenceError {
+    match error {
+        InferenceError::FieldDoesNotExist {
+            field,
+            range,
+            expression_id,
+            ..
+        } => InferenceError::FieldDoesNotExist {
+            field,
+            container: Box::new(union_type.clone()),
+            range,
+            expression_id,
+        },
+        InferenceError::PositionDoesNotExist {
+            position,
+            range,
+            expression_id,
+            ..
+        } => InferenceError::PositionDoesNotExist {
+            position,
+            container: Box::new(union_type.clone()),
+            range,
+            expression_id,
+        },
+        InferenceError::NonLiteralSubscript {
+            by,
+            range,
+            expression_id,
+            ..
+        } => InferenceError::NonLiteralSubscript {
+            container: Box::new(union_type.clone()),
+            by,
+            range,
+            expression_id,
+        },
+        InferenceError::NotAList {
+            range,
+            expression_id,
+            ..
+        } => InferenceError::NotAList {
+            actual: Box::new(union_type.clone()),
+            range,
+            expression_id,
+        },
+        InferenceError::UnsupportedSubset {
+            range,
+            expression_id,
+            ..
+        } => InferenceError::UnsupportedSubset {
+            actual: Box::new(union_type.clone()),
+            range,
+            expression_id,
+        },
+        other => other,
+    }
 }
 
 // The one member-wise union shape `unify` handles: a normalized two-member `T | NULL` union

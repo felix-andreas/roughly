@@ -101,7 +101,7 @@ For(x@b1)
       Assign(x@b1)
         Integer(2L)
     Symbol(x@b1)
-Symbol(x@b0)
+Symbol(x@b1)
 
 #---- assignment_inside_loop_body_remains_visible_later_in_same_body
 #---- R/main.R

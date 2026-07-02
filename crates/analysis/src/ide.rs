@@ -16,9 +16,9 @@ use {
         document::{Document, DocumentId},
         hir::{ExpressionId, Module},
         interner::{Interner, Symbol},
-        naming::{NamesGlobal, NamesLocal},
+        naming::{DocumentKind, NamesGlobal, NamesLocal},
         text::{TextPosition, TextRange},
-        types::CoreType,
+        types::{CoreType, TypeScheme},
     },
     std::{
         collections::BTreeMap,
@@ -46,9 +46,15 @@ pub trait IdeDatabase {
         expression_id: ExpressionId,
     ) -> Option<&CoreType>;
     fn all_document_ids(&self) -> Vec<DocumentId>;
+    // Whether the document participates in the package (top-level bindings are package globals) or is
+    // a standalone script (top-level bindings are document-local slots). Completion offers a script's
+    // top-level bindings as locals; a package file's arrive through the global namespace instead.
+    fn document_kind(&self, document_id: DocumentId) -> Option<DocumentKind>;
     // The standard-library namespace a symbol's stub was declared in (`base`, `stats`, …), for showing a
     // stdlib name's origin package on hover. `None` when the symbol is not a stdlib stub.
     fn stub_namespace(&self, symbol: Symbol) -> Option<&'static str>;
+    // Every standard-library stub name with its scheme, for the stdlib completion source.
+    fn stub_schemes(&self) -> Vec<(Symbol, &TypeScheme)>;
 }
 
 // `Analysis`'s inherent accessors already expose every fact the trait names, so the impl forwards to
@@ -99,8 +105,16 @@ impl IdeDatabase for Analysis {
         self.all_document_ids()
     }
 
+    fn document_kind(&self, document_id: DocumentId) -> Option<DocumentKind> {
+        self.document_kind(document_id)
+    }
+
     fn stub_namespace(&self, symbol: Symbol) -> Option<&'static str> {
         self.stub_namespace(symbol)
+    }
+
+    fn stub_schemes(&self) -> Vec<(Symbol, &TypeScheme)> {
+        self.stub_schemes()
     }
 }
 
@@ -238,11 +252,12 @@ pub fn references(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenameResult {
-    pub edits: BTreeMap<PathBuf, Vec<RenameEdit>>,
+    pub edits: BTreeMap<PathBuf, Vec<TextEdit>>,
 }
 
+/// One replacement in a document: rename occurrences and code-action edits share this shape.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RenameEdit {
+pub struct TextEdit {
     pub range: TextRange,
     pub replacement_text: String,
 }
@@ -259,6 +274,63 @@ pub fn rename(
 }
 
 //
+// Code actions
+//
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeAction {
+    pub title: String,
+    pub kind: CodeActionKind,
+    // All current actions are static single-file edits (no resolve round-trip); the map shape
+    // matches `RenameResult` so the LSP layer converts both identically.
+    pub edits: BTreeMap<PathBuf, Vec<TextEdit>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodeActionKind {
+    RemoveUnusedAssignment,
+    PrefixDot,
+    InsertInferredAnnotation,
+    AddMissingAnnotations,
+}
+
+impl CodeActionKind {
+    // The hierarchical LSP kind string. Clients filter by dot-separated prefix, so each fix is a
+    // sub-kind of the standard `quickfix` / `source` base kinds.
+    pub fn as_lsp_string(self) -> &'static str {
+        match self {
+            Self::RemoveUnusedAssignment => "quickfix.remove-unused-assignment",
+            Self::PrefixDot => "quickfix.prefix-dot",
+            Self::InsertInferredAnnotation => "quickfix.insert-inferred-type-annotation",
+            Self::AddMissingAnnotations => "source.addMissingAnnotations",
+        }
+    }
+}
+
+pub fn code_actions(analysis: &mut Analysis, path: &Path, range: TextRange) -> Vec<CodeAction> {
+    lower(analysis);
+    resolve_package(analysis);
+    // The annotation actions read checked types (the inserted text is the inlay-hint rendering).
+    typecheck(analysis);
+    generic::code_actions(&*analysis, path, range)
+}
+
+//
+// Type definition
+//
+
+pub fn type_definition(
+    analysis: &mut Analysis,
+    path: &Path,
+    position: TextPosition,
+) -> Option<Vec<Location>> {
+    lower(analysis);
+    resolve_package(analysis);
+    typecheck(analysis);
+    generic::type_definition(&*analysis, path, position)
+}
+
+//
 // Completion
 //
 
@@ -267,6 +339,9 @@ pub struct CompletionItem {
     pub label: String,
     pub kind: CompletionItemKind,
     pub source: CompletionItemSource,
+    // Extra type information shown next to the item: a stub's or typed field's rendered type, or a
+    // type name's declaring directive. `None` when the item carries no type fact.
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -274,13 +349,20 @@ pub enum CompletionItemKind {
     Keyword,
     Variable,
     Function,
+    Field,
+    Type,
 }
 
+// Where a completion item came from; the variant order is the ranking order among items of equal
+// match quality (project names before standard-library names).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CompletionItemSource {
     Keyword,
     Local,
     Global,
+    Stdlib,
+    Field,
+    Type,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -303,6 +385,8 @@ pub fn completion(
 ) -> Option<CompletionResult> {
     lower(analysis);
     resolve_package(analysis);
+    // Typed field completion (`record$` and `record[["`) reads the subject's checked type.
+    typecheck(analysis);
     generic::completion(&*analysis, path, position)
 }
 
@@ -365,7 +449,14 @@ mod completion_limit_tests {
         let mut analysis = analysis_with_globals(count);
         let result = complete_prefix_g(&mut analysis);
 
-        assert_eq!(result.items.len(), count);
+        // Stdlib stub names matching the prefix also surface; the under-limit guarantee this test
+        // pins is that every package global made it through, with the result not truncated.
+        let global_items = result
+            .items
+            .iter()
+            .filter(|item| matches!(item.source, super::CompletionItemSource::Global))
+            .count();
+        assert_eq!(global_items, count);
         assert!(!result.is_incomplete);
     }
 }

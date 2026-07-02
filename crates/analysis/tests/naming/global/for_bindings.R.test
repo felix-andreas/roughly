@@ -50,7 +50,7 @@ For(x@b1)
     Assign(x@b1)
       Symbol(x@b1)
     Symbol(x@b1)
-Symbol(x@b0)
+Symbol(x@b1)
 
 #---- assignment_inside_loop_rhs_can_use_other_outer_binding
 #---- R/main.R
@@ -107,7 +107,7 @@ For(x@b1)
       Integer(1L)
   Block
     Symbol(x@b1)
-Symbol(x@b0)
+Symbol(x@b1)
 
 #---- for_variable_beats_final_package_global_winner
 #---- R/a.R
@@ -141,4 +141,8 @@ For(x@b2)
       Integer(1L)
   Block
     Symbol(x@b2)
-Symbol(x@b1)
+Symbol(x@b2)
+
+warning[naming] `x` might be undefined here because it is introduced only in conditionally executed code.
+--> 4:1-4:2
+| x

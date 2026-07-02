@@ -146,6 +146,6 @@ For(x@b1)
       Integer(1L)
   Block
     Symbol(x@b1)
-Symbol(x@?)
+Symbol(x@b1)
 
 No diagnostics.

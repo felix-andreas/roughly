@@ -14,6 +14,16 @@ R/main.R:3:7
 #++++
 parameter [local variable]
 partner [local variable]
+packageVersion [stdlib function]
+pairs [stdlib variable]
+palette [stdlib function]
+par [stdlib variable]
+parent.env [stdlib variable]
+parent.frame [stdlib variable]
+parse [stdlib function]
+paste [stdlib function]
+paste0 [stdlib function]
+path.expand [stdlib function]
 #!!!! completion inner_parameter.completion
 R/main.R:4:12
 #++++
@@ -31,6 +41,9 @@ wrapper <- function(value) {
 R/main.R:3:7
 #++++
 value [local variable]
+validObject [stdlib variable]
+vapply [stdlib variable]
+var [stdlib function]
 
 #==== locals
 #---- locals_and_globals
@@ -46,10 +59,21 @@ he
 R/main.R:4:5
 #++++
 local_value [local variable]
+load [stdlib function]
+local [stdlib variable]
+loess [stdlib variable]
+log [stdlib function]
+log10 [stdlib function]
+log1p [stdlib function]
+log2 [stdlib function]
+logical [stdlib function]
 #!!!! completion global.completion
 R/main.R:6:3
 #++++
 helper [global function]
+head [stdlib function]
+heat.colors [stdlib function]
+help [stdlib function]
 
 #---- outer_local_visible_in_nested_function
 #---- R/main.R
@@ -64,7 +88,17 @@ wrapper <- function() {
 #!!!! completion inner_function_name.completion
 R/main.R:4:8
 #++++
-inner [local variable]
+inner [local function]
+is.environment [stdlib function]
+is.function [stdlib function]
+is.infinite [stdlib function]
+is.nan [stdlib function]
+withCallingHandlers [stdlib variable]
+environment [stdlib variable]
+environmentName [stdlib function]
+sessionInfo [stdlib function]
+as.environment [stdlib variable]
+R.version.string [stdlib variable]
 #!!!! completion outer_local_name.completion
 R/main.R:5:12
 #++++
@@ -84,6 +118,9 @@ wrapper <- function() {
 R/main.R:5:7
 #++++
 value [local variable]
+validObject [stdlib variable]
+vapply [stdlib variable]
+var [stdlib function]
 
 #---- sibling_nested_functions_keep_scope_separate
 #---- R/main.R
@@ -104,18 +141,44 @@ wrapper <- function() {
 R/main.R:4:7
 #++++
 var_a [local variable]
+validObject [stdlib variable]
+vapply [stdlib variable]
+var [stdlib function]
 #!!!! completion first_nested_parameter.completion
 R/main.R:5:7
 #++++
 param_a [local variable]
+packageVersion [stdlib function]
+pairs [stdlib variable]
+palette [stdlib function]
+par [stdlib variable]
+parent.env [stdlib variable]
+parent.frame [stdlib variable]
+parse [stdlib function]
+paste [stdlib function]
+paste0 [stdlib function]
+path.expand [stdlib function]
 #!!!! completion second_nested_local.completion
 R/main.R:9:7
 #++++
 var_b [local variable]
+validObject [stdlib variable]
+vapply [stdlib variable]
+var [stdlib function]
 #!!!! completion second_nested_parameter.completion
 R/main.R:10:7
 #++++
 param_b [local variable]
+packageVersion [stdlib function]
+pairs [stdlib variable]
+palette [stdlib function]
+par [stdlib variable]
+parent.env [stdlib variable]
+parent.frame [stdlib variable]
+parse [stdlib function]
+paste [stdlib function]
+paste0 [stdlib function]
+path.expand [stdlib function]
 
 #==== keywords
 #---- reserved_words
@@ -129,6 +192,48 @@ R/main.R:1:2
 if [keyword keyword]
 in [keyword keyword]
 Inf [keyword keyword]
+iconv [stdlib function]
+identical [stdlib function]
+ifelse [stdlib function]
+image [stdlib variable]
+inherits [stdlib function]
+install.packages [stdlib function]
+installed.packages [stdlib variable]
+integer [stdlib function]
+integrate [stdlib variable]
+interactive [stdlib function]
+intersect [stdlib function]
+invisible [stdlib function]
+IQR [stdlib function]
+is [stdlib variable]
+is.array [stdlib function]
+is.atomic [stdlib function]
+is.call [stdlib function]
+is.character [stdlib function]
+is.data.frame [stdlib function]
+is.double [stdlib function]
+is.element [stdlib function]
+is.environment [stdlib function]
+is.factor [stdlib function]
+is.finite [stdlib function]
+is.function [stdlib function]
+is.infinite [stdlib function]
+is.integer [stdlib function]
+is.list [stdlib function]
+is.logical [stdlib function]
+is.matrix [stdlib function]
+is.na [stdlib function]
+is.name [stdlib function]
+is.nan [stdlib function]
+is.null [stdlib function]
+is.numeric [stdlib function]
+is.primitive [stdlib function]
+is.symbol [stdlib function]
+is.vector [stdlib function]
+isFALSE [stdlib function]
+isGeneric [stdlib function]
+isTRUE [stdlib function]
+isVirtualClass [stdlib function]
 #!!!! completion na_keywords.completion
 R/main.R:2:4
 #++++
@@ -202,6 +307,41 @@ wrapper <- function(values) {
 R/main.R:4:8
 #++++
 item [local variable]
+is.finite [stdlib function]
+is.infinite [stdlib function]
+write.csv [stdlib function]
+write.csv2 [stdlib function]
+write.table [stdlib function]
+writeLines [stdlib function]
+install.packages [stdlib function]
+installed.packages [stdlib variable]
+integer [stdlib function]
+integrate [stdlib variable]
+interactive [stdlib function]
+intersect [stdlib function]
+is.character [stdlib function]
+is.data.frame [stdlib function]
+is.integer [stdlib function]
+is.primitive [stdlib function]
+isTRUE [stdlib function]
+dir.create [stdlib function]
+Filter [stdlib function]
+fitted [stdlib variable]
+list.files [stdlib function]
+signature [stdlib variable]
+title [stdlib variable]
+wilcox.test [stdlib variable]
+withCallingHandlers [stdlib variable]
+chisq.test [stdlib variable]
+existsMethod [stdlib function]
+weighted.mean [stdlib function]
+as.integer [stdlib function]
+environmentName [stdlib function]
+attributes [stdlib function]
+conditionMessage [stdlib function]
+duplicated [stdlib function]
+substitute [stdlib function]
+anyDuplicated [stdlib function]
 #!!!! completion for_body_local.completion
 R/main.R:5:12
 #++++
@@ -222,10 +362,80 @@ wrapper <- function(values) {
 R/main.R:4:10
 #++++
 item [local variable]
+is.finite [stdlib function]
+is.infinite [stdlib function]
+write.csv [stdlib function]
+write.csv2 [stdlib function]
+write.table [stdlib function]
+writeLines [stdlib function]
+install.packages [stdlib function]
+installed.packages [stdlib variable]
+integer [stdlib function]
+integrate [stdlib variable]
+interactive [stdlib function]
+intersect [stdlib function]
+is.character [stdlib function]
+is.data.frame [stdlib function]
+is.integer [stdlib function]
+is.primitive [stdlib function]
+isTRUE [stdlib function]
+dir.create [stdlib function]
+Filter [stdlib function]
+fitted [stdlib variable]
+list.files [stdlib function]
+signature [stdlib variable]
+title [stdlib variable]
+wilcox.test [stdlib variable]
+withCallingHandlers [stdlib variable]
+chisq.test [stdlib variable]
+existsMethod [stdlib function]
+weighted.mean [stdlib function]
+as.integer [stdlib function]
+environmentName [stdlib function]
+attributes [stdlib function]
+conditionMessage [stdlib function]
+duplicated [stdlib function]
+substitute [stdlib function]
+anyDuplicated [stdlib function]
 #!!!! completion outer_for.completion
 R/main.R:6:8
 #++++
 item [local variable]
+is.finite [stdlib function]
+is.infinite [stdlib function]
+write.csv [stdlib function]
+write.csv2 [stdlib function]
+write.table [stdlib function]
+writeLines [stdlib function]
+install.packages [stdlib function]
+installed.packages [stdlib variable]
+integer [stdlib function]
+integrate [stdlib variable]
+interactive [stdlib function]
+intersect [stdlib function]
+is.character [stdlib function]
+is.data.frame [stdlib function]
+is.integer [stdlib function]
+is.primitive [stdlib function]
+isTRUE [stdlib function]
+dir.create [stdlib function]
+Filter [stdlib function]
+fitted [stdlib variable]
+list.files [stdlib function]
+signature [stdlib variable]
+title [stdlib variable]
+wilcox.test [stdlib variable]
+withCallingHandlers [stdlib variable]
+chisq.test [stdlib variable]
+existsMethod [stdlib function]
+weighted.mean [stdlib function]
+as.integer [stdlib function]
+environmentName [stdlib function]
+attributes [stdlib function]
+conditionMessage [stdlib function]
+duplicated [stdlib function]
+substitute [stdlib function]
+anyDuplicated [stdlib function]
 
 #---- local_shadows_global_same_name
 #---- R/main.R
@@ -239,3 +449,6 @@ wrapper <- function() {
 R/main.R:4:5
 #++++
 value [local variable]
+validObject [stdlib variable]
+vapply [stdlib variable]
+var [stdlib function]

@@ -107,17 +107,17 @@ pub fn render_interface_snapshot(
     let definition_count = module.definitions.len();
     for (expression_index, expression_id) in module.expressions.iter().enumerate() {
         let expression = module.arena.get(*expression_id);
-        if let ExpressionKind::Assign { target, .. } = &expression.kind {
+        if let Some(target) = expression.kind.assignment_variable() {
             let name = lowering_context
                 .interner()
-                .resolve(*target)
+                .resolve(target)
                 .unwrap_or("<unknown>");
             let binding = inference_state
-                .lookup_name(*target)
+                .lookup_name(target)
                 .unwrap_or_else(|| panic!("binding `{name}` should be present after inference"));
             exported_entries.push((
                 definition_count + expression_index,
-                *target,
+                target,
                 format!(
                     "{name}: {}",
                     analysis::render_type_scheme(lowering_context.interner(), &binding.type_scheme)
@@ -339,7 +339,16 @@ fn render_named_expression(
             }
         }
         ExpressionKind::Assign { target, value, .. } => {
-            let name = interner.resolve(*target).unwrap_or("<unknown>");
+            let name = match target {
+                analysis::hir::AssignTarget::Variable { symbol, .. } => {
+                    interner.resolve(*symbol).unwrap_or("<unknown>")
+                }
+                analysis::hir::AssignTarget::Replacement { lhs } => {
+                    analysis::hir::replacement_base(arena, *lhs)
+                        .and_then(|(_, symbol)| interner.resolve(symbol))
+                        .unwrap_or("<replacement>")
+                }
+            };
             let binding = find_expression_binding()
                 .map(|(binding_document_id, binding_id)| {
                     render_binding_label(binding_document_id, binding_id)
@@ -439,6 +448,8 @@ fn render_named_expression(
             lines.push(format!("{prefix}Dollar({rendered_name})"));
             render_nested(*value, indent + 1, lines);
         }
+        ExpressionKind::Break => lines.push(format!("{prefix}Break")),
+        ExpressionKind::Next => lines.push(format!("{prefix}Next")),
         ExpressionKind::Unsupported => lines.push(format!("{prefix}Unsupported")),
     }
 }
@@ -508,7 +519,16 @@ fn render_locally_named_expression(
             }
         }
         ExpressionKind::Assign { target, value, .. } => {
-            let name = interner.resolve(*target).unwrap_or("<unknown>");
+            let name = match target {
+                analysis::hir::AssignTarget::Variable { symbol, .. } => {
+                    interner.resolve(*symbol).unwrap_or("<unknown>")
+                }
+                analysis::hir::AssignTarget::Replacement { lhs } => {
+                    analysis::hir::replacement_base(arena, *lhs)
+                        .and_then(|(_, symbol)| interner.resolve(symbol))
+                        .unwrap_or("<replacement>")
+                }
+            };
             let binding = local_naming_result
                 .expression_resolutions
                 .get(&expression_id)
@@ -608,6 +628,8 @@ fn render_locally_named_expression(
             lines.push(format!("{prefix}Dollar({rendered_name})"));
             render_nested(*value, indent + 1, lines);
         }
+        ExpressionKind::Break => lines.push(format!("{prefix}Break")),
+        ExpressionKind::Next => lines.push(format!("{prefix}Next")),
         ExpressionKind::Unsupported => lines.push(format!("{prefix}Unsupported")),
     }
 }

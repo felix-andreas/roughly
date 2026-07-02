@@ -1178,16 +1178,13 @@ fn collect_package_definition_names(
     names: &mut BTreeSet<Symbol>,
 ) {
     for expression_id in expressions {
-        match &module.arena.get(*expression_id).kind {
-            ExpressionKind::Assign { target, .. } => {
-                if top_level_binding(local_naming, *expression_id).is_some() {
-                    names.insert(*target);
-                }
+        let kind = &module.arena.get(*expression_id).kind;
+        if let Some(target) = kind.simple_assignment_target() {
+            if top_level_binding(local_naming, *expression_id).is_some() {
+                names.insert(target);
             }
-            ExpressionKind::Block { expressions, .. } => {
-                collect_package_definition_names(module, local_naming, expressions, names);
-            }
-            _ => {}
+        } else if let ExpressionKind::Block { expressions, .. } = kind {
+            collect_package_definition_names(module, local_naming, expressions, names);
         }
     }
 }
@@ -1225,10 +1222,14 @@ fn package_naming_diagnostics(
     // direct top-level assigns drive — and depend on — the candidate order (the precise reverse-dep edge).
     let mut top_level_targets: BTreeSet<Symbol> = BTreeSet::new();
     for expression_id in &module.expressions {
-        if let ExpressionKind::Assign { target, .. } = &module.arena.get(*expression_id).kind
+        if let Some(target) = module
+            .arena
+            .get(*expression_id)
+            .kind
+            .simple_assignment_target()
             && top_level_binding(local_naming, *expression_id).is_some()
         {
-            top_level_targets.insert(*target);
+            top_level_targets.insert(target);
         }
     }
     let mut definer_order: BTreeMap<Symbol, Vec<FileId>> = BTreeMap::new();
@@ -1314,19 +1315,26 @@ fn package_naming_diagnostics(
         // file's position in the path-ordered candidate list with repeated assignments within the file.
         let mut occurrence_totals: BTreeMap<Symbol, usize> = BTreeMap::new();
         for expression_id in &module.expressions {
-            if let ExpressionKind::Assign { target, .. } = &module.arena.get(*expression_id).kind
+            if let Some(target) = module
+                .arena
+                .get(*expression_id)
+                .kind
+                .simple_assignment_target()
                 && top_level_binding(local_naming, *expression_id).is_some()
             {
-                *occurrence_totals.entry(*target).or_default() += 1;
+                *occurrence_totals.entry(target).or_default() += 1;
             }
         }
         let mut occurrences_seen: BTreeMap<Symbol, usize> = BTreeMap::new();
         for expression_id in &module.expressions {
-            let ExpressionKind::Assign { target, .. } = &module.arena.get(*expression_id).kind
+            let Some(target) = module
+                .arena
+                .get(*expression_id)
+                .kind
+                .simple_assignment_target()
             else {
                 continue;
             };
-            let target = *target;
             let Some(binding) = top_level_binding(local_naming, *expression_id) else {
                 continue;
             };
@@ -1890,14 +1898,22 @@ fn strict_origin_diagnostics(
     }
     let mut assignment_targets = HashMap::new();
     for expression in module.arena.expressions() {
-        if let ExpressionKind::Assign { target, value } = &expression.kind {
-            assignment_targets.insert(*value, *target);
+        if let ExpressionKind::Assign { value, .. } = &expression.kind
+            && let Some(target) = expression.kind.assignment_variable()
+        {
+            assignment_targets.insert(*value, target);
         }
     }
     strict_origins
         .iter()
         .map(|origin| {
-            let message = if let Some(target) = assignment_targets.get(&origin.expression_id) {
+            // A loop-widened origin is about the named variable, never about the expression the
+            // loop happens to be the value of, so it skips the assignment-value phrasing.
+            let assignment_target = match &origin.kind {
+                StrictOriginKind::LoopWidened(_) => None,
+                _ => assignment_targets.get(&origin.expression_id),
+            };
+            let message = if let Some(target) = assignment_target {
                 let name = interner.resolve(*target).unwrap_or("<unknown>");
                 format!("strict mode: could not determine the type of `{name}`; add a type annotation")
             } else {
@@ -1909,6 +1925,12 @@ fn strict_origin_diagnostics(
                         let name = interner.resolve(*symbol).unwrap_or("<unknown>");
                         format!(
                             "strict mode: could not determine the type of `{name}`; it has no known type"
+                        )
+                    }
+                    StrictOriginKind::LoopWidened(symbol) => {
+                        let name = interner.resolve(*symbol).unwrap_or("<unknown>");
+                        format!(
+                            "strict mode: could not determine the type of `{name}`; its type does not stabilize across loop iterations — add a type annotation"
                         )
                     }
                 }

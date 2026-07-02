@@ -4,10 +4,11 @@ use {
         diagnostics, format,
         index::{self, IndexError, Item},
         lsp_types::{
-            CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionList,
-            CompletionOptions, CompletionParams, CompletionResponse, Diagnostic, DiagnosticOptions,
-            DiagnosticServerCancellationData, DiagnosticServerCapabilities,
-            DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+            CodeAction, CodeActionKind, CodeActionOptions, CodeActionOrCommand, CodeActionParams,
+            CodeActionProviderCapability, CodeActionResponse, CompletionItem, CompletionItemKind,
+            CompletionItemLabelDetails, CompletionList, CompletionOptions, CompletionParams,
+            CompletionResponse, Diagnostic, DiagnosticOptions, DiagnosticServerCancellationData,
+            DiagnosticServerCapabilities, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
             DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
             DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
             DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentFormattingParams,
@@ -23,11 +24,12 @@ use {
             SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
             SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
             ServerCapabilities, ServerInfo, ShowMessageParams, SignatureHelp, SignatureHelpOptions,
-            SignatureHelpParams, SignatureInformation, TextDocumentSyncCapability,
+            SignatureHelpParams, SignatureInformation, SymbolKind, TextDocumentSyncCapability,
             TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
-            UnchangedDocumentDiagnosticReport, Url, WorkspaceEdit, WorkspaceSymbolParams,
-            WorkspaceSymbolResponse,
+            TypeDefinitionProviderCapability, UnchangedDocumentDiagnosticReport, Url,
+            WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
+            request::{GotoTypeDefinitionParams, GotoTypeDefinitionResponse},
         },
         position::{self, PositionEncoding},
         symbols,
@@ -1077,6 +1079,9 @@ impl EngineWorker {
                                     analysis::CompletionItemSource::Keyword => "Keyword".into(),
                                     analysis::CompletionItemSource::Local => "Local".into(),
                                     analysis::CompletionItemSource::Global => "Global".into(),
+                                    analysis::CompletionItemSource::Stdlib => "Stdlib".into(),
+                                    analysis::CompletionItemSource::Field => "Field".into(),
+                                    analysis::CompletionItemSource::Type => "Type".into(),
                                 }),
                             }),
                             kind: Some(match item.kind {
@@ -1089,7 +1094,10 @@ impl EngineWorker {
                                 analysis::CompletionItemKind::Function => {
                                     CompletionItemKind::FUNCTION
                                 }
+                                analysis::CompletionItemKind::Field => CompletionItemKind::FIELD,
+                                analysis::CompletionItemKind::Type => CompletionItemKind::STRUCT,
                             }),
+                            detail: item.detail,
                             ..Default::default()
                         })
                         .collect(),
@@ -1591,30 +1599,128 @@ impl EngineWorker {
                 "rename was cancelled by a concurrent edit",
             ));
         };
-        let workspace_edit = rename_result.map(|rename_result| {
-            let changes = rename_result
-                .edits
-                .into_iter()
-                .map(|(edit_path, edits)| {
-                    let uri = self.document_uri(&edit_path);
-                    let edits = edits
-                        .into_iter()
-                        .map(|edit| TextEdit {
-                            range: self.to_lsp_range_in(&edit_path, edit.range),
-                            new_text: edit.replacement_text,
-                        })
-                        .collect();
-                    (uri, edits)
-                })
-                .collect();
-
-            WorkspaceEdit {
-                changes: Some(changes),
-                ..Default::default()
-            }
-        });
+        let workspace_edit =
+            rename_result.map(|rename_result| self.to_workspace_edit(rename_result.edits));
 
         Ok(workspace_edit)
+    }
+
+    // Encodes a per-path edit set (a rename result or a code action's edits) as an LSP
+    // `WorkspaceEdit`, converting each edit's range against its own document's rope.
+    fn to_workspace_edit(
+        &self,
+        edits: std::collections::BTreeMap<PathBuf, Vec<analysis::TextEdit>>,
+    ) -> WorkspaceEdit {
+        let changes = edits
+            .into_iter()
+            .map(|(edit_path, edits)| {
+                let uri = self.document_uri(&edit_path);
+                let edits = edits
+                    .into_iter()
+                    .map(|edit| TextEdit {
+                        range: self.to_lsp_range_in(&edit_path, edit.range),
+                        new_text: edit.replacement_text,
+                    })
+                    .collect();
+                (uri, edits)
+            })
+            .collect();
+
+        WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        }
+    }
+
+    //
+    // CODE ACTIONS
+    //
+
+    fn code_action(
+        &mut self,
+        params: CodeActionParams,
+    ) -> Result<Option<CodeActionResponse>, ResponseError> {
+        let uri = params.text_document.uri;
+        let Some(path) = self.document_path(&uri) else {
+            return Ok(None);
+        };
+
+        tracing::debug!(?path, "code action");
+
+        if self.document(&path).is_none() {
+            tracing::info!(?path, "document not found");
+            return Err(path_not_found_error(&path));
+        }
+
+        let internal_range = self
+            .to_internal_range(&path, params.range)
+            .expect("opened document rope available for code actions");
+        let actions = self
+            .cancellable(|| {
+                EngineIde::new(&self.engine, &self.paths).code_actions(&path, internal_range)
+            })
+            .unwrap_or_default();
+        if actions.is_empty() {
+            return Ok(None);
+        }
+
+        let response = actions
+            .into_iter()
+            .map(|action| {
+                CodeActionOrCommand::CodeAction(CodeAction {
+                    title: action.title,
+                    kind: Some(CodeActionKind::from(action.kind.as_lsp_string().to_owned())),
+                    edit: Some(self.to_workspace_edit(action.edits)),
+                    ..Default::default()
+                })
+            })
+            .collect();
+        Ok(Some(response))
+    }
+
+    //
+    // TYPE DEFINITION
+    //
+
+    fn type_definition(
+        &mut self,
+        params: GotoTypeDefinitionParams,
+    ) -> Result<Option<GotoTypeDefinitionResponse>, ResponseError> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let Some(path) = self.document_path(&uri) else {
+            return Ok(None);
+        };
+        let position = params.text_document_position_params.position;
+
+        tracing::debug!(?path, ?position, "goto type definition");
+
+        if self.document(&path).is_none() {
+            tracing::info!(?path, "document not found");
+            return Err(path_not_found_error(&path));
+        }
+
+        let internal_position = self
+            .to_internal_position(&path, position)
+            .expect("opened document rope available for type definition");
+        let response = self
+            .cancellable(|| {
+                EngineIde::new(&self.engine, &self.paths).type_definition(&path, internal_position)
+            })
+            .unwrap_or_default()
+            .map(|locations| {
+                let mut locations = locations
+                    .into_iter()
+                    .map(|location| self.convert_location(location))
+                    .collect::<Vec<_>>();
+                match locations.len() {
+                    1 => GotoTypeDefinitionResponse::Scalar(
+                        locations.pop().expect("single type definition location"),
+                    ),
+                    _ => GotoTypeDefinitionResponse::Array(locations),
+                }
+            });
+
+        Ok(response)
     }
 
     //
@@ -1638,8 +1744,47 @@ impl EngineWorker {
         // they read the engine's parsed tree directly rather than running any analysis phase.
         let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(file));
         let items = index::index(parsed.0.tree().root_node(), parsed.0.rope(), false, false);
-        let symbols: Vec<DocumentSymbol> =
+        let mut symbols: Vec<DocumentSymbol> =
             symbols::document(&items, &|range| self.to_lsp_range_in(&path, range));
+
+        // `@type`/`@alias` declarations live in `#:` comments, invisible to the tree-walking
+        // indexer, so they join the outline from the lowered module. Ranges are converted before
+        // the interner borrow: `to_lsp_range_in` fetches from the engine, which would conflict
+        // with a held interner `Ref`.
+        let module = self.engine.fetch::<analysis::Module>(Key::Lower(file));
+        let definition_ranges = module
+            .definitions
+            .iter()
+            .map(|definition| {
+                position::tree_sitter_range_to_lsp(
+                    parsed.0.rope(),
+                    self.position_encoding,
+                    definition.range,
+                )
+            })
+            .collect::<Vec<_>>();
+        self.engine.group().with_interner(|interner| {
+            for (definition, range) in module.definitions.iter().zip(definition_ranges) {
+                let Some(name) = interner.resolve(definition.definition.name) else {
+                    continue;
+                };
+                #[allow(deprecated)] // `deprecated` is a required field of `DocumentSymbol`
+                symbols.push(DocumentSymbol {
+                    name: name.to_owned(),
+                    detail: Some(definition.definition.kind.directive_name().to_owned()),
+                    kind: match definition.definition.kind {
+                        analysis::DefinitionKind::Type => SymbolKind::STRUCT,
+                        analysis::DefinitionKind::Alias => SymbolKind::INTERFACE,
+                    },
+                    tags: None,
+                    deprecated: None,
+                    range,
+                    selection_range: range,
+                    children: None,
+                });
+            }
+        });
+        symbols.sort_by_key(|symbol| (symbol.range.start.line, symbol.range.start.character));
 
         Ok(Some(DocumentSymbolResponse::Nested(symbols)))
     }
@@ -1857,6 +2002,20 @@ impl LanguageServer for ServerState {
         self.read(move |worker| worker.definition(params))
     }
 
+    fn type_definition(
+        &mut self,
+        params: GotoTypeDefinitionParams,
+    ) -> BoxFuture<'static, Result<Option<GotoTypeDefinitionResponse>, ResponseError>> {
+        self.read(move |worker| worker.type_definition(params))
+    }
+
+    fn code_action(
+        &mut self,
+        params: CodeActionParams,
+    ) -> BoxFuture<'static, Result<Option<CodeActionResponse>, ResponseError>> {
+        self.read(move |worker| worker.code_action(params))
+    }
+
     fn hover(
         &mut self,
         params: HoverParams,
@@ -1957,11 +2116,17 @@ fn initialize_result(
     InitializeResult {
         capabilities: ServerCapabilities {
             position_encoding: Some(position_encoding.kind()),
+            code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
+                code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
+                ..Default::default()
+            })),
             completion_provider: Some(CompletionOptions {
-                trigger_characters: Some(vec!["$".into(), "@".into(), ":".into()]),
+                // `"` triggers field-name completion inside a `[["..."]]` string subscript.
+                trigger_characters: Some(vec!["$".into(), "@".into(), ":".into(), "\"".into()]),
                 ..Default::default()
             }),
             definition_provider: Some(OneOf::Left(true)),
+            type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
             diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
                 identifier: Some("roughly".into()),
                 inter_file_dependencies: true,

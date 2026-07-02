@@ -41,6 +41,14 @@ pub fn render_type_scheme(interner: &Interner, type_scheme: &TypeScheme) -> Stri
     renderer.render_type_scheme(type_scheme)
 }
 
+// Renders a `TypeScheme` for user-facing surfaces (completion detail), naming its quantified
+// variables `T`/`U`/… exactly as hover renders the same scheme; `render_type_scheme` above keeps the
+// internal `?N` fixture style.
+pub fn render_user_facing_scheme(interner: &Interner, type_scheme: &TypeScheme) -> String {
+    let mut renderer = TypeRenderer::user_facing(interner);
+    renderer.render_type_scheme(type_scheme)
+}
+
 // Renders a `CoreType` for display in user-facing surfaces (hover, inlay hints), presenting a function
 // type's free inference variables as a quantified scheme so a generalized binding reads with a readable
 // `<T, U>` binder and named type parameters (`<T> fn(x: T) -> T`) rather than raw variable ids. The IDE

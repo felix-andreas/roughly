@@ -7,9 +7,7 @@ mod fixture_renderers;
 use {
     analysis::{
         Analysis, CheckConfig, Document, DocumentChange, DocumentId, Interner, LintConfig,
-        TextPosition, TextRange,
-        hir::ExpressionKind,
-        ide,
+        TextPosition, TextRange, ide,
         lint::{self, NameStyle},
         lower::{self, LoweringContext},
         naming::{DocumentKind, resolve_document_locally},
@@ -272,13 +270,13 @@ fn run_bindings_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, S
             .infer_expression(expression, &module.arena, &type_definitions)
             .map_err(|error| render_expression_error_kind(&error).to_owned())?;
 
-        if let ExpressionKind::Assign { target, .. } = &expression.kind {
+        if let Some(target) = expression.kind.assignment_variable() {
             let name = lowering_context
                 .interner()
-                .resolve(*target)
+                .resolve(target)
                 .unwrap_or("<unknown>");
             let binding = inference_state
-                .lookup_name(*target)
+                .lookup_name(target)
                 .unwrap_or_else(|| panic!("binding `{name}` should be present after inference"));
             lines.push(format!(
                 "{name}: {}",
@@ -796,11 +794,16 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
                     analysis::CompletionItemSource::Keyword => "keyword",
                     analysis::CompletionItemSource::Local => "local",
                     analysis::CompletionItemSource::Global => "global",
+                    analysis::CompletionItemSource::Stdlib => "stdlib",
+                    analysis::CompletionItemSource::Field => "field",
+                    analysis::CompletionItemSource::Type => "type",
                 };
                 let kind = match item.kind {
                     analysis::CompletionItemKind::Keyword => "keyword",
                     analysis::CompletionItemKind::Variable => "variable",
                     analysis::CompletionItemKind::Function => "function",
+                    analysis::CompletionItemKind::Field => "field",
+                    analysis::CompletionItemKind::Type => "type",
                 };
                 format!("{} [{source} {kind}]", item.label)
             })
@@ -846,7 +849,7 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
         format!("{}:\n{}", path.display(), contents.trim_end())
     }
 
-    fn apply_text_edits(source: &str, edits: &[analysis::RenameEdit]) -> Result<String, String> {
+    fn apply_text_edits(source: &str, edits: &[analysis::TextEdit]) -> Result<String, String> {
         let rope = ropey::Rope::from_str(source);
         let mut replacements = edits
             .iter()
