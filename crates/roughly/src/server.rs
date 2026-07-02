@@ -1655,6 +1655,16 @@ impl EngineWorker {
             return Err(path_not_found_error(&path));
         }
 
+        // A rename edit is inserted as plain source text, so a non-syntactic name (`my var`,
+        // `1st`, a reserved word) would silently produce broken R everywhere the binding occurs.
+        // Reject it here with a message the client shows in the rename box.
+        if !is_valid_r_identifier(&new_name) {
+            return Err(ResponseError::new(
+                ErrorCode::INVALID_PARAMS,
+                format!("`{new_name}` is not a valid R identifier"),
+            ));
+        }
+
         let internal_position = self
             .to_internal_position(&path, position)
             .expect("opened document rope available for rename");
@@ -2402,6 +2412,48 @@ fn stub_document_diagnostics(rope: &ropey::Rope, encoding: PositionEncoding) -> 
             }
         }))
         .collect()
+}
+
+// A syntactic R identifier: letters, digits, `.`, and `_`, not starting with a digit or an
+// underscore, `.` not followed by a digit at the start, and not a reserved word. Anything else
+// would need backtick quoting, which a rename edit does not insert.
+fn is_valid_r_identifier(name: &str) -> bool {
+    const RESERVED: &[&str] = &[
+        "if",
+        "else",
+        "repeat",
+        "while",
+        "function",
+        "for",
+        "in",
+        "next",
+        "break",
+        "TRUE",
+        "FALSE",
+        "NULL",
+        "Inf",
+        "NaN",
+        "NA",
+        "NA_integer_",
+        "NA_real_",
+        "NA_character_",
+        "NA_complex_",
+    ];
+    let mut characters = name.chars();
+    let Some(first) = characters.next() else {
+        return false;
+    };
+    let starts_validly = match first {
+        '.' => !name
+            .chars()
+            .nth(1)
+            .is_some_and(|second| second.is_ascii_digit()),
+        character => character.is_alphabetic(),
+    };
+    starts_validly
+        && characters
+            .all(|character| character.is_alphanumeric() || character == '.' || character == '_')
+        && !RESERVED.contains(&name)
 }
 
 fn semantic_token_legend() -> Vec<SemanticTokenType> {

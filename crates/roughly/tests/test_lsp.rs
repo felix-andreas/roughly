@@ -1183,6 +1183,37 @@ async fn inlay_hints_respect_requested_viewport() {
     context.shutdown().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn rename_rejects_a_non_syntactic_name() {
+    let mut context = setup_test_with_features(&[("R/a.R", "value <- 1L\n")], &[]).await;
+
+    let file_uri = context.file_uri("R/a.R");
+    context.open_file(&file_uri, "value <- 1L\n").await;
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    for bad_name in ["my var", "1st", "function", ""] {
+        let result = context
+            .server
+            .rename(RenameParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: file_uri.clone(),
+                    },
+                    position: Position::new(0, 1),
+                },
+                new_name: bad_name.into(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await;
+        assert!(
+            result.is_err(),
+            "renaming to {bad_name:?} must be rejected, got: {result:?}"
+        );
+    }
+
+    context.shutdown().await;
+}
+
 #[tokio::test]
 async fn rename_uses_analysis_across_files() {
     let mut context = setup_test_with_features(
