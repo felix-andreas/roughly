@@ -548,6 +548,20 @@ impl Diagnostic {
                     format!("`[` is not supported on `{}`", type_renderer.render(actual)),
                 )
             }
+            InferenceError::UnsupportedIndexShape {
+                index_count,
+                range,
+                expression_id: _,
+            } => (
+                *range,
+                match index_count {
+                    0 => "indexing with an empty index (`x[]`) is not supported yet".to_owned(),
+                    1 => "indexing with a named index argument is not supported yet".to_owned(),
+                    count => format!(
+                        "indexing with {count} indexes is not supported yet — matrix and data.frame subsetting is not modeled"
+                    ),
+                },
+            ),
             InferenceError::RecursionLimitExceeded => (
                 fallback_range,
                 format!(

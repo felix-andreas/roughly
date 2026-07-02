@@ -107,6 +107,14 @@ pub enum InferenceError {
     UnresolvedAnnotationType {
         symbol: Symbol,
     },
+    // An indexing form the checker does not model: multiple indexes (`m[i, j]`), an empty index
+    // (`x[]`), or a named index argument. The subject was already inferred; this is about the
+    // index shape, so the message must name indexing rather than a function call.
+    UnsupportedIndexShape {
+        index_count: usize,
+        range: Range,
+        expression_id: ExpressionId,
+    },
     // An annotation names a parameter the annotated function does not define. R matches call
     // arguments against the definition's formal names, so such an annotation promises callers a
     // name the runtime would reject.
@@ -4935,20 +4943,37 @@ impl InferenceState {
         resolution_context: Option<&ResolutionContext<'_>>,
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<CoreType, InferenceError> {
-        if arguments.len() != 1 || arguments[0].name.is_some() {
-            return Err(InferenceError::FunctionArityMismatch {
-                expected: 1,
-                actual: arguments.len(),
-                range: Some(expression.range),
-                expression_id: Some(expression.id),
-            });
-        }
-
+        // The subject and every index are inferred first regardless of shape, so names inside an
+        // unsupported form (`m[i, j]`) still resolve and get their own diagnostics.
         let inferred_value =
             self.infer_expression_with_context(value, arena, resolution_context, type_definitions)?;
         let value_type = self.resolve_structural(inferred_value, type_definitions, Some(value))?;
-        let arg0_expr = arena.get(arguments[0].expression);
-        self.infer_expression_with_context(arg0_expr, arena, resolution_context, type_definitions)?;
+        for argument in arguments {
+            let argument_expression = arena.get(argument.expression);
+            self.infer_expression_with_context(
+                argument_expression,
+                arena,
+                resolution_context,
+                type_definitions,
+            )?;
+        }
+
+        // An Unknown/Any subject stays Unknown/Any even under an unsupported index shape — the
+        // subject's own gap was already diagnosed, and a matrix or data.frame value is Unknown
+        // today, so `m[i, j]` must not cascade an arity error.
+        if matches!(value_type, CoreType::Unknown) {
+            return Ok(CoreType::Unknown);
+        }
+        if matches!(value_type, CoreType::Any) {
+            return Ok(CoreType::Any);
+        }
+        if arguments.len() != 1 || arguments[0].name.is_some() {
+            return Err(InferenceError::UnsupportedIndexShape {
+                index_count: arguments.len(),
+                range: expression.range,
+                expression_id: expression.id,
+            });
+        }
 
         self.subset_result_type(value_type, value, expression, type_definitions)
     }
@@ -5005,25 +5030,33 @@ impl InferenceState {
         resolution_context: Option<&ResolutionContext<'_>>,
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<CoreType, InferenceError> {
-        if arguments.len() != 1 || arguments[0].name.is_some() {
-            return Err(InferenceError::FunctionArityMismatch {
-                expected: 1,
-                actual: arguments.len(),
-                range: Some(expression.range),
-                expression_id: Some(expression.id),
-            });
-        }
-
         let inferred_value =
             self.infer_expression_with_context(value, arena, resolution_context, type_definitions)?;
         let value_type = self.resolve_structural(inferred_value, type_definitions, Some(value))?;
+        for argument in arguments {
+            let argument_expression = arena.get(argument.expression);
+            self.infer_expression_with_context(
+                argument_expression,
+                arena,
+                resolution_context,
+                type_definitions,
+            )?;
+        }
+
+        if matches!(value_type, CoreType::Unknown) {
+            return Ok(CoreType::Unknown);
+        }
+        if matches!(value_type, CoreType::Any) {
+            return Ok(CoreType::Any);
+        }
+        if arguments.len() != 1 || arguments[0].name.is_some() {
+            return Err(InferenceError::UnsupportedIndexShape {
+                index_count: arguments.len(),
+                range: expression.range,
+                expression_id: expression.id,
+            });
+        }
         let index_expression = arena.get(arguments[0].expression);
-        self.infer_expression_with_context(
-            index_expression,
-            arena,
-            resolution_context,
-            type_definitions,
-        )?;
 
         self.subset2_result_type(
             value_type,

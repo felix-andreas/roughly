@@ -78,3 +78,27 @@ narrowed <- value
 error[type-error] expected `integer`, found `integer | character`
 --> 5:1-5:18
 | narrowed <- value
+
+#==== unsupported_index_shapes
+#---- matrix_style_indexing_on_unknown_stays_silent
+holder <- list(a = 1L)
+m <- holder@slot
+cell <- m[1, 2]
+#++++
+No diagnostics.
+
+#---- matrix_style_indexing_on_list_names_indexing
+values <- list(1L, 2L)
+cell <- values[1, 2]
+#++++
+error[type-error] indexing with 2 indexes is not supported yet — matrix and data.frame subsetting is not modeled
+--> 2:9-2:21
+| cell <- values[1, 2]
+
+#---- empty_index_is_reported_as_indexing
+values <- list(1L, 2L)
+copy <- values[]
+#++++
+error[type-error] indexing with an empty index (`x[]`) is not supported yet
+--> 2:9-2:17
+| copy <- values[]
