@@ -59,7 +59,7 @@ trusted <- 3L
 R/main.R:2:1
 #++++
 ```
-integer
+checked : integer
 ```
 
 Local variable, defined at `R/main.R:2:1`
@@ -71,7 +71,7 @@ Local variable, defined at `R/main.R:4:1`
 R/main.R:6:1
 #++++
 ```
-integer
+trusted : integer
 ```
 
 Local variable, defined at `R/main.R:6:1`
@@ -148,7 +148,7 @@ wrapper <- function(flag) {
 R/main.R:3:3
 #++++
 ```
-integer
+value : integer
 ```
 
 Local variable, defined at `R/main.R:2:13`
@@ -170,7 +170,7 @@ f <- function(flag) {
 R/main.R:6:3
 #++++
 ```
-integer
+x : integer
 ```
 
 Local variable, defined at `R/main.R:2:3`
@@ -189,7 +189,7 @@ f <- function(flag) {
 R/main.R:6:3
 #++++
 ```
-integer | character
+x : integer | character
 ```
 
 Local variable, defined at `R/main.R:2:3`
@@ -208,7 +208,7 @@ f <- function() {
 R/main.R:6:3
 #++++
 ```
-integer
+total : integer
 ```
 
 Local variable, defined at `R/main.R:2:3`
@@ -235,7 +235,7 @@ identity
 R/main.R:2:1
 #++++
 ```
-<T> fn(x: T) -> T
+identity : <T> fn(x: T) -> T
 ```
 
 Package global, defined at `R/main.R:1:1`
@@ -249,7 +249,7 @@ pair
 R/main.R:2:1
 #++++
 ```
-<T, U> fn(x: T, y: U) -> T
+pair : <T, U> fn(x: T, y: U) -> T
 ```
 
 Package global, defined at `R/main.R:1:1`
@@ -264,7 +264,7 @@ value
 R/main.R:2:1
 #++++
 ```
-Unknown
+value : Unknown
 ```
 
 Package global, defined at `R/main.R:1:1`
@@ -277,7 +277,7 @@ undefined_fn(1L)
 R/main.R:1:1
 #++++
 ```
-Unknown
+undefined_fn : Unknown
 ```
 
 #==== hover_type_in_annotation
@@ -346,7 +346,7 @@ value <- if (TRUE) 1L else "foo"
 R/main.R:1:1
 #++++
 ```
-integer | character
+value : integer | character
 ```
 
 Local variable, defined at `R/main.R:1:1`
@@ -359,7 +359,45 @@ for (item in list(a = 1L, b = "two")) item
 R/main.R:1:39
 #++++
 ```
-integer | character
+item : integer | character
 ```
 
 Local variable, defined at `R/main.R:1:1`
+
+#==== stdlib_names
+#---- print_shows_named_multiline_signature_and_origin
+#---- R/main.R
+print(1L)
+#++++ any
+#!!!! hover stub_print.hover
+R/main.R:1:1
+#++++
+```
+print : fn(
+  integer,
+  [digits]: Any,
+  [quote]: logical,
+  [right]: logical,
+  [max]: Any,
+  [width]: Any,
+  [n]: Any,
+  [na.print]: Any,
+  [row.names]: Any,
+  ...: Any,
+) -> integer
+```
+
+From the `base` package.
+
+#---- length_shows_named_signature_and_origin
+#---- R/main.R
+length(c(1L, 2L))
+#++++ any
+#!!!! hover stub_length.hover
+R/main.R:1:1
+#++++
+```
+length : fn(x: Any) -> integer
+```
+
+From the `base` package.

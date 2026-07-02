@@ -23,7 +23,7 @@ use {
             Argument, AssignTarget, AssignmentScope, DefinitionId, DefinitionItem, DefinitionKind,
             Expression, ExpressionId, ExpressionKind, Module,
         },
-        interner::Symbol,
+        interner::{Interner, Symbol},
         naming::{
             BindingId, BindingInfo, DocumentKind, NamesLocal, find_exported_binding,
             is_maybe_undefined_expression,
@@ -70,8 +70,9 @@ pub fn hover(database: &dyn IdeDatabase, path: &Path, position: TextPosition) ->
             let expression = module.arena.try_get(expression_id)?;
 
             if let Some(core_type) = database.checked_expression_type(document_id, expression_id) {
-                contents.push(code_block(&render_generalized_type(
+                contents.push(code_block(&hover_type_line(
                     database.interner(),
+                    hovered_name(database, expression),
                     core_type,
                 )));
             }
@@ -507,6 +508,47 @@ fn active_parameter(
 
 fn code_block(body: &str) -> String {
     format!("```\n{body}\n```")
+}
+
+// The name the hover is on, when the hovered expression *is* a name: a plain variable/function
+// reference or a namespace-qualified one. Other expressions (calls, literals) have no name to lead
+// the type line with.
+fn hovered_name<'d>(database: &'d dyn IdeDatabase, expression: &Expression) -> Option<&'d str> {
+    let symbol = match &expression.kind {
+        ExpressionKind::Symbol(symbol) => *symbol,
+        ExpressionKind::NamespaceGet { name, .. } => *name,
+        // Hovering an assignment shows the assigned variable's name with the bound value's type.
+        other => other.assignment_variable()?,
+    };
+    database.interner().resolve(symbol)
+}
+
+// The primary hover line: `name : TYPE` for a hovered name (mirroring the stub-declaration
+// notation) and the bare type otherwise. A function signature whose one-line render is long is
+// broken across lines — one parameter per line, the same shape the `#:` formatter gives long
+// annotations — so wide stub signatures stay readable in the hover popup.
+fn hover_type_line(interner: &Interner, name: Option<&str>, core_type: &CoreType) -> String {
+    const ONE_LINE_LIMIT: usize = 72;
+
+    let prefix = name.map(|name| format!("{name} : ")).unwrap_or_default();
+    if let CoreType::Function(function_type) = core_type {
+        let signature = render_function_signature(interner, function_type);
+        if prefix.len() + signature.label.len() > ONE_LINE_LIMIT && !signature.parameters.is_empty()
+        {
+            let first_parameter_start = signature.parameters[0].start;
+            let last_parameter_end = signature.parameters[signature.parameters.len() - 1].end;
+            let mut broken = format!("{prefix}{}\n", &signature.label[..first_parameter_start]);
+            for parameter in &signature.parameters {
+                broken.push_str("  ");
+                broken.push_str(&signature.label[parameter.clone()]);
+                broken.push_str(",\n");
+            }
+            broken.push_str(&signature.label[last_parameter_end..].trim_start_matches(", "));
+            return broken;
+        }
+        return format!("{prefix}{}", signature.label);
+    }
+    format!("{prefix}{}", render_generalized_type(interner, core_type))
 }
 
 fn render_range(range: Range) -> String {

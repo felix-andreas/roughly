@@ -32,8 +32,9 @@ export default defineConfig({
 				{
 					label: 'Typing',
 					items: [
-						{ slug: 'type-checker' },
+						{ slug: 'typing' },
 						{ slug: 'typing-reference' },
+						{ slug: 'stdlib-stubs' },
 					],
 				},
 				{
@@ -60,7 +61,7 @@ export default defineConfig({
 						},
 						{
 							label: 'Typing',
-							link: '/type-checker',
+							link: '/typing',
 						},
 						{
 							label: 'Linter',
