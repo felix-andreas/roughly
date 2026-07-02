@@ -20,6 +20,8 @@ const SHIPPED_STUBS: &[(&str, &str)] = &[
     ("stats", include_str!("../stubs/stats.Rtypes")),
     ("utils", include_str!("../stubs/utils.Rtypes")),
     ("methods", include_str!("../stubs/methods.Rtypes")),
+    ("graphics", include_str!("../stubs/graphics.Rtypes")),
+    ("grDevices", include_str!("../stubs/grDevices.Rtypes")),
 ];
 
 // The extension of a stub file: R type information, declaration-only. The name mirrors R's own `.Rd`

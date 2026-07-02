@@ -19,6 +19,11 @@ pi / 2
 #++++
 double
 
+#---- letters_is_character_vector
+letters
+#++++
+character[]
+
 #==== precise_base_calls
 #---- length_of_vector_is_integer
 length(c(1L, 2L, 3L))
@@ -80,18 +85,68 @@ substr("hello", 1L, 3L)
 #++++
 character
 
-#==== composition_with_kernel
-#---- stub_result_feeds_operator_kernel
-length(c(1L, 2L)) + 1L
+#==== idiomatic_coercion_forms
+#---- seq_len_accepts_double_literal
+seq_len(10)
+#++++
+integer[]
+
+#---- substr_accepts_double_literal_positions
+substr("hello", 1, 3)
+#++++
+character
+
+#---- substring_accepts_optional_last
+substring("hello", 1, 3)
+#++++
+character
+
+#---- substring_two_argument_form
+substring("hello", 2)
+#++++
+character
+
+#---- round_accepts_double_literal_digits
+round(3.14159, 2)
+#++++
+double
+
+#---- mean_second_positional_is_trim_not_na_rm
+mean(c(1, 2), 0.1)
+#++++
+double
+
+#---- toupper_accepts_vector
+toupper(c("a", "b"))
+#++++
+character
+
+#---- nchar_accepts_vector_and_coerced_input
+nchar(c("aa", "b"))
+nchar(42L)
 #++++
 integer
+integer
 
-#---- value_binding_threads_through_assignment
-flag <- T
-flag
+#---- gsub_accepts_vector_subject_and_flags
+gsub("a", "b", c("aa", "ab"), fixed = TRUE)
+#++++
+character
+
+#---- grepl_accepts_flags
+grepl("^x", "xy", perl = TRUE, ignore.case = TRUE)
 #++++
 logical
-logical
+
+#---- sort_accepts_decreasing_by_name
+sort(c(2L, 1L), decreasing = TRUE)
+#++++
+Any
+
+#---- unique_accepts_fromLast
+unique(c(1L, 1L), fromLast = TRUE)
+#++++
+Any
 
 #==== precise_variadic_calls
 #---- paste_of_many_arguments_is_character
@@ -104,28 +159,68 @@ paste()
 #++++
 character
 
-#---- cat_is_null
+#---- paste_accepts_sep_and_collapse
+paste(c("a", "b"), collapse = ", ")
+paste("a", "b", sep = "-")
+#++++
+character
+character
+
+#---- paste_accepts_explicit_null_collapse
+paste("a", collapse = NULL)
+#++++
+character
+
+#---- paste0_accepts_collapse
+paste0("x", 1L, collapse = "")
+#++++
+character
+
+#---- cat_is_null_and_accepts_sep
 cat("a", "b")
+cat("a", "b", sep = "\n")
 #++++
 NULL
+NULL
 
-#---- sum_of_many_arguments_is_double
+#---- format_accepts_named_controls
+format(3.14159, nsmall = 2L)
+#++++
+character
+
+#---- sprintf_variadic_is_character
+sprintf("%d-%s", 1L, "a")
+#++++
+character
+
+#==== type_preserving_reductions
+#---- sum_is_type_preserving_any
 sum(1L, 2L, 3L)
 #++++
-double
-
-#---- min_of_many_arguments_is_double
-min(1L, 2L, 3L)
-#++++
-double
-
-#---- range_is_double_vector
-range(1L, 2L, 3L)
-#++++
-double[]
+Any
 
 #---- sum_accepts_named_na_rm_with_rest_arguments
 sum(1, 2, na.rm = TRUE)
+#++++
+Any
+
+#---- min_accepts_character_arguments
+min("a", "z")
+#++++
+Any
+
+#---- max_is_type_preserving_any
+max(1L, 2L, na.rm = TRUE)
+#++++
+Any
+
+#---- range_is_type_preserving_any
+range(1L, 2L, 3L)
+#++++
+Any
+
+#---- prod_is_genuinely_double
+prod(2L, 3L)
 #++++
 double
 
@@ -138,6 +233,22 @@ double
 mean(c(1, 2), na.rm = TRUE)
 #++++
 double
+
+#==== logic_reductions
+#---- any_is_logical
+any(TRUE, FALSE)
+#++++
+logical
+
+#---- all_accepts_vector_and_na_rm
+all(c(TRUE, FALSE), na.rm = TRUE)
+#++++
+logical
+
+#---- isTRUE_is_logical
+isTRUE(TRUE)
+#++++
+logical
 
 #==== degradation
 #---- shape_polymorphic_rev_degrades_to_any
@@ -161,11 +272,6 @@ substring("hello", 1L)
 #++++
 character
 
-#---- sprintf_variadic_is_character
-sprintf("%d-%s", 1L, "a")
-#++++
-character
-
 #---- gsub_is_character
 gsub("a", "b", "banana")
 #++++
@@ -181,6 +287,16 @@ strsplit("a,b", ",")
 #++++
 list[character[]]
 
+#---- strrep_is_character
+strrep("ab", 3L)
+#++++
+character
+
+#---- toString_accepts_sep
+toString(c(1L, 2L), sep = "; ")
+#++++
+character
+
 #==== precise_math
 #---- round_is_double
 round(3.14159, 2L)
@@ -195,6 +311,18 @@ double
 #---- signif_is_double
 signif(3.14159, 3L)
 #++++
+double
+
+#---- sqrt_of_integer_is_double
+sqrt(4L)
+#++++
+double
+
+#---- exp_and_log_are_double
+exp(1L)
+log(8, base = 2)
+#++++
+double
 double
 
 #==== generic_apply
@@ -238,6 +366,261 @@ Position(is.numeric, ns)
 list[integer]
 integer | NULL
 
+#---- reduce_folds_to_element_type
+Reduce(function(a, b) a + b, list(1L, 2L))
+#++++
+integer
+
+#---- reduce_accepts_init_with_distinct_accumulator_type
+Reduce(function(acc, x) paste0(acc, x), list(1L, 2L), init = "")
+#++++
+character
+
+#---- invisible_passes_value_through
+invisible(5L)
+#++++
+integer
+
+#---- force_passes_value_through
+force(1L)
+#++++
+integer
+
+#---- print_returns_its_argument
+print(42L)
+print(c("a", "b"), quote = FALSE)
+#++++
+integer
+character[]
+
+#---- suppressWarnings_passes_body_type_through
+suppressWarnings(as.numeric("x"))
+#++++
+double
+
+#==== never_and_conditions
+#---- stop_in_else_branch_does_not_poison_the_join
+x <- if (TRUE) 1L else stop("bad")
+x + 1L
+#++++
+integer
+integer
+
+#---- stopifnot_is_null_and_accepts_string_labels
+stopifnot(TRUE)
+stopifnot("must hold" = TRUE)
+#++++
+NULL
+NULL
+
+#---- message_is_null
+message("hi", appendLF = FALSE)
+#++++
+NULL
+
+#---- tryCatch_resolves_with_handler
+tryCatch(1L, error = function(e) NULL)
+#++++
+Any
+
+#---- try_returns_any
+try(log(-1), silent = TRUE)
+#++++
+Any
+
+#==== structure_queries
+#---- names_is_null_hybrid_any
+names(list(a = 1L))
+#++++
+Any
+
+#---- class_is_character
+class(1L)
+#++++
+character
+
+#---- inherits_is_logical
+inherits(1L, "integer")
+#++++
+logical
+
+#---- nrow_is_null_hybrid_any_and_arithmetic_stays_clean
+n <- nrow(c(1L))
+n + 1L
+#++++
+Any
+Unknown
+
+#---- NROW_is_genuinely_integer
+NROW(c(1L, 2L))
+#++++
+integer
+
+#---- dim_is_null_hybrid_any
+dim(1L)
+#++++
+Any
+
+#---- typeof_is_character
+typeof(1L)
+#++++
+character
+
+#---- which_is_integer_vector
+which(c(TRUE, FALSE))
+#++++
+integer[]
+
+#---- which_max_is_integer
+which.max(c(1, 3))
+#++++
+integer
+
+#---- match_is_integer
+match("a", c("a", "b"))
+#++++
+integer
+
+#---- identical_is_logical
+identical(1L, 1L)
+#++++
+logical
+
+#---- attr_reads_any
+attr(1L, "names")
+#++++
+Any
+
+#==== builders
+#---- atomic_constructors_return_typed_vectors
+numeric(3)
+integer(2L)
+character(0L)
+logical(1L)
+#++++
+double[]
+integer[]
+character[]
+logical[]
+
+#---- matrix_and_factor_degrade_to_any_with_checked_formals
+matrix(c(1L, 2L), nrow = 1L)
+factor(c("a"), levels = c("a", "b"))
+#++++
+Any
+Any
+
+#---- rowSums_is_double_vector
+rowSums(matrix(c(1, 2), nrow = 1L), na.rm = TRUE)
+#++++
+double[]
+
+#---- order_is_integer_vector
+order(c(2L, 1L), decreasing = TRUE)
+#++++
+integer[]
+
+#---- tabulate_is_integer_vector
+tabulate(c(1L, 2L))
+#++++
+integer[]
+
+#---- split_returns_list
+split(c(1L, 2L), c("a", "b"))
+#++++
+list[Any]
+
+#==== file_and_system
+#---- file_path_is_character
+file.path("a", "b")
+#++++
+character
+
+#---- file_exists_scalar_claim_keeps_if_clean
+if (file.exists("f")) 1L else 2L
+#++++
+integer
+
+#---- readLines_is_character_vector
+readLines("f.txt")
+#++++
+character[]
+
+#---- writeLines_is_null
+writeLines("hi")
+#++++
+NULL
+
+#---- readRDS_is_any_saveRDS_is_null
+readRDS("f.rds")
+saveRDS(1L, "f.rds")
+#++++
+Any
+NULL
+
+#---- basename_is_character
+basename("/a/b.R")
+#++++
+character
+
+#---- list_files_is_character_vector
+list.files("dir", pattern = "[.]R$", full.names = TRUE)
+#++++
+character[]
+
+#---- tempfile_is_character
+tempfile(fileext = ".csv")
+#++++
+character
+
+#---- dir_exists_is_logical
+dir.exists("d")
+#++++
+logical
+
+#---- sys_time_is_any_sys_getenv_is_character
+Sys.time()
+Sys.getenv("HOME")
+#++++
+Any
+character
+
+#---- sys_getpid_is_integer
+Sys.getpid()
+#++++
+integer
+
+#---- commandArgs_is_character_vector
+commandArgs(trailingOnly = TRUE)
+#++++
+character[]
+
+#---- set_seed_is_null
+set.seed(42)
+#++++
+NULL
+
+#==== attach_and_load
+#---- library_with_string_argument_resolves
+library("utils", character.only = TRUE)
+#++++
+Any
+
+#---- require_is_logical
+if (require("utils", quietly = TRUE)) 1L else 2L
+#++++
+integer
+
+#---- requireNamespace_is_logical
+requireNamespace("utils", quietly = TRUE)
+#++++
+logical
+
+#---- getOption_is_any
+getOption("digits", default = 7L)
+#++++
+Any
+
 #==== still_any
 #---- grep_stays_any
 grep("a", "banana")
@@ -249,55 +632,33 @@ sapply(list(1L), is.numeric)
 #++++
 Any
 
-#==== precise_stats
-#---- sd_is_double
-sd(c(1, 2, 3))
-#++++
-double
-
-#---- median_accepts_na_rm
-median(c(1, 2), na.rm = TRUE)
-#++++
-double
-
-#---- quantile_is_double_vector
-quantile(c(1, 2, 3))
-#++++
-double[]
-
-#---- rnorm_is_double_vector
-rnorm(5L)
-#++++
-double[]
-
-#==== precise_utils
-#---- str_is_null
-str(list(1L, 2L))
-#++++
-NULL
-
-#---- write_csv_is_null
-write.csv("x", "out.csv")
-#++++
-NULL
-
-#---- install_packages_is_null
-install.packages("roughly")
-#++++
-NULL
-
-#---- help_is_null
-help(length)
-#++++
-NULL
-
-#==== still_any_utils
-#---- read_csv_stays_any
-read.csv("data.csv")
+#---- arbitrary_named_argument_sinks_resolve_as_any
+data.frame(x = 1L)
+structure(1L, class = "score")
+cbind(a = 1L, b = 2L)
+Sys.setenv(MY_VAR = "v")
+table(group = c("a", "a"))
 #++++
 Any
+Any
+Any
+Any
+Any
 
-#---- head_stays_any
-head(c(1L, 2L, 3L))
+#---- reflection_resolves
+do.call(sum, list(1L))
+ifelse(TRUE, 1L, 2L)
+eval(parse(text = "1 + 1"))
 #++++
+Any
+Any
+Any
+
+#---- exists_and_get_have_string_signatures
+exists("count")
+get("count")
+assign("count", 1L)
+#++++
+logical
+Any
 Any

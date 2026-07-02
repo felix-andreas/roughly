@@ -4,15 +4,16 @@ description: The standard-library stub format (.Rtypes declaration files) that t
 ---
 
 :::note[Status]
-The standard-library stub format ships. `T`/`F`/`pi` plus a curated set of base functions are
-declaration-only `.Rtypes` stub files under `crates/analysis/stubs/` (`base.Rtypes`, `stats.Rtypes`,
-`utils.Rtypes`, `methods.Rtypes`), loaded and bound into the checker as a **set-once input** that never
-invalidates a package edit (see [Incremental hygiene](#incremental-hygiene)). Project
-[overrides](#override-precedence) are supported. Still **proposed / not yet built**: the CRAN tier
-(per-project introspection, §7), R-version keying of the embedded corpus (§8), the stubtest CI
-validator, and `pkg::name` (`NamespaceGet`). Sections below mark which is which. The authoritative
-typing contract remains the [Typing Reference](/typing-reference); this note describes how the
-standard library feeds that contract.
+The standard-library stub format ships. The corpus is ~530 declarations across six declaration-only
+`.Rtypes` stub files under `crates/analysis/stubs/` — `base.Rtypes` (~340 names), `stats.Rtypes`,
+`utils.Rtypes`, `methods.Rtypes` are loaded and bound into the checker as a **set-once input** that
+never invalidates a package edit (see [Incremental hygiene](#incremental-hygiene));
+`graphics.Rtypes` and `grDevices.Rtypes` exist but await their two-line `SHIPPED_STUBS` entries in
+`stdlib.rs`. Project [overrides](#override-precedence) are supported. Still **proposed / not yet
+built**: the CRAN tier (per-project introspection, §7), R-version keying of the embedded corpus (§8),
+the stubtest CI validator, and `pkg::name` (`NamespaceGet`). Sections below mark which is which. The
+authoritative typing contract remains the [Typing Reference](/typing-reference); this note describes
+how the standard library feeds that contract.
 :::
 
 ## Problem
@@ -90,10 +91,12 @@ later without rewriting the corpus. Until the type system gains overload sets (o
 is deferred), a repeated name is resolved last-wins by the loader. Two rules govern the current corpus:
 
 - **Genuinely parametric functions get real generics.** Higher-order helpers whose result is a function
-  of the argument *type* (`lapply`, `Map`, `Reduce`, `identity`, ...) are written with `<T> fn(...)`
-  binders and keep precise polymorphic schemes.
-- **Ad-hoc overloads fall back to `Any`.** A function whose return type varies by argument *value* or
-  by arity (`abs`, `rep`, `seq`, `is`) is given `Any` rather than a falsely-precise signature, so a
+  of the argument *type* (`lapply`, `Reduce`, `print`, `invisible`, `setNames`, `suppressWarnings`, ...)
+  are written with `<T> fn(...)` binders and keep precise polymorphic schemes.
+- **Value-dependent results fall back to `Any`.** A function whose return type varies by argument
+  *value* or by arity (`rep`, `seq`, `is`, `grep(value =)`) — including the **type-preserving**
+  reductions (`sum`/`min`/`max` keep integer input integer; `min`/`max` even work on character), whose
+  faithful typing needs overload sets — is given `Any` rather than a falsely-precise signature, so a
   call yields `Any` and never a spurious type or arity error. The name still resolves.
 
 ## Override precedence
@@ -134,12 +137,17 @@ Two extensions that a faithful corpus needs have landed:
 | Variadics | `paste`, `sum`, `cat` | trailing `...: TYPE` rest parameter (`fn(...: Any) -> character`) |
 | Dotted parameter names | `na.rm`, `length.out` | interior `.` allowed in parameter and field names |
 
-Two remain, so the affected functions still degrade to `Any`:
+The gaps below remain; each caps how precise the affected declarations can be:
 
 | Gap | Example | Extension needed |
 |-----|---------|------------------|
 | Generic atomic suffix | `rev`, `head`, shape-threading | accept `T[]` (type variable + suffix) |
-| Overloading | one name resolves last-wins | overload sets or traits in the type system |
+| Overloading | `sum`/`min`/`max` type-preserving returns; `cor` vector-vs-matrix | overload sets or traits in the type system |
+| Trailing-dot parameter names | `stop(call. =)`, `warning(immediate. =)` | parameter names currently allow interior dots only |
+| Named-into-rest absorption | `data.frame(x = 1)`, `Sys.setenv(VAR = "v")`, `par(mfrow = ...)` | the checker never routes a named argument into `...`, so arbitrary-named-argument sinks must stay `Any` values |
+| Extra-optional-tolerant function compatibility | `lapply(words, nchar)` breaks if `nchar` declares its optional formals | function compatibility requires matching parameter counts, so callback-idiom stubs must stay single-parameter |
+| `Never` type | `stop`, `q` | without it, a `NULL` return claim would poison `x <- if (ok) v else stop(...)` joins, so these stay `Any` |
+| Nullable results under member-wise operators | `names`, `dim`, `nrow` | `T | NULL` returns false-positive on `1:nrow(df)` / `for (nm in names(x))` until flow narrowing or NULL-tolerant joins exist, so these return `Any` |
 
 The declaration grammar already permits repeated declarations of one name, so adopting overload sets
 later needs no corpus rewrite; until then, and until the generic-vector design lands, the shape-mirroring
@@ -153,7 +161,8 @@ loaded, parsed, and interned once, and are never invalidated by user edits.
 The `StubLibrary` is a **flat set-once map**: `values: Symbol -> scheme` (each entry pairs the harvested
 `TypeScheme` with the declaration's source range). It is not keyed by namespace.
 
-- Every shipped `.Rtypes` file (`base.Rtypes`, `stats.Rtypes`, `utils.Rtypes`, `methods.Rtypes`) is harvested into the
+- Every shipped `.Rtypes` file (`base.Rtypes`, `stats.Rtypes`, `utils.Rtypes`, `methods.Rtypes`; the
+  `graphics.Rtypes`/`grDevices.Rtypes` files await their `SHIPPED_STUBS` entries) is harvested into the
   one flat map, folded in file order — a later declaration of a name overrides an earlier one (last-wins,
   the same rule that governs project overrides). All shipped namespaces are thus attached to the base
   scope together; there is no per-namespace partition.
@@ -212,6 +221,27 @@ type and value namespaces respectively and never interact.
 **Rule:** if a function's return type is not a static function of its argument *types* (only of runtime
 values or classes), omit it or give `Any`.
 
+### Corpus compromise vocabulary
+
+The corpus optimizes for (1) zero false errors on idiomatic calls, then (2) the most precise sound
+return. The recurring compromises are named once in the `base.Rtypes` header and referenced per entry:
+
+- **Any-param** — a parameter is `Any` although R documents a type: the checker does not widen
+  `integer` to `double` at parameter positions, whole-number double literals are not accepted at
+  `integer` parameters, and R itself coerces argument types (`nchar(42)` is legal). The `T[]` generic
+  design restores parameter precision.
+- **scalar-claim** — an elementwise (vectorized) function declares its scalar result form
+  (`character`, not `character[]`): a scalar claim coerces into every vector position and can never
+  false-positive downstream, while a vector claim would break `if (grepl(...))`.
+- **type-preserving** — the result's atomic type follows the input's (`sum`, `sort`, `rev`); the
+  return is `Any` until overload sets, never a falsely-precise `double`.
+- **NULL-hybrid** — the result is `T`-or-`NULL` depending on the runtime value (`names`, `dim`,
+  `nrow`); returns `Any` (see the gaps table).
+- **named-formals** — a variadic function's named formals must all be declared (`paste`'s
+  `sep`/`collapse`, `cat`'s `sep`, `format`'s `nsmall`), because an undeclared named formal is a false
+  "unknown named argument" error; where the named-argument space is *open* (`data.frame`), the stub
+  must be an `Any` value instead.
+
 **Two-tier dynamic marker** (borrowed from typeshed): keep a real `Any` for genuinely untypeable
 returns *distinct from* a greppable "incomplete / not-yet-typed" marker. The distinction makes partial
 stubs first-class and improvable, and lets tooling find what still needs work — mirroring typeshed's
@@ -226,8 +256,8 @@ T : logical
 F : logical
 pi : double
 length : fn(x: Any) -> integer
-nchar : fn(x: character) -> integer
-seq_len : fn(length_out: integer) -> integer[]
+nchar : fn(x: Any) -> integer
+seq_len : fn(length.out: Any) -> integer[]
 ```
 
 The schemes each produces:
@@ -237,8 +267,12 @@ The schemes each produces:
 | `T`, `F` | `Scalar(Logical)` |
 | `pi` | `Scalar(Double)` |
 | `length` | `fn([], [x: Any], Integer)` |
-| `nchar` | `fn([], [x: Character], Integer)` |
-| `seq_len` | `fn([], [length_out: Integer], Vector(Integer))` |
+| `nchar` | `fn([], [x: Any], Integer)` |
+| `seq_len` | `fn([], [length.out: Any], Vector(Integer))` |
+
+(`nchar`'s subject and `seq_len`'s count are Any-param — see the
+[compromise vocabulary](#corpus-compromise-vocabulary) — so `nchar(42)` and `seq_len(10)` check clean
+while the returns stay precise.)
 
 R that type-checks against these stubs plus the hardcoded kernel:
 
@@ -251,9 +285,10 @@ flag <- T                      #: logical  (stub value binding)
 This demonstrates stub schemes and the hardcoded kernel interoperating: `length`'s scheme types `n`,
 the operator kernel promotes `pi / 2`, and the `T` value binding types `flag`.
 
-`paste`'s variadics and `length.out`'s dotted parameter name are now expressible directly
-(`paste : fn(...: Any) -> character`, `seq_len : fn(length.out: integer) -> integer[]`). One gap
-remains, degrading to `Any` until the generic-vector design lands:
+`paste`'s variadics, its `sep`/`collapse` named formals, and `length.out`'s dotted parameter name are
+expressible directly
+(`paste : fn([sep]: character, [collapse]: character | NULL, [recycle0]: logical, ...: Any) -> character`).
+One gap remains, degrading returns to the scalar-claim or `Any` until the generic-vector design lands:
 
 - `nchar`'s / `rev`'s shape polymorphism (the result shape should track the input vector shape).
 
@@ -275,15 +310,20 @@ machinery. This closes the `T`/`F`/`pi` gap with only the two integration edits 
   suffix (and overload sets) remain, so shape-mirroring and ad-hoc-overloaded functions still degrade
   to `Any` until that design lands.
 - **The operator/`c` kernel cannot migrate.** One-source-of-truth is necessarily partial.
-- **Corpus size.** Base alone is ~1200 functions. Curate a high-value subset; treat stubs as living
+- **Corpus size.** Base alone is ~1400 exports. Curate a high-value subset; treat stubs as living
   docs with real drift risk. The full validation tool is a **stubtest-equivalent** that introspects real
   R signatures via `formals()` / `getNamespaceExports()` and diffs them against the `#:` annotations
   (R-dependent, future — §7-9). A **name-level** slice of it already ships and runs in the ordinary unit
-  suite (no R): `tests/test_stdlib_exports.rs` diffs the names the corpus declares against a checked-in,
-  hand-maintained snapshot of each namespace's real exports (`tests/stdlib_exports/<namespace>.txt`).
-  Policy — the corpus must be a **subset** of the snapshot (every stubbed name must be a real export;
-  a stubbed non-export is a hard failure), while unstubbed real exports are allowed and only counted as a
-  coverage gauge. It is names only; arity/type validation stays the R-dependent future slice.
+  suite (no R): `tests/test_stdlib_exports.rs` diffs the names each corpus file declares against a
+  checked-in snapshot of that namespace's real exports (`tests/stdlib_exports/<namespace>.txt`). The
+  snapshots are best-effort full export lists written from R knowledge (hundreds of names per package,
+  including operators and names no stub will cover) — a static stand-in until real-R generation — so
+  the printed per-package coverage percentage is an honest gauge, not a self-referential one. Policy —
+  the corpus must be a **subset** of the snapshot (every stubbed name must be a real export; a stubbed
+  non-export is a hard failure); unstubbed real exports are allowed and only gauge-counted, and no
+  percentage is ever asserted. The suite additionally asserts that every shipped stub source parses
+  and harvests **cleanly** (the loader still drops malformed lines silently — see the backlog item on
+  loader diagnostics) and that the loader-visible names match the corpus files exactly.
 - **`Any` over-permissiveness** silences real errors — hence the two-tier marker in §4.
 - **Incremental isolation** is automatic — a set-once input; see §3.
 

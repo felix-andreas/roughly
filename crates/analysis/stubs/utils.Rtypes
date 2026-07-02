@@ -1,26 +1,57 @@
 # Standard-library stubs: utils package.
 #
-# Declaration-only stub file (`.Rtypes`); see base.Rtypes for the format. Side-effecting helpers get a
-# precise `NULL` return; those whose result shape mirrors their input stay `Any` until the
-# generic-vector design lands. Stubbing every name still makes it resolve and keeps strict mode quiet.
+# Declaration-only stub file (`.Rtypes`); see base.Rtypes for the format and the shared compromise
+# vocabulary (Any-param, scalar-claim, type-preserving, NULL-hybrid, named-formals).
 
-# widened to Any: the result is a prefix/suffix of the argument, so its shape mirrors the input. This is
-# the shape-mirroring group; a `T[]`-over-a-type-variable return is deferred (see
-# `.agents/memory/typing-design.md`), so a concrete return type would be falsely precise.
-head : Any
-tail : Any
+# Prefix/suffix of the argument: type-preserving returns, but the arity and `n =` formal are real.
+head : fn(x: Any, [n]: Any) -> Any
+tail : fn(x: Any, [n]: Any) -> Any
 
-# Side-effecting helpers: the value produced is not statically interesting, but the return type is a
-# precise `NULL` (each returns `invisible(NULL)`). A bare leading positional plus `...` matches the
-# working `sprintf`/`format` shape; the checker fills a variadic function's named parameters by name
-# only, so a named leading parameter would reject the positional call.
-str : fn(Any, ...: Any) -> NULL
-write.csv : fn(Any, ...: Any) -> NULL
-install.packages : fn(Any, ...: Any) -> NULL
-help : fn(object: Any) -> NULL
+# `str` prints a structure summary and returns NULL invisibly. Its first argument is a bare positional
+# (the checker fills a variadic function's named parameters by name only); the named formals cover the
+# common display controls.
+str : fn(Any, [max.level]: Any, [vec.len]: Any, [list.len]: Any, [digits.d]: Any, [give.attr]: logical, [give.head]: logical, ...: Any) -> NULL
 
-# widened to Any: the result mirrors the input's structure. `read.csv` returns a data frame (no
-# `data.frame` type yet); `modifyList` returns the argument list with its element structure changed, so
-# a concrete return type would be falsely precise.
+# Delimited I/O. Readers return data frames (no nameable type yet — `Any`). Writers return NULL
+# invisibly; their named formals must be declared (named-formals) or `write.csv(x, f, row.names =
+# FALSE)` would falsely error. `write.csv` forbids overriding `sep`/`dec`/`qmethod` in R, so only the
+# formals it genuinely accepts are declared.
 read.csv : Any
-modifyList : Any
+read.csv2 : Any
+read.delim : Any
+read.table : Any
+write.csv : fn(Any, [file]: Any, [quote]: Any, [na]: character, [row.names]: Any, [fileEncoding]: character, [eol]: character, ...: Any) -> NULL
+write.csv2 : fn(Any, [file]: Any, [quote]: Any, [na]: character, [row.names]: Any, [fileEncoding]: character, [eol]: character, ...: Any) -> NULL
+write.table : fn(x: Any, [file]: Any, [append]: logical, [quote]: Any, [sep]: character, [eol]: character, [na]: character, [dec]: character, [row.names]: Any, [col.names]: Any, [qmethod]: character, [fileEncoding]: character) -> NULL
+
+# Package management. `install.packages`'s full formal set is declared so named arguments (`repos =`,
+# `dependencies =`, `Ncpus =`) match; the pickers/listings return install matrices (`Any`).
+install.packages : fn(pkgs: Any, [lib]: Any, [repos]: Any, [contriburl]: Any, [method]: Any, [available]: Any, [destdir]: Any, [dependencies]: Any, [type]: character, [configure.args]: Any, [configure.vars]: Any, [clean]: logical, [Ncpus]: Any, [verbose]: logical, [libs_only]: logical, [INSTALL_opts]: Any, [quiet]: logical, [keep_outputs]: Any) -> NULL
+remove.packages : fn(pkgs: Any, [lib]: Any) -> NULL
+update.packages : Any
+installed.packages : Any
+available.packages : Any
+packageVersion : fn(pkg: character, [lib.loc]: Any) -> Any
+download.file : fn(url: Any, destfile: Any, [method]: character, [quiet]: logical, [mode]: character, [cacheOK]: logical, [extra]: Any, [headers]: Any) -> integer
+untar : fn(tarfile: Any, [files]: Any, [list]: logical, [exdir]: character, [tar]: character) -> Any
+unzip : fn(zipfile: Any, [files]: Any, [list]: logical, [overwrite]: logical, [junkpaths]: logical, [exdir]: character, [unzip]: Any, [setTimes]: logical) -> Any
+zip : fn(zipfile: Any, files: Any, [flags]: character, [extras]: character, [zip]: character) -> Any
+
+# `help` returns a browsable help object (class `help_files_with_topic`), not NULL; its topic is
+# usually an unevaluated name (NSE), which `Any` parameters absorb.
+help : fn([topic]: Any, [package]: Any, [lib.loc]: Any, [verbose]: logical, [try.all.packages]: logical, [help_type]: character) -> Any
+
+# Session and miscellany. `capture.output` genuinely returns the captured lines (with `file =` it
+# returns NULL — a value-dependent edge accepted for the dominant form). `combn`'s result shape depends
+# on `FUN`/`simplify`. `data` loads datasets by unevaluated name.
+sessionInfo : fn([package]: Any) -> Any
+object.size : fn(x: Any) -> Any
+capture.output : fn([file]: Any, [append]: logical, [type]: character, [split]: logical, ...: Any) -> character[]
+combn : fn(Any, Any, [FUN]: Any, [simplify]: logical, ...: Any) -> Any
+modifyList : fn(x: Any, val: Any, [keep.null]: logical) -> Any
+data : Any
+txtProgressBar : Any
+setTxtProgressBar : fn(pb: Any, value: Any, [title]: Any, [label]: Any) -> Any
+URLencode : fn(URL: Any, [reserved]: logical, [repeated]: logical) -> character
+URLdecode : fn(URL: Any) -> character
+glob2rx : fn(pattern: Any, [trim.head]: logical, [trim.tail]: logical) -> character
