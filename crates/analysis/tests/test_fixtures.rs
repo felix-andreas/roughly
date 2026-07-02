@@ -413,7 +413,8 @@ fn run_stdlib_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, Str
     let mut inference_state = inference_state_with_builtins(&mut lowering_context);
     let stub_library = StubLibrary::load(lowering_context.interner_mut());
     stub_library.seed_into(&mut inference_state);
-    let type_definitions = TypeDefinitionEnvironment::from_module(&module);
+    let mut type_definitions = TypeDefinitionEnvironment::from_module(&module);
+    stub_library.seed_type_definitions(&mut type_definitions);
     let inferred_types = match inference_state.infer_module(&module, &type_definitions) {
         Ok(inferred_types) => inferred_types,
         Err(error) => {

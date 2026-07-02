@@ -127,9 +127,18 @@ fn stub_names_are_a_subset_of_real_export_snapshots() {
 fn stub_declarations_harvest_cleanly() {
     for &(namespace, stub_source, _) in STUB_CORPUS {
         let mut interner = Interner::default();
+        // Harvest against the corpus's own opaque `@type` declarations, exactly like the loader:
+        // a value declaration may return a nominal (`data.frame`) another corpus line declares.
+        let mut type_definitions = TypeDefinitionEnvironment::default();
+        for &(_, corpus_source, _) in STUB_CORPUS {
+            for type_declaration in
+                analysis::stub::parse_stub_file(corpus_source, &mut interner).types
+            {
+                type_definitions.seed_opaque_type(type_declaration.name);
+            }
+        }
         let (declarations, _errors) = parse_stub_declarations(stub_source, &mut interner);
         let mut inference_state = InferenceState::new();
-        let type_definitions = TypeDefinitionEnvironment::default();
         for declaration in &declarations {
             let name = interner.resolve(declaration.name).unwrap_or("<unknown>");
             assert!(

@@ -2321,7 +2321,7 @@ fn stub_document_diagnostics(rope: &ropey::Rope, encoding: PositionEncoding) -> 
     // for example); the loader would drop it silently, so report it here where the author can see
     // it. Harvest uses the same entry point the loader does.
     let mut inference_state = analysis::typecheck::InferenceState::new();
-    let type_definitions = analysis::typecheck::TypeDefinitionEnvironment::default();
+    let type_definitions = analysis::stdlib::stub_editing_type_definitions(&mut interner, &text);
     let harvest_diagnostics = declarations.iter().filter_map(|declaration| {
         let error = inference_state
             .harvest_annotation_scheme(&declaration.surface_type, &type_definitions)

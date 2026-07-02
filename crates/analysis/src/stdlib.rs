@@ -2,7 +2,7 @@ use {
     crate::{
         Interner,
         interner::Symbol,
-        stub::parse_stub_declarations,
+        stub::{parse_stub_declarations, parse_stub_file},
         typecheck::{InferenceState, TypeDefinitionEnvironment},
         types::TypeScheme,
     },
@@ -42,6 +42,10 @@ pub const STUB_EXTENSION: &str = "Rtypes";
 #[derive(Debug, Clone, Default)]
 pub struct StubLibrary {
     values: BTreeMap<Symbol, StubValue>,
+    // Opaque nominal types the corpus declares (`@type data.frame`), keyed to their declaration
+    // range. Seeded under every type-definition environment so a stub (or user annotation) can
+    // name them; a project's own `@type`/`@alias` of the same name shadows the stub type.
+    type_declarations: BTreeMap<Symbol, Range>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,19 +78,50 @@ impl StubLibrary {
     // omits). Every stub name is interned through the caller's interner, so a user reference and the stub
     // share one symbol id.
     pub fn load_with_overrides(interner: &mut Interner, override_sources: &[String]) -> Self {
-        let mut values = BTreeMap::new();
-        for &(namespace, source) in SHIPPED_STUBS {
-            harvest_stub_source(interner, source, Some(namespace), &mut values);
+        // Types first, across every source: a value declaration may reference a type a later file
+        // (or the same file, further down) declares, so harvesting runs against the full set.
+        let mut type_declarations = BTreeMap::new();
+        let shipped = SHIPPED_STUBS
+            .iter()
+            .map(|&(namespace, source)| (Some(namespace), source));
+        let overrides = override_sources
+            .iter()
+            .map(|source| (None, source.as_str()));
+        let sources = shipped.chain(overrides).collect::<Vec<_>>();
+        for &(_, source) in &sources {
+            let stub_file = parse_stub_file(source, interner);
+            for type_declaration in stub_file.types {
+                type_declarations
+                    .entry(type_declaration.name)
+                    .or_insert(type_declaration.range);
+            }
         }
-        for source in override_sources {
-            harvest_stub_source(interner, source, None, &mut values);
+        let mut type_definitions = TypeDefinitionEnvironment::default();
+        for symbol in type_declarations.keys() {
+            type_definitions.seed_opaque_type(*symbol);
+        }
+
+        let mut values = BTreeMap::new();
+        for (namespace, source) in sources {
+            harvest_stub_source(interner, source, namespace, &type_definitions, &mut values);
         }
 
         debug_assert!(
             !values.is_empty(),
             "shipped stub corpus yielded no schemes; a stub file failed to parse"
         );
-        Self { values }
+        Self {
+            values,
+            type_declarations,
+        }
+    }
+
+    // Seeds the corpus's opaque nominal types into a type-definition environment. Call after the
+    // environment is built from modules: seeding never overwrites, so user declarations win.
+    pub fn seed_type_definitions(&self, type_definitions: &mut TypeDefinitionEnvironment) {
+        for symbol in self.type_declarations.keys() {
+            type_definitions.seed_opaque_type(*symbol);
+        }
     }
 
     // Whether `namespace` is one the shipped corpus models (`base`, `stats`, …). An unknown
@@ -154,6 +189,25 @@ impl StubLibrary {
     }
 }
 
+// The type-definition environment an open `.Rtypes` editor buffer harvests against: the shipped
+// corpus's opaque `@type` declarations plus the buffer's own. Without this, a valid override
+// declaration returning a shipped nominal (`data.frame`) would falsely report as unloadable.
+pub fn stub_editing_type_definitions(
+    interner: &mut Interner,
+    buffer_source: &str,
+) -> TypeDefinitionEnvironment {
+    let mut type_definitions = TypeDefinitionEnvironment::default();
+    for &(_, source) in SHIPPED_STUBS {
+        for type_declaration in parse_stub_file(source, interner).types {
+            type_definitions.seed_opaque_type(type_declaration.name);
+        }
+    }
+    for type_declaration in parse_stub_file(buffer_source, interner).types {
+        type_definitions.seed_opaque_type(type_declaration.name);
+    }
+    type_definitions
+}
+
 // The names each shipped namespace declares, keyed by namespace in `SHIPPED_STUBS` order. Names are
 // extracted with the real stub parser (not a second scanner), so this stays in step with what the loader
 // harvests. A name repeated within one file appears once. Used by the exhaustiveness check that diffs the
@@ -210,15 +264,15 @@ fn harvest_stub_source(
     interner: &mut Interner,
     source: &str,
     namespace: Option<&'static str>,
+    type_definitions: &TypeDefinitionEnvironment,
     values: &mut BTreeMap<Symbol, StubValue>,
 ) {
     let (declarations, _errors) = parse_stub_declarations(source, interner);
     let mut inference_state = InferenceState::new();
-    let type_definitions = TypeDefinitionEnvironment::default();
     let mut declared_in_this_source = BTreeSet::new();
     for declaration in declarations {
         let Ok(scheme) =
-            inference_state.harvest_annotation_scheme(&declaration.surface_type, &type_definitions)
+            inference_state.harvest_annotation_scheme(&declaration.surface_type, type_definitions)
         else {
             continue;
         };

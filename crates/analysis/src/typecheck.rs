@@ -393,7 +393,10 @@ struct ResolutionContext<'a> {
 struct TypeDefinition {
     kind: DefinitionKind,
     type_parameters: Vec<Symbol>,
-    surface_type: SurfaceType,
+    // `None` for an opaque nominal (a stub `@type`): there is nothing to expand, so structural
+    // projection, variance computation, and representation checks all treat the type as sealed —
+    // it is compatible only with itself.
+    representation: Option<SurfaceType>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -416,13 +419,27 @@ impl TypeDefinitionEnvironment {
                     TypeDefinition {
                         kind: definition.definition.kind,
                         type_parameters: definition.definition.type_parameters.clone(),
-                        surface_type: definition.definition.surface_type.clone(),
+                        representation: Some(definition.definition.surface_type.clone()),
                     },
                 );
             }
         }
 
         Self { definitions }
+    }
+
+    // Seeds an opaque nominal type (kind `Type`, no parameters, `Any` representation) under the
+    // module-declared definitions: standard-library stub types (`data.frame`, `connection`, ...)
+    // enter here, and a module's own `@type`/`@alias` of the same name wins because seeding never
+    // overwrites an existing definition. The `Any` representation is honest for an opaque type —
+    // its structure is not inspectable, so `@new` against it checks nothing and compatibility
+    // works purely by name.
+    pub fn seed_opaque_type(&mut self, symbol: Symbol) {
+        self.definitions.entry(symbol).or_insert(TypeDefinition {
+            kind: DefinitionKind::Type,
+            type_parameters: Vec::new(),
+            representation: None,
+        });
     }
 
     fn get(&self, symbol: Symbol) -> Option<&TypeDefinition> {
@@ -472,12 +489,14 @@ impl Variance {
 // stays `Bivariant`.
 fn parameter_variances(definition: &TypeDefinition) -> Vec<Variance> {
     let mut variances = BTreeMap::new();
-    accumulate_parameter_variances(
-        &definition.surface_type,
-        Variance::Covariant,
-        &definition.type_parameters,
-        &mut variances,
-    );
+    if let Some(representation) = &definition.representation {
+        accumulate_parameter_variances(
+            representation,
+            Variance::Covariant,
+            &definition.type_parameters,
+            &mut variances,
+        );
+    }
     definition
         .type_parameters
         .iter()
@@ -3582,27 +3601,35 @@ impl InferenceState {
                             return Err(alias_cycle_error(*name, expression));
                         }
 
-                        let lowered_alias =
-                            if type_definition.type_parameters.len() != lowered_arguments.len() {
-                                Err(InferenceError::UnresolvedAnnotationType { symbol: *name })
-                            } else {
-                                let mut nested_substitutions = substitutions.clone();
-                                for (type_parameter, lowered_argument) in type_definition
-                                    .type_parameters
-                                    .iter()
-                                    .zip(lowered_arguments)
-                                {
-                                    nested_substitutions.insert(*type_parameter, lowered_argument);
-                                }
+                        let lowered_alias = if type_definition.type_parameters.len()
+                            != lowered_arguments.len()
+                        {
+                            Err(InferenceError::UnresolvedAnnotationType { symbol: *name })
+                        } else {
+                            let mut nested_substitutions = substitutions.clone();
+                            for (type_parameter, lowered_argument) in type_definition
+                                .type_parameters
+                                .iter()
+                                .zip(lowered_arguments)
+                            {
+                                nested_substitutions.insert(*type_parameter, lowered_argument);
+                            }
 
-                                self.lower_surface_type_with_substitutions(
-                                    &type_definition.surface_type,
+                            match &type_definition.representation {
+                                Some(representation) => self.lower_surface_type_with_substitutions(
+                                    representation,
                                     &nested_substitutions,
                                     expanding_aliases,
                                     type_definitions,
                                     expression,
-                                )
-                            };
+                                ),
+                                // An alias always carries a representation; an opaque
+                                // definition cannot be expanded.
+                                None => {
+                                    Err(InferenceError::UnresolvedAnnotationType { symbol: *name })
+                                }
+                            }
+                        };
 
                         expanding_aliases.remove(name);
                         lowered_alias
@@ -3796,8 +3823,11 @@ impl InferenceState {
             substitutions.insert(*type_parameter, type_argument.clone());
         }
 
+        let Some(representation) = &type_definition.representation else {
+            return Ok(None);
+        };
         match self.lower_surface_type_with_substitutions(
-            &type_definition.surface_type,
+            &representation.clone(),
             &substitutions,
             &mut BTreeSet::new(),
             type_definitions,

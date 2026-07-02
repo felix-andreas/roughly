@@ -635,7 +635,7 @@ logical
 Sys.time()
 Sys.getenv("HOME")
 #++++
-Any
+POSIXct
 character
 
 #---- sys_getpid_is_integer
@@ -726,3 +726,34 @@ double
 mystery <- foobar::bazqux
 #++++
 Unknown
+
+#==== opaque_nominal_types
+#---- sys_date_returns_the_date_nominal
+Sys.Date()
+#++++
+Date
+
+#---- as_factor_returns_the_factor_nominal
+as.factor(c("a", "b"))
+#++++
+factor
+
+#---- file_returns_a_connection
+file("data.txt", open = "r")
+#++++
+connection
+
+#---- annotation_can_name_a_stub_nominal
+#: fn(x: factor) -> logical
+check_factor <- function(x) TRUE
+check_factor(as.factor("a"))
+#++++
+fn(x: factor) -> logical
+logical
+
+#---- stub_nominals_are_distinct
+#: fn(x: factor) -> logical
+check_factor <- function(x) TRUE
+check_factor(Sys.Date())
+#++++
+error: type mismatch

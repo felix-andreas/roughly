@@ -1185,7 +1185,7 @@ fn parse_named_type_ref(
 }
 
 fn identifier_span(text: &str) -> Option<(usize, usize)> {
-    utils::identifier_span_at(text, 0)
+    utils::member_name_span_at(text, 0)
 }
 
 fn invalid_syntax(message: impl Into<String>) -> TypeParseError {
@@ -1430,8 +1430,10 @@ impl<'a> TypeParser<'a> {
             return self.parse_function_type();
         }
 
+        // Type names admit interior dots like member names do: R's own class names are dotted
+        // (`data.frame`, `POSIXct`), and stub `@type` declarations must be able to name them.
         let identifier_span = self
-            .parse_identifier_span()
+            .parse_member_name_span()
             .ok_or_else(|| invalid_syntax("expected a type."))?;
         let identifier = &self.source[identifier_span.0..identifier_span.1];
 
@@ -1771,9 +1773,8 @@ impl<'a> TypeParser<'a> {
         Some(span)
     }
 
-    // Lexes a parameter or field name, which — unlike a type name — may contain interior `.` (`na.rm`).
-    // The dot is admitted only at the name sites that call this; type names, type parameters, and
-    // `@type` names keep the dot-free `identifier_span_at`.
+    // Lexes a parameter, field, or type name, which may contain interior `.` (`na.rm`,
+    // `data.frame`). Type-parameter binders keep the dot-free `identifier_span_at`.
     fn parse_member_name_span(&mut self) -> Option<(usize, usize)> {
         self.skip_ascii_whitespace();
         let span = utils::member_name_span_at(self.source, self.position)?;

@@ -12,7 +12,8 @@ The standard-library stub format ships. The corpus is ~530 declarations across s
 [overload sets](#overloads-and-generics), and `pkg::name` qualified access (with unknown-namespace
 and not-exported warnings) are supported. Still **proposed / not yet built**: the CRAN tier
 (per-project introspection, §7), R-version keying of the embedded corpus (§8), the stubtest CI
-validator, and `@type` declarations in `.Rtypes`. Sections below mark which is which. The authoritative typing contract remains the
+validator, and structural (non-opaque) `@type` declarations in `.Rtypes`. Sections below mark which
+is which. The authoritative typing contract remains the
 [Typing Reference](/typing-reference); this note describes how the standard library feeds that
 contract.
 :::
@@ -72,9 +73,15 @@ The extension `.Rtypes` evokes R's own `.Rd` documentation convention (R-somethi
 second type notation; reusing the `#:` type grammar keeps one source of truth for type syntax across
 inline annotations and stub files.
 
-A declaration binds a **value** name (a function or a constant) to a type. Nominal **type/class**
-declarations in stub files (the `@type` form described in §2/§4) are not yet expressible in `.Rtypes`;
-until they are, the shipped corpus is value bindings only.
+Besides value declarations, a line of the form `@type NAME` declares an **opaque nominal type** — a
+named type with no inspectable representation, for standard-library values the type grammar cannot
+describe structurally (`data.frame`, `factor`, `connection`, `Date`, ...). An opaque nominal is
+compatible only with itself; values of it come only from functions declared to return it, so
+`Sys.Date()` is a `Date` and passing it where `factor` is expected is a type error. Type names may
+contain interior dots (`data.frame`), and a project's own `@type`/`@alias` of the same name shadows
+the stub type. Consumers of these values keep `Any` parameters (R coerces liberally); the nominals
+tighten *returns*. Structural `@type NAME {REPRESENTATION}` declarations are not expressible in
+`.Rtypes` — opaque nominals are the stub form.
 
 ### Cross-ecosystem note
 

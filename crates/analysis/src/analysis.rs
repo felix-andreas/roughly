@@ -735,7 +735,12 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 })
             })
             .collect::<Vec<_>>();
-        TypeDefinitionEnvironment::from_modules(package_modules.iter().copied())
+        let mut type_definitions =
+            TypeDefinitionEnvironment::from_modules(package_modules.iter().copied());
+        analysis_state
+            .stub_library
+            .seed_type_definitions(&mut type_definitions);
+        type_definitions
     };
 
     let package_naming = analysis_state
@@ -905,7 +910,12 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 let package_modules = package_document_ids
                     .iter()
                     .filter_map(|package_document_id| analysis_state.module(*package_document_id));
-                TypeDefinitionEnvironment::from_modules(package_modules.chain([module]))
+                let mut script_type_definitions =
+                    TypeDefinitionEnvironment::from_modules(package_modules.chain([module]));
+                analysis_state
+                    .stub_library
+                    .seed_type_definitions(&mut script_type_definitions);
+                script_type_definitions
             } else {
                 type_definitions.clone()
             };

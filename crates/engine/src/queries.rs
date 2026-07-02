@@ -585,9 +585,10 @@ impl QueryGroup for RoughlyQueries {
                         );
                     }
                 }
-                Stored::new(TypeDefinitionEnvironment::from_modules(
-                    modules.iter().map(|view| &*view.0),
-                ))
+                let mut type_definitions =
+                    TypeDefinitionEnvironment::from_modules(modules.iter().map(|view| &*view.0));
+                self.stubs.seed_type_definitions(&mut type_definitions);
+                Stored::new(type_definitions)
             }
 
             Key::FallbackRange => {
@@ -899,12 +900,16 @@ fn infer_file(
                 );
             }
         }
-        TypeDefinitionEnvironment::from_modules(
+        let mut script_type_definitions = TypeDefinitionEnvironment::from_modules(
             package_modules
                 .iter()
                 .map(|view| &*view.0)
                 .chain([&*module]),
-        )
+        );
+        group
+            .stubs
+            .seed_type_definitions(&mut script_type_definitions);
+        script_type_definitions
     };
 
     let mut lowering = group.lowering.borrow_mut();

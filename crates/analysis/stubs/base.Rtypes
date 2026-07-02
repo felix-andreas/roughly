@@ -37,6 +37,19 @@
 # record synthesis) that a single declaration cannot describe, so they are modeled directly in the
 # checker instead.
 
+# Opaque nominal types: standard-library values whose structure the type grammar cannot describe.
+# `@type NAME` declares a named type with no inspectable representation — compatible only with
+# itself, produced only by functions declared to return it. Consumers that accept them keep `Any`
+# parameters (R coerces liberally), so the nominals tighten *returns* without rejecting calls.
+@type data.frame
+@type factor
+@type matrix
+@type formula
+@type connection
+@type Date
+@type POSIXct
+@type environment
+
 # Reserved value constants and built-in constant vectors.
 T : logical
 F : logical
@@ -101,11 +114,11 @@ as.logical : fn(x: Any) -> logical
 as.vector : fn(x: Any, [mode]: character) -> Any
 as.list : fn(x: Any) -> list[Any]
 # Coercions to types the stub grammar cannot name yet (factor, data.frame, date/time, language objects).
-as.factor : Any
-as.data.frame : Any
-as.matrix : Any
-as.Date : Any
-as.POSIXct : Any
+as.factor : fn(x: Any) -> factor
+as.data.frame : fn(x: Any, [row.names]: Any, [optional]: logical, [stringsAsFactors]: logical, ...: Any) -> data.frame
+as.matrix : fn(x: Any, ...: Any) -> matrix
+as.Date : fn(x: Any, [format]: character, [tryFormats]: Any, [origin]: Any, [tz]: character, ...: Any) -> Date
+as.POSIXct : fn(x: Any, [tz]: character, [format]: character, [tryFormats]: Any, [origin]: Any, ...: Any) -> POSIXct
 as.name : Any
 as.symbol : Any
 as.function : Any
@@ -509,16 +522,16 @@ save : fn([file]: Any, [list]: Any, [ascii]: logical, [version]: Any, [envir]: A
 save.image : fn([file]: Any, [version]: Any, [ascii]: logical, [compress]: Any, [safe]: logical) -> NULL
 scan : Any
 dput : <T> fn(x: T, [file]: Any, [control]: Any) -> T
-file : Any
-url : Any
-gzfile : Any
-textConnection : Any
+file : fn([description]: character, [open]: character, [blocking]: logical, [encoding]: character, [raw]: logical, [method]: character) -> connection
+url : fn(description: character, [open]: character, [blocking]: logical, [encoding]: character, [method]: character, [headers]: Any) -> connection
+gzfile : fn(description: character, [open]: character, [encoding]: character, [compression]: Any) -> connection
+textConnection : fn(object: Any, [open]: character, [local]: logical, [name]: character, [encoding]: character) -> connection
 close : fn(con: Any, [type]: character) -> Any
 readline : fn([prompt]: character) -> character
 
 # System and session.
-Sys.time : fn() -> Any
-Sys.Date : fn() -> Any
+Sys.time : fn() -> POSIXct
+Sys.Date : fn() -> Date
 Sys.getenv : fn([x]: Any, [unset]: Any, [names]: logical) -> character
 # `Sys.setenv(VAR = "v")`: arbitrary variable names as named arguments.
 Sys.setenv : Any
