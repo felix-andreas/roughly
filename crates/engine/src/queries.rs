@@ -32,7 +32,7 @@ use {
         hir::{DefinitionKind, ExpressionId, ExpressionKind, HirArena, Module},
         interner::{Interner, Symbol},
         lint::analyze as lint_analyze,
-        lower::{LoweringContext, lower, lower_with_diagnostics},
+        lower::{LoweringContext, LoweringResult, lower_with_diagnostics},
         naming::{
             BindingInfo, DocumentKind, DocumentNamingComputation, NamesGlobal, NamesLocal,
             resolve_document_locally,
@@ -504,13 +504,13 @@ impl QueryGroup for RoughlyQueries {
                 // degradation: a removed parse (`fetch_optional` -> `None`, not reachable on today's graph
                 // since `Parse` is derived, but defensive against a future fetch reorder) is treated like a
                 // malformed one rather than panicking.
-                match engine.fetch_optional::<ParsedDocument>(Key::Parse(*file)) {
-                    Some(parsed) if !parsed.0.tree().root_node().has_error() => {
-                        let mut lowering = self.lowering.borrow_mut();
-                        Stored::new(lower(&parsed.0, &mut lowering))
-                    }
-                    _ => Stored::new(Module::new(HirArena::new(), Vec::new(), Vec::new())),
-                }
+                // Projects the module out of the one `lower_with_diagnostics` run owned by
+                // `LoweringDiagnostics` (the file used to be lowered twice — once here, once for
+                // the diagnostics). The module's own value-eq stays the type-only cutoff the
+                // granularity proofs rely on; the malformed-input empty-module semantics live in
+                // `lower_with_diagnostics` itself.
+                let result = engine.fetch::<LoweringResult>(Key::LoweringDiagnostics(*file));
+                Stored::new(result.module.clone())
             }
 
             Key::LocalNaming(file) => {
@@ -759,17 +759,19 @@ impl QueryGroup for RoughlyQueries {
 
             Key::LoweringDiagnostics(file) => {
                 bump(&self.counters.lowering_diagnostics, *file);
-                // The lowering-phase diagnostics: the same `lower_with_diagnostics` production runs, which
-                // short-circuits to `collect_syntax_errors` on a malformed tree and otherwise returns the
-                // lowering-pass diagnostics. The re-lowered module is discarded — `Lower` owns the module
-                // (its type-only cutoff stays pristine for the granularity proofs), so this query owns only
-                // the diagnostics. A removed source degrades to none (tombstone hardening, like `Lower`).
+                // The single `lower_with_diagnostics` run for the file: it short-circuits to an
+                // empty module + `collect_syntax_errors` on a malformed tree and otherwise returns
+                // the module with the lowering-pass diagnostics. `Lower` projects the module out.
+                // A removed source degrades to an empty result (tombstone hardening).
                 match engine.fetch_optional::<ParsedDocument>(Key::Parse(*file)) {
                     Some(parsed) => {
                         let mut lowering = self.lowering.borrow_mut();
-                        Stored::new(lower_with_diagnostics(&parsed.0, &mut lowering).diagnostics)
+                        Stored::new(lower_with_diagnostics(&parsed.0, &mut lowering))
                     }
-                    None => Stored::new(Vec::<Diagnostic>::new()),
+                    None => Stored::new(LoweringResult {
+                        module: Module::new(HirArena::new(), Vec::new(), Vec::new()),
+                        diagnostics: Vec::new(),
+                    }),
                 }
             }
 
@@ -800,8 +802,8 @@ impl QueryGroup for RoughlyQueries {
                 // so re-entering them while holding the borrow would double-borrow the `RefCell`.
                 let package_naming =
                     engine.fetch::<Vec<Diagnostic>>(Key::PackageNamingDiagnostics(*file));
-                let lowering_diagnostics =
-                    engine.fetch::<Vec<Diagnostic>>(Key::LoweringDiagnostics(*file));
+                let lowering_result =
+                    engine.fetch::<LoweringResult>(Key::LoweringDiagnostics(*file));
                 let lint = engine.fetch::<Vec<Diagnostic>>(Key::Lint(*file));
                 // Strict-mode diagnostics are rendered here (production renders them in `typecheck`'s
                 // round 2 via the private `strict_origin_diagnostics`, ported verbatim below). Type errors
@@ -820,7 +822,7 @@ impl QueryGroup for RoughlyQueries {
                     strict_diagnostics,
                     strict_override: module.strict_override,
                     unused,
-                    lowering: (*lowering_diagnostics).clone(),
+                    lowering: lowering_result.diagnostics.clone(),
                     lint: (*lint).clone(),
                 })
             }
