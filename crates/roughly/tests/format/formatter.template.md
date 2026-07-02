@@ -13,9 +13,13 @@ Format your R files using the command line:
 ```sh
 roughly fmt           # Format all files in the current directory
 roughly fmt <path>    # Format all files in <path>
-roughly fmt --check   # Only check if files would be formatted
+roughly fmt --check   # List files that would be reformatted, without writing
 roughly fmt --diff    # Show a diff of formatting changes without applying them
 ```
+
+`--check` and `--diff` exit 1 when any file would change, so they slot straight into CI. Errors
+(for example a file that cannot be parsed) exit 2 — see the full
+[exit-code table](/getting-started#exit-codes).
 
 ## Philosophy
 

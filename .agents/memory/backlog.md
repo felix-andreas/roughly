@@ -62,7 +62,7 @@ Update `typing-reference.md` **first** for each item (contract-first), then impl
 - **Strict mode (settled semantics, `decisions.md`):** strict = Unknown origins **and unresolved-name references are errors**; explicit `Any` stays the escape hatch; recursion-Unknown becomes an origin. **Per-file toggle:** top-of-file `#: @strict` / `#: @strict off` directive overriding config (gates are already per-file in both pipelines; derive from the parse so incrementality holds).
 - **Unused rebuilt on reaching definitions** (falls out of the Phase-1 slot model): a write no read reaches = unused. Report **assignments**, not bindings. Add: unused function **parameters** (default off or hint-level), unused `library()`/`require()` once imports are modeled. Own diagnostic code (`unused`, not `naming`), `DiagnosticTag::UNNECESSARY` so editors fade it.
 - **One lint framework:** `lint.rs` (tree-walk style lints) and the naming-integrated unused check are two disconnected systems. Unify: every lint has a stable code, per-lint severity config, and suppression comments (`# roughly: allow(unused)`-style); duplicated name-style logic collapsed.
-- **CLI:** 1-based line:col in rendered diagnostics (currently prints raw 0-based LSP positions, `file:0:11`); don't repeat the message under the caret; `--strict`/severity overrides; `fmt --check`; machine-readable output (JSON) for CI use; exit-code semantics documented.
+- **CLI** — landed: 1-based line:column in rendered diagnostics (header, gutter, and no more phantom context line above the range); message no longer repeated under the caret; `roughly check --output json` (JSON Lines on stdout; field contract on the getting-started page); unified exit codes across `check`/`fmt` — 0 clean, 1 findings (warnings count; `fmt --diff` now exits 1 as its help text always claimed), 2 usage/config/IO — documented and covered by `crates/roughly/tests/test_cli.rs`. Still open: `--strict`/severity overrides (no severity threshold flag yet — warnings-only runs exit 1).
 - **Diagnostic quality sweep:** `type1`-style internal names must never render (map to `T`/`U` or "this value"); wrong-construct wording (`m[1, 2]` reported as "this call passes 2 positional arguments"); `related_information` for defined-here/duplicate pairs; annotation-semantic errors still render under `syntax-error` with doubled `Syntax Error:` prefix.
 
 ## Phase 4 — Editor polish (LSP + formatter)
@@ -104,7 +104,6 @@ Formatter (all verified):
 
 - Doc/impl mismatches: `DESIGN.md` §3 "typecheck never reads project_files" false for scripts; `stdlib_stubs` listed as an engine input it isn't; stale round-caching comment on `analysis.rs` fixed-point; `linter.md` "two further checks" (there are three); `stdlib-stubs.md` claims `identity`/`Map` have generic schemes (identity absent, Map is `Any`).
 - MEMORY.md corrections: type-notation cursor features are *partial* (see Phase 4); the malformed-input differential claim ("generator is well-formed") is stale — the generator emits malformed sources.
-- `roughly check` on a directory: exit code is 1 when only warnings are present in some invocations and 0 in others (verify + document severity→exit mapping).
 
 ## Post-beta (explicitly out of beta scope)
 

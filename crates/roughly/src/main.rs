@@ -1,6 +1,6 @@
 use {
     clap::{Parser, Subcommand},
-    roughly::cli::{self, CheckError, DebugError, FmtError},
+    roughly::cli::{self, CommandError, Outcome, OutputFormat},
     std::{path::PathBuf, process::ExitCode},
     tracing_subscriber::prelude::*,
 };
@@ -30,19 +30,13 @@ fn main() -> ExitCode {
     );
 
     match cli.command {
-        Command::Check { files } => match cli::check(files.as_deref()) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(CheckError) => ExitCode::FAILURE,
-        },
+        Command::Check { files, output } => exit_code(cli::check(files.as_deref(), output)),
         Command::Fmt {
             files,
             check,
             diff,
             verbose,
-        } => match cli::fmt(files.as_deref(), check, diff, verbose) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(FmtError) => ExitCode::FAILURE,
-        },
+        } => exit_code(cli::fmt(files.as_deref(), check, diff, verbose)),
         Command::Server {
             stdio: _,
             verbose: _,
@@ -52,18 +46,25 @@ fn main() -> ExitCode {
         }
         Command::Debug(dev) => match dev {
             Debug::Index {
-                paths: files,
+                paths,
                 recursive,
                 show_items,
-            } => match cli::index(files.as_deref(), recursive, show_items) {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(DebugError) => ExitCode::FAILURE,
-            },
-            Debug::Ast { path } => match cli::ast(&path) {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(DebugError) => ExitCode::FAILURE,
-            },
+            } => exit_code(
+                cli::index(paths.as_deref(), recursive, show_items).map(|()| Outcome::Clean),
+            ),
+            Debug::Ast { path } => exit_code(cli::ast(&path).map(|()| Outcome::Clean)),
         },
+    }
+}
+
+// The exit codes are a documented contract (see the docs getting-started page): 0 clean, 1
+// findings (diagnostics, or files a `fmt --check`/`--diff` run would change), 2
+// usage/configuration/IO errors. Clap's own usage errors also exit 2.
+fn exit_code(result: Result<Outcome, CommandError>) -> ExitCode {
+    match result {
+        Ok(Outcome::Clean) => ExitCode::SUCCESS,
+        Ok(Outcome::Findings) => ExitCode::from(1),
+        Err(CommandError) => ExitCode::from(2),
     }
 }
 
@@ -88,6 +89,9 @@ enum Command {
     Check {
         /// R files to check
         files: Option<Vec<PathBuf>>,
+        /// Diagnostic output format
+        #[clap(long, value_enum, default_value = "human")]
+        output: OutputFormat,
     },
     /// Run the formatter on the given files or directories
     #[clap(alias = "format")]

@@ -10,9 +10,14 @@ Roughly includes a built-in linter to catch errors and enforce consistent coding
 Lint your R files using the command line:
 
 ```sh
-roughly check              # Check all files in the current directory
-roughly check <path>       # Check all files in <path>
+roughly check                # Check all files in the current directory
+roughly check <path>         # Check all files in <path>
+roughly check --output json  # One JSON object per diagnostic, on stdout (for CI)
 ```
+
+The exit code is 0 when there are no diagnostics, 1 when any diagnostic is reported (warnings
+included), and 2 on a usage, configuration, or I/O error. The JSON output contract and the full
+exit-code table live on the [getting-started page](/getting-started#exit-codes).
 
 ## Current Checks
 

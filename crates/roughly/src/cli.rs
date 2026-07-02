@@ -2,7 +2,7 @@ use {
     crate::{
         config::{self, ExperimentalFeatures},
         diagnostics, format, index,
-        lsp_types::DiagnosticSeverity,
+        lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString},
         position::PositionEncoding,
         server, tree, utils,
     },
@@ -55,10 +55,30 @@ pub fn error(message: &str) {
 // CHECK
 //
 
-#[derive(Debug)]
-pub struct CheckError;
+/// Result of a CLI command, mapped by `main` onto the documented exit codes: `Clean` exits 0 and
+/// `Findings` — diagnostics reported, or files a `fmt --check`/`--diff` run would change — exits 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    Clean,
+    Findings,
+}
 
-pub fn check(maybe_files: Option<&[PathBuf]>) -> Result<(), CheckError> {
+/// A usage, configuration, or I/O failure, already reported on stderr; `main` exits 2.
+#[derive(Debug)]
+pub struct CommandError;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum OutputFormat {
+    /// Rendered diagnostics with source snippets, on stderr
+    Human,
+    /// One JSON object per diagnostic (JSON Lines), on stdout
+    Json,
+}
+
+pub fn check(
+    maybe_files: Option<&[PathBuf]>,
+    output: OutputFormat,
+) -> Result<Outcome, CommandError> {
     let root: Vec<PathBuf> = vec![".".into()];
     let files = maybe_files.unwrap_or(&root);
 
@@ -69,14 +89,14 @@ pub fn check(maybe_files: Option<&[PathBuf]>) -> Result<(), CheckError> {
                 Ok(config) => config,
                 Err(err) => {
                     error(&err.to_string());
-                    return Err(CheckError);
+                    return Err(CommandError);
                 }
             };
 
             let target = std::fs::canonicalize(file).map_err(|err| {
                 error(&format!("failed to resolve: {}", file.display()));
                 eprintln!("{err}");
-                CheckError
+                CommandError
             })?;
 
             let paths = Walk::new(&target)
@@ -89,7 +109,7 @@ pub fn check(maybe_files: Option<&[PathBuf]>) -> Result<(), CheckError> {
                     }
                     Err(err) => {
                         error(&err.to_string());
-                        Some(Err(CheckError))
+                        Some(Err(CommandError))
                     }
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -99,7 +119,8 @@ pub fn check(maybe_files: Option<&[PathBuf]>) -> Result<(), CheckError> {
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut n_files = 0;
-    let mut n_errors = 0;
+    let mut n_diagnostics = 0;
+    let mut n_failures = 0;
     for (target, paths, config) in targets_with_config {
         // One analysis per target keeps package-global naming and the project-global type
         // namespace intact across all files under that target.
@@ -111,7 +132,7 @@ pub fn check(maybe_files: Option<&[PathBuf]>) -> Result<(), CheckError> {
             let source = match std::fs::read_to_string(&path) {
                 Ok(source) => source,
                 Err(err) => {
-                    n_errors += 1;
+                    n_failures += 1;
                     error(&format!("failed to read: {}", path.display()));
                     eprintln!("{err}");
                     continue;
@@ -121,7 +142,7 @@ pub fn check(maybe_files: Option<&[PathBuf]>) -> Result<(), CheckError> {
                 .add_document_from_source(path.clone(), &source)
                 .is_err()
             {
-                n_errors += 1;
+                n_failures += 1;
                 error(&format!(
                     "failed to sync analysis document from source {}",
                     path.display()
@@ -135,7 +156,7 @@ pub fn check(maybe_files: Option<&[PathBuf]>) -> Result<(), CheckError> {
 
         for path in checked_paths {
             let Some(document_id) = analysis_state.document_id_for_path(&path) else {
-                n_errors += 1;
+                n_failures += 1;
                 error(&format!(
                     "analysis document not found after sync {}",
                     path.display()
@@ -153,99 +174,128 @@ pub fn check(maybe_files: Option<&[PathBuf]>) -> Result<(), CheckError> {
             );
 
             for diagnostic in diagnostics {
-                n_errors += 1;
-                log(
-                    match diagnostic.severity {
-                        Some(DiagnosticSeverity::INFORMATION) => LogLevel::Info,
-                        Some(DiagnosticSeverity::WARNING) => LogLevel::Warn,
-                        Some(DiagnosticSeverity::ERROR) => LogLevel::Error,
-                        _ => LogLevel::Info,
-                    },
-                    &diagnostic.message,
-                );
-                let range = diagnostic.range;
-                let padding_arrow = range.end.line.to_string().len();
-                eprintln!(
-                    "{}{} {}:{}:{}",
-                    " ".repeat(padding_arrow),
-                    style("-->").bold().blue(),
-                    path.display(),
-                    range.start.line,
-                    range.start.character
-                );
-
-                let line_start = usize::max(1, range.start.line as usize) - 1;
-                let lines = {
-                    let start = rope.line_to_char(line_start);
-                    let end =
-                        rope.line_to_char(range.end.line as usize) + range.end.character as usize;
-                    rope.slice(start..end)
-                };
-                let width = padding_arrow + 1;
-                for (i, line) in lines.lines().enumerate() {
-                    eprint!(
-                        "{} {}",
-                        style(format!("{:<width$}|", line_start + i)).blue().bold(),
-                        line
-                    );
+                n_diagnostics += 1;
+                match output {
+                    OutputFormat::Human => render_human_diagnostic(&path, rope, &diagnostic),
+                    OutputFormat::Json => render_json_diagnostic(&path, &diagnostic),
                 }
-                eprintln!();
-
-                let width_message =
-                    u32::max(1, range.end.character.abs_diff(range.start.character));
-                eprintln!(
-                    "{}{}  {}",
-                    " ".repeat(width),
-                    " ".repeat(usize::min(
-                        range.start.character as usize,
-                        range.end.character as usize
-                    )),
-                    {
-                        let arrow = style("^".repeat(width_message as usize)).bold();
-                        match diagnostic.severity {
-                            Some(DiagnosticSeverity::INFORMATION) => arrow.blue(),
-                            Some(DiagnosticSeverity::WARNING) => arrow.yellow(),
-                            Some(DiagnosticSeverity::ERROR) => arrow.red(),
-                            _ => arrow,
-                        }
-                    }
-                );
-                eprintln!(
-                    "{}{}  {}",
-                    " ".repeat(width),
-                    " ".repeat(usize::min(
-                        range.start.character as usize,
-                        range.end.character as usize
-                    )),
-                    {
-                        let message = style(&diagnostic.message).bold();
-                        match diagnostic.severity {
-                            Some(DiagnosticSeverity::INFORMATION) => message.blue(),
-                            Some(DiagnosticSeverity::WARNING) => message.yellow(),
-                            Some(DiagnosticSeverity::ERROR) => message.red(),
-                            _ => message,
-                        }
-                    }
-                );
-
-                eprintln!("\n")
             }
         }
     }
 
     if n_files == 0 {
-        warn("No R files found under the given path(s)");
-        return Err(CheckError);
+        error("no R files found under the given path(s)");
+        return Err(CommandError);
     }
-
-    if n_errors == 0 {
-        Ok(())
+    if n_failures > 0 {
+        return Err(CommandError);
+    }
+    Ok(if n_diagnostics == 0 {
+        Outcome::Clean
     } else {
-        Err(CheckError)
-    }
+        Outcome::Findings
+    })
 }
 
-fn analysis_root_for_target(target: &std::path::Path) -> PathBuf {
+// Renders one diagnostic rustc-style on stderr: the message, a `--> path:line:column` header, the
+// source line(s), and a caret underline. Rendered lines and columns are 1-based; the diagnostic's
+// range stays 0-based internally.
+fn render_human_diagnostic(path: &Path, rope: &Rope, diagnostic: &Diagnostic) {
+    log(
+        match diagnostic.severity {
+            Some(DiagnosticSeverity::WARNING) => LogLevel::Warn,
+            Some(DiagnosticSeverity::ERROR) => LogLevel::Error,
+            _ => LogLevel::Info,
+        },
+        &diagnostic.message,
+    );
+
+    let range = diagnostic.range;
+    // Diagnostic ranges come from analysis of this same rope, so they are in bounds; the clamp
+    // only guards the render against a malformed range so it cannot panic.
+    let last_line_index = rope.len_lines().saturating_sub(1);
+    let start_line = usize::min(range.start.line as usize, last_line_index);
+    let end_line = usize::min(range.end.line as usize, last_line_index);
+
+    let gutter_width = (end_line + 1).to_string().len();
+    eprintln!(
+        "{}{} {}:{}:{}",
+        " ".repeat(gutter_width),
+        style("-->").bold().blue(),
+        path.display(),
+        range.start.line + 1,
+        range.start.character + 1
+    );
+
+    for line_index in start_line..=end_line {
+        let line = rope.line(line_index).to_string();
+        eprintln!(
+            "{} {}",
+            style(format!(
+                "{:<width$}|",
+                line_index + 1,
+                width = gutter_width + 1
+            ))
+            .blue()
+            .bold(),
+            line.trim_end_matches(['\n', '\r'])
+        );
+    }
+
+    // The underline sits below the last rendered line, so it starts at the range's start column
+    // only when the range is confined to a single line.
+    let caret_column = if start_line == end_line {
+        range.start.character as usize
+    } else {
+        0
+    };
+    let caret_width = usize::max(
+        1,
+        (range.end.character as usize).saturating_sub(caret_column),
+    );
+    eprintln!(
+        "{}{}  {}",
+        " ".repeat(gutter_width + 1),
+        " ".repeat(caret_column),
+        {
+            let carets = style("^".repeat(caret_width)).bold();
+            match diagnostic.severity {
+                Some(DiagnosticSeverity::WARNING) => carets.yellow(),
+                Some(DiagnosticSeverity::ERROR) => carets.red(),
+                _ => carets,
+            }
+        }
+    );
+    eprintln!();
+}
+
+// Renders one diagnostic as a JSON Lines record on stdout for CI use. Positions are 1-based like
+// the human renderer; the field names are a documented contract (see the getting-started page).
+fn render_json_diagnostic(path: &Path, diagnostic: &Diagnostic) {
+    let severity = match diagnostic.severity {
+        Some(DiagnosticSeverity::WARNING) => "warning",
+        Some(DiagnosticSeverity::INFORMATION) => "information",
+        Some(DiagnosticSeverity::HINT) => "hint",
+        _ => "error",
+    };
+    let code = diagnostic.code.as_ref().map(|code| match code {
+        NumberOrString::Number(number) => number.to_string(),
+        NumberOrString::String(string) => string.clone(),
+    });
+    let record = serde_json::json!({
+        "path": path.display().to_string(),
+        "line": diagnostic.range.start.line + 1,
+        "column": diagnostic.range.start.character + 1,
+        "endLine": diagnostic.range.end.line + 1,
+        "endColumn": diagnostic.range.end.character + 1,
+        "severity": severity,
+        "code": code,
+        "message": diagnostic.message,
+    });
+    println!("{record}");
+}
+
+fn analysis_root_for_target(target: &Path) -> PathBuf {
     if target.is_dir() {
         return target.to_path_buf();
     }
@@ -266,15 +316,12 @@ fn analysis_root_for_target(target: &std::path::Path) -> PathBuf {
 // FMT
 //
 
-#[derive(Debug)]
-pub struct FmtError;
-
 pub fn fmt(
     maybe_files: Option<&[PathBuf]>,
     check: bool,
     diff: bool,
     verbose: bool,
-) -> Result<(), FmtError> {
+) -> Result<Outcome, CommandError> {
     let mut parser = tree::new_parser();
 
     let root: Vec<PathBuf> = vec![".".into()];
@@ -285,7 +332,7 @@ pub fn fmt(
         .map(|file| {
             let config = config::Config::discover(file).map_err(|err| {
                 error(&err.to_string());
-                FmtError
+                CommandError
             })?;
 
             let paths = Walk::new(file)
@@ -298,7 +345,7 @@ pub fn fmt(
                     }
                     Err(err) => {
                         error(&err.to_string());
-                        Some(Err(FmtError))
+                        Some(Err(CommandError))
                     }
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -350,16 +397,18 @@ pub fn fmt(
                     utils::print_diff(&initial, &new);
                 } else if check {
                     eprintln!("Would reformat: {}", style(path.display()).bold());
-                } else if std::fs::write(&path, &new).is_err() {
+                } else if let Err(err) = std::fs::write(&path, &new) {
+                    n_errors += 1;
                     error(&format!("failed to write to file: {}", path.display()));
+                    eprintln!("{err}");
                 }
             }
         }
     }
 
     if n_files == 0 {
-        warn("No R files found under the given path(s)");
-        return Err(FmtError);
+        error("no R files found under the given path(s)");
+        return Err(CommandError);
     }
 
     let (action_format, action_skip) = if check || diff {
@@ -391,11 +440,14 @@ pub fn fmt(
         ));
     }
 
-    if n_errors > 0 || (check && n_unformatted > 0) {
-        return Err(FmtError);
+    if n_errors > 0 {
+        return Err(CommandError);
     }
-
-    Ok(())
+    Ok(if (check || diff) && n_unformatted > 0 {
+        Outcome::Findings
+    } else {
+        Outcome::Clean
+    })
 }
 
 //
@@ -410,10 +462,11 @@ pub fn server(experimental_features: ExperimentalFeatures) {
 // DEBUG
 //
 
-#[derive(Debug)]
-pub struct DebugError;
-
-pub fn index(paths: Option<&[PathBuf]>, nested: bool, print_items: bool) -> Result<(), DebugError> {
+pub fn index(
+    paths: Option<&[PathBuf]>,
+    nested: bool,
+    print_items: bool,
+) -> Result<(), CommandError> {
     let mut parser = tree::new_parser();
 
     let root: Vec<PathBuf> = vec![".".into()];
@@ -437,7 +490,7 @@ pub fn index(paths: Option<&[PathBuf]>, nested: bool, print_items: bool) -> Resu
                 }
                 Err(err) => {
                     error(&err.to_string());
-                    Some(Err(DebugError))
+                    Some(Err(CommandError))
                 }
             })
             .collect::<Result<Vec<_>, _>>()?
@@ -445,7 +498,7 @@ pub fn index(paths: Option<&[PathBuf]>, nested: bool, print_items: bool) -> Resu
             let rope = utils::read_to_rope(&path).map_err(|err| {
                 error(&format!("failed to index: {}", path.display()));
                 eprintln!("{err}");
-                DebugError
+                CommandError
             })?;
 
             // Only time the indexing operation, not the I/O
@@ -501,7 +554,7 @@ pub fn index(paths: Option<&[PathBuf]>, nested: bool, print_items: bool) -> Resu
 
     if n_files == 0 {
         warn("No R files found under the given path(s)");
-        return Err(DebugError);
+        return Err(CommandError);
     }
 
     let elapsed_global = start_global.elapsed();
@@ -519,12 +572,12 @@ pub fn index(paths: Option<&[PathBuf]>, nested: bool, print_items: bool) -> Resu
     Ok(())
 }
 
-pub fn ast(path: &Path) -> Result<(), DebugError> {
+pub fn ast(path: &Path) -> Result<(), CommandError> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) => {
             error(&err.to_string());
-            return Err(DebugError);
+            return Err(CommandError);
         }
     };
 

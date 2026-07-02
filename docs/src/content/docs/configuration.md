@@ -67,7 +67,8 @@ invalid config in /path/to/roughly.toml at line 2, column 1: unknown field `nami
 Where the error surfaces:
 
 - **Editor:** the language server never crashes on a malformed config. At startup it falls back to the defaults; on a live edit to `roughly.toml` it keeps the previous configuration. Either way it reports the error as an editor error message.
-- **CLI:** `roughly check` and `roughly fmt` print the error to stderr and exit non-zero.
+- **CLI:** `roughly check` and `roughly fmt` print the error to stderr and exit 2 (see the
+  [exit-code table](/getting-started#exit-codes)).
 
 ## Legacy Keys
 
