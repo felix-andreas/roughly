@@ -1483,11 +1483,10 @@ struct OpenDelimiter {
     opener_level: usize,
 }
 
-// Guards the render gate against the one place the annotation grammar is looser than it looks: an
-// expanded `@param {TYPE} name` swallows everything after the type as the parameter name, so a
-// JSDoc-style trailing description ("x (defaults to one)") parses cleanly with the prose inside the
-// name. Reflowing such a block would corrupt the prose; a block whose function-parameter names are
-// not plain identifiers is emitted verbatim instead.
+// Guards the render gate against parameter names that are not plain identifiers. The parser
+// validates `@param name {TYPE}` names strictly, so this is defense in depth for any grammar
+// path that still interns a looser name; a block whose function-parameter names are not plain
+// identifiers is emitted verbatim rather than reflowed.
 fn annotation_parameter_names_are_plain(parsed: &TypeSyntax, interner: &Interner) -> bool {
     fn is_plain_name(name: &str) -> bool {
         // The optional-name form `[ label ]` may intern surrounding padding with the name; padding

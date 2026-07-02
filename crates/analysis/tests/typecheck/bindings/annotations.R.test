@@ -37,7 +37,7 @@ value: integer | NULL
 
 #---- expanded_forall_identity_binding
 #: @forall T
-#: @param {T} value
+#: @param value {T}
 #: @return {T}
 identity <- function(value) value
 #++++
@@ -76,8 +76,8 @@ keep_left: <T, U> fn(left: T, right: U) -> T
 #---- expanded_forall_two_lines_binding
 #: @forall T
 #: @forall U
-#: @param {T} left
-#: @param {U} right
+#: @param left {T}
+#: @param right {U}
 #: @return {T}
 keep_left <- function(left, right) left
 #++++

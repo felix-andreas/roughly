@@ -936,19 +936,44 @@ pub fn parse_expanded_block_surface_type(
                     "`@param` directives must appear before `@return` or `@returns` in the same `#:` block.",
                 ));
             }
-            let (type_text, name_text) = parse_braced_type_and_tail(parameter_text.trim())
-                .ok_or_else(|| {
-                    invalid_syntax("expected `@param {TYPE} name` in the expanded annotation.")
-                })?;
-            let trimmed_name = name_text.trim();
+            let parameter_text = parameter_text.trim();
+            // The braced type comes after the name (`@param name {TYPE}`), matching `@type` and
+            // `@alias` and keeping a wrapped multi-line type as the directive's trailing element.
+            // The old JSDoc order gets a targeted migration error rather than a generic one.
+            if parameter_text.starts_with('{') {
+                return Err(invalid_syntax(
+                    "`@param` takes the parameter name first: write `@param name {TYPE}`.",
+                ));
+            }
+            let Some(brace_index) = parameter_text.find('{') else {
+                return Err(invalid_syntax(
+                    "expected `@param name {TYPE}` in the expanded annotation.",
+                ));
+            };
+            let trimmed_name = parameter_text[..brace_index].trim();
             let is_optional = trimmed_name.starts_with('[') && trimmed_name.ends_with(']');
             let normalized_name = trimmed_name
                 .strip_prefix('[')
                 .and_then(|name| name.strip_suffix(']'))
-                .unwrap_or(trimmed_name);
+                .unwrap_or(trimmed_name)
+                .trim();
             if normalized_name.is_empty() {
                 return Err(invalid_syntax(
-                    "Expected a parameter name after `@param {TYPE}`.",
+                    "expected a parameter name after `@param`, before the braced type.",
+                ));
+            }
+            if normalized_name.contains(char::is_whitespace) {
+                return Err(invalid_syntax(
+                    "a `@param` name must be a single identifier: write `@param name {TYPE}`.",
+                ));
+            }
+            let (type_text, trailing_text) =
+                parse_braced_type_and_tail(&parameter_text[brace_index..]).ok_or_else(|| {
+                    invalid_syntax("expected `@param name {TYPE}` in the expanded annotation.")
+                })?;
+            if !trailing_text.trim().is_empty() {
+                return Err(invalid_syntax(
+                    "did not expect text after the parameter type in the expanded annotation.",
                 ));
             }
             let name = interner.intern(normalized_name);

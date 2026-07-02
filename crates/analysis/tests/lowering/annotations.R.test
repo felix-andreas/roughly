@@ -90,8 +90,8 @@ Assign x
       Integer("1L")
 
 #---- expanded_optional_parameter_annotation
-#: @param {integer} count
-#: @param {character} [label]
+#: @param count {integer}
+#: @param [label] {character}
 #: @returns {integer}
 f <- function(count, label = NULL) count
 #++++
@@ -102,7 +102,7 @@ Assign f
 
 #---- generic_expanded_annotation
 #: @forall T
-#: @param {T} value
+#: @param value {T}
 #: @return {T}
 identity <- function(value) value
 #++++
@@ -112,8 +112,8 @@ Assign identity
     Symbol(value)
 
 #---- multiline_annotation
-#: @param {integer} a
-#: @param {integer} b
+#: @param a {integer}
+#: @param b {integer}
 #: @return {integer}
 f <- function(a, b) a + b
 #++++

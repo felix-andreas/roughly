@@ -213,9 +213,9 @@ function type.
 `@param` and `@return`/`@returns` lines, with an optional leading `@forall`:
 
 ```r
-#: @param {fn(integer) -> character} render_count
-#: @param {integer} count
-#: @param {character} [label]
+#: @param render_count {fn(integer) -> character}
+#: @param count {integer}
+#: @param [label] {character}
 #: @returns {character}
 apply_renderer <- function(render_count, count, label = NULL) {
   if (!is.null(label)) paste0(label, ": ", render_count(count)) else render_count(count)
@@ -224,7 +224,7 @@ apply_renderer <- function(render_count, count, label = NULL) {
 
 ```r
 #: @forall T
-#: @param {T} value
+#: @param value {T}
 #: @return {T}
 identity <- function(value) value
 ```

@@ -142,7 +142,7 @@ InvalidSemantics { message: "cannot mix definition and annotation directives in 
 
 #---- mixed_definition_and_expanded_annotation_block
 @type Person {list{name: character}}
-@param {integer} count
+@param count {integer}
 @return {Person}
 #++++
 InvalidSemantics { message: "cannot mix definition and annotation directives in the same `#:` block." }

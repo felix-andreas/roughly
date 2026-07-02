@@ -165,26 +165,26 @@
 
 #==== annotation_expanded
 #---- params_and_return
-#: @param { integer } count
-#: @param { fn(integer)->character } render
+#: @param count { integer }
+#: @param render { fn(integer)->character }
 #: @returns { character }
 #++++
-#: @param {integer} count
-#: @param {fn(integer) -> character} render
+#: @param count {integer}
+#: @param render {fn(integer) -> character}
 #: @returns {character}
 
 #---- optional_param
-#: @param { character } [ label ]
+#: @param [ label ] { character }
 #++++
-#: @param {character} [label]
+#: @param [label] {character}
 
 #---- forall
 #: @forall T , U
-#: @param { T } a
+#: @param a { T }
 #: @return { U }
 #++++
 #: @forall T, U
-#: @param {T} a
+#: @param a {T}
 #: @return {U}
 
 #==== annotation_multiline_compact
@@ -276,38 +276,38 @@
 
 #==== annotation_multiline_expanded
 #---- param_type_wraps_across_lines
-#: @param {fn(
+#: @param callback {fn(
 #: integer,
 #: character
-#: ) -> double} callback
+#: ) -> double}
 #: @return {logical}
 #++++
-#: @param {fn(
+#: @param callback {fn(
 #:   integer,
 #:   character
-#: ) -> double} callback
+#: ) -> double}
 #: @return {logical}
 
 #---- forall_then_wrapped_param
 #: @forall T
-#: @param {list{
+#: @param box {list{
 #: value: T
-#: }} box
+#: }}
 #: @return {T}
 #++++
 #: @forall T
-#: @param {list{
+#: @param box {list{
 #:   value: T
-#: }} box
+#: }}
 #: @return {T}
 
 #---- balanced_params_stay_flat
-#: @param {integer} count
-#: @param {character} label
+#: @param count {integer}
+#: @param label {character}
 #: @return {integer}
 #++++
-#: @param {integer} count
-#: @param {character} label
+#: @param count {integer}
+#: @param label {character}
 #: @return {integer}
 
 #==== annotation_multiline_definitions
@@ -386,9 +386,9 @@
 #: T[] not supported, see docs (someday)
 
 #---- param_description_verbatim
-#: @param {integer} x (defaults to one)
+#: @param x {integer} (defaults to one)
 #++++
-#: @param {integer} x (defaults to one)
+#: @param x {integer} (defaults to one)
 
 #---- interior_empty_line_before_closer_kept
 #: list{a: integer,

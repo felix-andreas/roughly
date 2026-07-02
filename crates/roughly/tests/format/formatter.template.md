@@ -451,8 +451,8 @@ The reformat is deliberately non-invasive: token order, identifier casing, and y
 
 ```r
 # type_annotations_expanded : compare
-#: @param { integer } count
-#: @param { fn(integer)->character } render
+#: @param count { integer }
+#: @param render { fn(integer)->character }
 #: @returns { character }
 ```
 

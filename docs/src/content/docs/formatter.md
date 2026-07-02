@@ -569,13 +569,13 @@ The reformat is deliberately non-invasive: token order, identifier casing, and y
 
 ```r
 # Before formatting
-#: @param { integer } count
-#: @param { fn(integer)->character } render
+#: @param count { integer }
+#: @param render { fn(integer)->character }
 #: @returns { character }
 
 # After formatting
-#: @param {integer} count
-#: @param {fn(integer) -> character} render
+#: @param count {integer}
+#: @param render {fn(integer) -> character}
 #: @returns {character}
 ```
 

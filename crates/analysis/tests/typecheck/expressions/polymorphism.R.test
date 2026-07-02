@@ -87,7 +87,7 @@ character
 
 #---- expanded_forall_identity_instantiates
 #: @forall T
-#: @param {T} value
+#: @param value {T}
 #: @return {T}
 identity <- function(value) value
 identity(1L)

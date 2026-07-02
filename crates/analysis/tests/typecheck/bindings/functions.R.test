@@ -20,8 +20,8 @@ first <- function(x, y) x
 first: <T, U> fn(x: T, y: U) -> T
 
 #---- annotated_optional_parameter_binding
-#: @param {integer} count
-#: @param {character} [label]
+#: @param count {integer}
+#: @param [label] {character}
 #: @return {integer}
 double_count <- function(count, label = NULL) count + count
 #++++

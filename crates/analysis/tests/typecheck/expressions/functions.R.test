@@ -27,8 +27,8 @@ fn(count: integer) -> NULL
 fn(count: integer) -> NULL
 
 #---- expanded_annotation_with_optional_parameter
-#: @param {integer} count
-#: @param {character} [label]
+#: @param count {integer}
+#: @param [label] {character}
 #: @return {integer}
 double_count <- function(count, label = NULL) count + count
 double_count(1L)
@@ -39,8 +39,8 @@ integer
 integer
 
 #---- higher_order_function_annotation
-#: @param {fn(integer) -> character} render_count
-#: @param {integer} count
+#: @param render_count {fn(integer) -> character}
+#: @param count {integer}
 #: @return {character}
 apply_renderer <- function(render_count, count) { render_count(count) }
 #: fn(integer) -> character

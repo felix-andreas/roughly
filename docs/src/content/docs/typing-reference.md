@@ -57,9 +57,9 @@ double_count <- function(count) count + count
 ```
 
 ```r
-#: @param {fn(integer) -> character} render_count
-#: @param {integer} count
-#: @param {character} [label]
+#: @param render_count {fn(integer) -> character}
+#: @param count {integer}
+#: @param [label] {character}
 #: @returns {character}
 apply_renderer <- function(render_count, count, label = NULL) {
   if (!is.null(label)) paste0(label, ": ", render_count(count)) else render_count(count)
@@ -606,7 +606,7 @@ value <- list(name = "bob", age = 20)
 
 ```r
 #: @type Person {list{ name: character, age: double }}
-#: @param {Person} value
+#: @param value {Person}
 identity_person <- function(value) value
 ```
 
@@ -1288,8 +1288,8 @@ Expanded function annotations use these forms:
 
 - `@forall T,U,...`
 - `@forall T`
-- `@param {TYPE} name`
-- `@param {TYPE} [name]` for optional parameters
+- `@param name {TYPE}`
+- `@param [name] {TYPE}` for optional parameters
 - `@return {TYPE}`
 - `@returns {TYPE}`
 
@@ -1306,28 +1306,28 @@ Additional rules:
 Examples:
 
 ```r
-#: @param {integer} count
-#: @param {character} [label]
+#: @param count {integer}
+#: @param [label] {character}
 #: @return {integer}
 double_count <- function(count, label = NULL) { count + count }
 ```
 
 ```r
-#: @param {integer} count
+#: @param count {integer}
 log_count <- function(count) { }
 ```
 
 ```r
 #: @forall T
-#: @param {T} value
+#: @param value {T}
 #: @return {T}
 identity <- function(value) value
 ```
 
 ```r
 #: @forall T
-#: @param {logical} condition
-#: @param {T} value
+#: @param condition {logical}
+#: @param value {T}
 #: @return {T | NULL}
 then_some <- function(condition, value) {
   if (condition) value
@@ -1337,8 +1337,8 @@ then_some <- function(condition, value) {
 ```r
 #: @forall T
 #: @forall U
-#: @param {T} left
-#: @param {U} right
+#: @param left {T}
+#: @param right {U}
 #: @return {T}
 keep_left <- function(left, right) left
 ```
@@ -1506,8 +1506,8 @@ Expanded annotations may also use function types directly.
 Example:
 
 ```r
-#: @param {fn(integer) -> character} render_count
-#: @param {integer} count
+#: @param render_count {fn(integer) -> character}
+#: @param count {integer}
 #: @return {character}
 apply_renderer <- function(render_count, count) { render_count(count) }
 ```

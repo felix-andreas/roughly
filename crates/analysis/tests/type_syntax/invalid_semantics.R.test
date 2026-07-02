@@ -7,7 +7,7 @@ InvalidSemantics { message: "duplicate type parameter name `T` in `<...>`." }
 #---- duplicate_type_parameters_in_expanded_forall
 @forall T
 @forall T
-@param {T} value
+@param value {T}
 @return {T}
 #++++
 InvalidSemantics { message: "duplicate type parameter name `T` in expanded function annotation." }
@@ -20,7 +20,7 @@ InvalidSemantics { message: "cannot use multiple compact annotations in the same
 
 #---- expanded_param_after_return
 @return {integer}
-@param {integer} count
+@param count {integer}
 #++++
 InvalidSemantics { message: "`@param` directives must appear before `@return` or `@returns` in the same `#:` block." }
 

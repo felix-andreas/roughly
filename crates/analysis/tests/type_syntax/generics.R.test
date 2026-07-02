@@ -81,7 +81,7 @@ list{owner: Person<integer>}
 #==== generic_expanded_function_annotations
 #---- expanded_single_forall
 @forall T
-@param {T} value
+@param value {T}
 @return {T}
 #++++
 <T> fn(value: T) -> T
@@ -89,31 +89,31 @@ list{owner: Person<integer>}
 #---- expanded_multiple_forall_lines
 @forall T
 @forall U
-@param {T} left
-@param {U} right
+@param left {T}
+@param right {U}
 @return {T}
 #++++
 <T, U> fn(left: T, right: U) -> T
 
 #---- expanded_single_forall_multiple_names
 @forall T,U
-@param {T} left
-@param {U} right
+@param left {T}
+@param right {U}
 @return {U}
 #++++
 <T, U> fn(left: T, right: U) -> U
 
 #---- expanded_generic_nullable_return
 @forall T
-@param {logical} condition
-@param {T} value
+@param condition {logical}
+@param value {T}
 @return {T | NULL}
 #++++
 <T> fn(condition: logical, value: T) -> T | NULL
 
 #---- expanded_generic_structural_parameter
 @forall T
-@param {list[T]} values
+@param values {list[T]}
 @return {list[T]}
 #++++
 <T> fn(values: list[T]) -> list[T]

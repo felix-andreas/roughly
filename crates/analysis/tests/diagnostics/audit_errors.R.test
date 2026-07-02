@@ -401,7 +401,7 @@ error[syntax-error] Syntax Error: invalid semantics: generic type `Pair` expects
 #---- duplicate_forall_param
 #: @forall T
 #: @forall T
-#: @param {T} x
+#: @param x {T}
 #: @return {T}
 f <- function(x) x
 #++++

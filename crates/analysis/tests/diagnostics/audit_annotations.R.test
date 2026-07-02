@@ -181,21 +181,21 @@ double_count <- function(count) count + count
 No diagnostics.
 
 #---- expanded_function_success
-#: @param {integer} count
+#: @param count {integer}
 #: @return {integer}
 double_count <- function(count) count + count
 #++++
 No diagnostics.
 
 #---- expanded_default_return_null
-#: @param {integer} count
+#: @param count {integer}
 log_count <- function(count) { }
 #++++
 No diagnostics.
 
 #---- expanded_optional_param
-#: @param {integer} count
-#: @param {character} [label]
+#: @param count {integer}
+#: @param [label] {character}
 #: @return {integer}
 render <- function(count, label = NULL) count
 #++++
@@ -203,7 +203,7 @@ No diagnostics.
 
 #---- forall_identity
 #: @forall T
-#: @param {T} value
+#: @param value {T}
 #: @return {T}
 identity <- function(value) value
 #++++
@@ -273,8 +273,8 @@ error[type-error] expected `Person`, found `list{name: character}`
 | value <- list(name = "bob")
 
 #---- expanded_optional_param_no_default_rejected
-#: @param {integer} count
-#: @param {character} [label]
+#: @param count {integer}
+#: @param [label] {character}
 #: @return {integer}
 render <- function(count, label) count
 #++++
@@ -372,7 +372,7 @@ f <- function(count) count
 No diagnostics.
 
 #---- expanded_returns_keyword
-#: @param {integer} count
+#: @param count {integer}
 #: @returns {integer}
 double_count <- function(count) count + count
 #++++
@@ -394,8 +394,8 @@ No diagnostics.
 
 #---- forall_two_params
 #: @forall T, U
-#: @param {T} left
-#: @param {U} right
+#: @param left {T}
+#: @param right {U}
 #: @return {T}
 keep_left <- function(left, right) left
 #++++
@@ -423,7 +423,7 @@ error[type-error] expected `integer[named]`, found `integer[]`
 
 #==== audit_annotations_probe2
 #---- expanded_return_mismatch_concrete
-#: @param {integer} count
+#: @param count {integer}
 #: @return {character}
 f <- function(count) count
 #++++
@@ -452,7 +452,7 @@ error[type-error] expected `double`, found `character`
 #---- forall_duplicate_param
 #: @forall T
 #: @forall T
-#: @param {T} value
+#: @param value {T}
 #: @return {T}
 f <- function(value) value
 #++++
@@ -477,7 +477,7 @@ error[type-error] expected `fn(integer) -> integer`, found `integer`
 | value <- 1L
 
 #---- expanded_param_type_violation_in_body
-#: @param {character} count
+#: @param count {character}
 #: @return {character}
 f <- function(count) count + count
 #++++

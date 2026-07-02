@@ -86,7 +86,7 @@ error[type-error] expected a numeric value (`integer` or `double`), found `chara
 | make <- function(value = "a" + 1L) value
 
 #---- annotated_non_null_default_incompatible
-#: @param {integer} count
+#: @param count {integer}
 #: @return {integer}
 describe <- function(count = "x") count
 #++++
@@ -95,8 +95,8 @@ error[type-error] expected `integer`, found `character`
 | describe <- function(count = "x") count
 
 #---- null_default_allowed_for_annotated_parameter
-#: @param {integer} count
-#: @param {character} [label]
+#: @param count {integer}
+#: @param [label] {character}
 #: @return {integer}
 double_count <- function(count, label = NULL) count + count
 #++++
