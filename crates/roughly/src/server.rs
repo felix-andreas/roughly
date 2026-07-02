@@ -14,7 +14,8 @@ use {
             DocumentDiagnosticParams, DocumentDiagnosticReport, DocumentDiagnosticReportResult,
             DocumentFormattingParams, DocumentHighlight, DocumentHighlightParams,
             DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
-            DocumentSymbolResponse, FileChangeType, FileSystemWatcher,
+            DocumentSymbolResponse, FileChangeType, FileSystemWatcher, FoldingRange,
+            FoldingRangeKind, FoldingRangeParams, FoldingRangeProviderCapability,
             FullDocumentDiagnosticReport, GlobPattern, Hover, HoverContents, HoverParams,
             HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
             InlayHint, InlayHintKind, InlayHintLabel, InlayHintParams, Location, MarkupContent,
@@ -1675,6 +1676,85 @@ impl EngineWorker {
         Ok(highlights)
     }
 
+    fn folding_range(
+        &mut self,
+        params: FoldingRangeParams,
+    ) -> Result<Option<Vec<FoldingRange>>, ResponseError> {
+        let uri = params.text_document.uri;
+        let Some(path) = self.document_path(&uri) else {
+            return Ok(None);
+        };
+        let Some(document) = self.document(&path) else {
+            return Err(path_not_found_error(&path));
+        };
+
+        // Fold every multi-line braced/parenthesized region and call-argument list, plus each run
+        // of consecutive comment lines (`#:` annotation blocks fold as one region). Walking the raw
+        // tree keeps this parse-only — no analysis phase runs for folding.
+        let mut ranges = Vec::new();
+        let mut cursor = document.tree().walk();
+        let mut comment_run: Option<(usize, usize)> = None;
+        fn flush_comment_run(run: &mut Option<(usize, usize)>, ranges: &mut Vec<FoldingRange>) {
+            if let Some((start, end)) = run.take()
+                && end > start
+            {
+                ranges.push(FoldingRange {
+                    start_line: start as u32,
+                    end_line: end as u32,
+                    kind: Some(FoldingRangeKind::Comment),
+                    ..FoldingRange::default()
+                });
+            }
+        }
+        let mut done = false;
+        while !done {
+            let node = cursor.node();
+            if node.kind_id() == analysis::tree::kind::COMMENT {
+                let row = node.range().start_point.row;
+                comment_run = match comment_run {
+                    Some((start, end)) if row == end + 1 => Some((start, row)),
+                    Some(run) => {
+                        flush_comment_run(&mut Some(run), &mut ranges);
+                        Some((row, row))
+                    }
+                    None => Some((row, row)),
+                };
+            } else if matches!(
+                node.kind_id(),
+                analysis::tree::kind::BRACED_EXPRESSION
+                    | analysis::tree::kind::PARENTHESIZED_EXPRESSION
+                    | analysis::tree::kind::ARGUMENTS
+            ) {
+                let range = node.range();
+                if range.end_point.row > range.start_point.row {
+                    ranges.push(FoldingRange {
+                        start_line: range.start_point.row as u32,
+                        // Keep the closing delimiter's line visible.
+                        end_line: (range.end_point.row - 1) as u32,
+                        kind: Some(FoldingRangeKind::Region),
+                        ..FoldingRange::default()
+                    });
+                }
+            }
+
+            if cursor.goto_first_child() {
+                continue;
+            }
+            loop {
+                if cursor.goto_next_sibling() {
+                    break;
+                }
+                if !cursor.goto_parent() {
+                    done = true;
+                    break;
+                }
+            }
+        }
+        flush_comment_run(&mut comment_run, &mut ranges);
+
+        Ok(Some(ranges))
+    }
+
     //
     // RENAME
     //
@@ -2199,6 +2279,13 @@ impl LanguageServer for ServerState {
         self.read(move |worker| worker.document_highlight(params))
     }
 
+    fn folding_range(
+        &mut self,
+        params: FoldingRangeParams,
+    ) -> BoxFuture<'static, Result<Option<Vec<FoldingRange>>, ResponseError>> {
+        self.read(move |worker| worker.folding_range(params))
+    }
+
     fn document_symbol(
         &mut self,
         params: DocumentSymbolParams,
@@ -2274,6 +2361,7 @@ fn initialize_result(
             }),
             references_provider: Some(OneOf::Left(true)),
             document_highlight_provider: Some(OneOf::Left(true)),
+            folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
             rename_provider: Some(OneOf::Left(true)),
             semantic_tokens_provider: Some(
                 SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {

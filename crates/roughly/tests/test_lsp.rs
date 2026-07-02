@@ -9,15 +9,15 @@ use {
             DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
             DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentFormattingParams,
             DocumentHighlightParams, DocumentSymbolParams, DocumentSymbolResponse, FileChangeType,
-            FileEvent, FormattingOptions, GeneralClientCapabilities, GotoDefinitionParams,
-            GotoDefinitionResponse, HoverContents, HoverParams, HoverProviderCapability,
-            InitializeParams, InitializeResult, InitializedParams, InlayHintParams, MessageType,
-            ParameterInformationSettings, ParameterLabel, PartialResultParams, Position,
-            PositionEncodingKind, PublishDiagnosticsParams, Range, ReferenceContext,
-            ReferenceParams, RenameParams, ShowMessageParams, SignatureHelpClientCapabilities,
-            SignatureHelpParams, SignatureInformationSettings, TextDocumentClientCapabilities,
-            TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-            TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
+            FileEvent, FoldingRangeParams, FormattingOptions, GeneralClientCapabilities,
+            GotoDefinitionParams, GotoDefinitionResponse, HoverContents, HoverParams,
+            HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+            InlayHintParams, MessageType, ParameterInformationSettings, ParameterLabel,
+            PartialResultParams, Position, PositionEncodingKind, PublishDiagnosticsParams, Range,
+            ReferenceContext, ReferenceParams, RenameParams, ShowMessageParams,
+            SignatureHelpClientCapabilities, SignatureHelpParams, SignatureInformationSettings,
+            TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier,
+            TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
             WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceFolder,
             notification::{PublishDiagnostics, ShowMessage},
             request::{RegisterCapability, WorkspaceDiagnosticRefresh},
@@ -1178,6 +1178,44 @@ async fn inlay_hints_respect_requested_viewport() {
         lines,
         vec![1],
         "only the in-viewport hint should be returned"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn folding_ranges_cover_braces_and_comment_runs() {
+    let source = "#: fn(x: integer)\n#: -> integer\nf <- function(x) {\n  x\n}\n";
+    let mut context = setup_test_with_features(&[("R/a.R", source)], &[]).await;
+
+    let file_uri = context.file_uri("R/a.R");
+    context.open_file(&file_uri, source).await;
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    let ranges = context
+        .server
+        .folding_range(FoldingRangeParams {
+            text_document: TextDocumentIdentifier {
+                uri: file_uri.clone(),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("folding range failed")
+        .expect("expected folding ranges");
+
+    assert!(
+        ranges
+            .iter()
+            .any(|range| range.start_line == 0 && range.end_line == 1),
+        "the two-line annotation block should fold: {ranges:?}"
+    );
+    assert!(
+        ranges
+            .iter()
+            .any(|range| range.start_line == 2 && range.end_line == 3),
+        "the function body braces should fold: {ranges:?}"
     );
 
     context.shutdown().await;
