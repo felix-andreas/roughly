@@ -41,7 +41,7 @@ use {
         tree::new_parser,
         type_syntax::type_name_token_range,
         typecheck::{
-            BUILTINS, ExportedValue, InferenceError, ModuleCheck, StrictOriginKind,
+            BUILTINS, ExportedValue, InferenceError, InferenceState, ModuleCheck, StrictOriginKind,
             StrictUnknownOrigin, TypeDefinitionEnvironment,
             inference_state_with_builtins_in_interner,
         },
@@ -107,7 +107,12 @@ pub enum Key {
     FallbackRange,
     /// The firewall: project one symbol's winning file out of the index. Value-eq per symbol.
     DefiningItem(Symbol),
-    /// The per-symbol exported scheme. Editing a function body recomputes only *its* `GlobalScheme`.
+    /// One file's full exported value schemes from a single whole-file inference. `GlobalScheme`
+    /// projects single symbols out of this, so a file with k exports costs one inference per body
+    /// edit instead of k.
+    ExportedSchemes(FileId),
+    /// The per-symbol exported scheme. Editing a function body recomputes only *its* `GlobalScheme`
+    /// (value-eq per symbol — this is the interface firewall referrers cut off on).
     GlobalScheme(Symbol),
     /// The interface-dependency out-edges of one package global: the **other** package globals that
     /// computing `GlobalScheme(symbol)` reads. Computing a global's scheme infers its whole winning file,
@@ -293,6 +298,10 @@ pub struct RoughlyQueries {
     // package interface (a stub is not a package definition, so `DefiningItem` is `None` for it), so it
     // perturbs no per-symbol cutoff — the same stub isolation the from-scratch checker keeps structurally.
     stubs: StubLibrary,
+    // The builtins+stubs inference environment, built once on first use and cloned per inference —
+    // rebuilding it seeded every whole-file inference with ~500 stub scheme imports otherwise.
+    // Valid for the group's lifetime: builtins and the stub corpus are set-once ambient state.
+    inference_template: RefCell<Option<InferenceState>>,
     counters: Counters,
 }
 
@@ -317,6 +326,7 @@ impl RoughlyQueries {
             lowering,
             parser: RefCell::new(new_parser().expect("engine query group: R grammar should load")),
             stubs,
+            inference_template: RefCell::new(None),
             counters: Counters::default(),
         }
     }
@@ -386,6 +396,10 @@ impl RoughlyQueries {
 
     pub fn global_scheme_runs(&self, symbol: Symbol) -> u64 {
         per_key(&self.counters.global_scheme, symbol)
+    }
+
+    pub fn exported_schemes_runs(&self, file: FileId) -> u64 {
+        per_key(&self.counters.exported_schemes, file)
     }
 
     pub fn interface_deps_runs(&self, symbol: Symbol) -> u64 {
@@ -615,12 +629,12 @@ impl QueryGroup for RoughlyQueries {
                     let defining = engine.fetch::<Option<FileId>>(Key::DefiningItem(*symbol));
                     let scheme = match *defining {
                         Some(defining_file) => {
-                            let (_check, exports) =
-                                infer_file(self, engine, defining_file, &no_overrides(), false);
+                            let exports = engine
+                                .fetch::<Vec<ExportedValue>>(Key::ExportedSchemes(defining_file));
                             exports
-                                .into_iter()
+                                .iter()
                                 .find(|export| export.symbol == *symbol)
-                                .map(|export| export.type_scheme)
+                                .map(|export| export.type_scheme.clone())
                         }
                         None => None,
                     };
@@ -633,6 +647,12 @@ impl QueryGroup for RoughlyQueries {
                         .fetch::<BTreeMap<Symbol, TypeScheme>>(Key::InterfaceScc((*scc).clone()));
                     Stored::new(interface.get(symbol).cloned())
                 }
+            }
+
+            Key::ExportedSchemes(file) => {
+                bump(&self.counters.exported_schemes, *file);
+                let (_check, exports) = infer_file(self, engine, *file, &no_overrides(), false);
+                Stored::new(exports)
             }
 
             Key::InterfaceScc(members) => {
@@ -886,8 +906,16 @@ fn infer_file(
     };
 
     let mut lowering = group.lowering.borrow_mut();
-    let mut inference_state = inference_state_with_builtins_in_interner(lowering.interner_mut());
-    group.stubs.seed_into(&mut inference_state);
+    let mut inference_state = {
+        let mut template = group.inference_template.borrow_mut();
+        template
+            .get_or_insert_with(|| {
+                let mut state = inference_state_with_builtins_in_interner(lowering.interner_mut());
+                group.stubs.seed_into(&mut state);
+                state
+            })
+            .clone()
+    };
     // The authoritative `Typecheck` round records per-expression types (for the IDE's
     // `expression_types_by_id`) and strict `Unknown` origins; the `GlobalScheme`/SCC callers only need the
     // exported schemes and discard the `ModuleCheck`, so they leave recording off (the wasted-work note on
@@ -2029,6 +2057,7 @@ struct Counters {
     package_type_definitions: Cell<u64>,
     fallback_range: Cell<u64>,
     defining_item: RefCell<HashMap<Symbol, u64>>,
+    exported_schemes: RefCell<HashMap<FileId, u64>>,
     global_scheme: RefCell<HashMap<Symbol, u64>>,
     interface_deps: RefCell<HashMap<Symbol, u64>>,
     symbol_scc: RefCell<HashMap<Symbol, u64>>,
