@@ -1,6 +1,6 @@
 ---
 title: Guide
-description: A guide to Roughly's static type checker for R and its typing-comment syntax
+description: A guided tour of Roughly's static type checker for R — from inference-only checking to annotations, generics, and strict mode
 ---
 
 Roughly includes a static type checker for R. R has no type system of its own, so
@@ -12,46 +12,35 @@ Because R has no type-annotation syntax, annotations live in `#:` comments. They
 like comments to every other R tool, so annotated code stays fully compatible with
 regular R.
 
-This page is a guide to using the type checker. For the full, precise semantics — every
-coercion, operator, and annotation rule — see the [Typing Reference](/typing-reference).
+This page is a guide: it introduces the type system one concept at a time, in the order
+you will meet them in real code. For the full, precise semantics — every coercion,
+operator, and annotation rule — see the [Typing Reference](/typing-reference).
 
-## Surfacing type errors
+## Start without annotations
 
-The checker always runs to power editor features (inferred types on hover, inlay hints,
-and signature help work out of the box). Type-*error* diagnostics, however, are opt-in,
-so a project that has not adopted annotations is not flooded with messages.
+You do not need to write a single annotation to benefit from the checker. It always
+runs to power editor features: hover shows the inferred type of any expression, inlay
+hints show inferred types of bindings, and signature help shows function signatures as
+you type. That works out of the box.
 
-Turn type errors on in `roughly.toml`:
+```r
+count <- 3L          # hover: count : integer
+ratio <- count / 2   # hover: ratio : double
+greet <- function(name) paste("hi", name)
+                     # hover: greet : <T> fn(name: T) -> character
+```
+
+Type-*error* diagnostics are opt-in, so a project that has not adopted typing is not
+flooded with messages. Turn them on in `roughly.toml`:
 
 ```toml
 [check]
 typing = true
 ```
 
-With that set, `roughly check` and your editor report a `type-error` diagnostic wherever
-the types do not line up.
-
-A separate switch, `strict = true`, additionally flags every place the checker could
-*not* determine a type — an unsupported construct, or a reference to a binding with no
-known type. It only adds `strict` diagnostics; it does not change inference. See
-[strict mode](/typing-reference#strict-mode) for the precise rules.
-
-## What it does
-
-The checker infers a type for every expression. With type errors enabled it reports a
-`type-error` diagnostic when the types do not line up. A few examples:
-
-```r
-#: integer
-value <- "hello"
-# error[type-error] expected `integer`, found `character`
-
-1L + "a"
-# error[type-error] expected a numeric value (`integer` or `double`), found `character`
-```
-
-Inferred types flow through bindings, function calls, operators, and indexing, so
-mistakes are caught even without annotations:
+With that set, `roughly check` and your editor report a `type-error` diagnostic
+wherever types do not line up — even in completely unannotated code, because inferred
+types flow through bindings, calls, operators, and indexing:
 
 ```r
 add <- function(a, b) a + b   # inferred: <T: numeric> fn(a: T, b: T) -> T
@@ -59,328 +48,335 @@ add(1L, "x")
 # error[type-error] expected a numeric value (`integer` or `double`), found `character`
 ```
 
-When the checker cannot model a construct it falls back to `Unknown` instead of
-erroring, so one unsupported expression does not cascade into noise.
+Two things are worth noticing in that example, because they are the heart of the
+system:
 
-## Typing comments
+- The checker worked out on its own that `a` and `b` must be numeric — using `+` is
+  what constrained them.
+- The result is a *generic* function: `add(1L, 2L)` is `integer`, `add(0.5, 1)` is
+  `double`. Inference does not force one answer where R allows several.
 
-A typing annotation is one or more `#:` lines attached to the binding or expression
-that follows immediately. Consecutive `#:` lines with no blank line between them form
-a single annotation block. A blank line between the comment and the expression is an
-error.
+When the checker cannot model a construct, it does not guess: the expression becomes
+`Unknown` and checking continues without cascading errors. More on that
+[below](#the-gradual-boundary-any-and-unknown).
+
+## The shape of R values
+
+To read inferred types — and later to write annotations — you need the type
+vocabulary. It mirrors how R values actually behave.
+
+### Atomic values and the three vector shapes
+
+R's atomic types are `logical`, `integer`, `double`, `complex`, `character`, and
+`raw`. Every atomic value in R is a vector, but code treats them in three
+distinguishable ways, and the type system keeps them apart:
+
+| You write | Meaning | Example value |
+|-----------|---------|---------------|
+| `integer` | scalar-like: a single value | `1L` |
+| `integer[]` | array-like: many values, positional | `c(1L, 2L)` |
+| `integer[named]` | map-like: values keyed by names | `c(a = 1L)` |
+
+Literals are scalar-like. `c(...)` builds array-like vectors (or map-like ones when
+every element is named) and applies R's promotion rules, so `c(1L, 2.5)` is
+`double[]` and `c(1L, "a")` is `character[]`.
+
+The distinction matters because extraction and iteration behave differently per
+shape: `x[[1L]]` on an `integer[]` gives `integer`; name-based `[[` on a map-like
+vector gives `integer | NULL`, because the name may be absent at runtime.
+
+### Lists
+
+R lists carry more structure, and the type system offers four forms, from loosest to
+most precise:
+
+- `list[integer]` — array-like: any number of elements, all the same type.
+- `list[named: integer]` — map-like: keyed by names, all values the same type.
+- `list{integer, character}` — tuple-like: exactly these elements, in this order.
+- `list{name: character, age: double}` — record-like: exactly these named fields.
+
+`list(...)` infers the precise form: `list(1L, "a")` is the tuple
+`list{integer, character}`, and `list(name = "Ada", age = 36)` is the record
+`list{name: character, age: double}`. Field access is checked — `person$name` on the
+record above is `character`, and `person$nmae` is a type error.
+
+### `NULL`
+
+`NULL` has its own type, and "a value or `NULL`" is written as a union: `integer |
+NULL`. This is how R idioms like optional list fields and absent names are modeled —
+name-based access returns `T | NULL` rather than pretending the value is always
+there.
+
+## When types meet: coercions
+
+R freely promotes values in well-understood ways, and the checker mirrors the safe
+ones instead of demanding exact matches at every boundary:
+
+- **Scalars coerce into vector positions.** Where `integer[]` is expected, `1L` is
+  accepted — a scalar is a length-one vector.
+- **`integer` widens to `double`** (in any shape): `mean(1L)` and `sd(c(1L, 2L))`
+  are fine. The reverse never holds — a `double` is not accepted where `integer` is
+  required.
+- **Whole-number literals count as `integer` at parameter positions.** R programmers
+  write `seq_len(10)`, not `seq_len(10L)`; the literal `10` passes where `integer`
+  is expected. A fractional literal (`2.5`) or a `double` *variable* does not.
+- **`T` coerces into `T | NULL`** — a plain value fits wherever an optional one is
+  expected.
+
+These are directional conveniences applied when checking a value against an
+expectation. Inference itself never widens: a binding inferred `integer` stays
+`integer`.
+
+## More than one possibility: unions
+
+Control flow can leave a variable with more than one possible type, and R code does
+this on purpose. The checker models it with unions instead of rejecting it:
+
+```r
+value <- if (condition) 1L else "one"
+# value : integer | character
+```
+
+Reassignment across branches works the same way — the checker tracks variables as
+mutable slots the way R actually treats them:
+
+```r
+x <- 1L
+if (flag) x <- "two"
+x + 1L
+# error[type-error]: `x` is `integer | character` here, and `+` rejects the
+# `character` member
+```
+
+A union value must be acceptable in *every* shape it can take. Operators and field
+access apply member-wise: comparing `integer | double` against a number is fine
+(both members are numeric); adding `integer | character` is an error (one member is
+not). Once a union member is genuinely impossible, R code typically guards it —
+narrowing on such guards is on the roadmap; today the union stays until you
+reassign.
+
+## The gradual boundary: `Any` and `Unknown`
+
+Two special types make the system gradual rather than all-or-nothing:
+
+- **`Any` is a deliberate opt-out.** It is compatible with everything in both
+  directions and produces no diagnostics. Standard-library functions whose result
+  cannot be described statically return `Any`; you can annotate with it too.
+- **`Unknown` is an honest "could not determine".** An unsupported construct or an
+  unresolved name yields `Unknown`. It also flows without erroring — the checker
+  diagnoses the *cause* once, where the type became `Unknown`, instead of cascading
+  a second error at every later use. [Strict mode](#strict-mode) turns those origins
+  into visible diagnostics.
+
+The difference matters: `Any` says "I chose not to check this"; `Unknown` says "the
+checker could not check this". Strict mode reports the latter, never the former.
+
+## Your first annotation
+
+Inference carries you far, but annotations let you state intent, tighten interfaces,
+and document code. An annotation is one or more `#:` lines attached to the binding or
+expression that follows immediately (no blank line in between; consecutive `#:` lines
+form one block):
 
 ```r
 #: integer
-value <- 1L
-
-#: list[integer]
-values <- list(1L, 2L, 3L)
-
-#: fn(count: integer) -> integer
-double_count <- function(count) count + count
+port <- 8080L
 ```
 
-There are four annotation forms:
-
-| Form | Meaning |
-| --- | --- |
-| `#: TYPE` | checked annotation |
-| `#: @trust TYPE` | trusted coercion (escape hatch) |
-| `#: @if-unknown TYPE` | fill in a type only when inference gave up |
-| `#: @new NOMINAL` | introduce a value of a nominal type |
-
-A block may hold exactly one compact annotation, or an expanded function annotation
-(`@param`/`@return` lines), or one or more `@type`/`@alias` definitions. These forms
-cannot be mixed in the same block.
-
-### Checked annotations
-
-`#: TYPE` checks that the value is compatible with `TYPE`. Checking is
-compatibility-based, not exact equality, so it allows the widening coercions defined
-below. If the check passes, the binding is then treated as having `TYPE`.
+A plain type annotation is **checked**: the inferred type of the value must be
+compatible with the declared type, and the declaration becomes the binding's type.
 
 ```r
 #: list[integer]
-value <- list(1L, 2L, 3L)   # ok: list{integer, integer, integer} coerces to list[integer]
+sizes <- list(1L, 2L)     # ok: the tuple fits the array-like claim
+
+#: integer
+label <- "west"
+# error[type-error] expected `integer`, found `character`
 ```
 
-### Trusted coercions
+Two escape hatches cover the boundary with untypeable code:
 
-`#: @trust TYPE` tells the checker to treat the value as `TYPE` without checking
-compatibility at that site. It is the "trust me" escape hatch, similar to TypeScript's
-`as`. Use it only when you know more than the checker, since it can hide real mistakes.
+- `#: @trust TYPE` asserts a type **without checking** — for values the checker
+  cannot see through (foreign calls, reflection). Use sparingly; a wrong `@trust` is
+  a wrong type from then on.
+- `#: @if-unknown TYPE` applies only when the inferred type is `Unknown` — it refines
+  what the checker could not determine but never overrides what it could. This is
+  the safe way to annotate around unsupported constructs.
 
-```r
-#: @trust integer
-value <- external_input
-```
+## Annotating functions
 
-### Unknown-only coercions
-
-`#: @if-unknown TYPE` is allowed only when the inferred type is `Unknown`. It fills in
-an inference gap without overriding anything the checker already knows. Using it on a
-value whose type is already known is an error.
-
-```r
-#: @if-unknown integer
-value <- unsupported_value   # ok only if `unsupported_value` is Unknown
-```
-
-## Type definitions
-
-`@type` and `@alias` lines define named types. They share one project-global
-namespace, forward references are allowed across files, and duplicate names are errors.
-A block of only `@type`/`@alias` lines is a definition block and is not attached to the
-following expression.
-
-### Aliases
-
-`#: @alias NAME {TYPE}` defines a structural alias. Using the alias is exactly the same
-as writing its underlying type; it creates no new type identity.
-
-```r
-#: @alias PersonShape {list{ name: character, age: double }}
-
-#: PersonShape
-value <- list(name = "bob", age = 20)
-```
-
-Aliases may be generic:
-
-```r
-#: @alias Box<T> {list{ value: T }}
-
-#: Box<integer>
-value <- list(value = 1L)
-```
-
-### Nominal types
-
-`#: @type NAME {TYPE}` defines a nominal type with a fresh identity. Two nominal types
-are incompatible even if their underlying representation is identical, and an ordinary
-structural value is not compatible with a nominal type unless you introduce it with
-`@new`.
-
-```r
-#: @type Person {list{ name: character, age: double }}
-
-#: @new Person
-person <- list(name = "bob", age = 20)
-```
-
-`@new` accepts a bare nominal name or a fully-applied generic nominal (`Person<integer>`).
-Aliases, unions, function types, and other non-nominal forms are not allowed after `@new`.
-
-A nominal value is compatible with its underlying representation, and operators or
-indexing project it down to that representation:
-
-```r
-#: @type Person {list{ name: character }}
-
-#: @new Person
-person <- list(name = "bob")
-
-person$name   # character: `$` sees the representation type
-```
-
-## Function annotations
-
-A function can be annotated in one of two styles. They cannot be mixed for the same
-function.
+Functions are where annotations pay off most: the annotation is checked against the
+body *and* becomes the signature every caller is checked against.
 
 ### Compact style
 
-A single `fn(...)` type, with an optional `-> RETURN_TYPE` (omitted means `NULL`):
-
 ```r
 #: fn(count: integer) -> integer
-double_count <- function(count) count + count
-
-#: fn(count: integer, [label]: character) -> integer
-double_count <- function(count, label = NULL) count + count
-
-#: <T> fn(value: T) -> T
-identity <- function(value) value
+double_it <- function(count) count * 2L
 ```
 
-Named parameters (`name: TYPE`) may be called by name; bare positional parameters
-(`fn(integer)`) may not. Optional parameters use bracket syntax and must be named:
-`[label]: character`. A leading `<T>` binder introduces type parameters for the whole
-function type.
+- Optional parameters wrap their name in brackets: `fn(count: integer, [label]:
+  character) -> integer`.
+- A variadic function declares its rest parameter as `...: TYPE`; every surplus
+  positional argument is checked against that element type.
+- Parameter names must match the function's formals — the checker matches call
+  arguments by name exactly like R does, and it will tell you when an annotation
+  names a parameter the function does not define.
 
 ### Expanded style
 
-`@param` and `@return`/`@returns` lines, with an optional leading `@forall`:
+For longer signatures, `@param` and `@returns` document one parameter per line.
+The parameter name comes first, its type in braces:
 
 ```r
 #: @param render_count {fn(integer) -> character}
 #: @param count {integer}
 #: @param [label] {character}
 #: @returns {character}
-apply_renderer <- function(render_count, count, label = NULL) {
-  if (!is.null(label)) paste0(label, ": ", render_count(count)) else render_count(count)
+render <- function(render_count, count, label = "n") {
+  paste(label, render_count(count))
 }
 ```
 
+Both styles produce the same signature; pick per function. The formatter keeps both
+styles tidy.
+
+## Naming shapes: aliases and nominal types
+
+Structural types describe shape, but repeating `list{name: character, age: double}`
+everywhere is noise, and sometimes two identically-shaped values should *not* be
+interchangeable. Two declaration forms cover this:
+
+### `@alias` — a name for a shape
+
 ```r
-#: @forall T
-#: @param value {T}
-#: @return {T}
+#: @alias PersonShape {list{ name: character, age: double }}
+
+#: PersonShape
+ada <- list(name = "Ada", age = 36)
+```
+
+An alias is purely structural: `PersonShape` and the written-out list type are the
+same type. Aliases can be generic: `#: @alias Box<T> {list{ value: T }}`, used as
+`Box<integer>`.
+
+### `@type` — a distinct (nominal) type
+
+```r
+#: @type Person {list{ name: character, age: double }}
+
+#: @new Person
+ada <- list(name = "Ada", age = 36)
+```
+
+`@type` declares a **nominal** type: values only have it where you introduce it with
+`@new`, and another `@type` with the same shape is a *different* type. Use it for
+domain concepts — `Meters` and `Seconds` can both wrap `double` and still never mix.
+The `@new` introduction checks the value against the declared representation, so a
+nominal type is a checked claim, not a cast.
+
+Nominal types can be generic too (`@type Pair<T, U> {...}`, introduced with
+`@new Pair<integer, character>`), and type arguments are checked with the variance
+the representation implies.
+
+## Generic functions
+
+A `<T>` binder makes a signature polymorphic:
+
+```r
+#: <T> fn(value: T) -> T
 identity <- function(value) value
 ```
 
-`@forall` lines must come before `@param`, and `@param` before `@return`. Optional
-parameters use the JSDoc-style `[name]` bracket. If no return is given, it defaults to
-`NULL`.
+Inside the body, `T` is opaque — the body must work *for every* `T`, so it cannot
+add requirements the signature does not state (using `value + 1L` above would be an
+error: the signature never promised `T` is numeric). At call sites `T` is filled in
+per call: `identity(1L)` is `integer`, `identity("a")` is `character`.
 
-### Inferred function types
+Two bounds refine what a type parameter accepts. You do not write them explicitly —
+they arise from *how* the parameter is used, and they render in hover as `<T: ...>`:
 
-An unannotated function gets its type from its definition and uses. Every parameter is
-named (R parameters always match by name or position), a parameter with a default is
-optional, and unconstrained parameters generalize at the binding:
-
-```r
-identity <- function(x) x          # <T> fn(x: T) -> T
-double_count <- function(x) x + x  # <T: numeric> fn(x: T) -> T
-```
-
-## Type vocabulary
-
-### Atomic scalars
-
-Roughly uses R's own type names: `logical`, `integer`, `double`, `complex`,
-`character`, `raw`, and `NULL`. A bare name (`integer`) is a scalar-like value.
-
-### Vector shapes
-
-Atomic types have three shapes:
-
-- `T` — scalar-like (e.g. `integer`)
-- `T[]` — array-like vector (e.g. `integer[]`)
-- `T[named]` — map-like vector keyed by names (e.g. `integer[named]`)
-
-A scalar-like `T` coerces to `T[]`, and a map-like `T[named]` coerces to `T[]`. The
-reverse coercions are not allowed.
-
-### List shapes
-
-R uses `list(...)` for several different collection meanings, so the checker
-distinguishes four list forms:
-
-| Form | Description |
-| --- | --- |
-| `list{T1, T2, ...}` | tuple-like: fixed size, positions matter |
-| `list{name: T, ...}` | record-like: fixed size, field names matter |
-| `list[T]` | array-like: homogeneous, positions not in the type |
-| `list[named: T]` | map-like: homogeneous, name-keyed |
-
-`list(...)` infers to a fixed-shape form by default: all-unnamed elements become
-tuple-like, all-named become record-like, and mixing named and unnamed elements is an
-error.
+- **numeric** — inferred for unannotated parameters used arithmetically
+  (`<T: numeric> fn(x: T) -> T` for `function(x) x + 1L`). Only `integer` and
+  `double` satisfy it.
+- **atomic** — using a parameter as a vector *element* type, `T[]`, restricts `T`
+  to the six atomic types. This is how element-preserving signatures are written:
 
 ```r
-list(1L, 2L, 3L)           # list{integer, integer, integer}
-list(foo = 1L, bar = "x")  # list{foo: integer, bar: character}
+#: <T> fn(x: T[]) -> T[]
+shuffle <- function(x) sample(x)
+
+shuffle(c(1L, 2L))    # integer[]
+shuffle(c("a", "b"))  # character[]
+shuffle(list(1L))     # error: a list is not an atomic vector
 ```
 
-Fixed-shape lists coerce to the homogeneous forms when every element is compatible with
-the element type: tuple-like and record-like lists coerce to `list[T]`, and record-like
-lists also coerce to `list[named: T]`. The reverse coercions do not hold.
+A parameter that picks up both bounds — a generic vector element used
+arithmetically — is a scalar `integer`-or-`double` and renders as
+`<T: scalar numeric>`.
 
-### Unions, `Any`, `Unknown`
+## The standard library
 
-A union `A | B | ...` describes a value that has one of the member types; `T | NULL` is
-the nullable special case. A value of a member type is compatible with the union
-(`integer` fits `integer | character | NULL`), and a union fits any wider union, but a
-union is not compatible with a plain member type: `integer | character` does not fit
-`integer`, and `T | NULL` does not fit plain `T`. Unions normalize — nested unions
-flatten, duplicate members collapse, `NULL` renders last, and an `Any` or `Unknown`
-member absorbs the whole union.
+Base R functions have no annotations to read, so Roughly ships **stub
+declarations** for `base`, `stats`, `utils`, `methods`, `graphics`, and
+`grDevices` — declaration-only `.Rtypes` files using the same type notation as `#:`
+comments. That is why `length(x)` is `integer` and `paste(...)` is `character` out
+of the box, and why hovering a base name shows a real signature plus its origin
+package.
 
-`Any` is the explicit escape hatch: it is compatible with every type in both
-directions, and should appear only when you write it. `Unknown` means the checker could
-not infer something more specific; it is compatible only with `Any`, so it does not
-silently satisfy concrete annotations.
+Three things are useful to know:
 
-### Generics
+- **Type-preserving functions are typed faithfully.** `sum(1L, 2L)` is `integer`
+  while `sum(0.5, 1)` is `double` (overloaded per atomic family), and
+  `sort(c("b", "a"))` is `character[]` (generic `T[]` signatures). You do not pay a
+  precision penalty for using base R.
+- **`pkg::name` works.** A qualified read has the same type as the bare name; an
+  unknown package or a name the package does not export gets a warning.
+- **Projects can override or extend the stubs.** Drop `.Rtypes` files under
+  `<project>/stubs/` — a declaration there replaces the shipped one of the same
+  name. Repeating a name declares an ordered overload set. See
+  [Stdlib Stubs](/stdlib-stubs) for the format and rules.
 
-A type can bind type parameters with a leading binder, which is rank-1 (allowed only at
-the outermost level):
+## Strict mode
 
-```
-<T> list[T]
-<T, U> fn(T) -> U
-<T> fn(T) -> T | NULL
-```
+Everything so far reports what the checker *knows* is wrong. Strict mode surfaces
+what it *could not check*: each place a type genuinely became `Unknown` — an
+unsupported construct, an unresolved reference — gets a `strict` diagnostic at its
+origin (one per cause, not one per use).
 
-Generic aliases and nominal types are applied with angle brackets (`Box<integer>`,
-`Pair<integer, character>`), and the argument count must match the declaration exactly.
-
-## Operators and indexing
-
-Arithmetic (`+`, `-`, `*`, `/`, `^`, `%%`, `%/%`) is defined for numeric operands
-(`integer`, `double`, and numeric-constrained type variables). `+`, `-`, `*`, `%%`, and
-`%/%` return `integer` when both operands are `integer` and `double` otherwise; `/` and
-`^` always return `double`. The result is scalar-like only when both operands are
-scalar-like, and array-like otherwise.
-
-```r
-1L + 1L          # integer
-1L - 1.5         # double
-1L / 2L          # double
-c(1L, 2L) * 2L   # integer[]
+```toml
+[check]
+strict = true
 ```
 
-Comparisons (`<`, `<=`, `>`, `>=`, `==`, `!=`) require both operands in the same family
-(numeric, `character`, or `logical`) and return `logical`. Boolean `&&` / `||` require
-scalar `logical` operands. The range operator `from:to` builds an `integer[]` or
-`double[]` sequence from scalar numeric operands, and `c(...)` builds an atomic vector
-from atomic arguments.
+Strict is a per-file conversation, too: a `#: @strict` comment at the top of a file
+opts that file in regardless of the config, and `#: @strict off` opts it out. That
+makes it practical to hold your typed core to the strict bar while legacy files
+migrate gradually.
 
-For indexing, `[[` extracts a single element and `$name` is sugar for `[["name"]]`:
+Strict never flags `Any` — opting out is a choice, and the checker respects it.
 
-- `[[` on a vector `T`, `T[]` returns `T`; on `T[named]` by name it returns `T | NULL`
-- `[[` on `list[T]` returns `T`; on `list[named: T]` by name returns `T | NULL`
-- on tuple-like / record-like lists, `[[` needs a statically known literal index or
-  field name
+## How the checker thinks
 
-`[` is currently defined only for array-like and map-like lists (returning the same
-list shape); other `[` forms are not yet modeled.
+A short mental model that explains most behavior you will see:
 
-## Numeric inference variables
+- **Inference is Hindley-Milner.** Unannotated code gets principal types via
+  unification; functions generalize at bindings, so helpers stay polymorphic.
+- **Checking against expectations is compatibility, not equality.** The safe
+  coercions (scalar→vector, `integer`→`double`, `T`→`T | NULL`) apply where a value
+  meets a declared expectation. Compatibility checks are probes: a failed check
+  leaves no trace behind.
+- **Sound over complete.** The checker prefers refusing a construct loudly (and
+  saying so under strict) to silently mistyping it. R constructs that resist static
+  typing — non-standard evaluation, reflective environment tricks — degrade to
+  `Unknown` rather than to wrong answers.
 
-An unannotated value used as a numeric operand is constrained to be numeric (`integer`
-or `double`) rather than rejected. When such a constraint survives to a function
-boundary, it generalizes into a numeric-constrained type parameter, rendered
-`<T: numeric>`:
+## Where to go next
 
-```r
-function(x) x + 1L   # <T: numeric> fn(x: T) -> T
-function(x) -x       # <T: numeric> fn(x: T) -> T
-function(x) x > 0L   # <T: numeric> fn(x: T) -> logical
-function(x) x / 2    # <T: numeric> fn(x: T) -> double
-```
-
-A numeric-constrained variable that is not abstracted by a parameter defaults to
-`double`, matching R's treatment of bare numbers. Calling such a function with a
-non-numeric argument is an error at the call site.
-
-Everywhere types are shown — hover, inlay hints, signature help, and error messages —
-a not-yet-resolved inference variable displays as a type-parameter name (`T`, `U`, `V`,
-… in reading order), never as a raw internal id. A function type additionally binds its
-variables up front (`<T, U> fn(x: list[T], f: fn(T) -> U) -> list[U]` for `lapply`), and
-one rendering spans the whole type, so the same variable keeps the same name across
-parameters, return type, and both sides of an `expected …, found …` message.
-
-## Control flow
-
-- `if` without `else` produces `T | NULL` (or `NULL` if the branch is `NULL`); the
-  condition must be scalar `logical`.
-- `if ... else` joins the branch types: branches that unify share that type, a `NULL`
-  branch gives `T | NULL`, and genuinely different branches produce their union —
-  `if (flag) 1L else "foo"` is `integer | character`, not an error.
-- A block evaluates to the type of its last expression, or `NULL` if empty or
-  terminated with `;`.
-- `for`, `while`, and `repeat` all evaluate to `NULL`. A `for` loop iterates vectors and
-  homogeneous lists with their element type, and fixed-shape lists with the union of
-  their item types, binding that element type inside the body.
+- [Typing Reference](/typing-reference) — the authoritative semantics: every type
+  form, operator rule, coercion, and annotation, precisely specified.
+- [Stdlib Stubs](/stdlib-stubs) — how the standard library is typed and how to
+  override it per project.
+- [Configuration](/configuration) — the `[check]` keys (`typing`, `strict`,
+  `unused`) and everything else in `roughly.toml`.
