@@ -1,7 +1,7 @@
 use {
     crate::{
         analysis::LintConfig,
-        diagnostic::Diagnostic,
+        diagnostic::{Diagnostic, Lint},
         document::Document,
         tree::{field, kind},
     },
@@ -60,6 +60,7 @@ fn traverse(
                                 && last_comma.is_none()
                             {
                                 diagnostics.push(Diagnostic::lint_error(
+                                    Lint::MissingComma,
                                     previous_argument.range(),
                                     "Expected comma after argument",
                                 ));
@@ -84,6 +85,7 @@ fn traverse(
                     && state.check_trailing_commas
                 {
                     diagnostics.push(Diagnostic::lint_error(
+                        Lint::TrailingComma,
                         trailing_comma.range(),
                         "Unexpected comma after last argument",
                     ));
@@ -108,6 +110,7 @@ fn traverse(
 
                 if actual_name != expected_name {
                     diagnostics.push(Diagnostic::lint_warning(
+                        Lint::NamingStyle,
                         node.range(),
                         format!(
                             "Variable `{actual_name}` should have {} name, e.g. {expected_name}",
@@ -124,6 +127,7 @@ fn traverse(
                 && operator.kind_id() == kind::EQUAL
             {
                 diagnostics.push(Diagnostic::lint_warning(
+                    Lint::AssignmentOperator,
                     node.range(),
                     "Use <-, not =, for assignment",
                 ));
@@ -144,7 +148,11 @@ fn traverse(
             };
 
             if let Some(message) = message {
-                diagnostics.push(Diagnostic::lint_warning(node.range(), message));
+                diagnostics.push(Diagnostic::lint_warning(
+                    Lint::BooleanShorthand,
+                    node.range(),
+                    message,
+                ));
             }
         }
         kind::PARAMETER => {
@@ -161,6 +169,7 @@ fn traverse(
 
                 if actual_name != expected_name {
                     diagnostics.push(Diagnostic::lint_warning(
+                        Lint::NamingStyle,
                         name.range(),
                         format!(
                             "Parameter `{actual_name}` should have {} name, e.g. {expected_name}",

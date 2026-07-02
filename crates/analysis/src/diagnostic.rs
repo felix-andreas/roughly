@@ -162,6 +162,86 @@ fn collect_function_free_variables(
     collect_free_variables(&function_type.return_type, out);
 }
 
+// Applies `# roughly: allow(code, ...)` suppression comments: a diagnostic is dropped when a
+// suppression naming its code (or `all`) sits on the diagnostic's own line (a trailing comment) or
+// on the line directly above it. Codes are the user-facing strings diagnostics render with
+// (`naming-style`, `unused`, `unresolved`, ...). Applied at diagnostic assembly, after severity
+// decisions, so a suppressed escalated error is dropped like any other diagnostic.
+pub fn apply_suppressions(diagnostics: Vec<Diagnostic>, source: &str) -> Vec<Diagnostic> {
+    if !source.contains("roughly:") {
+        return diagnostics;
+    }
+    let mut allowed_by_line: BTreeMap<usize, Vec<String>> = BTreeMap::new();
+    for (line_index, line) in source.lines().enumerate() {
+        let Some(comment_start) = line.find('#') else {
+            continue;
+        };
+        let comment = line[comment_start..].trim_start_matches('#').trim();
+        let Some(rest) = comment.strip_prefix("roughly:") else {
+            continue;
+        };
+        let Some(arguments) = rest
+            .trim()
+            .strip_prefix("allow(")
+            .and_then(|rest| rest.split_once(')'))
+            .map(|(inside, _)| inside)
+        else {
+            continue;
+        };
+        let codes = arguments
+            .split(',')
+            .map(|code| code.trim().to_owned())
+            .filter(|code| !code.is_empty())
+            .collect::<Vec<_>>();
+        if !codes.is_empty() {
+            allowed_by_line.entry(line_index).or_default().extend(codes);
+        }
+    }
+    if allowed_by_line.is_empty() {
+        return diagnostics;
+    }
+    diagnostics
+        .into_iter()
+        .filter(|diagnostic| {
+            let row = diagnostic.range.start_point.row;
+            let same_line = allowed_by_line.get(&row);
+            let line_above = row
+                .checked_sub(1)
+                .and_then(|previous| allowed_by_line.get(&previous));
+            let code = diagnostic.code.to_string();
+            !same_line
+                .into_iter()
+                .chain(line_above)
+                .flatten()
+                .any(|allowed| *allowed == code || allowed == "all")
+        })
+        .collect()
+}
+
+// The individual style lints, each with a stable user-facing code: the code names the rule in
+// diagnostics (`warning[naming-style]`), in suppression comments, and in configuration, so it must
+// stay stable once shipped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Lint {
+    MissingComma,
+    TrailingComma,
+    NamingStyle,
+    AssignmentOperator,
+    BooleanShorthand,
+}
+
+impl Lint {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Lint::MissingComma => "missing-comma",
+            Lint::TrailingComma => "trailing-comma",
+            Lint::NamingStyle => "naming-style",
+            Lint::AssignmentOperator => "assignment-operator",
+            Lint::BooleanShorthand => "boolean-shorthand",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub severity: Severity,
@@ -171,19 +251,19 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    pub fn lint_error(range: Range, message: impl Into<String>) -> Self {
+    pub fn lint_error(lint: Lint, range: Range, message: impl Into<String>) -> Self {
         Self {
             severity: Severity::Error,
-            code: DiagnosticCode::Lint,
+            code: DiagnosticCode::Lint(lint),
             message: message.into(),
             range,
         }
     }
 
-    pub fn lint_warning(range: Range, message: impl Into<String>) -> Self {
+    pub fn lint_warning(lint: Lint, range: Range, message: impl Into<String>) -> Self {
         Self {
             severity: Severity::Warning,
-            code: DiagnosticCode::Lint,
+            code: DiagnosticCode::Lint(lint),
             message: message.into(),
             range,
         }
@@ -658,7 +738,7 @@ impl fmt::Display for Severity {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticCode {
-    Lint,
+    Lint(Lint),
     Naming,
     // A reference the resolver could not resolve: an unknown bare name, an unknown package
     // namespace, or a name a known namespace does not export. Its own code (rather than `Naming`)
@@ -675,7 +755,7 @@ pub enum DiagnosticCode {
 impl fmt::Display for DiagnosticCode {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Lint => formatter.write_str("lint"),
+            Self::Lint(lint) => formatter.write_str(lint.code()),
             Self::Unresolved => formatter.write_str("unresolved"),
             Self::Naming => formatter.write_str("naming"),
             Self::Unused => formatter.write_str("unused"),

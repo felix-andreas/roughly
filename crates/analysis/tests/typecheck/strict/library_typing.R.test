@@ -8,11 +8,11 @@ count <- length(c(1L, 2L, 3L))
 width <- nchar("hello")
 ids <- seq_len(count)
 #++++
-warning[lint] Use TRUE, not T, for Boolean values
+warning[boolean-shorthand] Use TRUE, not T, for Boolean values
 --> 1:9-1:10
 | flag <- T
 
-warning[lint] Use FALSE, not F, for Boolean values
+warning[boolean-shorthand] Use FALSE, not F, for Boolean values
 --> 2:12-2:13
 | no_flag <- F
 

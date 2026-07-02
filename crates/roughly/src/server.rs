@@ -505,6 +505,8 @@ impl EngineWorker {
         }
 
         let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(file));
+        let rendered =
+            analysis::diagnostic::apply_suppressions(rendered, &parsed.0.rope().to_string());
         diagnostics::convert_diagnostics(rendered, parsed.0.rope(), self.position_encoding)
     }
 

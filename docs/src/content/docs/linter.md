@@ -46,13 +46,12 @@ y <-
 
 ### Semantics Checks
 
-Semantics checks enforce coding conventions and best practices that won't necessarily cause errors but may lead to bugs or reduce code quality:
+Semantics checks enforce coding conventions and best practices that won't necessarily cause errors but may lead to bugs or reduce code quality. Each check has a stable code, shown in brackets in diagnostics (`warning[naming-style]`) and usable in [suppression comments](#suppressing-diagnostics):
 
-- **Variable naming convention**: Enforces consistent naming style (snake_case or camelCase) according to your configuration
-- **Parameter naming convention**: Ensures function parameters follow the same naming convention
-- **Assignment operator**: Recommends using `<-` rather than `=` for variable assignment
-- **Trailing commas**: Flags unnecessary trailing commas in function calls
-- **Boolean values**: Use `TRUE` and `FALSE` over `T` and `F`
+- **`naming-style`**: Enforces consistent naming style (snake_case or camelCase) for variables and function parameters, according to your configuration
+- **`assignment-operator`**: Recommends using `<-` rather than `=` for variable assignment
+- **`missing-comma`** / **`trailing-comma`**: Flags a missing comma between call arguments and an unnecessary trailing comma after the last one
+- **`boolean-shorthand`**: Use `TRUE` and `FALSE` over `T` and `F`
 
 Example:
 ```r
@@ -67,6 +66,23 @@ calculate_mean <- function(dataSet) {
 # Trailing comma (warning)
 result <- sum(1, 2, 3,)
 ```
+
+### Suppressing diagnostics
+
+A `# roughly: allow(code, ...)` comment suppresses matching diagnostics on its own line (as a
+trailing comment) or on the line directly below it. The codes are the bracketed names diagnostics
+render with — the lint codes above plus `unused`, `unresolved`, and the other check codes —
+and `allow(all)` suppresses everything for that line:
+
+```r
+flag <- T  # roughly: allow(boolean-shorthand)
+
+# roughly: allow(unused)
+scratch <- compute_debug_info()
+```
+
+Use suppressions for genuine exceptions; a file that needs many of them is usually asking for a
+configuration change instead.
 
 ### Opt-in Checks
 

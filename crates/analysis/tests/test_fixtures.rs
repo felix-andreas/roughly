@@ -361,6 +361,9 @@ fn run_lint_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, Strin
             naming_style: Some(NameStyle::Snake),
         },
     );
+    // Suppression comments are applied at diagnostic assembly in production; the runner mirrors
+    // that so the suite can cover them.
+    let diagnostics = analysis::diagnostic::apply_suppressions(diagnostics, &case.input);
 
     Ok(vec![vec![FixtureRunFile {
         path: PathBuf::new(),

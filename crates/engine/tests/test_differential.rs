@@ -234,7 +234,9 @@ fn engine_diagnostics(
             diagnostic.escalate_unresolved_to_error();
         }
     }
-    rendered
+    // Mirrors production's suppression-comment filter at assembly.
+    let source = engine.fetch::<String>(Key::SourceText(id));
+    analysis::diagnostic::apply_suppressions(rendered, &source)
 }
 
 // ----------------------------------------------------------------------------------------------------
@@ -245,7 +247,7 @@ type NormalizedDiagnostic = (usize, usize, u8, u8, String);
 
 fn code_rank(code: DiagnosticCode) -> u8 {
     match code {
-        DiagnosticCode::Lint => 0,
+        DiagnosticCode::Lint(_) => 0,
         DiagnosticCode::Naming => 1,
         DiagnosticCode::SyntaxError => 2,
         DiagnosticCode::TypeError => 3,

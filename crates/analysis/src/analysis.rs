@@ -476,6 +476,10 @@ impl Analysis {
                 diagnostic.escalate_unresolved_to_error();
             }
         }
+        if let Some(document) = self.document_by_id(document_id) {
+            diagnostics =
+                crate::diagnostic::apply_suppressions(diagnostics, &document.rope().to_string());
+        }
         diagnostics
     }
 
