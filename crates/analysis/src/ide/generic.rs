@@ -355,11 +355,10 @@ fn is_hint_renderable(core_type: &CoreType, variables_allowed: bool) -> bool {
                     .is_none_or(|variadic| is_hint_renderable(variadic, variables_allowed))
                 && is_hint_renderable(&function_type.return_type, variables_allowed)
         }
-        CoreType::Any
-        | CoreType::Null
-        | CoreType::Scalar(_)
-        | CoreType::Vector(_)
-        | CoreType::NamedVector(_) => true,
+        CoreType::Vector(element) | CoreType::NamedVector(element) => {
+            is_hint_renderable(element, variables_allowed)
+        }
+        CoreType::Any | CoreType::Null | CoreType::Scalar(_) => true,
     }
 }
 

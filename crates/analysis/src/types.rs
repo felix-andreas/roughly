@@ -90,8 +90,13 @@ pub enum CoreType {
     Union(Vec<CoreType>),
     Scalar(Atomic),
     Nominal(Symbol, Vec<CoreType>),
-    Vector(Atomic),
-    NamedVector(Atomic),
+    // The element is a full `CoreType` so a generic scheme can hold a type variable there
+    // (`<T> fn(x: T[]) -> T[]`), but the only *valid* resolved elements are `Scalar(_)` (a concrete
+    // atomic) and `Variable(_)` (an element still being inferred). Annotation lowering rejects
+    // every other element shape, and element variables carry the atomic-element constraint so they
+    // can never be bound to one.
+    Vector(Box<CoreType>),
+    NamedVector(Box<CoreType>),
     List(Box<CoreType>),
     NamedList(Box<CoreType>),
     Record(Vec<RecordField<CoreType>>),
@@ -101,6 +106,24 @@ pub enum CoreType {
 }
 
 impl CoreType {
+    pub fn vector(atomic: Atomic) -> CoreType {
+        CoreType::Vector(Box::new(CoreType::Scalar(atomic)))
+    }
+
+    pub fn named_vector(atomic: Atomic) -> CoreType {
+        CoreType::NamedVector(Box::new(CoreType::Scalar(atomic)))
+    }
+
+    // The concrete atomic of a vector element, when it has resolved to one (`None` for an element
+    // still held by an inference variable). Callers that require a concrete element — the operator
+    // kernel, `c(...)` promotion, subset results — go through this instead of matching the box.
+    pub fn element_atomic(&self) -> Option<Atomic> {
+        match self {
+            CoreType::Scalar(atomic) => Some(*atomic),
+            _ => None,
+        }
+    }
+
     pub fn union_of(members: Vec<CoreType>) -> CoreType {
         let Some(mut members) = normalize_union(members, CoreType::Null, |member| match member {
             CoreType::Union(inner) => Ok(inner),

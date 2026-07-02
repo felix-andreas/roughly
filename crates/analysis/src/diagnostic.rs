@@ -139,12 +139,10 @@ fn collect_free_variables(core_type: &CoreType, out: &mut Vec<InferenceVariableI
             }
         }
         CoreType::Function(function_type) => collect_function_free_variables(function_type, out),
-        CoreType::Any
-        | CoreType::Unknown
-        | CoreType::Null
-        | CoreType::Scalar(_)
-        | CoreType::Vector(_)
-        | CoreType::NamedVector(_) => {}
+        CoreType::Vector(element) | CoreType::NamedVector(element) => {
+            collect_free_variables(element, out)
+        }
+        CoreType::Any | CoreType::Unknown | CoreType::Null | CoreType::Scalar(_) => {}
     }
 }
 
@@ -792,8 +790,10 @@ impl<'a> TypeRenderer<'a> {
                     format!("{name}<{rendered_type_arguments}>")
                 }
             }
-            CoreType::Vector(atomic) => format!("{}[]", render_atomic(*atomic)),
-            CoreType::NamedVector(atomic) => format!("{}[named]", render_atomic(*atomic)),
+            CoreType::Vector(element) => format!("{}[]", self.render_core_type(element)),
+            CoreType::NamedVector(element) => {
+                format!("{}[named]", self.render_core_type(element))
+            }
             CoreType::List(item_type) => format!("list[{}]", self.render_core_type(item_type)),
             CoreType::NamedList(item_type) => {
                 format!("list[named: {}]", self.render_core_type(item_type))

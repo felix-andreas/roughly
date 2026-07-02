@@ -644,6 +644,12 @@ impl InferenceState {
                     .map(|member| self.substitute_rigid_names(member))
                     .collect(),
             ),
+            CoreType::Vector(element) => {
+                CoreType::Vector(Box::new(self.substitute_rigid_names(element)))
+            }
+            CoreType::NamedVector(element) => {
+                CoreType::NamedVector(Box::new(self.substitute_rigid_names(element)))
+            }
             CoreType::List(inner) => CoreType::List(Box::new(self.substitute_rigid_names(inner))),
             CoreType::NamedList(inner) => {
                 CoreType::NamedList(Box::new(self.substitute_rigid_names(inner)))
@@ -2762,7 +2768,7 @@ impl InferenceState {
             self.resolve_structural(inferred_sequence, type_definitions, Some(sequence))?;
         let Some(item_type) = iterable_item_type(&sequence_type) else {
             return Err(InferenceError::TypeMismatch {
-                expected: Box::new(CoreType::Vector(Atomic::Integer)),
+                expected: Box::new(CoreType::vector(Atomic::Integer)),
                 actual: Box::new(sequence_type),
                 range: Some(range),
                 expression_id: Some(sequence.id),
@@ -3047,12 +3053,25 @@ impl InferenceState {
                     expression,
                 )
             }
-            (CoreType::Scalar(actual_atomic), CoreType::Vector(expected_atomic)) => {
-                Ok(atomic_widens_to(actual_atomic, expected_atomic))
-            }
-            (CoreType::NamedVector(actual_atomic), CoreType::Vector(expected_atomic)) => {
-                Ok(atomic_widens_to(actual_atomic, expected_atomic))
-            }
+            // A scalar coerces into a vector position, a named vector drops its names into a plain
+            // vector position, and vectors check element-wise. Element recursion lands on the
+            // scalar arms below for concrete elements (so `integer` widening applies inside
+            // vectors too) and on the variable arms above for a generic element (`T[]`), which is
+            // how a call like `sort(c(1L))` binds `T := integer`.
+            (CoreType::Scalar(actual_atomic), CoreType::Vector(expected_element)) => self
+                .check_compatibility(
+                    CoreType::Scalar(actual_atomic),
+                    *expected_element,
+                    type_definitions,
+                    expression,
+                ),
+            (CoreType::NamedVector(actual_element), CoreType::Vector(expected_element)) => self
+                .check_compatibility(
+                    *actual_element,
+                    *expected_element,
+                    type_definitions,
+                    expression,
+                ),
             // `integer` widens to `double` in compatibility (a directional check only — unification
             // never widens): R freely promotes integers in numeric contexts, and without this every
             // numeric parameter in the stub corpus had to be `Any` to avoid rejecting `mean(1L)`.
@@ -3061,15 +3080,20 @@ impl InferenceState {
             {
                 Ok(true)
             }
-            (CoreType::Vector(actual_atomic), CoreType::Vector(expected_atomic))
-                if atomic_widens_to(actual_atomic, expected_atomic) =>
-            {
-                Ok(true)
-            }
-            (CoreType::NamedVector(actual_atomic), CoreType::NamedVector(expected_atomic))
-                if atomic_widens_to(actual_atomic, expected_atomic) =>
-            {
-                Ok(true)
+            (CoreType::Vector(actual_element), CoreType::Vector(expected_element)) => self
+                .check_compatibility(
+                    *actual_element,
+                    *expected_element,
+                    type_definitions,
+                    expression,
+                ),
+            (CoreType::NamedVector(actual_element), CoreType::NamedVector(expected_element)) => {
+                self.check_compatibility(
+                    *actual_element,
+                    *expected_element,
+                    type_definitions,
+                    expression,
+                )
             }
             // Fixed-shape structural compatibility, checked covariantly per element/field. This is
             // what lets `@new` and checked annotations on a `list(...)` accept (and unify) a value
@@ -3562,7 +3586,7 @@ impl InferenceState {
                     type_definitions,
                     expression,
                 )? {
-                    CoreType::Scalar(atomic) => Ok(CoreType::Vector(atomic)),
+                    CoreType::Scalar(atomic) => Ok(CoreType::vector(atomic)),
                     other_type => Ok(CoreType::List(Box::new(other_type))),
                 }
             }
@@ -3574,7 +3598,7 @@ impl InferenceState {
                     type_definitions,
                     expression,
                 )? {
-                    CoreType::Scalar(atomic) => Ok(CoreType::NamedVector(atomic)),
+                    CoreType::Scalar(atomic) => Ok(CoreType::named_vector(atomic)),
                     other_type => Ok(CoreType::NamedList(Box::new(other_type))),
                 }
             }
@@ -3818,6 +3842,14 @@ impl InferenceState {
                 }
                 Ok(CoreType::Nominal(symbol, resolved_type_arguments))
             }
+            CoreType::Vector(element) => {
+                let resolved_element = self.resolve(*element)?;
+                Ok(CoreType::Vector(Box::new(resolved_element)))
+            }
+            CoreType::NamedVector(element) => {
+                let resolved_element = self.resolve(*element)?;
+                Ok(CoreType::NamedVector(Box::new(resolved_element)))
+            }
             CoreType::List(item_type) => {
                 let resolved_item_type = self.resolve(*item_type)?;
                 Ok(CoreType::List(Box::new(resolved_item_type)))
@@ -4001,15 +4033,15 @@ impl InferenceState {
             {
                 Ok(CoreType::Scalar(left_atomic))
             }
-            (CoreType::Vector(left_atomic), CoreType::Vector(right_atomic))
-                if left_atomic == right_atomic =>
-            {
-                Ok(CoreType::Vector(left_atomic))
+            (CoreType::Vector(left_element), CoreType::Vector(right_element)) => {
+                let unified_element =
+                    self.unify_internal(*left_element, *right_element, expression)?;
+                Ok(CoreType::Vector(Box::new(unified_element)))
             }
-            (CoreType::NamedVector(left_atomic), CoreType::NamedVector(right_atomic))
-                if left_atomic == right_atomic =>
-            {
-                Ok(CoreType::NamedVector(left_atomic))
+            (CoreType::NamedVector(left_element), CoreType::NamedVector(right_element)) => {
+                let unified_element =
+                    self.unify_internal(*left_element, *right_element, expression)?;
+                Ok(CoreType::NamedVector(Box::new(unified_element)))
             }
             (CoreType::List(left_item_type), CoreType::List(right_item_type)) => {
                 let unified_item_type =
@@ -4064,6 +4096,8 @@ impl InferenceState {
                 }
                 Ok(false)
             }
+            CoreType::Vector(element) => self.occurs_in(variable, &element),
+            CoreType::NamedVector(element) => self.occurs_in(variable, &element),
             CoreType::List(item_type) => self.occurs_in(variable, &item_type),
             CoreType::NamedList(item_type) => self.occurs_in(variable, &item_type),
             CoreType::Record(fields) => {
@@ -4456,7 +4490,7 @@ impl InferenceState {
                             CoreType::Scalar(Atomic::Double),
                             Some(expression),
                         )?;
-                        Ok(CoreType::Vector(Atomic::Double))
+                        Ok(CoreType::vector(Atomic::Double))
                     }
                 }
             }
@@ -4517,8 +4551,10 @@ impl InferenceState {
 
         match resolved_type {
             CoreType::Scalar(Atomic::Logical) => Ok(CoreType::Scalar(Atomic::Logical)),
-            CoreType::Vector(Atomic::Logical) | CoreType::NamedVector(Atomic::Logical) => {
-                Ok(CoreType::Vector(Atomic::Logical))
+            CoreType::Vector(element) | CoreType::NamedVector(element)
+                if *element == CoreType::Scalar(Atomic::Logical) =>
+            {
+                Ok(CoreType::vector(Atomic::Logical))
             }
             CoreType::Any | CoreType::Unknown => Ok(CoreType::Unknown),
             CoreType::Variable(_) => {
@@ -4704,7 +4740,7 @@ impl InferenceState {
             }
         }
 
-        Ok(CoreType::Vector(result_atomic))
+        Ok(CoreType::vector(result_atomic))
     }
 
     fn infer_function_call_expression(
@@ -5326,12 +5362,13 @@ impl InferenceState {
         match value_type {
             CoreType::Unknown => Ok(CoreType::Unknown),
             CoreType::Any => Ok(CoreType::Any),
-            CoreType::Scalar(atomic) | CoreType::Vector(atomic) => Ok(CoreType::Scalar(atomic)),
-            CoreType::NamedVector(atomic) => {
+            CoreType::Scalar(atomic) => Ok(CoreType::Scalar(atomic)),
+            CoreType::Vector(element) => Ok(*element),
+            CoreType::NamedVector(element) => {
                 if literal_name_symbol(index_expression).is_some() {
-                    Ok(nullable_type(CoreType::Scalar(atomic)))
+                    Ok(nullable_type(*element))
                 } else {
-                    Ok(CoreType::Scalar(atomic))
+                    Ok(*element)
                 }
             }
             CoreType::List(item_type) => Ok(*item_type),
@@ -5436,7 +5473,7 @@ impl InferenceState {
         match value_type {
             CoreType::Unknown => Ok(CoreType::Unknown),
             CoreType::Any => Ok(CoreType::Any),
-            CoreType::NamedVector(atomic) => Ok(nullable_type(CoreType::Scalar(atomic))),
+            CoreType::NamedVector(element) => Ok(nullable_type(*element)),
             CoreType::NamedList(item_type) => Ok(nullable_type(*item_type)),
             CoreType::Record(fields) => match fields.iter().find(|field| field.name == name) {
                 Some(field) => Ok(field.value.clone()),
@@ -5555,9 +5592,9 @@ impl InferenceState {
         }
         let combined_atomic = item_atomic.unwrap_or(Atomic::Integer);
         if all_arguments_are_named {
-            Ok(CoreType::NamedVector(combined_atomic))
+            Ok(CoreType::named_vector(combined_atomic))
         } else {
-            Ok(CoreType::Vector(combined_atomic))
+            Ok(CoreType::vector(combined_atomic))
         }
     }
 
@@ -5857,8 +5894,12 @@ impl InferenceState {
                 }
                 Ok(CoreType::Nominal(*symbol, instantiated_type_arguments))
             }
-            CoreType::Vector(atomic) => Ok(CoreType::Vector(*atomic)),
-            CoreType::NamedVector(atomic) => Ok(CoreType::NamedVector(*atomic)),
+            CoreType::Vector(element) => Ok(CoreType::Vector(Box::new(
+                self.instantiate_core_type(element, substitutions)?,
+            ))),
+            CoreType::NamedVector(element) => Ok(CoreType::NamedVector(Box::new(
+                self.instantiate_core_type(element, substitutions)?,
+            ))),
             CoreType::List(item_type) => Ok(CoreType::List(Box::new(
                 self.instantiate_core_type(item_type, substitutions)?,
             ))),
@@ -5954,6 +5995,12 @@ impl InferenceState {
                 }
                 Ok(CoreType::union_of(defaulted_members))
             }
+            CoreType::Vector(element) => Ok(CoreType::Vector(Box::new(
+                self.default_free_numeric(*element)?,
+            ))),
+            CoreType::NamedVector(element) => Ok(CoreType::NamedVector(Box::new(
+                self.default_free_numeric(*element)?,
+            ))),
             CoreType::List(item_type) => Ok(CoreType::List(Box::new(
                 self.default_free_numeric(*item_type)?,
             ))),
@@ -6035,12 +6082,12 @@ impl InferenceState {
         core_type: &CoreType,
     ) -> Result<BTreeSet<InferenceVariableId>, InferenceError> {
         match self.resolve(core_type.clone())? {
-            CoreType::Any
-            | CoreType::Unknown
-            | CoreType::Null
-            | CoreType::Scalar(_)
-            | CoreType::Vector(_)
-            | CoreType::NamedVector(_) => Ok(BTreeSet::new()),
+            CoreType::Any | CoreType::Unknown | CoreType::Null | CoreType::Scalar(_) => {
+                Ok(BTreeSet::new())
+            }
+            CoreType::Vector(element) | CoreType::NamedVector(element) => {
+                self.free_type_variables_in_core_type(&element)
+            }
             CoreType::Union(members) => {
                 let mut free_variables = BTreeSet::new();
                 for member in members {
@@ -6354,7 +6401,9 @@ fn shapes_or_scalar(parts: &Option<Vec<(OperandShape, ComparisonFamily)>>) -> Ve
 fn comparison_operand_parts(core_type: &CoreType) -> Option<(OperandShape, ComparisonFamily)> {
     let (shape, atomic) = match core_type {
         CoreType::Scalar(atomic) => (OperandShape::Scalar, *atomic),
-        CoreType::Vector(atomic) | CoreType::NamedVector(atomic) => (OperandShape::Vector, *atomic),
+        CoreType::Vector(element) | CoreType::NamedVector(element) => {
+            (OperandShape::Vector, element.element_atomic()?)
+        }
         _ => return None,
     };
 
@@ -6427,12 +6476,14 @@ fn constraint_is_satisfied(constraint: Constraint, core_type: &CoreType) -> bool
 }
 
 fn is_numeric_core_type(core_type: &CoreType) -> bool {
-    matches!(
-        core_type,
-        CoreType::Scalar(Atomic::Integer | Atomic::Double)
-            | CoreType::Vector(Atomic::Integer | Atomic::Double)
-            | CoreType::NamedVector(Atomic::Integer | Atomic::Double)
-    )
+    match core_type {
+        CoreType::Scalar(Atomic::Integer | Atomic::Double) => true,
+        CoreType::Vector(element) | CoreType::NamedVector(element) => matches!(
+            element.as_ref(),
+            CoreType::Scalar(Atomic::Integer | Atomic::Double)
+        ),
+        _ => false,
+    }
 }
 
 fn constraint_violation_error(
@@ -6450,21 +6501,23 @@ fn constraint_violation_error(
 
 fn numeric_operand_parts(core_type: &CoreType) -> Option<(OperandShape, Atomic)> {
     match core_type {
-        CoreType::Scalar(Atomic::Integer) => Some((OperandShape::Scalar, Atomic::Integer)),
-        CoreType::Scalar(Atomic::Double) => Some((OperandShape::Scalar, Atomic::Double)),
-        CoreType::Vector(Atomic::Integer) => Some((OperandShape::Vector, Atomic::Integer)),
-        CoreType::Vector(Atomic::Double) => Some((OperandShape::Vector, Atomic::Double)),
-        CoreType::NamedVector(Atomic::Integer) => Some((OperandShape::Vector, Atomic::Integer)),
-        CoreType::NamedVector(Atomic::Double) => Some((OperandShape::Vector, Atomic::Double)),
+        CoreType::Scalar(atomic @ (Atomic::Integer | Atomic::Double)) => {
+            Some((OperandShape::Scalar, *atomic))
+        }
+        CoreType::Vector(element) | CoreType::NamedVector(element) => {
+            match element.element_atomic()? {
+                atomic @ (Atomic::Integer | Atomic::Double) => Some((OperandShape::Vector, atomic)),
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
 
 fn combine_operand_atomic(core_type: &CoreType) -> Option<Atomic> {
     match core_type {
-        CoreType::Scalar(atomic) | CoreType::Vector(atomic) | CoreType::NamedVector(atomic) => {
-            Some(*atomic)
-        }
+        CoreType::Scalar(atomic) => Some(*atomic),
+        CoreType::Vector(element) | CoreType::NamedVector(element) => element.element_atomic(),
         _ => None,
     }
 }
@@ -6501,7 +6554,7 @@ fn combine_atomic_rank(atomic: Atomic) -> Option<u8> {
 fn core_type_for_shape(shape: OperandShape, atomic: Atomic) -> CoreType {
     match shape {
         OperandShape::Scalar => CoreType::Scalar(atomic),
-        OperandShape::Vector => CoreType::Vector(atomic),
+        OperandShape::Vector => CoreType::vector(atomic),
     }
 }
 
@@ -6564,12 +6617,11 @@ fn erase_variables(core_type: CoreType) -> CoreType {
                 .map(|element| Box::new(erase_variables(*element))),
             return_type: Box::new(erase_variables(*function_type.return_type)),
         }),
-        other @ (CoreType::Any
-        | CoreType::Unknown
-        | CoreType::Null
-        | CoreType::Scalar(_)
-        | CoreType::Vector(_)
-        | CoreType::NamedVector(_)) => other,
+        CoreType::Vector(element) => CoreType::Vector(Box::new(erase_variables(*element))),
+        CoreType::NamedVector(element) => {
+            CoreType::NamedVector(Box::new(erase_variables(*element)))
+        }
+        other @ (CoreType::Any | CoreType::Unknown | CoreType::Null | CoreType::Scalar(_)) => other,
     }
 }
 
@@ -6643,9 +6695,8 @@ fn nullable_single_member(members: &[CoreType]) -> Option<CoreType> {
 
 fn iterable_item_type(core_type: &CoreType) -> Option<CoreType> {
     match core_type {
-        CoreType::Scalar(atomic) | CoreType::Vector(atomic) | CoreType::NamedVector(atomic) => {
-            Some(CoreType::Scalar(*atomic))
-        }
+        CoreType::Scalar(atomic) => Some(CoreType::Scalar(*atomic)),
+        CoreType::Vector(element) | CoreType::NamedVector(element) => Some((**element).clone()),
         CoreType::List(item_type) | CoreType::NamedList(item_type) => Some((**item_type).clone()),
         // A fixed-shape list iterates every element, so the loop variable can hold any of the item
         // types: the element type is their union (which collapses back to the single item type for
@@ -6691,8 +6742,12 @@ fn import_core_type(
                 .map(|type_argument| import_core_type(type_argument, substitutions))
                 .collect(),
         ),
-        CoreType::Vector(atomic) => CoreType::Vector(*atomic),
-        CoreType::NamedVector(atomic) => CoreType::NamedVector(*atomic),
+        CoreType::Vector(element) => {
+            CoreType::Vector(Box::new(import_core_type(element, substitutions)))
+        }
+        CoreType::NamedVector(element) => {
+            CoreType::NamedVector(Box::new(import_core_type(element, substitutions)))
+        }
         CoreType::List(item_type) => {
             CoreType::List(Box::new(import_core_type(item_type, substitutions)))
         }
