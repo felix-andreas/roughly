@@ -6,7 +6,8 @@ use {
         lsp_types::{
             CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionList,
             CompletionOptions, CompletionParams, CompletionResponse, Diagnostic, DiagnosticOptions,
-            DiagnosticServerCapabilities, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+            DiagnosticServerCancellationData, DiagnosticServerCapabilities,
+            DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
             DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
             DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
             DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentFormattingParams,
@@ -155,6 +156,12 @@ struct EngineWorker {
     // change's range against this evolving buffer. Closed package documents are not buffered here — they
     // exist only as engine `SourceText` inputs read from disk.
     documents: HashMap<PathBuf, Document>,
+    // Open documents with non-`file:` URIs (untitled buffers, virtual editor documents) are served
+    // as standalone script documents, keyed internally by a synthetic path (`document_path`) so the
+    // path-keyed host and engine tables can track them. This maps each synthetic path back to the
+    // client's URI for outgoing locations and published diagnostics; entries live exactly as long
+    // as the document is tracked (inserted on open, removed by `retract_source_input`).
+    virtual_document_uris: HashMap<PathBuf, Url>,
     parser: tree_sitter::Parser,
     position_encoding: PositionEncoding,
     // When the client advertises pull-diagnostics support it owns the request cadence, so the
@@ -264,6 +271,7 @@ impl EngineWorker {
             file_ids: HashMap::new(),
             next_file_id: 0,
             documents: HashMap::new(),
+            virtual_document_uris: HashMap::new(),
             parser: analysis::tree::new_parser().expect("server parser should initialize"),
             position_encoding,
             client_supports_pull_diagnostics,
@@ -301,6 +309,48 @@ impl EngineWorker {
         self.workspace_root.join("R")
     }
 
+    // The worker's internal document key for a client URI. `file:` URIs use their filesystem path;
+    // any other scheme (an untitled buffer, a virtual editor document) has no filesystem identity,
+    // so it cannot join package analysis, but it is still served as a standalone script document
+    // keyed by a synthetic path. `None` only for a `file:` URI whose path cannot be extracted —
+    // malformed client input, which callers drop with a warning rather than treat as incoherence.
+    fn document_path(&self, uri: &Url) -> Option<PathBuf> {
+        if uri.scheme() == "file" {
+            return uri.to_file_path().ok();
+        }
+        Some(self.virtual_document_path(uri))
+    }
+
+    // The synthetic path for a non-`file:` document: the URI encoded as a single path component
+    // under a reserved directory name. It is a pure table key — nothing ever reads it from disk
+    // (`is_package_path` is false for it, so `did_close` retracts instead of re-reading). The
+    // encoding is deterministic so reopening the same URI reuses the same `FileId`, and escapes
+    // path separators (plus `%` for injectivity) so distinct URIs cannot produce the same key.
+    fn virtual_document_path(&self, uri: &Url) -> PathBuf {
+        let mut encoded = String::with_capacity(uri.as_str().len());
+        for character in uri.as_str().chars() {
+            match character {
+                '%' => encoded.push_str("%25"),
+                '/' => encoded.push_str("%2F"),
+                '\\' => encoded.push_str("%5C"),
+                _ => encoded.push(character),
+            }
+        }
+        self.workspace_root.join(".roughly-virtual").join(encoded)
+    }
+
+    // The client-facing URI for a tracked document path — the inverse of `document_path`. Every
+    // tracked path is either a virtual document (whose URI is recorded) or a real absolute path,
+    // so a failure here means the host tables are incoherent.
+    fn document_uri(&self, path: &Path) -> Url {
+        match self.virtual_document_uris.get(path) {
+            Some(uri) => uri.clone(),
+            None => Url::from_file_path(path).unwrap_or_else(|()| {
+                panic!("tracked path should convert to a URI: {}", path.display())
+            }),
+        }
+    }
+
     fn document(&self, path: &Path) -> Option<&Document> {
         self.documents.get(path)
     }
@@ -315,17 +365,15 @@ impl EngineWorker {
 
     // Run an engine read under the shared cancellation token (the worker resets it to `false` before each
     // `Job::Read`). If a newer edit flips it mid-read, the engine abandons the in-flight computation and
-    // this returns the type's empty default, so the query answers empty rather than spending a full pass
-    // on a result the next edit already superseded — latest-edit-wins. Only used by read handlers; edit
-    // handlers run their (different-file-publishing) diagnostics to completion via the plain `fetch` path.
-    fn cancellable<R: Default>(&self, body: impl FnOnce() -> R) -> R {
-        self.engine
-            .with_cancellation(self.cancel.clone(), body)
-            .unwrap_or_default()
-    }
-
-    fn opened_document(&self, path: &Path) -> Option<&Document> {
-        self.documents.get(path)
+    // this returns `Err(Cancelled)` rather than spending a full pass on a result the next edit already
+    // superseded — latest-edit-wins. Each caller decides what a cancelled read means for its client:
+    // best-effort lookups (hover, completion, ...) answer empty via `unwrap_or_default`, but answers the
+    // client treats as authoritative or applies as a mutation (pull diagnostics, rename edits) must
+    // return a retryable protocol error instead — an empty answer there would be cached or silently
+    // applied as "nothing". Only used by read handlers; edit handlers run their (different-file-
+    // publishing) diagnostics to completion via the plain `fetch` path.
+    fn cancellable<R>(&self, body: impl FnOnce() -> R) -> Result<R, Cancelled> {
+        self.engine.with_cancellation(self.cancel.clone(), body)
     }
 
     fn to_internal_position(&self, path: &Path, position: Position) -> Option<TextPosition> {
@@ -347,22 +395,31 @@ impl EngineWorker {
     }
 
     // The target of a definition, reference, or rename edit may live in a different document than
-    // the request, so the outgoing range is encoded against that document's rope.
+    // the request, so the outgoing range is encoded against that document's rope. The fallback for
+    // an untracked path passes byte columns through as code units — wrong for non-ASCII lines under
+    // UTF-16 — so it warns: reaching it means a range was produced for a document the engine does
+    // not hold, which is worth surfacing even though the degraded range is usually still usable.
     fn to_lsp_range_in(&self, path: &Path, range: TextRange) -> Range {
         match self.parsed_for(path) {
             Some(parsed) => {
                 position::internal_range_to_lsp(parsed.0.rope(), self.position_encoding, range)
             }
-            None => Range::new(
-                Position::new(
-                    range.start.line_index as u32,
-                    range.start.character_index as u32,
-                ),
-                Position::new(
-                    range.end.line_index as u32,
-                    range.end.character_index as u32,
-                ),
-            ),
+            None => {
+                tracing::warn!(
+                    ?path,
+                    "encoding a range for an untracked document; byte columns passed through as code units"
+                );
+                Range::new(
+                    Position::new(
+                        range.start.line_index as u32,
+                        range.start.character_index as u32,
+                    ),
+                    Position::new(
+                        range.end.line_index as u32,
+                        range.end.character_index as u32,
+                    ),
+                )
+            }
         }
     }
 
@@ -373,7 +430,13 @@ impl EngineWorker {
                 self.position_encoding,
                 position,
             ),
-            None => Position::new(position.line_index as u32, position.character_index as u32),
+            None => {
+                tracing::warn!(
+                    ?path,
+                    "encoding a position for an untracked document; byte column passed through as code units"
+                );
+                Position::new(position.line_index as u32, position.character_index as u32)
+            }
         }
     }
 
@@ -421,7 +484,7 @@ impl EngineWorker {
 
     fn convert_location(&self, location: analysis::ide::Location) -> Location {
         Location {
-            uri: Url::from_file_path(&location.path).expect("location path should convert to URI"),
+            uri: self.document_uri(&location.path),
             range: self.to_lsp_range_in(&location.path, location.range),
         }
     }
@@ -494,6 +557,7 @@ impl EngineWorker {
             self.engine.remove_input(&Key::DocumentKind(file));
             self.paths.remove(file);
         }
+        self.virtual_document_uris.remove(path);
     }
 
     // Recompute the `ProjectFiles` input. Package documents come first, ascending by package-relative path
@@ -556,9 +620,7 @@ impl EngineWorker {
             if !self.file_ids.contains_key(&open_path) {
                 continue;
             }
-            let Ok(open_uri) = Url::from_file_path(&open_path) else {
-                continue;
-            };
+            let open_uri = self.document_uri(&open_path);
             let diagnostics = self.convert_document_diagnostics(&open_path);
             if let Err(error) = self
                 .client
@@ -631,7 +693,13 @@ impl EngineWorker {
 
     fn did_open(&mut self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
-        let path = uri.to_file_path().unwrap();
+        let Some(path) = self.document_path(&uri) else {
+            tracing::warn!(%uri, "ignoring did_open for a file URI without a usable path");
+            return;
+        };
+        if uri.scheme() != "file" {
+            self.virtual_document_uris.insert(path.clone(), uri.clone());
+        }
         let text = &params.text_document.text;
 
         tracing::debug!(?path, "did open");
@@ -661,32 +729,46 @@ impl EngineWorker {
 
     fn did_close(&mut self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
-        let path = uri.to_file_path().unwrap();
+        let Some(path) = self.document_path(&uri) else {
+            tracing::warn!(%uri, "ignoring did_close for a file URI without a usable path");
+            return;
+        };
 
         tracing::debug!(?path, "did close");
 
         self.open_documents.remove(&path);
         self.documents.remove(&path);
-        if self.is_package_path(&path) && path.exists() {
+        if self.is_package_path(&path) {
             // A closed package file still on disk reverts to its on-disk text (discarding unsaved buffer
-            // edits); the file set is unchanged, so no `rebuild_project_files`.
-            let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-                panic!(
-                    "failed to reload package source on close {}: {error}",
-                    path.display()
-                )
-            });
-            self.set_source_input(&path, text, true);
-        } else {
-            // A deleted package file, or a closed script: it is no longer tracked.
-            self.retract_source_input(&path);
-            self.rebuild_project_files();
+            // edits); the file set is unchanged, so no `rebuild_project_files`. The read can race a
+            // concurrent delete or rename (close events are not ordered against the filesystem), which
+            // is recoverable exactly like the watcher path: treat the file as deleted and let a later
+            // watcher event re-sync it if it reappears.
+            match std::fs::read_to_string(&path) {
+                Ok(text) => {
+                    self.set_source_input(&path, text, true);
+                    return;
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        ?path,
+                        ?error,
+                        "failed to reload package source on close; treating it as deleted"
+                    );
+                }
+            }
         }
+        // A deleted package file, a closed script, or a closed virtual document: no longer tracked.
+        self.retract_source_input(&path);
+        self.rebuild_project_files();
     }
 
     fn did_change(&mut self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
-        let path = uri.to_file_path().unwrap();
+        let Some(path) = self.document_path(&uri) else {
+            tracing::warn!(%uri, "ignoring did_change for a file URI without a usable path");
+            return;
+        };
         let content_changes = params.content_changes;
 
         tracing::debug!(?path, "did change");
@@ -708,12 +790,19 @@ impl EngineWorker {
         // in the batch are applied, so positions are converted and applied against the live rope
         // one change at a time rather than all up front.
         for change in content_changes {
-            let range = change.range.unwrap_or_else(|| {
-                panic!(
-                    "incremental did_change for {} must include a range",
-                    path.display()
-                )
-            });
+            // A change without a range replaces the whole document. Clients may legally fall back
+            // to full-text sync even though the server negotiated incremental sync.
+            let Some(range) = change.range else {
+                let document =
+                    Document::parse(&mut self.parser, &change.text).unwrap_or_else(|_| {
+                        panic!(
+                            "failed to parse full-text did_change buffer {}",
+                            path.display()
+                        )
+                    });
+                self.documents.insert(path.clone(), document);
+                continue;
+            };
             let internal_range = self.to_internal_range(&path, range).unwrap_or_else(|| {
                 panic!(
                     "analysis document not found while converting did_change range for {}",
@@ -766,7 +855,11 @@ impl EngineWorker {
     }
 
     fn did_save(&mut self, params: DidSaveTextDocumentParams) {
-        let path = params.text_document.uri.to_file_path().unwrap();
+        let uri = params.text_document.uri;
+        let Some(path) = self.document_path(&uri) else {
+            tracing::warn!(%uri, "ignoring did_save for a file URI without a usable path");
+            return;
+        };
 
         tracing::debug!(?path, "did save");
 
@@ -800,7 +893,12 @@ impl EngineWorker {
         for change in params.changes {
             let uri = change.uri;
             let typ = change.typ;
-            let path = uri.to_file_path().unwrap();
+            // Watched files are filesystem entities by definition; a non-file URI here is client
+            // nonsense, not incoherent server state.
+            let Ok(path) = uri.to_file_path() else {
+                tracing::warn!(%uri, "ignoring watched-file change for a non-file URI");
+                continue;
+            };
 
             tracing::info!(?path, ?typ, "watched file changed");
 
@@ -873,7 +971,7 @@ impl EngineWorker {
         params: DocumentDiagnosticParams,
     ) -> Result<DocumentDiagnosticReportResult, ResponseError> {
         let uri = params.text_document.uri;
-        let Ok(path) = uri.to_file_path() else {
+        let Some(path) = self.document_path(&uri) else {
             return Ok(empty_full_diagnostic_report());
         };
 
@@ -888,8 +986,13 @@ impl EngineWorker {
 
         // The engine computes the report on demand (typecheck included via the `Diagnostics` fetch in
         // `convert_document_diagnostics`), so it already equals the push path and reflects package-visible
-        // edits in dependent files — no separate full pass is needed.
-        let items = self.cancellable(|| self.convert_document_diagnostics(&path));
+        // edits in dependent files — no separate full pass is needed. A pull report is authoritative —
+        // the client caches it until the next pull — so a cancelled read must NOT degrade to an empty
+        // report ("this document is clean"); per the LSP spec it answers `ServerCancelled` with
+        // `retriggerRequest`, so the client pulls again.
+        let Ok(items) = self.cancellable(|| self.convert_document_diagnostics(&path)) else {
+            return Err(diagnostics_cancelled_error());
+        };
         let result_id = diagnostics_result_id(&items);
 
         // The result id is a content hash of the report, so an unchanged answer is correct even
@@ -924,11 +1027,7 @@ impl EngineWorker {
         &mut self,
         params: CompletionParams,
     ) -> Result<Option<CompletionResponse>, ResponseError> {
-        let Ok(path) = params
-            .text_document_position
-            .text_document
-            .uri
-            .to_file_path()
+        let Some(path) = self.document_path(&params.text_document_position.text_document.uri)
         else {
             return Ok(None);
         };
@@ -936,7 +1035,7 @@ impl EngineWorker {
 
         tracing::debug!(?path, "completion");
 
-        if self.opened_document(&path).is_none() {
+        if self.document(&path).is_none() {
             tracing::error!(?path, "document not found");
             return Err(path_not_found_error(&path));
         }
@@ -948,6 +1047,7 @@ impl EngineWorker {
             .cancellable(|| {
                 EngineIde::new(&self.engine, &self.paths).completion(&path, internal_position)
             })
+            .unwrap_or_default()
             .map(|result| {
                 CompletionResponse::List(CompletionList {
                     is_incomplete: result.is_incomplete,
@@ -993,14 +1093,14 @@ impl EngineWorker {
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>, ResponseError> {
         let uri = params.text_document_position_params.text_document.uri;
-        let Ok(path) = uri.to_file_path() else {
+        let Some(path) = self.document_path(&uri) else {
             return Ok(None);
         };
         let position = params.text_document_position_params.position;
 
         tracing::debug!(?path, ?position, "goto definition");
 
-        if self.opened_document(&path).is_none() {
+        if self.document(&path).is_none() {
             tracing::info!(?path, "document not found");
             return Err(path_not_found_error(&path));
         }
@@ -1012,6 +1112,7 @@ impl EngineWorker {
             .cancellable(|| {
                 EngineIde::new(&self.engine, &self.paths).definition(&path, internal_position)
             })
+            .unwrap_or_default()
             .map(|locations| {
                 let mut locations = locations
                     .into_iter()
@@ -1034,14 +1135,14 @@ impl EngineWorker {
 
     fn hover(&mut self, params: HoverParams) -> Result<Option<Hover>, ResponseError> {
         let uri = params.text_document_position_params.text_document.uri;
-        let Ok(path) = uri.to_file_path() else {
+        let Some(path) = self.document_path(&uri) else {
             return Ok(None);
         };
         let position = params.text_document_position_params.position;
 
         tracing::debug!(?path, ?position, "hover");
 
-        if self.opened_document(&path).is_none() {
+        if self.document(&path).is_none() {
             tracing::info!(?path, "document not found");
             return Err(path_not_found_error(&path));
         }
@@ -1049,9 +1150,12 @@ impl EngineWorker {
         let internal_position = self
             .to_internal_position(&path, position)
             .expect("opened document rope available for hover");
-        let Some(hover_info) = self.cancellable(|| {
-            EngineIde::new(&self.engine, &self.paths).hover(&path, internal_position)
-        }) else {
+        let Some(hover_info) = self
+            .cancellable(|| {
+                EngineIde::new(&self.engine, &self.paths).hover(&path, internal_position)
+            })
+            .unwrap_or_default()
+        else {
             tracing::debug!(?position, "hover target not found");
             return Ok(None);
         };
@@ -1078,13 +1182,13 @@ impl EngineWorker {
         params: InlayHintParams,
     ) -> Result<Option<Vec<InlayHint>>, ResponseError> {
         let uri = params.text_document.uri;
-        let Ok(path) = uri.to_file_path() else {
+        let Some(path) = self.document_path(&uri) else {
             return Ok(None);
         };
 
         tracing::debug!(?path, "inlay hints");
 
-        if self.opened_document(&path).is_none() {
+        if self.document(&path).is_none() {
             tracing::info!(?path, "document not found");
             return Err(path_not_found_error(&path));
         }
@@ -1092,9 +1196,11 @@ impl EngineWorker {
         let viewport = self
             .to_internal_range(&path, params.range)
             .expect("opened document rope available for inlay hints");
-        let raw_hints = self.cancellable(|| {
-            EngineIde::new(&self.engine, &self.paths).inlay_hints(&path, Some(viewport))
-        });
+        let raw_hints = self
+            .cancellable(|| {
+                EngineIde::new(&self.engine, &self.paths).inlay_hints(&path, Some(viewport))
+            })
+            .unwrap_or_default();
         let hints = raw_hints
             .into_iter()
             .map(|hint| InlayHint {
@@ -1125,7 +1231,7 @@ impl EngineWorker {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>, ResponseError> {
         let uri = params.text_document.uri;
-        let Ok(path) = uri.to_file_path() else {
+        let Some(path) = self.document_path(&uri) else {
             return Ok(None);
         };
 
@@ -1221,14 +1327,14 @@ impl EngineWorker {
         params: SignatureHelpParams,
     ) -> Result<Option<SignatureHelp>, ResponseError> {
         let uri = params.text_document_position_params.text_document.uri;
-        let Ok(path) = uri.to_file_path() else {
+        let Some(path) = self.document_path(&uri) else {
             return Ok(None);
         };
         let position = params.text_document_position_params.position;
 
         tracing::debug!(?path, ?position, "signature help");
 
-        if self.opened_document(&path).is_none() {
+        if self.document(&path).is_none() {
             tracing::info!(?path, "document not found");
             return Err(path_not_found_error(&path));
         }
@@ -1236,9 +1342,12 @@ impl EngineWorker {
         let internal_position = self
             .to_internal_position(&path, position)
             .expect("opened document rope available for signature help");
-        let Some(help) = self.cancellable(|| {
-            EngineIde::new(&self.engine, &self.paths).signature_help(&path, internal_position)
-        }) else {
+        let Some(help) = self
+            .cancellable(|| {
+                EngineIde::new(&self.engine, &self.paths).signature_help(&path, internal_position)
+            })
+            .unwrap_or_default()
+        else {
             return Ok(None);
         };
 
@@ -1275,13 +1384,13 @@ impl EngineWorker {
         params: DocumentFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>, ResponseError> {
         let uri = params.text_document.uri;
-        let Ok(path) = uri.to_file_path() else {
+        let Some(path) = self.document_path(&uri) else {
             return Ok(None);
         };
 
         tracing::debug!(?path, "format");
 
-        let Some(document) = self.opened_document(&path) else {
+        let Some(document) = self.document(&path) else {
             tracing::info!(?path, "document not found");
             return Err(path_not_found_error(&path));
         };
@@ -1322,13 +1431,13 @@ impl EngineWorker {
     ) -> Result<Option<Vec<TextEdit>>, ResponseError> {
         let uri = params.text_document.uri;
         let range = params.range;
-        let Ok(path) = uri.to_file_path() else {
+        let Some(path) = self.document_path(&uri) else {
             return Ok(None);
         };
 
         tracing::debug!(?path, "format");
 
-        let Some(document) = self.opened_document(&path) else {
+        let Some(document) = self.document(&path) else {
             tracing::info!(?path, "document not found");
             return Err(path_not_found_error(&path));
         };
@@ -1379,7 +1488,7 @@ impl EngineWorker {
         params: ReferenceParams,
     ) -> Result<Option<Vec<Location>>, ResponseError> {
         let uri = params.text_document_position.text_document.uri;
-        let Ok(path) = uri.to_file_path() else {
+        let Some(path) = self.document_path(&uri) else {
             return Ok(None);
         };
         let position = params.text_document_position.position;
@@ -1387,7 +1496,7 @@ impl EngineWorker {
 
         tracing::debug!(?path, ?position, ?include_declaration, "find references");
 
-        if self.opened_document(&path).is_none() {
+        if self.document(&path).is_none() {
             tracing::info!(?path, "document not found");
             return Err(path_not_found_error(&path));
         }
@@ -1403,6 +1512,7 @@ impl EngineWorker {
                     include_declaration,
                 )
             })
+            .unwrap_or_default()
             .map(|locations| {
                 locations
                     .into_iter()
@@ -1419,7 +1529,7 @@ impl EngineWorker {
 
     fn rename(&mut self, params: RenameParams) -> Result<Option<WorkspaceEdit>, ResponseError> {
         let uri = params.text_document_position.text_document.uri;
-        let Ok(path) = uri.to_file_path() else {
+        let Some(path) = self.document_path(&uri) else {
             return Ok(None);
         };
         let position = params.text_document_position.position;
@@ -1427,7 +1537,7 @@ impl EngineWorker {
 
         tracing::debug!(?path, ?position, ?new_name, "rename");
 
-        if self.opened_document(&path).is_none() {
+        if self.document(&path).is_none() {
             tracing::info!(?path, "document not found");
             return Err(path_not_found_error(&path));
         }
@@ -1435,37 +1545,40 @@ impl EngineWorker {
         let internal_position = self
             .to_internal_position(&path, position)
             .expect("opened document rope available for rename");
-        let workspace_edit = self
-            .cancellable(|| {
-                EngineIde::new(&self.engine, &self.paths).rename(
-                    &path,
-                    internal_position,
-                    &new_name,
-                )
-            })
-            .map(|rename_result| {
-                let changes = rename_result
-                    .edits
-                    .into_iter()
-                    .map(|(edit_path, edits)| {
-                        let uri = Url::from_file_path(&edit_path)
-                            .expect("rename edit path should convert to URI");
-                        let edits = edits
-                            .into_iter()
-                            .map(|edit| TextEdit {
-                                range: self.to_lsp_range_in(&edit_path, edit.range),
-                                new_text: edit.replacement_text,
-                            })
-                            .collect();
-                        (uri, edits)
-                    })
-                    .collect();
+        // A rename answer is a mutation the client applies: a cancelled read must not degrade to a
+        // `null` edit — the client would report a successful rename that changed nothing. An edit
+        // arriving mid-rename also invalidates the request's positions, so answer `ContentModified`
+        // (the LSP code for "the result became stale"), which clients handle without applying anything.
+        let Ok(rename_result) = self.cancellable(|| {
+            EngineIde::new(&self.engine, &self.paths).rename(&path, internal_position, &new_name)
+        }) else {
+            return Err(ResponseError::new(
+                ErrorCode::CONTENT_MODIFIED,
+                "rename was cancelled by a concurrent edit",
+            ));
+        };
+        let workspace_edit = rename_result.map(|rename_result| {
+            let changes = rename_result
+                .edits
+                .into_iter()
+                .map(|(edit_path, edits)| {
+                    let uri = self.document_uri(&edit_path);
+                    let edits = edits
+                        .into_iter()
+                        .map(|edit| TextEdit {
+                            range: self.to_lsp_range_in(&edit_path, edit.range),
+                            new_text: edit.replacement_text,
+                        })
+                        .collect();
+                    (uri, edits)
+                })
+                .collect();
 
-                WorkspaceEdit {
-                    changes: Some(changes),
-                    ..Default::default()
-                }
-            });
+            WorkspaceEdit {
+                changes: Some(changes),
+                ..Default::default()
+            }
+        });
 
         Ok(workspace_edit)
     }
@@ -1479,7 +1592,7 @@ impl EngineWorker {
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>, ResponseError> {
         let uri = params.text_document.uri;
-        let Ok(path) = uri.to_file_path() else {
+        let Some(path) = self.document_path(&uri) else {
             return Ok(None);
         };
 
@@ -1505,7 +1618,9 @@ impl EngineWorker {
 
         tracing::debug!(?query);
 
-        let workspace_items = self.cancellable(|| self.package_items_map());
+        let workspace_items = self
+            .cancellable(|| self.package_items_map())
+            .unwrap_or_default();
         let symbols = symbols::workspace(&query, &workspace_items, &|path, range| {
             self.to_lsp_range_in(path, range)
         });
@@ -1890,6 +2005,18 @@ fn box_future<T: Send + 'static>(content: T) -> BoxFuture<'static, T> {
     Box::pin(async { content })
 }
 
+// The spec-mandated answer for a diagnostic pull the server abandoned: `ServerCancelled` carrying
+// `DiagnosticServerCancellationData { retriggerRequest: true }`, so the client re-pulls instead of
+// caching an answer that was never computed.
+fn diagnostics_cancelled_error() -> ResponseError {
+    ResponseError::new_with_data(
+        ErrorCode::SERVER_CANCELLED,
+        "diagnostics were cancelled by a concurrent edit",
+        serde_json::to_value(DiagnosticServerCancellationData::default())
+            .expect("diagnostic cancellation data is serializable"),
+    )
+}
+
 fn empty_full_diagnostic_report() -> DocumentDiagnosticReportResult {
     DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(
         RelatedFullDocumentDiagnosticReport {
@@ -1960,4 +2087,24 @@ fn path_not_found_error(path: &Path) -> ResponseError {
         ErrorCode::REQUEST_FAILED,
         format!("path not found '{}'", path.display()),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Pins the wire shape of a cancelled diagnostic pull: the `ServerCancelled` code and camelCase
+    // `retriggerRequest: true` data the spec requires for the client to re-pull. The LSP suite
+    // cannot trigger an in-flight cancellation deterministically (it depends on engine checkpoint
+    // timing), so the protocol contract is asserted here.
+    #[test]
+    fn cancelled_pull_answer_matches_the_lsp_contract() {
+        let error = diagnostics_cancelled_error();
+        assert_eq!(error.code, ErrorCode::SERVER_CANCELLED);
+        let data = error.data.expect("cancellation answer carries data");
+        assert_eq!(
+            data.get("retriggerRequest"),
+            Some(&serde_json::Value::Bool(true))
+        );
+    }
 }

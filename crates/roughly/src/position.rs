@@ -33,22 +33,24 @@ impl PositionEncoding {
     }
 }
 
+// Clients may send positions past the end of a line or past the last line (stale requests racing
+// an edit are protocol-legal), so both conversions clamp to the document: the line to the last
+// line, the column to that line's length. Nothing past-EOF ever reaches analysis or the client.
 pub fn lsp_position_to_internal(
     rope: &Rope,
     encoding: PositionEncoding,
     position: Position,
 ) -> TextPosition {
-    let line_index = position.line as usize;
+    // A rope always has at least one (possibly empty) line, so the clamped index is valid.
+    let line_index = (position.line as usize).min(rope.len_lines().saturating_sub(1));
+    let line = rope.line(line_index);
     let unit = position.character as usize;
-    let character_index = match rope.get_line(line_index) {
-        Some(line) => match encoding {
-            PositionEncoding::Utf8 => unit.min(line.len_bytes()),
-            PositionEncoding::Utf16 => {
-                let utf16 = unit.min(line.len_utf16_cu());
-                line.char_to_byte(line.utf16_cu_to_char(utf16))
-            }
-        },
-        None => unit,
+    let character_index = match encoding {
+        PositionEncoding::Utf8 => unit.min(line.len_bytes()),
+        PositionEncoding::Utf16 => {
+            let utf16 = unit.min(line.len_utf16_cu());
+            line.char_to_byte(line.utf16_cu_to_char(utf16))
+        }
     };
     TextPosition {
         line_index,
@@ -61,17 +63,14 @@ pub fn internal_position_to_lsp(
     encoding: PositionEncoding,
     position: TextPosition,
 ) -> Position {
-    let character = match rope.get_line(position.line_index) {
-        Some(line) => {
-            let byte = position.character_index.min(line.len_bytes());
-            match encoding {
-                PositionEncoding::Utf8 => byte,
-                PositionEncoding::Utf16 => line.char_to_utf16_cu(line.byte_to_char(byte)),
-            }
-        }
-        None => position.character_index,
+    let line_index = position.line_index.min(rope.len_lines().saturating_sub(1));
+    let line = rope.line(line_index);
+    let byte = position.character_index.min(line.len_bytes());
+    let character = match encoding {
+        PositionEncoding::Utf8 => byte,
+        PositionEncoding::Utf16 => line.char_to_utf16_cu(line.byte_to_char(byte)),
     };
-    Position::new(position.line_index as u32, character as u32)
+    Position::new(line_index as u32, character as u32)
 }
 
 pub fn lsp_range_to_internal(rope: &Rope, encoding: PositionEncoding, range: Range) -> TextRange {

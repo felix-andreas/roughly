@@ -64,6 +64,18 @@ Delivery is negotiated at startup: when the client advertises pull-diagnostics s
 request cadence, and the server stops pushing `publishDiagnostics`. Clients without pull support keep
 receiving pushed diagnostics. Workspace-wide pull (`workspace/diagnostic`) is not yet implemented.
 
+If an edit arrives while a pull is being computed, the server abandons the stale computation and
+answers `ServerCancelled` with `retriggerRequest: true`, so the client re-pulls instead of caching
+an incomplete report. A rename request cancelled the same way answers `ContentModified` rather than
+an empty edit.
+
+### Untitled and virtual documents
+
+Documents whose URI has no `file:` path — for example a VS Code untitled buffer with the R language
+mode — are served as standalone script documents: diagnostics, hover, completion, formatting, and
+the other document features work as for any open file. Like all scripts, they export nothing to
+package analysis.
+
 ## Planned
 
 Not yet available:

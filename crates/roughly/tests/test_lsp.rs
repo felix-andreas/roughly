@@ -5,18 +5,19 @@ use {
         lsp_types::{
             ClientCapabilities, CompletionParams, CompletionResponse, DiagnosticClientCapabilities,
             DiagnosticServerCapabilities, DiagnosticWorkspaceClientCapabilities,
-            DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidOpenTextDocumentParams,
-            DidSaveTextDocumentParams, DocumentDiagnosticParams, DocumentDiagnosticReport,
-            DocumentDiagnosticReportResult, DocumentFormattingParams, DocumentSymbolParams,
-            DocumentSymbolResponse, FileChangeType, FileEvent, FormattingOptions,
-            GeneralClientCapabilities, GotoDefinitionParams, GotoDefinitionResponse, HoverContents,
-            HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-            InitializedParams, InlayHintParams, MessageType, PartialResultParams, Position,
-            PositionEncodingKind, PublishDiagnosticsParams, Range, ReferenceContext,
-            ReferenceParams, RenameParams, ShowMessageParams, SignatureHelpParams,
-            TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-            TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
-            WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceFolder,
+            DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
+            DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
+            DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentFormattingParams,
+            DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FileEvent,
+            FormattingOptions, GeneralClientCapabilities, GotoDefinitionParams,
+            GotoDefinitionResponse, HoverContents, HoverParams, HoverProviderCapability,
+            InitializeParams, InitializeResult, InitializedParams, InlayHintParams, MessageType,
+            PartialResultParams, Position, PositionEncodingKind, PublishDiagnosticsParams, Range,
+            ReferenceContext, ReferenceParams, RenameParams, ShowMessageParams,
+            SignatureHelpParams, TextDocumentClientCapabilities, TextDocumentContentChangeEvent,
+            TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
+            VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceClientCapabilities,
+            WorkspaceFolder,
             notification::{PublishDiagnostics, ShowMessage},
             request::{RegisterCapability, WorkspaceDiagnosticRefresh},
         },
@@ -348,6 +349,24 @@ impl TestContext {
             .expect("did_change failed");
     }
 
+    // Replaces the whole document with `text` (a range-less change): the full-text-sync fallback
+    // clients may legally use even though the server negotiated incremental sync.
+    fn replace_file_full(&mut self, uri: &Url, version: i32, text: &str) {
+        self.server
+            .did_change(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: text.into(),
+                }],
+            })
+            .expect("did_change failed");
+    }
+
     fn save_file(&mut self, uri: &Url) {
         self.server
             .did_save(DidSaveTextDocumentParams {
@@ -355,6 +374,14 @@ impl TestContext {
                 text: None,
             })
             .expect("did_save failed");
+    }
+
+    fn close_file(&mut self, uri: &Url) {
+        self.server
+            .did_close(DidCloseTextDocumentParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+            })
+            .expect("did_close failed");
     }
 
     // Waits briefly for a `workspace/diagnostic/refresh` request, returning whether one arrived.
@@ -527,12 +554,13 @@ async fn hover_returns_identifier_definition_without_debug_by_default() {
 }
 
 #[tokio::test]
-async fn requests_for_non_file_uris_return_gracefully() {
-    // Editors send requests for non-`file:` buffers (`untitled:`, `vscode-vfs:`, ...). Those have no
-    // filesystem path, so the read handlers must answer with an empty result rather than panicking the
-    // worker thread, which would terminate the whole server process.
+async fn requests_for_unopened_non_file_uris_answer_gracefully() {
+    // Editors send requests for non-`file:` buffers (`untitled:`, `vscode-vfs:`, ...). An open one is
+    // served as a standalone script document (see `untitled_document_is_served_as_a_standalone_script`);
+    // one the server never saw opened must still be answered — with an error response or an empty
+    // result — rather than panicking the worker thread, which would terminate the server process.
     let mut context = setup_test(&[("R/main.R", "x <- 1L")]).await;
-    let untitled = Url::parse("untitled:Untitled-1").expect("untitled uri should parse");
+    let untitled = Url::parse("untitled:Untitled-9").expect("untitled uri should parse");
 
     let hover = context
         .server
@@ -545,11 +573,10 @@ async fn requests_for_non_file_uris_return_gracefully() {
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
         })
-        .await
-        .expect("hover request failed");
+        .await;
     assert!(
-        hover.is_none(),
-        "hover on a non-file uri should return no result"
+        matches!(hover, Err(_) | Ok(None)),
+        "hover on an unopened non-file uri must be answered, got: {hover:?}"
     );
 
     let report = context.document_diagnostic(&untitled, None).await;
@@ -558,7 +585,194 @@ async fn requests_for_non_file_uris_return_gracefully() {
             report,
             DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(_))
         ),
-        "a pull diagnostic on a non-file uri should return an empty full report"
+        "a pull diagnostic on an unopened non-file uri should return an empty full report"
+    );
+
+    // The server is still alive and serving regular documents.
+    let file_uri = context.file_uri("R/main.R");
+    context.open_file(&file_uri, "x <- 1L").await;
+    recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn untitled_document_is_served_as_a_standalone_script() {
+    // A non-`file:` URI (a VS Code untitled buffer with the R language mode is the realistic case)
+    // cannot join package analysis, but the server serves it as a standalone script document:
+    // diagnostics, hover, and incremental edits work like for any open file, and the untitled
+    // traffic must never take down analysis of regular documents.
+    let mut context = setup_test(&[]).await;
+    let untitled = Url::parse("untitled:Untitled-1").expect("untitled uri should parse");
+
+    context
+        .open_file(&untitled, "answer <- 42L\nfinal = answer\n")
+        .await;
+
+    let diagnostics = recv_diagnostics(&mut context.diagnostics_receiver, &untitled, TIMEOUT).await;
+    assert!(
+        diagnostics
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("<-")),
+        "expected the `=` lint on the untitled buffer, got: {:?}",
+        diagnostics.diagnostics
+    );
+
+    // IDE features answer inside the untitled buffer: hover over the `answer` reference.
+    let hover = context
+        .server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: untitled.clone(),
+                },
+                position: Position::new(1, 10),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover on an untitled document failed")
+        .expect("hover response missing");
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markup hover contents");
+    };
+    assert!(
+        markup.value.contains("defined at"),
+        "expected hover in the untitled buffer to resolve `answer`, got: {}",
+        markup.value
+    );
+
+    // Outgoing edits map back to the client's URI, never the internal synthetic key: renaming
+    // `answer` yields edits keyed by the untitled URI.
+    let rename = context
+        .server
+        .rename(RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: untitled.clone(),
+                },
+                position: Position::new(0, 1),
+            },
+            new_name: "result".into(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("rename in an untitled document failed")
+        .expect("expected a rename edit");
+    let changes = rename.changes.expect("expected rename changes");
+    assert!(
+        changes.keys().all(|uri| uri == &untitled),
+        "rename edits must be keyed by the untitled URI, got: {:?}",
+        changes.keys().collect::<Vec<_>>()
+    );
+    let untitled_edits = changes
+        .get(&untitled)
+        .expect("expected edits for the untitled document");
+    assert_eq!(
+        untitled_edits.len(),
+        2,
+        "expected both occurrences of `answer` to be renamed, got: {untitled_edits:?}"
+    );
+
+    // Incremental edits apply to the untitled buffer: fix the `=` and the lint disappears.
+    context.change_file(
+        &untitled,
+        1,
+        Range::new(Position::new(1, 6), Position::new(1, 7)),
+        "<-",
+    );
+    let after_fix = recv_diagnostics(&mut context.diagnostics_receiver, &untitled, TIMEOUT).await;
+    assert!(
+        after_fix.diagnostics.is_empty(),
+        "expected the fixed untitled buffer to be clean, got: {:?}",
+        after_fix.diagnostics
+    );
+
+    // Closing the untitled buffer unregisters it, and regular documents keep working.
+    context.close_file(&untitled);
+    let file_uri = context.file_uri("R/after_untitled.R");
+    context.open_file(&file_uri, "x <- T\n").await;
+    let regular = recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
+    assert!(
+        regular
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("TRUE")),
+        "expected regular documents to keep working after untitled traffic, got: {:?}",
+        regular.diagnostics
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn full_text_did_change_replaces_the_document() {
+    // A `didChange` without a range is a whole-document replacement. Clients may legally fall back
+    // to full-text sync even though the server negotiated incremental sync, so it must apply
+    // instead of killing the server.
+    let mut context = setup_test(&[]).await;
+    let file_uri = context.file_uri("R/full_sync.R");
+    context.open_file(&file_uri, "x <- T\n").await;
+
+    let initial = recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
+    assert!(
+        initial
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("TRUE")),
+        "expected the T-vs-TRUE lint before the replacement, got: {:?}",
+        initial.diagnostics
+    );
+
+    context.replace_file_full(&file_uri, 1, "y = 1\n");
+
+    let after = recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
+    assert!(
+        after
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("<-")),
+        "expected the `=` lint from the replacement text, got: {:?}",
+        after.diagnostics
+    );
+    assert!(
+        !after
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("TRUE")),
+        "the old text must be fully replaced, not merged, got: {:?}",
+        after.diagnostics
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn did_close_survives_a_failing_disk_reread() {
+    // Closing a package document reverts it to its on-disk text, but that read can race a
+    // concurrent delete or rename. Simulate a close-time read that fails although the path exists
+    // (the path is a directory), which must degrade like a deletion instead of killing the server.
+    let mut context = setup_test(&[]).await;
+    std::fs::create_dir_all(context.workspace_dir.join("R/casualty.R"))
+        .expect("failed to create directory posing as a source file");
+
+    let casualty_uri = context.file_uri("R/casualty.R");
+    context.open_file(&casualty_uri, "x <- 1\n").await;
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+    context.close_file(&casualty_uri);
+
+    // The server treated the unreadable file as deleted and keeps serving.
+    let file_uri = context.file_uri("R/still_alive.R");
+    context.open_file(&file_uri, "x <- T\n").await;
+    let diagnostics = recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
+    assert!(
+        diagnostics
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("TRUE")),
+        "expected the server to survive the failing close-time re-read, got: {:?}",
+        diagnostics.diagnostics
     );
 
     context.shutdown().await;
@@ -1550,9 +1764,10 @@ async fn hover_range_under_utf8_with_non_bmp_emoji() {
 // S6: out-of-bounds / stale position safety on every IDE entry point. The document has an empty
 // line 1, so `Position::new(1, 50)` is a character past the end of a (zero-length) line, and
 // `Position::new(50, 0)` is a line past the last line. The position-encoding conversion
-// (`to_internal_position`/`to_internal_range`) clamps the character to the line length and leaves
-// an out-of-range line untouched (its `get_line` returns `None`), so neither path panics; the IDE
-// lookups then return `None` instead of panicking.
+// (`to_internal_position`/`to_internal_range`) clamps both coordinates to the document — the line
+// to the last line, the character to that line's length — so nothing past-EOF ever reaches
+// analysis; the IDE lookups then answer the clamped, in-bounds position (`None`/empty wherever it
+// hits no analysis target).
 
 const OOB_DOC: &str = "alpha <- 1\n\nbeta <- 2\n";
 
@@ -1689,45 +1904,27 @@ async fn completion_out_of_bounds_position_is_safe() {
     let file_uri = context.file_uri("R/oob_completion.R");
     context.open_file(&file_uri, OOB_DOC).await;
 
-    // A line past the last line cannot resolve a line slice, so completion is None.
-    let past_last_line = context
-        .server
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: file_uri.clone(),
+    // Both coordinates clamp to the document (a line past the last line to the last line, a
+    // character past the line end to the line end), which are valid completion positions, so
+    // completion may legitimately return keyword/global candidates; the contract here is that the
+    // clamped requests do not panic.
+    for position in oob_positions() {
+        let _completions = context
+            .server
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: file_uri.clone(),
+                    },
+                    position,
                 },
-                position: Position::new(50, 0),
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .expect("completion request must not panic the server");
-    assert!(
-        past_last_line.is_none(),
-        "OOB-line completion should be None, got: {past_last_line:?}"
-    );
-
-    // A character past the end of a line clamps to the line end (a valid completion position), so
-    // completion legitimately returns keyword/global candidates; the contract here is only that the
-    // clamped request does not panic.
-    let _past_line_end = context
-        .server
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: file_uri.clone(),
-                },
-                position: Position::new(1, 50),
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .expect("completion request must not panic the server");
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            })
+            .await
+            .expect("completion request must not panic the server");
+    }
 
     context.shutdown().await;
 }
@@ -1958,6 +2155,76 @@ async fn pull_capable_client_suppresses_push() {
     assert!(
         messages.iter().any(|message| message.contains("TRUE")),
         "the pull report must still carry the diagnostic, got: {messages:?}"
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn cancelled_pull_diagnostics_is_retryable_never_authoritative_empty() {
+    // An edit racing a pull must never be answered with an empty full report — the report is
+    // authoritative (the client caches it until the next pull). Whether the edit lands before the
+    // read starts (the read then correctly answers the pre-edit state) or mid-read (the engine
+    // observes the cancellation token at its next checkpoint and the server answers
+    // `ServerCancelled`) is timing- and checkpoint-dependent, so both legal outcomes are asserted
+    // strictly; the empty-report bug is caught either way. The exact wire shape of the
+    // cancellation answer is pinned deterministically by a unit test in `server.rs`.
+    let mut context = setup_test_with_pull_diagnostics(&[]).await;
+    let file_uri = context.file_uri("R/cancel_race.R");
+    // A pull client gets no push on open, so the first pull computes cold over a document large
+    // enough to leave a real race window; every line carries known lints.
+    let source = "x = T\n".repeat(2000);
+    context.open_file(&file_uri, &source).await;
+
+    let mut racing_server = context.server.clone();
+    let pull = racing_server.document_diagnostic(DocumentDiagnosticParams {
+        text_document: TextDocumentIdentifier {
+            uri: file_uri.clone(),
+        },
+        identifier: Some("roughly".into()),
+        previous_result_id: None,
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    });
+    context.change_file(
+        &file_uri,
+        1,
+        Range::new(Position::new(0, 0), Position::new(0, 1)),
+        "y",
+    );
+
+    match pull.await {
+        Ok(result) => {
+            let (messages, _) = full_report_messages(result);
+            assert!(
+                !messages.is_empty(),
+                "a completed pull for this document must report its diagnostics; an empty full \
+                 report means a cancelled read was served as authoritative"
+            );
+        }
+        Err(async_lsp::Error::Response(response)) => {
+            assert_eq!(
+                response.code,
+                async_lsp::ErrorCode::SERVER_CANCELLED,
+                "a cancelled pull must answer ServerCancelled, got: {response:?}"
+            );
+            let data = response
+                .data
+                .expect("a cancelled pull must carry DiagnosticServerCancellationData");
+            assert_eq!(
+                data.get("retriggerRequest"),
+                Some(&serde_json::Value::Bool(true)),
+                "the cancellation data must ask the client to retrigger, got: {data:?}"
+            );
+        }
+        Err(other) => panic!("unexpected pull failure: {other:?}"),
+    }
+
+    // Either way the client can retry and get the (post-edit) authoritative report.
+    let (messages, _) = full_report_messages(context.document_diagnostic(&file_uri, None).await);
+    assert!(
+        !messages.is_empty(),
+        "the retried pull must report the document's diagnostics"
     );
 
     context.shutdown().await;
