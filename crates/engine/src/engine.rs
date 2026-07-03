@@ -347,7 +347,26 @@ impl<G: QueryGroup> Engine<G> {
     /// Validate one query against the current revision and return its `changed_at`. This is the red-green
     /// core: green-by-revision, green-by-early-cutoff, or red (recompute). Recursion walks dependencies;
     /// it does not record them (validation is not a body), and the recorded list is always acyclic.
+    ///
+    /// Every deepening of the fetch spine passes through here — both the dependency walk below and a
+    /// recompute whose body fetches (body → `fetch` → `validate` → `recompute` → body …) — so this is
+    /// the one place the host stack grows with dependency-chain depth. Query depth tracks the *user's
+    /// program* (a re-export chain `a <- b <- … <- concrete` is one query level per link), which no
+    /// fixed stack can bound, so within `RED_ZONE` bytes of overflow the stack is grown by
+    /// `STACK_PER_GROWTH` instead: a mechanically generated deep chain slows down, it does not abort
+    /// the process. On platforms where the remaining stack cannot be measured `maybe_grow` degrades
+    /// to a plain call.
     fn validate(&self, key: &G::Key) -> Revision {
+        // The red zone must cover every frame a body can push between two `validate` entries. That is
+        // bounded by one file's inference descending to a global reference, which the lowering
+        // recursion cap bounds at 160 expression frames — 512 KiB holds comfortably even for debug
+        // frame sizes.
+        const RED_ZONE: usize = 512 * 1024;
+        const STACK_PER_GROWTH: usize = 8 * 1024 * 1024;
+        stacker::maybe_grow(RED_ZONE, STACK_PER_GROWTH, || self.validate_inner(key))
+    }
+
+    fn validate_inner(&self, key: &G::Key) -> Revision {
         let revision = self.revision.get();
         let snapshot = self.slots.borrow().get(key).map(|slot| {
             // The dependency list is cloned only when we will actually walk it (a deep-validation,

@@ -88,6 +88,16 @@ its own body (§5). An **accidental** cycle — a derived body transitively fetc
 *recovery* (`Unknown`-pinning) stays inside the interface body (§5); this guard is only the loud failure
 for graph mistakes.
 
+### Fetch-spine depth
+
+An *acyclic* chain still nests on the host stack: fetch → `validate` → `recompute` → body → fetch …, one
+level per dependency link, and the link count tracks the user's program (a re-export chain is one query
+level per link), which no fixed thread stack can bound. Every deepening passes through `validate`, so
+`validate` is the single guard point: within a red zone of overflow it grows the stack
+(`stacker::maybe_grow`) instead of aborting, sized so the frames a body can push between two `validate`
+entries (bounded by the lowering recursion cap) always fit. A mechanically generated deep chain slows
+down; it never kills the process.
+
 ### Input removal
 
 `Engine::remove_input(key)` bumps the revision and replaces the input's slot with a **tombstone**: a

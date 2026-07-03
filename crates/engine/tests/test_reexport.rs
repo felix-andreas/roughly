@@ -139,6 +139,54 @@ fn period_two_cycle_pins_to_unknown_and_converges() {
     let _ = diagnostics; // reaching here at all proves the cycle did not panic the engine.
 }
 
+// FETCH-SPINE DEPTH: a mechanically generated re-export chain thousands of links long must resolve,
+// not abort the process. Each link is one query level on the host stack (fetch → validate → recompute
+// → body → fetch …), so a chain this deep overflows any fixed thread stack; `validate`'s stack-growth
+// guard is what keeps it alive. The chain is then revalidated after an edit to the concrete base,
+// covering the dependency-walk recursion in `validate` itself (the second deep spine).
+#[test]
+fn very_deep_chain_does_not_overflow_the_stack() {
+    // Deep enough that an unguarded spine aborts on any fixed thread stack (verified: without the
+    // `validate` guard this chain dies of stack overflow well before the tail), small enough to keep
+    // the suite fast.
+    const LINKS: FileId = 2048;
+    let mut sources: Vec<(FileId, String)> = Vec::new();
+    for index in 0..LINKS {
+        let name = format!("d{index}");
+        let body = if index + 1 < LINKS {
+            format!("{name} <- d{}", index + 1)
+        } else {
+            format!("{name} <- function() 1")
+        };
+        sources.push((index, body));
+    }
+    let borrowed: Vec<(FileId, &str)> = sources
+        .iter()
+        .map(|(file, body)| (*file, body.as_str()))
+        .collect();
+    let mut engine = setup(&borrowed);
+
+    let head = engine.group().intern("d0");
+    let scheme_head = global_scheme(&engine, head);
+    assert!(
+        scheme_head.is_some(),
+        "the {LINKS}-link chain head resolves"
+    );
+    assert_ne!(body_of(&scheme_head), CoreType::Unknown);
+
+    // Edit the concrete base: the head's revalidation walks the whole chain depth again.
+    engine.set_input(
+        Key::SourceText(LINKS - 1),
+        parse_source_input(&format!("d{} <- function() \"two\"", LINKS - 1)),
+    );
+    let scheme_head_after = global_scheme(&engine, head);
+    assert_ne!(
+        scheme_head, scheme_head_after,
+        "the edit propagates through all {LINKS} links"
+    );
+    assert_ne!(body_of(&scheme_head_after), CoreType::Unknown);
+}
+
 // CHAIN NEAR THE BOUND: a re-export chain whose length exceeds any `#members + slack`-style cap still
 // resolves fully to the concrete scheme. In the engine an acyclic chain travels fetch recursion, which has
 // no round cap, so it can never be truncated to a stale `Unknown` — the regression the production
