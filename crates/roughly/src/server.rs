@@ -168,6 +168,9 @@ struct EngineWorker {
     // Whether the one-time "configuration lives in roughly.toml" notice was already shown for an
     // editor-settings payload the server does not apply.
     warned_about_editor_configuration: bool,
+    // Memoized per-file symbol items for workspace-symbol search; entries are dropped at the input
+    // write paths, so the cache can never serve a stale tree.
+    symbol_items_cache: HashMap<PathBuf, Vec<Item>>,
     // Open documents with non-`file:` URIs (untitled buffers, virtual editor documents) are served
     // as standalone script documents, keyed internally by a synthetic path (`document_path`) so the
     // path-keyed host and engine tables can track them. This maps each synthetic path back to the
@@ -299,6 +302,7 @@ impl EngineWorker {
             documents: HashMap::new(),
             stub_documents: HashMap::new(),
             warned_about_editor_configuration: false,
+            symbol_items_cache: HashMap::new(),
             virtual_document_uris: HashMap::new(),
             parser: analysis::tree::new_parser().expect("server parser should initialize"),
             position_encoding,
@@ -527,21 +531,28 @@ impl EngineWorker {
     }
 
     // Workspace symbols index every package document's tree (the `R/` files). The host already knows which
-    // `FileId`s are package documents (path under `R/`); each tree comes from the engine's `Parse` query.
-    fn package_items_map(&self) -> HashMap<PathBuf, Vec<Item>> {
+    // Symbol items per file — package documents plus open scripts — for workspace-symbol search.
+    // Indexing walks the whole tree, so items are memoized per file and invalidated at the one
+    // input-write chokepoint (`set_parsed_input` / `retract_source_input`): a symbol query between
+    // keystrokes re-walks nothing.
+    fn package_items_map(&mut self) -> HashMap<PathBuf, Vec<Item>> {
         let r_path = self.workspace_r_path();
-        let package = self
+        let candidates = self
             .file_ids
             .iter()
-            .filter(|(path, _)| path.starts_with(&r_path))
+            .filter(|(path, _)| path.starts_with(&r_path) || self.open_documents.contains(*path))
             .map(|(path, file)| (path.clone(), *file))
             .collect::<Vec<_>>();
-        package
+        candidates
             .into_iter()
             .map(|(path, file)| {
+                if let Some(items) = self.symbol_items_cache.get(&path) {
+                    return (path, items.clone());
+                }
                 let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(file));
                 let items =
                     index::index(parsed.0.tree().root_node(), parsed.0.rope(), false, false);
+                self.symbol_items_cache.insert(path.clone(), items.clone());
                 (path, items)
             })
             .collect()
@@ -580,6 +591,7 @@ impl EngineWorker {
     // Feeds an already-parsed document into the engine — the one parse per edit. Open buffers pass
     // their incrementally-maintained document here, so a keystroke never re-parses the file.
     fn set_parsed_input(&mut self, path: &Path, document: Document, is_package: bool) {
+        self.symbol_items_cache.remove(path);
         let file = self.file_id_for(path);
         self.engine
             .set_input(Key::SourceText(file), ParsedDocument(document));
@@ -597,6 +609,7 @@ impl EngineWorker {
     // Drop a file from the engine (deletion or a closed, no-longer-tracked document): tombstone its source
     // input so dependents revalidate against the smaller set, and remove it from the host tables.
     fn retract_source_input(&mut self, path: &Path) {
+        self.symbol_items_cache.remove(path);
         if let Some(file) = self.file_ids.remove(path) {
             self.engine.remove_input(&Key::SourceText(file));
             self.engine.remove_input(&Key::DocumentKind(file));
@@ -2030,9 +2043,10 @@ impl EngineWorker {
 
         tracing::debug!(?query);
 
-        let workspace_items = self
-            .cancellable(|| self.package_items_map())
-            .unwrap_or_default();
+        // The per-file walks are memoized, so a query between keystrokes touches only changed
+        // files; a concurrent edit invalidates entries rather than racing a long read, so no
+        // cancellation wrapper is needed here.
+        let workspace_items = self.package_items_map();
         let symbols = symbols::workspace(&query, &workspace_items, &|path, range| {
             self.to_lsp_range_in(path, range)
         });
