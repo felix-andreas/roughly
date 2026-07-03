@@ -1379,6 +1379,64 @@ impl EngineWorker {
 
         tracing::debug!(?path, "semantic tokens");
 
+        // A `.Rtypes` stub buffer is pure type notation: classify each line with the stub-aware
+        // lexer instead of scanning an R tree for `#:` comments.
+        if is_stub_document(&path) {
+            let Some(rope) = self.stub_documents.get(&path) else {
+                return Ok(None);
+            };
+            let rope = rope.clone();
+            let mut previous_line = 0u32;
+            let mut previous_start = 0u32;
+            let mut data = Vec::new();
+            for (line_index, line) in rope.lines().enumerate() {
+                let line_text = line.to_string();
+                for token in analysis::stub::stub_line_tokens(&line_text) {
+                    let start_position = position::internal_position_to_lsp(
+                        &rope,
+                        self.position_encoding,
+                        TextPosition {
+                            line_index,
+                            character_index: token.start,
+                        },
+                    );
+                    let end_position = position::internal_position_to_lsp(
+                        &rope,
+                        self.position_encoding,
+                        TextPosition {
+                            line_index,
+                            character_index: token.end,
+                        },
+                    );
+                    let line_number = start_position.line;
+                    let start_character = start_position.character;
+                    let length = end_position.character.saturating_sub(start_character);
+                    if length == 0 {
+                        continue;
+                    }
+                    let delta_line = line_number - previous_line;
+                    let delta_start = if delta_line == 0 {
+                        start_character - previous_start
+                    } else {
+                        start_character
+                    };
+                    data.push(SemanticToken {
+                        delta_line,
+                        delta_start,
+                        length,
+                        token_type: semantic_token_index(token.role),
+                        token_modifiers_bitset: 0,
+                    });
+                    previous_line = line_number;
+                    previous_start = start_character;
+                }
+            }
+            return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+                result_id: None,
+                data,
+            })));
+        }
+
         let Some(parsed) = self.parsed_for(&path) else {
             return Ok(None);
         };

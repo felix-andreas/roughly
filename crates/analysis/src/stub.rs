@@ -1,7 +1,9 @@
 use {
     crate::{
         interner::{Interner, Symbol},
-        type_syntax::{TypeParseError, parse_surface_type},
+        type_syntax::{
+            TypeParseError, TypeToken, TypeTokenRole, parse_surface_type, semantic_tokens,
+        },
         types::SurfaceType,
     },
     tree_sitter::{Point, Range},
@@ -168,6 +170,67 @@ fn is_stub_name(name: &str) -> bool {
     }
     name.chars()
         .all(|character| character.is_alphanumeric() || character == '.' || character == '_')
+}
+
+// Classifies one stub-file line for editor highlighting: a `@type NAME` declaration yields the
+// directive and the declared type name; a `name : <type-expr>` declaration yields the name (as a
+// parameter-style token), the separator, and the type expression's own tokens. Offsets are byte
+// ranges into `line`. Comments and blank lines yield nothing — the editor's comment highlighting
+// already covers them.
+pub fn stub_line_tokens(line: &str) -> Vec<TypeToken> {
+    let content = strip_comment(line);
+    let trimmed = content.trim_end();
+    let leading = trimmed.len() - trimmed.trim_start().len();
+    let body = trimmed.trim_start();
+    if body.is_empty() {
+        return Vec::new();
+    }
+
+    if let Some(type_name) = body.strip_prefix("@type") {
+        let mut tokens = vec![TypeToken {
+            start: leading,
+            end: leading + "@type".len(),
+            role: TypeTokenRole::Directive,
+        }];
+        let name = type_name.trim();
+        if !name.is_empty() {
+            let name_start = leading + body.len() - type_name.trim_start().len();
+            tokens.push(TypeToken {
+                start: name_start,
+                end: name_start + name.len(),
+                role: TypeTokenRole::TypeName,
+            });
+        }
+        return tokens;
+    }
+
+    let Some(separator) = top_level_colon(body) else {
+        return Vec::new();
+    };
+    let name = body[..separator].trim_end();
+    let mut tokens = Vec::new();
+    if !name.is_empty() {
+        tokens.push(TypeToken {
+            start: leading,
+            end: leading + name.len(),
+            role: TypeTokenRole::ParameterName,
+        });
+    }
+    tokens.push(TypeToken {
+        start: leading + separator,
+        end: leading + separator + 1,
+        role: TypeTokenRole::Separator,
+    });
+    let type_text = &body[separator + 1..];
+    let type_offset = leading + separator + 1;
+    for token in semantic_tokens(type_text) {
+        tokens.push(TypeToken {
+            start: type_offset + token.start,
+            end: type_offset + token.end,
+            role: token.role,
+        });
+    }
+    tokens
 }
 
 fn strip_comment(line: &str) -> &str {

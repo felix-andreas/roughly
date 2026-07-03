@@ -14,10 +14,11 @@ use {
             HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
             InlayHintParams, MessageType, ParameterInformationSettings, ParameterLabel,
             PartialResultParams, Position, PositionEncodingKind, PublishDiagnosticsParams, Range,
-            ReferenceContext, ReferenceParams, RenameParams, ShowMessageParams,
-            SignatureHelpClientCapabilities, SignatureHelpParams, SignatureInformationSettings,
-            TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-            TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
+            ReferenceContext, ReferenceParams, RenameParams, SemanticTokensParams,
+            SemanticTokensResult, ShowMessageParams, SignatureHelpClientCapabilities,
+            SignatureHelpParams, SignatureInformationSettings, TextDocumentClientCapabilities,
+            TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+            TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
             WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceFolder,
             notification::{PublishDiagnostics, ShowMessage},
             request::{RegisterCapability, WorkspaceDiagnosticRefresh},
@@ -2768,6 +2769,47 @@ async fn config_reload_failure_keeps_previous_config_and_reports() {
         formatted.contains("    x + 1"),
         "expected the previous 4-space config to remain in effect, got:\n{formatted}"
     );
+
+    context.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stub_documents_get_semantic_tokens() {
+    let mut context = setup_test(&[]).await;
+
+    let stub_uri = context.file_uri("stubs/project.Rtypes");
+    context
+        .open_file(
+            &stub_uri,
+            "@type frame\nload_it : fn(x: character) -> frame\n",
+        )
+        .await;
+    let _ = recv_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
+
+    let tokens = context
+        .server
+        .semantic_tokens_full(SemanticTokensParams {
+            text_document: TextDocumentIdentifier {
+                uri: stub_uri.clone(),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("semantic tokens failed");
+
+    let Some(SemanticTokensResult::Tokens(tokens)) = tokens else {
+        panic!("expected tokens, got: {tokens:?}");
+    };
+    assert!(
+        tokens.data.len() >= 6,
+        "directive + type name + declaration tokens expected: {:?}",
+        tokens.data
+    );
+    // First token is the `@type` directive at line 0, column 0, length 5.
+    assert_eq!(tokens.data[0].delta_line, 0);
+    assert_eq!(tokens.data[0].delta_start, 0);
+    assert_eq!(tokens.data[0].length, 5);
 
     context.shutdown().await;
 }
