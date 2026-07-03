@@ -3,6 +3,9 @@
 > [!IMPORTANT]
 > Maintained by humans. AI Agents are not allowed to edit this file.
 
+bugs:
+* when saving roughly.toml: "received did_save for non-open document /home/felix/Projects/typing-demo/roughly.toml"
+
 code quality:
 - it still uses child_by_field_name instead by id
 - there are some modules with a single file
@@ -67,10 +70,13 @@ fixtures:
 
 ## Needs refinement
 
+- is it worth to drop tree-sitter and write hand-rolled recursice decent parser?
+
 - website: better slogan (rust-analyzer: Bringing a great IDE experience to the Rust programming language.)
 - make really good landing page
   - find old commit where animation looked good
 - website: improve user guide
+- website: animation looked good on 673b0c44bf101a6f74b4e0feef73a1c3a8111246. it looked nice how the roughly logo was formed on inital load. also looked cool how it morphed into types. only difference should be that once you scroll down. the particles morph into the heading (there shouldn't be actual text on top only particles that form the heading)
 
 general:
 - verify if crate/folder structure is reasonable
