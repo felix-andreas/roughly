@@ -401,3 +401,16 @@ length : fn(x: Any) -> integer
 ```
 
 From the `base` package.
+
+#---- overloaded_stub_hover_counts_its_other_signatures
+#---- R/main.R
+total <- sum(1L, 2L)
+#++++ any
+#!!!! hover stub_sum.hover
+R/main.R:1:11
+#++++
+```
+sum : fn([na.rm]: logical, ...: integer[] | logical[]) -> integer
+```
+
+From the `base` package (+2 overloads).

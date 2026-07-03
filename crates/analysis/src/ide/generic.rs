@@ -11,7 +11,7 @@ use {
     super::{
         COMPLETION_LIMIT, CodeAction, CodeActionKind, CompletionItem, CompletionItemKind,
         CompletionItemSource, CompletionResult, DebugSection, HoverInfo, IdeDatabase, InlayHint,
-        Location, RenameResult, SignatureHelp, TextEdit,
+        Location, RenameResult, SignatureData, SignatureHelp, TextEdit,
     },
     crate::{
         diagnostic::{
@@ -36,7 +36,7 @@ use {
         },
         types::{
             Annotation, Constraint, CoreType, FunctionType, InferenceVariableId, RecordField,
-            TypeAnnotationKind,
+            TypeAnnotationKind, TypeScheme,
         },
     },
     ropey::{Rope, iter::Chunks},
@@ -79,6 +79,13 @@ pub fn hover(database: &dyn IdeDatabase, path: &Path, position: TextPosition) ->
                     core_type,
                     &|variable| database.variable_constraint(document_id, variable),
                 )));
+            } else if let Some(line) =
+                overloaded_stub_type_line(database, document_id, expression_id)
+            {
+                // A stub overload set records no checked type on the callee (the set has no single
+                // type); show the committed candidate — or the primary declaration for a bare
+                // reference — so the name still hovers with a signature.
+                contents.push(code_block(&line));
             }
             if let Some(summary) = variable_definition_summary(database, document_id, expression_id)
             {
@@ -408,6 +415,25 @@ pub fn signature_help(
         return None;
     };
 
+    // A call that committed one scheme of a stub overload set lists the whole declared set, with
+    // the committed candidate active — the single checked callee type would otherwise show one
+    // signature and hide the alternatives the name actually offers.
+    if let Some(selected) = database.selected_overload(document_id, *callee)
+        && let Some(symbol) = callee_symbol(module, *callee)
+    {
+        let schemes = database.stub_overload_schemes(symbol);
+        if schemes.len() > 1 {
+            let signatures = schemes
+                .iter()
+                .map(|scheme| overload_signature(database, scheme, arguments, module, point))
+                .collect::<Vec<_>>();
+            return Some(SignatureHelp {
+                active_signature: selected.min(signatures.len().saturating_sub(1)),
+                signatures,
+            });
+        }
+    }
+
     let callee_type = database.checked_expression_type(document_id, *callee)?;
     let CoreType::Function(function_type) = callee_type else {
         return None;
@@ -421,10 +447,68 @@ pub fn signature_help(
     let active_parameter = active_parameter(function_type, &signature, arguments, module, point);
 
     Some(SignatureHelp {
-        label: signature.label,
-        parameters: signature.parameters,
-        active_parameter,
+        signatures: vec![SignatureData {
+            label: signature.label,
+            parameters: signature.parameters,
+            active_parameter,
+        }],
+        active_signature: 0,
     })
+}
+
+// The callee's referenced symbol, when the callee is a name (`sum(...)`, `base::sum(...)`).
+fn callee_symbol(module: &Module, callee: ExpressionId) -> Option<Symbol> {
+    match &module.arena.try_get(callee)?.kind {
+        ExpressionKind::Symbol(symbol) => Some(*symbol),
+        ExpressionKind::NamespaceGet { name, .. } => Some(*name),
+        _ => None,
+    }
+}
+
+// One overload candidate rendered for the signature list. The scheme's own quantifier constraints
+// drive the binder (`<T: atomic> fn(x: T[]) -> T[]`); a non-function declaration (possible in a
+// hand-written override set) still occupies its slot so the committed index stays aligned with the
+// declared set.
+fn overload_signature(
+    database: &dyn IdeDatabase,
+    scheme: &TypeScheme,
+    arguments: &[Argument],
+    module: &Module,
+    point: Point,
+) -> SignatureData {
+    let constraint_of = |variable: InferenceVariableId| {
+        scheme
+            .quantified_variables
+            .iter()
+            .find(|quantified| quantified.variable == variable)
+            .map(|quantified| quantified.constraint)
+            .unwrap_or(Constraint::Unconstrained)
+    };
+    match &scheme.body {
+        CoreType::Function(function_type) => {
+            let rendered = render_function_signature_with_constraints(
+                database.interner(),
+                function_type,
+                &constraint_of,
+            );
+            let active_parameter =
+                active_parameter(function_type, &rendered, arguments, module, point);
+            SignatureData {
+                label: rendered.label,
+                parameters: rendered.parameters,
+                active_parameter,
+            }
+        }
+        other => SignatureData {
+            label: render_generalized_type_with_constraints(
+                database.interner(),
+                other,
+                &constraint_of,
+            ),
+            parameters: Vec::new(),
+            active_parameter: None,
+        },
+    }
 }
 
 // The rendered parameter the cursor's argument targets, following the call-matching rules of the
@@ -518,6 +602,41 @@ fn active_parameter(
 
 fn code_block(body: &str) -> String {
     format!("```\n{body}\n```")
+}
+
+// The type line for a hovered stub name whose declaration is an overload set: the committed
+// candidate when the name is a call's callee (`selected_overload` is keyed by the callee), the
+// primary declaration for a bare reference. Only fires for names that resolve outside the document
+// (`non_locals`) — a local binding shadowing a stub name hovers as the local it is.
+fn overloaded_stub_type_line(
+    database: &dyn IdeDatabase,
+    document_id: DocumentId,
+    expression_id: ExpressionId,
+) -> Option<String> {
+    let local_naming = database.document_naming(document_id)?;
+    let symbol = *local_naming.non_locals.get(&expression_id)?;
+    let schemes = database.stub_overload_schemes(symbol);
+    if schemes.len() < 2 {
+        return None;
+    }
+    let scheme = database
+        .selected_overload(document_id, expression_id)
+        .and_then(|index| schemes.get(index))
+        .unwrap_or(&schemes[0]);
+    let constraint_of = |variable: InferenceVariableId| {
+        scheme
+            .quantified_variables
+            .iter()
+            .find(|quantified| quantified.variable == variable)
+            .map(|quantified| quantified.constraint)
+            .unwrap_or(Constraint::Unconstrained)
+    };
+    Some(hover_type_line(
+        database.interner(),
+        database.interner().resolve(symbol),
+        &scheme.body,
+        &constraint_of,
+    ))
 }
 
 // The name the hover is on, when the hovered expression *is* a name: a plain variable/function
@@ -616,10 +735,19 @@ fn variable_definition_summary(
     }
 
     // A stdlib stub name (a non-local resolved to no package binding) reports its origin namespace so a
-    // standard-library function reads as coming from its package (e.g. `lapply` from `base`).
+    // standard-library function reads as coming from its package (e.g. `lapply` from `base`). An
+    // overloaded name says so — the signature shown above is only the primary declaration, and calls
+    // select among the whole set by argument types.
     if let Some(symbol) = local_naming.non_locals.get(&expression_id)
         && let Some(namespace) = database.stub_namespace(*symbol)
     {
+        let overload_count = database.stub_overload_schemes(*symbol).len();
+        if overload_count > 1 {
+            return Some(format!(
+                "From the `{namespace}` package (+{} overloads).",
+                overload_count - 1
+            ));
+        }
         return Some(format!("From the `{namespace}` package."));
     }
 

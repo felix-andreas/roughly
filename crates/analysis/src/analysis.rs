@@ -148,6 +148,7 @@ struct TypecheckDocumentOutput {
     strict_diagnostics: Vec<Diagnostic>,
     expression_types: HashMap<ExpressionId, CoreType>,
     variable_constraints: BTreeMap<InferenceVariableId, Constraint>,
+    selected_overloads: BTreeMap<ExpressionId, usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -524,6 +525,25 @@ impl Analysis {
             .and_then(|output| output.variable_constraints.get(&variable))
             .copied()
             .unwrap_or(Constraint::Unconstrained)
+    }
+
+    // The declared-set index of the overload a call committed, keyed by the callee expression;
+    // `None` when the callee did not resolve to a stub overload set (or the call never matched).
+    pub fn selected_overload(
+        &self,
+        document_id: DocumentId,
+        expression_id: ExpressionId,
+    ) -> Option<usize> {
+        self.document_typecheck_outputs
+            .get(&document_id)?
+            .selected_overloads
+            .get(&expression_id)
+            .copied()
+    }
+
+    // The full declared overload set of a stub name, in declaration order; empty for non-stubs.
+    pub fn stub_overload_schemes(&self, symbol: Symbol) -> &[TypeScheme] {
+        self.stub_library.overload_schemes(symbol)
     }
 }
 
@@ -996,6 +1016,7 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
                 strict_diagnostics,
                 expression_types,
                 variable_constraints: module_check.variable_constraints,
+                selected_overloads: module_check.selected_overloads,
             },
         ));
         checked_document_ids.push(*document_id);

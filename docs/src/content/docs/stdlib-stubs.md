@@ -107,11 +107,15 @@ A call to the name commits the **first candidate that accepts the arguments** (s
 `integer` and `sum(1.5, 2.5)` is `double`); the call-site selection rules — probe isolation, the
 unresolved-argument fallback to the last candidate, the two-round literal courtesy, and the no-match
 error — are specified in the Typing Reference under
-[Overload sets](/typing-reference#overload-sets). Non-call uses of the name (hover, passing it as a
+[Overload sets](/typing-reference#overload-sets). Non-call uses of the name (passing it as a
 value) see the first candidate, so the corpus orders each set most-specific first and ends it with
 the most general candidate — conventionally an `Any` fallback, which also keeps mixtures the
 candidates cannot express (`sum(TRUE, 1L)`) from erroring. A project override that redeclares a name
 **replaces its whole set**; an override that wants overloads declares all of them itself.
+
+The editor shows the whole set: signature help on a call lists every declared candidate with the
+committed one active, and hover on the name shows the committed candidate's signature (the primary
+declaration when the name is not being called) plus a `(+N overloads)` note.
 
 Three rules govern the current corpus:
 

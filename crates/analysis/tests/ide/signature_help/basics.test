@@ -71,3 +71,18 @@ fn([quiet]: logical, ...: character) -> character
 param 0: [quiet]: logical
 param 1: ...: character
 active parameter: 1
+
+#==== overloads
+#---- overloaded_call_lists_all_candidates_with_the_committed_one_active
+#---- R/main.R
+total <- sum(1L, 2L)
+#++++ any
+#!!!! signature_help overloads.sig
+R/main.R:1:14
+#++++
+signature 0 (active): fn([na.rm]: logical, ...: integer[] | logical[]) -> integer
+param 0: [na.rm]: logical
+param 1: ...: integer[] | logical[]
+active parameter: 1
+signature 1: fn([na.rm]: logical, ...: double[]) -> double
+signature 2: fn([na.rm]: logical, ...: Any) -> Any

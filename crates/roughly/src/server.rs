@@ -1640,43 +1640,54 @@ impl EngineWorker {
             return Ok(None);
         };
 
-        let active_parameter = help.active_parameter.map(|index| index as u32);
-        let parameters = help
-            .parameters
-            .iter()
-            .map(|span| {
-                let text = help
-                    .label
-                    .get(span.clone())
-                    .expect("parameter span should lie within the signature label");
-                // Label offsets are UTF-16 code units per the LSP spec (independent of the
-                // negotiated document position encoding, which governs only document positions).
-                let label = if self.client_supports_parameter_label_offsets {
-                    let prefix = help
-                        .label
-                        .get(..span.start)
-                        .expect("parameter span should start on a label character boundary");
-                    let start = utf16_length(prefix);
-                    let end = start + utf16_length(text);
-                    ParameterLabel::LabelOffsets([start, end])
-                } else {
-                    ParameterLabel::Simple(text.to_owned())
-                };
-                ParameterInformation {
-                    label,
+        let signatures = help
+            .signatures
+            .into_iter()
+            .map(|signature| {
+                let active_parameter = signature.active_parameter.map(|index| index as u32);
+                let parameters = signature
+                    .parameters
+                    .iter()
+                    .map(|span| {
+                        let text = signature
+                            .label
+                            .get(span.clone())
+                            .expect("parameter span should lie within the signature label");
+                        // Label offsets are UTF-16 code units per the LSP spec (independent of the
+                        // negotiated document position encoding, which governs only document positions).
+                        let label = if self.client_supports_parameter_label_offsets {
+                            let prefix = signature.label.get(..span.start).expect(
+                                "parameter span should start on a label character boundary",
+                            );
+                            let start = utf16_length(prefix);
+                            let end = start + utf16_length(text);
+                            ParameterLabel::LabelOffsets([start, end])
+                        } else {
+                            ParameterLabel::Simple(text.to_owned())
+                        };
+                        ParameterInformation {
+                            label,
+                            documentation: None,
+                        }
+                    })
+                    .collect();
+                SignatureInformation {
+                    label: signature.label,
                     documentation: None,
+                    parameters: Some(parameters),
+                    active_parameter,
                 }
             })
-            .collect();
+            .collect::<Vec<_>>();
 
+        // The top-level active parameter mirrors the active signature's own; clients that ignore
+        // per-signature values still highlight correctly.
+        let active_parameter = signatures
+            .get(help.active_signature)
+            .and_then(|signature| signature.active_parameter);
         let signature_help = SignatureHelp {
-            signatures: vec![SignatureInformation {
-                label: help.label,
-                documentation: None,
-                parameters: Some(parameters),
-                active_parameter,
-            }],
-            active_signature: Some(0),
+            signatures,
+            active_signature: Some(help.active_signature as u32),
             active_parameter,
         };
 

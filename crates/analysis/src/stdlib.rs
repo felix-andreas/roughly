@@ -187,6 +187,16 @@ impl StubLibrary {
     pub fn namespace_of(&self, symbol: Symbol) -> Option<&'static str> {
         self.values.get(&symbol)?.namespace
     }
+
+    // The full declared overload set of a stub name, in declaration order — empty for a non-stub
+    // symbol. Signature help lists every candidate of a multi-scheme name; single-scheme names
+    // return their one scheme.
+    pub fn overload_schemes(&self, symbol: Symbol) -> &[TypeScheme] {
+        self.values
+            .get(&symbol)
+            .map(|value| value.schemes.as_slice())
+            .unwrap_or(&[])
+    }
 }
 
 // The type-definition environment an open `.Rtypes` editor buffer harvests against: the shipped

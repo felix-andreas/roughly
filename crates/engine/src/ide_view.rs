@@ -582,4 +582,21 @@ impl<'a> IdeDatabase for EngineIdeRef<'a> {
     fn stub_schemes(&self) -> Vec<(Symbol, &TypeScheme)> {
         self.stubs.schemes().collect()
     }
+
+    fn stub_overload_schemes(&self, symbol: Symbol) -> &[TypeScheme] {
+        self.stubs.overload_schemes(symbol)
+    }
+
+    fn selected_overload(
+        &self,
+        document_id: DocumentId,
+        expression_id: ExpressionId,
+    ) -> Option<usize> {
+        self.caches
+            .checks
+            .get(&document_id)?
+            .selected_overloads
+            .get(&expression_id)
+            .copied()
+    }
 }

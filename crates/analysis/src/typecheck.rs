@@ -219,6 +219,11 @@ pub struct InferenceState {
     // inlay hints) can show checked types. Left off during interface rounds to avoid the cost.
     record_expression_types: bool,
     recorded_expression_types: BTreeMap<ExpressionId, CoreType>,
+    // For each call whose callee resolved to a stub overload set, the index (into the declared set)
+    // of the scheme the call committed, keyed by the callee expression. Only the selection pass
+    // knows which candidate won, and signature help needs it to mark the active signature; recorded
+    // on the commit path only, so failed probes leave nothing behind.
+    selected_overloads: BTreeMap<ExpressionId, usize>,
     // Sites that introduce a genuine `Unknown` into the type lattice, collected while recording is
     // enabled (the authoritative round-2 check). Strict mode reports these origins; ordinary
     // propagation of `Unknown` is never recorded here, so a single root cause yields one diagnostic.
@@ -354,6 +359,10 @@ pub struct ModuleCheck {
     // and needs the bound to render `<T: numeric>` rather than a bare `<T>`; the inference state
     // that knows it is gone by the time the IDE layer reads the stored types.
     pub variable_constraints: BTreeMap<InferenceVariableId, Constraint>,
+    // For each call whose callee resolved to a stub overload set, the declared-set index of the
+    // committed scheme, keyed by the callee expression. Signature help lists the whole set and
+    // marks this one active.
+    pub selected_overloads: BTreeMap<ExpressionId, usize>,
     pub errors: Vec<InferenceError>,
     // Origins of genuine `Unknown` types, each already confirmed to resolve to `Unknown` in the
     // final substitution. Strict mode turns each into one diagnostic; non-strict checks ignore them.
@@ -1264,6 +1273,7 @@ impl InferenceState {
                 }
                 self.strict_origins.clear();
                 self.recorded_expression_types.clear();
+                self.selected_overloads.clear();
                 self.loop_memos.clear();
             }
         }
@@ -1307,6 +1317,7 @@ impl InferenceState {
             expression_types,
             expression_types_by_id,
             variable_constraints,
+            selected_overloads: std::mem::take(&mut self.selected_overloads),
             errors,
             strict_origins,
         }
@@ -5039,9 +5050,19 @@ impl InferenceState {
                 break;
             }
         }
+        let declared_count = schemes.len();
         let schemes = match (has_unresolved_argument, schemes.split_last()) {
             (true, Some((last, _))) => std::slice::from_ref(last),
             _ => schemes,
+        };
+        // Maps a probe index back into the declared set: the unresolved-argument fallback probes
+        // only the final declaration, so its one candidate is the set's last index.
+        let declared_index = |probe_index: usize| {
+            if schemes.len() == declared_count {
+                probe_index
+            } else {
+                declared_count - 1
+            }
         };
 
         // Selection runs strict first, then (only if nothing matched and a whole-number double
@@ -5062,7 +5083,7 @@ impl InferenceState {
 
         let mut first_error = None;
         for &allow_literal_courtesy in literal_courtesy_rounds {
-            for scheme in schemes {
+            for (probe_index, scheme) in schemes.iter().enumerate() {
                 let snapshot = self.snapshot();
                 let function_type = match self
                     .instantiate_type_scheme(scheme)
@@ -5096,6 +5117,10 @@ impl InferenceState {
                 match outcome {
                     Ok(result) => {
                         self.commit(snapshot);
+                        if self.record_expression_types {
+                            self.selected_overloads
+                                .insert(callee.id, declared_index(probe_index));
+                        }
                         return Ok(result);
                     }
                     Err(InferenceError::RecursionLimitExceeded) => {

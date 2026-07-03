@@ -634,20 +634,41 @@ fn run_ide_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String
                     let request = parse_position_request(contents, "signature_help")?;
                     match ide::signature_help(analysis_state, &request.path, request.position) {
                         Some(help) => {
-                            let mut rendered = help.label.clone();
-                            // Parameters are byte spans into the label; rendering the extracted
-                            // text pins that the offsets line up with the rendered signature.
-                            for (index, span) in help.parameters.iter().enumerate() {
-                                let text = help.label.get(span.clone()).ok_or_else(|| {
-                                    "signature parameter span outside its label".to_owned()
-                                })?;
-                                rendered.push_str(&format!("\nparam {index}: {text}"));
+                            // Every signature renders; an overloaded call marks the committed
+                            // candidate. Parameters are byte spans into each label; rendering the
+                            // extracted text pins that the offsets line up with the signature.
+                            let mut rendered = String::new();
+                            for (signature_index, signature) in help.signatures.iter().enumerate() {
+                                if !rendered.is_empty() {
+                                    rendered.push('\n');
+                                }
+                                if help.signatures.len() > 1 {
+                                    let marker = if signature_index == help.active_signature {
+                                        " (active)"
+                                    } else {
+                                        ""
+                                    };
+                                    rendered.push_str(&format!(
+                                        "signature {signature_index}{marker}: "
+                                    ));
+                                }
+                                rendered.push_str(&signature.label);
+                                if signature_index == help.active_signature {
+                                    for (index, span) in signature.parameters.iter().enumerate() {
+                                        let text =
+                                            signature.label.get(span.clone()).ok_or_else(|| {
+                                                "signature parameter span outside its label"
+                                                    .to_owned()
+                                            })?;
+                                        rendered.push_str(&format!("\nparam {index}: {text}"));
+                                    }
+                                    let active = match signature.active_parameter {
+                                        Some(index) => index.to_string(),
+                                        None => "none".to_owned(),
+                                    };
+                                    rendered.push_str(&format!("\nactive parameter: {active}"));
+                                }
                             }
-                            let active = match help.active_parameter {
-                                Some(index) => index.to_string(),
-                                None => "none".to_owned(),
-                            };
-                            rendered.push_str(&format!("\nactive parameter: {active}"));
                             rendered
                         }
                         None => "no signature help".to_owned(),

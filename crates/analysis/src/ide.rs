@@ -62,6 +62,16 @@ pub trait IdeDatabase {
     fn stub_namespace(&self, symbol: Symbol) -> Option<&'static str>;
     // Every standard-library stub name with its scheme, for the stdlib completion source.
     fn stub_schemes(&self) -> Vec<(Symbol, &TypeScheme)>;
+    // The full declared overload set of a stub name, in declaration order; empty for non-stubs.
+    // Signature help lists every candidate of a multi-scheme name.
+    fn stub_overload_schemes(&self, symbol: Symbol) -> &[TypeScheme];
+    // The declared-set index of the overload a call committed, keyed by the callee expression;
+    // `None` when the callee did not resolve to a stub overload set or the call never matched.
+    fn selected_overload(
+        &self,
+        document_id: DocumentId,
+        expression_id: ExpressionId,
+    ) -> Option<usize>;
 }
 
 // `Analysis`'s inherent accessors already expose every fact the trait names, so the impl forwards to
@@ -130,6 +140,18 @@ impl IdeDatabase for Analysis {
 
     fn stub_schemes(&self) -> Vec<(Symbol, &TypeScheme)> {
         self.stub_schemes()
+    }
+
+    fn stub_overload_schemes(&self, symbol: Symbol) -> &[TypeScheme] {
+        self.stub_overload_schemes(symbol)
+    }
+
+    fn selected_overload(
+        &self,
+        document_id: DocumentId,
+        expression_id: ExpressionId,
+    ) -> Option<usize> {
+        self.selected_overload(document_id, expression_id)
     }
 }
 
@@ -207,6 +229,15 @@ pub fn inlay_hints(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignatureHelp {
+    // One entry per signature. Most calls have exactly one; a call whose callee resolved to a stub
+    // overload set lists every declared candidate so the editor can page through them.
+    pub signatures: Vec<SignatureData>,
+    // Index into `signatures` of the committed overload (0 for single-signature calls).
+    pub active_signature: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignatureData {
     pub label: String,
     // Byte spans into `label`, one per parameter in display order (positional, named, then `...`
     // when variadic). Spans rather than copied strings keep the label the single source of truth,
