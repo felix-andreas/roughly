@@ -165,6 +165,9 @@ struct EngineWorker {
     // engine input, so live stub edits publish parse diagnostics from their own buffer and never
     // route through the engine's document inputs.
     stub_documents: HashMap<PathBuf, ropey::Rope>,
+    // Whether the one-time "configuration lives in roughly.toml" notice was already shown for an
+    // editor-settings payload the server does not apply.
+    warned_about_editor_configuration: bool,
     // Open documents with non-`file:` URIs (untitled buffers, virtual editor documents) are served
     // as standalone script documents, keyed internally by a synthetic path (`document_path`) so the
     // path-keyed host and engine tables can track them. This maps each synthetic path back to the
@@ -295,6 +298,7 @@ impl EngineWorker {
             next_file_id: 0,
             documents: HashMap::new(),
             stub_documents: HashMap::new(),
+            warned_about_editor_configuration: false,
             virtual_document_uris: HashMap::new(),
             parser: analysis::tree::new_parser().expect("server parser should initialize"),
             position_encoding,
@@ -1059,8 +1063,26 @@ impl EngineWorker {
         }
     }
 
-    fn did_change_configuration(&mut self, _params: DidChangeConfigurationParams) {
-        // Stub implementation to satisfy Zed's requirements; does not apply any configuration changes.
+    fn did_change_configuration(&mut self, params: DidChangeConfigurationParams) {
+        // Roughly is configured through `roughly.toml`, not editor settings; the notification must
+        // still be accepted (Zed sends it unconditionally). Silently discarding a non-empty
+        // settings payload would leave the user believing their editor configuration applied, so
+        // say where configuration actually lives — once, not per notification.
+        if params.settings.is_null() {
+            return;
+        }
+        if self.warned_about_editor_configuration {
+            return;
+        }
+        self.warned_about_editor_configuration = true;
+        if let Err(error) = self.client.show_message(ShowMessageParams {
+            typ: MessageType::INFO,
+            message: "Roughly is configured through roughly.toml in the workspace root; \
+                      editor settings sent via workspace/didChangeConfiguration are not applied."
+                .to_owned(),
+        }) {
+            tracing::warn!(?error, "failed to send the configuration notice");
+        }
     }
 
     //
