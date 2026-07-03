@@ -307,6 +307,7 @@ pub enum CodeActionKind {
     PrefixDot,
     InsertInferredAnnotation,
     AddMissingAnnotations,
+    IfUnknownToTrust,
 }
 
 impl CodeActionKind {
@@ -318,6 +319,7 @@ impl CodeActionKind {
             Self::PrefixDot => "quickfix.prefix-dot",
             Self::InsertInferredAnnotation => "quickfix.insert-inferred-type-annotation",
             Self::AddMissingAnnotations => "source.addMissingAnnotations",
+            Self::IfUnknownToTrust => "quickfix.if-unknown-to-trust",
         }
     }
 }

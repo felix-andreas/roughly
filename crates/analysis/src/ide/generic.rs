@@ -1000,6 +1000,59 @@ pub fn code_actions(database: &dyn IdeDatabase, path: &Path, range: TextRange) -
 
     let mut actions = Vec::new();
 
+    // `@if-unknown` asserts "only if the checker could not determine a type"; once the value's
+    // type IS determined, the annotation errors and the intended escalation is `@trust`. The
+    // rewrite is offered on any `@if-unknown` in range — it is the directive's one upgrade path.
+    for expression in &module.arena.expressions {
+        let Some(annotation) = &expression.annotation else {
+            continue;
+        };
+        if !matches!(
+            annotation.annotation(),
+            Annotation::Type {
+                kind: TypeAnnotationKind::UnknownOnly,
+                ..
+            }
+        ) {
+            continue;
+        }
+        let block_range = annotation.range();
+        if !expression_overlaps_viewport(block_range, &range) {
+            continue;
+        }
+        let block_text = document
+            .rope()
+            .byte_slice(block_range.start_byte..block_range.end_byte)
+            .to_string();
+        let Some(offset) = block_text.find("@if-unknown") else {
+            continue;
+        };
+        let prefix = &block_text[..offset];
+        let row = block_range.start_point.row + prefix.matches('\n').count();
+        let column = match prefix.rfind('\n') {
+            Some(last_newline) => offset - last_newline - 1,
+            None => block_range.start_point.column + offset,
+        };
+        actions.push(CodeAction {
+            title: "Replace `@if-unknown` with `@trust`".to_owned(),
+            kind: CodeActionKind::IfUnknownToTrust,
+            edits: single_file_edit(
+                path,
+                TextRange {
+                    start: TextPosition {
+                        line_index: row,
+                        character_index: column,
+                    },
+                    end: TextPosition {
+                        line_index: row,
+                        character_index: column + "@if-unknown".len(),
+                    },
+                },
+                "@trust".to_owned(),
+            ),
+        });
+    }
+
     if let Some(naming) = database.document_naming(document_id) {
         for unused in &naming.unused_assignments {
             if !expression_overlaps_viewport(unused.range, &range) {
