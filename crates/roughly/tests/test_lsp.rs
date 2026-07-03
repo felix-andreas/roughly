@@ -18,9 +18,10 @@ use {
             PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams, RenameParams,
             SemanticTokensParams, SemanticTokensResult, ShowMessageParams,
             SignatureHelpClientCapabilities, SignatureHelpParams, SignatureInformationSettings,
-            TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-            TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
-            WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceFolder,
+            SymbolKind, TextDocumentClientCapabilities, TextDocumentContentChangeEvent,
+            TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
+            VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceClientCapabilities,
+            WorkspaceFolder,
             notification::{PublishDiagnostics, ShowMessage},
             request::{RegisterCapability, WorkspaceDiagnosticRefresh},
         },
@@ -1555,6 +1556,50 @@ async fn document_symbols() {
             );
         }
     }
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn document_symbols_include_type_definitions() {
+    let mut context = setup_test(&[]).await;
+
+    let file_uri = context.file_uri("R/typed_syms.R");
+    let source = "#: @type point {list{x: double, y: double}}\n#: @alias points {list[point]}\nmake <- function() 1L\n";
+    context.open_file(&file_uri, source).await;
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    let result = context
+        .server
+        .document_symbol(DocumentSymbolParams {
+            text_document: TextDocumentIdentifier {
+                uri: file_uri.clone(),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("document_symbol request failed")
+        .expect("expected document symbols");
+
+    let DocumentSymbolResponse::Nested(symbols) = result else {
+        panic!("expected nested symbols: {result:?}");
+    };
+    let point = symbols
+        .iter()
+        .find(|symbol| symbol.name == "point")
+        .unwrap_or_else(|| panic!("expected `point` in the outline: {symbols:?}"));
+    assert_eq!(point.kind, SymbolKind::STRUCT);
+    assert_eq!(point.detail.as_deref(), Some("@type"));
+    let points = symbols
+        .iter()
+        .find(|symbol| symbol.name == "points")
+        .unwrap_or_else(|| panic!("expected `points` in the outline: {symbols:?}"));
+    assert_eq!(points.kind, SymbolKind::INTERFACE);
+    assert!(
+        symbols.iter().any(|symbol| symbol.name == "make"),
+        "tree-indexed bindings still appear alongside type definitions"
+    );
 
     context.shutdown().await;
 }
