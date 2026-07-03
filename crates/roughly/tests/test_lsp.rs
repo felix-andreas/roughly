@@ -2867,6 +2867,49 @@ async fn config_reload_failure_keeps_previous_config_and_reports() {
     context.shutdown().await;
 }
 
+#[tokio::test]
+async fn malformed_config_publishes_a_diagnostic_on_the_config_file() {
+    // A workspace whose `roughly.toml` does not parse: the server starts on defaults, and besides
+    // the one-shot message it publishes a persistent diagnostic on the config file itself,
+    // pointing at the offending content.
+    let mut context = setup_test(&[("roughly.toml", "[format]\nspaces = \"lots\"\n")]).await;
+    let config_uri = context.file_uri("roughly.toml");
+
+    let published = recv_diagnostics(&mut context.diagnostics_receiver, &config_uri, TIMEOUT).await;
+    assert_eq!(
+        published.diagnostics.len(),
+        1,
+        "one malformed config, one diagnostic: {:?}",
+        published.diagnostics
+    );
+    let diagnostic = &published.diagnostics[0];
+    assert!(
+        diagnostic.message.contains("invalid config"),
+        "expected the config-error message, got: {}",
+        diagnostic.message
+    );
+    assert_eq!(
+        diagnostic.range.start.line, 1,
+        "the diagnostic points at the offending line"
+    );
+
+    // Fixing the file clears the diagnostic on the next watched-file reload.
+    std::fs::write(
+        context.workspace_dir.join("roughly.toml"),
+        "[format]\nindent-width = 2\n",
+    )
+    .expect("failed to rewrite the config");
+    context.notify_watched_file_changed("roughly.toml", FileChangeType::CHANGED);
+    let cleared = recv_diagnostics(&mut context.diagnostics_receiver, &config_uri, TIMEOUT).await;
+    assert!(
+        cleared.diagnostics.is_empty(),
+        "a config that loads again clears its diagnostic, got: {:?}",
+        cleared.diagnostics
+    );
+
+    context.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn stub_type_name_jumps_to_its_type_declaration() {
     let mut context = setup_test(&[]).await;

@@ -92,6 +92,15 @@ impl ConfigError {
         }
         self
     }
+
+    /// The 1-based line and column of a parse or deserialize failure inside the config text, when
+    /// the underlying toml error carries a span. `None` for I/O failures.
+    pub fn parse_location(&self) -> Option<(usize, usize)> {
+        match self {
+            ConfigError::Invalid(error) => error.location,
+            ConfigError::Io { .. } => None,
+        }
+    }
 }
 
 /// A malformed `roughly.toml`: the toml parse or deserialize failure, with its source span

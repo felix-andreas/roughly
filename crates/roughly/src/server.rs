@@ -1,6 +1,6 @@
 use {
     crate::{
-        config::{CONFIG_FILE_NAME, Config, ExperimentalFeatures},
+        config::{self, CONFIG_FILE_NAME, Config, ExperimentalFeatures},
         diagnostics, format,
         index::{self, IndexError, Item},
         lsp_types::{
@@ -8,7 +8,7 @@ use {
             CodeActionProviderCapability, CodeActionResponse, Command, CompletionItem,
             CompletionItemKind, CompletionItemLabelDetails, CompletionList, CompletionOptions,
             CompletionParams, CompletionResponse, Diagnostic, DiagnosticOptions,
-            DiagnosticServerCancellationData, DiagnosticServerCapabilities,
+            DiagnosticServerCancellationData, DiagnosticServerCapabilities, DiagnosticSeverity,
             DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
             DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
             DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
@@ -20,15 +20,15 @@ use {
             HoverContents, HoverParams, HoverProviderCapability, InitializeParams,
             InitializeResult, InitializedParams, InlayHint, InlayHintKind, InlayHintLabel,
             InlayHintParams, InsertTextFormat, Location, MarkupContent, MarkupKind, MessageType,
-            OneOf, ParameterInformation, ParameterLabel, Position, PublishDiagnosticsParams, Range,
-            ReferenceParams, Registration, RegistrationParams, RelatedFullDocumentDiagnosticReport,
-            RelatedUnchangedDocumentDiagnosticReport, RelativePattern, RenameParams, SaveOptions,
-            SemanticToken, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
-            SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams,
-            SemanticTokensResult, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
-            ShowMessageParams, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-            SignatureInformation, SymbolKind, TextDocumentSyncCapability, TextDocumentSyncKind,
-            TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
+            NumberOrString, OneOf, ParameterInformation, ParameterLabel, Position,
+            PublishDiagnosticsParams, Range, ReferenceParams, Registration, RegistrationParams,
+            RelatedFullDocumentDiagnosticReport, RelatedUnchangedDocumentDiagnosticReport,
+            RelativePattern, RenameParams, SaveOptions, SemanticToken, SemanticTokenType,
+            SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
+            SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
+            ServerCapabilities, ServerInfo, ShowMessageParams, SignatureHelp, SignatureHelpOptions,
+            SignatureHelpParams, SignatureInformation, SymbolKind, TextDocumentSyncCapability,
+            TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
             TypeDefinitionProviderCapability, UnchangedDocumentDiagnosticReport, Url,
             WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
@@ -144,7 +144,7 @@ struct EngineWorker {
     config: Config,
     // A config-discovery failure found during `initialize`, surfaced to the client via
     // `window/showMessage` once `initialized` arrives (the safe point to message every client).
-    pending_config_error: Option<String>,
+    pending_config_error: Option<config::ConfigError>,
     experimental_features: ExperimentalFeatures,
     workspace_root: PathBuf,
     open_documents: HashSet<PathBuf>,
@@ -244,10 +244,7 @@ impl EngineWorker {
         // to the defaults and surface the error once the client is ready for messages.
         let (config, pending_config_error) = match Config::discover(&workspace_root) {
             Ok(config) => (config, None),
-            Err(error) => (
-                Config::default(),
-                Some(format!("{error}; using the default configuration")),
-            ),
+            Err(error) => (Config::default(), Some(error)),
         };
 
         let client_encodings = params
@@ -699,6 +696,45 @@ impl EngineWorker {
         }
     }
 
+    // Publishes a malformed `roughly.toml` as a diagnostic on the config file itself — pointing at
+    // the offending key when the parse error carries a span — so it lands in the problems panel and
+    // persists until fixed, unlike the one-shot message. `None` clears it (the config loads again).
+    fn publish_config_diagnostics(&mut self, error: Option<&config::ConfigError>) {
+        let config_path = self.workspace_root.join(CONFIG_FILE_NAME);
+        let Ok(uri) = Url::from_file_path(&config_path) else {
+            return;
+        };
+        let diagnostics = error
+            .map(|error| {
+                let (line, column) = error.parse_location().unwrap_or((1, 1));
+                let start = Position::new(
+                    line.saturating_sub(1) as u32,
+                    column.saturating_sub(1) as u32,
+                );
+                vec![Diagnostic {
+                    range: Range {
+                        start,
+                        end: Position::new(start.line, start.character + 1),
+                    },
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: Some(NumberOrString::String("config".to_owned())),
+                    code_description: None,
+                    source: Some("roughly".into()),
+                    message: error.to_string(),
+                    related_information: None,
+                    tags: None,
+                    data: None,
+                }]
+            })
+            .unwrap_or_default();
+        if let Err(error) = self
+            .client
+            .publish_diagnostics(PublishDiagnosticsParams::new(uri, diagnostics, None))
+        {
+            tracing::error!(?error, "failed to publish config diagnostics");
+        }
+    }
+
     // Brings every client-visible document current after a change that can move diagnostics in many
     // documents at once (a save, or a config reload). Precisely detecting which documents moved is
     // not reliably available — cross-file naming diagnostics move even when type checking is off —
@@ -737,8 +773,9 @@ impl EngineWorker {
 
 impl EngineWorker {
     fn initialized(&mut self, _: InitializedParams) {
-        if let Some(message) = self.pending_config_error.take() {
-            self.report_error(message);
+        if let Some(error) = self.pending_config_error.take() {
+            self.report_error(format!("{error}; using the default configuration"));
+            self.publish_config_diagnostics(Some(&error));
         }
 
         let workspace_r_path = self.workspace_r_path();
@@ -1076,9 +1113,11 @@ impl EngineWorker {
                     Ok(config) => {
                         config_changed |= config != self.config;
                         self.config = config;
+                        self.publish_config_diagnostics(None);
                     }
                     Err(error) => {
                         self.report_error(format!("{error}; keeping the previous configuration"));
+                        self.publish_config_diagnostics(Some(&error));
                     }
                 }
                 continue;
