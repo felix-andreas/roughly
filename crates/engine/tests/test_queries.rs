@@ -19,7 +19,7 @@
 
 use engine::{
     Engine,
-    queries::{Config, FileId, Key, RoughlyQueries},
+    queries::{Config, FileId, Key, RoughlyQueries, parse_source_input},
 };
 
 const A: FileId = 0; // defines `x`
@@ -32,7 +32,7 @@ fn setup(sources: &[(FileId, &str)]) -> Engine<RoughlyQueries> {
     engine.set_input(Key::ProjectFiles, files);
     engine.set_input(Key::Config, Config::default());
     for (file, source) in sources {
-        engine.set_input(Key::SourceText(*file), (*source).to_owned());
+        engine.set_input(Key::SourceText(*file), parse_source_input(source));
         engine.set_input(
             Key::DocumentKind(*file),
             analysis::naming::DocumentKind::Package,
@@ -92,7 +92,10 @@ fn body_edit_does_not_refold_index_and_confines_to_referrers() {
 
     // Body-only edit: same exported name `x`, but its return type goes integer -> string.
     let mut engine = engine;
-    engine.set_input(Key::SourceText(A), "x <- function() \"two\"".to_owned());
+    engine.set_input(
+        Key::SourceText(A),
+        parse_source_input("x <- function() \"two\""),
+    );
     realize_all(&engine);
     let group = engine.group();
 
@@ -143,7 +146,7 @@ fn body_edit_with_unchanged_scheme_cuts_off_at_exported_schemes() {
     let typecheck_b_before = engine.group().typecheck_runs(B);
 
     let mut engine = engine;
-    engine.set_input(Key::SourceText(A), "x <- function() 2".to_owned()); // still () -> integer
+    engine.set_input(Key::SourceText(A), parse_source_input("x <- function() 2")); // still () -> integer
     realize_all(&engine);
     let group = engine.group();
 
@@ -178,7 +181,10 @@ fn structural_edit_refolds_index_once_but_firewall_confines_propagation() {
 
     // Add a new top-level binding `y` to a.R: the exported-name set changes {x} -> {x, y}.
     let mut engine = engine;
-    engine.set_input(Key::SourceText(A), "x <- function() 1\ny <- 2".to_owned());
+    engine.set_input(
+        Key::SourceText(A),
+        parse_source_input("x <- function() 1\ny <- 2"),
+    );
     realize_all(&engine);
     let group = engine.group();
 
@@ -230,7 +236,7 @@ fn package_naming_diagnostics_are_incremental() {
 
     // Body-only edit to a.R: same exported name `x`, body literal changes. b and c reference nothing
     // whose resolution moved, so neither re-runs its package-naming diagnostics.
-    engine.set_input(Key::SourceText(A), "x <- function() 2".to_owned());
+    engine.set_input(Key::SourceText(A), parse_source_input("x <- function() 2"));
     realize_all(&engine);
     assert_eq!(
         engine.group().package_naming_diagnostics_runs(B),
@@ -286,7 +292,7 @@ fn package_naming_diagnostics_are_incremental() {
 #[test]
 fn fetching_through_a_tombstoned_source_yields_empty_without_panic() {
     let mut engine = Engine::new(RoughlyQueries::new());
-    engine.set_input(Key::SourceText(A), "x <- 1L".to_owned());
+    engine.set_input(Key::SourceText(A), parse_source_input("x <- 1L"));
     // Record the `Lower(A) -> Parse(A) -> SourceText(A)` chain.
     let module = engine.fetch::<analysis::hir::Module>(Key::Lower(A));
     assert!(!module.expressions.is_empty());

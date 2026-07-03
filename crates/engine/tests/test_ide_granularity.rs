@@ -10,7 +10,7 @@ use {
     engine::{
         Engine,
         ide_view::{EngineIde, PathTable},
-        queries::{Config, FileId, Key, RoughlyQueries},
+        queries::{Config, FileId, Key, RoughlyQueries, parse_source_input},
     },
     std::path::PathBuf,
 };
@@ -43,7 +43,7 @@ impl Host {
         let mut engine = Engine::new(RoughlyQueries::new());
         let mut paths = PathTable::new(PathBuf::from(BASE));
         for (id, source) in files {
-            engine.set_input(Key::SourceText(*id), (*source).to_owned());
+            engine.set_input(Key::SourceText(*id), parse_source_input(source));
             engine.set_input(Key::DocumentKind(*id), DocumentKind::Package);
             paths.insert(*id, package_path(*id));
         }
@@ -57,7 +57,7 @@ impl Host {
 
     fn edit(&mut self, id: FileId, source: &str) {
         self.engine
-            .set_input(Key::SourceText(id), source.to_owned());
+            .set_input(Key::SourceText(id), parse_source_input(source));
     }
 
     // Each feature drives the genuine `EngineIde` priming path; the result is discarded because the

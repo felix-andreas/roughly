@@ -19,7 +19,7 @@ use {
     },
     engine::{
         Engine,
-        queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries},
+        queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries, parse_source_input},
     },
 };
 
@@ -29,7 +29,7 @@ fn setup(sources: &[(FileId, &str)]) -> Engine<RoughlyQueries> {
     engine.set_input(Key::ProjectFiles, files);
     engine.set_input(Key::Config, Config::default());
     for (file, source) in sources {
-        engine.set_input(Key::SourceText(*file), (*source).to_owned());
+        engine.set_input(Key::SourceText(*file), parse_source_input(source));
         engine.set_input(Key::DocumentKind(*file), DocumentKind::Package);
     }
     engine
@@ -87,7 +87,10 @@ fn monotone_reexport_chain_converges_to_concrete() {
     );
 
     // Edit the concrete base: integer -> string. The change must propagate up the whole chain.
-    engine.set_input(Key::SourceText(2), "c <- function() \"two\"".to_owned());
+    engine.set_input(
+        Key::SourceText(2),
+        parse_source_input("c <- function() \"two\""),
+    );
     let scheme_a_after = global_scheme(&engine, a);
     let scheme_c_after = global_scheme(&engine, c);
     assert_ne!(

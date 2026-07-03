@@ -197,6 +197,15 @@ pub struct Config {
     pub lint: LintConfig,
 }
 
+/// Parses a source string into the `SourceText` input value. Hosts that already hold an
+/// incrementally-maintained [`Document`] (the language server's open buffers) feed it directly
+/// instead — that is the whole point of the parsed input: one parse per edit, done by the host.
+pub fn parse_source_input(source: &str) -> ParsedDocument {
+    let mut parser = analysis::tree::new_parser().expect("tree-sitter parser should initialize");
+    let document = Document::parse(&mut parser, source).expect("engine input source should parse");
+    ParsedDocument(document)
+}
+
 /// The `Parse` value. [`Document`] is not `PartialEq`, but its tree is a pure function of the source, so
 /// rope equality is a sound cutoff proxy: equal source ⇒ equal parse for everything downstream reads.
 pub struct ParsedDocument(pub Document);
@@ -477,16 +486,21 @@ impl QueryGroup for RoughlyQueries {
 
             Key::Parse(file) => {
                 bump(&self.counters.parse, *file);
-                // Read the source through `fetch_optional`: a removed `SourceText` (a tombstone) degrades to
-                // an empty document instead of panicking, so a stale dependency edge walked into `Parse(f)`
-                // after a deletion yields an empty parse rather than resurrecting the removed input (tombstone
-                // hardening; see `Engine::fetch_optional`).
-                let source = engine.fetch_optional::<String>(Key::SourceText(*file));
-                let text = source.as_deref().map(String::as_str).unwrap_or("");
-                let mut parser = self.parser.borrow_mut();
-                let document = Document::parse(&mut parser, text)
-                    .expect("engine query: open document source should parse");
-                Stored::new(ParsedDocument(document))
+                // The input already carries the parsed document — the host parses once (open files
+                // maintain their tree incrementally across keystrokes), so this query only projects
+                // it. Read through `fetch_optional`: a removed input (a tombstone) degrades to an
+                // empty document instead of panicking, so a stale dependency edge walked into
+                // `Parse(f)` after a deletion yields an empty parse rather than resurrecting the
+                // removed input (tombstone hardening; see `Engine::fetch_optional`).
+                match engine.fetch_optional::<ParsedDocument>(Key::SourceText(*file)) {
+                    Some(parsed) => Stored::new(ParsedDocument(parsed.0.clone())),
+                    None => {
+                        let mut parser = self.parser.borrow_mut();
+                        let document = Document::parse(&mut parser, "")
+                            .expect("engine query: the empty tombstone source should parse");
+                        Stored::new(ParsedDocument(document))
+                    }
+                }
             }
 
             Key::Lower(file) => {
@@ -1946,8 +1960,13 @@ fn fallback_range(engine: &Engine<RoughlyQueries>) -> Range {
         if *kind != DocumentKind::Package {
             continue;
         }
-        let text = engine.fetch::<String>(Key::SourceText(*file));
-        let first_line_length = text.split_inclusive('\n').next().unwrap_or("").len();
+        let parsed = engine.fetch::<ParsedDocument>(Key::SourceText(*file));
+        let first_line_length = parsed
+            .0
+            .rope()
+            .get_line(0)
+            .map(|line| line.len_bytes())
+            .unwrap_or(0);
         return Range {
             start_byte: 0,
             end_byte: first_line_length,

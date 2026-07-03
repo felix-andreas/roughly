@@ -37,7 +37,7 @@ use {
     },
     engine::{
         Engine,
-        queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries},
+        queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries, parse_source_input},
     },
     std::collections::BTreeMap,
     tree_sitter::{Parser, Range},
@@ -123,7 +123,7 @@ impl Lifecycle {
     fn set_source_input(&mut self, path: &str, text: &str) {
         let file = self.file_id_for(path);
         self.engine
-            .set_input(Key::SourceText(file), text.to_owned());
+            .set_input(Key::SourceText(file), parse_source_input(text));
         self.engine.set_input(
             Key::DocumentKind(file),
             if is_package_path(path) {

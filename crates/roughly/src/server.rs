@@ -567,8 +567,18 @@ impl EngineWorker {
     // Set (or update) a file's engine source inputs. Does not touch `ProjectFiles`; the caller invokes
     // `rebuild_project_files` when the file SET changes (add/remove), not on a text-only edit.
     fn set_source_input(&mut self, path: &Path, text: String, is_package: bool) {
+        let mut parser = analysis::tree::new_parser().expect("server parser should initialize");
+        let document = Document::parse(&mut parser, &text)
+            .unwrap_or_else(|_| panic!("failed to parse source input {}", path.display()));
+        self.set_parsed_input(path, document, is_package);
+    }
+
+    // Feeds an already-parsed document into the engine — the one parse per edit. Open buffers pass
+    // their incrementally-maintained document here, so a keystroke never re-parses the file.
+    fn set_parsed_input(&mut self, path: &Path, document: Document, is_package: bool) {
         let file = self.file_id_for(path);
-        self.engine.set_input(Key::SourceText(file), text);
+        self.engine
+            .set_input(Key::SourceText(file), ParsedDocument(document));
         self.engine.set_input(
             Key::DocumentKind(file),
             if is_package {
@@ -754,10 +764,10 @@ impl EngineWorker {
 
         let document = Document::parse(&mut self.parser, text)
             .unwrap_or_else(|_| panic!("failed to parse open document buffer {}", path.display()));
-        self.documents.insert(path.clone(), document);
+        self.documents.insert(path.clone(), document.clone());
         self.open_documents.insert(path.clone());
         let is_package = self.is_package_path(&path);
-        self.set_source_input(&path, text.clone(), is_package);
+        self.set_parsed_input(&path, document, is_package);
         self.rebuild_project_files();
 
         if !self.client_supports_pull_diagnostics {
@@ -916,16 +926,17 @@ impl EngineWorker {
                     )
                 });
         }
-        // A text-only edit leaves the file SET unchanged, so only the file's `SourceText` is re-set (no
-        // `rebuild_project_files`); the buffer is the source of truth for the new text.
-        let text = self
+        // A text-only edit leaves the file SET unchanged, so only the file's input is re-set (no
+        // `rebuild_project_files`). The incrementally-maintained buffer IS the input — the edit
+        // already re-parsed it in place, so the engine sees the same tree without a second parse
+        // or a whole-buffer re-materialization.
+        let document = self
             .documents
             .get(&path)
             .expect("open document buffer present after did_change")
-            .rope()
-            .to_string();
+            .clone();
         let is_package = self.is_package_path(&path);
-        self.set_source_input(&path, text, is_package);
+        self.set_parsed_input(&path, document, is_package);
 
         if !self.client_supports_pull_diagnostics {
             let diagnostics = self.convert_document_diagnostics(&path);

@@ -11,7 +11,7 @@ use {
     engine::{
         Cancelled, Engine,
         ide_view::{EngineIde, PathTable},
-        queries::{Config, FileId, Key, RoughlyQueries},
+        queries::{Config, FileId, Key, RoughlyQueries, parse_source_input},
     },
     std::{
         path::PathBuf,
@@ -38,7 +38,7 @@ fn build_single_file_engine() -> (Engine<RoughlyQueries>, PathTable, PathBuf) {
     let mut engine = Engine::new(RoughlyQueries::new());
     engine.set_input(
         Key::SourceText(file),
-        "add <- function(x, y) x + y\nz <- add(1L, 2L)\n".to_owned(),
+        parse_source_input("add <- function(x, y) x + y\nz <- add(1L, 2L)\n"),
     );
     engine.set_input(Key::DocumentKind(file), DocumentKind::Package);
     engine.set_input(Key::ProjectFiles, vec![file]);

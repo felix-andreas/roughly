@@ -22,7 +22,7 @@ use {
     engine::{
         Engine,
         ide_view::{EngineIde, PathTable},
-        queries::{Config, FileId, Key, RoughlyQueries},
+        queries::{Config, FileId, Key, RoughlyQueries, parse_source_input},
     },
     std::{collections::BTreeMap, path::PathBuf},
 };
@@ -102,7 +102,7 @@ fn build_engine(workspace: &Workspace) -> (Engine<RoughlyQueries>, PathTable) {
     let mut engine = Engine::new(RoughlyQueries::new());
     let mut paths = PathTable::new(PathBuf::from(BASE));
     for (id, state) in &workspace.files {
-        engine.set_input(Key::SourceText(*id), state.source.clone());
+        engine.set_input(Key::SourceText(*id), parse_source_input(&state.source));
         engine.set_input(
             Key::DocumentKind(*id),
             if state.package {
@@ -440,7 +440,7 @@ fn sync_engine(
         }
     }
     for (id, state) in &next.files {
-        engine.set_input(Key::SourceText(*id), state.source.clone());
+        engine.set_input(Key::SourceText(*id), parse_source_input(&state.source));
         engine.set_input(
             Key::DocumentKind(*id),
             if state.package {

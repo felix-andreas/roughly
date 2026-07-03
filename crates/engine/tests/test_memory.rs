@@ -15,7 +15,7 @@ use {
     analysis::{Analysis, CheckConfig, LintConfig, naming::DocumentKind, run_full},
     engine::{
         Engine,
-        queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries},
+        queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries, parse_source_input},
     },
     std::{
         alloc::{GlobalAlloc, Layout, System},
@@ -105,7 +105,10 @@ fn build_and_warm_new_engine(file_count: usize) -> Engine<RoughlyQueries> {
         },
     );
     for index in 0..file_count {
-        engine.set_input(Key::SourceText(index as FileId), generate_source(index));
+        engine.set_input(
+            Key::SourceText(index as FileId),
+            parse_source_input(&generate_source(index)),
+        );
         engine.set_input(Key::DocumentKind(index as FileId), DocumentKind::Package);
     }
     for index in 0..file_count as FileId {

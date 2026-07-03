@@ -50,7 +50,7 @@ use {
     analysis::{Analysis, CheckConfig, LintConfig, naming::DocumentKind, run_full},
     engine::{
         Engine,
-        queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries},
+        queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries, parse_source_input},
     },
     std::{
         path::PathBuf,
@@ -133,7 +133,7 @@ fn build_new_engine(file_count: usize) -> Engine<RoughlyQueries> {
     for index in 0..file_count {
         engine.set_input(
             Key::SourceText(index as FileId),
-            generate_source(index, false),
+            parse_source_input(&generate_source(index, false)),
         );
         engine.set_input(Key::DocumentKind(index as FileId), DocumentKind::Package);
     }
@@ -172,7 +172,7 @@ fn measure_new_per_edit(
         let returns_double = round % 2 == 0;
         engine.set_input(
             Key::SourceText(edit_file),
-            generate_source(edit_file as usize, returns_double),
+            parse_source_input(&generate_source(edit_file as usize, returns_double)),
         );
         let start = Instant::now();
         let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(edit_file));
@@ -258,7 +258,7 @@ fn body_edit_recheck_is_blast_radius_bounded() {
     // BODY-ONLY edit: every `g_{edit}_*` returns double instead of integer. Same exported name set.
     engine.set_input(
         Key::SourceText(edit_file),
-        generate_source(edit_file as usize, true),
+        parse_source_input(&generate_source(edit_file as usize, true)),
     );
     // Re-fetch EVERY file's diagnostics, so any file that *would* recompute does — the delta below is
     // then the true package-wide recompute set, not an artifact of which files we chose to fetch.
