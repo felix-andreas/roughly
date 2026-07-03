@@ -193,6 +193,23 @@ sprintf("%d-%s", 1L, "a")
 #++++
 character
 
+#---- unmatched_named_argument_absorbs_into_rest
+paste("a", quote = FALSE)
+#++++
+character
+
+#---- absorbed_named_argument_checks_the_rest_element_and_steers_selection
+sum(1L, 2L, extra = 2L)
+sum(1L, 2L, extra = "x")
+#++++
+integer
+Any
+
+#---- duplicated_declared_parameter_is_rejected_despite_rest
+paste("a", sep = "-", sep = "_")
+#++++
+error: named parameter mismatch
+
 #==== type_preserving_reductions
 #---- sum_of_integers_is_integer
 sum(1L, 2L, 3L)

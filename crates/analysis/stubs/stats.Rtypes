@@ -30,9 +30,11 @@ na.omit : fn(object: Any) -> Any
 complete.cases : fn(...: Any) -> logical
 
 # Model fitting and prediction: the result is a model object whose shape depends on the formula and
-# data (no nameable model/data.frame types yet), so it is not statically typeable.
-lm : Any
-glm : Any
+# data, so results stay `Any` — but the fitters' subjects are checkable: the formula comes first
+# positionally, `data`/`family` are real named formals, and every other keyword is absorbed by the
+# rest parameter (R forwards them to the fitting method).
+lm : fn(formula, [data]: Any, [subset]: Any, [weights]: Any, [na.action]: Any, ...: Any) -> Any
+glm : fn(formula, [family]: Any, [data]: Any, [subset]: Any, [weights]: Any, [na.action]: Any, ...: Any) -> Any
 nls : Any
 loess : Any
 aov : Any

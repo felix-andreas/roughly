@@ -989,7 +989,8 @@ A **rest parameter** (`...: TYPE`) changes how surplus arguments are handled:
 - a rest parameter adds no required arguments, so a variadic function may be called with none (`paste()` is legal)
 - after the fixed positional and named parameters are matched, any number of remaining positional arguments are absorbed by the rest parameter, each checked against its element type
 - surplus positional arguments never fill an optional named parameter of a variadic function; a named parameter after `...` is matched by name only (as in R), so `sum(1, 2, na.rm = TRUE)` sends `1` and `2` to the rest and `na.rm` by name
-- an unmatched **named** argument is still a named-parameter error even when the callee is variadic; named arguments are never routed into the rest parameter
+- a named argument matching **no declared parameter** is also absorbed by the rest parameter and checked against its element type — R collects unmatched keywords into `...`, the pass-through idiom variadic wrappers rely on (`read.csv(file, colClasses = "character")`)
+- a named argument that **duplicates a declared parameter already given** stays a named-parameter error even with a rest parameter (R rejects a formal matched by multiple actual arguments); without a rest parameter, any unmatched named argument is an error as before
 
 ### Overload sets
 

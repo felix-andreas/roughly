@@ -587,10 +587,12 @@ fn active_parameter(
         }
     }
 
+    // A named argument targets the parameter it names; a name matching no declared parameter is
+    // absorbed by `...` (the checker's named-into-rest rule), so the variadic slot highlights.
     let named_target = arguments
         .get(cursor_index)
         .and_then(|argument| argument.name)
-        .and_then(slot_for_name);
+        .and_then(|name| slot_for_name(name).or(variadic_slot));
 
     Some(
         named_target

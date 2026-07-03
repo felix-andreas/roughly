@@ -287,10 +287,12 @@ return. The recurring compromises are named once in the `base.Rtypes` header and
   return `Any` (never a falsely-precise `double`) until the `T[]` generic design lands.
 - **NULL-hybrid** — the result is `T`-or-`NULL` depending on the runtime value (`names`, `dim`,
   `nrow`); returns `Any` (see the gaps table).
-- **named-formals** — a variadic function's named formals must all be declared (`paste`'s
-  `sep`/`collapse`, `cat`'s `sep`, `format`'s `nsmall`), because an undeclared named formal is a false
-  "unknown named argument" error; where the named-argument space is *open* (`data.frame`), the stub
-  must be an `Any` value instead.
+- **named-formals** — declare the named formals whose *types* are worth checking (`paste`'s
+  `sep`/`collapse`, `read.csv`'s `header`/`sep`). An undeclared named argument to a variadic
+  function is not an error: it is absorbed by the rest parameter and checked against its element
+  type (the checker's named-into-rest rule, matching R), so open named-argument spaces
+  (`read.csv`'s pass-through to `read.table`, `lm`'s fitting controls) work with `...: Any` —
+  declaring a formal buys a typed check, omitting it buys pass-through.
 
 **Two-tier dynamic marker** (borrowed from typeshed): keep a real `Any` for genuinely untypeable
 returns *distinct from* a greppable "incomplete / not-yet-typed" marker. The distinction makes partial

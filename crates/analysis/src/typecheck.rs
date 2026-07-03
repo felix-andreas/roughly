@@ -5245,6 +5245,23 @@ impl InferenceState {
                     .iter()
                     .position(|parameter| parameter.name == name)
                 else {
+                    // A named argument matching no declared parameter is absorbed by the rest
+                    // parameter, checked against its element type (R collects unmatched keywords
+                    // into `...` — the pass-through idiom `read.csv(f, colClasses = ...)`). A name
+                    // that *duplicates* a declared parameter already given stays an error (R:
+                    // "formal argument matched by multiple actual arguments"), and without a rest
+                    // parameter an unmatched name is an error as before.
+                    if let Some(element) = &variadic_element
+                        && !expected_named_parameters.contains(&name)
+                    {
+                        self.check_argument(
+                            element.clone(),
+                            inferred_argument,
+                            arg_expr,
+                            type_definitions,
+                        )?;
+                        continue;
+                    }
                     return Err(InferenceError::NamedParameterMismatch {
                         expected_parameters: expected_named_parameters,
                         actual_parameters: actual_named_arguments,

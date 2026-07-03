@@ -25,10 +25,27 @@ str(list(1L), max.level = 1L)
 NULL
 
 #==== utils_io
-#---- read_csv_stays_any
+#---- read_csv_returns_a_data_frame
 read.csv("data.csv")
 #++++
-Any
+data.frame
+
+#---- read_csv_checks_declared_controls_and_absorbs_passthrough_keywords
+read.csv("data.csv", header = FALSE, stringsAsFactors = FALSE)
+read.table("data.tsv", sep = "\t", nrows = 10L, comment.char = "")
+#++++
+data.frame
+data.frame
+
+#---- read_csv_rejects_a_mistyped_declared_control
+read.csv("data.csv", header = "yes")
+#++++
+error: type mismatch
+
+#---- read_csv_accepts_a_connection_subject
+read.csv(file("data.csv"))
+#++++
+data.frame
 
 #---- write_csv_is_null
 write.csv("x", "out.csv")

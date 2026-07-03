@@ -127,12 +127,30 @@ dbinom(3, 10, 0.5, log = TRUE)
 double[]
 
 #==== stats_models
-#---- model_fitters_stay_any
-lm(c(1, 2))
-glm(c(1, 2))
+#---- model_fitters_take_a_formula_and_return_any
+x <- c(1, 2)
+y <- c(2, 4)
+lm(y ~ x)
+glm(y ~ x, family = "poisson")
 #++++
+double[]
+double[]
 Any
 Any
+
+#---- model_fitters_absorb_passthrough_keywords
+x <- c(1, 2)
+y <- c(2, 4)
+lm(y ~ x, singular.ok = TRUE)
+#++++
+double[]
+double[]
+Any
+
+#---- model_fitter_rejects_a_non_formula_subject
+lm(c(1, 2))
+#++++
+error: type mismatch
 
 #---- prediction_helpers_stay_any
 predict(1L)
