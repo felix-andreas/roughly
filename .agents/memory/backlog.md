@@ -111,8 +111,7 @@ Formatter (all verified):
 
 ## Independent track (anytime, small)
 
-- Doc/impl mismatches: `DESIGN.md` §3 "typecheck never reads project_files" false for scripts; `stdlib_stubs` listed as an engine input it isn't; stale round-caching comment on `analysis.rs` fixed-point; `linter.md` "two further checks" (there are three). (The `stdlib-stubs.md` `identity`/`Map` generic-scheme claim is fixed — the page no longer lists either as a generic.)
-- MEMORY.md corrections: type-notation cursor features are *partial* (see Phase 4); the malformed-input differential claim ("generator is well-formed") is stale — the generator emits malformed sources.
+- (All previously recorded doc/impl mismatches are fixed and verified: `DESIGN.md` §3 documents the script exception and `stdlib_stubs` as a non-input; `linter.md` says three further checks; MEMORY.md's differential claim covers malformed input.)
 
 ## Website / docs-site track (parallel to the beta program, user-facing)
 
