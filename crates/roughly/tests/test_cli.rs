@@ -30,7 +30,11 @@ fn stderr(output: &Output) -> String {
 fn project(files: &[(&str, &str)]) -> tempfile::TempDir {
     let directory = tempfile::tempdir().expect("failed to create a temporary directory");
     for (name, content) in files {
-        fs::write(directory.path().join(name), content).expect("failed to write a test file");
+        let path = directory.path().join(name);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("failed to create test directories");
+        }
+        fs::write(path, content).expect("failed to write a test file");
     }
     directory
 }
@@ -198,6 +202,45 @@ fn check_missing_target_exits_two() {
     let directory = project(&[]);
     let output = roughly(directory.path(), &["check", "does-not-exist.R"]);
     assert_eq!(exit_code(&output), 2, "stderr: {}", stderr(&output));
+}
+
+#[test]
+fn check_reports_dropped_override_stub_declarations() {
+    // The loader drops an override declaration it cannot harvest; `check` must say so instead of
+    // silently checking against a corpus the author did not write.
+    let directory = project(&[
+        ("clean.R", "x <- 1\n"),
+        ("stubs/project.Rtypes", "size : Frobnicate\n"),
+    ]);
+    let output = roughly(directory.path(), &["check", "clean.R"]);
+    let stderr = stderr(&output);
+
+    assert_eq!(
+        exit_code(&output),
+        1,
+        "a dropped override declaration is a finding: {stderr}"
+    );
+    assert!(
+        stderr.contains("does not load"),
+        "expected the dropped declaration to be reported, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("project.Rtypes:1:1"),
+        "expected a 1-based stub-file position header, got: {stderr}"
+    );
+}
+
+#[test]
+fn check_loads_valid_override_stubs_silently() {
+    let directory = project(&[
+        ("clean.R", "x <- 1\n"),
+        (
+            "stubs/project.Rtypes",
+            "my_helper : fn(x: double) -> double\n",
+        ),
+    ]);
+    let output = roughly(directory.path(), &["check", "clean.R"]);
+    assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
 }
 
 #[test]

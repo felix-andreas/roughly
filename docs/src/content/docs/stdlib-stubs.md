@@ -139,6 +139,11 @@ project supplies **replaces** the shipped declaration of the same name — a pro
 type or add a name the shipped corpus omits. A missing directory, an unreadable file, or a malformed
 line is skipped: overrides are optional and one bad line must never block analysis.
 
+Skipped never means silent. `roughly check` reports every dropped override declaration as an error
+on its stub line (a line that fails to parse, or a declaration naming an unresolvable type) and
+treats an unreadable override file as an I/O failure, and the editor shows the same problems as
+diagnostics while a `.Rtypes` file is open.
+
 ## 2. Base-environment model
 
 **One source of truth for everything scheme-shaped, plus a small justified hardcoded kernel.**
@@ -365,8 +370,9 @@ machinery. This closes the `T`/`F`/`pi` gap with only the two integration edits 
   the corpus must be a **subset** of the snapshot (every stubbed name must be a real export; a stubbed
   non-export is a hard failure); unstubbed real exports are allowed and only gauge-counted, and no
   percentage is ever asserted. The suite additionally asserts that every shipped stub source parses
-  and harvests **cleanly** (the loader still drops malformed lines silently — see the backlog item on
-  loader diagnostics) and that the loader-visible names match the corpus files exactly.
+  and harvests **cleanly** (the loader drops malformed lines rather than aborting, and dropped
+  *override* declarations are reported by `roughly check` and the editor) and that the loader-visible
+  names match the corpus files exactly.
 - **`Any` over-permissiveness** silences real errors — hence the two-tier marker in §4.
 - **Incremental isolation** is automatic — a set-once input; see §3.
 

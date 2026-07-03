@@ -161,8 +161,13 @@ impl Analysis {
     pub fn new(base_path: PathBuf, lint_config: LintConfig, check_config: CheckConfig) -> Self {
         // A project may ship its own `.Rtypes` stubs under `<base_path>/stubs/` that override or extend the
         // shipped corpus. They are discovered and folded in once here; the assembled library is a
-        // set-once base-environment input.
-        let overrides = crate::stdlib::discover_project_stub_sources(&base_path);
+        // set-once base-environment input. Unreadable override files are skipped — reporting them is
+        // the caller's concern (`roughly check` reports them; here they must never block analysis).
+        let overrides: Vec<String> = crate::stdlib::discover_project_stubs(&base_path)
+            .sources
+            .into_iter()
+            .map(|stub_source| stub_source.source)
+            .collect();
         Self::new_with_stub_library(base_path, lint_config, check_config, move |interner| {
             StubLibrary::load_with_overrides(interner, &overrides)
         })

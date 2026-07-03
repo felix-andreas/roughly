@@ -8,7 +8,7 @@ use {
     },
     std::{
         collections::{BTreeMap, BTreeSet},
-        path::Path,
+        path::{Path, PathBuf},
     },
     tree_sitter::Range,
 };
@@ -198,14 +198,56 @@ pub fn stub_editing_type_definitions(
 ) -> TypeDefinitionEnvironment {
     let mut type_definitions = TypeDefinitionEnvironment::default();
     for &(_, source) in SHIPPED_STUBS {
-        for type_declaration in parse_stub_file(source, interner).types {
-            type_definitions.seed_opaque_type(type_declaration.name);
-        }
+        seed_stub_source_types(interner, source, &mut type_definitions);
     }
-    for type_declaration in parse_stub_file(buffer_source, interner).types {
-        type_definitions.seed_opaque_type(type_declaration.name);
-    }
+    seed_stub_source_types(interner, buffer_source, &mut type_definitions);
     type_definitions
+}
+
+// One declaration the stub loader drops from a source, located by its (zero-based) line: a line
+// that fails to parse, or a declaration that parses but fails to harvest into a scheme (an
+// unresolvable type name, for example). Every surface that reports stub feedback — the editor's
+// `.Rtypes` buffer diagnostics and `roughly check`'s override report — renders from this one list,
+// so the wording stays identical.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StubProblem {
+    pub line: usize,
+    pub message: String,
+}
+
+// Everything the loader drops from one stub source against `type_definitions`, ordered by line.
+pub fn stub_source_problems(
+    interner: &mut Interner,
+    source: &str,
+    type_definitions: &TypeDefinitionEnvironment,
+) -> Vec<StubProblem> {
+    let (declarations, errors) = parse_stub_declarations(source, interner);
+    let mut problems: Vec<StubProblem> = errors
+        .into_iter()
+        .map(|error| StubProblem {
+            line: error.line,
+            message: error.message,
+        })
+        .collect();
+    let mut inference_state = InferenceState::new();
+    for declaration in &declarations {
+        let Err(error) =
+            inference_state.harvest_annotation_scheme(&declaration.surface_type, type_definitions)
+        else {
+            continue;
+        };
+        let rendered = crate::diagnostic::Diagnostic::from_inference_error(
+            &error,
+            declaration.range,
+            interner,
+        );
+        problems.push(StubProblem {
+            line: declaration.range.start_point.row,
+            message: format!("this declaration does not load: {}", rendered.message),
+        });
+    }
+    problems.sort_by_key(|problem| problem.line);
+    problems
 }
 
 // The names each shipped namespace declares, keyed by namespace in `SHIPPED_STUBS` order. Names are
@@ -230,14 +272,30 @@ pub fn shipped_stub_names_by_namespace() -> Vec<(&'static str, Vec<String>)> {
         .collect()
 }
 
-// Reads a project's override stub files from `<root>/stubs/*.Rtypes`, in sorted path order, returning their
-// source text. A project drops declaration-only stub files there to override or extend the shipped
-// standard-library stubs. A missing directory or an unreadable file is silently skipped: overrides are
-// optional, and a malformed override must never block analysis.
-pub fn discover_project_stub_sources(root: &Path) -> Vec<String> {
+// One readable project override stub file, in `<root>/stubs/*.Rtypes`.
+#[derive(Debug, Clone)]
+pub struct ProjectStubSource {
+    pub path: PathBuf,
+    pub source: String,
+}
+
+// A project's override stub files: the readable ones (in sorted path order — the order the loader
+// folds them) plus the paths that could not be read, with the read error. Overrides are optional
+// and a broken one must never block analysis, so consumers load `sources` and decide how loudly to
+// report `unreadable` (`roughly check` reports it as an I/O failure; the server logs it).
+#[derive(Debug, Clone, Default)]
+pub struct ProjectStubs {
+    pub sources: Vec<ProjectStubSource>,
+    pub unreadable: Vec<(PathBuf, String)>,
+}
+
+// Reads a project's override stub files from `<root>/stubs/*.Rtypes`. A project drops
+// declaration-only stub files there to override or extend the shipped standard-library stubs. A
+// missing directory means no overrides.
+pub fn discover_project_stubs(root: &Path) -> ProjectStubs {
     let stubs_directory = root.join("stubs");
     let Ok(entries) = std::fs::read_dir(&stubs_directory) else {
-        return Vec::new();
+        return ProjectStubs::default();
     };
     let mut paths = entries
         .flatten()
@@ -248,10 +306,47 @@ pub fn discover_project_stub_sources(root: &Path) -> Vec<String> {
         })
         .collect::<Vec<_>>();
     paths.sort();
-    paths
+    let mut project_stubs = ProjectStubs::default();
+    for path in paths {
+        match std::fs::read_to_string(&path) {
+            Ok(source) => project_stubs
+                .sources
+                .push(ProjectStubSource { path, source }),
+            Err(error) => project_stubs.unreadable.push((path, error.to_string())),
+        }
+    }
+    project_stubs
+}
+
+// The per-file problem lists for a set of override sources, parallel to `sources`. Harvest runs
+// exactly as `load_with_overrides` runs it — opaque types are collected across the shipped corpus
+// and every override first — so a declaration referencing a type another override file declares
+// does not falsely report as unloadable.
+pub fn stub_override_problems(sources: &[ProjectStubSource]) -> Vec<Vec<StubProblem>> {
+    let mut interner = Interner::new();
+    let mut type_definitions = TypeDefinitionEnvironment::default();
+    for &(_, source) in SHIPPED_STUBS {
+        seed_stub_source_types(&mut interner, source, &mut type_definitions);
+    }
+    for stub_source in sources {
+        seed_stub_source_types(&mut interner, &stub_source.source, &mut type_definitions);
+    }
+    sources
         .iter()
-        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .map(|stub_source| {
+            stub_source_problems(&mut interner, &stub_source.source, &type_definitions)
+        })
         .collect()
+}
+
+fn seed_stub_source_types(
+    interner: &mut Interner,
+    source: &str,
+    type_definitions: &mut TypeDefinitionEnvironment,
+) {
+    for type_declaration in parse_stub_file(source, interner).types {
+        type_definitions.seed_opaque_type(type_declaration.name);
+    }
 }
 
 // Parses one stub source and harvests each declaration's type expression into a scheme keyed by the

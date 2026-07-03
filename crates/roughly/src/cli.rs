@@ -134,7 +134,49 @@ pub fn check(
         // One analysis per target keeps package-global naming and the project-global type
         // namespace intact across all files under that target.
         let root = analysis_root_for_target(&target);
-        let mut analysis_state = Analysis::new(root, config.lint, config.check);
+
+        // A broken override stub silently changes what every file below checks against, so what the
+        // loader drops is reported as findings before the per-file diagnostics: an unreadable
+        // override file is an I/O failure (exit 2), and each dropped declaration is an error
+        // diagnostic on its stub line. The same discovered sources feed the analysis, so the report
+        // and the loaded corpus can never disagree.
+        let project_stubs = analysis::stdlib::discover_project_stubs(&root);
+        for (path, error_message) in &project_stubs.unreadable {
+            n_failures += 1;
+            error(&format!("failed to read override stub: {}", path.display()));
+            eprintln!("{error_message}");
+        }
+        for (stub_source, problems) in
+            project_stubs
+                .sources
+                .iter()
+                .zip(analysis::stdlib::stub_override_problems(
+                    &project_stubs.sources,
+                ))
+        {
+            let rope = Rope::from_str(&stub_source.source);
+            for problem in problems {
+                n_diagnostics += 1;
+                let diagnostic =
+                    diagnostics::convert_stub_problem(&problem, &rope, PositionEncoding::Utf8);
+                match output {
+                    OutputFormat::Human => {
+                        render_human_diagnostic(&stub_source.path, &rope, &diagnostic)
+                    }
+                    OutputFormat::Json => render_json_diagnostic(&stub_source.path, &diagnostic),
+                }
+            }
+        }
+
+        let override_sources: Vec<String> = project_stubs
+            .sources
+            .iter()
+            .map(|stub_source| stub_source.source.clone())
+            .collect();
+        let mut analysis_state =
+            Analysis::new_with_stub_library(root, config.lint, config.check, move |interner| {
+                analysis::stdlib::StubLibrary::load_with_overrides(interner, &override_sources)
+            });
         let mut checked_paths = Vec::with_capacity(paths.len());
         for path in paths {
             n_files += 1;

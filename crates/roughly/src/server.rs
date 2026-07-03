@@ -8,20 +8,19 @@ use {
             CodeActionProviderCapability, CodeActionResponse, CompletionItem, CompletionItemKind,
             CompletionItemLabelDetails, CompletionList, CompletionOptions, CompletionParams,
             CompletionResponse, Diagnostic, DiagnosticOptions, DiagnosticServerCancellationData,
-            DiagnosticServerCapabilities, DiagnosticSeverity, DidChangeTextDocumentParams,
-            DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
-            DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-            DocumentDiagnosticParams, DocumentDiagnosticReport, DocumentDiagnosticReportResult,
-            DocumentFormattingParams, DocumentHighlight, DocumentHighlightParams,
-            DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
-            DocumentSymbolResponse, Documentation, FileChangeType, FileSystemWatcher, FoldingRange,
-            FoldingRangeKind, FoldingRangeParams, FoldingRangeProviderCapability,
-            FullDocumentDiagnosticReport, GlobPattern, Hover, HoverContents, HoverParams,
-            HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
-            InlayHint, InlayHintKind, InlayHintLabel, InlayHintParams, Location, MarkupContent,
-            MarkupKind, MessageType, NumberOrString, OneOf, ParameterInformation, ParameterLabel,
-            Position, PublishDiagnosticsParams, Range, ReferenceParams, Registration,
-            RegistrationParams, RelatedFullDocumentDiagnosticReport,
+            DiagnosticServerCapabilities, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+            DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
+            DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
+            DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentFormattingParams,
+            DocumentHighlight, DocumentHighlightParams, DocumentRangeFormattingParams,
+            DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, Documentation,
+            FileChangeType, FileSystemWatcher, FoldingRange, FoldingRangeKind, FoldingRangeParams,
+            FoldingRangeProviderCapability, FullDocumentDiagnosticReport, GlobPattern, Hover,
+            HoverContents, HoverParams, HoverProviderCapability, InitializeParams,
+            InitializeResult, InitializedParams, InlayHint, InlayHintKind, InlayHintLabel,
+            InlayHintParams, Location, MarkupContent, MarkupKind, MessageType, OneOf,
+            ParameterInformation, ParameterLabel, Position, PublishDiagnosticsParams, Range,
+            ReferenceParams, Registration, RegistrationParams, RelatedFullDocumentDiagnosticReport,
             RelatedUnchangedDocumentDiagnosticReport, RelativePattern, RenameParams, SaveOptions,
             SemanticToken, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
             SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams,
@@ -283,8 +282,17 @@ impl EngineWorker {
 
         // A project may ship its own `.Rtypes` stubs under `<root>/stubs/` to override or extend the
         // shipped standard-library corpus. They are read once here and folded into the engine's set-once
-        // stub library; they are never re-read on an edit.
-        let project_stub_sources = analysis::stdlib::discover_project_stub_sources(&workspace_root);
+        // stub library; they are never re-read on an edit. An unreadable override cannot block the
+        // server, so it is logged and skipped (`roughly check` is the surface that reports it).
+        let project_stubs = analysis::stdlib::discover_project_stubs(&workspace_root);
+        for (path, error_message) in &project_stubs.unreadable {
+            tracing::warn!(?path, %error_message, "skipping unreadable project stub override");
+        }
+        let project_stub_sources = project_stubs
+            .sources
+            .into_iter()
+            .map(|stub_source| stub_source.source)
+            .collect();
 
         let mut worker = Self {
             client,
@@ -2655,91 +2663,17 @@ fn is_stub_document(path: &std::path::Path) -> bool {
         .is_some_and(|extension| extension == "Rtypes")
 }
 
-// Parse diagnostics for one `.Rtypes` stub buffer. The parse runs against a throwaway interner:
-// stub buffers must never touch the engine's shared interner or its inputs (the loaded corpus is a
-// set-once ambient input; the live buffer is only a document being edited).
+// Diagnostics for one `.Rtypes` stub buffer: the declarations the loader would drop (parse failures
+// and unharvestable declarations), each spanning its whole line. The analysis runs against a
+// throwaway interner: stub buffers must never touch the engine's shared interner or its inputs (the
+// loaded corpus is a set-once ambient input; the live buffer is only a document being edited).
 fn stub_document_diagnostics(rope: &ropey::Rope, encoding: PositionEncoding) -> Vec<Diagnostic> {
     let text = rope.to_string();
     let mut interner = analysis::Interner::new();
-    let (declarations, errors) = analysis::stub::parse_stub_declarations(&text, &mut interner);
-    // A declaration can parse and still fail to harvest into a scheme (an unresolvable type name,
-    // for example); the loader would drop it silently, so report it here where the author can see
-    // it. Harvest uses the same entry point the loader does.
-    let mut inference_state = analysis::typecheck::InferenceState::new();
     let type_definitions = analysis::stdlib::stub_editing_type_definitions(&mut interner, &text);
-    let harvest_diagnostics = declarations.iter().filter_map(|declaration| {
-        let error = inference_state
-            .harvest_annotation_scheme(&declaration.surface_type, &type_definitions)
-            .err()?;
-        let rendered = analysis::diagnostic::Diagnostic::from_inference_error(
-            &error,
-            declaration.range,
-            &interner,
-        );
-        let start = position::internal_position_to_lsp(
-            rope,
-            encoding,
-            TextPosition {
-                line_index: declaration.range.start_point.row,
-                character_index: declaration.range.start_point.column,
-            },
-        );
-        let end = position::internal_position_to_lsp(
-            rope,
-            encoding,
-            TextPosition {
-                line_index: declaration.range.end_point.row,
-                character_index: declaration.range.end_point.column,
-            },
-        );
-        Some(Diagnostic {
-            range: Range { start, end },
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("stub".to_owned())),
-            code_description: None,
-            source: Some("roughly".into()),
-            message: format!("this declaration does not load: {}", rendered.message),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    });
-    harvest_diagnostics
-        .collect::<Vec<_>>()
-        .into_iter()
-        .chain(errors.into_iter().map(|error| {
-            let line_length = rope
-                .get_line(error.line)
-                .map(|line| line.len_chars().saturating_sub(1))
-                .unwrap_or(0);
-            let start = position::internal_position_to_lsp(
-                rope,
-                encoding,
-                TextPosition {
-                    line_index: error.line,
-                    character_index: 0,
-                },
-            );
-            let end = position::internal_position_to_lsp(
-                rope,
-                encoding,
-                TextPosition {
-                    line_index: error.line,
-                    character_index: line_length,
-                },
-            );
-            Diagnostic {
-                range: Range { start, end },
-                severity: Some(DiagnosticSeverity::ERROR),
-                code: Some(NumberOrString::String("stub".to_owned())),
-                code_description: None,
-                source: Some("roughly".into()),
-                message: error.message,
-                related_information: None,
-                tags: None,
-                data: None,
-            }
-        }))
+    analysis::stdlib::stub_source_problems(&mut interner, &text, &type_definitions)
+        .iter()
+        .map(|problem| diagnostics::convert_stub_problem(problem, rope, encoding))
         .collect()
 }
 

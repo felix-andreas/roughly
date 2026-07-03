@@ -1,8 +1,9 @@
 use {
     crate::{
-        lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString},
+        lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Range},
         position::{self, PositionEncoding},
     },
+    analysis::text::TextPosition,
     ropey::Rope,
 };
 
@@ -43,5 +44,52 @@ fn convert_severity(severity: analysis::Severity) -> DiagnosticSeverity {
     match severity {
         analysis::Severity::Error => DiagnosticSeverity::ERROR,
         analysis::Severity::Warning => DiagnosticSeverity::WARNING,
+    }
+}
+
+// A whole-line error diagnostic for one declaration the stub loader drops, shared by the server's
+// `.Rtypes` buffer diagnostics and the CLI's override report so both surfaces render the problem
+// identically.
+pub fn convert_stub_problem(
+    problem: &analysis::stdlib::StubProblem,
+    rope: &Rope,
+    encoding: PositionEncoding,
+) -> Diagnostic {
+    let line_length = rope
+        .get_line(problem.line)
+        .map(|line| {
+            let mut length = line.len_chars();
+            while length > 0 && matches!(line.char(length - 1), '\n' | '\r') {
+                length -= 1;
+            }
+            length
+        })
+        .unwrap_or(0);
+    let start = position::internal_position_to_lsp(
+        rope,
+        encoding,
+        TextPosition {
+            line_index: problem.line,
+            character_index: 0,
+        },
+    );
+    let end = position::internal_position_to_lsp(
+        rope,
+        encoding,
+        TextPosition {
+            line_index: problem.line,
+            character_index: line_length,
+        },
+    );
+    Diagnostic {
+        range: Range { start, end },
+        severity: Some(DiagnosticSeverity::ERROR),
+        code: Some(NumberOrString::String("stub".to_owned())),
+        code_description: None,
+        source: Some("roughly".into()),
+        message: problem.message.clone(),
+        related_information: None,
+        tags: None,
+        data: None,
     }
 }
