@@ -2008,6 +2008,7 @@ pub fn completion(
                 source: CompletionItemSource::Keyword,
                 detail: None,
                 documentation: None,
+                takes_arguments: None,
             });
         }
     }
@@ -2025,13 +2026,15 @@ pub fn completion(
                 continue;
             }
 
-            let kind = global_completion_kind(database, *export_document_id, *symbol);
+            let (kind, takes_arguments) =
+                global_completion_kind(database, *export_document_id, *symbol);
             items.push(CompletionItem {
                 label: label.to_owned(),
                 kind,
                 source: CompletionItemSource::Global,
                 detail: None,
                 documentation: None,
+                takes_arguments,
             });
         }
     }
@@ -2047,7 +2050,7 @@ pub fn completion(
         }
         items.push(CompletionItem {
             label: label.to_owned(),
-            kind: match scheme.body {
+            kind: match &scheme.body {
                 CoreType::Function(_) => CompletionItemKind::Function,
                 _ => CompletionItemKind::Variable,
             },
@@ -2056,6 +2059,14 @@ pub fn completion(
             documentation: database
                 .stub_namespace(symbol)
                 .map(|namespace| format!("From the `{namespace}` package.")),
+            takes_arguments: match &scheme.body {
+                CoreType::Function(function_type) => Some(
+                    !function_type.parameters.is_empty()
+                        || !function_type.named_parameters.is_empty()
+                        || function_type.variadic.is_some(),
+                ),
+                _ => None,
+            },
         });
     }
 
@@ -2289,6 +2300,7 @@ fn field_completion_items(
                 source: CompletionItemSource::Field,
                 detail: Some(render_generalized_type(database.interner(), &field.value)),
                 documentation: None,
+                takes_arguments: None,
             })
         })
         .collect()
@@ -2371,6 +2383,7 @@ fn annotation_completion(
                 source: CompletionItemSource::Type,
                 detail: None,
                 documentation: None,
+                takes_arguments: None,
             });
         }
     }
@@ -2392,6 +2405,7 @@ fn annotation_completion(
                 source: CompletionItemSource::Type,
                 detail: Some(definition.definition.kind.directive_name().to_owned()),
                 documentation: None,
+                takes_arguments: None,
             });
         }
     }
@@ -2432,6 +2446,7 @@ fn rendered_query_matches(
             source: CompletionItemSource::Local,
             detail: None,
             documentation: None,
+            takes_arguments: None,
         })
         .collect()
 }
@@ -2475,6 +2490,7 @@ fn local_completion_items(
                         source: CompletionItemSource::Local,
                         detail: None,
                         documentation: None,
+                        takes_arguments: None,
                     });
                 }
             }
@@ -2539,6 +2555,7 @@ fn collect_local_bindings_in_body(
                         source: CompletionItemSource::Local,
                         detail: None,
                         documentation: None,
+                        takes_arguments: None,
                     });
                 }
             }
@@ -2558,6 +2575,7 @@ fn collect_local_bindings_in_body(
                         source: CompletionItemSource::Local,
                         detail: None,
                         documentation: None,
+                        takes_arguments: None,
                     });
                 }
             }
@@ -2575,15 +2593,15 @@ fn global_completion_kind(
     database: &dyn IdeDatabase,
     document_id: DocumentId,
     symbol: Symbol,
-) -> CompletionItemKind {
+) -> (CompletionItemKind, Option<bool>) {
     let Some(module) = database.module(document_id) else {
-        return CompletionItemKind::Variable;
+        return (CompletionItemKind::Variable, None);
     };
     let Some(local_naming) = database.document_naming(document_id) else {
-        return CompletionItemKind::Variable;
+        return (CompletionItemKind::Variable, None);
     };
     let Some(binding_id) = find_exported_binding(module, local_naming, symbol) else {
-        return CompletionItemKind::Variable;
+        return (CompletionItemKind::Variable, None);
     };
 
     binding_completion_kind(module, local_naming, binding_id)
@@ -2593,17 +2611,17 @@ fn binding_completion_kind(
     module: &Module,
     local_naming: &NamesLocal,
     binding_id: BindingId,
-) -> CompletionItemKind {
+) -> (CompletionItemKind, Option<bool>) {
     let Some(expression_id) = local_naming.expression_resolutions.iter().find_map(
         |(expression_id, resolved_binding_id)| {
             (*resolved_binding_id == binding_id).then_some(*expression_id)
         },
     ) else {
-        return CompletionItemKind::Variable;
+        return (CompletionItemKind::Variable, None);
     };
 
     let Some(expression) = module.arena.try_get(expression_id) else {
-        return CompletionItemKind::Variable;
+        return (CompletionItemKind::Variable, None);
     };
     match expression.kind {
         ExpressionKind::Assign { value, .. } => {
@@ -2612,11 +2630,13 @@ fn binding_completion_kind(
                 .try_get(value)
                 .map(|expression| &expression.kind)
             {
-                Some(ExpressionKind::Function { .. }) => CompletionItemKind::Function,
-                _ => CompletionItemKind::Variable,
+                Some(ExpressionKind::Function { parameters, .. }) => {
+                    (CompletionItemKind::Function, Some(!parameters.is_empty()))
+                }
+                _ => (CompletionItemKind::Variable, None),
             }
         }
-        _ => CompletionItemKind::Variable,
+        _ => (CompletionItemKind::Variable, None),
     }
 }
 

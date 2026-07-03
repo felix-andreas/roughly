@@ -3,7 +3,8 @@ use {
         LanguageServer,
         concurrency::{Concurrency, ConcurrencyLayer},
         lsp_types::{
-            ClientCapabilities, CompletionParams, CompletionResponse, DiagnosticClientCapabilities,
+            ClientCapabilities, CompletionClientCapabilities, CompletionItemCapability,
+            CompletionParams, CompletionResponse, DiagnosticClientCapabilities,
             DiagnosticServerCapabilities, DiagnosticWorkspaceClientCapabilities,
             DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
             DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
@@ -12,13 +13,13 @@ use {
             FileEvent, FoldingRangeParams, FormattingOptions, GeneralClientCapabilities,
             GotoDefinitionParams, GotoDefinitionResponse, HoverContents, HoverParams,
             HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
-            InlayHintParams, MessageType, ParameterInformationSettings, ParameterLabel,
-            PartialResultParams, Position, PositionEncodingKind, PublishDiagnosticsParams, Range,
-            ReferenceContext, ReferenceParams, RenameParams, SemanticTokensParams,
-            SemanticTokensResult, ShowMessageParams, SignatureHelpClientCapabilities,
-            SignatureHelpParams, SignatureInformationSettings, TextDocumentClientCapabilities,
-            TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-            TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
+            InlayHintParams, InsertTextFormat, MessageType, ParameterInformationSettings,
+            ParameterLabel, PartialResultParams, Position, PositionEncodingKind,
+            PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams, RenameParams,
+            SemanticTokensParams, SemanticTokensResult, ShowMessageParams,
+            SignatureHelpClientCapabilities, SignatureHelpParams, SignatureInformationSettings,
+            TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier,
+            TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
             WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceFolder,
             notification::{PublishDiagnostics, ShowMessage},
             request::{RegisterCapability, WorkspaceDiagnosticRefresh},
@@ -268,6 +269,23 @@ async fn setup_test_with_pull_diagnostics(initial_files: &[(&str, &str)]) -> Tes
     let capabilities = ClientCapabilities {
         text_document: Some(TextDocumentClientCapabilities {
             diagnostic: Some(DiagnosticClientCapabilities::default()),
+            ..TextDocumentClientCapabilities::default()
+        }),
+        ..ClientCapabilities::default()
+    };
+    setup_test_inner(true, initial_files, &[], capabilities).await
+}
+
+async fn setup_test_with_snippet_support(initial_files: &[(&str, &str)]) -> TestContext {
+    let capabilities = ClientCapabilities {
+        text_document: Some(TextDocumentClientCapabilities {
+            completion: Some(CompletionClientCapabilities {
+                completion_item: Some(CompletionItemCapability {
+                    snippet_support: Some(true),
+                    ..CompletionItemCapability::default()
+                }),
+                ..CompletionClientCapabilities::default()
+            }),
             ..TextDocumentClientCapabilities::default()
         }),
         ..ClientCapabilities::default()
@@ -1146,7 +1164,83 @@ async fn completion() {
         labels.contains(&"my_function"),
         "expected 'my_function' in completions, got: {labels:?}"
     );
+    // Without snippet support, items insert their plain label: no snippet text or format.
+    let my_function = items
+        .iter()
+        .find(|item| item.label == "my_function")
+        .expect("my_function item");
+    assert!(
+        my_function.insert_text.is_none() && my_function.insert_text_format.is_none(),
+        "a non-snippet client must get plain-label insertion"
+    );
 
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn completion_inserts_call_snippets_for_functions() {
+    let mut context = setup_test_with_snippet_support(&[]).await;
+
+    let file_uri = context.file_uri("R/snip.R");
+    let source = "snip_args <- function(x) x\nsnip_none <- function() 1L\nsn\n";
+    context.open_file(&file_uri, source).await;
+    drain_diagnostics(&mut context.diagnostics_receiver).await;
+
+    let items = |response: Option<CompletionResponse>| match response.expect("expected completions")
+    {
+        CompletionResponse::List(list) => list.items,
+        other => panic!("expected a list response: {other:?}"),
+    };
+
+    let at = |line: u32, character: u32| CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: file_uri.clone(),
+            },
+            position: Position::new(line, character),
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let completions = items(
+        context
+            .server
+            .completion(at(2, 2))
+            .await
+            .expect("completion request failed"),
+    );
+    let snip_args = completions
+        .iter()
+        .find(|item| item.label == "snip_args")
+        .expect("snip_args item");
+    assert_eq!(
+        snip_args.insert_text.as_deref(),
+        Some("snip_args($0)"),
+        "a function taking arguments drops the cursor between the parens"
+    );
+    assert_eq!(
+        snip_args.insert_text_format,
+        Some(InsertTextFormat::SNIPPET)
+    );
+    assert_eq!(
+        snip_args
+            .command
+            .as_ref()
+            .map(|command| command.command.as_str()),
+        Some("editor.action.triggerParameterHints"),
+        "inserting a call asks the editor for parameter hints"
+    );
+    let snip_none = completions
+        .iter()
+        .find(|item| item.label == "snip_none")
+        .expect("snip_none item");
+    assert_eq!(
+        snip_none.insert_text.as_deref(),
+        Some("snip_none()$0"),
+        "a zero-argument function drops the cursor past the parens"
+    );
     context.shutdown().await;
 }
 

@@ -5,10 +5,11 @@ use {
         index::{self, IndexError, Item},
         lsp_types::{
             CodeAction, CodeActionKind, CodeActionOptions, CodeActionOrCommand, CodeActionParams,
-            CodeActionProviderCapability, CodeActionResponse, CompletionItem, CompletionItemKind,
-            CompletionItemLabelDetails, CompletionList, CompletionOptions, CompletionParams,
-            CompletionResponse, Diagnostic, DiagnosticOptions, DiagnosticServerCancellationData,
-            DiagnosticServerCapabilities, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+            CodeActionProviderCapability, CodeActionResponse, Command, CompletionItem,
+            CompletionItemKind, CompletionItemLabelDetails, CompletionList, CompletionOptions,
+            CompletionParams, CompletionResponse, Diagnostic, DiagnosticOptions,
+            DiagnosticServerCancellationData, DiagnosticServerCapabilities,
+            DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
             DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
             DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
             DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentFormattingParams,
@@ -18,8 +19,8 @@ use {
             FoldingRangeProviderCapability, FullDocumentDiagnosticReport, GlobPattern, Hover,
             HoverContents, HoverParams, HoverProviderCapability, InitializeParams,
             InitializeResult, InitializedParams, InlayHint, InlayHintKind, InlayHintLabel,
-            InlayHintParams, Location, MarkupContent, MarkupKind, MessageType, OneOf,
-            ParameterInformation, ParameterLabel, Position, PublishDiagnosticsParams, Range,
+            InlayHintParams, InsertTextFormat, Location, MarkupContent, MarkupKind, MessageType,
+            OneOf, ParameterInformation, ParameterLabel, Position, PublishDiagnosticsParams, Range,
             ReferenceParams, Registration, RegistrationParams, RelatedFullDocumentDiagnosticReport,
             RelatedUnchangedDocumentDiagnosticReport, RelativePattern, RenameParams, SaveOptions,
             SemanticToken, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
@@ -191,6 +192,10 @@ struct EngineWorker {
     // (unambiguous even when two parameters render to the same text); otherwise it falls back to
     // the parameter's label substring, which such clients locate in the signature label themselves.
     client_supports_parameter_label_offsets: bool,
+    // When the client can expand snippet syntax, function completions insert a call — `name($0)`
+    // with the cursor between the parens (or `name()$0` past them for a zero-argument function) —
+    // instead of the bare name.
+    client_supports_snippets: bool,
 }
 
 // One LSP operation handed to the worker. `Initialize` is special: it CONSTRUCTS the worker state
@@ -282,6 +287,15 @@ impl EngineWorker {
             .and_then(|parameter_information| parameter_information.label_offset_support)
             .unwrap_or(false);
 
+        let client_supports_snippets = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|text_document| text_document.completion.as_ref())
+            .and_then(|completion| completion.completion_item.as_ref())
+            .and_then(|completion_item| completion_item.snippet_support)
+            .unwrap_or(false);
+
         // A project may ship its own `.Rtypes` stubs under `<root>/stubs/` to override or extend the
         // shipped standard-library corpus. They are read once here and folded into the engine's set-once
         // stub library; they are never re-read on an edit. An unreadable override cannot block the
@@ -320,6 +334,7 @@ impl EngineWorker {
             client_supports_pull_diagnostics,
             client_supports_diagnostic_refresh,
             client_supports_parameter_label_offsets,
+            client_supports_snippets,
         };
 
         let workspace_r_path = worker.workspace_r_path();
@@ -1207,6 +1222,7 @@ impl EngineWorker {
         let internal_position = self
             .to_internal_position(&path, position)
             .expect("opened document rope available for completion");
+        let snippets = self.client_supports_snippets;
         let completions = self
             .cancellable(|| {
                 EngineIde::new(&self.engine, &self.paths).completion(&path, internal_position)
@@ -1218,40 +1234,69 @@ impl EngineWorker {
                     items: result
                         .items
                         .into_iter()
-                        .map(|item| CompletionItem {
-                            label: item.label,
-                            label_details: Some(CompletionItemLabelDetails {
-                                detail: None,
-                                description: Some(match item.source {
-                                    analysis::CompletionItemSource::Keyword => "Keyword".into(),
-                                    analysis::CompletionItemSource::Local => "Local".into(),
-                                    analysis::CompletionItemSource::Global => "Global".into(),
-                                    analysis::CompletionItemSource::Stdlib => "Stdlib".into(),
-                                    analysis::CompletionItemSource::Field => "Field".into(),
-                                    analysis::CompletionItemSource::Type => "Type".into(),
+                        .map(|item| {
+                            // A snippet-capable client gets a call for a function item: the cursor
+                            // lands between the parens when the call takes arguments, past them
+                            // when it takes none (unknown signatures get the with-arguments shape).
+                            let call_snippet = (snippets
+                                && item.kind == analysis::CompletionItemKind::Function)
+                                .then(|| {
+                                    if item.takes_arguments == Some(false) {
+                                        format!("{}()$0", item.label)
+                                    } else {
+                                        format!("{}($0)", item.label)
+                                    }
+                                });
+                            CompletionItem {
+                                label: item.label,
+                                label_details: Some(CompletionItemLabelDetails {
+                                    detail: None,
+                                    description: Some(match item.source {
+                                        analysis::CompletionItemSource::Keyword => "Keyword".into(),
+                                        analysis::CompletionItemSource::Local => "Local".into(),
+                                        analysis::CompletionItemSource::Global => "Global".into(),
+                                        analysis::CompletionItemSource::Stdlib => "Stdlib".into(),
+                                        analysis::CompletionItemSource::Field => "Field".into(),
+                                        analysis::CompletionItemSource::Type => "Type".into(),
+                                    }),
                                 }),
-                            }),
-                            kind: Some(match item.kind {
-                                analysis::CompletionItemKind::Keyword => {
-                                    CompletionItemKind::KEYWORD
-                                }
-                                analysis::CompletionItemKind::Variable => {
-                                    CompletionItemKind::VARIABLE
-                                }
-                                analysis::CompletionItemKind::Function => {
-                                    CompletionItemKind::FUNCTION
-                                }
-                                analysis::CompletionItemKind::Field => CompletionItemKind::FIELD,
-                                analysis::CompletionItemKind::Type => CompletionItemKind::STRUCT,
-                            }),
-                            detail: item.detail,
-                            documentation: item.documentation.map(|documentation| {
-                                Documentation::MarkupContent(MarkupContent {
-                                    kind: MarkupKind::Markdown,
-                                    value: documentation,
-                                })
-                            }),
-                            ..Default::default()
+                                kind: Some(match item.kind {
+                                    analysis::CompletionItemKind::Keyword => {
+                                        CompletionItemKind::KEYWORD
+                                    }
+                                    analysis::CompletionItemKind::Variable => {
+                                        CompletionItemKind::VARIABLE
+                                    }
+                                    analysis::CompletionItemKind::Function => {
+                                        CompletionItemKind::FUNCTION
+                                    }
+                                    analysis::CompletionItemKind::Field => {
+                                        CompletionItemKind::FIELD
+                                    }
+                                    analysis::CompletionItemKind::Type => {
+                                        CompletionItemKind::STRUCT
+                                    }
+                                }),
+                                detail: item.detail,
+                                documentation: item.documentation.map(|documentation| {
+                                    Documentation::MarkupContent(MarkupContent {
+                                        kind: MarkupKind::Markdown,
+                                        value: documentation,
+                                    })
+                                }),
+                                insert_text_format: call_snippet
+                                    .is_some()
+                                    .then_some(InsertTextFormat::SNIPPET),
+                                // Typing continues inside the inserted call, so ask the editor for
+                                // parameter hints exactly as if `(` had been typed.
+                                command: call_snippet.as_ref().map(|_| Command {
+                                    title: "trigger parameter hints".to_owned(),
+                                    command: "editor.action.triggerParameterHints".to_owned(),
+                                    arguments: None,
+                                }),
+                                insert_text: call_snippet,
+                                ..Default::default()
+                            }
                         })
                         .collect(),
                 })

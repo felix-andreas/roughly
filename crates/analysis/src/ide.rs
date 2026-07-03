@@ -393,6 +393,11 @@ pub struct CompletionItem {
     // Prose shown in the item's documentation panel — a stdlib item's origin package. `None` when
     // the item has nothing beyond its label and detail.
     pub documentation: Option<String>,
+    // Whether a `Function` item's call takes any arguments (parameters, named parameters, or a
+    // rest parameter), when its signature is known. Drives the call-snippet shape a
+    // snippet-capable client inserts: `name($0)` with arguments, `name()$0` without, and the
+    // with-arguments default when unknown. `None` for non-functions.
+    pub takes_arguments: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
