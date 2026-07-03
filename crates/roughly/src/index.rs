@@ -162,10 +162,18 @@ pub fn index(root: Node, rope: &Rope, nested: bool, other: bool) -> Vec<Item> {
                 let maybe_op = node.child_by_field_name("operator");
                 let maybe_rhs = node.child_by_field_name("rhs");
 
-                if let Some(lhs) = maybe_lhs
-                    && lhs.kind() == "identifier"
-                    && maybe_op.is_some_and(|op| op.kind() == "<-")
-                {
+                // Every assignment form binds: `<-`/`=`/`<<-` name the target on the left,
+                // the mirrored `->`/`->>` on the right.
+                let target_and_value = match (maybe_lhs, maybe_op.map(|op| op.kind()), maybe_rhs) {
+                    (Some(lhs), Some("<-" | "=" | "<<-"), rhs) if lhs.kind() == "identifier" => {
+                        Some((lhs, rhs))
+                    }
+                    (lhs, Some("->" | "->>"), Some(rhs)) if rhs.kind() == "identifier" => {
+                        Some((rhs, lhs))
+                    }
+                    _ => None,
+                };
+                if let Some((lhs, maybe_rhs)) = target_and_value {
                     let (info, detail, children) = maybe_rhs
                         .map(|rhs| match rhs.kind() {
                             "function_definition" => index_function(rhs, rope, nested),
@@ -459,4 +467,20 @@ pub fn get_argument<'a>(
     pos: usize,
 ) -> Option<Node<'a>> {
     s4::call_argument(arguments, rope, query, pos)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::index;
+
+    #[test]
+    fn all_assignment_forms_appear_in_the_outline() {
+        let source = "a <- 1L\nb = 2L\nc <<- 3L\n4L -> d\n5L ->> e\n";
+        let mut parser = analysis::tree::new_parser().expect("parser");
+        let tree = parser.parse(source, None).expect("parse");
+        let rope = ropey::Rope::from_str(source);
+        let items = index(tree.root_node(), &rope, false, false);
+        let names: Vec<&str> = items.iter().map(|item| item.name.as_str()).collect();
+        assert_eq!(names, ["a", "b", "c", "d", "e"], "{items:?}");
+    }
 }
