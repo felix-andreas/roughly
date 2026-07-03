@@ -98,6 +98,20 @@ level per link), which no fixed thread stack can bound. Every deepening passes t
 entries (bounded by the lowering recursion cap) always fit. A mechanically generated deep chain slows
 down; it never kills the process.
 
+### Memory bound
+
+Derived keys are minted per file **and per symbol**, so a long editing session accretes memo slots
+nothing will fetch again (a global typed character by character mints per-symbol keys per keystroke;
+a deleted file leaves its whole derived chain). `Engine::evict_stale_memos(keep_revisions)` is the
+bound: it drops every **derived** slot not read within the window — `verified_at` is a faithful
+last-used signal because validating a key green refreshes it — and a dropped slot simply recomputes
+on its next fetch (a missing slot is "never computed"), so eviction is a pure memory/latency trade.
+Inputs and tombstones are never evicted: an input cannot be recomputed on demand, and a tombstone
+must outlive every stale dependency edge pointing at it. The LSP server sweeps on a fixed cadence of
+input writes with a window far above any feature's revalidation rhythm. The interner stays
+append-only by design (symbol ids are shared across values); its growth is bytes per distinct name
+ever seen, accepted as negligible against the memo table.
+
 ### Input removal
 
 `Engine::remove_input(key)` bumps the revision and replaces the input's slot with a **tombstone**: a

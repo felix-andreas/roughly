@@ -1,15 +1,21 @@
-//! Resident-memory benchmark: the engine vs. the from-scratch `analysis` crate at 9k / 94k / 281k LoC.
-//! Measures *live heap bytes* — net `alloc - dealloc`
-//! held by each structure once fully built and warmed — via a counting global allocator, which is a clean,
-//! deterministic proxy for resident set size of the data structures (it excludes transient scratch that has
-//! already been freed, exactly the steady-state figure we care about).
+//! Memory behavior of the engine. Two parts:
 //!
-//! The engine is built and warmed (every file's `Diagnostics` fetched, so every memo is live), then its
-//! live bytes are read and it is dropped; the `analysis` path is then built with `run_full` and measured the
-//! same way. Each size is measured independently from a drained baseline so the two figures are comparable.
+//! 1. A fast, always-on **memo-table growth bound**: derived keys are minted per file *and per
+//!    symbol*, so an edit stream that keeps minting fresh global names (typing a name character by
+//!    character mints one per keystroke) grows the memo table without bound;
+//!    `Engine::evict_stale_memos` is the bound, and the test proves eviction returns the table to the
+//!    live working set while answers stay correct.
 //!
-//! Heavy (`#[ignore]`); run manually:
-//! `cargo test -p engine --release --test test_memory -- --ignored --nocapture --test-threads=1`.
+//! 2. A resident-memory benchmark: the engine vs. the from-scratch `analysis` crate at 9k / 94k /
+//!    281k LoC. Measures *live heap bytes* — net `alloc - dealloc` held by each structure once fully
+//!    built and warmed — via a counting global allocator, which is a clean, deterministic proxy for
+//!    resident set size of the data structures (it excludes transient scratch that has already been
+//!    freed, exactly the steady-state figure we care about). The engine is built and warmed (every
+//!    file's `Diagnostics` fetched, so every memo is live), then its live bytes are read and it is
+//!    dropped; the `analysis` path is then built with `run_full` and measured the same way. Each size
+//!    is measured independently from a drained baseline so the two figures are comparable.
+//!    Heavy (`#[ignore]`); run manually:
+//!    `cargo test -p engine --release --test test_memory -- --ignored --nocapture --test-threads=1`.
 
 use {
     analysis::{Analysis, CheckConfig, LintConfig, naming::DocumentKind, run_full},
@@ -137,6 +143,112 @@ fn build_old_engine(file_count: usize) -> Analysis {
     }
     run_full(&mut analysis_state);
     analysis_state
+}
+
+// ----------------------------------------------------------------------------------------------------
+// Growth bound under an edit stream (fast, slot counts, always on).
+// ----------------------------------------------------------------------------------------------------
+
+#[test]
+fn edit_stream_growth_is_bounded_by_eviction() {
+    let mut engine = Engine::new(RoughlyQueries::new());
+    engine.set_input(Key::ProjectFiles, vec![0 as FileId]);
+    engine.set_input(
+        Key::Config,
+        Config {
+            check: CheckConfig {
+                typing: true,
+                strict: false,
+                unused: false,
+            },
+            lint: LintConfig::default(),
+        },
+    );
+    engine.set_input(Key::DocumentKind(0), DocumentKind::Package);
+    engine.set_input(Key::SourceText(0), parse_source_input("value <- start()\n"));
+    let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(0));
+    let baseline = engine.slot_count();
+
+    // The pathological (and realistic) stream: every edit references a fresh global name, exactly
+    // what typing an identifier does one keystroke at a time. Each name mints per-symbol derived
+    // keys that no later revision ever fetches again.
+    for index in 0..300u32 {
+        engine.set_input(
+            Key::SourceText(0),
+            parse_source_input(&format!("value <- name_{index}()\n")),
+        );
+        let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(0));
+    }
+    let grown = engine.slot_count();
+    assert!(
+        grown > baseline + 250,
+        "per-symbol keys accrete across the stream (else this test guards nothing): {baseline} -> {grown}"
+    );
+
+    // Evict everything not read in the last few revisions: the table returns to the live working
+    // set (the inputs plus the chain the final fetch validated).
+    let dropped = engine.evict_stale_memos(4);
+    let bounded = engine.slot_count();
+    assert!(dropped > 0, "the stream left stale memos to drop");
+    assert!(
+        bounded <= baseline + 16,
+        "eviction bounds the table near the live working set: {bounded} vs baseline {baseline}"
+    );
+
+    // Correctness after eviction, part 1: the surviving chain still answers.
+    let after_eviction = engine.fetch::<FileDiagnostics>(Key::Diagnostics(0));
+
+    // Part 2: an edit that references an *evicted* symbol again forces the dropped per-symbol keys
+    // to recompute through a live dependent — the answer must equal a fresh engine's for the same
+    // final state, not crash and not go stale.
+    engine.set_input(
+        Key::SourceText(0),
+        parse_source_input("value <- name_5()\n"),
+    );
+    let revalidated = engine.fetch::<FileDiagnostics>(Key::Diagnostics(0));
+
+    let mut fresh = Engine::new(RoughlyQueries::new());
+    fresh.set_input(Key::ProjectFiles, vec![0 as FileId]);
+    fresh.set_input(
+        Key::Config,
+        Config {
+            check: CheckConfig {
+                typing: true,
+                strict: false,
+                unused: false,
+            },
+            lint: LintConfig::default(),
+        },
+    );
+    fresh.set_input(Key::DocumentKind(0), DocumentKind::Package);
+    fresh.set_input(
+        Key::SourceText(0),
+        parse_source_input("value <- name_5()\n"),
+    );
+    let fresh_result = fresh.fetch::<FileDiagnostics>(Key::Diagnostics(0));
+    // Raw type errors carry interner Symbols, whose ids depend on each engine's interning history;
+    // every rendered (string-bearing) field must match exactly, and the raw ones by shape.
+    assert_eq!(
+        revalidated.naming, fresh_result.naming,
+        "an evicted-then-revalidated chain answers exactly like a fresh engine"
+    );
+    assert_eq!(revalidated.package_naming, fresh_result.package_naming);
+    assert!(
+        revalidated
+            .package_naming
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("name_5")),
+        "the re-referenced evicted symbol resolves to the same unresolved-name diagnostic: {:?}",
+        revalidated.package_naming
+    );
+    assert_eq!(revalidated.lowering, fresh_result.lowering);
+    assert_eq!(revalidated.lint, fresh_result.lint);
+    assert_eq!(revalidated.unused, fresh_result.unused);
+    assert_eq!(
+        revalidated.type_errors.len(),
+        fresh_result.type_errors.len()
+    );
+    drop(after_eviction);
 }
 
 #[test]

@@ -170,6 +170,8 @@ struct EngineWorker {
     // Memoized per-file symbol items for workspace-symbol search; entries are dropped at the input
     // write paths, so the cache can never serve a stale tree.
     symbol_items_cache: HashMap<PathBuf, Vec<Item>>,
+    // Input writes since the last stale-memo sweep; see `maybe_evict_stale_memos`.
+    input_writes_since_eviction: u32,
     // Open documents with non-`file:` URIs (untitled buffers, virtual editor documents) are served
     // as standalone script documents, keyed internally by a synthetic path (`document_path`) so the
     // path-keyed host and engine tables can track them. This maps each synthetic path back to the
@@ -311,6 +313,7 @@ impl EngineWorker {
             stub_documents: HashMap::new(),
             warned_about_editor_configuration: false,
             symbol_items_cache: HashMap::new(),
+            input_writes_since_eviction: 0,
             virtual_document_uris: HashMap::new(),
             parser: analysis::tree::new_parser().expect("server parser should initialize"),
             position_encoding,
@@ -612,6 +615,24 @@ impl EngineWorker {
             },
         );
         self.paths.insert(file, path.to_path_buf());
+        self.maybe_evict_stale_memos();
+    }
+
+    // The memory bound for a long editing session: derived engine keys are minted per file and per
+    // symbol, so transient names (a global typed character by character, deleted files) leave memo
+    // slots nothing will fetch again. Every `EVICTION_INTERVAL` input writes, drop the slots not read
+    // within the last `EVICTION_KEEP_REVISIONS` revisions — anything a feature still uses is
+    // revalidated (and so refreshed) far more often than that, so eviction only touches garbage; a
+    // false positive merely recomputes on the next fetch.
+    fn maybe_evict_stale_memos(&mut self) {
+        const EVICTION_INTERVAL: u32 = 1024;
+        const EVICTION_KEEP_REVISIONS: u64 = 8192;
+        self.input_writes_since_eviction += 1;
+        if self.input_writes_since_eviction >= EVICTION_INTERVAL {
+            self.input_writes_since_eviction = 0;
+            let dropped = self.engine.evict_stale_memos(EVICTION_KEEP_REVISIONS);
+            tracing::debug!(dropped, "evicted stale engine memos");
+        }
     }
 
     // Drop a file from the engine (deletion or a closed, no-longer-tracked document): tombstone its source
@@ -622,6 +643,7 @@ impl EngineWorker {
             self.engine.remove_input(&Key::SourceText(file));
             self.engine.remove_input(&Key::DocumentKind(file));
             self.paths.remove(file);
+            self.maybe_evict_stale_memos();
         }
         self.virtual_document_uris.remove(path);
     }

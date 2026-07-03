@@ -241,6 +241,37 @@ impl<G: QueryGroup> Engine<G> {
         );
     }
 
+    /// Evict every **derived** memo slot that has not been read within the last `keep_revisions`
+    /// revisions, returning how many were dropped. This is the memory bound for a long editing
+    /// session: derived keys are minted per file *and per symbol*, so transient names (a global typed
+    /// character by character, a deleted file's queries) leave slots behind that nothing will fetch
+    /// again — without eviction the table accretes forever.
+    ///
+    /// Correct by construction: a memo is a pure cache, so a dropped slot is simply recomputed on its
+    /// next fetch ([`validate`](Engine::validate) treats a missing slot as never-computed). A live
+    /// dependent that still records a dropped key revalidates through it and recomputes it — early
+    /// cutoff above the recomputed key resumes as soon as a value compares equal. `verified_at` is a
+    /// faithful last-used signal: validating a key green refreshes it, so anything transitively read
+    /// in the window survives.
+    ///
+    /// **Input slots (including tombstones) are never evicted**: an input cannot be recomputed on
+    /// demand — a validation walk reaching a missing input would panic — and a tombstone must outlive
+    /// every stale dependency edge that still points at it.
+    ///
+    /// Takes `&mut self` like [`set_input`](Engine::set_input): eviction is a database write and must
+    /// run between top-level fetches, never from inside a query body.
+    pub fn evict_stale_memos(&mut self, keep_revisions: u64) -> usize {
+        debug_assert!(
+            self.dependency_stack.borrow().is_empty() && self.computing.borrow().is_empty(),
+            "eviction must run between top-level fetches"
+        );
+        let horizon = self.revision.get().0.saturating_sub(keep_revisions);
+        let mut slots = self.slots.borrow_mut();
+        let before = slots.len();
+        slots.retain(|_, slot| slot.is_input || slot.verified_at.0 >= horizon);
+        before - slots.len()
+    }
+
     /// Fetch a query's value, computing or validating it as needed, and record the read as a dependency
     /// of the body currently executing (if any). Panics if the stored value is not a `T` — a body asking
     /// for the wrong type for a key is a host bug, not a recoverable condition.
