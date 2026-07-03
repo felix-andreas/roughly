@@ -1248,6 +1248,61 @@ impl EngineWorker {
 
         tracing::debug!(?path, ?position, "goto definition");
 
+        // Inside a `.Rtypes` buffer, a type name jumps to its `@type` declaration line in the same
+        // file (stub files are self-contained: the shipped corpus is not on disk to jump into).
+        if is_stub_document(&path) {
+            let Some(rope) = self.stub_documents.get(&path) else {
+                return Ok(None);
+            };
+            let cursor = position::lsp_position_to_internal(rope, self.position_encoding, position);
+            let Some(line) = rope.get_line(cursor.line_index) else {
+                return Ok(None);
+            };
+            let line_text = line.to_string();
+            let target = analysis::stub::stub_line_tokens(&line_text)
+                .into_iter()
+                .find(|token| {
+                    token.role == analysis::type_syntax::TypeTokenRole::TypeName
+                        && token.start <= cursor.character_index
+                        && cursor.character_index <= token.end
+                })
+                .map(|token| line_text[token.start..token.end].to_owned());
+            let Some(name) = target else {
+                return Ok(None);
+            };
+            for (line_index, declaration_line) in rope.lines().enumerate() {
+                let text = declaration_line.to_string();
+                let trimmed = text.trim_start();
+                let Some(declared) = trimmed.strip_prefix("@type") else {
+                    continue;
+                };
+                if declared.trim() == name {
+                    let column = text.len() - trimmed.len();
+                    let start = position::internal_position_to_lsp(
+                        rope,
+                        self.position_encoding,
+                        TextPosition {
+                            line_index,
+                            character_index: column,
+                        },
+                    );
+                    let end = position::internal_position_to_lsp(
+                        rope,
+                        self.position_encoding,
+                        TextPosition {
+                            line_index,
+                            character_index: text.trim_end().len(),
+                        },
+                    );
+                    return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                        uri: uri.clone(),
+                        range: Range { start, end },
+                    })));
+                }
+            }
+            return Ok(None);
+        }
+
         if self.document(&path).is_none() {
             tracing::info!(?path, "document not found");
             return Err(path_not_found_error(&path));

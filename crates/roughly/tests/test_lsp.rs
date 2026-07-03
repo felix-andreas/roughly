@@ -2774,6 +2774,44 @@ async fn config_reload_failure_keeps_previous_config_and_reports() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn stub_type_name_jumps_to_its_type_declaration() {
+    let mut context = setup_test(&[]).await;
+
+    let stub_uri = context.file_uri("stubs/project.Rtypes");
+    context
+        .open_file(
+            &stub_uri,
+            "@type frame\nload_it : fn(x: character) -> frame\n",
+        )
+        .await;
+    let _ = recv_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
+
+    let response = context
+        .server
+        .definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: stub_uri.clone(),
+                },
+                // Inside `frame` in the return position of the declaration line.
+                position: Position::new(1, 34),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("definition failed")
+        .expect("expected a definition");
+
+    let GotoDefinitionResponse::Scalar(location) = response else {
+        panic!("expected a scalar location: {response:?}");
+    };
+    assert_eq!(location.range.start.line, 0);
+
+    context.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn stub_documents_get_semantic_tokens() {
     let mut context = setup_test(&[]).await;
 
