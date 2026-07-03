@@ -764,17 +764,19 @@ impl EngineWorker {
 
         if is_stub_document(&path) {
             let rope = ropey::Rope::from_str(text);
-            let diagnostics = stub_document_diagnostics(&rope, self.position_encoding);
-            self.stub_documents.insert(path, rope);
-            if let Err(error) = self
-                .client
-                .publish_diagnostics(PublishDiagnosticsParams::new(
-                    uri,
-                    diagnostics,
-                    Some(params.text_document.version),
-                ))
-            {
-                tracing::error!(?error, "failed to publish stub diagnostics");
+            self.stub_documents.insert(path, rope.clone());
+            if !self.client_supports_pull_diagnostics {
+                let diagnostics = stub_document_diagnostics(&rope, self.position_encoding);
+                if let Err(error) = self
+                    .client
+                    .publish_diagnostics(PublishDiagnosticsParams::new(
+                        uri,
+                        diagnostics,
+                        Some(params.text_document.version),
+                    ))
+                {
+                    tracing::error!(?error, "failed to publish stub diagnostics");
+                }
             }
             return;
         }
@@ -875,17 +877,19 @@ impl EngineWorker {
                     }
                 }
             }
-            let rope = self.stub_documents[&path].clone();
-            let diagnostics = stub_document_diagnostics(&rope, self.position_encoding);
-            if let Err(error) = self
-                .client
-                .publish_diagnostics(PublishDiagnosticsParams::new(
-                    uri,
-                    diagnostics,
-                    Some(params.text_document.version),
-                ))
-            {
-                tracing::error!(?error, "failed to publish stub diagnostics");
+            if !self.client_supports_pull_diagnostics {
+                let rope = self.stub_documents[&path].clone();
+                let diagnostics = stub_document_diagnostics(&rope, self.position_encoding);
+                if let Err(error) = self
+                    .client
+                    .publish_diagnostics(PublishDiagnosticsParams::new(
+                        uri,
+                        diagnostics,
+                        Some(params.text_document.version),
+                    ))
+                {
+                    tracing::error!(?error, "failed to publish stub diagnostics");
+                }
             }
             return;
         }
@@ -1113,6 +1117,20 @@ impl EngineWorker {
 
         tracing::debug!(?path, "document diagnostic");
 
+        // A stub buffer is not an engine document: its report is the standalone stub parse the push
+        // path serves, computed against the live rope. An unopened stub answers empty like any
+        // untracked pull.
+        if is_stub_document(&path) {
+            let Some(rope) = self.stub_documents.get(&path) else {
+                return Ok(empty_full_diagnostic_report());
+            };
+            let items = stub_document_diagnostics(rope, self.position_encoding);
+            return Ok(diagnostic_report(
+                items,
+                params.previous_result_id.as_deref(),
+            ));
+        }
+
         // Unlike the sync notifications, a pull can legitimately target a document the server does
         // not track; answer with an empty full report rather than panicking.
         if !self.file_ids.contains_key(&path) {
@@ -1129,29 +1147,9 @@ impl EngineWorker {
         let Ok(items) = self.cancellable(|| self.convert_document_diagnostics(&path)) else {
             return Err(diagnostics_cancelled_error());
         };
-        let result_id = diagnostics_result_id(&items);
-
-        // The result id is a content hash of the report, so an unchanged answer is correct even
-        // under inter-file dependencies where the document's own edit version did not move.
-        if params.previous_result_id.as_deref() == Some(result_id.as_str()) {
-            return Ok(DocumentDiagnosticReportResult::Report(
-                DocumentDiagnosticReport::Unchanged(RelatedUnchangedDocumentDiagnosticReport {
-                    related_documents: None,
-                    unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
-                        result_id,
-                    },
-                }),
-            ));
-        }
-
-        Ok(DocumentDiagnosticReportResult::Report(
-            DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
-                related_documents: None,
-                full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                    result_id: Some(result_id),
-                    items,
-                },
-            }),
+        Ok(diagnostic_report(
+            items,
+            params.previous_result_id.as_deref(),
         ))
     }
 
@@ -2596,6 +2594,36 @@ fn diagnostics_cancelled_error() -> ResponseError {
         serde_json::to_value(DiagnosticServerCancellationData::default())
             .expect("diagnostic cancellation data is serializable"),
     )
+}
+
+// Wrap freshly computed diagnostics as a pull answer: `Unchanged` when the report's content hash
+// matches the client's previous result id, a `Full` report carrying the new id otherwise. Hashing
+// content (not edit versions) keeps the unchanged answer correct even under inter-file dependencies
+// where the document's own edit version did not move.
+fn diagnostic_report(
+    items: Vec<Diagnostic>,
+    previous_result_id: Option<&str>,
+) -> DocumentDiagnosticReportResult {
+    let result_id = diagnostics_result_id(&items);
+    if previous_result_id == Some(result_id.as_str()) {
+        return DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Unchanged(
+            RelatedUnchangedDocumentDiagnosticReport {
+                related_documents: None,
+                unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
+                    result_id,
+                },
+            },
+        ));
+    }
+    DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(
+        RelatedFullDocumentDiagnosticReport {
+            related_documents: None,
+            full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                result_id: Some(result_id),
+                items,
+            },
+        },
+    ))
 }
 
 fn empty_full_diagnostic_report() -> DocumentDiagnosticReportResult {

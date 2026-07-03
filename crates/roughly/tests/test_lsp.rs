@@ -2913,3 +2913,62 @@ async fn stub_documents_are_served_with_parse_diagnostics() {
 
     context.shutdown().await;
 }
+
+#[tokio::test]
+async fn stub_documents_answer_pull_diagnostics() {
+    // A pull client gets stub-buffer reports through `textDocument/diagnostic` (no push), with the
+    // same unchanged/full result-id protocol as R documents.
+    let mut context = setup_test_with_pull_diagnostics(&[]).await;
+
+    let stub_uri = context.file_uri("stubs/project.Rtypes");
+    context
+        .open_file(
+            &stub_uri,
+            "length : fn(x: Any) -> integer\nbroken line without colon\n",
+        )
+        .await;
+
+    let (messages, result_id) =
+        full_report_messages(context.document_diagnostic(&stub_uri, None).await);
+    assert_eq!(
+        messages.len(),
+        1,
+        "one malformed line, one diagnostic: {messages:?}"
+    );
+    let result_id = result_id.expect("a non-empty stub report carries a result id");
+
+    let repeat = context
+        .document_diagnostic(&stub_uri, Some(result_id.clone()))
+        .await;
+    assert!(
+        matches!(
+            repeat,
+            DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Unchanged(_))
+        ),
+        "expected an unchanged report on repeat pull, got: {repeat:?}"
+    );
+
+    // Fixing the line moves the next pull to a clean full report.
+    context.change_file(
+        &stub_uri,
+        1,
+        Range::new(Position::new(1, 0), Position::new(1, 25)),
+        "nchar : fn(x: character) -> integer",
+    );
+    let (after_fix, _) = full_report_messages(context.document_diagnostic(&stub_uri, None).await);
+    assert!(
+        after_fix.is_empty(),
+        "fixed stub pulls an empty report, got: {after_fix:?}"
+    );
+
+    // A stub path that was never opened answers an empty full report like any untracked pull.
+    let never_opened = context.file_uri("stubs/never_opened.Rtypes");
+    let (unopened, _) =
+        full_report_messages(context.document_diagnostic(&never_opened, None).await);
+    assert!(
+        unopened.is_empty(),
+        "expected an empty report for an unopened stub, got: {unopened:?}"
+    );
+
+    context.shutdown().await;
+}
