@@ -14,7 +14,7 @@ use {
             DocumentDiagnosticParams, DocumentDiagnosticReport, DocumentDiagnosticReportResult,
             DocumentFormattingParams, DocumentHighlight, DocumentHighlightParams,
             DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
-            DocumentSymbolResponse, FileChangeType, FileSystemWatcher, FoldingRange,
+            DocumentSymbolResponse, Documentation, FileChangeType, FileSystemWatcher, FoldingRange,
             FoldingRangeKind, FoldingRangeParams, FoldingRangeProviderCapability,
             FullDocumentDiagnosticReport, GlobPattern, Hover, HoverContents, HoverParams,
             HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
@@ -1217,6 +1217,12 @@ impl EngineWorker {
                                 analysis::CompletionItemKind::Type => CompletionItemKind::STRUCT,
                             }),
                             detail: item.detail,
+                            documentation: item.documentation.map(|documentation| {
+                                Documentation::MarkupContent(MarkupContent {
+                                    kind: MarkupKind::Markdown,
+                                    value: documentation,
+                                })
+                            }),
                             ..Default::default()
                         })
                         .collect(),

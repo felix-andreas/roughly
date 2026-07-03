@@ -1877,6 +1877,7 @@ pub fn completion(
                 kind: CompletionItemKind::Keyword,
                 source: CompletionItemSource::Keyword,
                 detail: None,
+                documentation: None,
             });
         }
     }
@@ -1900,6 +1901,7 @@ pub fn completion(
                 kind,
                 source: CompletionItemSource::Global,
                 detail: None,
+                documentation: None,
             });
         }
     }
@@ -1921,6 +1923,9 @@ pub fn completion(
             },
             source: CompletionItemSource::Stdlib,
             detail: Some(render_user_facing_scheme(database.interner(), scheme)),
+            documentation: database
+                .stub_namespace(symbol)
+                .map(|namespace| format!("From the `{namespace}` package.")),
         });
     }
 
@@ -2153,6 +2158,7 @@ fn field_completion_items(
                 kind: CompletionItemKind::Field,
                 source: CompletionItemSource::Field,
                 detail: Some(render_generalized_type(database.interner(), &field.value)),
+                documentation: None,
             })
         })
         .collect()
@@ -2234,6 +2240,7 @@ fn annotation_completion(
                 kind: CompletionItemKind::Type,
                 source: CompletionItemSource::Type,
                 detail: None,
+                documentation: None,
             });
         }
     }
@@ -2254,6 +2261,7 @@ fn annotation_completion(
                 kind: CompletionItemKind::Type,
                 source: CompletionItemSource::Type,
                 detail: Some(definition.definition.kind.directive_name().to_owned()),
+                documentation: None,
             });
         }
     }
@@ -2293,6 +2301,7 @@ fn rendered_query_matches(
             kind: CompletionItemKind::Variable,
             source: CompletionItemSource::Local,
             detail: None,
+            documentation: None,
         })
         .collect()
 }
@@ -2335,6 +2344,7 @@ fn local_completion_items(
                         kind: CompletionItemKind::Variable,
                         source: CompletionItemSource::Local,
                         detail: None,
+                        documentation: None,
                     });
                 }
             }
@@ -2398,6 +2408,7 @@ fn collect_local_bindings_in_body(
                         kind,
                         source: CompletionItemSource::Local,
                         detail: None,
+                        documentation: None,
                     });
                 }
             }
@@ -2416,6 +2427,7 @@ fn collect_local_bindings_in_body(
                         kind: CompletionItemKind::Variable,
                         source: CompletionItemSource::Local,
                         detail: None,
+                        documentation: None,
                     });
                 }
             }

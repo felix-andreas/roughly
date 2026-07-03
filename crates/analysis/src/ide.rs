@@ -359,6 +359,9 @@ pub struct CompletionItem {
     // Extra type information shown next to the item: a stub's or typed field's rendered type, or a
     // type name's declaring directive. `None` when the item carries no type fact.
     pub detail: Option<String>,
+    // Prose shown in the item's documentation panel — a stdlib item's origin package. `None` when
+    // the item has nothing beyond its label and detail.
+    pub documentation: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
