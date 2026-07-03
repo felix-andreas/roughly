@@ -805,7 +805,32 @@ impl EngineWorker {
                                 }),
                                 kind: None,
                             },
-                        ],
+                        ]
+                        .into_iter()
+                        // The governing config may live in an ancestor ABOVE the workspace root
+                        // (discovery walks upward); watch the discovered file's own directory too,
+                        // or live edits to it would silently not apply until a restart. The
+                        // in-root watcher above stays: a config created at the root later takes
+                        // precedence and must also trigger a reload.
+                        .chain(
+                            Config::discover_path(&self.workspace_root)
+                                .filter(|config_path| {
+                                    config_path.parent() != Some(self.workspace_root.as_path())
+                                })
+                                .and_then(|config_path| {
+                                    let directory = config_path.parent()?;
+                                    Some(FileSystemWatcher {
+                                        glob_pattern: GlobPattern::Relative(RelativePattern {
+                                            base_uri: OneOf::Right(
+                                                Url::from_file_path(directory).ok()?,
+                                            ),
+                                            pattern: CONFIG_FILE_NAME.into(),
+                                        }),
+                                        kind: None,
+                                    })
+                                }),
+                        )
+                        .collect(),
                     })
                     .unwrap(),
                 ),
@@ -1090,7 +1115,6 @@ impl EngineWorker {
     }
 
     fn did_change_watched_files(&mut self, params: DidChangeWatchedFilesParams) {
-        let config_path = self.workspace_root.join(CONFIG_FILE_NAME);
         let workspace_r_path = self.workspace_r_path();
 
         let mut config_changed = false;
@@ -1106,7 +1130,14 @@ impl EngineWorker {
 
             tracing::info!(?path, ?typ, "watched file changed");
 
-            if path == config_path {
+            // Any watched `roughly.toml` — the workspace root's or a governing ancestor's —
+            // triggers re-discovery. Matching by file name rather than a full-path comparison also
+            // tolerates a symlinked root or a case-normalizing client, where the client's path
+            // spelling differs from ours; re-running discovery is idempotent either way.
+            if path
+                .file_name()
+                .is_some_and(|name| name == CONFIG_FILE_NAME)
+            {
                 // Re-run discovery rather than reading the changed file directly, so a deleted
                 // workspace config correctly falls back to an ancestor config or the defaults.
                 match Config::discover(&self.workspace_root) {

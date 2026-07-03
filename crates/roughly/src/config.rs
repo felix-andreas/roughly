@@ -27,33 +27,18 @@ impl Config {
     /// workspace root) and the CLI (from each target argument) resolve configuration through this
     /// one search.
     pub fn discover(target: impl AsRef<Path>) -> Result<Config, ConfigError> {
-        let target = target.as_ref();
-        // A relative path is made absolute first: its lexical parent chain ends at the empty path,
-        // so walking it directly would never reach the real filesystem ancestors.
-        let target = std::path::absolute(target).map_err(|error| ConfigError::Io {
-            path: target.to_path_buf(),
-            source: error,
-        })?;
-        // `std::path::absolute` keeps `..` components, and `parent()` strips them lexically — so a
-        // target like `/a/b/../c.R` would walk `/a/b/..` and then back INTO `/a/b`, which is not an
-        // ancestor of the target at all. Resolve `.`/`..` away first so the walk visits only true
-        // ancestors.
-        let target = normalize_lexically(&target);
-
-        let mut directory = if target.is_dir() {
-            Some(target.as_path())
-        } else {
-            target.parent()
-        };
-        while let Some(current) = directory {
-            let candidate = current.join(CONFIG_FILE_NAME);
-            if candidate.is_file() {
-                return Config::from_path(candidate);
-            }
-            directory = current.parent();
+        match find_config_file(target.as_ref())? {
+            Some(path) => Config::from_path(path),
+            None => Ok(Config::default()),
         }
+    }
 
-        Ok(Config::default())
+    /// The path of the config file [`discover`](Config::discover) would load for `target`, when one
+    /// exists — the file the language server must watch for live reloads (it may sit in an ancestor
+    /// *above* the workspace root). Resolution failures degrade to `None`: the caller is deciding
+    /// what to watch, and `discover` itself reports the error.
+    pub fn discover_path(target: impl AsRef<Path>) -> Option<PathBuf> {
+        find_config_file(target.as_ref()).ok().flatten()
     }
 
     pub fn from_path(path: impl AsRef<Path>) -> Result<Config, ConfigError> {
@@ -77,10 +62,42 @@ impl Config {
     }
 }
 
+// The nearest-ancestor search both `discover` and `discover_path` walk: the target's own directory
+// (its parent when the target is a file), then each ancestor, for a `roughly.toml`.
+fn find_config_file(target: &Path) -> Result<Option<PathBuf>, ConfigError> {
+    // A relative path is made absolute first: its lexical parent chain ends at the empty path,
+    // so walking it directly would never reach the real filesystem ancestors.
+    let target = std::path::absolute(target).map_err(|error| ConfigError::Resolve {
+        path: target.to_path_buf(),
+        source: error,
+    })?;
+    // `std::path::absolute` keeps `..` components, and `parent()` strips them lexically — so a
+    // target like `/a/b/../c.R` would walk `/a/b/..` and then back INTO `/a/b`, which is not an
+    // ancestor of the target at all. Resolve `.`/`..` away first so the walk visits only true
+    // ancestors.
+    let target = normalize_lexically(&target);
+
+    let mut directory = if target.is_dir() {
+        Some(target.as_path())
+    } else {
+        target.parent()
+    };
+    while let Some(current) = directory {
+        let candidate = current.join(CONFIG_FILE_NAME);
+        if candidate.is_file() {
+            return Ok(Some(candidate));
+        }
+        directory = current.parent();
+    }
+    Ok(None)
+}
+
 #[derive(Error, Debug)]
 pub enum ConfigError {
     #[error("failed to read config file {path}: {source}", path = .path.display())]
     Io { path: PathBuf, source: io::Error },
+    #[error("failed to resolve {path} while searching for a config file: {source}", path = .path.display())]
+    Resolve { path: PathBuf, source: io::Error },
     #[error(transparent)]
     Invalid(ConfigParseError),
 }
@@ -94,11 +111,11 @@ impl ConfigError {
     }
 
     /// The 1-based line and column of a parse or deserialize failure inside the config text, when
-    /// the underlying toml error carries a span. `None` for I/O failures.
+    /// the underlying toml error carries a span. `None` for I/O and resolution failures.
     pub fn parse_location(&self) -> Option<(usize, usize)> {
         match self {
             ConfigError::Invalid(error) => error.location,
-            ConfigError::Io { .. } => None,
+            ConfigError::Io { .. } | ConfigError::Resolve { .. } => None,
         }
     }
 }
