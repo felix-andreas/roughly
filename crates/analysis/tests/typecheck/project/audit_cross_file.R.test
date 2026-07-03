@@ -269,7 +269,7 @@ No diagnostics.
 #---- scripts/use.R
 r <- helper(1L)
 #++++
-warning[unresolved] I could not resolve `helper` in this package, its imports, or builtins.
+warning[unresolved] I could not resolve `helper` in this package, its imports, or builtins. Did you mean `help`?
 --> 1:6-1:12
 | r <- helper(1L)
 

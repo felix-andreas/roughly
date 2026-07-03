@@ -248,3 +248,22 @@ Assign(result@b0)
 warning[unresolved] `bazqux` is not exported by `stats`.
 --> 1:11-1:24
 | result <- stats::bazqux(1L)
+
+#==== typo_suggestions
+#---- near_miss_of_a_stub_name_suggests_it
+#---- R/main.R
+lenght(c(1L, 2L))
+#++++
+Call
+  Symbol(lenght@?)
+  Argument
+    Call
+      Symbol(c@?)
+      Argument
+        Integer(1L)
+      Argument
+        Integer(2L)
+
+warning[unresolved] I could not resolve `lenght` in this package, its imports, or builtins. Did you mean `length`?
+--> 1:1-1:7
+| lenght(c(1L, 2L))

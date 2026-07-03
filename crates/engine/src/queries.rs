@@ -1448,9 +1448,19 @@ fn package_naming_diagnostics(
         }
         let name = interner.resolve(*symbol).unwrap_or("<unknown>");
         let range = module.arena.get(*expression_id).range;
+        // Mirrors production's stub-only typo hint (set-once input: no invalidation edge).
+        let candidates = group
+            .stubs
+            .symbols()
+            .filter_map(|candidate| interner.resolve(candidate));
+        let suggestion = analysis::diagnostic::nearest_name(name, candidates)
+            .map(|nearest| format!(" Did you mean `{nearest}`?"))
+            .unwrap_or_default();
         diagnostics.push(Diagnostic::unresolved_warning(
             range,
-            format!("I could not resolve `{name}` in this package, its imports, or builtins."),
+            format!(
+                "I could not resolve `{name}` in this package, its imports, or builtins.{suggestion}"
+            ),
         ));
     }
 

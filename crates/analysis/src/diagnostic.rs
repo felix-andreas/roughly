@@ -184,6 +184,64 @@ fn collect_function_free_variables(
     collect_free_variables(&function_type.return_type, out);
 }
 
+// The closest candidate to a misspelled name, for "did you mean" hints on unresolved references:
+// the lexicographically first candidate at the smallest edit distance, when that distance is small
+// relative to the name (≤ 1 for short names, ≤ 2 from length 5). Short names skip the hint —
+// almost everything is within distance 2 of `x`.
+pub fn nearest_name<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    if name.chars().count() < 3 {
+        return None;
+    }
+    let budget = if name.chars().count() >= 5 { 2 } else { 1 };
+    let mut best: Option<(usize, &str)> = None;
+    for candidate in candidates {
+        if candidate == name {
+            continue;
+        }
+        let distance = edit_distance_within(name, candidate, budget);
+        let Some(distance) = distance else {
+            continue;
+        };
+        best = match best {
+            Some((best_distance, best_name))
+                if (best_distance, best_name) <= (distance, candidate) =>
+            {
+                Some((best_distance, best_name))
+            }
+            _ => Some((distance, candidate)),
+        };
+    }
+    best.map(|(_, candidate)| candidate)
+}
+
+// Levenshtein distance, `None` when it exceeds `budget` (with a cheap length pre-check so the
+// whole candidate set stays fast to scan).
+fn edit_distance_within(left: &str, right: &str, budget: usize) -> Option<usize> {
+    let left: Vec<char> = left.chars().collect();
+    let right: Vec<char> = right.chars().collect();
+    if left.len().abs_diff(right.len()) > budget {
+        return None;
+    }
+    let mut previous: Vec<usize> = (0..=right.len()).collect();
+    let mut current = vec![0; right.len() + 1];
+    for (row, left_character) in left.iter().enumerate() {
+        current[0] = row + 1;
+        let mut row_minimum = current[0];
+        for (column, right_character) in right.iter().enumerate() {
+            let substitution = previous[column] + usize::from(left_character != right_character);
+            current[column + 1] = substitution
+                .min(previous[column + 1] + 1)
+                .min(current[column] + 1);
+            row_minimum = row_minimum.min(current[column + 1]);
+        }
+        if row_minimum > budget {
+            return None;
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+    (previous[right.len()] <= budget).then_some(previous[right.len()])
+}
+
 // Applies `# roughly: allow(code, ...)` suppression comments: a diagnostic is dropped when a
 // suppression naming its code (or `all`) sits on the diagnostic's own line (a trailing comment) or
 // on the line directly above it. Codes are the user-facing strings diagnostics render with

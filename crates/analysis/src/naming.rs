@@ -356,9 +356,22 @@ pub(crate) fn package_document_diagnostics(
         }
         let name = interner.resolve(*symbol).unwrap_or("<unknown>");
         let range = context.module.arena.get(*expression_id).range;
+        // A near-miss of a standard-library name is almost always a typo; the hint names the
+        // correction. Candidates are the stub corpus only: it is a set-once input, so the hint
+        // adds no invalidation edge — suggesting package globals would make every file's
+        // diagnostics depend on the whole export namespace.
+        let candidates = context
+            .stub_library
+            .symbols()
+            .filter_map(|candidate| interner.resolve(candidate));
+        let suggestion = crate::diagnostic::nearest_name(name, candidates)
+            .map(|nearest| format!(" Did you mean `{nearest}`?"))
+            .unwrap_or_default();
         diagnostics.push(Diagnostic::unresolved_warning(
             range,
-            format!("I could not resolve `{name}` in this package, its imports, or builtins."),
+            format!(
+                "I could not resolve `{name}` in this package, its imports, or builtins.{suggestion}"
+            ),
         ));
     }
 
