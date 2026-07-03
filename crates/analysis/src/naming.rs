@@ -354,45 +354,94 @@ pub(crate) fn package_document_diagnostics(
         {
             continue;
         }
-        let name = interner.resolve(*symbol).unwrap_or("<unknown>");
         let range = context.module.arena.get(*expression_id).range;
-        // A near-miss of a standard-library name is almost always a typo; the hint names the
-        // correction. Candidates are the stub corpus only: it is a set-once input, so the hint
-        // adds no invalidation edge — suggesting package globals would make every file's
-        // diagnostics depend on the whole export namespace.
-        let candidates = context
-            .stub_library
-            .symbols()
-            .filter_map(|candidate| interner.resolve(candidate));
-        let suggestion = crate::diagnostic::nearest_name(name, candidates)
-            .map(|nearest| format!(" Did you mean `{nearest}`?"))
-            .unwrap_or_default();
-        diagnostics.push(Diagnostic::unresolved_warning(
+        diagnostics.push(unresolved_reference_diagnostic(
+            interner,
+            context.stub_library,
+            *symbol,
             range,
-            format!(
-                "I could not resolve `{name}` in this package, its imports, or builtins.{suggestion}"
-            ),
         ));
     }
 
     for read in &context.local_naming.namespace_reads {
         let range = context.module.arena.get(read.expression_id).range;
-        let namespace = interner.resolve(read.namespace).unwrap_or("<unknown>");
-        if !context.stub_library.is_known_namespace(namespace) {
-            diagnostics.push(Diagnostic::unresolved_warning(
-                range,
-                format!("unknown package namespace `{namespace}`."),
-            ));
-        } else if !context.stub_library.namespace_exports(namespace, read.name) {
-            let name = interner.resolve(read.name).unwrap_or("<unknown>");
-            diagnostics.push(Diagnostic::unresolved_warning(
-                range,
-                format!("`{name}` is not exported by `{namespace}`."),
-            ));
+        if let Some(diagnostic) =
+            namespace_read_diagnostic(interner, context.stub_library, read, range)
+        {
+            diagnostics.push(diagnostic);
         }
     }
 
     diagnostics
+}
+
+// The "assigned but never used" warnings: one per `unused_assignments` entry, phrased against the
+// assigned name at the assignment site. All eligibility rules already ran when
+// `resolve_document_locally` populated `unused_assignments`; this only resolves the name and
+// renders. Shared verbatim by the from-scratch pipeline and the query engine.
+pub fn unused_diagnostics(local_naming: &NamesLocal, interner: &Interner) -> Vec<Diagnostic> {
+    local_naming
+        .unused_assignments
+        .iter()
+        .map(|unused| {
+            let name = interner.resolve(unused.symbol).unwrap_or("<unknown>");
+            Diagnostic::unused_warning(
+                unused.range,
+                format!("`{name}` is assigned but never used."),
+            )
+        })
+        .collect()
+}
+
+// The could-not-resolve diagnostic for one unresolved reference, shared verbatim by the from-scratch
+// pipeline and the query engine so the two can never drift apart on wording. The typo hint's
+// candidates are the stub corpus only: it is a set-once input, so the hint adds no invalidation
+// edge — suggesting package globals would make every file's diagnostics depend on the whole export
+// namespace.
+pub fn unresolved_reference_diagnostic(
+    interner: &Interner,
+    stub_library: &StubLibrary,
+    symbol: Symbol,
+    range: Range,
+) -> Diagnostic {
+    let name = interner.resolve(symbol).unwrap_or("<unknown>");
+    let candidates = stub_library
+        .symbols()
+        .filter_map(|candidate| interner.resolve(candidate));
+    let suggestion = crate::diagnostic::nearest_name(name, candidates)
+        .map(|nearest| format!(" Did you mean `{nearest}`?"))
+        .unwrap_or_default();
+    Diagnostic::unresolved_warning(
+        range,
+        format!(
+            "I could not resolve `{name}` in this package, its imports, or builtins.{suggestion}"
+        ),
+    )
+}
+
+// The `pkg::name` validation diagnostic for one namespace read (unknown namespace, or a name the
+// namespace does not export), shared verbatim by both pipelines.
+pub fn namespace_read_diagnostic(
+    interner: &Interner,
+    stub_library: &StubLibrary,
+    read: &NamespaceRead,
+    range: Range,
+) -> Option<Diagnostic> {
+    let namespace = interner.resolve(read.namespace).unwrap_or("<unknown>");
+    if !stub_library.is_known_namespace(namespace) {
+        return Some(Diagnostic::unresolved_warning(
+            range,
+            format!("unknown package namespace `{namespace}`."),
+        ));
+    }
+    if !stub_library.namespace_exports(namespace, read.name) {
+        let name = interner.resolve(read.name).unwrap_or("<unknown>");
+        return Some(Diagnostic::unresolved_warning(
+            range,
+            format!("`{name}` is not exported by `{namespace}`."),
+        ));
+    }
+    None
 }
 
 // The path-ordered candidate list per package-global name: the documents whose top-level assignments

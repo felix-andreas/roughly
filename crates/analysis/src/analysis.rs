@@ -457,16 +457,10 @@ impl Analysis {
         if let Some(output) = self.document_naming_outputs.get(&document_id) {
             diagnostics.extend(output.diagnostics.iter().cloned());
             if self.check_config.unused {
-                for unused in &output.output.unused_assignments {
-                    let name = self
-                        .interner()
-                        .resolve(unused.symbol)
-                        .unwrap_or("<unknown>");
-                    diagnostics.push(Diagnostic::unused_warning(
-                        unused.range,
-                        format!("`{name}` is assigned but never used."),
-                    ));
-                }
+                diagnostics.extend(crate::naming::unused_diagnostics(
+                    &output.output,
+                    self.interner(),
+                ));
             }
         }
         if let Some(output) = &self.package_naming_output
@@ -1013,7 +1007,7 @@ pub fn typecheck(analysis_state: &mut Analysis) -> Vec<DocumentId> {
 // Renders each strict `Unknown` origin into a diagnostic. An origin that is the value of an
 // assignment is phrased against the bound name (the actionable fix is to annotate that binding);
 // any other origin is phrased against the expression itself.
-fn strict_origin_diagnostics(
+pub fn strict_origin_diagnostics(
     module: &Module,
     strict_origins: &[StrictUnknownOrigin],
     interner: &Interner,

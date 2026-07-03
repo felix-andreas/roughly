@@ -19,7 +19,7 @@ pub mod types;
 pub use crate::{
     analysis::{
         Analysis, AnalysisError, CheckConfig, LintConfig, LintLevel, lint, lower, resolve_package,
-        run_full, typecheck,
+        run_full, strict_origin_diagnostics, typecheck,
     },
     diagnostic::{
         Diagnostic, DiagnosticCode, Diagnostics, DocumentDiagnostics, Severity, render_core_type,

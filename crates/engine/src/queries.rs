@@ -41,9 +41,8 @@ use {
         tree::new_parser,
         type_syntax::type_name_token_range,
         typecheck::{
-            BUILTINS, ExportedValue, InferenceError, InferenceState, ModuleCheck, StrictOriginKind,
-            StrictUnknownOrigin, TypeDefinitionEnvironment,
-            inference_state_with_builtins_in_interner,
+            BUILTINS, ExportedValue, InferenceError, InferenceState, ModuleCheck,
+            TypeDefinitionEnvironment, inference_state_with_builtins_in_interner,
         },
         types::{Annotation, CoreType, NamedTypeRef, SurfaceType, TypeScheme},
     },
@@ -809,11 +808,15 @@ impl QueryGroup for RoughlyQueries {
                 // stay raw `InferenceError`s; the harness renders them against the interner + fallback
                 // range so there is a single source of truth for the type-error set.
                 let lowering = self.lowering.borrow();
-                let strict_diagnostics =
-                    strict_origin_diagnostics(&module, &check.strict_origins, lowering.interner());
+                let strict_diagnostics = analysis::strict_origin_diagnostics(
+                    &module,
+                    &check.strict_origins,
+                    lowering.interner(),
+                );
                 // Computed unconditionally (like `strict_diagnostics`); the consumer gates it on the `unused`
                 // check, matching production's `check_config.unused` in `Analysis::document_diagnostics`.
-                let unused = unused_diagnostics(&naming.naming, lowering.interner());
+                let unused =
+                    analysis::naming::unused_diagnostics(&naming.naming, lowering.interner());
                 Stored::new(FileDiagnostics {
                     naming: naming.diagnostics.clone(),
                     package_naming: (*package_naming).clone(),
@@ -1446,39 +1449,23 @@ fn package_naming_diagnostics(
         if resolves {
             continue;
         }
-        let name = interner.resolve(*symbol).unwrap_or("<unknown>");
         let range = module.arena.get(*expression_id).range;
-        // Mirrors production's stub-only typo hint (set-once input: no invalidation edge).
-        let candidates = group
-            .stubs
-            .symbols()
-            .filter_map(|candidate| interner.resolve(candidate));
-        let suggestion = analysis::diagnostic::nearest_name(name, candidates)
-            .map(|nearest| format!(" Did you mean `{nearest}`?"))
-            .unwrap_or_default();
-        diagnostics.push(Diagnostic::unresolved_warning(
+        diagnostics.push(analysis::naming::unresolved_reference_diagnostic(
+            interner,
+            &group.stubs,
+            *symbol,
             range,
-            format!(
-                "I could not resolve `{name}` in this package, its imports, or builtins.{suggestion}"
-            ),
         ));
     }
 
-    // `pkg::name` validation, mirroring production's namespace-read loop byte-for-byte.
+    // `pkg::name` validation: the diagnostic builder is the shared production function, so the
+    // wording cannot drift; only the walk that decides *which* reads to validate lives here.
     for read in &local_naming.namespace_reads {
         let range = module.arena.get(read.expression_id).range;
-        let namespace = interner.resolve(read.namespace).unwrap_or("<unknown>");
-        if !group.stubs.is_known_namespace(namespace) {
-            diagnostics.push(Diagnostic::unresolved_warning(
-                range,
-                format!("unknown package namespace `{namespace}`."),
-            ));
-        } else if !group.stubs.namespace_exports(namespace, read.name) {
-            let name = interner.resolve(read.name).unwrap_or("<unknown>");
-            diagnostics.push(Diagnostic::unresolved_warning(
-                range,
-                format!("`{name}` is not exported by `{namespace}`."),
-            ));
+        if let Some(diagnostic) =
+            analysis::naming::namespace_read_diagnostic(interner, &group.stubs, read, range)
+        {
+            diagnostics.push(diagnostic);
         }
     }
 
@@ -1947,83 +1934,6 @@ fn is_builtin(interner: &Interner, symbol: Symbol) -> bool {
             .iter()
             .any(|(builtin_name, _)| *builtin_name == name)
     })
-}
-
-// Renders each strict `Unknown` origin into a diagnostic, ported verbatim from `analysis.rs`'s private
-// `strict_origin_diagnostics`. An origin that is the value of an assignment is phrased against the bound
-// name (the actionable fix is to annotate that binding); any other origin is phrased against the
-// expression itself. Kept byte-identical to production so the rendered messages compare equal.
-fn strict_origin_diagnostics(
-    module: &Module,
-    strict_origins: &[StrictUnknownOrigin],
-    interner: &Interner,
-) -> Vec<Diagnostic> {
-    if strict_origins.is_empty() {
-        return Vec::new();
-    }
-    let mut assignment_targets = HashMap::new();
-    for expression in module.arena.expressions() {
-        if let ExpressionKind::Assign { value, .. } = &expression.kind
-            && let Some(target) = expression.kind.assignment_variable()
-        {
-            assignment_targets.insert(*value, target);
-        }
-    }
-    strict_origins
-        .iter()
-        .map(|origin| {
-            // A loop-widened origin is about the named variable, never about the expression the
-            // loop happens to be the value of, so it skips the assignment-value phrasing.
-            let assignment_target = match &origin.kind {
-                StrictOriginKind::LoopWidened(_) => None,
-                _ => assignment_targets.get(&origin.expression_id),
-            };
-            let message = if let Some(target) = assignment_target {
-                let name = interner.resolve(*target).unwrap_or("<unknown>");
-                format!("strict mode: could not determine the type of `{name}`; add a type annotation")
-            } else {
-                match &origin.kind {
-                    StrictOriginKind::UnsupportedConstruct => {
-                        "strict mode: this expression has an undetermined type (`Unknown`)".to_owned()
-                    }
-                    StrictOriginKind::UndeterminedReference(symbol) => {
-                        let name = interner.resolve(*symbol).unwrap_or("<unknown>");
-                        format!(
-                            "strict mode: could not determine the type of `{name}`; it has no known type"
-                        )
-                    }
-                    StrictOriginKind::LoopWidened(symbol) => {
-                        let name = interner.resolve(*symbol).unwrap_or("<unknown>");
-                        format!(
-                            "strict mode: could not determine the type of `{name}`; its type does not stabilize across loop iterations — add a type annotation"
-                        )
-                    }
-                }
-            };
-            Diagnostic::strict(origin.range, message)
-        })
-        .collect()
-}
-
-// The "assigned but never used" warnings, ported verbatim from `analysis.rs`'s `document_diagnostics`:
-// one warning per `unused_assignments` entry, phrased against the assigned name at the assignment site.
-// All the eligibility rules (reaching-write reachability, top-level/parameter/for-variable exclusions,
-// and `.`/`_`-prefixed throwaways skipped) already ran in `resolve_document_locally` when it populated
-// `unused_assignments`, so this only resolves the name and renders. The message string is mirrored from
-// `analysis.rs` (the analysis subsystem is unreachable across the crate boundary) and must stay
-// byte-identical for the differential comparison.
-fn unused_diagnostics(local_naming: &NamesLocal, interner: &Interner) -> Vec<Diagnostic> {
-    local_naming
-        .unused_assignments
-        .iter()
-        .map(|unused| {
-            let name = interner.resolve(unused.symbol).unwrap_or("<unknown>");
-            Diagnostic::unused_warning(
-                unused.range,
-                format!("`{name}` is assigned but never used."),
-            )
-        })
-        .collect()
 }
 
 // The package-wide fallback diagnostic range, byte `0..len` of the first package file's first line —
