@@ -514,3 +514,35 @@ setClass("Creature", representation(name = "character"))
 R/methods.R:
 setMethod("speak", "Creature", function(x) x)
 make <- function() new("Creature")
+
+#==== type_names
+#---- alias_renames_across_files
+#---- R/a.R
+#: @alias score {double}
+#: fn(x: score) -> score
+bump <- function(x) x
+#++++ any
+#---- R/b.R
+#: fn(value: score) -> score
+keep <- function(value) value
+#++++ any
+#!!!! rename alias.rename
+R/a.R:1:12 -> points
+#++++
+before:
+R/a.R:
+#: @alias score {double}
+#: fn(x: score) -> score
+bump <- function(x) x
+R/b.R:
+#: fn(value: score) -> score
+keep <- function(value) value
+
+after:
+R/a.R:
+#: @alias points {double}
+#: fn(x: points) -> points
+bump <- function(x) x
+R/b.R:
+#: fn(value: points) -> points
+keep <- function(value) value

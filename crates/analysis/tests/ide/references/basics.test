@@ -254,3 +254,22 @@ R/classes.R:1:12
 R/classes.R:1:11..1:17 [declaration]
 R/methods.R:1:21..1:27
 R/methods.R:2:25..2:31
+
+#==== type_names
+#---- type_references_span_annotations_across_files
+#---- R/a.R
+#: @type handle
+#: fn(x: handle) -> handle
+open_it <- function(x) x
+#++++ any
+#---- R/b.R
+#: fn(value: handle) -> NULL
+close_it <- function(value) NULL
+#++++ any
+#!!!! references type.refs
+R/a.R:2:14
+#++++
+R/a.R:1:10..1:16 [declaration]
+R/a.R:2:10..2:16
+R/a.R:2:21..2:27
+R/b.R:1:14..1:20
