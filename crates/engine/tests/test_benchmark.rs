@@ -304,6 +304,165 @@ fn body_edit_recheck_is_blast_radius_bounded() {
 }
 
 // ----------------------------------------------------------------------------------------------------
+// Invalidation cliffs: the two edit shapes that are NOT blast-radius bounded
+// ----------------------------------------------------------------------------------------------------
+
+// A syntactically broken keystroke state: lowering short-circuits a malformed tree to an empty
+// module, so the file's exported names flip to empty (and back on the fixing keystroke).
+fn malformed_source(index: usize) -> String {
+    let mut source = generate_source(index, false);
+    source.push_str("g_broken <- function() (\n");
+    source
+}
+
+// The committed witness for the malformed-flip cliff: entering and leaving a broken state each
+// re-fold the all-files symbol index (the exported-name set genuinely changes), and the recompute
+// set stays bounded by the edited file's referrers — the storm is per-symbol-narrow, not O(package)
+// inference. Pinning the counters keeps the cliff's cost visible: an accidental coarse dependency
+// (e.g. typecheck reading the whole index) would blow the recompute assertion immediately.
+#[test]
+fn malformed_flip_refolds_index_but_recompute_stays_bounded() {
+    let file_count = 300;
+    let edit_file: FileId = mid_chain_edit_file(file_count);
+
+    let mut engine = build_new_engine(file_count);
+    warm_new_engine(&engine, file_count);
+
+    let index_before = engine.group().package_symbol_index_runs();
+    let typecheck_before = total_typecheck_runs(&engine, file_count);
+
+    // Enter the malformed state (mid-keystroke), then leave it (the fixing keystroke), fetching
+    // everything after each flip so every file that would recompute does.
+    engine.set_input(
+        Key::SourceText(edit_file),
+        parse_source_input(&malformed_source(edit_file as usize)),
+    );
+    warm_new_engine(&engine, file_count);
+    engine.set_input(
+        Key::SourceText(edit_file),
+        parse_source_input(&generate_source(edit_file as usize, false)),
+    );
+    warm_new_engine(&engine, file_count);
+
+    let group = engine.group();
+    assert_eq!(
+        group.package_symbol_index_runs() - index_before,
+        2,
+        "each side of a malformed round-trip re-folds the all-files symbol index once"
+    );
+    let recompute = total_typecheck_runs(&engine, file_count) - typecheck_before;
+    assert!(
+        recompute <= 4,
+        "a malformed round-trip re-typechecks only the edited file and its referrer per side, \
+         got {recompute}"
+    );
+}
+
+// The cliff timing table: what the two not-blast-radius-bounded edit shapes actually cost, next to a
+// plain body edit at the same size. `working set` fetches the edited file + referrer (the editor's
+// synchronous cost); `full sweep` re-fetches every file (a pull-everything client, and the upper
+// bound on deferred cost). Sizes via `BENCH_LOC`, rounds via `BENCH_ROUNDS` as above.
+#[test]
+#[ignore = "perf benchmark; run manually with --release --nocapture"]
+fn benchmark_invalidation_cliffs() {
+    let target_loc: usize = std::env::var("BENCH_LOC")
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(100_000);
+    let rounds: usize = std::env::var("BENCH_ROUNDS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(10);
+    let file_count = file_count_for_loc(target_loc);
+    let edit_file = mid_chain_edit_file(file_count);
+    println!();
+    println!(
+        "  {} files ({} LoC), mid-chain edit target, {rounds} rounds",
+        file_count,
+        total_loc(file_count)
+    );
+    println!(
+        "  {:<24}  {:>12}  {:>12}  {:>15}  {:>11}",
+        "scenario", "working set", "full sweep", "recompute/edit", "PSI/edit"
+    );
+
+    // Each scenario toggles between two sources for the edit target; per round: set input, fetch the
+    // working set (timed), then sweep the rest (timed separately).
+    let scenarios: [(
+        &str,
+        Box<dyn Fn(usize) -> String>,
+        Box<dyn Fn(usize) -> String>,
+    ); 3] = [
+        (
+            "body edit",
+            Box::new(|index| generate_source(index, false)),
+            Box::new(|index| generate_source(index, true)),
+        ),
+        (
+            "malformed flip",
+            Box::new(|index| generate_source(index, false)),
+            Box::new(malformed_source),
+        ),
+        (
+            "re-export retarget",
+            Box::new(|index| reexport_source(index, false)),
+            Box::new(|index| reexport_source(index, true)),
+        ),
+    ];
+
+    for (name, source_a, source_b) in scenarios {
+        let mut engine = build_new_engine(file_count);
+        engine.set_input(
+            Key::SourceText(edit_file),
+            parse_source_input(&source_a(edit_file as usize)),
+        );
+        warm_new_engine(&engine, file_count);
+
+        let typecheck_before = total_typecheck_runs(&engine, file_count);
+        let index_before = engine.group().package_symbol_index_runs();
+        let mut working_set = Duration::ZERO;
+        let mut full_sweep = Duration::ZERO;
+        for round in 0..rounds {
+            let source = if round % 2 == 0 {
+                source_b(edit_file as usize)
+            } else {
+                source_a(edit_file as usize)
+            };
+            engine.set_input(Key::SourceText(edit_file), parse_source_input(&source));
+            let start = Instant::now();
+            let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(edit_file));
+            let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(edit_file + 1));
+            working_set += start.elapsed();
+            let start = Instant::now();
+            warm_new_engine(&engine, file_count);
+            full_sweep += start.elapsed();
+        }
+        let recompute_per_edit =
+            (total_typecheck_runs(&engine, file_count) - typecheck_before) as f64 / rounds as f64;
+        let index_per_edit =
+            (engine.group().package_symbol_index_runs() - index_before) as f64 / rounds as f64;
+        println!(
+            "  {name:<24}  {:>9.3} ms  {:>9.3} ms  {recompute_per_edit:>15.1}  {index_per_edit:>11.1}",
+            (working_set / rounds as u32).as_secs_f64() * 1e3,
+            (full_sweep / rounds as u32).as_secs_f64() * 1e3,
+        );
+    }
+    println!();
+}
+
+// Like `generate_source`, plus one re-export line whose *target* flips with `retargeted`: the
+// exported name set is unchanged, but the re-export graph edge moves — the reference-set edit shape
+// that re-walks the symbol-SCC machinery rather than just re-typechecking bodies.
+fn reexport_source(index: usize, retargeted: bool) -> String {
+    let mut source = generate_source(index, false);
+    if index > 0 {
+        let target_item = if retargeted { 1 } else { 0 };
+        source.push_str(&format!("alias_{index} <- g_{}_{target_item}\n", index - 1));
+    }
+    source
+}
+
+// ----------------------------------------------------------------------------------------------------
 // The perf table (heavy; manual)
 // ----------------------------------------------------------------------------------------------------
 
