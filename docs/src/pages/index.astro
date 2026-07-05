@@ -620,12 +620,16 @@ roughly check .</code></pre>
         // holds rather than dispersing.
         const INTRO_DELAY = 0.25
         const ASSEMBLE = 1.7
-        // Idle cycle (seconds): with the reader parked at the top, the shape drifts
-        // back and forth between the logo and the "Roughly" wordmark on its own —
-        // hold each for CYCLE_HOLD, cross-fade over CYCLE_MORPH.
-        const CYCLE_HOLD = 11
-        const CYCLE_MORPH = 1.8
-        const CYCLE_PERIOD = (CYCLE_HOLD + CYCLE_MORPH) * 2
+        // Idle cycle (seconds): parked at the top, the shape holds, then bursts
+        // outward into a streaming swarm, drifts as the swarm, and re-gathers into
+        // the other shape — logo, then the "Roughly" wordmark, back and forth. One
+        // half-cycle is HOLD -> FALL (the burst) -> STREAM -> RISE (gather); the two
+        // shapes alternate each half-cycle.
+        const CYCLE_HOLD = 5
+        const CYCLE_FALL = 1
+        const CYCLE_STREAM = 4
+        const CYCLE_RISE = 2
+        const CYCLE_HALF = CYCLE_HOLD + CYCLE_FALL + CYCLE_STREAM + CYCLE_RISE
 
         let dpr = Math.min(window.devicePixelRatio || 1, 2)
         let cssW = 0
@@ -639,11 +643,11 @@ roughly check .</code></pre>
         let clock = 0
         let lastTime = 0
         let progress = 0
-        // Seconds parked at the top (drives the idle logo<->"Roughly" cycle); resets
-        // whenever the reader scrolls so returning to the top always starts on the
-        // logo. `cycle` is the eased 0=logo .. 1="Roughly" amount it produces.
-        let idleClock = 0
-        let cycle = 0
+        // Seconds parked at the top (drives the idle logo<->swarm<->"Roughly" cycle);
+        // resets whenever the reader scrolls so returning to the top always starts on
+        // the logo. `burstHalf` latches the one outward impulse fired per half-cycle.
+        let cycleClock = 0
+        let burstHalf = -1
         let centroidX = 0
         let centroidY = 0
         const mouse = { x: -9999, y: -9999, active: false }
@@ -895,14 +899,21 @@ roughly check .</code></pre>
           return 1
         }
 
-        // Idle cycle target (0 = logo, 1 = "Roughly") from seconds parked at the top:
-        // hold the logo, cross-fade to the wordmark, hold it, cross-fade back.
-        function idleCycleAmount(seconds: number) {
-          const phase = seconds % CYCLE_PERIOD
-          if (phase < CYCLE_HOLD) return 0
-          if (phase < CYCLE_HOLD + CYCLE_MORPH) return smooth01((phase - CYCLE_HOLD) / CYCLE_MORPH)
-          if (phase < CYCLE_HOLD * 2 + CYCLE_MORPH) return 1
-          return 1 - smooth01((phase - (CYCLE_HOLD * 2 + CYCLE_MORPH)) / CYCLE_MORPH)
+        // Idle cycle claim (1 = gathered on a shape, 0 = exploded into the streaming
+        // swarm) across one half-cycle: hold, fall (burst), stream, rise (gather).
+        function cycleClaim(phase: number) {
+          if (phase < CYCLE_HOLD) return 1
+          if (phase < CYCLE_HOLD + CYCLE_FALL) return 1 - smooth01((phase - CYCLE_HOLD) / CYCLE_FALL)
+          if (phase < CYCLE_HOLD + CYCLE_FALL + CYCLE_STREAM) return 0
+          return smooth01((phase - (CYCLE_HOLD + CYCLE_FALL + CYCLE_STREAM)) / CYCLE_RISE)
+        }
+        // Which shape (0 = logo, 1 = "Roughly") the half-cycle rests on: it holds the
+        // shape it started from, then gathers onto the other one. The swap happens
+        // mid-stream, while nothing is gathered, so there is no visible jump.
+        function cycleShapeSel(halfIndex: number, phase: number) {
+          const fromShape = halfIndex % 2 === 0 ? 0 : 1
+          const swapAt = CYCLE_HOLD + CYCLE_FALL + CYCLE_STREAM / 2
+          return phase < swapAt ? fromShape : 1 - fromShape
         }
 
         // One frame. After the fly-in the shape particles stay assembled: parked at
@@ -918,10 +929,22 @@ roughly check .</code></pre>
           // resolves quickly; the remaining scroll just holds it.
           const morph = smooth01(clamp01(progress / 0.72))
           const intro = introAmount()
-          // Ease the idle shape toward the logo<->"Roughly" cycle while parked at the
-          // top, or straight back to the logo the moment the reader scrolls (idleClock
-          // is held at 0 off the top, so its cycle target is the logo).
-          cycle += (idleCycleAmount(idleClock) - cycle) * 0.05
+          // Where the idle cycle is right now: which half (logo->swarm->"Roughly" or
+          // back), how gathered onto a shape (claim), and which shape it rests on.
+          const halfIndex = Math.floor(cycleClock / CYCLE_HALF)
+          const phase = cycleClock - halfIndex * CYCLE_HALF
+          const claim = cycleClaim(phase)
+          const shapeSel = cycleShapeSel(halfIndex, phase)
+          // Fire one outward impulse the instant the shape releases (start of FALL),
+          // so it bursts into radial streaks rather than just fading into the swarm.
+          if (burstHalf !== halfIndex && phase >= CYCLE_HOLD && phase < CYCLE_HOLD + 0.4) {
+            burstHalf = halfIndex
+            for (const particle of particles) {
+              if (particle.logoness <= 0) continue
+              particle.vx += (particle.x - centroidX) * 0.018 + (Math.random() - 0.5) * 0.5
+              particle.vy += (particle.y - centroidY) * 0.018 + (Math.random() - 0.5) * 0.5
+            }
+          }
           // How strongly the scroll text is claimed — ramps in fast so the headline
           // reads crisp. Drives the trail crispening below.
           const textForm = smooth01(clamp01(morph / 0.32))
@@ -935,26 +958,27 @@ roughly check .</code></pre>
           const settle = Math.max(intro < 1 ? Math.sin(Math.PI * intro) : 0, Math.sin(Math.PI * morph))
           for (let i = 0; i < particles.length; i++) {
             const p = particles[i]
-            // Shape particles stay claimed once the intro assembles them; pure
-            // drifters (logoness 0) never are.
-            const form = p.logoness * intro
+            // A shape particle is claimed while gathered on a shape — the intro
+            // assembles it, then the cycle holds it and releases it into the swarm;
+            // pure drifters (logoness 0) never are.
+            const form = p.logoness * intro * claim
             let pullX = 0
             let pullY = 0
             if (form > 0.0001) {
-              // Idle shape: logo <-> "Roughly" by the cycle. Scroll then slides that
-              // shape across to the headline.
-              const idleX = p.lx + (p.rx - p.lx) * cycle
-              const idleY = p.ly + (p.ry - p.ly) * cycle
-              const tx = idleX + (p.hx - idleX) * morph
-              const ty = idleY + (p.hy - idleY) * morph
+              // The shape it rests on (logo or "Roughly" by the cycle), slid across to
+              // the headline as you scroll.
+              const shapeX = p.lx + (p.rx - p.lx) * shapeSel
+              const shapeY = p.ly + (p.ry - p.ly) * shapeSel
+              const tx = shapeX + (p.hx - shapeX) * morph
+              const ty = shapeY + (p.hy - shapeY) * morph
               const springK = 0.1 * form
               pullX = (tx - p.x) * springK
               pullY = (ty - p.y) * springK
             }
-            // Flow current: only the pure drifters flow (the streaming rivers that
-            // keep the field alive). Assembled shape dots hold steady so the glyph
-            // reads clean, with no pulse.
-            const flow = p.logoness > 0 ? 0 : 0.06
+            // Flow current: the pure drifters always flow; a shape dot flows once the
+            // cycle releases it into the swarm (claim -> 0) and holds steady on the
+            // shape otherwise, so the gathered glyph reads clean.
+            const flow = p.logoness > 0 ? (1 - claim) * 0.06 : 0.06
             const angle = flowAngle(p.x, p.y, clock) + p.seed
             p.vx += pullX + Math.cos(angle) * flow
             p.vy += pullY + Math.sin(angle) * flow
@@ -976,9 +1000,10 @@ roughly check .</code></pre>
             p.vy *= damp
             p.x += p.vx
             p.y += p.vy
-            // Drifters wrap the field so the current fills the hero endlessly; shape
-            // dots are held by the spring and never reach the wrap.
-            if (p.logoness <= 0) {
+            // Drifters — and shape dots released into the swarm — wrap the field so
+            // the current fills the hero endlessly; a gathered shape dot is held by
+            // the spring and never reaches the wrap.
+            if (p.logoness <= 0 || claim < 0.05) {
               if (p.x < -4) p.x += cssW + 8
               else if (p.x > cssW + 4) p.x -= cssW + 8
               if (p.y < -4) p.y += cssH + 8
@@ -1024,9 +1049,15 @@ roughly check .</code></pre>
           lastTime = now
           if (dt > 0.05) dt = 0.05
           clock += dt
-          // Advance the idle logo<->"Roughly" cycle only while parked at the very
-          // top; any scroll resets it so returning to the top restarts on the logo.
-          idleClock = progress < 0.02 ? idleClock + dt : 0
+          // Advance the idle logo<->swarm<->"Roughly" cycle only while parked at the
+          // very top; any scroll resets it (and re-arms the burst) so returning to the
+          // top restarts on the logo.
+          if (progress < 0.02) {
+            cycleClock += dt
+          } else {
+            cycleClock = 0
+            burstHalf = -1
+          }
           render(now)
           rafId = requestAnimationFrame(loop)
         }
