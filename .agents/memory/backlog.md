@@ -113,7 +113,7 @@ Formatter (all verified):
 
 ## Website / docs-site track (parallel to the beta program, user-facing)
 
-- Landing page: hero animation restored (particle heading) — awaiting the user's aesthetic verdict; "IDE features in your editor" tabs look bad + layout shift on click (reserve dimensions); formatting-section examples not distinct enough (show inconsistently-formatted code morphing into consistent shape; pick genuinely distinct examples like auto-bracing/alignment).
+- Landing page: hero load intro reworked to a smoother sharp-particle + motion-blur-trail appearance (converge into logo → burst → even drift), scroll-morph into the particle heading kept — awaiting the user's aesthetic verdict; "IDE features in your editor" tabs look bad + layout shift on click (reserve dimensions); formatting-section examples not distinct enough (show inconsistently-formatted code morphing into consistent shape; pick genuinely distinct examples like auto-bracing/alignment).
 - Full docs-site accuracy + clarity pass once the beta semantics land (the typing pages are being rewritten continuously by the semantics slices; sweep the rest for stale claims afterwards).
 
 ## Post-beta (explicitly out of beta scope)

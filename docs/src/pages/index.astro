@@ -568,28 +568,31 @@ roughly check .</code></pre>
 
     <script>
       // ======================================================================
-      // Hero particle field. On load the field runs a one-shot intro: particles
-      // fly in and assemble into the R logo, hold, then disperse into a drifting
-      // ambient cloud. As you then scroll the hero, the same particles morph into
-      // the headline "Modern developer tooling for R." — the letters are drawn by
-      // the particles themselves; there is no separate DOM heading laid on top.
+      // Hero particle field. On load the field runs a one-shot intro: fine sharp
+      // particles fly in and assemble into the R logo leaving soft light trails,
+      // hold, then burst outward into a drifting ambient field. As you then scroll
+      // the hero, the same particles are constrained into the headline "Modern
+      // developer tooling for R." — the letters are drawn by the particles
+      // themselves; there is no separate DOM heading laid on top.
       // ======================================================================
       type Particle = {
         x: number
         y: number
         vx: number
         vy: number
-        // The three shapes a particle can rest on: its logo point (assembled
-        // during the intro), its headline point (formed as you scroll), and an
-        // ambient scattered home it drifts around when it belongs to neither.
+        // The two shapes a particle can lock onto: its logo point (assembled
+        // during the intro) and its headline point (formed as you scroll). When it
+        // is claimed by neither it falls back to the ambient home below.
         lx: number
         ly: number
         hx: number
         hy: number
+        // Even ambient home the particle settles onto when no shape claims it, so
+        // the field rests as an even living cloud rather than a clump.
         ax: number
         ay: number
-        // How strongly this particle joins the shapes: 1 = fully on the glyph and
-        // then the letters, 0 = a pure ambient drifter that only ever hovers.
+        // How strongly this particle joins the shapes: ~1 = settles onto the glyph
+        // and then the letters, 0 = a pure ambient drifter that only ever roams.
         logoness: number
         depth: number
         seed: number
@@ -612,33 +615,13 @@ roughly check .</code></pre>
         const context = ctx
         const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-        // Pre-rendered round particle sprite. Each dot is blitted from this instead
-        // of a square fillRect, so particles read as soft organic discs. A wide soft
-        // falloff keeps the field looking like light rather than pixels.
-        const DOT = document.createElement('canvas')
-        DOT.width = DOT.height = 16
-        const dotCtx = DOT.getContext('2d')
-        if (dotCtx) {
-          const grad = dotCtx.createRadialGradient(8, 8, 0, 8, 8, 8)
-          grad.addColorStop(0, 'rgba(255,255,255,1)')
-          grad.addColorStop(0.4, 'rgba(255,255,255,0.9)')
-          grad.addColorStop(1, 'rgba(255,255,255,0)')
-          dotCtx.fillStyle = grad
-          dotCtx.beginPath()
-          dotCtx.arc(8, 8, 8, 0, Math.PI * 2)
-          dotCtx.fill()
-        }
-        function blit(x: number, y: number, d: number) {
-          context.drawImage(DOT, x - d / 2, y - d / 2, d, d)
-        }
-
         // Load intro timeline (seconds). Particles fly in and assemble onto the
-        // logo, hold, then disperse back into the ambient cloud. `intro` (below)
+        // logo, hold, then disperse back into the ambient drift. `intro` (below)
         // is the resulting logo-assembly amount that rises 0->1 and falls 1->0.
-        const INTRO_DELAY = 0.2
-        const ASSEMBLE = 1.6
-        const HOLD = 1.2
-        const DISPERSE = 1.8
+        const INTRO_DELAY = 0.25
+        const ASSEMBLE = 1.7
+        const HOLD = 1.3
+        const DISPERSE = 2.0
         const disperseStart = INTRO_DELAY + ASSEMBLE + HOLD
         const introEnd = disperseStart + DISPERSE
 
@@ -653,6 +636,9 @@ roughly check .</code></pre>
         let clock = 0
         let lastTime = 0
         let progress = 0
+        // The logo disperses with one outward impulse the first time the intro
+        // crosses into its disperse phase; this latches that one-shot kick.
+        let disperseKicked = false
         let centroidX = 0
         let centroidY = 0
         const mouse = { x: -9999, y: -9999, active: false }
@@ -809,19 +795,17 @@ roughly check .</code></pre>
           const count = particleCount()
           particles = []
           for (let i = 0; i < count; i++) {
-            // Ambient home: a soft radial scatter filling the whole hero, denser
-            // toward the edges (sqrt keeps a gentle centre thinning) but never a
-            // hollow ring, so once the logo disperses the field reads as an even
-            // living cloud rather than an empty donut. The logo and headline are
-            // transient shapes formed by the intro and scroll, so ambient dots may
-            // cross the centre freely.
+            // Even ambient home: a soft radial scatter filling the hero, denser
+            // toward the centre (sqrt thins it gently) but never a hollow ring.
+            // Particles start here as a quiet field, fly inward onto the glyph as
+            // the intro assembles, and return here when it disperses.
             const ang = Math.random() * Math.PI * 2
             const rad = Math.sqrt(Math.random())
-            const ax = cssW * (0.5 + Math.cos(ang) * rad * 0.6)
-            const ay = cssH * (0.5 + Math.sin(ang) * rad * 0.55)
+            const ax = cssW * (0.5 + Math.cos(ang) * rad * 0.62)
+            const ay = cssH * (0.5 + Math.sin(ang) * rad * 0.56)
             particles.push({
-              x: Math.random() * cssW,
-              y: Math.random() * cssH,
+              x: ax,
+              y: ay,
               vx: 0,
               vy: 0,
               lx: 0,
@@ -833,7 +817,7 @@ roughly check .</code></pre>
               // ~80% of particles settle (almost) fully onto the glyph so the R
               // reads clearly at rest — a small residual keeps the strokes from
               // looking mechanically stamped; the other ~20% stay a pure ambient
-              // cloud so the field still feels organic.
+              // drift so the field still feels organic.
               logoness: Math.random() < 0.8 ? 0.96 + Math.random() * 0.04 : 0,
               depth: 0.35 + Math.random() * 0.65,
               seed: Math.random() * Math.PI * 2,
@@ -891,11 +875,12 @@ roughly check .</code></pre>
           headingTargets = buildTextTarget(HEADING_LINES)
           spawnParticles()
           pairTargets()
+          disperseKicked = false
         }
 
         // Logo-assembly amount for the load intro: 0 before it starts, eases up to
         // 1 as particles fly onto the glyph, holds, then eases back to 0 as the
-        // field disperses into the ambient cloud. Scroll morph takes over from there.
+        // field disperses into ambient drift. Scroll morph takes over from there.
         function introAmount() {
           if (clock <= INTRO_DELAY) return 0
           if (clock < INTRO_DELAY + ASSEMBLE) return smooth01((clock - INTRO_DELAY) / ASSEMBLE)
@@ -904,45 +889,63 @@ roughly check .</code></pre>
           return 0
         }
 
-        // One frame. Each particle chases a target that blends its ambient home,
-        // its logo point (weighted by the intro), and its headline point (weighted
-        // by scroll). A spring integrator gives the fly-in and settle their weight,
-        // and a flow-field drift keeps the field alive. Because the target is a
-        // pure function of the intro clock and scroll progress, the morph tracks
-        // the scrollbar exactly while the drift only rides on top.
+        // One frame. Each particle springs onto the shape it is currently claimed by
+        // — the logo during the intro, morphing into the headline as you scroll — or,
+        // when claimed by neither, settles onto its even ambient home and drifts
+        // there on the flow field. The two blend by `form`, so a particle eases
+        // between locked and loose. Rather than clearing, the frame is faded toward
+        // black so fast particles leave the soft light trails that make the field read
+        // as drifting light; the trail shortens as the headline locks in so the
+        // letters stay crisp.
         function render(now: number) {
-          context.clearRect(0, 0, cssW, cssH)
-          context.fillStyle = '#fff'
           const morph = smooth01(progress)
           const intro = introAmount()
+          // One outward impulse the first time the intro releases the logo, so the
+          // glyph bursts into radial streaks instead of merely fading — but not if
+          // the reader has already begun scrolling the letters into place.
+          if (!disperseKicked && clock >= disperseStart && morph < 0.1) {
+            disperseKicked = true
+            for (const p of particles) {
+              if (p.logoness <= 0) continue
+              p.vx += (p.x - centroidX) * 0.012 + (Math.random() - 0.5) * 0.3
+              p.vy += (p.y - centroidY) * 0.012 + (Math.random() - 0.5) * 0.3
+            }
+          }
+          context.globalAlpha = 1
+          context.fillStyle = `rgba(0,0,0,${0.12 + 0.7 * morph})`
+          context.fillRect(0, 0, cssW, cssH)
+          context.fillStyle = '#fff'
           // Looseness peaks mid-transition (mid-assemble and mid-scroll) so the
           // field breathes as it reshapes and settles crisp at either resting shape.
           const settle = Math.max(intro < 1 ? Math.sin(Math.PI * intro) : 0, Math.sin(Math.PI * morph))
           const t = now * 0.0006
-          const k = 0.14 + 0.16 * Math.max(intro, morph)
-          const damp = 0.82
+          const damp = 0.88
           for (let i = 0; i < particles.length; i++) {
             const p = particles[i]
-            // Blend the three resting shapes in order: ambient home, then pull
-            // toward the logo by the intro, then toward the headline by scroll.
-            // Heading wins at full scroll (weight 1) so the letters read crisp.
-            const wLogo = p.logoness * intro * (1 - morph)
-            let tx = p.ax + (p.lx - p.ax) * wLogo
-            let ty = p.ay + (p.ly - p.ay) * wLogo
-            tx += (p.hx - tx) * morph
-            ty += (p.hy - ty) * morph
-            // Spring toward the target, with a flow-field wander that grows while
-            // the field is in motion and for the loose ambient drifters.
-            const wander = (1 + settle * 6) * (1 + (1 - p.logoness) * 1.8)
+            // How strongly a shape claims this particle now: the logo during the
+            // intro (fading as you scroll) or the headline as scroll takes over.
+            const form = p.logoness * Math.max(intro * (1 - morph), morph)
+            // The point it heads for, morphing logo -> headline with scroll.
+            const shapeX = p.lx + (p.hx - p.lx) * morph
+            const shapeY = p.ly + (p.hy - p.ly) * morph
+            // Soft spring onto the shape — it vanishes when the particle is
+            // unclaimed (form 0) so the logo truly releases instead of staying
+            // tethered. A weak pull to the even ambient home fades in as the shape
+            // lets go, so a released or idle dot settles into an even field rather
+            // than drifting off into a clump. A flow-field wander keeps the loose
+            // dots alive and fades out as a particle locks onto a shape.
+            const springK = 0.08 * form
+            const homeK = 0.02 * (1 - form)
+            const wander = (1 - form) * (0.04 + settle * 0.05) * (1 + (1 - p.logoness) * 0.8)
             const angle = flowAngle(p.x, p.y, t) + p.seed
-            p.vx += (tx - p.x) * k + Math.cos(angle) * wander * 0.05
-            p.vy += (ty - p.y) * k + Math.sin(angle) * wander * 0.05
+            p.vx += (shapeX - p.x) * springK + (p.ax - p.x) * homeK + Math.cos(angle) * wander
+            p.vy += (shapeY - p.y) * springK + (p.ay - p.y) * homeK + Math.sin(angle) * wander
             if (mouse.active) {
               const mdx = p.x - mouse.x
               const mdy = p.y - mouse.y
               const d2 = mdx * mdx + mdy * mdy
               if (d2 < 11000 && d2 > 0.01) {
-                const push = (1 - d2 / 11000) * 1.6
+                const push = (1 - d2 / 11000) * 1.4
                 const inv = 1 / Math.sqrt(d2)
                 p.vx += mdx * inv * push
                 p.vy += mdy * inv * push
@@ -952,16 +955,14 @@ roughly check .</code></pre>
             p.vy *= damp
             p.x += p.vx
             p.y += p.vy
-            // On-glyph / on-letter particles are a touch larger and brighter so the
-            // shapes read solid; ambient drifters stay smaller and fainter, rising
-            // to full only as they join the headline.
-            const shaped = Math.max(wLogo, morph)
-            const size = (p.depth > 0.6 ? 2.9 : 2.1) + settle * 0.6 + 0.5 * shaped * p.logoness
-            const ambientFade = p.logoness > 0 ? 1 : 0.22 + 0.78 * morph
-            const shapeAlpha = 1 + 0.35 * shaped * p.logoness
-            const alpha = (0.5 + p.depth * 0.5) * (1 - settle * 0.4) * ambientFade * shapeAlpha
+            // Fine sharp dots like the original intro: 1-2px, brighter while sitting
+            // on a shape and dim while drifting so the ambient field stays quiet.
+            const size = p.depth > 0.62 ? 2 : 1
+            const ambient = p.logoness > 0 ? 0.11 + p.depth * 0.16 : 0.06 + p.depth * 0.1
+            let alpha = ambient + form * (0.42 + p.depth * 0.34)
+            alpha *= 1 - settle * 0.25
             context.globalAlpha = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha
-            blit(p.x, p.y, size)
+            context.fillRect(p.x, p.y, size, size)
           }
           context.globalAlpha = 1
         }
@@ -1031,14 +1032,11 @@ roughly check .</code></pre>
           syncScroll()
           if (reduceMotion) {
             // No animation: show the crisp DOM headline and copy. The particles
-            // rest as a faint static ambient field behind the text (no logo, no
-            // particle headline) so nothing competes with the legible <h1>.
+            // rest as a faint static scatter behind the text (no logo, no particle
+            // headline) so nothing competes with the legible <h1>.
             progress = 0
             clock = introEnd
-            for (const p of particles) {
-              p.x = p.ax
-              p.y = p.ay
-            }
+            disperseKicked = true
             render(0)
             if (nav) nav.style.setProperty('--reveal', '1')
             if (copy) copy.style.setProperty('--copy-op', '1')
