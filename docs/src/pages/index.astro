@@ -755,9 +755,9 @@ roughly check .</code></pre>
           probe.font = `600 ${basePx}px ${fontFamily}`
           let maxW = 1
           for (const line of lines) maxW = Math.max(maxW, probe.measureText(line).width)
-          const targetW = Math.min(cssW * 0.8, 760)
+          const targetW = Math.min(cssW * 0.7, 660)
           let fontPx = (basePx * targetW) / maxW
-          const maxFont = Math.min(cssW * 0.1, cssH * 0.16)
+          const maxFont = Math.min(cssW * 0.086, cssH * 0.142)
           if (fontPx > maxFont) fontPx = maxFont
           if (fontPx < 12) fontPx = 12
           const leading = fontPx * 1.04
@@ -786,8 +786,8 @@ roughly check .</code></pre>
           const left = centroidX - blockW / 2
           const top = centroidY - blockH / 2
           return sampleAlpha(data, off.width, off.height, SS, (sx, sy) => ({
-            x: left + sx / SS + (Math.random() - 0.5) * 1.8,
-            y: top + sy / SS + (Math.random() - 0.5) * 1.8,
+            x: left + sx / SS + (Math.random() - 0.5) * 0.9,
+            y: top + sy / SS + (Math.random() - 0.5) * 0.9,
           }))
         }
 
@@ -898,7 +898,9 @@ roughly check .</code></pre>
         // as drifting light; the trail shortens as the headline locks in so the
         // letters stay crisp.
         function render(now: number) {
-          const morph = smooth01(progress)
+          // The morph completes well before the end of the scroll track so the
+          // headline resolves quickly; the remaining scroll just holds it.
+          const morph = smooth01(clamp01(progress / 0.72))
           const intro = introAmount()
           // One outward impulse the first time the intro releases the logo, so the
           // glyph bursts into radial streaks instead of merely fading — but not if
@@ -907,58 +909,70 @@ roughly check .</code></pre>
             disperseKicked = true
             for (const p of particles) {
               if (p.logoness <= 0) continue
-              p.vx += (p.x - centroidX) * 0.012 + (Math.random() - 0.5) * 0.3
-              p.vy += (p.y - centroidY) * 0.012 + (Math.random() - 0.5) * 0.3
+              p.vx += (p.x - centroidX) * 0.016 + (Math.random() - 0.5) * 0.4
+              p.vy += (p.y - centroidY) * 0.016 + (Math.random() - 0.5) * 0.4
             }
           }
           context.globalAlpha = 1
-          context.fillStyle = `rgba(0,0,0,${0.12 + 0.7 * morph})`
+          // Fade toward black for motion trails; the trail shortens hard as the
+          // headline locks in (morph -> 1) so the letters read crisp, not smeared.
+          context.fillStyle = `rgba(0,0,0,${0.12 + 0.8 * morph})`
           context.fillRect(0, 0, cssW, cssH)
           context.fillStyle = '#fff'
           // Looseness peaks mid-transition (mid-assemble and mid-scroll) so the
           // field breathes as it reshapes and settles crisp at either resting shape.
           const settle = Math.max(intro < 1 ? Math.sin(Math.PI * intro) : 0, Math.sin(Math.PI * morph))
           const t = now * 0.0006
-          const damp = 0.88
           for (let i = 0; i < particles.length; i++) {
             const p = particles[i]
+            // Pure drifters (~20%) never join a shape: they stream across the whole
+            // field on the flow current and wrap at the edges, keeping the hero
+            // alive and dynamic behind the structured glyph.
+            const roamer = p.logoness <= 0
             // How strongly a shape claims this particle now: the logo during the
             // intro (fading as you scroll) or the headline as scroll takes over.
             const form = p.logoness * Math.max(intro * (1 - morph), morph)
             // The point it heads for, morphing logo -> headline with scroll.
             const shapeX = p.lx + (p.hx - p.lx) * morph
             const shapeY = p.ly + (p.hy - p.ly) * morph
-            // Soft spring onto the shape — it vanishes when the particle is
-            // unclaimed (form 0) so the logo truly releases instead of staying
-            // tethered. A weak pull to the even ambient home fades in as the shape
-            // lets go, so a released or idle dot settles into an even field rather
-            // than drifting off into a clump. A flow-field wander keeps the loose
-            // dots alive and fades out as a particle locks onto a shape.
-            const springK = 0.08 * form
-            const homeK = 0.02 * (1 - form)
-            const wander = (1 - form) * (0.04 + settle * 0.05) * (1 + (1 - p.logoness) * 0.8)
+            // Shape dots spring onto the glyph (the spring vanishes when unclaimed
+            // so the logo truly releases) and, when let go, drift gently back to an
+            // even ambient home so the field rests evenly rather than clumping. A
+            // faint always-on jitter keeps even the locked glyph subtly alive.
+            const springK = 0.1 * form
+            const homeK = roamer ? 0 : 0.02 * (1 - form)
+            const flow = roamer ? 0.11 : (1 - form) * (0.045 + settle * 0.06) + form * 0.014
             const angle = flowAngle(p.x, p.y, t) + p.seed
-            p.vx += (shapeX - p.x) * springK + (p.ax - p.x) * homeK + Math.cos(angle) * wander
-            p.vy += (shapeY - p.y) * springK + (p.ay - p.y) * homeK + Math.sin(angle) * wander
+            p.vx += (shapeX - p.x) * springK + (p.ax - p.x) * homeK + Math.cos(angle) * flow
+            p.vy += (shapeY - p.y) * springK + (p.ay - p.y) * homeK + Math.sin(angle) * flow
             if (mouse.active) {
               const mdx = p.x - mouse.x
               const mdy = p.y - mouse.y
               const d2 = mdx * mdx + mdy * mdy
-              if (d2 < 11000 && d2 > 0.01) {
-                const push = (1 - d2 / 11000) * 1.4
+              if (d2 < 12000 && d2 > 0.01) {
+                const push = (1 - d2 / 12000) * 1.7
                 const inv = 1 / Math.sqrt(d2)
                 p.vx += mdx * inv * push
                 p.vy += mdy * inv * push
               }
             }
+            // Drifters keep their momentum (long streaming trails); shape dots damp
+            // harder so the glyph settles crisp.
+            const damp = roamer ? 0.95 : 0.87
             p.vx *= damp
             p.vy *= damp
             p.x += p.vx
             p.y += p.vy
+            if (roamer) {
+              if (p.x < -4) p.x += cssW + 8
+              else if (p.x > cssW + 4) p.x -= cssW + 8
+              if (p.y < -4) p.y += cssH + 8
+              else if (p.y > cssH + 4) p.y -= cssH + 8
+            }
             // Fine sharp dots like the original intro: 1-2px, brighter while sitting
             // on a shape and dim while drifting so the ambient field stays quiet.
             const size = p.depth > 0.62 ? 2 : 1
-            const ambient = p.logoness > 0 ? 0.11 + p.depth * 0.16 : 0.06 + p.depth * 0.1
+            const ambient = roamer ? 0.1 + p.depth * 0.14 : 0.11 + p.depth * 0.16
             let alpha = ambient + form * (0.42 + p.depth * 0.34)
             alpha *= 1 - settle * 0.25
             context.globalAlpha = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha
@@ -980,10 +994,10 @@ roughly check .</code></pre>
           const scrollable = Math.max(1, (stage ? stage.offsetHeight : vh) - vh)
           progress = clamp01(y / scrollable)
           if (nav) nav.style.setProperty('--reveal', String(clamp01((y - vh * 0.12) / (vh * 0.16))))
-          // The subhead and buttons fade in over the last stretch of the scroll,
-          // after the particles have resolved into the headline. The headline
-          // itself is never shown as DOM text — the particles are the heading.
-          const copyP = smooth01(clamp01((progress - 0.72) / 0.28))
+          // The subhead and buttons fade in right after the particles resolve into
+          // the headline (which completes at progress 0.72). The headline itself is
+          // never shown as DOM text — the particles are the heading.
+          const copyP = smooth01(clamp01((progress - 0.6) / 0.22))
           if (copy) copy.style.setProperty('--copy-op', String(copyP))
           if (hint) hint.style.setProperty('--hint-op', String(clamp01(1 - y / (vh * 0.14))))
         }
@@ -1846,7 +1860,7 @@ roughly check .</code></pre>
          particle field fills and the header/copy reveal over as a parallax overlay. */
       #hero {
         position: relative;
-        height: 200svh;
+        height: 160svh;
         border-bottom: 1px solid var(--border);
       }
       .hero-viewport {
