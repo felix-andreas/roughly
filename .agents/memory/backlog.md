@@ -113,7 +113,7 @@ Formatter (all verified):
 
 ## Website / docs-site track (parallel to the beta program, user-facing)
 
-- Landing page: hero is a sharp-particle + motion-blur field that rests as a free-flowing streaming current (all unclaimed dots flow, matching the original); load = converge into R logo → burst → flow; scroll walks particles through the "Roughly" wordmark then the headline (resolving early in the scroll track, trail crispening to a full clear for sharp letters) — awaiting the user's aesthetic verdict; "IDE features in your editor" tabs look bad + layout shift on click (reserve dimensions); formatting-section examples not distinct enough (show inconsistently-formatted code morphing into consistent shape; pick genuinely distinct examples like auto-bracing/alignment).
+- Landing page: hero flies particles cleanly into the R logo and holds (no disperse); at the top the shape auto-cycles logo <-> "Roughly" wordmark every ~13s, ~20% drifters flow for life; scrolling slides the shape to the headline (sharp via full-clear trail) and scrolling up returns to the logo — awaiting the user's aesthetic verdict; "IDE features in your editor" tabs look bad + layout shift on click (reserve dimensions); formatting-section examples not distinct enough (show inconsistently-formatted code morphing into consistent shape; pick genuinely distinct examples like auto-bracing/alignment).
 - Full docs-site accuracy + clarity pass once the beta semantics land (the typing pages are being rewritten continuously by the semantics slices; sweep the rest for stale claims afterwards).
 
 ## Post-beta (explicitly out of beta scope)
