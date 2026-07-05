@@ -589,6 +589,11 @@ roughly check .</code></pre>
         ry: number
         hx: number
         hy: number
+        // Scatter home: a spread-out spot across the field the particle disperses to
+        // between shapes, so the swarm reads as individual particles rather than a
+        // blob before it re-gathers into the next shape.
+        sx: number
+        sy: number
         // How strongly this particle joins the shapes: ~1 = settles onto the glyph
         // and then the letters, 0 = a pure drifter that only ever flows.
         logoness: number
@@ -804,14 +809,17 @@ roughly check .</code></pre>
           const count = particleCount()
           particles = []
           for (let i = 0; i < count; i++) {
-            // Start as a soft radial scatter filling the hero (denser toward the
-            // centre, never a hollow ring) so the field reads evenly the instant it
-            // appears, then flies inward onto the glyph as the intro assembles.
+            // Soft radial scatter filling the hero (denser toward the centre, never a
+            // hollow ring): this is both the particle's start point and the scatter
+            // home it disperses back to between shapes, so the swarm spreads out as
+            // individual particles rather than a blob.
             const ang = Math.random() * Math.PI * 2
             const rad = Math.sqrt(Math.random())
+            const sx = cssW * (0.5 + Math.cos(ang) * rad * 0.62)
+            const sy = cssH * (0.5 + Math.sin(ang) * rad * 0.56)
             particles.push({
-              x: cssW * (0.5 + Math.cos(ang) * rad * 0.62),
-              y: cssH * (0.5 + Math.sin(ang) * rad * 0.56),
+              x: sx,
+              y: sy,
               vx: 0,
               vy: 0,
               lx: 0,
@@ -820,6 +828,8 @@ roughly check .</code></pre>
               ry: 0,
               hx: 0,
               hy: 0,
+              sx,
+              sy,
               // ~80% of particles settle (almost) fully onto the glyph so the R
               // reads clearly at rest — a small residual keeps the strokes from
               // looking mechanically stamped; the other ~20% never join a shape and
@@ -941,8 +951,8 @@ roughly check .</code></pre>
             burstHalf = halfIndex
             for (const particle of particles) {
               if (particle.logoness <= 0) continue
-              particle.vx += (particle.x - centroidX) * 0.018 + (Math.random() - 0.5) * 0.5
-              particle.vy += (particle.y - centroidY) * 0.018 + (Math.random() - 0.5) * 0.5
+              particle.vx += (particle.x - centroidX) * 0.012 + (Math.random() - 0.5) * 0.6
+              particle.vy += (particle.y - centroidY) * 0.012 + (Math.random() - 0.5) * 0.6
             }
           }
           // How strongly the scroll text is claimed — ramps in fast so the headline
@@ -958,27 +968,33 @@ roughly check .</code></pre>
           const settle = Math.max(intro < 1 ? Math.sin(Math.PI * intro) : 0, Math.sin(Math.PI * morph))
           for (let i = 0; i < particles.length; i++) {
             const p = particles[i]
-            // A shape particle is claimed while gathered on a shape — the intro
-            // assembles it, then the cycle holds it and releases it into the swarm;
-            // pure drifters (logoness 0) never are.
-            const form = p.logoness * intro * claim
+            // `shaped` = does this dot take part in shapes (1 after the intro), vs a
+            // pure drifter (0). `form` = how gathered onto a shape it is right now
+            // (drops to 0 as the cycle scatters it into the swarm).
+            const shaped = p.logoness * intro
+            const form = shaped * claim
             let pullX = 0
             let pullY = 0
-            if (form > 0.0001) {
-              // The shape it rests on (logo or "Roughly" by the cycle), slid across to
-              // the headline as you scroll.
+            if (shaped > 0.0001) {
+              // The shape it gathers onto (logo or "Roughly" by the cycle), slid
+              // across to the headline as you scroll.
               const shapeX = p.lx + (p.rx - p.lx) * shapeSel
               const shapeY = p.ly + (p.ry - p.ly) * shapeSel
-              const tx = shapeX + (p.hx - shapeX) * morph
-              const ty = shapeY + (p.hy - shapeY) * morph
-              const springK = 0.1 * form
+              const gx = shapeX + (p.hx - shapeX) * morph
+              const gy = shapeY + (p.hy - shapeY) * morph
+              // Target blends the spread-out scatter home (claim 0 = individual
+              // particles) with the gathered shape (claim 1). Gentle spring while
+              // scattered, firm once gathered; the intro factor eases the first
+              // assembly so the logo glides in rather than snapping.
+              const tx = p.sx + (gx - p.sx) * claim
+              const ty = p.sy + (gy - p.sy) * claim
+              const springK = (0.045 + 0.07 * claim) * intro
               pullX = (tx - p.x) * springK
               pullY = (ty - p.y) * springK
             }
-            // Flow current: the pure drifters always flow; a shape dot flows once the
-            // cycle releases it into the swarm (claim -> 0) and holds steady on the
-            // shape otherwise, so the gathered glyph reads clean.
-            const flow = p.logoness > 0 ? (1 - claim) * 0.06 : 0.06
+            // Flow current: the pure drifters always flow; a shape dot flows while
+            // scattered into the swarm (claim -> 0) and holds steady once gathered.
+            const flow = p.logoness > 0 ? (1 - claim) * 0.05 : 0.06
             const angle = flowAngle(p.x, p.y, clock) + p.seed
             p.vx += pullX + Math.cos(angle) * flow
             p.vy += pullY + Math.sin(angle) * flow
@@ -1000,10 +1016,9 @@ roughly check .</code></pre>
             p.vy *= damp
             p.x += p.vx
             p.y += p.vy
-            // Drifters — and shape dots released into the swarm — wrap the field so
-            // the current fills the hero endlessly; a gathered shape dot is held by
-            // the spring and never reaches the wrap.
-            if (p.logoness <= 0 || claim < 0.05) {
+            // Only pure drifters wrap the field; shape dots settle at their scatter
+            // home (well inside the field) when released, so they never reach a wrap.
+            if (p.logoness <= 0) {
               if (p.x < -4) p.x += cssW + 8
               else if (p.x > cssW + 4) p.x -= cssW + 8
               if (p.y < -4) p.y += cssH + 8
