@@ -580,19 +580,17 @@ roughly check .</code></pre>
         y: number
         vx: number
         vy: number
-        // The two shapes a particle can lock onto: its logo point (assembled
-        // during the intro) and its headline point (formed as you scroll). When it
-        // is claimed by neither it falls back to the ambient home below.
+        // The three shapes a particle can lock onto, in scroll order: its logo
+        // point (assembled during the intro), its "Roughly" wordmark point, and its
+        // headline point. When claimed by none it flows freely on the field.
         lx: number
         ly: number
+        rx: number
+        ry: number
         hx: number
         hy: number
-        // Even ambient home the particle settles onto when no shape claims it, so
-        // the field rests as an even living cloud rather than a clump.
-        ax: number
-        ay: number
         // How strongly this particle joins the shapes: ~1 = settles onto the glyph
-        // and then the letters, 0 = a pure ambient drifter that only ever roams.
+        // and then the letters, 0 = a pure drifter that only ever flows.
         logoness: number
         depth: number
         seed: number
@@ -604,8 +602,10 @@ roughly check .</code></pre>
       // scroll stage (#hero) that drives the scroll morph.
       const heroEl = document.getElementById('hero-viewport') as HTMLElement | null
 
-      // The headline the particles resolve into as you scroll, wrapped to two
-      // lines so the particle text roughly matches the hidden <h1>.
+      // As you scroll, the particles resolve through two text shapes: first the
+      // "Roughly" wordmark, then the headline (wrapped to two lines so the particle
+      // text roughly matches the hidden <h1>).
+      const ROUGHLY_LINES = ['Roughly']
       const HEADING_LINES = ['Modern developer', 'tooling for R.']
 
       function initHero() {
@@ -630,6 +630,7 @@ roughly check .</code></pre>
         let cssH = 0
         let particles: Particle[] = []
         let logoTargets: Target[] = []
+        let roughlyTargets: Target[] = []
         let headingTargets: Target[] = []
         let running = false
         let rafId = 0
@@ -657,7 +658,7 @@ roughly check .</code></pre>
         })()
 
         function particleCount() {
-          return cssW < 720 ? 2400 : cssW < 1100 ? 3800 : 5000
+          return cssW < 720 ? 2900 : cssW < 1100 ? 4600 : 6200
         }
         function sampleStride() {
           return cssW < 720 ? 4 : 3
@@ -746,7 +747,7 @@ roughly check .</code></pre>
         // Headline target: render the wrapped headline (matching the <h1>'s sans
         // font and weight) into an offscreen canvas, then run the same alpha
         // sampler. Centered on the shared centroid so it lines up with the DOM copy.
-        function buildTextTarget(lines: string[]): Target[] {
+        function buildTextTarget(lines: string[], widthFrac = 0.7, widthCap = 660): Target[] {
           const SS = 2
           const fontFamily = `'Geist Sans', system-ui, sans-serif`
           const probe = document.createElement('canvas').getContext('2d')
@@ -755,7 +756,7 @@ roughly check .</code></pre>
           probe.font = `600 ${basePx}px ${fontFamily}`
           let maxW = 1
           for (const line of lines) maxW = Math.max(maxW, probe.measureText(line).width)
-          const targetW = Math.min(cssW * 0.7, 660)
+          const targetW = Math.min(cssW * widthFrac, widthCap)
           let fontPx = (basePx * targetW) / maxW
           const maxFont = Math.min(cssW * 0.086, cssH * 0.142)
           if (fontPx > maxFont) fontPx = maxFont
@@ -786,8 +787,8 @@ roughly check .</code></pre>
           const left = centroidX - blockW / 2
           const top = centroidY - blockH / 2
           return sampleAlpha(data, off.width, off.height, SS, (sx, sy) => ({
-            x: left + sx / SS + (Math.random() - 0.5) * 0.9,
-            y: top + sy / SS + (Math.random() - 0.5) * 0.9,
+            x: left + sx / SS + (Math.random() - 0.5) * 0.5,
+            y: top + sy / SS + (Math.random() - 0.5) * 0.5,
           }))
         }
 
@@ -795,29 +796,26 @@ roughly check .</code></pre>
           const count = particleCount()
           particles = []
           for (let i = 0; i < count; i++) {
-            // Even ambient home: a soft radial scatter filling the hero, denser
-            // toward the centre (sqrt thins it gently) but never a hollow ring.
-            // Particles start here as a quiet field, fly inward onto the glyph as
-            // the intro assembles, and return here when it disperses.
+            // Start as a soft radial scatter filling the hero (denser toward the
+            // centre, never a hollow ring) so the field reads evenly the instant it
+            // appears, then flies inward onto the glyph as the intro assembles.
             const ang = Math.random() * Math.PI * 2
             const rad = Math.sqrt(Math.random())
-            const ax = cssW * (0.5 + Math.cos(ang) * rad * 0.62)
-            const ay = cssH * (0.5 + Math.sin(ang) * rad * 0.56)
             particles.push({
-              x: ax,
-              y: ay,
+              x: cssW * (0.5 + Math.cos(ang) * rad * 0.62),
+              y: cssH * (0.5 + Math.sin(ang) * rad * 0.56),
               vx: 0,
               vy: 0,
               lx: 0,
               ly: 0,
+              rx: 0,
+              ry: 0,
               hx: 0,
               hy: 0,
-              ax,
-              ay,
               // ~80% of particles settle (almost) fully onto the glyph so the R
               // reads clearly at rest — a small residual keeps the strokes from
-              // looking mechanically stamped; the other ~20% stay a pure ambient
-              // drift so the field still feels organic.
+              // looking mechanically stamped; the other ~20% never join a shape and
+              // keep flowing across the field so it always feels alive.
               logoness: Math.random() < 0.8 ? 0.96 + Math.random() * 0.04 : 0,
               depth: 0.35 + Math.random() * 0.65,
               seed: Math.random() * Math.PI * 2,
@@ -825,24 +823,28 @@ roughly check .</code></pre>
           }
         }
 
-        // Give every particle a logo point and a headline point. Both target sets
-        // are ordered left-to-right and paired by fractional index, so particles
-        // flow horizontally between the two shapes rather than crossing over each
-        // other. The point counts differ from the particle count, so a few points
-        // are shared — the soft dots and drift hide the slight overlap.
+        // Give every particle its logo, "Roughly", and headline points. All three
+        // target sets are ordered left-to-right and paired by fractional index, so
+        // particles flow horizontally between the shapes rather than crossing over
+        // each other. The point counts differ from the particle count, so a few
+        // points are shared — the drift hides the slight overlap.
         function pairTargets() {
-          if (!logoTargets.length || !headingTargets.length) return
+          if (!logoTargets.length || !roughlyTargets.length || !headingTargets.length) return
           const byX = (a: Target, b: Target) => a.x - b.x || a.y - b.y
           const logo = logoTargets.slice().sort(byX)
+          const word = roughlyTargets.slice().sort(byX)
           const head = headingTargets.slice().sort(byX)
           const total = particles.length
           for (let i = 0; i < total; i++) {
             const f = total > 1 ? i / (total - 1) : 0
             const l = logo[Math.min(logo.length - 1, Math.floor(f * logo.length))]
+            const w = word[Math.min(word.length - 1, Math.floor(f * word.length))]
             const h = head[Math.min(head.length - 1, Math.floor(f * head.length))]
             const p = particles[i]
             p.lx = l.x
             p.ly = l.y
+            p.rx = w.x
+            p.ry = w.y
             p.hx = h.x
             p.hy = h.y
           }
@@ -872,6 +874,9 @@ roughly check .</code></pre>
             centroidY = cssH * 0.44
           }
           logoTargets = buildLogoTarget()
+          // The wordmark is a single short word, so cap it narrower than the
+          // two-line headline to keep its cap height in the same visual range.
+          roughlyTargets = buildTextTarget(ROUGHLY_LINES, 0.34, 400)
           headingTargets = buildTextTarget(HEADING_LINES)
           spawnParticles()
           pairTargets()
@@ -889,22 +894,27 @@ roughly check .</code></pre>
           return 0
         }
 
-        // One frame. Each particle springs onto the shape it is currently claimed by
-        // — the logo during the intro, morphing into the headline as you scroll — or,
-        // when claimed by neither, settles onto its even ambient home and drifts
-        // there on the flow field. The two blend by `form`, so a particle eases
-        // between locked and loose. Rather than clearing, the frame is faded toward
-        // black so fast particles leave the soft light trails that make the field read
-        // as drifting light; the trail shortens as the headline locks in so the
-        // letters stay crisp.
+        // One frame. Each particle springs onto the shape currently claiming it — the
+        // logo during the intro, then the "Roughly" wordmark and the headline as you
+        // scroll — or, when claimed by none, flows freely across the field on the flow
+        // current and wraps at the edges, so the whole hero stays a living, streaming
+        // field. Rather than clearing, the frame is faded toward black so moving
+        // particles leave soft light trails; the trail vanishes to a full clear as a
+        // text shape locks in so the letters read crisp.
         function render(now: number) {
-          // The morph completes well before the end of the scroll track so the
-          // headline resolves quickly; the remaining scroll just holds it.
+          // The morph completes well before the end of the scroll track so the text
+          // resolves quickly; the remaining scroll just holds it.
           const morph = smooth01(clamp01(progress / 0.72))
           const intro = introAmount()
+          // How strongly the scroll text is claimed — ramps in fast so each word
+          // reads crisp. Drives both the trail crispening and the pull below.
+          const textForm = smooth01(clamp01(morph / 0.32))
+          // The scroll shape gathers onto "Roughly" first, then slides across to the
+          // headline past the mid-point so each shape gets its own clear beat.
+          const toHeading = smooth01(clamp01((morph - 0.5) / 0.5))
           // One outward impulse the first time the intro releases the logo, so the
           // glyph bursts into radial streaks instead of merely fading — but not if
-          // the reader has already begun scrolling the letters into place.
+          // the reader has already begun scrolling the text into place.
           if (!disperseKicked && clock >= disperseStart && morph < 0.1) {
             disperseKicked = true
             for (const p of particles) {
@@ -914,37 +924,43 @@ roughly check .</code></pre>
             }
           }
           context.globalAlpha = 1
-          // Fade toward black for motion trails; the trail shortens hard as the
-          // headline locks in (morph -> 1) so the letters read crisp, not smeared.
-          context.fillStyle = `rgba(0,0,0,${0.12 + 0.8 * morph})`
+          // Fade toward black for motion trails; the trail vanishes to a full clear
+          // as the scroll text locks in so the letters read crisp, not smeared.
+          context.fillStyle = `rgba(0,0,0,${0.13 + 0.86 * textForm})`
           context.fillRect(0, 0, cssW, cssH)
           context.fillStyle = '#fff'
           // Looseness peaks mid-transition (mid-assemble and mid-scroll) so the
           // field breathes as it reshapes and settles crisp at either resting shape.
           const settle = Math.max(intro < 1 ? Math.sin(Math.PI * intro) : 0, Math.sin(Math.PI * morph))
-          const t = now * 0.0006
           for (let i = 0; i < particles.length; i++) {
             const p = particles[i]
-            // Pure drifters (~20%) never join a shape: they stream across the whole
-            // field on the flow current and wrap at the edges, keeping the hero
-            // alive and dynamic behind the structured glyph.
-            const roamer = p.logoness <= 0
             // How strongly a shape claims this particle now: the logo during the
-            // intro (fading as you scroll) or the headline as scroll takes over.
-            const form = p.logoness * Math.max(intro * (1 - morph), morph)
-            // The point it heads for, morphing logo -> headline with scroll.
-            const shapeX = p.lx + (p.hx - p.lx) * morph
-            const shapeY = p.ly + (p.hy - p.ly) * morph
-            // Shape dots spring onto the glyph (the spring vanishes when unclaimed
-            // so the logo truly releases) and, when let go, drift gently back to an
-            // even ambient home so the field rests evenly rather than clumping. A
-            // faint always-on jitter keeps even the locked glyph subtly alive.
-            const springK = 0.1 * form
-            const homeK = roamer ? 0 : 0.02 * (1 - form)
-            const flow = roamer ? 0.11 : (1 - form) * (0.045 + settle * 0.06) + form * 0.014
-            const angle = flowAngle(p.x, p.y, t) + p.seed
-            p.vx += (shapeX - p.x) * springK + (p.ax - p.x) * homeK + Math.cos(angle) * flow
-            p.vy += (shapeY - p.y) * springK + (p.ay - p.y) * homeK + Math.sin(angle) * flow
+            // intro (fading as you scroll) or the scroll text as scroll takes over.
+            const wLogo = p.logoness * intro * (1 - morph)
+            const wText = p.logoness * textForm
+            const form = Math.max(wLogo, wText)
+            // Spring target: the logo point during the intro, blending into the
+            // scroll shape (wordmark sliding to headline) as you scroll. Unclaimed
+            // dots get no spring at all so they flow completely free.
+            const springK = 0.11 * form
+            let pullX = 0
+            let pullY = 0
+            const wSum = wLogo + wText
+            if (wSum > 0.0001) {
+              const scrollX = p.rx + (p.hx - p.rx) * toHeading
+              const scrollY = p.ry + (p.hy - p.ry) * toHeading
+              const tx = (p.lx * wLogo + scrollX * wText) / wSum
+              const ty = (p.ly * wLogo + scrollY * wText) / wSum
+              pullX = (tx - p.x) * springK
+              pullY = (ty - p.y) * springK
+            }
+            // Flow current: full for unclaimed dots (the streaming rivers that keep
+            // the field alive), fading out as a dot locks onto a shape, plus a faint
+            // always-on shimmer so even a locked glyph stays subtly alive.
+            const flow = (1 - form) * 0.06 + form * 0.012
+            const angle = flowAngle(p.x, p.y, clock) + p.seed
+            p.vx += pullX + Math.cos(angle) * flow
+            p.vy += pullY + Math.sin(angle) * flow
             if (mouse.active) {
               const mdx = p.x - mouse.x
               const mdy = p.y - mouse.y
@@ -956,25 +972,27 @@ roughly check .</code></pre>
                 p.vy += mdy * inv * push
               }
             }
-            // Drifters keep their momentum (long streaming trails); shape dots damp
-            // harder so the glyph settles crisp.
-            const damp = roamer ? 0.95 : 0.87
+            // Unclaimed dots keep their momentum so the flow streams; claimed dots
+            // damp harder so the shape settles crisp.
+            const damp = 0.92 - 0.05 * form
             p.vx *= damp
             p.vy *= damp
             p.x += p.vx
             p.y += p.vy
-            if (roamer) {
+            // Flowing dots wrap the field so the current fills the hero endlessly;
+            // claimed dots are held inward by the spring and never reach the wrap.
+            if (form < 0.05) {
               if (p.x < -4) p.x += cssW + 8
               else if (p.x > cssW + 4) p.x -= cssW + 8
               if (p.y < -4) p.y += cssH + 8
               else if (p.y > cssH + 4) p.y -= cssH + 8
             }
-            // Fine sharp dots like the original intro: 1-2px, brighter while sitting
-            // on a shape and dim while drifting so the ambient field stays quiet.
+            // Fine sharp dots: 1-2px, brighter while sitting on a shape and dim while
+            // flowing so the streaming field stays quiet behind the letters.
             const size = p.depth > 0.62 ? 2 : 1
-            const ambient = roamer ? 0.1 + p.depth * 0.14 : 0.11 + p.depth * 0.16
-            let alpha = ambient + form * (0.42 + p.depth * 0.34)
-            alpha *= 1 - settle * 0.25
+            const base = p.logoness > 0 ? 0.11 + p.depth * 0.16 : 0.1 + p.depth * 0.14
+            let alpha = base + form * (0.44 + p.depth * 0.34)
+            alpha *= 1 - settle * 0.22
             context.globalAlpha = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha
             context.fillRect(p.x, p.y, size, size)
           }
