@@ -568,28 +568,34 @@ roughly check .</code></pre>
 
     <script>
       // ======================================================================
-      // Hero particle field. On load the field runs a one-shot intro: particles
-      // fly in and assemble into the R logo, hold, then disperse into a drifting
-      // ambient cloud. As you then scroll the hero, the same particles morph into
-      // the headline "Modern developer tooling for R." — the letters are drawn by
-      // the particles themselves; there is no separate DOM heading laid on top.
+      // Hero particle field. On load the field runs a one-shot intro: fine sharp
+      // particles fly in and assemble into the R logo leaving soft light trails,
+      // hold, then burst outward into a drifting ambient field. As you then scroll
+      // the hero, the same particles are constrained into the headline "Modern
+      // developer tooling for R." — the letters are drawn by the particles
+      // themselves; there is no separate DOM heading laid on top.
       // ======================================================================
       type Particle = {
         x: number
         y: number
         vx: number
         vy: number
-        // The three shapes a particle can rest on: its logo point (assembled
-        // during the intro), its headline point (formed as you scroll), and an
-        // ambient scattered home it drifts around when it belongs to neither.
+        // The three shapes a particle can lock onto, in scroll order: its logo
+        // point (assembled during the intro), its "Roughly" wordmark point, and its
+        // headline point. When claimed by none it flows freely on the field.
         lx: number
         ly: number
+        rx: number
+        ry: number
         hx: number
         hy: number
-        ax: number
-        ay: number
-        // How strongly this particle joins the shapes: 1 = fully on the glyph and
-        // then the letters, 0 = a pure ambient drifter that only ever hovers.
+        // Scatter home: a spread-out spot across the field the particle disperses to
+        // between shapes, so the swarm reads as individual particles rather than a
+        // blob before it re-gathers into the next shape.
+        sx: number
+        sy: number
+        // How strongly this particle joins the shapes: ~1 = settles onto the glyph
+        // and then the letters, 0 = a pure drifter that only ever flows.
         logoness: number
         depth: number
         seed: number
@@ -601,8 +607,10 @@ roughly check .</code></pre>
       // scroll stage (#hero) that drives the scroll morph.
       const heroEl = document.getElementById('hero-viewport') as HTMLElement | null
 
-      // The headline the particles resolve into as you scroll, wrapped to two
-      // lines so the particle text roughly matches the hidden <h1>.
+      // As you scroll, the particles resolve through two text shapes: first the
+      // "Roughly" wordmark, then the headline (wrapped to two lines so the particle
+      // text roughly matches the hidden <h1>).
+      const ROUGHLY_LINES = ['Roughly']
       const HEADING_LINES = ['Modern developer', 'tooling for R.']
 
       function initHero() {
@@ -612,47 +620,39 @@ roughly check .</code></pre>
         const context = ctx
         const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-        // Pre-rendered round particle sprite. Each dot is blitted from this instead
-        // of a square fillRect, so particles read as soft organic discs. A wide soft
-        // falloff keeps the field looking like light rather than pixels.
-        const DOT = document.createElement('canvas')
-        DOT.width = DOT.height = 16
-        const dotCtx = DOT.getContext('2d')
-        if (dotCtx) {
-          const grad = dotCtx.createRadialGradient(8, 8, 0, 8, 8, 8)
-          grad.addColorStop(0, 'rgba(255,255,255,1)')
-          grad.addColorStop(0.4, 'rgba(255,255,255,0.9)')
-          grad.addColorStop(1, 'rgba(255,255,255,0)')
-          dotCtx.fillStyle = grad
-          dotCtx.beginPath()
-          dotCtx.arc(8, 8, 8, 0, Math.PI * 2)
-          dotCtx.fill()
-        }
-        function blit(x: number, y: number, d: number) {
-          context.drawImage(DOT, x - d / 2, y - d / 2, d, d)
-        }
-
-        // Load intro timeline (seconds). Particles fly in and assemble onto the
-        // logo, hold, then disperse back into the ambient cloud. `intro` (below)
-        // is the resulting logo-assembly amount that rises 0->1 and falls 1->0.
-        const INTRO_DELAY = 0.2
-        const ASSEMBLE = 1.6
-        const HOLD = 1.2
-        const DISPERSE = 1.8
-        const disperseStart = INTRO_DELAY + ASSEMBLE + HOLD
-        const introEnd = disperseStart + DISPERSE
+        // Load intro (seconds): particles fly in and assemble onto the logo. `intro`
+        // (below) rises 0->1 over the assemble window and then stays 1 — the logo
+        // holds rather than dispersing.
+        const INTRO_DELAY = 0.25
+        const ASSEMBLE = 1.7
+        // Idle cycle (seconds): parked at the top, the shape holds, then bursts
+        // outward into a streaming swarm, drifts as the swarm, and re-gathers into
+        // the other shape — logo, then the "Roughly" wordmark, back and forth. One
+        // half-cycle is HOLD -> FALL (the burst) -> STREAM -> RISE (gather); the two
+        // shapes alternate each half-cycle.
+        const CYCLE_HOLD = 5
+        const CYCLE_FALL = 1
+        const CYCLE_STREAM = 4
+        const CYCLE_RISE = 2
+        const CYCLE_HALF = CYCLE_HOLD + CYCLE_FALL + CYCLE_STREAM + CYCLE_RISE
 
         let dpr = Math.min(window.devicePixelRatio || 1, 2)
         let cssW = 0
         let cssH = 0
         let particles: Particle[] = []
         let logoTargets: Target[] = []
+        let roughlyTargets: Target[] = []
         let headingTargets: Target[] = []
         let running = false
         let rafId = 0
         let clock = 0
         let lastTime = 0
         let progress = 0
+        // Seconds parked at the top (drives the idle logo<->swarm<->"Roughly" cycle);
+        // resets whenever the reader scrolls so returning to the top always starts on
+        // the logo. `burstHalf` latches the one outward impulse fired per half-cycle.
+        let cycleClock = 0
+        let burstHalf = -1
         let centroidX = 0
         let centroidY = 0
         const mouse = { x: -9999, y: -9999, active: false }
@@ -671,7 +671,7 @@ roughly check .</code></pre>
         })()
 
         function particleCount() {
-          return cssW < 720 ? 2400 : cssW < 1100 ? 3800 : 5000
+          return cssW < 720 ? 2900 : cssW < 1100 ? 4600 : 6200
         }
         function sampleStride() {
           return cssW < 720 ? 4 : 3
@@ -760,7 +760,7 @@ roughly check .</code></pre>
         // Headline target: render the wrapped headline (matching the <h1>'s sans
         // font and weight) into an offscreen canvas, then run the same alpha
         // sampler. Centered on the shared centroid so it lines up with the DOM copy.
-        function buildTextTarget(lines: string[]): Target[] {
+        function buildTextTarget(lines: string[], widthFrac = 0.7, widthCap = 660): Target[] {
           const SS = 2
           const fontFamily = `'Geist Sans', system-ui, sans-serif`
           const probe = document.createElement('canvas').getContext('2d')
@@ -769,9 +769,9 @@ roughly check .</code></pre>
           probe.font = `600 ${basePx}px ${fontFamily}`
           let maxW = 1
           for (const line of lines) maxW = Math.max(maxW, probe.measureText(line).width)
-          const targetW = Math.min(cssW * 0.8, 760)
+          const targetW = Math.min(cssW * widthFrac, widthCap)
           let fontPx = (basePx * targetW) / maxW
-          const maxFont = Math.min(cssW * 0.1, cssH * 0.16)
+          const maxFont = Math.min(cssW * 0.086, cssH * 0.142)
           if (fontPx > maxFont) fontPx = maxFont
           if (fontPx < 12) fontPx = 12
           const leading = fontPx * 1.04
@@ -800,8 +800,8 @@ roughly check .</code></pre>
           const left = centroidX - blockW / 2
           const top = centroidY - blockH / 2
           return sampleAlpha(data, off.width, off.height, SS, (sx, sy) => ({
-            x: left + sx / SS + (Math.random() - 0.5) * 1.8,
-            y: top + sy / SS + (Math.random() - 0.5) * 1.8,
+            x: left + sx / SS + (Math.random() - 0.5) * 0.5,
+            y: top + sy / SS + (Math.random() - 0.5) * 0.5,
           }))
         }
 
@@ -809,31 +809,31 @@ roughly check .</code></pre>
           const count = particleCount()
           particles = []
           for (let i = 0; i < count; i++) {
-            // Ambient home: a soft radial scatter filling the whole hero, denser
-            // toward the edges (sqrt keeps a gentle centre thinning) but never a
-            // hollow ring, so once the logo disperses the field reads as an even
-            // living cloud rather than an empty donut. The logo and headline are
-            // transient shapes formed by the intro and scroll, so ambient dots may
-            // cross the centre freely.
+            // Soft radial scatter filling the hero (denser toward the centre, never a
+            // hollow ring): this is both the particle's start point and the scatter
+            // home it disperses back to between shapes, so the swarm spreads out as
+            // individual particles rather than a blob.
             const ang = Math.random() * Math.PI * 2
             const rad = Math.sqrt(Math.random())
-            const ax = cssW * (0.5 + Math.cos(ang) * rad * 0.6)
-            const ay = cssH * (0.5 + Math.sin(ang) * rad * 0.55)
+            const sx = cssW * (0.5 + Math.cos(ang) * rad * 0.62)
+            const sy = cssH * (0.5 + Math.sin(ang) * rad * 0.56)
             particles.push({
-              x: Math.random() * cssW,
-              y: Math.random() * cssH,
+              x: sx,
+              y: sy,
               vx: 0,
               vy: 0,
               lx: 0,
               ly: 0,
+              rx: 0,
+              ry: 0,
               hx: 0,
               hy: 0,
-              ax,
-              ay,
+              sx,
+              sy,
               // ~80% of particles settle (almost) fully onto the glyph so the R
               // reads clearly at rest — a small residual keeps the strokes from
-              // looking mechanically stamped; the other ~20% stay a pure ambient
-              // cloud so the field still feels organic.
+              // looking mechanically stamped; the other ~20% never join a shape and
+              // keep flowing across the field so it always feels alive.
               logoness: Math.random() < 0.8 ? 0.96 + Math.random() * 0.04 : 0,
               depth: 0.35 + Math.random() * 0.65,
               seed: Math.random() * Math.PI * 2,
@@ -841,24 +841,28 @@ roughly check .</code></pre>
           }
         }
 
-        // Give every particle a logo point and a headline point. Both target sets
-        // are ordered left-to-right and paired by fractional index, so particles
-        // flow horizontally between the two shapes rather than crossing over each
-        // other. The point counts differ from the particle count, so a few points
-        // are shared — the soft dots and drift hide the slight overlap.
+        // Give every particle its logo, "Roughly", and headline points. All three
+        // target sets are ordered left-to-right and paired by fractional index, so
+        // particles flow horizontally between the shapes rather than crossing over
+        // each other. The point counts differ from the particle count, so a few
+        // points are shared — the drift hides the slight overlap.
         function pairTargets() {
-          if (!logoTargets.length || !headingTargets.length) return
+          if (!logoTargets.length || !roughlyTargets.length || !headingTargets.length) return
           const byX = (a: Target, b: Target) => a.x - b.x || a.y - b.y
           const logo = logoTargets.slice().sort(byX)
+          const word = roughlyTargets.slice().sort(byX)
           const head = headingTargets.slice().sort(byX)
           const total = particles.length
           for (let i = 0; i < total; i++) {
             const f = total > 1 ? i / (total - 1) : 0
             const l = logo[Math.min(logo.length - 1, Math.floor(f * logo.length))]
+            const w = word[Math.min(word.length - 1, Math.floor(f * word.length))]
             const h = head[Math.min(head.length - 1, Math.floor(f * head.length))]
             const p = particles[i]
             p.lx = l.x
             p.ly = l.y
+            p.rx = w.x
+            p.ry = w.y
             p.hx = h.x
             p.hy = h.y
           }
@@ -888,80 +892,146 @@ roughly check .</code></pre>
             centroidY = cssH * 0.44
           }
           logoTargets = buildLogoTarget()
+          // The wordmark is a single short word, so cap it narrower than the
+          // two-line headline to keep its cap height in the same visual range.
+          roughlyTargets = buildTextTarget(ROUGHLY_LINES, 0.34, 400)
           headingTargets = buildTextTarget(HEADING_LINES)
           spawnParticles()
           pairTargets()
         }
 
-        // Logo-assembly amount for the load intro: 0 before it starts, eases up to
-        // 1 as particles fly onto the glyph, holds, then eases back to 0 as the
-        // field disperses into the ambient cloud. Scroll morph takes over from there.
+        // Logo-assembly amount for the load intro: 0 before it starts, eases up to 1
+        // as particles fly onto the glyph, then stays 1 — the logo holds instead of
+        // dispersing. The idle cycle and scroll morph take the shape from there.
         function introAmount() {
           if (clock <= INTRO_DELAY) return 0
           if (clock < INTRO_DELAY + ASSEMBLE) return smooth01((clock - INTRO_DELAY) / ASSEMBLE)
-          if (clock < disperseStart) return 1
-          if (clock < introEnd) return 1 - smooth01((clock - disperseStart) / DISPERSE)
-          return 0
+          return 1
         }
 
-        // One frame. Each particle chases a target that blends its ambient home,
-        // its logo point (weighted by the intro), and its headline point (weighted
-        // by scroll). A spring integrator gives the fly-in and settle their weight,
-        // and a flow-field drift keeps the field alive. Because the target is a
-        // pure function of the intro clock and scroll progress, the morph tracks
-        // the scrollbar exactly while the drift only rides on top.
+        // Idle cycle claim (1 = gathered on a shape, 0 = exploded into the streaming
+        // swarm) across one half-cycle: hold, fall (burst), stream, rise (gather).
+        function cycleClaim(phase: number) {
+          if (phase < CYCLE_HOLD) return 1
+          if (phase < CYCLE_HOLD + CYCLE_FALL) return 1 - smooth01((phase - CYCLE_HOLD) / CYCLE_FALL)
+          if (phase < CYCLE_HOLD + CYCLE_FALL + CYCLE_STREAM) return 0
+          return smooth01((phase - (CYCLE_HOLD + CYCLE_FALL + CYCLE_STREAM)) / CYCLE_RISE)
+        }
+        // Which shape (0 = logo, 1 = "Roughly") the half-cycle rests on: it holds the
+        // shape it started from, then gathers onto the other one. The swap happens
+        // mid-stream, while nothing is gathered, so there is no visible jump.
+        function cycleShapeSel(halfIndex: number, phase: number) {
+          const fromShape = halfIndex % 2 === 0 ? 0 : 1
+          const swapAt = CYCLE_HOLD + CYCLE_FALL + CYCLE_STREAM / 2
+          return phase < swapAt ? fromShape : 1 - fromShape
+        }
+
+        // One frame. After the fly-in the shape particles stay assembled: parked at
+        // the top they drift between the logo and the "Roughly" wordmark on the idle
+        // cycle, and scrolling slides that shape into the headline (scrolling back up
+        // returns it to the logo). The ~20% pure drifters never join a shape — they
+        // flow across the field on the flow current and wrap at the edges, keeping the
+        // hero alive. Rather than clearing, the frame is faded toward black so moving
+        // particles leave soft light trails; the trail vanishes to a full clear as the
+        // scroll text locks in so the letters read crisp.
         function render(now: number) {
-          context.clearRect(0, 0, cssW, cssH)
-          context.fillStyle = '#fff'
-          const morph = smooth01(progress)
+          // The morph completes well before the end of the scroll track so the text
+          // resolves quickly; the remaining scroll just holds it.
+          const morph = smooth01(clamp01(progress / 0.72))
           const intro = introAmount()
-          // Looseness peaks mid-transition (mid-assemble and mid-scroll) so the
-          // field breathes as it reshapes and settles crisp at either resting shape.
+          // Where the idle cycle is right now: which half (logo->swarm->"Roughly" or
+          // back), how gathered onto a shape (claim), and which shape it rests on.
+          const halfIndex = Math.floor(cycleClock / CYCLE_HALF)
+          const phase = cycleClock - halfIndex * CYCLE_HALF
+          const claim = cycleClaim(phase)
+          const shapeSel = cycleShapeSel(halfIndex, phase)
+          // Fire one outward impulse the instant the shape releases (start of FALL),
+          // so it bursts into radial streaks rather than just fading into the swarm.
+          if (burstHalf !== halfIndex && phase >= CYCLE_HOLD && phase < CYCLE_HOLD + 0.4) {
+            burstHalf = halfIndex
+            for (const particle of particles) {
+              if (particle.logoness <= 0) continue
+              particle.vx += (particle.x - centroidX) * 0.012 + (Math.random() - 0.5) * 0.6
+              particle.vy += (particle.y - centroidY) * 0.012 + (Math.random() - 0.5) * 0.6
+            }
+          }
+          // How strongly the scroll text is claimed — ramps in fast so the headline
+          // reads crisp. Drives the trail crispening below.
+          const textForm = smooth01(clamp01(morph / 0.32))
+          context.globalAlpha = 1
+          // Fade toward black for motion trails; the trail vanishes to a full clear
+          // as the scroll text locks in so the letters read crisp, not smeared.
+          context.fillStyle = `rgba(0,0,0,${0.13 + 0.86 * textForm})`
+          context.fillRect(0, 0, cssW, cssH)
+          context.fillStyle = '#fff'
+          // Looseness peaks mid-transition so the field breathes as it reshapes.
           const settle = Math.max(intro < 1 ? Math.sin(Math.PI * intro) : 0, Math.sin(Math.PI * morph))
-          const t = now * 0.0006
-          const k = 0.14 + 0.16 * Math.max(intro, morph)
-          const damp = 0.82
           for (let i = 0; i < particles.length; i++) {
             const p = particles[i]
-            // Blend the three resting shapes in order: ambient home, then pull
-            // toward the logo by the intro, then toward the headline by scroll.
-            // Heading wins at full scroll (weight 1) so the letters read crisp.
-            const wLogo = p.logoness * intro * (1 - morph)
-            let tx = p.ax + (p.lx - p.ax) * wLogo
-            let ty = p.ay + (p.ly - p.ay) * wLogo
-            tx += (p.hx - tx) * morph
-            ty += (p.hy - ty) * morph
-            // Spring toward the target, with a flow-field wander that grows while
-            // the field is in motion and for the loose ambient drifters.
-            const wander = (1 + settle * 6) * (1 + (1 - p.logoness) * 1.8)
-            const angle = flowAngle(p.x, p.y, t) + p.seed
-            p.vx += (tx - p.x) * k + Math.cos(angle) * wander * 0.05
-            p.vy += (ty - p.y) * k + Math.sin(angle) * wander * 0.05
+            // `shaped` = does this dot take part in shapes (1 after the intro), vs a
+            // pure drifter (0). `form` = how gathered onto a shape it is right now
+            // (drops to 0 as the cycle scatters it into the swarm).
+            const shaped = p.logoness * intro
+            const form = shaped * claim
+            let pullX = 0
+            let pullY = 0
+            if (shaped > 0.0001) {
+              // The shape it gathers onto (logo or "Roughly" by the cycle), slid
+              // across to the headline as you scroll.
+              const shapeX = p.lx + (p.rx - p.lx) * shapeSel
+              const shapeY = p.ly + (p.ry - p.ly) * shapeSel
+              const gx = shapeX + (p.hx - shapeX) * morph
+              const gy = shapeY + (p.hy - shapeY) * morph
+              // Target blends the spread-out scatter home (claim 0 = individual
+              // particles) with the gathered shape (claim 1). Gentle spring while
+              // scattered, firm once gathered; the intro factor eases the first
+              // assembly so the logo glides in rather than snapping.
+              const tx = p.sx + (gx - p.sx) * claim
+              const ty = p.sy + (gy - p.sy) * claim
+              const springK = (0.045 + 0.07 * claim) * intro
+              pullX = (tx - p.x) * springK
+              pullY = (ty - p.y) * springK
+            }
+            // Flow current: the pure drifters always flow; a shape dot flows while
+            // scattered into the swarm (claim -> 0) and holds steady once gathered.
+            const flow = p.logoness > 0 ? (1 - claim) * 0.05 : 0.06
+            const angle = flowAngle(p.x, p.y, clock) + p.seed
+            p.vx += pullX + Math.cos(angle) * flow
+            p.vy += pullY + Math.sin(angle) * flow
             if (mouse.active) {
               const mdx = p.x - mouse.x
               const mdy = p.y - mouse.y
               const d2 = mdx * mdx + mdy * mdy
-              if (d2 < 11000 && d2 > 0.01) {
-                const push = (1 - d2 / 11000) * 1.6
+              if (d2 < 12000 && d2 > 0.01) {
+                const push = (1 - d2 / 12000) * 1.7
                 const inv = 1 / Math.sqrt(d2)
                 p.vx += mdx * inv * push
                 p.vy += mdy * inv * push
               }
             }
+            // Drifters keep their momentum so the flow streams; assembled shape dots
+            // damp harder so the shape settles crisp.
+            const damp = 0.92 - 0.05 * form
             p.vx *= damp
             p.vy *= damp
             p.x += p.vx
             p.y += p.vy
-            // On-glyph / on-letter particles are a touch larger and brighter so the
-            // shapes read solid; ambient drifters stay smaller and fainter, rising
-            // to full only as they join the headline.
-            const shaped = Math.max(wLogo, morph)
-            const size = (p.depth > 0.6 ? 2.9 : 2.1) + settle * 0.6 + 0.5 * shaped * p.logoness
-            const ambientFade = p.logoness > 0 ? 1 : 0.22 + 0.78 * morph
-            const shapeAlpha = 1 + 0.35 * shaped * p.logoness
-            const alpha = (0.5 + p.depth * 0.5) * (1 - settle * 0.4) * ambientFade * shapeAlpha
+            // Only pure drifters wrap the field; shape dots settle at their scatter
+            // home (well inside the field) when released, so they never reach a wrap.
+            if (p.logoness <= 0) {
+              if (p.x < -4) p.x += cssW + 8
+              else if (p.x > cssW + 4) p.x -= cssW + 8
+              if (p.y < -4) p.y += cssH + 8
+              else if (p.y > cssH + 4) p.y -= cssH + 8
+            }
+            // Fine sharp dots: 1-2px, brighter while sitting on a shape and dim while
+            // flowing so the streaming field stays quiet behind the letters.
+            const size = p.depth > 0.62 ? 2 : 1
+            const base = p.logoness > 0 ? 0.11 + p.depth * 0.16 : 0.1 + p.depth * 0.14
+            let alpha = base + form * (0.44 + p.depth * 0.34)
+            alpha *= 1 - settle * 0.22
             context.globalAlpha = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha
-            blit(p.x, p.y, size)
+            context.fillRect(p.x, p.y, size, size)
           }
           context.globalAlpha = 1
         }
@@ -979,10 +1049,10 @@ roughly check .</code></pre>
           const scrollable = Math.max(1, (stage ? stage.offsetHeight : vh) - vh)
           progress = clamp01(y / scrollable)
           if (nav) nav.style.setProperty('--reveal', String(clamp01((y - vh * 0.12) / (vh * 0.16))))
-          // The subhead and buttons fade in over the last stretch of the scroll,
-          // after the particles have resolved into the headline. The headline
-          // itself is never shown as DOM text — the particles are the heading.
-          const copyP = smooth01(clamp01((progress - 0.72) / 0.28))
+          // The subhead and buttons fade in right after the particles resolve into
+          // the headline (which completes at progress 0.72). The headline itself is
+          // never shown as DOM text — the particles are the heading.
+          const copyP = smooth01(clamp01((progress - 0.6) / 0.22))
           if (copy) copy.style.setProperty('--copy-op', String(copyP))
           if (hint) hint.style.setProperty('--hint-op', String(clamp01(1 - y / (vh * 0.14))))
         }
@@ -994,6 +1064,15 @@ roughly check .</code></pre>
           lastTime = now
           if (dt > 0.05) dt = 0.05
           clock += dt
+          // Advance the idle logo<->swarm<->"Roughly" cycle only while parked at the
+          // very top; any scroll resets it (and re-arms the burst) so returning to the
+          // top restarts on the logo.
+          if (progress < 0.02) {
+            cycleClock += dt
+          } else {
+            cycleClock = 0
+            burstHalf = -1
+          }
           render(now)
           rafId = requestAnimationFrame(loop)
         }
@@ -1030,15 +1109,11 @@ roughly check .</code></pre>
           relayout()
           syncScroll()
           if (reduceMotion) {
-            // No animation: show the crisp DOM headline and copy. The particles
-            // rest as a faint static ambient field behind the text (no logo, no
-            // particle headline) so nothing competes with the legible <h1>.
+            // No animation: show the crisp DOM headline and copy. The particles rest
+            // as a faint static scatter behind the text (intro never runs, so nothing
+            // assembles) so nothing competes with the legible <h1>.
             progress = 0
-            clock = introEnd
-            for (const p of particles) {
-              p.x = p.ax
-              p.y = p.ay
-            }
+            clock = 0
             render(0)
             if (nav) nav.style.setProperty('--reveal', '1')
             if (copy) copy.style.setProperty('--copy-op', '1')
@@ -1848,7 +1923,7 @@ roughly check .</code></pre>
          particle field fills and the header/copy reveal over as a parallax overlay. */
       #hero {
         position: relative;
-        height: 200svh;
+        height: 160svh;
         border-bottom: 1px solid var(--border);
       }
       .hero-viewport {
