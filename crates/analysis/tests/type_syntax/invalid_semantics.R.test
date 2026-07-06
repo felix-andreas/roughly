@@ -12,6 +12,18 @@ InvalidSemantics { message: "duplicate type parameter name `T` in `<...>`." }
 #++++
 InvalidSemantics { message: "duplicate type parameter name `T` in expanded function annotation." }
 
+#---- unknown_constraint_in_universal_binder
+<T: frobnicate> fn(values: T) -> T
+#++++
+InvalidSemantics { message: "unknown type-parameter constraint `frobnicate`; the available constraints are `numeric` and `atomic`." }
+
+#---- unknown_constraint_in_expanded_forall
+@forall T: frobnicate
+@param value {T}
+@return {T}
+#++++
+InvalidSemantics { message: "unknown type-parameter constraint `frobnicate`; the available constraints are `numeric` and `atomic`." }
+
 #---- consecutive_typing_comments
 integer
 character

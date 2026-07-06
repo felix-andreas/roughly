@@ -67,6 +67,12 @@ identity <- function(value) value
 #++++
 identity: <T> fn(value: T) -> T
 
+#---- constrained_binder_scheme_keeps_its_constraint
+#: <T: numeric> fn(values: T) -> T
+passthrough <- function(values) values
+#++++
+passthrough: <T: numeric> fn(values: T) -> T
+
 #---- compact_forall_two_parameters_binding
 #: <T, U> fn(left: T, right: U) -> T
 keep_left <- function(left, right) left

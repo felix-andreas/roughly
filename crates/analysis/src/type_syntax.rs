@@ -3,8 +3,8 @@ use {
         hir::{Definition, DefinitionKind},
         interner::{Interner, Symbol},
         types::{
-            Annotation, Atomic, FunctionType, NamedTypeRef, RecordField, SurfaceType,
-            TypeAnnotationKind,
+            Annotation, Atomic, BinderParameter, Constraint, FunctionType, NamedTypeRef,
+            RecordField, SurfaceType, TypeAnnotationKind,
         },
     },
     ropey::Rope,
@@ -199,7 +199,14 @@ pub fn render_surface_type(surface_type: &SurfaceType, interner: &Interner) -> S
         SurfaceType::Binders(type_parameters, inner_type) => {
             let rendered_params = type_parameters
                 .iter()
-                .map(|&p| interner.resolve(p).unwrap_or("<unknown>").to_owned())
+                .map(|parameter| {
+                    let name = interner.resolve(parameter.name).unwrap_or("<unknown>");
+                    match parameter.constraint {
+                        Constraint::Numeric => format!("{name}: numeric"),
+                        Constraint::AtomicElement => format!("{name}: atomic"),
+                        Constraint::ScalarNumeric | Constraint::Unconstrained => name.to_owned(),
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
@@ -207,6 +214,17 @@ pub fn render_surface_type(surface_type: &SurfaceType, interner: &Interner) -> S
                 render_surface_type(inner_type, interner)
             )
         }
+    }
+}
+
+// The writable constraint vocabulary for `<T: ...>` / `@forall T: ...` binders. `numeric` and
+// `atomic` match the display names inferred signatures use; the internal scalar-numeric meet is
+// inference-only and not writable.
+fn binder_constraint_from_name(name: &str) -> Option<Constraint> {
+    match name {
+        "numeric" => Some(Constraint::Numeric),
+        "atomic" => Some(Constraint::AtomicElement),
+        _ => None,
     }
 }
 
@@ -914,13 +932,34 @@ pub fn parse_expanded_block_surface_type(
                         "expected a type parameter name in `@forall`.",
                     ));
                 }
-                let param_symbol = interner.intern(param);
-                if type_parameters.contains(&param_symbol) {
+                // `@forall T` or `@forall T: numeric` — the same constraint vocabulary as the
+                // compact `<T: numeric>` binder.
+                let (name_text, constraint) = match param.split_once(':') {
+                    Some((name_text, constraint_text)) => {
+                        let constraint_text = constraint_text.trim();
+                        let constraint = binder_constraint_from_name(constraint_text)
+                            .ok_or_else(|| {
+                                invalid_semantics(format!(
+                                    "unknown type-parameter constraint `{constraint_text}`; the available constraints are `numeric` and `atomic`."
+                                ))
+                            })?;
+                        (name_text.trim(), constraint)
+                    }
+                    None => (param, Constraint::Unconstrained),
+                };
+                let param_symbol = interner.intern(name_text);
+                if type_parameters
+                    .iter()
+                    .any(|parameter: &BinderParameter| parameter.name == param_symbol)
+                {
                     return Err(invalid_semantics(format!(
-                        "duplicate type parameter name `{param}` in expanded function annotation."
+                        "duplicate type parameter name `{name_text}` in expanded function annotation."
                     )));
                 }
-                type_parameters.push(param_symbol);
+                type_parameters.push(BinderParameter {
+                    name: param_symbol,
+                    constraint,
+                });
             }
         } else if let Some(parameter_text) = directive.strip_prefix("@param") {
             if seen_return {
@@ -1308,13 +1347,37 @@ impl<'a> TypeParser<'a> {
                 let param = &self.source[span.0..span.1];
                 let param_symbol = self.interner.intern(param);
 
-                if type_parameters.contains(&param_symbol) {
+                if type_parameters
+                    .iter()
+                    .any(|parameter: &BinderParameter| parameter.name == param_symbol)
+                {
                     return Err(invalid_semantics(format!(
                         "duplicate type parameter name `{param}` in `<...>`."
                     )));
                 }
 
-                type_parameters.push(param_symbol);
+                // An optional declared constraint: `<T: numeric>` / `<T: atomic>`, the same
+                // vocabulary inferred signatures display with.
+                self.skip_ascii_whitespace();
+                let mut constraint = Constraint::Unconstrained;
+                if self.peek_byte() == Some(b':') {
+                    self.consume_byte(b':');
+                    self.skip_ascii_whitespace();
+                    let constraint_span = self.parse_identifier_span().ok_or_else(|| {
+                        invalid_syntax("expected a constraint name after `:` in `<...>`.")
+                    })?;
+                    let constraint_name = &self.source[constraint_span.0..constraint_span.1];
+                    constraint = binder_constraint_from_name(constraint_name).ok_or_else(|| {
+                        invalid_semantics(format!(
+                            "unknown type-parameter constraint `{constraint_name}`; the available constraints are `numeric` and `atomic`."
+                        ))
+                    })?;
+                }
+
+                type_parameters.push(BinderParameter {
+                    name: param_symbol,
+                    constraint,
+                });
 
                 self.skip_ascii_whitespace();
                 if self.consume_byte(b',') {

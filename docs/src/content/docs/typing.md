@@ -311,14 +311,17 @@ add requirements the signature does not state (using `value + 1L` above would be
 error: the signature never promised `T` is numeric). At call sites `T` is filled in
 per call: `identity(1L)` is `integer`, `identity("a")` is `character`.
 
-Two bounds refine what a type parameter accepts. You do not write them explicitly —
-they arise from *how* the parameter is used, and they render in hover as `<T: ...>`:
+Two bounds refine what a type parameter accepts. They arise on their own from *how*
+the parameter is used, and you can also state them directly in the binder
+(`<T: numeric>`, or `@forall T: numeric` in the expanded style):
 
 - **numeric** — inferred for unannotated parameters used arithmetically
   (`<T: numeric> fn(x: T) -> T` for `function(x) x + 1L`). Only `integer` and
-  `double` satisfy it.
+  `double` (scalar or vector) satisfy it. Write it yourself when the constraint is
+  part of the interface rather than an accident of the body.
 - **atomic** — using a parameter as a vector *element* type, `T[]`, restricts `T`
-  to the six atomic types. This is how element-preserving signatures are written:
+  to the six atomic types (writable as `<T: atomic>`). This is how
+  element-preserving signatures are written:
 
 ```r
 #: <T> fn(x: T[]) -> T[]

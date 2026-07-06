@@ -1,0 +1,37 @@
+#==== option_handling
+#---- config_module_is_clean
+# NULL-union option handling: annotated nullable results, is.null narrowing with early
+# returns, switch dispatch with and without defaults, and environment-variable fallbacks.
+#: fn(name: character, [fallback]: character) -> character
+env_or <- function(name, fallback = "") {
+  value <- Sys.getenv(name)
+  if (nchar(value) == 0L) {
+    return(fallback)
+  }
+  value
+}
+
+#: fn(level: character) -> integer
+log_level_rank <- function(level) {
+  switch(level, debug = 1L, info = 2L, warn = 3L, error = 4L, 2L)
+}
+
+#: fn(timeout: integer | NULL) -> integer
+effective_timeout <- function(timeout) {
+  if (is.null(timeout)) {
+    return(30L)
+  }
+  if (timeout < 1L) {
+    stop("timeout must be positive")
+  }
+  timeout
+}
+
+describe_config <- function() {
+  host <- env_or("SERVICE_HOST", "localhost")
+  rank <- log_level_rank(env_or("LOG_LEVEL", "info"))
+  timeout <- effective_timeout(NULL)
+  sprintf("%s (level %d, timeout %ds)", host, rank, timeout)
+}
+#++++
+No diagnostics.

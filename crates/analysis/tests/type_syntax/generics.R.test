@@ -32,6 +32,29 @@
 #++++
 <T> fn(value: T, label: character) -> T | NULL
 
+#==== constrained_binders
+#---- numeric_constrained_binder
+<T: numeric> fn(values: T) -> T
+#++++
+<T: numeric> fn(values: T) -> T
+
+#---- atomic_constrained_binder
+<T: atomic> fn(x: T[]) -> T[]
+#++++
+<T: atomic> fn(x: T[]) -> T[]
+
+#---- constrained_and_unconstrained_binders_mix
+<T: numeric, U> fn(x: T, y: U) -> T
+#++++
+<T: numeric, U> fn(x: T, y: U) -> T
+
+#---- expanded_forall_with_constraint
+@forall T: numeric
+@param value {T}
+@return {T}
+#++++
+<T: numeric> fn(value: T) -> T
+
 #==== generic_named_types
 #---- generic_alias_definition
 @alias Box<T> {list{value: T}}

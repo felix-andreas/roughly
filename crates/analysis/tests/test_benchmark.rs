@@ -145,30 +145,15 @@ fn run_benchmark(target_loc: usize) {
             .expect("document should parse");
     }
 
+    // Cold-check timing only: `analysis` is the one-shot CLI/oracle path, so re-driving it after an
+    // edit would measure a code path production never exercises (per-edit latency belongs to the
+    // engine crate's benchmarks, which assert recompute bounds there).
     let cold_start = Instant::now();
     analysis::run_full(&mut analysis_state);
     let cold_elapsed = cold_start.elapsed();
-
-    let edited_file = file_count / 2;
-    analysis_state
-        .add_document_from_source(
-            common::file_path(edited_file),
-            &common::generate_file(edited_file, ITEMS_PER_FILE, true),
-        )
-        .expect("document should parse");
-    let recheck_start = Instant::now();
-    let recomputed = analysis::typecheck(&mut analysis_state);
-    let recheck_elapsed = recheck_start.elapsed();
 
     println!("benchmark target {target_loc} LoC");
     println!("  realized LoC:         {realized_loc}");
     println!("  files:                {file_count}");
     println!("  cold full check:      {cold_elapsed:?}");
-    println!("  single-file recheck:  {recheck_elapsed:?}");
-    println!("  documents recomputed: {}", recomputed.len());
-    assert_eq!(
-        recomputed.len(),
-        1,
-        "body-only edit should recheck one document"
-    );
 }

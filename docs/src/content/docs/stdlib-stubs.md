@@ -80,8 +80,10 @@ compatible only with itself; values of it come only from functions declared to r
 `Sys.Date()` is a `Date` and passing it where `factor` is expected is a type error. Type names may
 contain interior dots (`data.frame`), and a project's own `@type`/`@alias` of the same name shadows
 the stub type. Consumers of these values keep `Any` parameters (R coerces liberally); the nominals
-tighten *returns*. Structural `@type NAME {REPRESENTATION}` declarations are not expressible in
-`.Rtypes` — opaque nominals are the stub form.
+tighten *returns*. `$`, `[`, and `[[` on an opaque nominal yield `Unknown` instead of erroring —
+`df$amount` and `df[rows, ]` stay usable, with each access surfaced under strict mode (see the
+[Typing Reference](/typing-reference#nominal-types)). Structural `@type NAME {REPRESENTATION}`
+declarations are not expressible in `.Rtypes` — opaque nominals are the stub form.
 
 ### Cross-ecosystem note
 

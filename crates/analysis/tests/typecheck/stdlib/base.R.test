@@ -774,3 +774,14 @@ check_factor <- function(x) TRUE
 check_factor(Sys.Date())
 #++++
 error: type mismatch
+
+#---- combine_drops_null_members_of_union_arguments
+grow <- function() {
+  acc <- c()
+  for (value in c(1.5, 2.5)) {
+    acc <- c(acc, value)
+  }
+  acc
+}
+#++++
+fn() -> double[] | NULL

@@ -395,3 +395,32 @@ f <- function(x) {
 }
 #++++
 error: invalid operand
+
+#==== constrained_binders
+#---- numeric_binder_is_writable_and_enforced
+#: <T: numeric> fn(values: T) -> T
+passthrough <- function(values) values
+kept <- passthrough(2.5)
+rejected <- passthrough("text")
+#++++
+error: constraint violation
+
+#---- numeric_binder_accepts_numeric_arguments
+#: <T: numeric> fn(values: T) -> T
+passthrough <- function(values) values
+passthrough(2.5)
+passthrough(1L)
+#++++
+fn(values: ?1) -> ?1
+double
+integer
+
+#---- forall_binder_takes_the_same_constraint
+#: @forall T: numeric
+#: @param values {T}
+#: @return {T}
+passthrough <- function(values) values
+passthrough(3.5)
+#++++
+fn(values: ?1) -> ?1
+double

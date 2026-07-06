@@ -227,6 +227,8 @@ The intended fixture suites are:
 - `naming/local` - file-local binding introduction and lexical use-site resolution
 - `naming/global` - package-global resolution across multiple files
 - `project` - multi-file typed package behavior, currently rendered as per-file diagnostics
+- `realworld` - complete idiomatic R programs through the full production analysis, pinning the
+  false-positive rate on clean code and true positives on buggy code
 - `unification` - optional internal raw-inference coverage for metavariable-facing engine behavior
 
 Keep focused test-running guidance minimal in this document. Exact suite adoption may lag behind the intended split while implementation and fixture migration are still in progress.
@@ -447,6 +449,28 @@ Rules:
   `bindings`, `expressions`, or `interfaces`
 - if a future incremental-analysis suite later becomes the owner of full rendered diagnostics,
   revisit this split then rather than preemptively collapsing it now
+
+### `realworld`
+
+Purpose:
+
+- evaluate the type system on complete, idiomatic R programs rather than isolated constructs
+- pin the end-to-end false-positive rate: realistic clean programs must produce `No diagnostics.`
+- pin true positives: programs with planted bugs must report exactly the planted diagnostics
+
+Expected output should show:
+
+- final rendered diagnostic text through the full production analysis (typing and unused checks
+  enabled, standard-library stub corpus loaded)
+
+Rules:
+
+- write cases as real programs (CSV pipelines, config handling, text processing), not minimal
+  construct demos — construct-level coverage belongs in `expressions`, `bindings`, or `diagnostics`
+- an unexpected diagnostic on a clean program is a product regression to fix, never an expectation
+  to re-bless
+- when the checker legitimately catches a program error in a supposedly-clean case, fix the R code
+  (it was a true positive) or move it to the buggy catalog — do not bless the diagnostic away
 
 ## Testing guidance
 

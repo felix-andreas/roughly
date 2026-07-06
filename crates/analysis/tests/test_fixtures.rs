@@ -36,6 +36,11 @@ fn diagnostics() {
 }
 
 #[test]
+fn realworld() {
+    run_fixture_suite("tests/realworld", run_realworld_fixture);
+}
+
+#[test]
 fn unused() {
     run_fixture_suite("tests/unused", run_unused_fixture);
 }
@@ -288,6 +293,39 @@ fn run_bindings_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, S
     Ok(vec![vec![FixtureRunFile {
         path: PathBuf::new(),
         output: lines.join("\n"),
+    }]])
+}
+
+// The real-world evaluation corpus: substantial, idiomatic R programs checked with everything on
+// (typing, unused, default lints). The clean programs pin the false-positive rate on real code;
+// the deliberately buggy ones pin true positives. Treat any unexpected diagnostic here as a
+// product regression to fix, never as an expectation to re-bless.
+fn run_realworld_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>>, String> {
+    let FixtureKind::Simple(case) = &fixture.kind else {
+        return Err("unsupported fixture".to_owned());
+    };
+    let mut parser = new_parser().unwrap();
+    let document = Document::parse(&mut parser, &case.input).expect("parse fixture");
+    let mut analysis_state = Analysis::new(
+        PathBuf::new(),
+        LintConfig::default(),
+        CheckConfig {
+            unused: true,
+            typing: true,
+            strict: false,
+        },
+    );
+    analysis_state.add_document(PathBuf::from("R/main.R"), document);
+    analysis::run_full(&mut analysis_state);
+    let document_id = analysis_state
+        .document_id_for_path(Path::new("R/main.R"))
+        .ok_or_else(|| "missing document id".to_owned())?;
+    Ok(vec![vec![FixtureRunFile {
+        path: PathBuf::new(),
+        output: render_diagnostics(
+            &case.input,
+            &analysis_state.document_diagnostics(document_id),
+        ),
     }]])
 }
 

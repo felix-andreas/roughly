@@ -66,7 +66,16 @@ pub enum SurfaceType {
     Record(Vec<RecordField<SurfaceType>>),
     Tuple(Vec<SurfaceType>),
     Function(FunctionType<SurfaceType>),
-    Binders(Vec<Symbol>, Box<SurfaceType>),
+    Binders(Vec<BinderParameter>, Box<SurfaceType>),
+}
+
+/// One `<T>` / `<T: numeric>` binder parameter: the quantified name plus its declared constraint
+/// (`Unconstrained` for a plain `<T>`). The writable constraint vocabulary is `numeric` and
+/// `atomic`, matching how inferred constraints display in signatures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BinderParameter {
+    pub name: Symbol,
+    pub constraint: Constraint,
 }
 
 impl SurfaceType {

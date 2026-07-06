@@ -551,6 +551,24 @@ Examples:
 - `<T, U> fn(T) -> U`
 - `<T> fn(T) -> T | NULL`
 
+A binder name may carry a constraint, written `NAME: CONSTRAINT`:
+
+- `<T: numeric> fn(values: T) -> T`
+- `<T: numeric, U> fn(x: T, y: U) -> T`
+
+Two constraint names are writable:
+
+- `numeric` — the parameter instantiates only to a numeric scalar (`integer`, `double`) or a
+  numeric vector (`integer[]`, `double[]`, and their `[named]` forms)
+- `atomic` — the parameter instantiates only to one of the six atomic scalar types; the same bound
+  that using a parameter as a vector element (`T[]`) imposes
+
+Any other constraint name is an annotation error that names the available constraints. An argument
+whose type violates a constraint is a type error at the call that imposed it. A written constraint
+composes with positional bounds exactly like an inferred one: `T: numeric` used as a `T[]` element
+holds both bounds and instantiates only to a scalar `integer` or `double` (see
+[Numeric inference variables](#numeric-inference-variables)).
+
 For now, universal binders are rank-1 only.
 
 - a `<...>` binder is allowed only at the outermost level of a user-facing type expression
@@ -752,6 +770,20 @@ height + height
 ```
 
 `height + height` has type `double`; arithmetic projects `Meters` to `double` and the result does not keep the nominal identity.
+
+**Opaque nominal types** have no representation to project. Standard-library stubs declare types
+the type grammar cannot describe structurally (`data.frame`, `factor`, `connection`, `Date`, ...)
+as bare `@type NAME` — see [Standard library stubs](/stdlib-stubs). For these:
+
+- `$`, `[`, and `[[` are accepted and the result is `Unknown` rather than an error: the R object
+  behind such a class commonly supports value-dependent access (`df$amount`, `df[rows, ]`), and
+  refusing would reject the most idiomatic R there is
+- the access is not checked further — no field-existence, index-count, or index-type checking —
+  so `df[i, j]` and `df[rows, ]` both pass
+- every such access is an unsupported construct under [strict mode](#strict-mode): the untyped
+  result is deliberate and visible, not silent
+- all other structural requirements on an opaque nominal (arithmetic, loop iteration, ...) remain
+  type errors, and the nominal identity itself still checks exactly like any other nominal type
 
 Examples:
 
@@ -1171,6 +1203,11 @@ Use `[[` for supported vector indexing instead.
 
 For a homogeneous fixed-shape list the union collapses, so the result matches the plain coercion to the array-like or map-like shape.
 
+#### Indexing opaque nominal types
+
+`$`, `[`, and `[[` on an opaque nominal type (`data.frame`, `factor`, ...) yield `Unknown` without
+further checking; see [Nominal types](#nominal-types) for the rule and its rationale.
+
 Some indexing forms remain unsupported for now. In particular, this document does not currently define `[` on vectors, and tuple-like or fixed-shape record-like `[[` access requires statically known literal indices or names.
 
 ### Numeric inference variables
@@ -1341,6 +1378,11 @@ Examples:
 
 - with no arguments, `c()` returns `NULL`, matching R
 - `NULL` arguments are dropped, matching R; `c(x, NULL)` is `c(x)` and `c(NULL)` is `NULL`
+- a union-typed argument participates member-wise: `NULL` members are dropped first (at runtime the
+  value is either `NULL` — dropped by `c` — or one of the other members), and every remaining
+  member must be an atomic vector type and joins the coercion like a separate argument; an
+  accumulator seeded with `NULL` therefore combines cleanly — with `acc` of type
+  `double[] | NULL`, `c(acc, 1.0)` is `double[]`
 - every non-`NULL` argument must be an atomic vector type; lists are not supported
 - mixed atomic arguments coerce to the widest type along R's coercion hierarchy
   `logical < integer < double < complex < character`; `raw` does not participate and only combines
@@ -1445,6 +1487,8 @@ Expanded function annotations use these forms:
 
 - `@forall T,U,...`
 - `@forall T`
+- `@forall T: numeric` — binder constraints use the same names and semantics as the compact
+  `<T: numeric>` form (see [Type parameters, aliases, and nominal types](#type-parameters-aliases-and-nominal-types))
 - `@param name {TYPE}`
 - `@param [name] {TYPE}` for optional parameters
 - `@return {TYPE}`

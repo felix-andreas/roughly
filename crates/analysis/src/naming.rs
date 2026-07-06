@@ -973,7 +973,8 @@ impl<'a> TypeResolver<'a> {
                 }
 
                 let mut nested_type_parameters = local_type_parameters.clone();
-                nested_type_parameters.extend(type_parameters.iter().copied());
+                nested_type_parameters
+                    .extend(type_parameters.iter().map(|parameter| parameter.name));
                 self.resolve_surface_type(inner_type, &nested_type_parameters, range, document_id);
             }
             SurfaceType::Any

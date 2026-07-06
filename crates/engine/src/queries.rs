@@ -1748,7 +1748,7 @@ fn resolve_surface_type(
                 return;
             }
             let mut nested = local_type_parameters.clone();
-            nested.extend(type_parameters.iter().copied());
+            nested.extend(type_parameters.iter().map(|parameter| parameter.name));
             resolve_surface_type(
                 inner_type,
                 &nested,
@@ -1903,7 +1903,7 @@ fn collect_surface_type_references(
                 return;
             }
             let mut nested = local_type_parameters.clone();
-            nested.extend(type_parameters.iter().copied());
+            nested.extend(type_parameters.iter().map(|parameter| parameter.name));
             collect_surface_type_references(inner_type, &nested, references);
         }
         SurfaceType::Any | SurfaceType::Unknown | SurfaceType::Null | SurfaceType::Scalar(_) => {}

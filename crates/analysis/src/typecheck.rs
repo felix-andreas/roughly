@@ -707,8 +707,12 @@ impl InferenceState {
         self.fresh_constrained_variable(Constraint::Unconstrained)
     }
 
-    fn fresh_rigid_variable(&mut self, name: Symbol) -> InferenceVariableId {
-        let variable = self.fresh_variable();
+    fn fresh_rigid_variable(
+        &mut self,
+        name: Symbol,
+        constraint: Constraint,
+    ) -> InferenceVariableId {
+        let variable = self.fresh_constrained_variable(constraint);
         self.set_rigid(variable, name);
         variable
     }
@@ -4148,10 +4152,13 @@ impl InferenceState {
                 // so this only makes annotation binders rigid.
                 let mut nested_type_parameters = substitutions.clone();
                 for type_parameter in bound_type_parameters {
-                    nested_type_parameters.insert(
-                        *type_parameter,
-                        CoreType::Variable(self.fresh_rigid_variable(*type_parameter)),
-                    );
+                    // A declared constraint (`<T: numeric>`) rides on the rigid variable from
+                    // creation: the annotation itself promises it, so the body may use the
+                    // parameter under that bound and the scheme generalizes back with it.
+                    let variable =
+                        self.fresh_rigid_variable(type_parameter.name, type_parameter.constraint);
+                    nested_type_parameters
+                        .insert(type_parameter.name, CoreType::Variable(variable));
                 }
 
                 self.lower_surface_type_with_substitutions(
@@ -5772,13 +5779,23 @@ impl InferenceState {
         }
 
         // An Unknown/Any subject stays Unknown/Any even under an unsupported index shape — the
-        // subject's own gap was already diagnosed, and a matrix or data.frame value is Unknown
-        // today, so `m[i, j]` must not cascade an arity error.
+        // subject's own gap was already diagnosed, so `m[i, j]` must not cascade an arity error.
         if matches!(value_type, CoreType::Unknown) {
             return Ok(CoreType::Unknown);
         }
         if matches!(value_type, CoreType::Any) {
             return Ok(CoreType::Any);
+        }
+        // A sealed nominal supports value-dependent indexing of any shape at runtime
+        // (`df[rows, cols]`, `df[predicate, ]`), none of it modeled: `Unknown`, before the
+        // index-arity check, so idiomatic two-index data.frame subsetting is not an error.
+        if matches!(value_type, CoreType::Nominal(..)) {
+            self.record_strict_origin(
+                expression.id,
+                expression.range,
+                StrictOriginKind::UnsupportedConstruct,
+            );
+            return Ok(CoreType::Unknown);
         }
         if arguments.len() != 1 || arguments[0].name.is_some() {
             return Err(InferenceError::UnsupportedIndexShape {
@@ -5826,6 +5843,17 @@ impl InferenceState {
             CoreType::Record(fields) => Ok(CoreType::NamedList(Box::new(CoreType::union_of(
                 fields.iter().map(|field| field.value.clone()).collect(),
             )))),
+            // A sealed nominal has no modeled structure, but the R object behind it commonly
+            // supports `[` with a value-dependent result (`df[rows]`, `f[levels]`): the slice is
+            // `Unknown` — sound-by-refusal, surfaced under strict mode — not a hard error.
+            CoreType::Nominal(..) => {
+                self.record_strict_origin(
+                    expression.id,
+                    expression.range,
+                    StrictOriginKind::UnsupportedConstruct,
+                );
+                Ok(CoreType::Unknown)
+            }
             other_type => Err(InferenceError::UnsupportedSubset {
                 actual: Box::new(other_type),
                 range: expression.range,
@@ -5861,6 +5889,16 @@ impl InferenceState {
         }
         if matches!(value_type, CoreType::Any) {
             return Ok(CoreType::Any);
+        }
+        // A sealed nominal: value-dependent element access, unmodeled — `Unknown` before the
+        // index-arity check, exactly as for `[`.
+        if matches!(value_type, CoreType::Nominal(..)) {
+            self.record_strict_origin(
+                expression.id,
+                expression.range,
+                StrictOriginKind::UnsupportedConstruct,
+            );
+            return Ok(CoreType::Unknown);
         }
         if arguments.len() != 1 || arguments[0].name.is_some() {
             return Err(InferenceError::UnsupportedIndexShape {
@@ -5973,6 +6011,17 @@ impl InferenceState {
                     }),
                 }
             }
+            // A sealed nominal has no modeled structure, but the R object behind it commonly
+            // supports `[[` with a value-dependent result (`df[["col"]]`): the element is
+            // `Unknown` — sound-by-refusal, surfaced under strict mode — not a hard error.
+            CoreType::Nominal(..) => {
+                self.record_strict_origin(
+                    expression.id,
+                    expression.range,
+                    StrictOriginKind::UnsupportedConstruct,
+                );
+                Ok(CoreType::Unknown)
+            }
             other_type => Err(InferenceError::NotAList {
                 actual: Box::new(other_type),
                 range: expression.range,
@@ -6042,6 +6091,18 @@ impl InferenceState {
                     range: expression.range,
                     expression_id: expression.id,
                 })
+            }
+            // A sealed nominal (`data.frame`, `factor`, ...) has no modeled structure, but the R
+            // object behind it commonly supports `$` with a value-dependent result (`df$col`).
+            // Refusing loudly here would error on the most idiomatic R there is, so the access is
+            // `Unknown` — sound-by-refusal, surfaced under strict mode.
+            CoreType::Nominal(..) => {
+                self.record_strict_origin(
+                    expression.id,
+                    expression.range,
+                    StrictOriginKind::UnsupportedConstruct,
+                );
+                Ok(CoreType::Unknown)
             }
             other_type => Err(InferenceError::NotAList {
                 actual: Box::new(other_type),
@@ -6117,7 +6178,20 @@ impl InferenceState {
             saw_non_null_argument = true;
             all_arguments_are_named &= argument.name.is_some();
 
-            let Some(current_atomic) = combine_operand_atomic(&resolved_argument) else {
+            // A union argument combines member-wise. Its `NULL` members contribute nothing —
+            // R drops `NULL` inside `c(...)`, so the idiomatic accumulator seeded with `c()`
+            // (`acc <- c(); acc <- c(acc, x)` — type `T[] | NULL` at the loop join) is not an
+            // error — and every remaining member must itself be combinable.
+            let argument_atomics = match &resolved_argument {
+                CoreType::Union(members) => members
+                    .iter()
+                    .filter(|member| !matches!(member, CoreType::Null))
+                    .map(combine_operand_atomic)
+                    .collect::<Option<Vec<Atomic>>>(),
+                other => combine_operand_atomic(other).map(|atomic| vec![atomic]),
+            };
+            let Some(argument_atomics) = argument_atomics.filter(|atomics| !atomics.is_empty())
+            else {
                 return Err(InferenceError::TypeMismatch {
                     expected: Box::new(CoreType::Scalar(Atomic::Integer)),
                     actual: Box::new(resolved_argument.clone()),
@@ -6126,16 +6200,21 @@ impl InferenceState {
                 });
             };
 
-            item_atomic = Some(match item_atomic {
-                Some(previous_atomic) => promote_combine_atomic(previous_atomic, current_atomic)
-                    .ok_or_else(|| InferenceError::TypeMismatch {
-                        expected: Box::new(CoreType::Scalar(previous_atomic)),
-                        actual: Box::new(resolved_argument.clone()),
-                        range: Some(arg_expr.range),
-                        expression_id: Some(arg_expr.id),
-                    })?,
-                None => current_atomic,
-            });
+            for current_atomic in argument_atomics {
+                item_atomic = Some(match item_atomic {
+                    Some(previous_atomic) => {
+                        promote_combine_atomic(previous_atomic, current_atomic).ok_or_else(
+                            || InferenceError::TypeMismatch {
+                                expected: Box::new(CoreType::Scalar(previous_atomic)),
+                                actual: Box::new(resolved_argument.clone()),
+                                range: Some(arg_expr.range),
+                                expression_id: Some(arg_expr.id),
+                            },
+                        )?
+                    }
+                    None => current_atomic,
+                });
+            }
         }
 
         if !saw_non_null_argument {
@@ -7684,7 +7763,7 @@ mod tests {
         let mut inference_state = InferenceState::new();
 
         let snapshot = inference_state.snapshot();
-        let rigid = inference_state.fresh_rigid_variable(name);
+        let rigid = inference_state.fresh_rigid_variable(name, Constraint::Unconstrained);
         assert!(
             inference_state
                 .unify(CoreType::Variable(rigid), CoreType::Scalar(Atomic::Integer))
