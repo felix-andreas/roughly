@@ -61,7 +61,7 @@ Type *inference* always runs — it powers editor features such as hover types, 
 
 - `typing` — report `type-error` diagnostics, including function-call argument mismatches. See the [Typing guide](/typing). Default `false`.
 - `unused` — report assignments whose value is never read (`unused` diagnostics). Default `false`.
-- `strict` — report each site with a genuinely undetermined (`Unknown`) type — an unsupported construct or a reference to a binding with no known type. See [strict mode](/typing-reference#strict-mode). Default `false`.
+- `strict` — report each site with a genuinely undetermined (`Unknown`) type — an unsupported construct or a reference to a binding with no known type. See [strict mode](/typing-reference#strict-mode). Default `false`. A single file can override this switch with a top-level `#: @strict` or `#: @strict off` comment.
 
 ## Debugging — top-level `debug`
 
@@ -79,7 +79,7 @@ Where the error surfaces:
 
 - **Editor:** the language server never crashes on a malformed config. At startup it falls back to the defaults; on a live edit to `roughly.toml` it keeps the previous configuration. Either way it reports the error as an editor error message **and** publishes a diagnostic on `roughly.toml` itself, pointing at the offending line — it stays in the problems panel until the config loads again.
 - **CLI:** `roughly check` and `roughly fmt` print the error to stderr and exit 2 (see the
-  [exit-code table](/getting-started#exit-codes)).
+  [exit-code table](/installation#exit-codes)).
 
 ## Legacy Keys
 
@@ -88,8 +88,3 @@ The top-level `case` and `spaces` keys are deprecated spellings of `lint.naming-
 ## Default Behavior
 
 If no `roughly.toml` is found, Roughly uses 2-space indentation, automatic line endings, no naming check, and all `[check]` diagnostics off.
-
-Roughly's formatter and linter are opinionated tools that don't aim to support every possible coding style. Instead, they enforce a consistent, readable style based on R community practices.
-
-
-A single file can override the `strict` switch with a top-level `#: @strict` or `#: @strict off` comment; see the typing reference.

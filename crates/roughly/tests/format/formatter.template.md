@@ -19,7 +19,7 @@ roughly fmt --diff    # Show a diff of formatting changes without applying them
 
 `--check` and `--diff` exit 1 when any file would change, so they slot straight into CI. Errors
 (for example a file that cannot be parsed) exit 2 — see the full
-[exit-code table](/getting-started#exit-codes).
+[exit-code table](/installation#exit-codes).
 
 ## Philosophy
 

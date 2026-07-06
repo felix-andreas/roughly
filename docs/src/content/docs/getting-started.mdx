@@ -1,139 +1,130 @@
 ---
 title: Getting Started
-description: Installation and basic setup for Roughly
+description: What Roughly does for your R code — catch type errors before you run, get a real IDE, and keep one consistent style
 ---
 
-import { Steps } from '@astrojs/starlight/components';
+R will happily run this function. It will even work — until the day `raw` is
+`"unknown"`, and a report deep in production tries to add `1L` to a string:
 
-Roughly is a fast, all-in-one toolchain for R, written in Rust: a formatter, a linter, a
-language server, and the first static type checker for R. It works on the code you already
-have — type annotations are written in `#:` comments that every other R tool simply ignores.
-
-This guide gets Roughly running in your editor or on the command line.
-
-## Install
-
-### VS Code (recommended)
-
-[![](https://vsmarketplacebadges.dev/version-short/felix-andreas.roughly.svg)](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
-
-Install the [Roughly extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
-from the VS Code Marketplace. The extension bundles the Roughly CLI for **Linux x86_64, macOS aarch64,
-and Windows x86_64**, so there is nothing else to set up.
-
-> On another architecture, install the [CLI](#command-line) separately and point the extension at it
-> with the `roughly.path` setting (see the [language server](/language-server) page).
-
-### Zed
-
-Install the [R extension](https://zed.dev/extensions/r) (Zed has no built-in R support), then the
-[Roughly extension](https://zed.dev/extensions/roughly) from Zed's extension registry.
-
-> To also get Roughly's `#:` annotation highlighting in Zed, enable LSP semantic tokens for R —
-> see [the language server page](/language-server#annotation-highlighting-in-zed).
-
-### Command line
-
-Use the CLI directly for formatting and linting in CI, with RStudio, or to back an editor extension on
-a platform without a bundled binary. Install it in whichever way suits you — a prebuilt binary, or from
-source with Cargo.
-
-**Prebuilt binary** (Linux, macOS, and Windows):
-
-<Steps>
-
-1. Download the binary for your platform from the [GitHub Releases](https://github.com/felix-andreas/roughly/releases) page.
-2. Add it to your system `PATH`.
-
-</Steps>
-
-**With Cargo**, if you have a [Rust toolchain](https://www.rust-lang.org/tools/install):
-
-```bash
-cargo install --git https://github.com/felix-andreas/roughly roughly
+```r
+parse_count <- function(raw) {
+  count <- 0L
+  if (raw == "unknown") {
+    count <- "?"
+  }
+  count + 1L
+}
 ```
 
-### RStudio (formatter only)
+Roughly catches it the moment you type it, with no annotations, no setup beyond
+installing the extension, and no changes to your code:
 
-You can configure Roughly as an external formatter in RStudio:
-
-<Steps>
-
-1. Open RStudio and navigate to:
-   ```
-   Options > Code > Formatting > Format with an External Tool
-   ```
-
-   Set the reformat command to: `path/to/roughly fmt`
-
-2. To enable **format-on-save**, go to:
-   ```
-   Options > Code > Saving > Format with an External Tool
-   ```
-
-   Check the `Reformat documents on save` option.
-
-</Steps>
-
-## Usage
-
-The CLI has three commands:
-
-```bash
-# Format R files (rewrites in place)
-roughly fmt                # format files in the current directory
-roughly fmt path/to/files  # format files at a specific path
-roughly fmt --check        # list files that would change, exit 1 (for CI)
-roughly fmt --diff         # show the diff without writing
-
-# Lint and type-check
-roughly check              # check files in the current directory
-roughly check path/to/files
-roughly check --output json  # one JSON object per diagnostic (for CI)
-roughly check --min-severity error  # only errors render and affect the exit code
-
-# Run the language server (for editors that speak LSP)
-roughly server
+```text
+error[type-error] expected a numeric value (`integer` or `double`), found `integer | character`
+--> 6:3-6:8
+|   count + 1L
 ```
 
-`roughly check` runs the linter by default. To also surface **type errors** and **unused-variable**
-warnings, opt in through `roughly.toml`:
+That is the pitch in one example: **Roughly is a static type checker for R** — the
+first one — wrapped in a fast, all-in-one toolchain written in Rust. It reads the
+R you already have, infers what your code means, and tells you where it cannot
+mean what you wrote.
+
+## Catch bugs before you run
+
+The checker infers types for ordinary R code (Hindley-Milner style, the same
+family of inference behind ML and Rust), so unannotated code is checked for
+real. Wrong argument types, missing arguments, calling a value that isn't a
+function, using a maybe-`NULL` value without a guard — all caught statically:
+
+```r
+ratio <- function(numerator, denominator) {
+  numerator / denominator
+}
+
+ratio(1.0)
+# error[type-error] This call passes 1 positional argument(s), but the function accepts 2.
+
+total <- 10L
+total(2L)
+# error[type-error] expected function, found `integer`
+```
+
+And because the checker tracks variables through control flow the way R actually
+treats them, it understands your guards too: `if (is.null(x)) return(0L)` narrows
+`x` from `integer | NULL` to `integer` on the lines below.
+
+## Types that live in comments
+
+When you want to state intent — tighten an interface, document a function,
+name a domain concept — annotations go in `#:` comments. Every other R tool
+sees a comment; your code stays 100% ordinary R:
+
+```r
+#: fn(count: integer, label: character) -> character
+render_row <- function(count, label) {
+  paste0(label, ": ", count)
+}
+
+render_row("three", 3L)
+# error[type-error] expected `integer`, found `character`
+```
+
+Adoption is gradual by design: inference-only checking works with zero
+annotations, annotations tighten the parts you care about, and a strict mode
+tells you what the checker could *not* see when you want the full guarantee.
+The [typing guide](/typing) walks through the whole system.
+
+## A real IDE for R
+
+Roughly is a language server, so the checker's knowledge shows up as editor
+intelligence in VS Code, Zed, or anything that speaks LSP:
+
+- **Hover** any name for its inferred type and signature — including base R
+  functions, which Roughly ships typed declarations for.
+- **Completion** with real types: record fields after `$`, stdlib functions
+  with signatures, annotation types inside `#:`.
+- **Go-to-definition, find references, rename** — across files, aware of R's
+  scoping, working on type names in annotations too.
+- **Inlay hints and signature help** as you type.
+
+## One style, zero debates
+
+The formatter rewrites whole projects to one consistent style in milliseconds,
+with `--check` and `--diff` modes for CI, and the linter catches the classics
+(`=` vs `<-` assignment, `T` vs `TRUE`, misplaced commas) with stable codes you
+can suppress line-by-line. Format-on-save works out of the box.
+
+```bash
+roughly fmt      # your whole project, one style
+roughly check    # lint + type errors, machine-readable with --output json
+```
+
+## Built to scale
+
+Roughly is written in Rust around an incremental analysis engine: it re-checks
+only what an edit invalidates, so diagnostics and hover stay instant on
+packages with hundreds of thousands of lines. The whole toolchain is one
+binary with no dependency on an R session.
+
+## Try it
+
+Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=felix-andreas.roughly)
+(everything bundled, nothing else to set up) — or see the
+[installation page](/installation) for Zed, RStudio, the standalone CLI, and
+CI setup.
+
+Then, if you want the types:
 
 ```toml
+# roughly.toml
 [check]
-typing = true   # report type errors
-unused = true   # report unused local variables
+typing = true
 ```
 
-Type *inference* itself is always on and powers editor features like hover and inlay hints — the
-settings above only control which diagnostics `roughly check` reports.
+## Where next
 
-### Machine-readable output
-
-`roughly check --output json` writes one JSON object per diagnostic to stdout ([JSON
-Lines](https://jsonlines.org)); progress and error messages stay on stderr, so stdout is pure JSON:
-
-```json
-{"path":"R/utils.R","line":2,"column":3,"endLine":2,"endColumn":7,"severity":"error","code":"syntax-error","message":"Syntax Error: unexpected \"<- (\""}
-```
-
-`line`/`column`/`endLine`/`endColumn` are 1-based, `severity` is `"error"` or `"warning"`, and
-`code` is the diagnostic's stable code. These field names are a contract — safe to build CI on.
-
-### Exit codes
-
-`roughly check` and `roughly fmt` share one scheme:
-
-| Code | Meaning |
-| ---- | ------- |
-| 0 | Clean — no diagnostics (`check`); nothing to change (`fmt`) |
-| 1 | Findings — any diagnostic, warnings included (`check`); files that would be reformatted (`fmt --check`, `fmt --diff`) |
-| 2 | Usage, configuration, or I/O error |
-
-There is no severity threshold yet: a warnings-only `check` run still exits 1.
-
-## Next steps
-
-- [Typing guide](/typing) — how inference and `#:` annotations work
-- [Formatter](/formatter), [Linter](/linter), and [Language Server](/language-server) references
+- [Installation](/installation) — every editor and the CLI
+- [Typing guide](/typing) — the type system, one concept at a time
+- [Formatter](/formatter), [Linter](/linter), [Language server](/language-server)
 - [Configuration](/configuration) — every `roughly.toml` option

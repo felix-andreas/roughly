@@ -1721,33 +1721,41 @@ apply_renderer <- function(render_count, count) { render_count(count) }
 
 ### S4 slot access
 
-`x@slot` reads (and `x@slot <- v` writes) an S4 object slot. S4 objects are not modeled, so a slot
-read types as `Unknown` and is a strict-mode origin — but the construct is fully lowered: the
-subject expression is inferred (its own type errors surface), the subject's variable read counts
-for naming, unused analysis, references, and rename, and a slot write is an ordinary
-replacement-form assignment of its base variable.
+`x@slot` reads (and `x@slot <- v` writes) an S4 object slot. S4 objects are not modeled, but the
+construct is fully lowered:
+
+- a slot read types as `Unknown` and is a strict-mode origin
+- the subject expression is inferred; its own type errors surface
+- the subject's variable read counts for naming, unused analysis, references, and rename
+- a slot write is an ordinary replacement-form assignment of its base variable
 
 ## Strict mode
 
-Strict mode is an opt-in check controlled by the `[check] strict` switch (default off). It does not
-change inference or introduce any new typing rules; it adds diagnostics and escalates one existing
-class. The typecheck phase already runs to produce the inferred types — strict mode reads those
-types and reports the places where the checker genuinely could not determine a type.
+Strict mode is an opt-in check controlled by the `[check] strict` switch (default off).
+
+- it does not change inference and introduces no new typing rules
+- it adds diagnostics at `Unknown` origins and escalates unresolved references
+- the typecheck phase already runs to produce the inferred types; strict mode reads those types
+  and reports the places where the checker genuinely could not determine one
 
 ### Unresolved references escalate to errors
 
-Unresolved references carry the `unresolved` diagnostic code: a bare name the resolver cannot find
-in the package, its imports, or builtins; an unknown package namespace in `pkg::name`; and a name a
-known namespace does not export. Outside strict mode these are warnings. Under strict (configured,
-or via the per-file directive) they are **errors**: a name the checker cannot see is a hole in the
-checked surface, not a hint.
+Unresolved references carry the `unresolved` diagnostic code:
+
+- a bare name the resolver cannot find in the package, its imports, or builtins
+- an unknown package namespace in `pkg::name`
+- a name a known namespace does not export
+
+Outside strict mode these are warnings. Under strict (configured, or via the per-file directive)
+they are **errors**: a name the checker cannot see is a hole in the checked surface, not a hint.
 
 ### Per-file directive
 
-A top-level `#: @strict` comment block switches strict mode on for its file regardless of the
-configured default; `#: @strict off` switches it off. The last directive in the file wins. The
-directive changes only whether strict diagnostics are published for that file — inference and every
-other check are untouched.
+- a top-level `#: @strict` comment block switches strict mode on for its file regardless of the
+  configured default; `#: @strict off` switches it off
+- the last directive in the file wins
+- the directive changes only whether strict diagnostics are published for that file — inference
+  and every other check are untouched
 
 ### What strict mode flags
 

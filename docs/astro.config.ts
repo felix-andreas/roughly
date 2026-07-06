@@ -23,6 +23,7 @@ export default defineConfig({
 					label: 'Roughly',
 					items: [
 						{ slug: 'getting-started' },
+						{ slug: 'installation' },
 						{ slug: 'formatter' },
 						{ slug: 'linter' },
 						{ slug: 'language-server' },

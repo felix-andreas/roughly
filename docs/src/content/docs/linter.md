@@ -17,7 +17,7 @@ roughly check --output json  # One JSON object per diagnostic, on stdout (for CI
 
 The exit code is 0 when there are no diagnostics, 1 when any diagnostic is reported (warnings
 included), and 2 on a usage, configuration, or I/O error. The JSON output contract and the full
-exit-code table live on the [getting-started page](/getting-started#exit-codes).
+exit-code table live on the [installation page](/installation#exit-codes).
 
 ## Current Checks
 
@@ -123,4 +123,5 @@ These features are not yet implemented.
 
 ## Integration
 
-Roughly's linter integrates seamlessly with its language server, providing real-time feedback in compatible editors like VS Code. Diagnostics appear as you type, with appropriate highlighting and hover information.
+The linter runs inside the [language server](/language-server), so the same diagnostics appear
+live in your editor as you type — no separate lint step needed.

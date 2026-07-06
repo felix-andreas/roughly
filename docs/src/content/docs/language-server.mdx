@@ -31,6 +31,8 @@ marked ⚠️ are planned but not yet available.
   - Folding ranges for braced regions, argument lists, and comment blocks
 
 - **Editing**
+  - Hover — the inferred type or full signature of any name (multi-line for long signatures),
+    with its origin package for standard-library names and an overload count where one applies
   - Completion for local and global variables
   - Completion for standard-library names, with their typed signatures as detail
   - Function completions insert a call snippet (`name(│)`, or `name()│` for zero-argument
@@ -40,6 +42,8 @@ marked ⚠️ are planned but not yet available.
   - Signature help — an overloaded standard-library call lists every declared candidate with the
     committed one active
   - Inlay hints for inferred types
+  - Code actions — remove an unused assignment, prefix an intentionally-unused variable with `.`,
+    insert an inferred type annotation, and turn an `@if-unknown` into `@trust`
   - Semantic highlighting of `#:` type annotations — types, type parameters, parameter names,
     operators, and `@`-directives get distinct, theme-respecting colors (see the editor sections
     below for setup); `.Rtypes` stub files get the same treatment
@@ -51,9 +55,11 @@ marked ⚠️ are planned but not yet available.
 - **Diagnostics**
   - Syntax errors — including missing or trailing commas
   - Lint rules — *[full list](/linter#semantics-checks)*
+  - Unresolved names — a name nothing defines, an unknown `pkg::` namespace, or a name a package
+    does not export, with "did you mean" typo hints (errors under
+    [strict mode](/typing-reference#strict-mode))
   - Unused local variables — *opt-in via `[check] unused = true`*
   - Type errors and function-call argument mismatches — *opt-in via `[check] typing = true`*
-  - Undefined-variable errors *(🧪 experimental)*
 
 Type *inference* runs by default and powers hover and inlay hints with no configuration. The two
 opt-in diagnostics above only control what `roughly check` reports. See the
@@ -87,8 +93,7 @@ package analysis.
 
 Not yet available:
 
-- Completion for symbols from external packages
-- Code actions and quick fixes
+- Completion for symbols from external (CRAN) packages beyond the bundled standard-library set
 
 ## Supported Editors
 
@@ -103,7 +108,7 @@ Roughly is a standard LSP implementation and works with any editor that speaks L
 
 ### Installation
 
-The easiest way to install is from the [VS Code Marketplace](/getting-started#vs-code-recommended). To
+The easiest way to install is from the [VS Code Marketplace](/installation#vs-code-recommended). To
 install a specific build manually:
 
 <Steps>
