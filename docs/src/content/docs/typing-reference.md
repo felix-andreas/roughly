@@ -939,12 +939,104 @@ Examples:
 - `if (flag) { } else { }` infers as `NULL`
 - `if (c(TRUE, FALSE)) 1L else 2L` is invalid because the condition is not scalar `logical`
 
+#### Diverging branches
+
+A branch **diverges** when it never falls through to the code after the `if`: it is (or is a block
+ending in) `return(...)`, `stop(...)`, `break`, or `next`, or an `if ... else` both of whose
+branches diverge. A diverging branch contributes neither its value nor its variable-slot state:
+
+- `x <- if (c) return(NULL) else 5` gives `x` type `double`, not `NULL | double`
+- variable writes inside a diverging branch do not join into the state after the `if` — only the
+  surviving branch's state flows on
+
+`stop(...)` is recognized by its bare name, like `local` and `return`; rebinding `stop` is not
+modeled.
+
+### Guard narrowing
+
+A condition that is a **type-guard predicate applied to a plain local variable** refines that
+variable's type along the `if` edges. The variable keeps the refined type inside each branch until
+a branch write replaces it, and the refinements merge back at the join exactly like branch writes.
+
+The recognized guards, with `x` a local variable (including parameters):
+
+| condition | true edge | false edge |
+|---|---|---|
+| `is.null(x)` | `x : NULL` | the `NULL` member is removed from `x`'s union |
+| `is.character(x)` | union members that are not `character`-family are removed | `character`-family members are removed |
+| `is.logical(x)`, `is.integer(x)`, `is.double(x)`, `is.function(x)`, `is.list(x)` | as above, for that family | as above |
+| `is.numeric(x)` | as above, where the family is `integer` **or** `double` | as above |
+| `!cond` | the two edges swap | |
+
+Rules and limits:
+
+- a *family* (`is.character`, …) membership test covers the scalar and the vector of the atomic
+  (`is.character` is true for `character` and `character[]`); `is.list` covers every list shape
+  (`list[T]`, `list[named: T]`, and fixed-shape lists); `is.function` covers function types
+- **narrowing filters union members**; a member whose family cannot be decided statically (an
+  inference variable, a flexible-element vector, an opaque nominal) is conservatively kept on
+  *both* edges
+- `is.null(x)` on an `Any` or `Unknown` variable refines the **true** edge to `NULL` (the runtime
+  guarantees it); family guards do **not** refine `Any`/`Unknown` — inventing a concrete shape
+  there would false-positive against scalar-claim standard-library signatures
+- when a guard cannot fire (`is.null(x)` on a union with no `NULL` member), no refinement happens —
+  the checker does not type dead branches specially
+- combined with a [diverging branch](#diverging-branches), the surviving edge's refinement
+  **persists after the `if`** — the idiomatic early-exit guard:
+
+  ```r
+  #: fn(x: integer | NULL) -> integer
+  f <- function(x) {
+    if (is.null(x)) {
+      return(0L)
+    }
+    x + 1L   # x : integer here
+  }
+  ```
+
+- only reads of **local variable slots** narrow (parameters, function locals, script locals);
+  package globals and arbitrary expressions (`is.null(f(x))`, `is.null(x$field)`) do not
+- conditions combined with `&&` / `||` are not decomposed yet
+- `is.na(x)` is not a type guard: `NA`-ness is a value property, not a type property, in this
+  system
+- narrowing never touches an unresolved inference variable; an unannotated parameter is not pinned
+  by a guard
+
 ### Blocks
 
 - a block evaluates to the type of its last expression
 - if a block has no contents, it evaluates to `NULL`
 - if the last expression is terminated with `;`, the block evaluates to `NULL`
 - if the last expression has type `Unknown`, the block evaluates to `Unknown`
+
+### `return`
+
+`return(x)` exits the enclosing function with `x` (`return()` exits with `NULL`). It is a
+control-flow construct, not a call: the syntactic call to the bare name `return` is recognized
+during lowering, like `local`.
+
+- a function's return type is the **union** of every `return` value's type in its body with the
+  body's trailing value: `function() { if (c) return("foo"); 5 }` is `fn() -> character | double`
+- the `return` expression itself yields no observable value where it stands, so — like `break` and
+  `next` — it types as `NULL` locally and is not a strict origin
+- the returned value expression is checked like any other; its errors surface normally
+- a `return` inside a loop exits the whole function, so it abandons the loop iteration like `break`
+  for control-flow purposes
+- a top-level `return` (an R runtime error) still checks its value; it joins no function's return
+  type
+
+### `switch`
+
+`switch(subject, a = ..., b = ..., default)` selects one branch by the subject's runtime value.
+Selection cannot be modeled statically, but the call is fully checked:
+
+- the subject and **every branch** are type checked; an error inside any branch surfaces like
+  anywhere else
+- the call's type is the **union of the branch value types**; `NULL` joins the union unless a
+  default (unnamed, non-first) branch exists, because an unmatched `switch` returns invisible
+  `NULL`
+- a named branch with no value falls through to the next branch in R; it contributes no type of
+  its own
 
 ### Name references
 
@@ -1582,6 +1674,14 @@ apply_renderer <- function(render_count, count) { render_count(count) }
 - when the checker encounters a syntactically valid construct that is not yet supported, the construct may infer as `Unknown`
 - this allows checking to continue even when the checker cannot model the construct precisely
 - whether an unsupported construct also produces a diagnostic is a construct-specific decision
+
+### S4 slot access
+
+`x@slot` reads (and `x@slot <- v` writes) an S4 object slot. S4 objects are not modeled, so a slot
+read types as `Unknown` and is a strict-mode origin — but the construct is fully lowered: the
+subject expression is inferred (its own type errors surface), the subject's variable read counts
+for naming, unused analysis, references, and rename, and a slot write is an ordinary
+replacement-form assignment of its base variable.
 
 ## Strict mode
 

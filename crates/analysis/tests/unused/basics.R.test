@@ -184,3 +184,20 @@ f <- function() {
 }
 #++++
 No diagnostics.
+
+#---- local_read_through_a_slot_access_counts
+f <- function() {
+  config <- list()
+  config@port
+}
+#++++
+No diagnostics.
+
+#---- slot_replacement_write_is_exempt
+f <- function() {
+  config <- list()
+  config@port <- 8080L
+  config
+}
+#++++
+No diagnostics.

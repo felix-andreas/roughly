@@ -1405,8 +1405,13 @@ impl<'a> DocumentNamingContext<'a> {
                     self.resolve_expression(argument.expression);
                 }
             }
-            ExpressionKind::Dollar { value, .. } => {
+            ExpressionKind::Dollar { value, .. } | ExpressionKind::Slot { value, .. } => {
                 self.resolve_expression(*value);
+            }
+            ExpressionKind::Return { value } => {
+                if let Some(value) = value {
+                    self.resolve_expression(*value);
+                }
             }
             ExpressionKind::NamespaceGet { namespace, name } => {
                 self.document_naming.namespace_reads.push(NamespaceRead {
@@ -1878,7 +1883,7 @@ impl<'a> DocumentNamingContext<'a> {
                     self.resolve_expression(argument.expression);
                 }
             }
-            ExpressionKind::Dollar { value, .. } => {
+            ExpressionKind::Dollar { value, .. } | ExpressionKind::Slot { value, .. } => {
                 self.resolve_replacement_lhs(*value, base_id);
             }
             ExpressionKind::Call { arguments, .. } => {

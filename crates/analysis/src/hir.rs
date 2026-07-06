@@ -218,6 +218,21 @@ pub enum ExpressionKind {
         value: ExpressionId,
         name: Symbol,
     },
+    // `x@slot`: an S4 slot read. The subject is fully lowered so its variable read participates in
+    // naming and every IDE feature; the checker does not model S4 objects, so the read itself
+    // types as `Unknown` (a strict origin).
+    Slot {
+        value: ExpressionId,
+        name: Symbol,
+    },
+    // `return(x)` / `return()`: exits the enclosing function with the value (`NULL` when absent).
+    // Like `local`, the *syntactic* call to the bare name `return` is the construct — R parses it
+    // as an ordinary call, but modeling it as one would mistype every early-return function. The
+    // value's type joins the enclosing function's return type; the expression itself yields no
+    // observable value locally, so like `break`/`next` it types as `NULL`.
+    Return {
+        value: Option<ExpressionId>,
+    },
     Break,
     Next,
     // `pkg::name` / `pkg:::name`: a direct read of one name from a package namespace, bypassing
@@ -292,7 +307,8 @@ pub fn replacement_base(arena: &HirArena, lhs: ExpressionId) -> Option<(Expressi
             ExpressionKind::Symbol(symbol) => return Some((current, *symbol)),
             ExpressionKind::Subset { value, .. }
             | ExpressionKind::Subset2 { value, .. }
-            | ExpressionKind::Dollar { value, .. } => current = *value,
+            | ExpressionKind::Dollar { value, .. }
+            | ExpressionKind::Slot { value, .. } => current = *value,
             ExpressionKind::Call { arguments, .. } => {
                 current = arguments.first()?.expression;
             }
@@ -349,7 +365,11 @@ pub fn contains_loop_exit(arena: &HirArena, root: ExpressionId) -> bool {
                     .iter()
                     .any(|argument| contains_loop_exit(arena, argument.expression))
         }
-        ExpressionKind::Dollar { value, .. } => contains_loop_exit(arena, *value),
+        ExpressionKind::Dollar { value, .. } | ExpressionKind::Slot { value, .. } => {
+            contains_loop_exit(arena, *value)
+        }
+        // A `return` exits the whole function, so it abandons the enclosing loop iteration too.
+        ExpressionKind::Return { .. } => true,
         ExpressionKind::Null
         | ExpressionKind::Logical(_)
         | ExpressionKind::Integer(_)
@@ -641,8 +661,19 @@ impl Module {
                 out.push_str(&format!("{prefix}Dollar {name_str}\n"));
                 self.render_expression(*value, indent + 1, out, interner);
             }
+            ExpressionKind::Slot { value, name } => {
+                let name_str = interner.resolve(*name).unwrap_or("<unknown>");
+                out.push_str(&format!("{prefix}Slot {name_str}\n"));
+                self.render_expression(*value, indent + 1, out, interner);
+            }
             ExpressionKind::NamespaceGet { namespace, name } => {
                 out.push_str(&format!("{prefix}NamespaceGet({namespace:?}, {name:?})\n"))
+            }
+            ExpressionKind::Return { value } => {
+                out.push_str(&format!("{prefix}Return\n"));
+                if let Some(value) = value {
+                    self.render_expression(*value, indent + 1, out, interner);
+                }
             }
             ExpressionKind::Break => out.push_str(&format!("{prefix}Break\n")),
             ExpressionKind::Next => out.push_str(&format!("{prefix}Next\n")),

@@ -151,9 +151,26 @@ x + 1L
 A union value must be acceptable in *every* shape it can take. Operators and field
 access apply member-wise: comparing `integer | double` against a number is fine
 (both members are numeric); adding `integer | character` is an error (one member is
-not). Once a union member is genuinely impossible, R code typically guards it —
-narrowing on such guards is on the roadmap; today the union stays until you
-reassign.
+not).
+
+When a member is impossible, guard it the way you already do in R — the checker
+**narrows** the variable along the branches:
+
+```r
+#: fn(x: integer | NULL) -> integer
+f <- function(x) {
+  if (is.null(x)) {
+    return(0L)
+  }
+  x + 1L   # x : integer here — the NULL member is gone
+}
+```
+
+`is.null`, the `is.character`/`is.numeric`/`is.integer`/`is.double`/`is.logical`
+family, `is.function`, and `is.list` all narrow, negation (`!is.null(x)`) swaps the
+branches, and an early exit (`return`, `stop`) carries the surviving type past the
+`if`, as above. The [typing reference](/typing-reference#guard-narrowing) lists the
+exact rules and limits.
 
 ## The gradual boundary: `Any` and `Unknown`
 

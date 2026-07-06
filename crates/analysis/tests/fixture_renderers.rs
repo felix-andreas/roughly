@@ -454,8 +454,19 @@ fn render_named_expression(
             lines.push(format!("{prefix}Dollar({rendered_name})"));
             render_nested(*value, indent + 1, lines);
         }
+        ExpressionKind::Slot { value, name } => {
+            let rendered_name = interner.resolve(*name).unwrap_or("<unknown>");
+            lines.push(format!("{prefix}Slot({rendered_name})"));
+            render_nested(*value, indent + 1, lines);
+        }
         ExpressionKind::NamespaceGet { namespace, name } => {
             lines.push(format!("{prefix}NamespaceGet({namespace:?}, {name:?})"));
+        }
+        ExpressionKind::Return { value } => {
+            lines.push(format!("{prefix}Return"));
+            if let Some(value) = value {
+                render_nested(*value, indent + 1, lines);
+            }
         }
         ExpressionKind::Break => lines.push(format!("{prefix}Break")),
         ExpressionKind::Next => lines.push(format!("{prefix}Next")),
@@ -637,8 +648,19 @@ fn render_locally_named_expression(
             lines.push(format!("{prefix}Dollar({rendered_name})"));
             render_nested(*value, indent + 1, lines);
         }
+        ExpressionKind::Slot { value, name } => {
+            let rendered_name = interner.resolve(*name).unwrap_or("<unknown>");
+            lines.push(format!("{prefix}Slot({rendered_name})"));
+            render_nested(*value, indent + 1, lines);
+        }
         ExpressionKind::NamespaceGet { namespace, name } => {
             lines.push(format!("{prefix}NamespaceGet({namespace:?}, {name:?})"));
+        }
+        ExpressionKind::Return { value } => {
+            lines.push(format!("{prefix}Return"));
+            if let Some(value) = value {
+                render_nested(*value, indent + 1, lines);
+            }
         }
         ExpressionKind::Break => lines.push(format!("{prefix}Break")),
         ExpressionKind::Next => lines.push(format!("{prefix}Next")),

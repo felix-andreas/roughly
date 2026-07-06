@@ -262,6 +262,30 @@ The per-line re-indent walk (no bracket matching, lines never split) is replaced
 
 Workspace root comes from `InitializeParams` (never process CWD); discovery = nearest `roughly.toml` ancestor of the target, identical in LSP and CLI; unknown keys are **errors with toml spans**, surfaced as diagnostics on `roughly.toml` plus a window message — never a startup panic; config reload triggers a diagnostics refresh; one config struct chain end-to-end (the four parallel representations collapse).
 
+## Guard narrowing
+
+Flow-sensitive narrowing is implemented as **branch-edge entry refinement on the slot model**, not
+a separate flow analysis: a recognized guard condition (`is.null(x)`, the `is.*` family, negation)
+computes refined types for the guarded slot's two edges, and each refinement is an ordinary
+undo-logged environment write inside the branch region — branch writes replace it, the region
+rollback reverts it, and the branch join sees final values with no new machinery. Early-exit
+persistence falls out of divergence-aware joins: a branch that never falls through (`return`,
+`stop`, `break`, `next`, blocks ending in them) contributes neither value nor state, so the
+surviving edge's refinement (and only it) applies after the `if`.
+
+Deliberate limits, for soundness and zero false positives:
+- **Union member filtering only.** Family guards do not invent a shape for `Any`/`Unknown` — a
+  refined `character | character[]` would false-positive against scalar-claim stub signatures.
+  The one non-union refinement is `is.null`'s true edge on `Any`/`Unknown` → `NULL`.
+- **Statically undecidable members stay on both edges** (inference variables, flexible-element
+  vectors, opaque nominals — `is.list(data.frame)` is true at runtime).
+- **Local slots only** (parameters, function/script locals). Package globals keep winner
+  semantics; guarded *expressions* (`is.null(x$field)`) are not tracked.
+- **No `&&`/`||` decomposition** and no in-condition narrowing (the right conjunct of
+  `!is.null(x) && x > 0` does not yet see the refinement) — recorded follow-ups.
+- The guarded key is resolved exactly as a read resolves (local slot under a naming context; the
+  flat global entry in context-less fixture states), so fixtures and production share one path.
+
 ## Expanded annotation syntax: `@param name {TYPE}`
 
 **DECIDED (user-proposed, ratified).** The expanded parameter directive is `@param name {TYPE}` / `@param [name] {TYPE}` — name first, braced type second — replacing the JSDoc-ordered `@param name {TYPE}`. Rationale: (1) the wrapping payload (the type) becomes the trailing element, so multi-line types continue cleanly under the directive instead of leaving the name dangling after the closing braces; (2) one shape across all directives (`@type Name {TYPE}`, `@alias Name<T> {TYPE}`, `@param name {TYPE}`); (3) the grammar becomes unambiguous — the name is a single identifier token right after the directive, which retires the swallow-the-tail-as-name ambiguity and leaves room for an optional trailing description as a first-class extension. The old order is rejected with a targeted error naming the new form, not a generic parse failure. `@return {TYPE}` / `@forall` are unchanged.

@@ -894,6 +894,10 @@ fn render_expression_hover(database: &dyn IdeDatabase, expression: &Expression) 
         ExpressionKind::Subset2 { arguments, .. } => {
             format!("Subset2(arguments: {})", arguments.len())
         }
+        ExpressionKind::Slot { name, .. } => {
+            let name = database.interner().resolve(*name).unwrap_or("<unknown>");
+            format!("Slot({name})")
+        }
         ExpressionKind::Dollar { name, .. } => {
             let name = database.interner().resolve(*name).unwrap_or("<unknown>");
             format!("Dollar({name})")
@@ -906,6 +910,7 @@ fn render_expression_hover(database: &dyn IdeDatabase, expression: &Expression) 
                 .unwrap_or("<unknown>"),
             database.interner().resolve(*name).unwrap_or("<unknown>")
         ),
+        ExpressionKind::Return { .. } => "Return".to_owned(),
         ExpressionKind::Break => "Break".to_owned(),
         ExpressionKind::Next => "Next".to_owned(),
         ExpressionKind::Unsupported => "Unsupported".to_owned(),

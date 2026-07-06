@@ -335,3 +335,63 @@ f(1L)
 #++++
 fn(integer) -> integer
 integer
+
+#==== early_return
+#---- early_return_joins_the_trailing_value
+f <- function() {
+  if (4 > 2) {
+    return("foo")
+  }
+  5
+}
+#++++
+fn() -> character | double
+
+#---- bare_return_contributes_null
+f <- function(x) {
+  if (x) {
+    return()
+  }
+  1L
+}
+#++++
+fn(x: logical) -> integer | NULL
+
+#---- return_value_errors_still_surface
+f <- function() {
+  return(1L + "x")
+}
+#++++
+error: invalid operand
+
+#---- return_inside_a_loop_exits_the_function
+f <- function() {
+  for (item in c(1L, 2L)) {
+    return(item)
+  }
+  NULL
+}
+#++++
+fn() -> integer | NULL
+
+#==== switch_calls
+#---- switch_branches_union_with_null_without_default
+describe <- function(x) {
+  switch(x, a = 1L, b = "two")
+}
+#++++
+fn(x: ?1) -> integer | character | NULL
+
+#---- switch_default_branch_removes_null
+describe <- function(x) {
+  switch(x, a = 1L, "fallback")
+}
+#++++
+fn(x: ?1) -> integer | character
+
+#---- switch_branches_are_typechecked
+f <- function(x) {
+  switch(x, a = 1L + "oops")
+}
+#++++
+error: invalid operand

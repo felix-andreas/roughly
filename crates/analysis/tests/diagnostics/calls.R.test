@@ -101,3 +101,14 @@ error[type-error] expected `integer`, found `character`
 double_count <- function(count, label = NULL) count + count
 #++++
 No diagnostics.
+
+#==== control_flow_builtins
+#---- return_and_switch_resolve_without_warnings
+classify <- function(x) {
+  if (x > 2L) {
+    return("big")
+  }
+  switch("mode", a = "one", "other")
+}
+#++++
+No diagnostics.

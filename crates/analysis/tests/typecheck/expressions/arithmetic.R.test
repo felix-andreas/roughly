@@ -121,3 +121,15 @@ Unknown
 1L ~ 2L
 #++++
 Unknown
+
+#---- s4_slot_read_is_unknown_but_visits_the_subject
+value <- 1L
+value@slot
+#++++
+integer
+Unknown
+
+#---- s4_slot_read_still_surfaces_subject_errors
+result <- (1L + "x")@slot
+#++++
+error: invalid operand
