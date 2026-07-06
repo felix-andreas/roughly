@@ -4,7 +4,7 @@ use {
         interner::{Interner, Symbol},
         types::{
             Annotation, Atomic, BinderParameter, Constraint, FunctionType, NamedTypeRef,
-            RecordField, SurfaceType, TypeAnnotationKind,
+            RecordField, RestParameter, SurfaceType, TypeAnnotationKind,
         },
     },
     ropey::Rope,
@@ -183,12 +183,23 @@ pub fn render_surface_type(surface_type: &SurfaceType, interner: &Interner) -> S
                 })
                 .collect::<Vec<_>>();
             let mut rendered_parts = rendered_parameters;
-            rendered_parts.extend(rendered_named_parameters);
-            if let Some(variadic_element) = &function_type.variadic {
-                rendered_parts.push(format!(
-                    "...: {}",
-                    render_surface_type(variadic_element, interner)
-                ));
+            match &function_type.variadic {
+                // The rest parameter renders at its formal position among the named parameters:
+                // parameters before it fill positionally, parameters after it by name only.
+                Some(variadic) => {
+                    let split = variadic
+                        .preceding_named
+                        .min(rendered_named_parameters.len());
+                    let mut named = rendered_named_parameters;
+                    let after = named.split_off(split);
+                    rendered_parts.extend(named);
+                    rendered_parts.push(format!(
+                        "...: {}",
+                        render_surface_type(&variadic.element, interner)
+                    ));
+                    rendered_parts.extend(after);
+                }
+                None => rendered_parts.extend(rendered_named_parameters),
             }
             format!(
                 "fn({}) -> {}",
@@ -1717,9 +1728,15 @@ impl<'a> TypeParser<'a> {
                 self.skip_ascii_whitespace();
 
                 // A rest parameter `...name: TYPE` (or bare `...` ≡ `...: Any`) makes the function
-                // variadic. It must be the last parameter, so after parsing it the only legal token is
-                // the closing `)`.
+                // variadic. Its position mirrors the `...` in the R formal list: parameters written
+                // before it fill positionally, parameters written after it fill by name only, so
+                // named parameters may follow it.
                 if self.source[self.position..].starts_with("...") {
+                    if variadic.is_some() {
+                        return Err(invalid_syntax(
+                            "a function type may declare at most one `...` rest parameter.",
+                        ));
+                    }
                     self.position += "...".len();
                     // An optional rest-parameter name is accepted for readability but discarded: the
                     // variadic carries only its element type, since rest arguments are matched by
@@ -1734,13 +1751,16 @@ impl<'a> TypeParser<'a> {
                     } else {
                         SurfaceType::Any
                     };
-                    variadic = Some(element_type);
+                    variadic = Some(RestParameter {
+                        element: Box::new(element_type),
+                        preceding_named: named_parameters.len(),
+                    });
 
                     self.skip_ascii_whitespace();
-                    self.expect_byte(
-                        b')',
-                        "a `...` rest parameter must be the last parameter in `fn(...)`.",
-                    )?;
+                    if self.consume_byte(b',') {
+                        continue;
+                    }
+                    self.expect_byte(b')', "expected `)` to close `fn(...)`.")?;
                     break;
                 }
 
@@ -1796,6 +1816,13 @@ impl<'a> TypeParser<'a> {
                 };
 
                 if !is_named {
+                    // Positional parameters have no name to match by, and everything after the
+                    // rest parameter fills by name only, so a bare positional cannot follow `...`.
+                    if variadic.is_some() {
+                        return Err(invalid_syntax(
+                            "a positional parameter cannot follow the `...` rest parameter; parameters after `...` are matched by name only — give it a name.",
+                        ));
+                    }
                     let parameter = self
                         .parse_type_until(StopContext::FUNCTION_PARAMETER)
                         .map_err(|error| {

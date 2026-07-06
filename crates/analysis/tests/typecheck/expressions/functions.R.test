@@ -396,6 +396,73 @@ f <- function(x) {
 #++++
 error: invalid operand
 
+#==== variadic_functions
+#---- dots_formal_infers_a_rest_parameter
+join <- function(...) NULL
+#++++
+fn(...: Any) -> NULL
+
+#---- pre_dots_formal_fills_positionally_and_surplus_is_absorbed
+wrap <- function(x, ...) x + 1L
+wrap(1L, "extra", TRUE)
+#++++
+fn(x: ?1, ...: Any) -> ?1
+integer
+
+#---- pre_dots_formal_still_matches_by_name
+wrap <- function(x, ...) x
+wrap(x = 1L, "extra")
+#++++
+fn(x: ?1, ...: Any) -> ?1
+integer
+
+#---- post_dots_formal_is_matched_by_name
+f <- function(..., sep) sep
+f("a", "b", sep = 1L)
+#++++
+fn(...: Any, sep: ?1) -> ?1
+integer
+
+#---- post_dots_formal_is_not_filled_positionally
+f <- function(..., sep) sep
+f("a", 1L)
+#++++
+error: function arity mismatch
+
+#---- unmatched_keyword_is_absorbed_by_the_rest
+f <- function(...) NULL
+f(anything = 1L, other = "x")
+#++++
+fn(...: Any) -> NULL
+NULL
+
+#---- variadic_annotation_now_checks_against_the_body
+#: fn(x: character, ...: character) -> character
+wrap <- function(x, ...) x
+wrap("a", "b", "c")
+#++++
+fn(x: character, ...: character) -> character
+character
+
+#---- variadic_annotation_element_is_enforced_at_calls
+#: fn(...: character) -> NULL
+f <- function(...) NULL
+f("a", 1L)
+#++++
+error: type mismatch
+
+#---- annotation_rest_position_must_match_the_formals
+#: fn(...: Any, x: integer) -> integer
+f <- function(x, ...) x
+#++++
+error: type mismatch
+
+#---- fixed_annotation_on_a_variadic_function_is_rejected
+#: fn(x: integer) -> integer
+f <- function(x, ...) x
+#++++
+error: type mismatch
+
 #==== constrained_binders
 #---- numeric_binder_is_writable_and_enforced
 #: <T: numeric> fn(values: T) -> T

@@ -204,12 +204,27 @@ fn(integer, ...: double) -> double
 #++++
 <T> fn(...: T) -> list[T]
 
-#---- rest_must_be_last
+#---- named_parameter_after_rest_is_name_only
 fn(..., x: integer) -> integer
 #++++
-InvalidSyntax { message: "a `...` rest parameter must be the last parameter in `fn(...)`." }
+fn(...: Any, x: integer) -> integer
+
+#---- optional_parameters_after_rest
+fn(...: Any, [sep]: character, [collapse]: character | NULL) -> character
+#++++
+fn(...: Any, [sep]: character, [collapse]: character | NULL) -> character
+
+#---- parameters_on_both_sides_of_rest
+fn(x: character, ...: character, [domain]: Any) -> character
+#++++
+fn(x: character, ...: character, [domain]: Any) -> character
 
 #---- two_rest_parameters_rejected
 fn(..., ...) -> integer
 #++++
-InvalidSyntax { message: "a `...` rest parameter must be the last parameter in `fn(...)`." }
+InvalidSyntax { message: "a function type may declare at most one `...` rest parameter." }
+
+#---- positional_parameter_after_rest_is_rejected
+fn(...: Any, integer) -> integer
+#++++
+InvalidSyntax { message: "a positional parameter cannot follow the `...` rest parameter; parameters after `...` are matched by name only — give it a name." }

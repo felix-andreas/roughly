@@ -363,8 +363,12 @@ fn render_named_expression(
             lines.push(format!("{prefix}Assign({name}@{binding})"));
             render_nested(*value, indent + 1, lines);
         }
-        ExpressionKind::Function { parameters, body } => {
-            let rendered_parameters = parameters
+        ExpressionKind::Function {
+            parameters,
+            variadic,
+            body,
+        } => {
+            let mut rendered_parameters = parameters
                 .iter()
                 .map(|parameter| {
                     let name = interner.resolve(parameter.symbol).unwrap_or("<unknown>");
@@ -378,8 +382,12 @@ fn render_named_expression(
                     .unwrap_or_else(|| "?".to_owned());
                     format!("{name}@{binding}")
                 })
-                .collect::<Vec<_>>()
-                .join(", ");
+                .collect::<Vec<_>>();
+            if let Some(position) = variadic {
+                rendered_parameters
+                    .insert((*position).min(rendered_parameters.len()), "...".to_owned());
+            }
+            let rendered_parameters = rendered_parameters.join(", ");
             lines.push(format!("{prefix}Function({rendered_parameters})"));
             render_nested(*body, indent + 1, lines);
         }
@@ -557,8 +565,12 @@ fn render_locally_named_expression(
             lines.push(format!("{prefix}Assign({name}@{binding})"));
             render_nested(*value, indent + 1, lines);
         }
-        ExpressionKind::Function { parameters, body } => {
-            let rendered_parameters = parameters
+        ExpressionKind::Function {
+            parameters,
+            variadic,
+            body,
+        } => {
+            let mut rendered_parameters = parameters
                 .iter()
                 .map(|parameter| {
                     let name = interner.resolve(parameter.symbol).unwrap_or("<unknown>");
@@ -572,8 +584,12 @@ fn render_locally_named_expression(
                     .unwrap_or_else(|| "?".to_owned());
                     format!("{name}@{binding}")
                 })
-                .collect::<Vec<_>>()
-                .join(", ");
+                .collect::<Vec<_>>();
+            if let Some(position) = variadic {
+                rendered_parameters
+                    .insert((*position).min(rendered_parameters.len()), "...".to_owned());
+            }
+            let rendered_parameters = rendered_parameters.join(", ");
             lines.push(format!("{prefix}Function({rendered_parameters})"));
             render_nested(*body, indent + 1, lines);
         }

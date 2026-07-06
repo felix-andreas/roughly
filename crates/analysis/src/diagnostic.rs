@@ -179,7 +179,7 @@ fn collect_function_free_variables(
         collect_free_variables(&parameter.value, out);
     }
     if let Some(variadic) = &function_type.variadic {
-        collect_free_variables(variadic, out);
+        collect_free_variables(&variadic.element, out);
     }
     collect_free_variables(&function_type.return_type, out);
 }
@@ -1026,15 +1026,27 @@ impl<'a> TypeRenderer<'a> {
         }
     }
 
-    // The rendered parameter parts of a function type, in display order: positional, named (optional
-    // names bracketed), then the trailing `...` element when variadic. Shared by the plain `fn(...)`
-    // render and the signature-help render, which additionally records each part's span in the label.
+    // The rendered parameter parts of a function type, in display order: positional, then named
+    // (optional names bracketed) with the `...` element at its formal position among them. Shared
+    // by the plain `fn(...)` render and the signature-help render, which additionally records each
+    // part's span in the label.
     fn render_function_parts(&mut self, function_type: &FunctionType<CoreType>) -> Vec<String> {
         let mut parts = Vec::new();
         for parameter in &function_type.parameters {
             parts.push(self.render_core_type(parameter));
         }
-        for parameter in &function_type.named_parameters {
+        let rest_position = function_type
+            .variadic
+            .as_ref()
+            .map(|variadic| variadic.preceding_named);
+        for (index, parameter) in function_type.named_parameters.iter().enumerate() {
+            if rest_position == Some(index) {
+                let variadic = function_type
+                    .variadic
+                    .as_ref()
+                    .expect("position implies rest");
+                parts.push(format!("...: {}", self.render_core_type(&variadic.element)));
+            }
             let name = self.interner.resolve(parameter.name).unwrap_or("<unknown>");
             let rendered_name = if parameter.optional {
                 format!("[{name}]")
@@ -1046,8 +1058,10 @@ impl<'a> TypeRenderer<'a> {
                 self.render_core_type(&parameter.value)
             ));
         }
-        if let Some(variadic_element) = &function_type.variadic {
-            parts.push(format!("...: {}", self.render_core_type(variadic_element)));
+        if let Some(variadic) = &function_type.variadic
+            && variadic.preceding_named >= function_type.named_parameters.len()
+        {
+            parts.push(format!("...: {}", self.render_core_type(&variadic.element)));
         }
         parts
     }

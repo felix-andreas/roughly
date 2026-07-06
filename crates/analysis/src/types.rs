@@ -271,12 +271,19 @@ impl<Type> RecordField<Type> {
 pub struct FunctionType<Type> {
     pub parameters: Vec<Type>,
     pub named_parameters: Vec<RecordField<Type>>,
-    // The element type of a trailing rest parameter (`...name: T`), if the function is variadic. A
-    // variadic function accepts any number of additional positional arguments, each of this type. Making
-    // this a single optional field makes "at most one rest parameter, and it is last" unrepresentable
-    // otherwise.
-    pub variadic: Option<Box<Type>>,
+    // The rest parameter (`...: T`), if the function is variadic. A single optional field makes
+    // "at most one rest parameter" unrepresentable otherwise.
+    pub variadic: Option<RestParameter<Type>>,
     pub return_type: Box<Type>,
+}
+
+// R's argument matching depends on where `...` sits in the formal list: formals before the dots
+// fill positionally, formals after it fill by name only. The position is therefore part of the
+// signature, counted as the number of named parameters that precede the dots.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestParameter<Type> {
+    pub element: Box<Type>,
+    pub preceding_named: usize,
 }
 
 impl<Type> FunctionType<Type> {
@@ -296,13 +303,13 @@ impl<Type> FunctionType<Type> {
     pub fn with_variadic(
         parameters: Vec<Type>,
         named_parameters: Vec<RecordField<Type>>,
-        variadic: Option<Type>,
+        variadic: Option<RestParameter<Type>>,
         return_type: Type,
     ) -> Self {
         Self {
             parameters,
             named_parameters,
-            variadic: variadic.map(Box::new),
+            variadic,
             return_type: Box::new(return_type),
         }
     }

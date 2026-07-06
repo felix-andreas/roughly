@@ -1713,9 +1713,9 @@ fn resolve_surface_type(
                     diagnostics,
                 );
             }
-            if let Some(element) = &function_type.variadic {
+            if let Some(variadic) = &function_type.variadic {
                 resolve_surface_type(
-                    element,
+                    &variadic.element,
                     local_type_parameters,
                     range,
                     resolved,
@@ -1888,8 +1888,12 @@ fn collect_surface_type_references(
                     references,
                 );
             }
-            if let Some(element) = &function_type.variadic {
-                collect_surface_type_references(element, local_type_parameters, references);
+            if let Some(variadic) = &function_type.variadic {
+                collect_surface_type_references(
+                    &variadic.element,
+                    local_type_parameters,
+                    references,
+                );
             }
             collect_surface_type_references(
                 &function_type.return_type,

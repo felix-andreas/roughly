@@ -22,12 +22,14 @@
 #   Declaring `T | NULL` would poison the idioms (`1:nrow(df)`, `for (nm in names(x))`) because
 #   operators and `for` reject the `NULL` member; until flow narrowing or NULL-tolerant joins exist,
 #   these return `Any`.
-# - "named-formals": a variadic function's named formals must be declared (`[sep]`, `[na.rm]`), because
-#   the checker never routes a named argument into `...` — an undeclared named formal would be a false
-#   "unknown named argument" error on calls like `paste(x, collapse = ", ")`.
+# - "named-formals": a variadic function's named formals are declared (`[sep]`, `[na.rm]`) so their
+#   arguments are type-checked instead of being absorbed untyped into `...`. The `...` is written at
+#   its position in R's formal list: formals before it fill positionally, formals after it fill by
+#   name only, exactly as R matches them.
 # - Functions whose calls carry *arbitrary* identifier-named arguments (`data.frame(x = 1)`,
-#   `Sys.setenv(VAR = "v")`, `structure(x, my_attr = 1)`, plotting `par(...)` sinks) cannot be variadic
-#   function stubs at all for the same reason; they stay `Any` values so every call form passes.
+#   `Sys.setenv(VAR = "v")`, `structure(x, my_attr = 1)`, plotting `par(...)` sinks) stay `Any`
+#   values: their keyword arguments are data, not formals, and a typed rest element would reject
+#   forms R accepts.
 # - Functions with trailing-dot formals (`stop`/`warning` take `call.`) stay `Any`: parameter names
 #   allow interior dots only, so the signature is not yet writable. `stop`'s `Any` also stands in for a
 #   missing `Never` type: `x <- if (ok) 1L else stop("bad")` must not force a `NULL` join.
@@ -115,10 +117,10 @@ as.vector : fn(x: Any, [mode]: character) -> Any
 as.list : fn(x: Any) -> list[Any]
 # Coercions to types the stub grammar cannot name yet (factor, data.frame, date/time, language objects).
 as.factor : fn(x: Any) -> factor
-as.data.frame : fn(x: Any, [row.names]: Any, [optional]: logical, [stringsAsFactors]: logical, ...: Any) -> data.frame
+as.data.frame : fn(x: Any, [row.names]: Any, [optional]: logical, ...: Any, [stringsAsFactors]: logical) -> data.frame
 as.matrix : fn(x: Any, ...: Any) -> matrix
-as.Date : fn(x: Any, [format]: character, [tryFormats]: Any, [origin]: Any, [tz]: character, ...: Any) -> Date
-as.POSIXct : fn(x: Any, [tz]: character, [format]: character, [tryFormats]: Any, [origin]: Any, ...: Any) -> POSIXct
+as.Date : fn(x: Any, [format]: character, [tryFormats]: Any, ...: Any, [origin]: Any, [tz]: character) -> Date
+as.POSIXct : fn(x: Any, [tz]: character, [format]: character, [tryFormats]: Any, ...: Any, [origin]: Any) -> POSIXct
 as.name : Any
 as.symbol : Any
 as.function : Any
@@ -151,21 +153,20 @@ enc2native : fn(x: Any) -> character
 Encoding : fn(x: Any) -> character
 iconv : fn(x: Any, [from]: character, [to]: character, [sub]: Any, [mark]: logical, [toRaw]: logical) -> character
 
-# Variadic string joins (named-formals: `sep`/`collapse` must be declared or `paste(x, collapse = ",")`
-# would falsely error). `collapse` admits an explicit `NULL` as in R. `paste0` has no `sep` formal in R
-# (a `sep =` argument is absorbed by `...` and concatenated — almost always a bug), but the checker
-# cannot route named arguments into `...`, so `[sep]` is declared to keep such calls from erroring; the
-# result type is `character` either way.
-paste : fn([sep]: character, [collapse]: character | NULL, [recycle0]: logical, ...: Any) -> character
-paste0 : fn([sep]: character, [collapse]: character | NULL, [recycle0]: logical, ...: Any) -> character
+# Variadic string joins (named-formals): R's formals are `paste(..., sep, collapse, recycle0)`, dots
+# first, so the options fill by name only. `collapse` admits an explicit `NULL` as in R. `paste0` has
+# no `sep` formal in R (a `sep =` argument is absorbed by `...` and concatenated — almost always a
+# bug), but declaring `[sep]` keeps such calls type-checked instead of erroring; the result type is
+# `character` either way.
+paste : fn(...: Any, [sep]: character, [collapse]: character | NULL, [recycle0]: logical) -> character
+paste0 : fn(...: Any, [sep]: character, [collapse]: character | NULL, [recycle0]: logical) -> character
 
-# `sprintf`/`format`/`gettextf` take a leading required argument then variadic extras. The leading
-# argument is a bare positional: the checker fills a variadic function's named parameters by name only,
-# so naming it would reject the positional call `sprintf("%d", 1L)` (cost: `sprintf(fmt = ...)` is not
-# matchable). `format`'s named formals cover the common `format.default` controls.
-sprintf : fn(character, ...: Any) -> character
-gettextf : fn(character, [domain]: Any, ...: Any) -> character
-format : fn(Any, [trim]: logical, [digits]: Any, [nsmall]: Any, [justify]: character, [width]: Any, [na.encode]: logical, [scientific]: Any, [big.mark]: character, [decimal.mark]: character, ...: Any) -> character
+# `sprintf`/`format`/`gettextf` take a leading required argument then variadic extras. Formals before
+# the `...` fill positionally (and by name), formals after it by name only, matching R. `format`'s
+# post-dots formals cover the common `format.default` controls.
+sprintf : fn(fmt: character, ...: Any) -> character
+gettextf : fn(fmt: character, ...: Any, [domain]: Any) -> character
+format : fn(x: Any, ...: Any, [trim]: logical, [digits]: Any, [nsmall]: Any, [justify]: character, [width]: Any, [na.encode]: logical, [scientific]: Any, [big.mark]: character, [decimal.mark]: character) -> character
 formatC : fn(x: Any, [width]: Any, [digits]: Any, [format]: character, [flag]: character, [mode]: character, [big.mark]: character, [small.mark]: character, [decimal.mark]: character, [preserve.width]: character, [zero.print]: Any) -> character
 prettyNum : fn(Any, [big.mark]: character, ...: Any) -> character
 
@@ -190,15 +191,15 @@ strsplit : fn(x: Any, split: character, [fixed]: logical, [perl]: logical, [useB
 # formals cover the common method arguments (`digits`, `n`, `row.names`, ...) that would otherwise be
 # false "unknown named argument" errors. `stop`/`warning` stay `Any` (trailing-dot `call.` formal +
 # missing `Never`, see header); `message`'s formals are expressible.
-print : <T> fn(T, [digits]: Any, [quote]: logical, [right]: logical, [max]: Any, [width]: Any, [n]: Any, [na.print]: Any, [row.names]: Any, ...: Any) -> T
-cat : fn([file]: Any, [sep]: character, [fill]: Any, [labels]: Any, [append]: logical, ...: Any) -> NULL
-message : fn([domain]: Any, [appendLF]: logical, ...: Any) -> NULL
+print : <T> fn(T, ...: Any, [digits]: Any, [quote]: logical, [right]: logical, [max]: Any, [width]: Any, [n]: Any, [na.print]: Any, [row.names]: Any) -> T
+cat : fn(...: Any, [file]: Any, [sep]: character, [fill]: Any, [labels]: Any, [append]: logical) -> NULL
+message : fn(...: Any, [domain]: Any, [appendLF]: logical) -> NULL
 stop : Any
 warning : Any
 # `stopifnot(exprs = ...)` matches by name; string-labelled conditions (`"must be" = x > 0`) pass
 # through the rest parameter. An identifier-labelled condition (`ok = x > 0`) still falsely errors —
 # that needs named-into-rest absorption.
-stopifnot : fn([exprs]: Any, [exprObject]: Any, [local]: Any, ...: Any) -> NULL
+stopifnot : fn(...: Any, [exprs]: Any, [exprObject]: Any, [local]: Any) -> NULL
 
 # Conditions and exits. `tryCatch`/`withCallingHandlers` take arbitrary condition-class names as named
 # arguments and their result type is the handler's or the body's (value-dependent) — `Any` values.
@@ -214,8 +215,8 @@ suppressPackageStartupMessages : <T> fn(expr: T) -> T
 on.exit : fn([expr]: Any, [add]: logical, [after]: logical) -> NULL
 
 # Logic reductions: always a single logical, whatever the inputs (named-formals: `na.rm`).
-any : fn([na.rm]: logical, ...: Any) -> logical
-all : fn([na.rm]: logical, ...: Any) -> logical
+any : fn(...: Any, [na.rm]: logical) -> logical
+all : fn(...: Any, [na.rm]: logical) -> logical
 isTRUE : fn(x: Any) -> logical
 isFALSE : fn(x: Any) -> logical
 xor : fn(x: Any, y: Any) -> logical
@@ -226,28 +227,28 @@ xor : fn(x: Any, y: Any) -> logical
 # logical and integer inputs reduce to integer, doubles to double, and `min`/`max`/`range` also
 # order characters — with `Any` as the fallback for mixtures the candidates cannot express. `prod`
 # genuinely always returns double. `mean`'s second positional is `trim`, not `na.rm`.
-sum : fn([na.rm]: logical, ...: integer[] | logical[]) -> integer
-sum : fn([na.rm]: logical, ...: double[]) -> double
-sum : fn([na.rm]: logical, ...: Any) -> Any
-min : fn([na.rm]: logical, ...: integer[] | logical[]) -> integer
-min : fn([na.rm]: logical, ...: double[]) -> double
-min : fn([na.rm]: logical, ...: character[]) -> character
-min : fn([na.rm]: logical, ...: Any) -> Any
-max : fn([na.rm]: logical, ...: integer[] | logical[]) -> integer
-max : fn([na.rm]: logical, ...: double[]) -> double
-max : fn([na.rm]: logical, ...: character[]) -> character
-max : fn([na.rm]: logical, ...: Any) -> Any
-range : fn([na.rm]: logical, ...: integer[] | logical[]) -> integer[]
-range : fn([na.rm]: logical, ...: double[]) -> double[]
-range : fn([na.rm]: logical, ...: character[]) -> character[]
-range : fn([na.rm]: logical, ...: Any) -> Any
-pmin : fn([na.rm]: logical, ...: integer[] | logical[]) -> integer[]
-pmin : fn([na.rm]: logical, ...: double[]) -> double[]
-pmin : fn([na.rm]: logical, ...: Any) -> Any
-pmax : fn([na.rm]: logical, ...: integer[] | logical[]) -> integer[]
-pmax : fn([na.rm]: logical, ...: double[]) -> double[]
-pmax : fn([na.rm]: logical, ...: Any) -> Any
-prod : fn([na.rm]: logical, ...: Any) -> double
+sum : fn(...: integer[] | logical[], [na.rm]: logical) -> integer
+sum : fn(...: double[], [na.rm]: logical) -> double
+sum : fn(...: Any, [na.rm]: logical) -> Any
+min : fn(...: integer[] | logical[], [na.rm]: logical) -> integer
+min : fn(...: double[], [na.rm]: logical) -> double
+min : fn(...: character[], [na.rm]: logical) -> character
+min : fn(...: Any, [na.rm]: logical) -> Any
+max : fn(...: integer[] | logical[], [na.rm]: logical) -> integer
+max : fn(...: double[], [na.rm]: logical) -> double
+max : fn(...: character[], [na.rm]: logical) -> character
+max : fn(...: Any, [na.rm]: logical) -> Any
+range : fn(...: integer[] | logical[], [na.rm]: logical) -> integer[]
+range : fn(...: double[], [na.rm]: logical) -> double[]
+range : fn(...: character[], [na.rm]: logical) -> character[]
+range : fn(...: Any, [na.rm]: logical) -> Any
+pmin : fn(...: integer[] | logical[], [na.rm]: logical) -> integer[]
+pmin : fn(...: double[], [na.rm]: logical) -> double[]
+pmin : fn(...: Any, [na.rm]: logical) -> Any
+pmax : fn(...: integer[] | logical[], [na.rm]: logical) -> integer[]
+pmax : fn(...: double[], [na.rm]: logical) -> double[]
+pmax : fn(...: Any, [na.rm]: logical) -> Any
+prod : fn(...: Any, [na.rm]: logical) -> double
 mean : fn(x: Any, [trim]: Any, [na.rm]: logical) -> double
 
 # Cumulative reductions: elementwise type-preserving (logical/integer input gives an integer
@@ -303,7 +304,7 @@ trunc : fn(x: Any) -> double
 # `rank`'s result type depends on `ties.method` (double for averages, integer otherwise).
 sort : <T> fn(x: T[], [decreasing]: logical, [na.last]: Any, [method]: character, [index.return]: logical, [partial]: Any) -> T[]
 sort : fn(x: Any, [decreasing]: logical, [na.last]: Any, [method]: character, [index.return]: logical, [partial]: Any) -> Any
-order : fn([na.last]: Any, [decreasing]: logical, [method]: character, ...: Any) -> integer[]
+order : fn(...: Any, [na.last]: Any, [decreasing]: logical, [method]: character) -> integer[]
 rank : fn(x: Any, [na.last]: Any, [ties.method]: character) -> Any
 rev : <T> fn(x: T[]) -> T[]
 rev : <T> fn(x: list[T]) -> list[T]
@@ -426,7 +427,7 @@ do.call : fn(what: Any, args: Any, [quote]: logical, [envir]: Any) -> Any
 match.arg : fn(arg: Any, [choices]: Any, [several.ok]: logical) -> character
 match.fun : fn(FUN: Any, [descend]: logical) -> Any
 ifelse : fn(test: Any, yes: Any, no: Any) -> Any
-all.equal : fn(Any, Any, [tolerance]: Any, [scale]: Any, [check.attributes]: logical, [check.names]: logical, ...: Any) -> Any
+all.equal : fn(Any, Any, [tolerance]: Any, [scale]: Any, ...: Any, [check.attributes]: logical, [check.names]: logical) -> Any
 identical : fn(x: Any, y: Any, [num.eq]: logical, [single.NA]: logical, [attrib.as.set]: logical, [ignore.bytecode]: logical, [ignore.environment]: logical, [ignore.srcref]: logical, [extptr.as.ref]: logical) -> logical
 UseMethod : fn(generic: character, [object]: Any) -> Any
 NextMethod : fn([generic]: Any, [object]: Any, ...: Any) -> Any
@@ -466,7 +467,7 @@ get0 : fn(x: character, [envir]: Any, [mode]: character, [inherits]: logical, [i
 mget : fn(x: Any, [envir]: Any, [mode]: character, [ifnotfound]: Any, [inherits]: logical) -> list[Any]
 exists : fn(x: character, [where]: Any, [envir]: Any, [frame]: Any, [mode]: character, [inherits]: logical) -> logical
 assign : fn(x: character, value: Any, [pos]: Any, [envir]: Any, [inherits]: logical, [immediate]: logical) -> Any
-rm : fn([list]: Any, [pos]: Any, [envir]: Any, [inherits]: logical, ...: Any) -> NULL
+rm : fn(...: Any, [list]: Any, [pos]: Any, [envir]: Any, [inherits]: logical) -> NULL
 eval : fn(expr: Any, [envir]: Any, [enclos]: Any) -> Any
 evalq : fn(expr: Any, [envir]: Any, [enclos]: Any) -> Any
 quote : fn(expr: Any) -> Any
@@ -498,7 +499,7 @@ commandArgs : fn([trailingOnly]: logical) -> character[]
 
 # File-system helpers. Elementwise path functions are scalar-claim (`if (file.exists(p))` must stay
 # clean); `list.files` genuinely returns a character vector.
-file.path : fn([fsep]: character, ...: Any) -> character
+file.path : fn(...: Any, [fsep]: character) -> character
 file.exists : fn(...: Any) -> logical
 file.remove : fn(...: Any) -> logical
 file.size : fn(...: Any) -> double
@@ -524,7 +525,7 @@ writeLines : fn(text: Any, [con]: Any, [sep]: character, [useBytes]: logical) ->
 readRDS : fn(file: Any, [refhook]: Any) -> Any
 saveRDS : fn(object: Any, [file]: Any, [ascii]: logical, [version]: Any, [compress]: Any, [refhook]: Any) -> NULL
 load : fn(file: Any, [envir]: Any, [verbose]: logical) -> Any
-save : fn([file]: Any, [list]: Any, [ascii]: logical, [version]: Any, [envir]: Any, [compress]: Any, [eval.promises]: logical, [precheck]: logical, ...: Any) -> NULL
+save : fn(...: Any, [list]: Any, [file]: Any, [ascii]: logical, [version]: Any, [envir]: Any, [compress]: Any, [eval.promises]: logical, [precheck]: logical) -> NULL
 save.image : fn([file]: Any, [version]: Any, [ascii]: logical, [compress]: Any, [safe]: logical) -> NULL
 scan : Any
 dput : <T> fn(x: T, [file]: Any, [control]: Any) -> T

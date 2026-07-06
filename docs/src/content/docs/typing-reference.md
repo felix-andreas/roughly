@@ -1108,11 +1108,20 @@ Argument checking is compatibility-based, not exact-equality-based:
 - a **whole-number `double` literal** such as `10` or `3` counts as `integer` at a parameter position — `seq_len(10)` and `substr(x, 1, 3)` are as valid as their `10L`/`1L`/`3L` spellings, generalizing the rule the `:` operator already applies to its endpoints. A fractional literal (`2.5`) and a `double`-typed *variable* holding a whole number are still rejected at an `integer` parameter
 - an argument whose type is `Unknown` is accepted at any parameter; the reason the value became `Unknown` was already diagnosed where it happened, and repeating it at every later use would only cascade noise
 
-A **rest parameter** (`...: TYPE`) changes how surplus arguments are handled:
+A **rest parameter** (`...: TYPE`) changes how surplus arguments are handled. Its position in the
+signature mirrors the position of `...` in the R formal list, and argument matching follows R's
+rule for formals around the dots:
 
 - a rest parameter adds no required arguments, so a variadic function may be called with none (`paste()` is legal)
-- after the fixed positional and named parameters are matched, any number of remaining positional arguments are absorbed by the rest parameter, each checked against its element type
-- surplus positional arguments never fill an optional named parameter of a variadic function; a named parameter after `...` is matched by name only (as in R), so `sum(1, 2, na.rm = TRUE)` sends `1` and `2` to the rest and `na.rm` by name
+- a positional argument first fills the unfilled parameters declared **before** the rest parameter,
+  in order — exactly as R fills formals before `...` positionally (`wrap("a", "b")` on
+  `fn(x: character, ...: character)` gives `x = "a"` and sends `"b"` to the rest)
+- once the pre-rest parameters are filled, any number of remaining positional arguments are
+  absorbed by the rest parameter, each checked against its element type
+- a positional argument never fills a parameter declared **after** the rest parameter; those are
+  matched by name only (as in R), so `sum(1, 2, na.rm = TRUE)` with
+  `fn(...: integer[] | logical[], [na.rm]: logical)` sends `1` and `2` to the rest and `na.rm` by
+  name
 - a named argument matching **no declared parameter** is also absorbed by the rest parameter and checked against its element type — R collects unmatched keywords into `...`, the pass-through idiom variadic wrappers rely on (`read.csv(file, colClasses = "character")`)
 - a named argument that **duplicates a declared parameter already given** stays a named-parameter error even with a rest parameter (R rejects a formal matched by multiple actual arguments); without a rest parameter, any unmatched named argument is an error as before
 
@@ -1556,13 +1565,17 @@ Compact function annotations use a single function type:
 
 Optional parameters must be named: `[name]: TYPE`. A bare optional positional form like `fn(integer, [character])` is not supported.
 
-A function may declare a trailing **rest parameter** to accept a variable number of arguments:
+A function may declare a **rest parameter** to accept a variable number of arguments:
 
 - `fn(...) -> RETURN_TYPE` — accepts any number of arguments of any type (`...` is shorthand for `...: Any`)
 - `fn(...name: TYPE) -> RETURN_TYPE` — each additional argument must have type `TYPE`; the name is optional and, if given, is discarded (rest arguments are matched by position, never by name)
 - `fn(prefix: TYPE, ...: TYPE) -> RETURN_TYPE` — a rest parameter may follow fixed parameters
+- `fn(...: TYPE, [option]: TYPE) -> RETURN_TYPE` — named parameters may also follow the rest
+  parameter; they are matched **by name only**, exactly like R formals declared after `...`
 
-The rest parameter must be the last parameter, and there may be at most one. `fn(..., x: integer)` is a syntax error.
+There may be at most one rest parameter. Its position is part of the signature and mirrors the
+position of `...` in the R formal list: parameters written before it fill positionally, parameters
+written after it fill by name only (see [Function calls](#function-calls)).
 
 Additional rules:
 
@@ -1575,9 +1588,14 @@ Examples:
 ```r
 #: fn(...: character) -> character
 join <- function(...) paste0(...)
+
+#: fn(x: character, ...: character) -> character
+wrap <- function(x, ...) paste0(x, ": ", paste(...))
 ```
 
-The rest parameter is available in compact `fn(...)` annotations and in stub declarations. Because type inference does not treat R's `...` as a rest parameter (see [Inferred function types](#inferred-function-types)), annotating a rest parameter over a hand-written `function(...)` body is not yet supported; declare such signatures in a [stub file](/stdlib-stubs) instead.
+The annotation's `...` must appear in the same position as the function's `...` formal — both
+count the parameters declared before it (see
+[Function type compatibility](#function-type-compatibility)).
 
 Examples:
 
@@ -1614,6 +1632,12 @@ An unannotated `function(...)` expression infers a function type directly from i
 
 - every parameter appears as a named parameter using its definition name, because R parameters are always matchable both by name and by position
 - a parameter with a default value is optional at call sites
+- a `...` formal becomes a **rest parameter** with element type `Any`, at the position it holds in
+  the formal list — `function(x, ...) …` infers as `fn(x: T, ...: Any) -> …`, and calls check
+  against it by the [rest-parameter rules](#function-calls) (surplus positionals and unmatched
+  keywords are absorbed; formals after the `...` are matched by name only)
+- the values reaching `...` are not tracked into the body: a body use of `...` (forwarding it to
+  another call) types as `Unknown`
 - parameter and return types are inferred; unconstrained parameters generalize at binding boundaries like any other inferred type
 - default value expressions are typechecked: an error inside a default is reported, and a non-`NULL`
   default for an annotated parameter must be compatible with the declared type
@@ -1683,9 +1707,16 @@ Examples:
 Variadic compatibility is conservative:
 
 - a variadic function type is compatible only with another variadic function type; their rest element types are contravariant, like ordinary parameters, and the fixed prefixes must match by the rules above
+- the rest parameters must sit at the **same position**: the number of parameters declared before
+  `...` must agree on both sides, because the position decides which parameters callers may fill
+  positionally
 - a variadic function type and a fixed-arity function type are never compatible, in either direction
 
 This over-rejects some safe pairings (for example a fixed function that happens to accept the same arguments), but it never admits an unsound one.
+
+Because inference gives a `...` formal a rest parameter at its formal position (see
+[Inferred function types](#inferred-function-types)), an annotation with a rest parameter checks
+against a `function(…, ..., …)` definition like any other function annotation.
 
 ### Higher-order function types
 

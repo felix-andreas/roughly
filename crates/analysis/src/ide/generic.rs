@@ -366,7 +366,7 @@ fn is_hint_renderable(core_type: &CoreType, variables_allowed: bool) -> bool {
                 && function_type
                     .variadic
                     .as_ref()
-                    .is_none_or(|variadic| is_hint_renderable(variadic, variables_allowed))
+                    .is_none_or(|variadic| is_hint_renderable(&variadic.element, variables_allowed))
                 && is_hint_renderable(&function_type.return_type, variables_allowed)
         }
         CoreType::Vector(element) | CoreType::NamedVector(element) => {
@@ -512,15 +512,13 @@ fn overload_signature(
 }
 
 // The rendered parameter the cursor's argument targets, following the call-matching rules of the
-// typing reference (which mirror R). The display slots mirror `RenderedSignature::parameters`:
-// positional parameters, then named parameters, then the `...` slot when the function is variadic.
-// A named argument targets the parameter it names; a positional argument fills the first open
-// positionally-fillable slot — every parameter, except that an optional named parameter of a
-// variadic function is matched by name only (it stands in for an R parameter declared after `...`,
-// so surplus positional arguments flow to `...` instead). Arguments before the cursor consume their
-// slots first, so `f(label = "x", <cursor>)` highlights the parameter `label` skipped over. With
-// every slot taken and no `...`, the highlight stays on the last parameter rather than wrapping to
-// a wrong one.
+// typing reference (which mirror R). A named argument targets the parameter it names; a positional
+// argument fills the first open positionally-fillable slot — every parameter before the rest
+// parameter, while parameters after the rest are matched by name only (R's rule for formals around
+// `...`), so surplus positional arguments flow to `...` instead. Arguments before the cursor
+// consume their slots first, so `f(label = "x", <cursor>)` highlights the parameter `label`
+// skipped over. With every slot taken and no `...`, the highlight stays on the last parameter
+// rather than wrapping to a wrong one.
 fn active_parameter(
     function_type: &FunctionType<CoreType>,
     signature: &RenderedSignature,
@@ -534,7 +532,19 @@ fn active_parameter(
 
     let positional_count = function_type.parameters.len();
     let matchable_count = positional_count + function_type.named_parameters.len();
+    let preceding_named = function_type.variadic.as_ref().map(|variadic| {
+        variadic
+            .preceding_named
+            .min(function_type.named_parameters.len())
+    });
     let variadic_slot = function_type.variadic.is_some().then_some(matchable_count);
+    // Matching works in slot space (positionals, then named, rest slot last); the rendered label
+    // interleaves the `...` at its formal position, so translate before answering the client.
+    let display_index = |slot: usize| match preceding_named {
+        Some(preceding) if slot == matchable_count => positional_count + preceding,
+        Some(preceding) if slot >= positional_count + preceding => slot + 1,
+        _ => slot,
+    };
     let slot_for_name = |name: Symbol| {
         function_type
             .named_parameters
@@ -544,10 +554,10 @@ fn active_parameter(
     };
     let positionally_fillable = |slot: usize| {
         slot < positional_count
-            || function_type
-                .named_parameters
-                .get(slot - positional_count)
-                .is_some_and(|parameter| !(function_type.variadic.is_some() && parameter.optional))
+            || match preceding_named {
+                Some(preceding) => slot - positional_count < preceding,
+                None => true,
+            }
     };
     let first_open_slot = |consumed: &[bool]| {
         consumed
@@ -598,6 +608,7 @@ fn active_parameter(
         named_target
             .or_else(|| first_open_slot(&consumed))
             .or(variadic_slot)
+            .map(display_index)
             .unwrap_or(signature.parameters.len() - 1),
     )
 }

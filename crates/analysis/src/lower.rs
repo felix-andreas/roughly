@@ -409,7 +409,7 @@ fn lower_function_definition(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> ExpressionKind {
-    let parameters = node
+    let (parameters, variadic) = node
         .child_by_field_id(field::PARAMETERS)
         .map(|parameters| lower_parameters(parameters, rope, lowering_context))
         .unwrap_or_default();
@@ -419,7 +419,11 @@ fn lower_function_definition(
         .map(|body| lower_node_with_rope(body, rope, lowering_context))
         .unwrap_or_else(|| lowering_context.expression(node.range(), ExpressionKind::Unsupported));
 
-    ExpressionKind::Function { parameters, body }
+    ExpressionKind::Function {
+        parameters,
+        variadic,
+        body,
+    }
 }
 
 fn lower_if_statement(
@@ -504,8 +508,9 @@ fn lower_parameters(
     parameters: Node<'_>,
     rope: &Rope,
     lowering_context: &mut LoweringContext,
-) -> Vec<Parameter> {
+) -> (Vec<Parameter>, Option<usize>) {
     let mut lowered_parameters = Vec::new();
+    let mut variadic = None;
     let child_count = parameters.named_child_count();
 
     for child_index in 0..child_count {
@@ -522,24 +527,33 @@ fn lower_parameters(
                 });
             }
             kind::PARAMETER => {
-                if let Some(name) = child.child_by_field_id(field::NAME)
-                    && name.kind_id() == kind::IDENTIFIER
-                {
-                    let default = child
-                        .child_by_field_id(field::DEFAULT)
-                        .map(|default| lower_node_with_rope(default, rope, lowering_context));
-                    lowered_parameters.push(Parameter {
-                        symbol: intern_node_text(name, rope, lowering_context),
-                        range: name.range(),
-                        default,
-                    });
+                if let Some(name) = child.child_by_field_id(field::NAME) {
+                    match name.kind_id() {
+                        kind::IDENTIFIER => {
+                            let default = child.child_by_field_id(field::DEFAULT).map(|default| {
+                                lower_node_with_rope(default, rope, lowering_context)
+                            });
+                            lowered_parameters.push(Parameter {
+                                symbol: intern_node_text(name, rope, lowering_context),
+                                range: name.range(),
+                                default,
+                            });
+                        }
+                        // A `...` formal binds no name; only its position matters (formals before
+                        // it fill positionally, formals after it by name only). R rejects a second
+                        // `...` at parse time, so keeping the first is enough.
+                        kind::DOTS if variadic.is_none() => {
+                            variadic = Some(lowered_parameters.len());
+                        }
+                        _ => {}
+                    }
                 }
             }
             _ => {}
         }
     }
 
-    lowered_parameters
+    (lowered_parameters, variadic)
 }
 
 fn lower_call(

@@ -1513,8 +1513,8 @@ fn annotation_parameter_names_are_plain(parsed: &TypeSyntax, interner: &Interner
                     .all(|parameter| surface_type_is_plain(parameter, interner))
                     && function_type
                         .variadic
-                        .as_deref()
-                        .is_none_or(|variadic| surface_type_is_plain(variadic, interner))
+                        .as_ref()
+                        .is_none_or(|variadic| surface_type_is_plain(&variadic.element, interner))
                     && surface_type_is_plain(&function_type.return_type, interner)
             }
             SurfaceType::Union(members) | SurfaceType::Tuple(members) => members

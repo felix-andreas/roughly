@@ -10,8 +10,8 @@ use {
         naming::{BindingId, NamesGlobal, NamesLocal, find_binding, find_exported_binding},
         types::{
             Annotation, Atomic, AttachedAnnotation, Constraint, CoreType, FunctionType,
-            InferenceVariableId, QuantifiedVariable, RecordField, SurfaceType, TypeAnnotationKind,
-            TypeScheme,
+            InferenceVariableId, QuantifiedVariable, RecordField, RestParameter, SurfaceType,
+            TypeAnnotationKind, TypeScheme,
         },
     },
     std::collections::{BTreeMap, BTreeSet},
@@ -619,8 +619,13 @@ fn accumulate_parameter_variances(
             }
             // A rest parameter is a parameter position, so its element is contravariant like the fixed
             // parameters.
-            if let Some(element) = &function_type.variadic {
-                accumulate_parameter_variances(element, polarity.flip(), parameters, variances);
+            if let Some(variadic) = &function_type.variadic {
+                accumulate_parameter_variances(
+                    &variadic.element,
+                    polarity.flip(),
+                    parameters,
+                    variances,
+                );
             }
             accumulate_parameter_variances(
                 &function_type.return_type,
@@ -799,7 +804,10 @@ impl InferenceState {
                 function_type
                     .variadic
                     .as_ref()
-                    .map(|element| self.substitute_rigid_names(element)),
+                    .map(|variadic| RestParameter {
+                        element: Box::new(self.substitute_rigid_names(&variadic.element)),
+                        preceding_named: variadic.preceding_named,
+                    }),
                 self.substitute_rigid_names(&function_type.return_type),
             )),
             other => other.clone(),
@@ -1672,9 +1680,14 @@ impl InferenceState {
                     type_definitions,
                 ),
             },
-            ExpressionKind::Function { parameters, body } => self.infer_function_expression(
+            ExpressionKind::Function {
+                parameters,
+                variadic,
+                body,
+            } => self.infer_function_expression(
                 expression.id,
                 parameters,
+                *variadic,
                 *body,
                 None,
                 expression,
@@ -2301,13 +2314,18 @@ impl InferenceState {
         // (parameters and return are checked inside `infer_function_expression`). The binding-level
         // `apply_annotation` below would lower the annotation a second time — a fresh, conflicting set
         // of rigid binder variables — so this path returns directly and does not re-apply.
-        if let ExpressionKind::Function { parameters, body } = &value_expression.kind
+        if let ExpressionKind::Function {
+            parameters,
+            variadic,
+            body,
+        } = &value_expression.kind
             && let Some(expected_function_type) =
                 self.checked_function_annotation(annotation, type_definitions, expression)?
         {
             return self.infer_function_expression(
                 value_expression.id,
                 parameters,
+                *variadic,
                 *body,
                 Some(expected_function_type),
                 expression,
@@ -2373,6 +2391,7 @@ impl InferenceState {
         &mut self,
         function_expression_id: ExpressionId,
         parameters: &[crate::hir::Parameter],
+        variadic: Option<usize>,
         body: ExpressionId,
         expected_function_type: Option<FunctionType<CoreType>>,
         expression: &Expression,
@@ -2388,6 +2407,7 @@ impl InferenceState {
         let signature_result = self.infer_function_signature(
             function_expression_id,
             parameters,
+            variadic,
             body,
             expected_function_type.as_ref(),
             expression,
@@ -2440,6 +2460,7 @@ impl InferenceState {
         &mut self,
         function_expression_id: ExpressionId,
         parameters: &[crate::hir::Parameter],
+        variadic: Option<usize>,
         body: ExpressionId,
         expected_function_type: Option<&FunctionType<CoreType>>,
         expression: &Expression,
@@ -2593,7 +2614,8 @@ impl InferenceState {
 
         // R parameters are always matchable by name and by position, so inferred function types carry
         // every parameter as a named parameter; parameters with a default value are optional at call
-        // sites.
+        // sites. A `...` formal becomes a rest parameter with element `Any` at its formal position
+        // (the values reaching it are not tracked into the body).
         let named_parameter_types = parameters
             .iter()
             .zip(parameter_types)
@@ -2605,9 +2627,13 @@ impl InferenceState {
                 )
             })
             .collect();
-        Ok(FunctionType::new(
+        Ok(FunctionType::with_variadic(
             Vec::new(),
             named_parameter_types,
+            variadic.map(|preceding_named| RestParameter {
+                element: Box::new(CoreType::Any),
+                preceding_named,
+            }),
             inferred_return_type,
         ))
     }
@@ -3573,13 +3599,18 @@ impl InferenceState {
 
                 // Variadic compatibility is conservative: a variadic function is compatible only with
                 // another variadic (their rest elements are contravariant, like ordinary parameters),
-                // and a variadic/fixed pair is always incompatible. This over-rejects some safe pairings
-                // but never admits an unsound one.
+                // and a variadic/fixed pair is always incompatible. The rest parameters must also sit
+                // at the same formal position — the position decides which parameters callers may
+                // fill positionally. This over-rejects some safe pairings but never admits an
+                // unsound one.
                 match (&actual_function.variadic, &expected_function.variadic) {
-                    (Some(actual_element), Some(expected_element)) => {
+                    (Some(actual_variadic), Some(expected_variadic)) => {
+                        if actual_variadic.preceding_named != expected_variadic.preceding_named {
+                            return Ok(false);
+                        }
                         if !self.check_compatibility(
-                            (**expected_element).clone(),
-                            (**actual_element).clone(),
+                            (*expected_variadic.element).clone(),
+                            (*actual_variadic.element).clone(),
                             type_definitions,
                             expression,
                         )? {
@@ -4083,14 +4114,17 @@ impl InferenceState {
                 let variadic = function_type
                     .variadic
                     .as_ref()
-                    .map(|element| {
-                        self.lower_surface_type_with_substitutions(
-                            element,
-                            substitutions,
-                            expanding_aliases,
-                            type_definitions,
-                            expression,
-                        )
+                    .map(|variadic| {
+                        Ok::<_, InferenceError>(RestParameter {
+                            element: Box::new(self.lower_surface_type_with_substitutions(
+                                &variadic.element,
+                                substitutions,
+                                expanding_aliases,
+                                type_definitions,
+                                expression,
+                            )?),
+                            preceding_named: variadic.preceding_named,
+                        })
                     })
                     .transpose()?;
                 Ok(CoreType::Function(FunctionType::with_variadic(
@@ -4562,8 +4596,8 @@ impl InferenceState {
                     }
                 }
 
-                if let Some(element) = &function_type.variadic
-                    && self.occurs_in(variable, element)?
+                if let Some(variadic) = &function_type.variadic
+                    && self.occurs_in(variable, &variadic.element)?
                 {
                     return Ok(true);
                 }
@@ -5572,7 +5606,17 @@ impl InferenceState {
             .collect::<Vec<_>>();
 
         let positional_parameters = function_type.parameters;
-        let variadic_element = function_type.variadic.map(|element| *element);
+        let variadic_element = function_type
+            .variadic
+            .as_ref()
+            .map(|variadic| (*variadic.element).clone());
+        // Named parameters declared before the rest parameter fill positionally, exactly as R
+        // fills formals before `...`. Removals keep declaration order, so the pre-rest parameters
+        // are always the front segment of the remaining list and this count tracks them.
+        let mut pre_rest_remaining = match &function_type.variadic {
+            Some(variadic) => variadic.preceding_named,
+            None => function_type.named_parameters.len(),
+        };
         let return_type = *function_type.return_type;
         let mut next_positional_index = 0;
         let mut remaining_named_parameters = function_type.named_parameters;
@@ -5611,6 +5655,9 @@ impl InferenceState {
                 };
 
                 let parameter = remaining_named_parameters.remove(parameter_index);
+                if parameter_index < pre_rest_remaining {
+                    pre_rest_remaining -= 1;
+                }
                 self.check_argument(
                     parameter.value,
                     inferred_argument,
@@ -5631,12 +5678,12 @@ impl InferenceState {
                 continue;
             }
 
-            // A positional argument past the fixed positionals fills an optional named parameter by
-            // position — but only when the function is not variadic. In a variadic function, surplus
-            // positionals belong to `...` (R's rule: a named parameter after `...` is matched by name
-            // only), so they are absorbed below instead of consuming an optional named parameter.
-            if variadic_element.is_none() && !remaining_named_parameters.is_empty() {
+            // A positional argument past the fixed positionals fills the next named parameter
+            // declared before the rest parameter (all of them, when the function is not variadic) —
+            // R's rule: formals before `...` fill positionally, formals after it by name only.
+            if pre_rest_remaining > 0 {
                 let parameter = remaining_named_parameters.remove(0);
+                pre_rest_remaining -= 1;
                 self.check_argument(
                     parameter.value,
                     inferred_argument,
@@ -6622,7 +6669,12 @@ impl InferenceState {
                 }
 
                 let instantiated_variadic = match &function_type.variadic {
-                    Some(element) => Some(self.instantiate_core_type(element, substitutions)?),
+                    Some(variadic) => Some(RestParameter {
+                        element: Box::new(
+                            self.instantiate_core_type(&variadic.element, substitutions)?,
+                        ),
+                        preceding_named: variadic.preceding_named,
+                    }),
                     None => None,
                 };
 
@@ -6810,8 +6862,9 @@ impl InferenceState {
                         .extend(self.free_type_variables_in_core_type(&named_parameter.value)?);
                 }
 
-                if let Some(element) = &function_type.variadic {
-                    free_variables.extend(self.free_type_variables_in_core_type(element)?);
+                if let Some(variadic) = &function_type.variadic {
+                    free_variables
+                        .extend(self.free_type_variables_in_core_type(&variadic.element)?);
                 }
 
                 free_variables
@@ -6842,7 +6895,10 @@ impl InferenceState {
         }
 
         let resolved_variadic = match function_type.variadic {
-            Some(element) => Some(self.resolve(*element)?),
+            Some(variadic) => Some(RestParameter {
+                element: Box::new(self.resolve(*variadic.element)?),
+                preceding_named: variadic.preceding_named,
+            }),
             None => None,
         };
 
@@ -6934,10 +6990,17 @@ impl InferenceState {
         let right_total = right_function.parameters.len() + right_function.named_parameters.len();
         // A variadic function accepts a caller shape a fixed function does not, so the two are never the
         // same type. Treat a variadic/fixed mismatch as an arity mismatch (the rest parameter counts as
-        // one interface slot the other side lacks).
-        if left_total != right_total
-            || left_function.variadic.is_some() != right_function.variadic.is_some()
-        {
+        // one interface slot the other side lacks). The rest parameter's formal position is part of
+        // the interface too — it decides which parameters fill positionally — so differing positions
+        // also fail here.
+        let rest_positions_differ = match (&left_function.variadic, &right_function.variadic) {
+            (Some(left_variadic), Some(right_variadic)) => {
+                left_variadic.preceding_named != right_variadic.preceding_named
+            }
+            (None, None) => false,
+            _ => true,
+        };
+        if left_total != right_total || rest_positions_differ {
             return Err(InferenceError::FunctionArityMismatch {
                 expected: left_total + usize::from(left_function.variadic.is_some()),
                 actual: right_total + usize::from(right_function.variadic.is_some()),
@@ -6982,9 +7045,15 @@ impl InferenceState {
         }
 
         let unified_variadic = match (left_function.variadic, right_function.variadic) {
-            (Some(left_element), Some(right_element)) => {
-                Some(self.unify_internal(*left_element, *right_element, expression)?)
-            }
+            (Some(left_variadic), Some(right_variadic)) => Some(RestParameter {
+                element: Box::new(self.unify_internal(
+                    *left_variadic.element,
+                    *right_variadic.element,
+                    expression,
+                )?),
+                // Positions were checked equal above; keep the left interface like the names.
+                preceding_named: left_variadic.preceding_named,
+            }),
             // Presence was checked to match above, so only the both-absent case remains here.
             _ => None,
         };
@@ -7432,9 +7501,10 @@ fn erase_variables(core_type: CoreType) -> CoreType {
                     )
                 })
                 .collect(),
-            variadic: function_type
-                .variadic
-                .map(|element| Box::new(erase_variables(*element))),
+            variadic: function_type.variadic.map(|variadic| RestParameter {
+                element: Box::new(erase_variables(*variadic.element)),
+                preceding_named: variadic.preceding_named,
+            }),
             return_type: Box::new(erase_variables(*function_type.return_type)),
         }),
         CoreType::Vector(element) => CoreType::Vector(Box::new(erase_variables(*element))),
@@ -7612,7 +7682,10 @@ fn import_core_type(
             function_type
                 .variadic
                 .as_ref()
-                .map(|element| import_core_type(element, substitutions)),
+                .map(|variadic| RestParameter {
+                    element: Box::new(import_core_type(&variadic.element, substitutions)),
+                    preceding_named: variadic.preceding_named,
+                }),
             import_core_type(&function_type.return_type, substitutions),
         )),
         // A variable absent from `substitutions` is a free scheme variable that belongs to another

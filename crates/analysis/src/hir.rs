@@ -170,6 +170,10 @@ pub enum ExpressionKind {
     },
     Function {
         parameters: Vec<Parameter>,
+        // Position of a `...` formal within `parameters` (the number of formals before it). R fills
+        // formals before the dots positionally and formals after it by name only, so the position
+        // is part of the signature. The dots itself is not a `Parameter` — it binds no name.
+        variadic: Option<usize>,
         body: ExpressionId,
     },
     // R's `local(expr)`: evaluates `expr` in a fresh child environment and returns its value. It is a
@@ -552,8 +556,12 @@ impl Module {
                 }
                 self.render_expression(*value, indent + 1, out, interner);
             }
-            ExpressionKind::Function { parameters, body } => {
-                let params = parameters
+            ExpressionKind::Function {
+                parameters,
+                variadic,
+                body,
+            } => {
+                let mut params = parameters
                     .iter()
                     .map(|p| {
                         let name = interner.resolve(p.symbol).unwrap_or("<unknown>");
@@ -563,8 +571,11 @@ impl Module {
                             name.to_owned()
                         }
                     })
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                    .collect::<Vec<_>>();
+                if let Some(position) = variadic {
+                    params.insert((*position).min(params.len()), "...".to_owned());
+                }
+                let params = params.join(", ");
                 out.push_str(&format!("{prefix}Function ({params})\n"));
                 self.render_expression(*body, indent + 1, out, interner);
             }

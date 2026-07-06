@@ -951,8 +951,13 @@ impl<'a> TypeResolver<'a> {
                         document_id,
                     );
                 }
-                if let Some(element) = &function_type.variadic {
-                    self.resolve_surface_type(element, local_type_parameters, range, document_id);
+                if let Some(variadic) = &function_type.variadic {
+                    self.resolve_surface_type(
+                        &variadic.element,
+                        local_type_parameters,
+                        range,
+                        document_id,
+                    );
                 }
                 self.resolve_surface_type(
                     &function_type.return_type,
@@ -1277,7 +1282,9 @@ impl<'a> DocumentNamingContext<'a> {
                     }
                 }
             }
-            ExpressionKind::Function { parameters, body } => {
+            ExpressionKind::Function {
+                parameters, body, ..
+            } => {
                 let mut scope = Scope::new(ScopeKind::Function);
                 for parameter in parameters {
                     let binding_id =
