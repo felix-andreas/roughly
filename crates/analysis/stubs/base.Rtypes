@@ -440,6 +440,12 @@ interactive : fn() -> logical
 # to their own function still gets the syntactic scoping treatment in v1.
 local : Any
 
+# `return(x)` is likewise a lowering-recognized control-flow form (it exits the enclosing function and
+# joins its value into the function's return type), so calls never reach this scheme; the binding makes
+# the bare name resolve and gives `return <- ...` the builtin-shadow warning. Same rebinding caveat as
+# `local`.
+return : Any
+
 # Reflective environment access (deliberately shallow — see the scope discipline in the stubs doc).
 # The environment-returning and NSE forms are `Any` values; the string-keyed lookups have stable
 # signatures worth declaring.

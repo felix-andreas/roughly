@@ -58,6 +58,7 @@ pub enum BuiltinKind {
     Or,
     Combine,
     List,
+    Switch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -224,6 +225,12 @@ pub struct InferenceState {
     // knows which candidate won, and signature help needs it to mark the active signature; recorded
     // on the commit path only, so failed probes leave nothing behind.
     selected_overloads: BTreeMap<ExpressionId, usize>,
+    // One frame per function-literal body currently being inferred; each `return(x)` in the body
+    // pushes its value's type into the innermost frame, and the function's return type is the
+    // union of the frame with the body's trailing value. Transient: pushed and popped around one
+    // body inference, so it is always empty at clone/compare points. Loop fixed-point re-passes
+    // push duplicates, which the union normalization collapses.
+    return_type_frames: Vec<Vec<CoreType>>,
     // Sites that introduce a genuine `Unknown` into the type lattice, collected while recording is
     // enabled (the authoritative round-2 check). Strict mode reports these origins; ordinary
     // propagation of `Unknown` is never recorded here, so a single root cause yields one diagnostic.
@@ -639,6 +646,7 @@ pub const BUILTINS: &[(&str, BuiltinKind)] = &[
     ("||", BuiltinKind::Or),
     ("c", BuiltinKind::Combine),
     ("list", BuiltinKind::List),
+    ("switch", BuiltinKind::Switch),
 ];
 
 impl InferenceState {
@@ -1732,6 +1740,29 @@ impl InferenceState {
                 resolution_context,
                 type_definitions,
             ),
+            // `return(x)` exits the enclosing function: the value's type joins that function's
+            // return type (collected on the frame the function-literal inference pushed). Like
+            // `break`/`next`, the expression yields no observable value where it stands, so it
+            // types as `NULL` locally and is not a strict origin. A top-level `return` (an R
+            // runtime error) has no frame to feed; its value is still checked.
+            ExpressionKind::Return { value } => {
+                let returned = match value {
+                    Some(value) => {
+                        let inferred = self.infer_expression_with_context(
+                            arena.get(*value),
+                            arena,
+                            resolution_context,
+                            type_definitions,
+                        )?;
+                        self.resolve(inferred)?
+                    }
+                    None => CoreType::Null,
+                };
+                if let Some(frame) = self.return_type_frames.last_mut() {
+                    frame.push(returned);
+                }
+                Ok(CoreType::Null)
+            }
             // `break` and `next` transfer control and never produce an observable value; like the
             // loops they belong to, they type as `NULL`. They are fully understood constructs, so
             // they are not strict origins.
@@ -2461,12 +2492,29 @@ impl InferenceState {
             }
         }
 
-        let inferred_return_type = self.infer_body_with_capture_discovery(
+        // Early returns join the trailing value: `function() { if (c) return("a"); 5 }` is
+        // `character | double`. The frame is popped before the `?` so an erroring body leaves the
+        // stack balanced.
+        self.return_type_frames.push(Vec::new());
+        let body_result = self.infer_body_with_capture_discovery(
             body,
             arena,
             resolution_context,
             type_definitions,
-        )?;
+        );
+        let early_returns = self
+            .return_type_frames
+            .pop()
+            .expect("return-type frames stay balanced around body inference");
+        let trailing_type = body_result?;
+        let inferred_return_type = if early_returns.is_empty() {
+            trailing_type
+        } else {
+            let resolved_trailing = self.resolve(trailing_type)?;
+            let mut members = early_returns;
+            members.push(resolved_trailing);
+            CoreType::union_of(members)
+        };
 
         // The body's return value only needs to be *compatible* with the annotated return (covariant,
         // like an argument against a parameter), so a body returning `integer` satisfies a declared
@@ -4383,6 +4431,15 @@ impl InferenceState {
                     type_definitions,
                 )
                 .map(Some),
+            BuiltinKind::Switch => self
+                .infer_builtin_switch(
+                    arguments,
+                    expression,
+                    arena,
+                    resolution_context,
+                    type_definitions,
+                )
+                .map(Some),
         }
     }
 
@@ -5831,6 +5888,55 @@ impl InferenceState {
         } else {
             Ok(CoreType::vector(combined_atomic))
         }
+    }
+
+    // `switch(subject, a = ..., b = ..., default)` selects one branch by the subject's runtime
+    // value. Selection cannot be modeled statically, but every branch IS checked — errors inside a
+    // branch surface like anywhere else — and the call's type is the union of the branch values.
+    // R returns invisible `NULL` when nothing matches, so `NULL` joins the union unless a default
+    // (unnamed, non-first) branch exists. A named branch with no value falls through to the next
+    // branch in R; it contributes no type of its own.
+    fn infer_builtin_switch(
+        &mut self,
+        arguments: &[Argument],
+        expression: &Expression,
+        arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<CoreType, InferenceError> {
+        let Some((subject, branches)) = arguments.split_first() else {
+            return Err(InferenceError::FunctionArityMismatch {
+                expected: 1,
+                actual: 0,
+                range: Some(expression.range),
+                expression_id: Some(expression.id),
+            });
+        };
+        self.infer_expression_with_context(
+            arena.get(subject.expression),
+            arena,
+            resolution_context,
+            type_definitions,
+        )?;
+
+        let mut members = Vec::with_capacity(branches.len() + 1);
+        let mut has_default = false;
+        for branch in branches {
+            if branch.name.is_none() {
+                has_default = true;
+            }
+            let branch_type = self.infer_expression_with_context(
+                arena.get(branch.expression),
+                arena,
+                resolution_context,
+                type_definitions,
+            )?;
+            members.push(self.resolve(branch_type)?);
+        }
+        if !has_default {
+            members.push(CoreType::Null);
+        }
+        Ok(CoreType::union_of(members))
     }
 
     fn infer_builtin_list(

@@ -225,6 +225,14 @@ pub enum ExpressionKind {
         value: ExpressionId,
         name: Symbol,
     },
+    // `return(x)` / `return()`: exits the enclosing function with the value (`NULL` when absent).
+    // Like `local`, the *syntactic* call to the bare name `return` is the construct — R parses it
+    // as an ordinary call, but modeling it as one would mistype every early-return function. The
+    // value's type joins the enclosing function's return type; the expression itself yields no
+    // observable value locally, so like `break`/`next` it types as `NULL`.
+    Return {
+        value: Option<ExpressionId>,
+    },
     Break,
     Next,
     // `pkg::name` / `pkg:::name`: a direct read of one name from a package namespace, bypassing
@@ -360,6 +368,8 @@ pub fn contains_loop_exit(arena: &HirArena, root: ExpressionId) -> bool {
         ExpressionKind::Dollar { value, .. } | ExpressionKind::Slot { value, .. } => {
             contains_loop_exit(arena, *value)
         }
+        // A `return` exits the whole function, so it abandons the enclosing loop iteration too.
+        ExpressionKind::Return { .. } => true,
         ExpressionKind::Null
         | ExpressionKind::Logical(_)
         | ExpressionKind::Integer(_)
@@ -658,6 +668,12 @@ impl Module {
             }
             ExpressionKind::NamespaceGet { namespace, name } => {
                 out.push_str(&format!("{prefix}NamespaceGet({namespace:?}, {name:?})\n"))
+            }
+            ExpressionKind::Return { value } => {
+                out.push_str(&format!("{prefix}Return\n"));
+                if let Some(value) = value {
+                    self.render_expression(*value, indent + 1, out, interner);
+                }
             }
             ExpressionKind::Break => out.push_str(&format!("{prefix}Break\n")),
             ExpressionKind::Next => out.push_str(&format!("{prefix}Next\n")),

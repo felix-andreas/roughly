@@ -946,6 +946,35 @@ Examples:
 - if the last expression is terminated with `;`, the block evaluates to `NULL`
 - if the last expression has type `Unknown`, the block evaluates to `Unknown`
 
+### `return`
+
+`return(x)` exits the enclosing function with `x` (`return()` exits with `NULL`). It is a
+control-flow construct, not a call: the syntactic call to the bare name `return` is recognized
+during lowering, like `local`.
+
+- a function's return type is the **union** of every `return` value's type in its body with the
+  body's trailing value: `function() { if (c) return("foo"); 5 }` is `fn() -> character | double`
+- the `return` expression itself yields no observable value where it stands, so — like `break` and
+  `next` — it types as `NULL` locally and is not a strict origin
+- the returned value expression is checked like any other; its errors surface normally
+- a `return` inside a loop exits the whole function, so it abandons the loop iteration like `break`
+  for control-flow purposes
+- a top-level `return` (an R runtime error) still checks its value; it joins no function's return
+  type
+
+### `switch`
+
+`switch(subject, a = ..., b = ..., default)` selects one branch by the subject's runtime value.
+Selection cannot be modeled statically, but the call is fully checked:
+
+- the subject and **every branch** are type checked; an error inside any branch surfaces like
+  anywhere else
+- the call's type is the **union of the branch value types**; `NULL` joins the union unless a
+  default (unnamed, non-first) branch exists, because an unmatched `switch` returns invisible
+  `NULL`
+- a named branch with no value falls through to the next branch in R; it contributes no type of
+  its own
+
 ### Name references
 
 - a name reference evaluates to the type currently bound to that name

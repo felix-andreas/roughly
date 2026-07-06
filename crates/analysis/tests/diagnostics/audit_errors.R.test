@@ -507,13 +507,13 @@ error[type-error] `[` is not supported on `integer[]`
 
 #---- unbound_local_in_uninferred_call_arg_no_panic
 f <- function(x) {
-  switch(x, a = (k <- 1L))
+  frobnicate(x, a = (k <- 1L))
   k
 }
 #++++
-warning[unresolved] I could not resolve `switch` in this package, its imports, or builtins. Did you mean `with`?
---> 2:3-2:9
-|   switch(x, a = (k <- 1L))
+warning[unresolved] I could not resolve `frobnicate` in this package, its imports, or builtins.
+--> 2:3-2:13
+|   frobnicate(x, a = (k <- 1L))
 
 #==== return_position_coercions
 #---- return_nullable_widening_ok

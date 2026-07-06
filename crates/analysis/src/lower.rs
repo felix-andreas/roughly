@@ -562,6 +562,16 @@ fn lower_call(
         return ExpressionKind::Local { body };
     }
 
+    // `return(x)` / `return()` is control flow, not a call: modeling it as a call would mistype
+    // every early-return function and warn that `return` is unresolved. Like `local`, the
+    // syntactic call to the bare name is the construct (rebinding `return` is not modeled). Any
+    // other shape (`return(a, b)`, `return(x = 1)`) stays an ordinary call, which R rejects at
+    // run time anyway.
+    if let Some(value) = return_argument(node, function, rope) {
+        let value = value.map(|value| lower_node_with_rope(value, rope, lowering_context));
+        return ExpressionKind::Return { value };
+    }
+
     let callee = lower_node_with_rope(function, rope, lowering_context);
     let arguments = node
         .child_by_field_id(field::ARGUMENTS)
@@ -591,6 +601,32 @@ fn single_local_argument<'tree>(
         return None;
     }
     argument.child_by_field_id(field::VALUE)
+}
+
+// The value node of a `return(<expr>)` / `return()` call: `Some` only when `function` is the bare
+// identifier `return` with zero or one positional (unnamed) argument (the inner `Option` is the
+// value, absent for `return()`). Any other shape is left as an ordinary call.
+fn return_argument<'tree>(
+    call: Node<'tree>,
+    function: Node<'_>,
+    rope: &Rope,
+) -> Option<Option<Node<'tree>>> {
+    if function.kind_id() != kind::IDENTIFIER || node_text(function, rope) != "return" {
+        return None;
+    }
+    let Some(arguments) = call.child_by_field_id(field::ARGUMENTS) else {
+        return Some(None);
+    };
+    let mut argument_nodes = (0..arguments.named_child_count())
+        .filter_map(|index| arguments.named_child(index))
+        .filter(|child| child.kind_id() == kind::ARGUMENT);
+    let Some(argument) = argument_nodes.next() else {
+        return Some(None);
+    };
+    if argument_nodes.next().is_some() || argument.child_by_field_id(field::NAME).is_some() {
+        return None;
+    }
+    Some(argument.child_by_field_id(field::VALUE))
 }
 
 fn lower_subset(

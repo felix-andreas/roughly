@@ -462,6 +462,12 @@ fn render_named_expression(
         ExpressionKind::NamespaceGet { namespace, name } => {
             lines.push(format!("{prefix}NamespaceGet({namespace:?}, {name:?})"));
         }
+        ExpressionKind::Return { value } => {
+            lines.push(format!("{prefix}Return"));
+            if let Some(value) = value {
+                render_nested(*value, indent + 1, lines);
+            }
+        }
         ExpressionKind::Break => lines.push(format!("{prefix}Break")),
         ExpressionKind::Next => lines.push(format!("{prefix}Next")),
         ExpressionKind::Unsupported => lines.push(format!("{prefix}Unsupported")),
@@ -649,6 +655,12 @@ fn render_locally_named_expression(
         }
         ExpressionKind::NamespaceGet { namespace, name } => {
             lines.push(format!("{prefix}NamespaceGet({namespace:?}, {name:?})"));
+        }
+        ExpressionKind::Return { value } => {
+            lines.push(format!("{prefix}Return"));
+            if let Some(value) = value {
+                render_nested(*value, indent + 1, lines);
+            }
         }
         ExpressionKind::Break => lines.push(format!("{prefix}Break")),
         ExpressionKind::Next => lines.push(format!("{prefix}Next")),

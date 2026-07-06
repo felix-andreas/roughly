@@ -1408,6 +1408,11 @@ impl<'a> DocumentNamingContext<'a> {
             ExpressionKind::Dollar { value, .. } | ExpressionKind::Slot { value, .. } => {
                 self.resolve_expression(*value);
             }
+            ExpressionKind::Return { value } => {
+                if let Some(value) = value {
+                    self.resolve_expression(*value);
+                }
+            }
             ExpressionKind::NamespaceGet { namespace, name } => {
                 self.document_naming.namespace_reads.push(NamespaceRead {
                     expression_id,
