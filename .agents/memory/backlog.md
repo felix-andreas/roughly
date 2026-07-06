@@ -123,7 +123,7 @@ Formatter (all verified):
 - S3 dispatch modeling (`UseMethod`, per-class method signatures) — prerequisite for honest `print`/`summary`/`plot`.
 - data.frame column-level typing; matrix dimensionality.
 - Traits/typeclasses (may subsume overload sets + the atomic-element constraint; revisit once both are in use).
-- Flow-sensitive narrowing (`if (is.null(x))` narrows `x`), building on the Phase-1 slot model.
+- Flow-sensitive narrowing — **DONE, pulled forward from post-beta** (guard predicates `is.null` + `is.*` family filter union members on the `if` edges via undo-logged entry refinement; divergence-aware joins persist the early-exit edge; `decisions.md` §Guard narrowing). Follow-ups: `&&`/`||` decomposition; in-condition narrowing (right conjunct sees the left guard); `inherits(x, "class")` once nominal classes are modeled; revisit the `T | NULL`-returning corpus entries (`nrow`, `names`) — still `Any` because *unguarded* idiomatic uses (`1:nrow(df)`) would error on the `NULL` member, which the beta bar forbids.
 - NAMESPACE-aware imports (`import()`/`importFrom()` checking), CRAN stub auto-generation via R introspection, R-version-keyed corpora, stubtest validation (R-dependent).
 - Own-standard-library exploration (user: R has genuinely bad constructs; a curated stdlib is on the table).
 - Formatter width-awareness (real pretty-printer with a line budget) — the current formatter is deliberately layout-preserving; revisit as a product decision.

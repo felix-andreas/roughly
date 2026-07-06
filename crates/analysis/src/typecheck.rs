@@ -61,6 +61,43 @@ pub enum BuiltinKind {
     Switch,
 }
 
+// A type-guard predicate recognized in `if` conditions (`is.null(x)`, `is.character(x)`, ...).
+// Guards narrow the guarded local variable's type along the branch edges; see the guard-narrowing
+// section of the typing reference for the exact filtering rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuardPredicate {
+    Null,
+    Character,
+    Logical,
+    Integer,
+    Double,
+    Numeric,
+    Function,
+    List,
+}
+
+// The names each guard predicate answers to. Seeded into `guard_predicates` by the builtin
+// constructors so condition inspection is a symbol lookup, not a string compare.
+const GUARD_PREDICATES: &[(&str, GuardPredicate)] = &[
+    ("is.null", GuardPredicate::Null),
+    ("is.character", GuardPredicate::Character),
+    ("is.logical", GuardPredicate::Logical),
+    ("is.integer", GuardPredicate::Integer),
+    ("is.double", GuardPredicate::Double),
+    ("is.numeric", GuardPredicate::Numeric),
+    ("is.function", GuardPredicate::Function),
+    ("is.list", GuardPredicate::List),
+];
+
+// A guard's effect on the guarded slot: the entry to install on each edge (`None` = that edge
+// leaves the entry untouched). `range` preserves the original binding's definition range.
+struct GuardRefinement {
+    key: EnvironmentKey,
+    range: Range,
+    true_type: Option<CoreType>,
+    false_type: Option<CoreType>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperandExpectation {
     Numeric,
@@ -231,6 +268,13 @@ pub struct InferenceState {
     // body inference, so it is always empty at clone/compare points. Loop fixed-point re-passes
     // push duplicates, which the union normalization collapses.
     return_type_frames: Vec<Vec<CoreType>>,
+    // Guard-predicate names (`is.null`, `is.character`, ...) resolved to symbols by the builtin
+    // constructors, so `if` conditions can be inspected without string comparison. Empty for a
+    // bare `InferenceState` (annotation harvesting never inspects conditions).
+    guard_predicates: BTreeMap<Symbol, GuardPredicate>,
+    // The symbol for `stop`, whose call unconditionally diverges (recognized by bare name, like
+    // `local` and `return` at lowering). `None` for a bare state.
+    stop_symbol: Option<Symbol>,
     // Sites that introduce a genuine `Unknown` into the type lattice, collected while recording is
     // enabled (the authoritative round-2 check). Strict mode reports these origins; ordinary
     // propagation of `Unknown` is never recorded here, so a single root cause yields one diagnostic.
@@ -622,6 +666,11 @@ pub fn inference_state_with_builtins_in_interner(interner: &mut Interner) -> Inf
         let symbol = interner.intern(name);
         inference_state.bind_builtin(symbol, *builtin_kind);
     }
+    for (name, predicate) in GUARD_PREDICATES {
+        let symbol = interner.intern(name);
+        inference_state.guard_predicates.insert(symbol, *predicate);
+    }
+    inference_state.stop_symbol = Some(interner.intern("stop"));
 
     inference_state
 }
@@ -2622,7 +2671,23 @@ impl InferenceState {
     ) -> Result<CoreType, InferenceError> {
         self.expect_scalar_logical(condition, arena, resolution_context, type_definitions)?;
 
+        // A type-guard condition refines the guarded slot along the branch edges. The refinement
+        // is an ordinary undo-logged entry write inside the branch region, so a branch write
+        // simply replaces it and the join below sees final values either way.
+        let refinement = self.condition_refinement(condition, arena, resolution_context)?;
+
         let snapshot = self.environment_snapshot();
+        if let Some(refinement) = &refinement
+            && let Some(true_type) = &refinement.true_type
+        {
+            self.set_environment_entry(
+                refinement.key,
+                Some(Binding {
+                    type_scheme: TypeScheme::monomorphic(true_type.clone()),
+                    range: refinement.range,
+                }),
+            );
+        }
         let consequence_result = self.infer_expression_with_context(
             consequence,
             arena,
@@ -2631,26 +2696,112 @@ impl InferenceState {
         );
         let consequence_bindings = self.environment_rollback(snapshot);
         let consequence_type = self.resolve(consequence_result?)?;
+        let consequence_diverges = self.expression_diverges(arena, consequence.id);
 
-        let Some(alternative) = alternative else {
-            // Without an `else`, the construct may fall through untouched: each slot the branch
-            // wrote joins with its pre-state value (pre-state first, so a union reads in
-            // execution order: `integer | character` for an `integer` slot a branch retypes).
-            self.join_branch_environments(BTreeMap::new(), consequence_bindings, expression)?;
-            return Ok(nullable_type(consequence_type));
+        // The false edge: the `else` branch when present, otherwise a synthetic empty region that
+        // carries just the false-edge refinement — that is what survives past the `if` when the
+        // consequence diverges (the early-exit guard pattern).
+        let mut alternative_outcome = None;
+        let alternative_bindings = match alternative {
+            Some(alternative) => {
+                let snapshot = self.environment_snapshot();
+                if let Some(refinement) = &refinement
+                    && let Some(false_type) = &refinement.false_type
+                {
+                    self.set_environment_entry(
+                        refinement.key,
+                        Some(Binding {
+                            type_scheme: TypeScheme::monomorphic(false_type.clone()),
+                            range: refinement.range,
+                        }),
+                    );
+                }
+                let alternative_result = self.infer_expression_with_context(
+                    alternative,
+                    arena,
+                    resolution_context,
+                    type_definitions,
+                );
+                let bindings = self.environment_rollback(snapshot);
+                alternative_outcome = Some((
+                    self.resolve(alternative_result?)?,
+                    self.expression_diverges(arena, alternative.id),
+                ));
+                bindings
+            }
+            None => {
+                let mut bindings = BTreeMap::new();
+                if let Some(refinement) = &refinement
+                    && let Some(false_type) = &refinement.false_type
+                {
+                    bindings.insert(
+                        refinement.key,
+                        Some(Binding {
+                            type_scheme: TypeScheme::monomorphic(false_type.clone()),
+                            range: refinement.range,
+                        }),
+                    );
+                }
+                bindings
+            }
         };
 
-        let snapshot = self.environment_snapshot();
-        let alternative_result = self.infer_expression_with_context(
-            alternative,
-            arena,
-            resolution_context,
-            type_definitions,
-        );
-        let alternative_bindings = self.environment_rollback(snapshot);
-        let alternative_type = self.resolve(alternative_result?)?;
+        // A diverging branch never falls through, so it contributes no state: the surviving edge's
+        // final values (refinement included) apply directly instead of joining with a path that
+        // cannot reach the code after the `if`. When neither (or both — dead code) diverge, every
+        // touched slot joins as before: pre-state first, so a union reads in execution order.
+        let alternative_diverges = alternative_outcome
+            .as_ref()
+            .is_some_and(|(_, diverges)| *diverges);
+        match (consequence_diverges, alternative_diverges) {
+            (true, false) => {
+                for (key, value) in alternative_bindings {
+                    self.set_environment_entry(key, value);
+                }
+            }
+            (false, true) => {
+                for (key, value) in consequence_bindings {
+                    self.set_environment_entry(key, value);
+                }
+            }
+            _ => {
+                if alternative.is_some() {
+                    self.join_branch_environments(
+                        consequence_bindings,
+                        alternative_bindings,
+                        expression,
+                    )?;
+                } else {
+                    // Fall-through side first, so a union reads in execution order (the pre-state
+                    // before the branch's retype: `integer | character`, not the reverse).
+                    self.join_branch_environments(
+                        alternative_bindings,
+                        consequence_bindings,
+                        expression,
+                    )?;
+                }
+            }
+        }
 
-        self.join_branch_environments(consequence_bindings, alternative_bindings, expression)?;
+        let Some((alternative_type, _)) = alternative_outcome else {
+            // Without an `else` the construct may fall through untouched, contributing `NULL`; a
+            // diverging branch never yields at all, so the whole expression is plain `NULL`.
+            return Ok(if consequence_diverges {
+                CoreType::Null
+            } else {
+                nullable_type(consequence_type)
+            });
+        };
+
+        // A diverging branch contributes no value either: `x <- if (c) return(NULL) else 5`
+        // gives `x` the surviving branch's type.
+        if consequence_diverges != alternative_diverges {
+            return Ok(if consequence_diverges {
+                alternative_type
+            } else {
+                consequence_type
+            });
+        }
 
         // An unmodelled branch makes the result unmodelled rather than claiming the other branch's
         // type, matching how `Unknown` propagates (and absorbs unions) through the rest of the
@@ -2660,6 +2811,114 @@ impl InferenceState {
         }
 
         self.join_types(consequence_type, alternative_type, expression)
+    }
+
+    // The guard refinement an `if` condition induces, when the condition is a recognized predicate
+    // applied to a plain local variable read (negation swaps the edges). `None` when the condition
+    // is no guard, the callee is locally shadowed, the argument is not a resolved local slot, or
+    // the guard cannot change the entry's type (see the guard-narrowing section of the typing
+    // reference for the filtering rules).
+    fn condition_refinement(
+        &mut self,
+        condition: &Expression,
+        arena: &HirArena,
+        resolution_context: Option<&ResolutionContext<'_>>,
+    ) -> Result<Option<GuardRefinement>, InferenceError> {
+        match &condition.kind {
+            ExpressionKind::UnaryNot { value } => Ok(self
+                .condition_refinement(arena.get(*value), arena, resolution_context)?
+                .map(|refinement| GuardRefinement {
+                    key: refinement.key,
+                    range: refinement.range,
+                    true_type: refinement.false_type,
+                    false_type: refinement.true_type,
+                })),
+            ExpressionKind::Call { callee, arguments } => {
+                let callee_expression = arena.get(*callee);
+                let ExpressionKind::Symbol(callee_symbol) = &callee_expression.kind else {
+                    return Ok(None);
+                };
+                let Some(predicate) = self.guard_predicates.get(callee_symbol).copied() else {
+                    return Ok(None);
+                };
+                // A local binding shadowing the predicate name wins, exactly as in resolution.
+                if let Some(context) = resolution_context
+                    && context
+                        .local_naming
+                        .expression_resolutions
+                        .contains_key(&callee_expression.id)
+                {
+                    return Ok(None);
+                }
+                let [argument] = arguments.as_slice() else {
+                    return Ok(None);
+                };
+                if argument.name.is_some() {
+                    return Ok(None);
+                }
+                let argument_expression = arena.get(argument.expression);
+                let ExpressionKind::Symbol(argument_symbol) = argument_expression.kind else {
+                    return Ok(None);
+                };
+                // The refined key is exactly the one a read of the argument resolves to: the local
+                // slot under a naming context; the flat global entry in a context-less state (the
+                // fixture drivers), where every binding lives in the global map. A name that is
+                // non-local under a context is a package global — winner semantics, not
+                // flow-refined — so no refinement.
+                let key = match resolution_context {
+                    Some(context) => match context
+                        .local_naming
+                        .expression_resolutions
+                        .get(&argument_expression.id)
+                    {
+                        Some(binding_id) => EnvironmentKey::Local(*binding_id),
+                        None => return Ok(None),
+                    },
+                    None => EnvironmentKey::Global(argument_symbol),
+                };
+                let Some(binding) = self.environment.get(&key).cloned() else {
+                    return Ok(None);
+                };
+                let entry_type = self.instantiate_type_scheme(&binding.type_scheme)?;
+                let entry_type = self.resolve(entry_type)?;
+                Ok(
+                    refine_guarded_type(&entry_type, predicate).map(|(true_type, false_type)| {
+                        GuardRefinement {
+                            key,
+                            range: binding.range,
+                            true_type,
+                            false_type,
+                        }
+                    }),
+                )
+            }
+            _ => Ok(None),
+        }
+    }
+
+    // Whether an expression never falls through to the code after it: `return`/`break`/`next`, a
+    // call to `stop` (by bare name — the `local`/`return` rebinding caveat applies), a block whose
+    // last expression diverges, or an `if`/`else` both of whose branches diverge.
+    fn expression_diverges(&self, arena: &HirArena, id: ExpressionId) -> bool {
+        match &arena.get(id).kind {
+            ExpressionKind::Return { .. } | ExpressionKind::Break | ExpressionKind::Next => true,
+            ExpressionKind::Block { expressions, .. } => expressions
+                .last()
+                .is_some_and(|last| self.expression_diverges(arena, *last)),
+            ExpressionKind::Call { callee, .. } => matches!(
+                &arena.get(*callee).kind,
+                ExpressionKind::Symbol(symbol) if Some(*symbol) == self.stop_symbol
+            ),
+            ExpressionKind::If {
+                consequence,
+                alternative: Some(alternative),
+                ..
+            } => {
+                self.expression_diverges(arena, *consequence)
+                    && self.expression_diverges(arena, *alternative)
+            }
+            _ => false,
+        }
     }
 
     // A loop body may run zero or more times, so the types flowing around the back edge join into
@@ -6947,6 +7206,96 @@ fn core_type_for_shape(shape: OperandShape, atomic: Atomic) -> CoreType {
     match shape {
         OperandShape::Scalar => CoreType::Scalar(atomic),
         OperandShape::Vector => CoreType::vector(atomic),
+    }
+}
+
+// The (true-edge, false-edge) entry types a guard predicate induces over `entry`, `None` per edge
+// when that edge leaves the entry untouched (and `None` overall when neither edge changes).
+// Narrowing filters union members; a member whose family cannot be decided statically stays on
+// both edges. The one non-union case: `is.null` on `Any`/`Unknown` pins the true edge to `NULL` —
+// family guards deliberately do not invent a concrete shape for `Any`/`Unknown` (a refined union
+// would false-positive against scalar-claim standard-library signatures).
+fn refine_guarded_type(
+    entry: &CoreType,
+    predicate: GuardPredicate,
+) -> Option<(Option<CoreType>, Option<CoreType>)> {
+    match entry {
+        CoreType::Union(members) => {
+            let mut true_members = Vec::with_capacity(members.len());
+            let mut false_members = Vec::with_capacity(members.len());
+            let mut decided_any = false;
+            for member in members {
+                match member_matches_guard(member, predicate) {
+                    Some(true) => {
+                        true_members.push(member.clone());
+                        decided_any = true;
+                    }
+                    Some(false) => {
+                        false_members.push(member.clone());
+                        decided_any = true;
+                    }
+                    None => {
+                        true_members.push(member.clone());
+                        false_members.push(member.clone());
+                    }
+                }
+            }
+            if !decided_any {
+                return None;
+            }
+            // An edge with no members is impossible at runtime; dead branches are not typed
+            // specially, so such an edge stays untouched. An edge keeping every member changes
+            // nothing and stays untouched too.
+            let true_type = (!true_members.is_empty() && true_members.len() < members.len())
+                .then(|| CoreType::union_of(true_members));
+            let false_type = (!false_members.is_empty() && false_members.len() < members.len())
+                .then(|| CoreType::union_of(false_members));
+            if true_type.is_none() && false_type.is_none() {
+                return None;
+            }
+            Some((true_type, false_type))
+        }
+        CoreType::Any | CoreType::Unknown if predicate == GuardPredicate::Null => {
+            Some((Some(CoreType::Null), None))
+        }
+        _ => None,
+    }
+}
+
+// Whether one (normalized, non-union) member satisfies a guard predicate: `Some(bool)` when the
+// member's runtime family is statically certain, `None` when it is not (inference variables,
+// flexible-element vectors, opaque nominals — `is.list(data.frame)` is true at runtime, for
+// example, which the checker cannot see through a sealed type).
+fn member_matches_guard(member: &CoreType, predicate: GuardPredicate) -> Option<bool> {
+    match member {
+        // A nested union inside a normalized union cannot occur; treat it as undecidable if a
+        // denormalized value ever reaches here rather than mis-filtering it.
+        CoreType::Variable(_)
+        | CoreType::Any
+        | CoreType::Unknown
+        | CoreType::Nominal(..)
+        | CoreType::Union(_) => None,
+        CoreType::Null => Some(predicate == GuardPredicate::Null),
+        CoreType::Scalar(atomic) => Some(atomic_matches_guard(*atomic, predicate)),
+        CoreType::Vector(element) | CoreType::NamedVector(element) => match element.as_ref() {
+            CoreType::Scalar(atomic) => Some(atomic_matches_guard(*atomic, predicate)),
+            _ => None,
+        },
+        CoreType::Function(_) => Some(predicate == GuardPredicate::Function),
+        CoreType::List(_) | CoreType::NamedList(_) | CoreType::Tuple(_) | CoreType::Record(_) => {
+            Some(predicate == GuardPredicate::List)
+        }
+    }
+}
+
+fn atomic_matches_guard(atomic: Atomic, predicate: GuardPredicate) -> bool {
+    match predicate {
+        GuardPredicate::Character => atomic == Atomic::Character,
+        GuardPredicate::Logical => atomic == Atomic::Logical,
+        GuardPredicate::Integer => atomic == Atomic::Integer,
+        GuardPredicate::Double => atomic == Atomic::Double,
+        GuardPredicate::Numeric => matches!(atomic, Atomic::Integer | Atomic::Double),
+        GuardPredicate::Null | GuardPredicate::Function | GuardPredicate::List => false,
     }
 }
 
