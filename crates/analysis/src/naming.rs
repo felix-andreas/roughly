@@ -1405,7 +1405,7 @@ impl<'a> DocumentNamingContext<'a> {
                     self.resolve_expression(argument.expression);
                 }
             }
-            ExpressionKind::Dollar { value, .. } => {
+            ExpressionKind::Dollar { value, .. } | ExpressionKind::Slot { value, .. } => {
                 self.resolve_expression(*value);
             }
             ExpressionKind::NamespaceGet { namespace, name } => {
@@ -1878,7 +1878,7 @@ impl<'a> DocumentNamingContext<'a> {
                     self.resolve_expression(argument.expression);
                 }
             }
-            ExpressionKind::Dollar { value, .. } => {
+            ExpressionKind::Dollar { value, .. } | ExpressionKind::Slot { value, .. } => {
                 self.resolve_replacement_lhs(*value, base_id);
             }
             ExpressionKind::Call { arguments, .. } => {

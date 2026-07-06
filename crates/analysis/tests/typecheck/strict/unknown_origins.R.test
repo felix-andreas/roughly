@@ -90,3 +90,12 @@ frobnicate(1L)
 warning[unresolved] I could not resolve `frobnicate` in this package, its imports, or builtins.
 --> 2:1-2:11
 | frobnicate(1L)
+
+#---- s4_slot_read_is_a_strict_origin
+#---- R/main.R
+config <- 1L
+port <- config@port
+#++++
+warning[strict] strict mode: could not determine the type of `port`; add a type annotation
+--> 2:9-2:20
+| port <- config@port

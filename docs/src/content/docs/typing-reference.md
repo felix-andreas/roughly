@@ -1583,6 +1583,14 @@ apply_renderer <- function(render_count, count) { render_count(count) }
 - this allows checking to continue even when the checker cannot model the construct precisely
 - whether an unsupported construct also produces a diagnostic is a construct-specific decision
 
+### S4 slot access
+
+`x@slot` reads (and `x@slot <- v` writes) an S4 object slot. S4 objects are not modeled, so a slot
+read types as `Unknown` and is a strict-mode origin — but the construct is fully lowered: the
+subject expression is inferred (its own type errors surface), the subject's variable read counts
+for naming, unused analysis, references, and rename, and a slot write is an ordinary
+replacement-form assignment of its base variable.
+
 ## Strict mode
 
 Strict mode is an opt-in check controlled by the `[check] strict` switch (default off). It does not

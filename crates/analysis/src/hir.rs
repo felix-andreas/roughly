@@ -218,6 +218,13 @@ pub enum ExpressionKind {
         value: ExpressionId,
         name: Symbol,
     },
+    // `x@slot`: an S4 slot read. The subject is fully lowered so its variable read participates in
+    // naming and every IDE feature; the checker does not model S4 objects, so the read itself
+    // types as `Unknown` (a strict origin).
+    Slot {
+        value: ExpressionId,
+        name: Symbol,
+    },
     Break,
     Next,
     // `pkg::name` / `pkg:::name`: a direct read of one name from a package namespace, bypassing
@@ -292,7 +299,8 @@ pub fn replacement_base(arena: &HirArena, lhs: ExpressionId) -> Option<(Expressi
             ExpressionKind::Symbol(symbol) => return Some((current, *symbol)),
             ExpressionKind::Subset { value, .. }
             | ExpressionKind::Subset2 { value, .. }
-            | ExpressionKind::Dollar { value, .. } => current = *value,
+            | ExpressionKind::Dollar { value, .. }
+            | ExpressionKind::Slot { value, .. } => current = *value,
             ExpressionKind::Call { arguments, .. } => {
                 current = arguments.first()?.expression;
             }
@@ -349,7 +357,9 @@ pub fn contains_loop_exit(arena: &HirArena, root: ExpressionId) -> bool {
                     .iter()
                     .any(|argument| contains_loop_exit(arena, argument.expression))
         }
-        ExpressionKind::Dollar { value, .. } => contains_loop_exit(arena, *value),
+        ExpressionKind::Dollar { value, .. } | ExpressionKind::Slot { value, .. } => {
+            contains_loop_exit(arena, *value)
+        }
         ExpressionKind::Null
         | ExpressionKind::Logical(_)
         | ExpressionKind::Integer(_)
@@ -639,6 +649,11 @@ impl Module {
             ExpressionKind::Dollar { value, name } => {
                 let name_str = interner.resolve(*name).unwrap_or("<unknown>");
                 out.push_str(&format!("{prefix}Dollar {name_str}\n"));
+                self.render_expression(*value, indent + 1, out, interner);
+            }
+            ExpressionKind::Slot { value, name } => {
+                let name_str = interner.resolve(*name).unwrap_or("<unknown>");
+                out.push_str(&format!("{prefix}Slot {name_str}\n"));
                 self.render_expression(*value, indent + 1, out, interner);
             }
             ExpressionKind::NamespaceGet { namespace, name } => {

@@ -546,3 +546,25 @@ bump <- function(x) x
 R/b.R:
 #: fn(value: points) -> points
 keep <- function(value) value
+
+#==== slot_access
+#---- renaming_a_variable_covers_its_slot_reads
+#---- R/main.R
+config <- make_config()
+port <- config@port
+config@host <- "localhost"
+#++++ any
+#!!!! rename slot.rename
+R/main.R:1:1 -> settings
+#++++
+before:
+R/main.R:
+config <- make_config()
+port <- config@port
+config@host <- "localhost"
+
+after:
+R/main.R:
+settings <- make_config()
+port <- settings@port
+settings@host <- "localhost"

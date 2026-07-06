@@ -637,7 +637,7 @@ fn lower_extract_operator(
     let Some(operator) = node.child_by_field_id(field::OPERATOR) else {
         return ExpressionKind::Unsupported;
     };
-    if operator.kind_id() != kind::DOLLAR {
+    if operator.kind_id() != kind::DOLLAR && operator.kind_id() != kind::AT {
         return ExpressionKind::Unsupported;
     }
 
@@ -653,9 +653,11 @@ fn lower_extract_operator(
         _ => return ExpressionKind::Unsupported,
     };
 
-    ExpressionKind::Dollar {
-        value: lower_node_with_rope(lhs, rope, lowering_context),
-        name,
+    let value = lower_node_with_rope(lhs, rope, lowering_context);
+    if operator.kind_id() == kind::AT {
+        ExpressionKind::Slot { value, name }
+    } else {
+        ExpressionKind::Dollar { value, name }
     }
 }
 

@@ -1752,6 +1752,23 @@ impl InferenceState {
                 );
                 Ok(CoreType::Unknown)
             }
+            // `x@slot` reads an S4 slot. S4 objects are not modeled, so the read types as
+            // `Unknown` and is a strict origin — but the subject is fully inferred first, so its
+            // own errors surface and its variable read stays visible to naming and the IDE.
+            ExpressionKind::Slot { value, .. } => {
+                self.infer_expression_with_context(
+                    arena.get(*value),
+                    arena,
+                    resolution_context,
+                    type_definitions,
+                )?;
+                self.record_strict_origin(
+                    expression.id,
+                    expression.range,
+                    StrictOriginKind::UnsupportedConstruct,
+                );
+                Ok(CoreType::Unknown)
+            }
             ExpressionKind::Unsupported => {
                 self.record_strict_origin(
                     expression.id,
@@ -2043,7 +2060,7 @@ impl InferenceState {
                     )?;
                 }
             }
-            ExpressionKind::Dollar { value, .. } => {
+            ExpressionKind::Dollar { value, .. } | ExpressionKind::Slot { value, .. } => {
                 self.infer_replacement_lhs_parts(
                     *value,
                     base_id,
