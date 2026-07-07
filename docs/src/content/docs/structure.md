@@ -58,6 +58,9 @@ Keep it focused on the file split and the role of each file.
   - `typecheck/calls.rs` — call checking: R's argument matcher (name-aware, positional, and
     rest-parameter matching), ordered overload probing, the callback-forwarding probe, and the
     argument compatibility check
+  - `typecheck/control.rs` — control-flow checking: `if` with guard narrowing (type guards and
+    the `missing()` supplied-state guard), divergence detection, and the `for`/`while`/`repeat`
+    loops driving the environment's fixed point
   - `typecheck/environment.rs` — the variable-slot environment: bind/lookup, undo-logged entry
     writes, branch joins, captured-write notes, and the loop fixed point
   - `typecheck/unify.rs` — the unification core: variable allocation (fresh and rigid), the
