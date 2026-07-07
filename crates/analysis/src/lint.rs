@@ -68,6 +68,7 @@ fn push_lint(
         code: DiagnosticCode::Lint(lint),
         message: message.into(),
         range,
+        related: Vec::new(),
     });
 }
 

@@ -330,6 +330,20 @@ pub struct Diagnostic {
     pub code: DiagnosticCode,
     pub message: String,
     pub range: Range,
+    // Companion locations for diagnostics whose story spans sites (the other definition an
+    // overwrite warning refers to, a duplicate's sibling declaration). Rendered as `note:` lines
+    // in CLI output and mapped to LSP related information in the editor.
+    pub related: Vec<RelatedLocation>,
+}
+
+// One companion location of a diagnostic, possibly in another document. Carries the document's
+// path (not an id) so every consumer — CLI rendering, the LSP conversion's URI mapping — can
+// resolve it without a pipeline-specific lookup table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelatedLocation {
+    pub path: std::path::PathBuf,
+    pub range: Range,
+    pub message: String,
 }
 
 impl Diagnostic {
@@ -339,6 +353,7 @@ impl Diagnostic {
             code: DiagnosticCode::Lint(lint),
             message: message.into(),
             range,
+            related: Vec::new(),
         }
     }
 
@@ -348,6 +363,7 @@ impl Diagnostic {
             code: DiagnosticCode::Lint(lint),
             message: message.into(),
             range,
+            related: Vec::new(),
         }
     }
 
@@ -357,6 +373,7 @@ impl Diagnostic {
             code: DiagnosticCode::Naming,
             message: message.into(),
             range,
+            related: Vec::new(),
         }
     }
 
@@ -366,6 +383,7 @@ impl Diagnostic {
             code: DiagnosticCode::Unresolved,
             message: message.into(),
             range,
+            related: Vec::new(),
         }
     }
 
@@ -383,6 +401,7 @@ impl Diagnostic {
             code: DiagnosticCode::Naming,
             message: message.into(),
             range,
+            related: Vec::new(),
         }
     }
 
@@ -392,6 +411,7 @@ impl Diagnostic {
             code: DiagnosticCode::Unused,
             message: message.into(),
             range,
+            related: Vec::new(),
         }
     }
 
@@ -406,6 +426,7 @@ impl Diagnostic {
             code: DiagnosticCode::SyntaxError,
             message,
             range,
+            related: Vec::new(),
         }
     }
 
@@ -415,6 +436,7 @@ impl Diagnostic {
             code: DiagnosticCode::TypeError,
             message: message.into(),
             range,
+            related: Vec::new(),
         }
     }
 
@@ -424,6 +446,7 @@ impl Diagnostic {
             code: DiagnosticCode::Strict,
             message: message.into(),
             range,
+            related: Vec::new(),
         }
     }
 
@@ -433,6 +456,7 @@ impl Diagnostic {
             code: DiagnosticCode::AnnotationError,
             message: message.into(),
             range,
+            related: Vec::new(),
         }
     }
 
@@ -803,7 +827,7 @@ impl Diagnostic {
         let end = self.range.end_point;
         let excerpt = excerpt_for_range(source, self.range);
 
-        format!(
+        let mut rendered = format!(
             "{severity}[{code}] {message}\n--> {start_line}:{start_column}-{end_line}:{end_column}\n{excerpt}\n",
             severity = self.severity,
             code = self.code,
@@ -813,7 +837,17 @@ impl Diagnostic {
             end_line = end.row + 1,
             end_column = end.column + 1,
             excerpt = excerpt,
-        )
+        );
+        for related in &self.related {
+            rendered.push_str(&format!(
+                "note: {message} --> {path}:{line}:{column}\n",
+                message = related.message,
+                path = related.path.display(),
+                line = related.range.start_point.row + 1,
+                column = related.range.start_point.column + 1,
+            ));
+        }
+        rendered
     }
 }
 

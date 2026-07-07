@@ -421,6 +421,7 @@ pub fn unused_parameter_diagnostics(
                 ),
                 message: format!("parameter `{name}` is never used."),
                 range: unused.range,
+                related: Vec::new(),
             }
         })
         .collect()
