@@ -86,7 +86,7 @@ impl InferenceState {
             self.set_environment_entry(
                 refinement.key,
                 Some(Binding {
-                    type_scheme: TypeScheme::monomorphic(true_type.clone()),
+                    type_scheme: std::sync::Arc::new(TypeScheme::monomorphic(true_type.clone())),
                     range: refinement.range,
                     unsupplied: refinement.true_unsupplied,
                 }),
@@ -115,7 +115,9 @@ impl InferenceState {
                     self.set_environment_entry(
                         refinement.key,
                         Some(Binding {
-                            type_scheme: TypeScheme::monomorphic(false_type.clone()),
+                            type_scheme: std::sync::Arc::new(TypeScheme::monomorphic(
+                                false_type.clone(),
+                            )),
                             range: refinement.range,
                             unsupplied: refinement.false_unsupplied,
                         }),
@@ -142,7 +144,9 @@ impl InferenceState {
                     bindings.insert(
                         refinement.key,
                         Some(Binding {
-                            type_scheme: TypeScheme::monomorphic(false_type.clone()),
+                            type_scheme: std::sync::Arc::new(TypeScheme::monomorphic(
+                                false_type.clone(),
+                            )),
                             range: refinement.range,
                             unsupplied: refinement.false_unsupplied,
                         }),

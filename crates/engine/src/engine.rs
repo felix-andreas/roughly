@@ -399,29 +399,13 @@ impl<G: QueryGroup> Engine<G> {
 
     fn validate_inner(&self, key: &G::Key) -> Revision {
         let revision = self.revision.get();
-        let snapshot = self.slots.borrow().get(key).map(|slot| {
-            // The dependency list is cloned only when we will actually walk it (a deep-validation,
-            // below). A green-by-revision or input slot returns its `changed_at` without touching its
-            // deps, so cloning them here would be pure waste — and ruinous waste at that: a high
-            // fan-in fold (e.g. an all-files index with O(package) dependencies) is reached on the
-            // validation path of O(package) callers, and cloning its whole dependency vector once per
-            // caller turns a linear revalidation into a quadratic one. Clone lazily to keep validation
-            // proportional to the work actually required.
-            let needs_walk = !slot.is_input && slot.verified_at != revision;
-            let dependencies = if needs_walk {
-                slot.dependencies.clone()
-            } else {
-                Vec::new()
-            };
-            (
-                slot.is_input,
-                slot.verified_at,
-                slot.changed_at,
-                dependencies,
-            )
-        });
+        let snapshot = self
+            .slots
+            .borrow()
+            .get(key)
+            .map(|slot| (slot.is_input, slot.verified_at, slot.changed_at));
 
-        let Some((is_input, verified_at, changed_at, dependencies)) = snapshot else {
+        let Some((is_input, verified_at, changed_at)) = snapshot else {
             // No slot: a derived query never computed before. (Inputs are always set before first read.)
             return self.recompute(key);
         };
@@ -442,10 +426,30 @@ impl<G: QueryGroup> Engine<G> {
         // the fold before any dead per-file edge is validated; the recompute then folds the smaller file
         // set and drops the edge. The cutoff decision is unaffected: we recompute iff some dependency
         // changed after `verified_at`, exactly as taking the max would decide.
-        for dependency in &dependencies {
-            if self.validate(dependency) > verified_at {
+        //
+        // The walk is index-based, re-borrowing the slot table and cloning ONE dependency key per
+        // step, because the borrow cannot be held across the recursive `validate` (a dependency's
+        // recompute mutates the table). Cloning the whole dependency vector up front instead would
+        // allocate per deep-validated slot — and for a high fan-in fold (an all-files index with
+        // O(package) dependencies) that one clone is O(package) by itself. The list cannot change
+        // under the walk: only `recompute(key)` rewrites it, and re-entering `key` from its own
+        // dependency chain is a cycle the accidental-cycle guard already rejects.
+        let mut dependency_index = 0;
+        loop {
+            let dependency = {
+                let slots = self.slots.borrow();
+                let Some(slot) = slots.get(key) else {
+                    break;
+                };
+                match slot.dependencies.get(dependency_index) {
+                    Some(dependency) => dependency.clone(),
+                    None => break,
+                }
+            };
+            if self.validate(&dependency) > verified_at {
                 return self.recompute(key);
             }
+            dependency_index += 1;
         }
         // Early cutoff: nothing we read has changed since we were last verified.
         if let Some(slot) = self.slots.borrow_mut().get_mut(key) {

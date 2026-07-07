@@ -48,12 +48,29 @@ pub enum InferenceEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Binding {
-    pub type_scheme: TypeScheme,
+    // Shared, not owned: the stub-laden template environment is cloned per whole-file inference,
+    // and sharing the schemes turns that clone into refcount bumps instead of deep copies of
+    // hundreds of stub signatures.
+    pub type_scheme: std::sync::Arc<TypeScheme>,
     pub range: Range,
     // The slot is a defaultless parameter on a control-flow edge where `missing(name)` held, so a
     // read would fail at run time (R: "argument is missing, with no default"). Set only by the
     // missing()-guard refinement; any write to the slot clears it.
     pub unsupplied: bool,
+}
+
+impl Binding {
+    pub fn new(type_scheme: TypeScheme, range: Range) -> Binding {
+        Binding {
+            type_scheme: std::sync::Arc::new(type_scheme),
+            range,
+            unsupplied: false,
+        }
+    }
+
+    pub fn monomorphic(core_type: CoreType, range: Range) -> Binding {
+        Binding::new(TypeScheme::monomorphic(core_type), range)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -312,7 +329,9 @@ pub struct InferenceState {
     // Ordered overload sets for stub names (declaration order). A call whose callee is one of
     // these names tries each scheme with a probe and commits the first that accepts the
     // arguments; every non-call use of the name sees the first scheme (the environment binding).
-    overload_sets: BTreeMap<Symbol, Vec<TypeScheme>>,
+    // Arc'd for the same template-clone reason as `Binding.type_scheme`: the sets are read-only
+    // after seeding, and the per-inference clone must not deep-copy every overloaded signature.
+    overload_sets: BTreeMap<Symbol, std::sync::Arc<Vec<TypeScheme>>>,
     // Non-zero while matching arguments against a probed overload candidate. The whole-number
     // literal courtesy (`1` accepted where `integer` is expected) is disabled during probes: the
     // literal is genuinely a double at runtime, so letting it match an integer candidate would
@@ -929,7 +948,7 @@ impl InferenceState {
                     .or_else(|| self.lookup_global_name(symbol))?;
                 Some(ExportedValue {
                     symbol,
-                    type_scheme: binding.type_scheme.clone(),
+                    type_scheme: (*binding.type_scheme).clone(),
                     range: binding.range,
                 })
             })
@@ -1732,7 +1751,7 @@ impl InferenceState {
         let current = self.environment.get(&key).cloned();
         let written_binding = Binding {
             unsupplied: false,
-            type_scheme: TypeScheme::monomorphic(written),
+            type_scheme: std::sync::Arc::new(TypeScheme::monomorphic(written)),
             range: expression.range,
         };
         let joined = self.join_environment_entries(current, Some(written_binding), expression)?;

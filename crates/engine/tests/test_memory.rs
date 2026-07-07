@@ -38,12 +38,18 @@ use {
 struct CountingAllocator;
 
 static LIVE_BYTES: AtomicI64 = AtomicI64::new(0);
+// Cumulative churn: every allocation ever made (count and bytes), never decremented. The *delta*
+// across an operation is its allocation churn — the measure the per-edit churn bench reports.
+static TOTAL_ALLOCATIONS: AtomicI64 = AtomicI64::new(0);
+static TOTAL_ALLOCATED_BYTES: AtomicI64 = AtomicI64::new(0);
 
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let pointer = unsafe { System.alloc(layout) };
         if !pointer.is_null() {
             LIVE_BYTES.fetch_add(layout.size() as i64, Ordering::Relaxed);
+            TOTAL_ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+            TOTAL_ALLOCATED_BYTES.fetch_add(layout.size() as i64, Ordering::Relaxed);
         }
         pointer
     }
@@ -59,6 +65,14 @@ static GLOBAL: CountingAllocator = CountingAllocator;
 
 fn live_bytes() -> i64 {
     LIVE_BYTES.load(Ordering::Relaxed)
+}
+
+fn total_allocations() -> i64 {
+    TOTAL_ALLOCATIONS.load(Ordering::Relaxed)
+}
+
+fn total_allocated_bytes() -> i64 {
+    TOTAL_ALLOCATED_BYTES.load(Ordering::Relaxed)
 }
 
 // ----------------------------------------------------------------------------------------------------
@@ -299,4 +313,69 @@ fn memory_new_vs_old_resident() {
         );
     }
     println!();
+}
+
+// ----------------------------------------------------------------------------------------------------
+// Per-edit allocation churn (heavy; run manually). Reports allocations and allocated bytes per warm
+// body-edit recheck — the churn the design bar says to minimize. Not asserted: raw counts move with
+// rustc/std versions; the value is the printed trend when a change claims to reduce churn.
+// ----------------------------------------------------------------------------------------------------
+
+#[test]
+#[ignore = "churn benchmark; run manually with --release --nocapture --test-threads=1"]
+fn churn_per_body_edit() {
+    const TARGET_LOC: usize = 10_000;
+    const ROUNDS: usize = 20;
+    let file_count = file_count_for_loc(TARGET_LOC);
+    let mut engine = build_and_warm_new_engine(file_count);
+    let edit_file = {
+        let middle = file_count / 2;
+        (middle - (middle % CHAIN_LEN) + CHAIN_LEN / 2) as FileId
+    };
+    let referrer = edit_file + 1;
+
+    // One untimed warmup round per parity so both edit directions have warm memos.
+    for round in 0..2 {
+        engine.set_input(
+            Key::SourceText(edit_file),
+            parse_source_input(&generate_edited_source(edit_file as usize, round % 2 == 0)),
+        );
+        let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(edit_file));
+        let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(referrer));
+    }
+
+    let allocations_before = total_allocations();
+    let bytes_before = total_allocated_bytes();
+    for round in 0..ROUNDS {
+        engine.set_input(
+            Key::SourceText(edit_file),
+            parse_source_input(&generate_edited_source(edit_file as usize, round % 2 == 0)),
+        );
+        let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(edit_file));
+        let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(referrer));
+    }
+    let allocations = (total_allocations() - allocations_before) / ROUNDS as i64;
+    let bytes = (total_allocated_bytes() - bytes_before) / ROUNDS as i64;
+    println!(
+        "churn per body edit at {} LoC: {allocations} allocations, {} KiB allocated",
+        total_loc(file_count),
+        bytes / 1024,
+    );
+}
+
+// The benchmark's toggling body edit: flips every function's return literal, changing each scheme
+// so the referrer genuinely re-typechecks (the same shape `test_benchmark.rs` measures).
+fn generate_edited_source(index: usize, returns_double: bool) -> String {
+    let literal = if returns_double { "1.0" } else { "1L" };
+    let mut source = String::new();
+    for item in 0..ITEMS_PER_FILE {
+        source.push_str(&format!("g_{index}_{item} <- function() {literal}\n"));
+    }
+    if !index.is_multiple_of(CHAIN_LEN) {
+        let previous = index - 1;
+        for item in 0..ITEMS_PER_FILE {
+            source.push_str(&format!("u_{index}_{item} <- g_{previous}_{item}()\n"));
+        }
+    }
+    source
 }

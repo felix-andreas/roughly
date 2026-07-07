@@ -26,11 +26,7 @@ impl InferenceState {
     pub fn bind_global_scheme(&mut self, symbol: Symbol, type_scheme: TypeScheme, range: Range) {
         self.set_environment_entry(
             EnvironmentKey::Global(symbol),
-            Some(Binding {
-                type_scheme,
-                range,
-                unsupplied: false,
-            }),
+            Some(Binding::new(type_scheme, range)),
         );
     }
 
@@ -51,11 +47,7 @@ impl InferenceState {
     ) {
         self.set_environment_entry(
             EnvironmentKey::Local(binding_id),
-            Some(Binding {
-                type_scheme,
-                range,
-                unsupplied: false,
-            }),
+            Some(Binding::new(type_scheme, range)),
         );
     }
 
@@ -200,7 +192,7 @@ impl InferenceState {
                     self.resolve(joined)?
                 };
                 Ok(Some(Binding {
-                    type_scheme: TypeScheme::monomorphic(joined),
+                    type_scheme: std::sync::Arc::new(TypeScheme::monomorphic(joined)),
                     range,
                     unsupplied,
                 }))
@@ -217,7 +209,8 @@ impl InferenceState {
     }
 
     pub fn bind_overload_set(&mut self, symbol: Symbol, schemes: Vec<TypeScheme>) {
-        self.overload_sets.insert(symbol, schemes);
+        self.overload_sets
+            .insert(symbol, std::sync::Arc::new(schemes));
     }
 
     pub fn lookup_global_name(&self, symbol: Symbol) -> Option<&Binding> {
@@ -376,11 +369,7 @@ impl InferenceState {
             if let Some((key, item_type, range)) = loop_variable {
                 self.set_environment_entry(
                     *key,
-                    Some(Binding {
-                        type_scheme: TypeScheme::monomorphic(item_type.clone()),
-                        range: *range,
-                        unsupplied: false,
-                    }),
+                    Some(Binding::monomorphic(item_type.clone(), *range)),
                 );
             }
             let result = iterate(self);
@@ -418,14 +407,7 @@ impl InferenceState {
                     .and_then(|value| value.as_ref())
                     .map(|binding| binding.range)
                     .unwrap_or(expression.range);
-                entry.insert(
-                    *key,
-                    Some(Binding {
-                        type_scheme: TypeScheme::monomorphic(CoreType::Unknown),
-                        range,
-                        unsupplied: false,
-                    }),
-                );
+                entry.insert(*key, Some(Binding::monomorphic(CoreType::Unknown, range)));
                 let symbol = match key {
                     EnvironmentKey::Global(symbol) => Some(*symbol),
                     EnvironmentKey::Local(binding_id) => resolution_context.and_then(|context| {
