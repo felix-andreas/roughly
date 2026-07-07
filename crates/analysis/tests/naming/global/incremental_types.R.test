@@ -22,9 +22,10 @@ TypeDefinition(Person = integer)
 Assign(person@b0)
   Integer(1L)
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:26
 | #: @type Person {integer}
+note: another definition is here. --> R/c.R:1:1
 #---- R/b.R
 #: Person
 value <- 1L
@@ -43,9 +44,10 @@ TypeDefinition(Person = double)
 Assign(other@b2)
   Integer(2L)
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:25
 | #: @type Person {double}
+note: another definition is here. --> R/a.R:1:1
 #.... second_definer_dropped
 #---- delete R/c.R
 #---- R/a.R

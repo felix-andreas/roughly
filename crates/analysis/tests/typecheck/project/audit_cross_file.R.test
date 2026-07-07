@@ -230,15 +230,17 @@ No diagnostics.
 #---- R/a.R
 #: @type Shape {integer}
 #++++
-error[syntax-error] Syntax Error: invalid semantics: type name `Shape` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Shape` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:25
 | #: @type Shape {integer}
+note: another definition is here. --> R/b.R:1:1
 #---- R/b.R
 #: @alias Shape {character}
 #++++
-error[syntax-error] Syntax Error: invalid semantics: type name `Shape` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Shape` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:28
 | #: @alias Shape {character}
+note: another definition is here. --> R/a.R:1:1
 
 #==== audit_cross_file_scripts
 #---- script_polymorphic_package_function

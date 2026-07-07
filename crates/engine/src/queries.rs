@@ -176,6 +176,19 @@ pub enum Key {
     /// Value-eq per name (the overwrite analog of [`Key::DefiningItem`]): adding or removing a definer
     /// of `X` re-runs only `X`'s co-definers' overwrite diagnostics.
     DefinerOrder(Symbol),
+    /// The package-wide ordered *type* definer lists: each `@type`/`@alias` name mapped to the files
+    /// declaring it, in `ProjectFiles` (path) order. The type analog of [`Key::PackageCandidateOrder`],
+    /// folded from [`Key::FileTypeDefinitions`] names over package files. Value-eq.
+    TypeCandidateOrder,
+    /// The firewall projecting one type name's ordered definer list out of [`Key::TypeCandidateOrder`].
+    /// Value-eq per name: moving a definition of type `X` between files re-runs only `X`'s
+    /// co-definers' duplicate-type diagnostics.
+    TypeDefinerOrder(Symbol),
+    /// One file's `@type`/`@alias` declaration sites for one name, in declaration order. The narrow
+    /// per-(file, name) fact behind duplicate-type notes, the type analog of [`Key::TopLevelSite`]:
+    /// its value moves only when those declaration ranges move.
+    /// (`analysis::naming::document_type_definition_sites`.)
+    TypeDefinitionSites(FileId, Symbol),
     /// One file's package-naming diagnostics: could-not-resolve, builtin shadow, overwrite pairs,
     /// duplicate-type, and type-reference. Reproduces `analysis::naming::package_document_diagnostics`
     /// byte-for-byte (same wording, ranges, severities, codes). Depends on the file's own naming plus
@@ -776,6 +789,39 @@ impl QueryGroup for RoughlyQueries {
                 let order =
                     engine.fetch::<BTreeMap<Symbol, Vec<FileId>>>(Key::PackageCandidateOrder);
                 Stored::new(order.get(name).cloned().unwrap_or_default())
+            }
+
+            Key::TypeCandidateOrder => {
+                // Path-ordered type definer lists: append each package file (in `ProjectFiles`
+                // order) onto the definer list of every type name it declares. Reads the
+                // `FileTypeDefinitions` declarations-only cutoff, so a body edit cuts off here.
+                let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
+                let mut order: BTreeMap<Symbol, Vec<FileId>> = BTreeMap::new();
+                for file in files.iter() {
+                    let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
+                    if *kind != DocumentKind::Package {
+                        continue;
+                    }
+                    let definitions = engine.fetch::<BTreeMap<Symbol, Vec<EngineTypeInfo>>>(
+                        Key::FileTypeDefinitions(*file),
+                    );
+                    for name in definitions.keys() {
+                        order.entry(*name).or_default().push(*file);
+                    }
+                }
+                Stored::new(order)
+            }
+
+            Key::TypeDefinerOrder(name) => {
+                let order = engine.fetch::<BTreeMap<Symbol, Vec<FileId>>>(Key::TypeCandidateOrder);
+                Stored::new(order.get(name).cloned().unwrap_or_default())
+            }
+
+            Key::TypeDefinitionSites(file, symbol) => {
+                let module = engine.fetch::<Module>(Key::Lower(*file));
+                Stored::new(analysis::naming::document_type_definition_sites(
+                    &module, *symbol,
+                ))
             }
 
             Key::PackageNamingDiagnostics(file) => {
@@ -1409,6 +1455,26 @@ fn package_naming_diagnostics(
             }
         }
     }
+    // Duplicate-note inputs: every declaration site of each duplicated name this file declares, in
+    // package walk order, plus the definers' file names — so each duplicate-type error can point at
+    // its nearest sibling declaration. The optional file-name fetches are tombstone hardening, like
+    // the overwrite notes' below.
+    let mut duplicate_type_sites: BTreeMap<Symbol, Vec<(FileId, Range)>> = BTreeMap::new();
+    let mut type_definer_names: BTreeMap<FileId, Option<PathBuf>> = BTreeMap::new();
+    for name in &duplicate_type_names {
+        let definers = engine.fetch::<Vec<FileId>>(Key::TypeDefinerOrder(*name));
+        let mut sites = Vec::new();
+        for definer in definers.iter() {
+            let ranges = engine.fetch::<Vec<Range>>(Key::TypeDefinitionSites(*definer, *name));
+            sites.extend(ranges.iter().map(|range| (*definer, *range)));
+            type_definer_names.entry(*definer).or_insert_with(|| {
+                engine
+                    .fetch_optional::<PathBuf>(Key::FileName(*definer))
+                    .map(|name| (*name).clone())
+            });
+        }
+        duplicate_type_sites.insert(*name, sites);
+    }
 
     // All cross-file fetches are done; hold the interner and build the rendered diagnostics.
     let lowering = group.lowering.borrow();
@@ -1418,19 +1484,48 @@ fn package_naming_diagnostics(
     // (T)/(B)/(A) apply only to package documents: scripts define no package globals and their type
     // declarations are local.
     if !is_script {
-        // (T) duplicate-type: one per declaration whose name is defined by more than one package site.
+        // (T) duplicate-type: one per declaration whose name is defined by more than one package
+        // site, each pointing at its nearest sibling declaration (the previous site in package
+        // order; the first site points at the next).
+        let mut type_occurrences_seen: BTreeMap<Symbol, usize> = BTreeMap::new();
         for definition in &module.definitions {
-            if duplicate_type_names.contains(&definition.definition.name) {
-                let name = interner
-                    .resolve(definition.definition.name)
-                    .unwrap_or("<unknown>");
-                diagnostics.push(Diagnostic::syntax_error(
-                    definition.range,
-                    format!(
-                        "invalid semantics: type name `{name}` is already defined by another top-level @type or @alias declaration in this package."
-                    ),
-                ));
+            let name_symbol = definition.definition.name;
+            let occurrence_index = *type_occurrences_seen.entry(name_symbol).or_default();
+            *type_occurrences_seen
+                .get_mut(&name_symbol)
+                .expect("occurrence counter exists") += 1;
+            if !duplicate_type_names.contains(&name_symbol) {
+                continue;
             }
+            let name = interner.resolve(name_symbol).unwrap_or("<unknown>");
+            let mut diagnostic = Diagnostic::annotation_error(
+                definition.range,
+                format!(
+                    "type name `{name}` is already defined by another top-level @type or @alias declaration in this package."
+                ),
+            );
+            if let Some(sites) = duplicate_type_sites.get(&name_symbol) {
+                let position = sites
+                    .iter()
+                    .position(|(definer, _)| *definer == file)
+                    .map(|start| start + occurrence_index)
+                    .unwrap_or(0);
+                let neighbour = if position > 0 {
+                    position - 1
+                } else {
+                    position + 1
+                };
+                if let Some((neighbour_file, range)) = sites.get(neighbour)
+                    && let Some(Some(path)) = type_definer_names.get(neighbour_file)
+                {
+                    diagnostic.related = vec![analysis::diagnostic::RelatedLocation {
+                        path: path.clone(),
+                        range: *range,
+                        message: "another definition is here.".to_owned(),
+                    }];
+                }
+            }
+            diagnostics.push(diagnostic);
         }
 
         // (B) builtin shadow + (A) overwrite pairs, per top-level assignment. Overwrite combines the

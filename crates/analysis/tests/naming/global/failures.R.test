@@ -119,25 +119,28 @@ note: the earlier binding is here. --> R/b.R:1:1
 #++++
 TypeDefinition(Person = integer)
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:26
 | #: @type Person {integer}
+note: another definition is here. --> R/b.R:1:1
 #---- R/b.R
 #: @type Person {double}
 #++++
 TypeDefinition(Person = double)
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:25
 | #: @type Person {double}
+note: another definition is here. --> R/a.R:1:1
 #---- R/c.R
 #: @alias Person {character}
 #++++
 TypeAlias(Person = character)
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:29
 | #: @alias Person {character}
+note: another definition is here. --> R/b.R:1:1
 
 #==== mixed_package_failures
 #---- later_package_winner_does_not_beat_local_shadow

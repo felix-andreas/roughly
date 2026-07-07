@@ -222,13 +222,15 @@ error[type-error] I cannot construct an infinite type: T occurs inside `fn(T) ->
 #: @alias Person {integer}
 value <- 1L
 #++++
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:40
 | #: @type Person {list{name: character}}
+note: another definition is here. --> R/main.R:2:1
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 2:1-2:27
 | #: @alias Person {integer}
+note: another definition is here. --> R/main.R:1:1
 
 #---- recovery_unknown_no_cascade
 #: fn(count: integer) -> integer

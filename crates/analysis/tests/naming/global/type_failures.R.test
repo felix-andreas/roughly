@@ -10,13 +10,15 @@ TypeDefinition(Person = double)
 Assign(value@b0)
   Integer(1L)
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:26
 | #: @type Person {integer}
+note: another definition is here. --> R/main.R:2:1
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 2:1-2:25
 | #: @type Person {double}
+note: another definition is here. --> R/main.R:1:1
 
 #---- duplicate_alias_name
 #---- R/main.R
@@ -29,13 +31,15 @@ TypeAlias(Person = double)
 Assign(value@b0)
   Integer(1L)
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:27
 | #: @alias Person {integer}
+note: another definition is here. --> R/main.R:2:1
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 2:1-2:26
 | #: @alias Person {double}
+note: another definition is here. --> R/main.R:1:1
 
 #---- alias_collides_with_nominal_type_name
 #---- R/main.R
@@ -48,13 +52,15 @@ TypeAlias(Person = double)
 Assign(value@b0)
   Integer(1L)
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:26
 | #: @type Person {integer}
+note: another definition is here. --> R/main.R:2:1
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 2:1-2:26
 | #: @alias Person {double}
+note: another definition is here. --> R/main.R:1:1
 
 #---- nominal_type_collides_with_alias_name
 #---- R/main.R
@@ -67,13 +73,15 @@ TypeDefinition(Person = double)
 Assign(value@b0)
   Integer(1L)
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:27
 | #: @alias Person {integer}
+note: another definition is here. --> R/main.R:2:1
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 2:1-2:25
 | #: @type Person {double}
+note: another definition is here. --> R/main.R:1:1
 
 #---- definition_unknown_type
 #---- R/main.R
@@ -94,17 +102,19 @@ error[naming] I could not resolve type `Person`.
 #++++
 TypeDefinition(Person = integer)
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:26
 | #: @type Person {integer}
+note: another definition is here. --> R/b.R:1:1
 #---- R/b.R
 #: @type Person {double}
 #++++
 TypeDefinition(Person = double)
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:25
 | #: @type Person {double}
+note: another definition is here. --> R/a.R:1:1
 
 #---- duplicate_alias_name_across_files
 #---- R/a.R
@@ -112,17 +122,19 @@ error[syntax-error] Syntax Error: invalid semantics: type name `Person` is alrea
 #++++
 TypeAlias(Person = integer)
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:27
 | #: @alias Person {integer}
+note: another definition is here. --> R/b.R:1:1
 #---- R/b.R
 #: @alias Person {double}
 #++++
 TypeAlias(Person = double)
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:26
 | #: @alias Person {double}
+note: another definition is here. --> R/a.R:1:1
 
 #---- nominal_alias_collision_across_files
 #---- R/a.R
@@ -130,17 +142,19 @@ error[syntax-error] Syntax Error: invalid semantics: type name `Person` is alrea
 #++++
 TypeDefinition(Person = integer)
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:26
 | #: @type Person {integer}
+note: another definition is here. --> R/b.R:1:1
 #---- R/b.R
 #: @alias Person {double}
 #++++
 TypeAlias(Person = double)
 
-error[syntax-error] Syntax Error: invalid semantics: type name `Person` is already defined by another top-level @type or @alias declaration in this package.
+error[annotation-error] type name `Person` is already defined by another top-level @type or @alias declaration in this package.
 --> 1:1-1:26
 | #: @alias Person {double}
+note: another definition is here. --> R/a.R:1:1
 
 #==== annotations
 #---- annotation_unknown_type

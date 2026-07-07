@@ -138,6 +138,7 @@ pub(crate) fn rebuild_package_naming(
     stub_library: &StubLibrary,
 ) -> PackageNamingComputation {
     let (types, duplicate_type_names) = build_type_index(package_modules);
+    let type_candidate_sites = build_type_candidate_sites(package_modules);
     let candidate_order = build_candidate_order(package_modules, locals);
     let candidate_sites = build_candidate_sites(package_modules, locals);
     let global_bindings = winners_from_candidate_order(&candidate_order);
@@ -158,6 +159,7 @@ pub(crate) fn rebuild_package_naming(
                 global_bindings: &global_bindings,
                 candidate_order: &candidate_order,
                 candidate_sites: &candidate_sites,
+                type_candidate_sites: &type_candidate_sites,
                 document_paths,
                 interner,
                 stub_library,
@@ -184,6 +186,7 @@ pub(crate) fn rebuild_package_naming(
                 global_bindings: &global_bindings,
                 candidate_order: &candidate_order,
                 candidate_sites: &candidate_sites,
+                type_candidate_sites: &type_candidate_sites,
                 document_paths,
                 interner,
                 stub_library,
@@ -220,6 +223,9 @@ pub(crate) struct PackageDocumentDiagnosticContext<'a> {
     // Parallel to `candidate_order` (same membership and order), each candidate's binding site, so
     // the overwrite warnings can attach a note pointing at the neighbouring document's binding.
     pub candidate_sites: &'a BTreeMap<Symbol, Vec<(DocumentId, Range)>>,
+    // Every package `@type`/`@alias` declaration site per name, in package walk order (declaration
+    // order within a document), so a duplicate-type error can point at a sibling declaration.
+    pub type_candidate_sites: &'a BTreeMap<Symbol, Vec<(DocumentId, Range)>>,
     pub document_paths: &'a HashMap<DocumentId, PathBuf>,
     pub interner: &'a Interner,
     // The stdlib stub corpus (base-environment names). A reference to a stub name resolves to its
@@ -237,21 +243,59 @@ pub(crate) fn package_document_diagnostics(
     // (A)/(B)/(T) apply only to package documents. Scripts define no package globals and their type
     // declarations are local, so they contribute only (C) and (D).
     if !context.is_script {
-        for definition in &context.module.definitions {
-            if context
-                .duplicate_type_names
-                .contains(&definition.definition.name)
-            {
-                let name = interner
-                    .resolve(definition.definition.name)
-                    .unwrap_or("<unknown>");
-                diagnostics.push(Diagnostic::syntax_error(
-                    definition.range,
-                    format!(
-                        "invalid semantics: type name `{name}` is already defined by another top-level @type or @alias declaration in this package."
-                    ),
-                ));
+        let related_site = |document_id: DocumentId, range: Range, message: &str| {
+            let path = context
+                .document_paths
+                .get(&document_id)
+                .cloned()
+                .unwrap_or_default();
+            crate::diagnostic::RelatedLocation {
+                path,
+                range,
+                message: message.to_owned(),
             }
+        };
+
+        // (T) duplicate-type: one per declaration whose name is defined by more than one package
+        // site, each pointing at its nearest sibling declaration (the previous site in package
+        // order; the first site points at the next).
+        let mut type_occurrences_seen = BTreeMap::<Symbol, usize>::new();
+        for definition in &context.module.definitions {
+            let name_symbol = definition.definition.name;
+            let occurrence_index = *type_occurrences_seen.entry(name_symbol).or_default();
+            *type_occurrences_seen
+                .get_mut(&name_symbol)
+                .expect("occurrence counter exists") += 1;
+            if !context.duplicate_type_names.contains(&name_symbol) {
+                continue;
+            }
+            let name = interner.resolve(name_symbol).unwrap_or("<unknown>");
+            let mut diagnostic = Diagnostic::annotation_error(
+                definition.range,
+                format!(
+                    "type name `{name}` is already defined by another top-level @type or @alias declaration in this package."
+                ),
+            );
+            if let Some(sites) = context.type_candidate_sites.get(&name_symbol) {
+                let position = sites
+                    .iter()
+                    .position(|(document, _)| *document == context.document_id)
+                    .map(|start| start + occurrence_index)
+                    .unwrap_or(0);
+                let neighbour = if position > 0 {
+                    position - 1
+                } else {
+                    position + 1
+                };
+                if let Some((document, range)) = sites.get(neighbour) {
+                    diagnostic.related = vec![related_site(
+                        *document,
+                        *range,
+                        "another definition is here.",
+                    )];
+                }
+            }
+            diagnostics.push(diagnostic);
         }
 
         // Overwrite warnings are per top-level *assignment*, not per document: `x <- 1; x <- 2` in one
@@ -275,20 +319,6 @@ pub(crate) fn package_document_diagnostics(
                     .push(binding.range);
             }
         }
-        let related_site =
-            |target: Symbol, document_id: DocumentId, range: Range, message: &str| {
-                let path = context
-                    .document_paths
-                    .get(&document_id)
-                    .cloned()
-                    .unwrap_or_default();
-                let _ = target;
-                crate::diagnostic::RelatedLocation {
-                    path,
-                    range,
-                    message: message.to_owned(),
-                }
-            };
         let neighbour_document_site = |target: Symbol, position: usize| {
             context
                 .candidate_sites
@@ -364,7 +394,6 @@ pub(crate) fn package_document_diagnostics(
                 let related = earlier
                     .map(|(document_id, range)| {
                         vec![related_site(
-                            target,
                             document_id,
                             range,
                             "the earlier binding is here.",
@@ -394,7 +423,6 @@ pub(crate) fn package_document_diagnostics(
                 let related = later
                     .map(|(document_id, range)| {
                         vec![related_site(
-                            target,
                             document_id,
                             range,
                             "the later binding is here.",
@@ -855,6 +883,36 @@ pub(crate) fn build_type_index(
         apply_type_definition_outcome(*symbol, sites, &mut types, &mut duplicate_type_names);
     }
     (types, duplicate_type_names)
+}
+
+// Every package `@type`/`@alias` declaration site per name, in package walk order (declaration
+// order within a document) — the same membership as `build_type_index`'s fold, kept as a separate
+// value so the info-only index (an engine value-equality cutoff) never becomes range-sensitive.
+// A duplicate-type error points its note at the declaration's nearest sibling in this list.
+pub(crate) fn build_type_candidate_sites(
+    package_modules: &[(DocumentId, &Module)],
+) -> BTreeMap<Symbol, Vec<(DocumentId, Range)>> {
+    let mut sites = BTreeMap::<Symbol, Vec<(DocumentId, Range)>>::new();
+    for (document_id, module) in package_modules {
+        for definition in &module.definitions {
+            sites
+                .entry(definition.definition.name)
+                .or_default()
+                .push((*document_id, definition.range));
+        }
+    }
+    sites
+}
+
+// One document's `@type`/`@alias` declaration sites for one name, in declaration order — the
+// per-file slice of `build_type_candidate_sites`, exposed for the engine's per-(file, name) query.
+pub fn document_type_definition_sites(module: &Module, name: Symbol) -> Vec<Range> {
+    module
+        .definitions
+        .iter()
+        .filter(|definition| definition.definition.name == name)
+        .map(|definition| definition.range)
+        .collect()
 }
 
 // The package type definitions a single document contributes: for each `@type`/`@alias` name, the
