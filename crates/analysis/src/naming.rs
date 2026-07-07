@@ -427,18 +427,18 @@ pub fn namespace_read_diagnostic(
     read: &NamespaceRead,
     range: Range,
 ) -> Option<Diagnostic> {
-    let namespace = interner.resolve(read.namespace).unwrap_or("<unknown>");
-    if !stub_library.is_known_namespace(namespace) {
+    let namespace_name = interner.resolve(read.namespace).unwrap_or("<unknown>");
+    if !stub_library.is_known_namespace(read.namespace) {
         return Some(Diagnostic::unresolved_warning(
             range,
-            format!("unknown package namespace `{namespace}`."),
+            format!("unknown package namespace `{namespace_name}`."),
         ));
     }
-    if !stub_library.namespace_exports(namespace, read.name) {
+    if !stub_library.namespace_exports(read.namespace, read.name) {
         let name = interner.resolve(read.name).unwrap_or("<unknown>");
         return Some(Diagnostic::unresolved_warning(
             range,
-            format!("`{name}` is not exported by `{namespace}`."),
+            format!("`{name}` is not exported by `{namespace_name}`."),
         ));
     }
     None

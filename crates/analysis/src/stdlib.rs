@@ -46,6 +46,11 @@ pub struct StubLibrary {
     // range. Seeded under every type-definition environment so a stub (or user annotation) can
     // name them; a project's own `@type`/`@alias` of the same name shadows the stub type.
     type_declarations: BTreeMap<Symbol, Range>,
+    // The names each namespace declares, across every source (shipped and project). This is what
+    // validates `pkg::name`: it is independent of the flat per-name winner fold in `values`,
+    // because a project override winning a name's *type* must not un-export it from its shipped
+    // namespace, and one name may be declared by several namespaces.
+    exports_by_namespace: BTreeMap<Symbol, BTreeSet<Symbol>>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,9 +61,10 @@ struct StubValue {
     // the set in order and commits the first scheme that accepts the arguments.
     schemes: Vec<TypeScheme>,
     range: Range,
-    // The R namespace the stub was declared in (`base`, `stats`, …), or `None` for a project override.
-    // Shown on hover so a stdlib name reads as coming from its package; it does not affect resolution.
-    namespace: Option<&'static str>,
+    // The namespace of the winning declaration (`base`, `stats`, or a project stub's file stem),
+    // shown on hover so the name reads as coming from its package. It does not affect resolution,
+    // and `pkg::name` validation uses `exports_by_namespace`, not this tag.
+    namespace: Option<Symbol>,
 }
 
 impl StubLibrary {
@@ -72,22 +78,33 @@ impl StubLibrary {
         Self::load_with_overrides(interner, &[])
     }
 
-    // Loads the shipped stubs, then folds project-supplied override sources over them: a binding an
-    // override defines replaces the shipped binding of the same name, so a project can correct or extend
-    // the standard-library signatures it sees (a more precise return type, or a name the shipped corpus
-    // omits). Every stub name is interned through the caller's interner, so a user reference and the stub
-    // share one symbol id.
-    pub fn load_with_overrides(interner: &mut Interner, override_sources: &[String]) -> Self {
+    // Loads the shipped stubs, then folds project-supplied stub files over them: a binding a project
+    // file defines replaces the shipped binding of the same name, so a project can correct or extend
+    // the standard-library signatures it sees — or type a third-party package outright. A project
+    // stub file's name declares its namespace (`stubs/dplyr.Rtypes` declares `dplyr`), so
+    // `dplyr::mutate` validates and types like a shipped namespace read. Every stub name is interned
+    // through the caller's interner, so a user reference and the stub share one symbol id.
+    pub fn load_with_overrides(interner: &mut Interner, overrides: &[ProjectStubSource]) -> Self {
         // Types first, across every source: a value declaration may reference a type a later file
         // (or the same file, further down) declares, so harvesting runs against the full set.
         let mut type_declarations = BTreeMap::new();
         let shipped = SHIPPED_STUBS
             .iter()
-            .map(|&(namespace, source)| (Some(namespace), source));
-        let overrides = override_sources
+            .map(|&(namespace, source)| (Some(interner.intern(namespace)), source))
+            .collect::<Vec<_>>();
+        let project = overrides
             .iter()
-            .map(|source| (None, source.as_str()));
-        let sources = shipped.chain(overrides).collect::<Vec<_>>();
+            .map(|stub_source| {
+                let namespace = stub_source
+                    .path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .filter(|stem| !stem.is_empty())
+                    .map(|stem| interner.intern(stem));
+                (namespace, stub_source.source.as_str())
+            })
+            .collect::<Vec<_>>();
+        let sources = shipped.into_iter().chain(project).collect::<Vec<_>>();
         for &(_, source) in &sources {
             let stub_file = parse_stub_file(source, interner);
             for type_declaration in stub_file.types {
@@ -102,8 +119,16 @@ impl StubLibrary {
         }
 
         let mut values = BTreeMap::new();
+        let mut exports_by_namespace: BTreeMap<Symbol, BTreeSet<Symbol>> = BTreeMap::new();
         for (namespace, source) in sources {
-            harvest_stub_source(interner, source, namespace, &type_definitions, &mut values);
+            let declared =
+                harvest_stub_source(interner, source, namespace, &type_definitions, &mut values);
+            if let Some(namespace) = namespace {
+                exports_by_namespace
+                    .entry(namespace)
+                    .or_default()
+                    .extend(declared);
+            }
         }
 
         debug_assert!(
@@ -113,6 +138,7 @@ impl StubLibrary {
         Self {
             values,
             type_declarations,
+            exports_by_namespace,
         }
     }
 
@@ -124,21 +150,19 @@ impl StubLibrary {
         }
     }
 
-    // Whether `namespace` is one the shipped corpus models (`base`, `stats`, …). An unknown
-    // namespace is a diagnostic at `pkg::name` sites; a known one gates the export check below.
-    pub fn is_known_namespace(&self, namespace: &str) -> bool {
-        SHIPPED_STUBS
-            .iter()
-            .any(|(shipped_namespace, _)| *shipped_namespace == namespace)
+    // Whether `namespace` is one the corpus models: a shipped namespace (`base`, `stats`, …) or a
+    // project stub file's namespace (`stubs/dplyr.Rtypes` → `dplyr`). An unknown namespace is a
+    // diagnostic at `pkg::name` sites; a known one gates the export check below.
+    pub fn is_known_namespace(&self, namespace: Symbol) -> bool {
+        self.exports_by_namespace.contains_key(&namespace)
     }
 
-    // Whether the corpus declares `symbol` in `namespace`. The corpus folds flat (one winner per
-    // name), so a name declared by a different shipped namespace does not count for this one.
-    pub fn namespace_exports(&self, namespace: &str, symbol: Symbol) -> bool {
-        self.values
-            .get(&symbol)
-            .and_then(|value| value.namespace)
-            .is_some_and(|shipped_namespace| shipped_namespace == namespace)
+    // Whether `namespace` declares `symbol` in any of its sources. Declaration-level, not
+    // winner-level: a project override winning `sd`'s type does not un-export `sd` from `stats`.
+    pub fn namespace_exports(&self, namespace: Symbol, symbol: Symbol) -> bool {
+        self.exports_by_namespace
+            .get(&namespace)
+            .is_some_and(|names| names.contains(&symbol))
     }
 
     pub fn contains(&self, symbol: Symbol) -> bool {
@@ -182,9 +206,9 @@ impl StubLibrary {
             .filter_map(|(symbol, value)| value.schemes.first().map(|scheme| (*symbol, scheme)))
     }
 
-    // The R namespace a stub name was declared in (`base`, `stats`, …), for display on hover. `None`
-    // when the symbol is not a stub, or when it comes from a project override (no shipped namespace).
-    pub fn namespace_of(&self, symbol: Symbol) -> Option<&'static str> {
+    // The namespace of a stub name's winning declaration (`base`, `stats`, a project stub's file
+    // stem), for display on hover. `None` when the symbol is not a stub.
+    pub fn namespace_of(&self, symbol: Symbol) -> Option<Symbol> {
         self.values.get(&symbol)?.namespace
     }
 
@@ -360,42 +384,38 @@ fn seed_stub_source_types(
 }
 
 // Parses one stub source and harvests each declaration's type expression into a scheme keyed by the
-// declared name. Declaring the same name more than once *within one source* builds an ordered
-// overload set; a later *source* (a project override) still replaces the whole set for that name, so
-// an override that wants overloads declares all of them itself. A declaration whose type expression
-// fails to lower into a scheme is skipped, and lines that fail to parse are dropped by the
-// declaration parser, so a malformed project override degrades gracefully rather than aborting analysis.
+// declared name, returning every name the source declares (parse-level, so `pkg::name` validation
+// covers a declaration even when its scheme fails to load). Declaring the same name more than once
+// *within one source* builds an ordered overload set; a later *source* (a project stub) still
+// replaces the whole set for that name, so an override that wants overloads declares all of them
+// itself. A declaration whose type expression fails to lower into a scheme is skipped, and lines
+// that fail to parse are dropped by the declaration parser, so a malformed project stub degrades
+// gracefully rather than aborting analysis.
 fn harvest_stub_source(
     interner: &mut Interner,
     source: &str,
-    namespace: Option<&'static str>,
+    namespace: Option<Symbol>,
     type_definitions: &TypeDefinitionEnvironment,
     values: &mut BTreeMap<Symbol, StubValue>,
-) {
+) -> BTreeSet<Symbol> {
     let (declarations, _errors) = parse_stub_declarations(source, interner);
     let mut inference_state = InferenceState::new();
     let mut declared_in_this_source = BTreeSet::new();
+    let mut harvested_in_this_source = BTreeSet::new();
     for declaration in declarations {
+        declared_in_this_source.insert(declaration.name);
         let Ok(scheme) =
             inference_state.harvest_annotation_scheme(&declaration.surface_type, type_definitions)
         else {
             continue;
         };
-        if declared_in_this_source.contains(&declaration.name) {
+        if harvested_in_this_source.contains(&declaration.name) {
             if let Some(value) = values.get_mut(&declaration.name) {
                 value.schemes.push(scheme);
             }
             continue;
         }
-        declared_in_this_source.insert(declaration.name);
-        // A project override of a shipped name replaces the scheme but keeps the shipped
-        // namespace tag: the override refines the type of `stats::sd`, it does not move `sd`
-        // out of `stats` — dropping the tag would make `stats::sd` warn "not exported".
-        let namespace = namespace.or_else(|| {
-            values
-                .get(&declaration.name)
-                .and_then(|existing| existing.namespace)
-        });
+        harvested_in_this_source.insert(declaration.name);
         values.insert(
             declaration.name,
             StubValue {
@@ -405,4 +425,5 @@ fn harvest_stub_source(
             },
         );
     }
+    declared_in_this_source
 }

@@ -1081,10 +1081,15 @@ Selection cannot be modeled statically, but the call is fully checked:
 `pkg::name` (and `pkg:::name`) reads one name directly from a package namespace, bypassing
 lexical scoping.
 
-- when the standard-library stubs declare `name` in `pkg`, the qualified read has the stub's
-  type, exactly like the bare name
+- a namespace is **known** when stubs declare it: the shipped standard-library packages, plus any
+  project stub file — `stubs/dplyr.Rtypes` declares the namespace `dplyr`
+  (see [Standard library stubs](/stdlib-stubs))
+- when the stubs declare `name` in `pkg`, the qualified read has the stub's type, exactly like the
+  bare name
 - an unknown namespace warns (`unknown package namespace `foobar``); a known namespace that does
   not declare the name warns (``bazqux` is not exported by `stats``)
+- exports are declaration-level: a project stub overriding a shipped name's *type* does not remove
+  the name from its shipped namespace, so `stats::sd` stays valid under an `sd` override
 - an unvalidated qualified read types as `Unknown`, and that reference is a strict origin
 - `::` and `:::` are not distinguished: the checker does not model the exported/internal split
 

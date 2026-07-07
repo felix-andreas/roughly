@@ -168,11 +168,7 @@ pub fn check(
             }
         }
 
-        let override_sources: Vec<String> = project_stubs
-            .sources
-            .iter()
-            .map(|stub_source| stub_source.source.clone())
-            .collect();
+        let override_sources = project_stubs.sources.clone();
         let mut analysis_state =
             Analysis::new_with_stub_library(root, config.lint, config.check, move |interner| {
                 analysis::stdlib::StubLibrary::load_with_overrides(interner, &override_sources)

@@ -164,11 +164,7 @@ impl Analysis {
         // shipped corpus. They are discovered and folded in once here; the assembled library is a
         // set-once base-environment input. Unreadable override files are skipped — reporting them is
         // the caller's concern (`roughly check` reports them; here they must never block analysis).
-        let overrides: Vec<String> = crate::stdlib::discover_project_stubs(&base_path)
-            .sources
-            .into_iter()
-            .map(|stub_source| stub_source.source)
-            .collect();
+        let overrides = crate::stdlib::discover_project_stubs(&base_path).sources;
         Self::new_with_stub_library(base_path, lint_config, check_config, move |interner| {
             StubLibrary::load_with_overrides(interner, &overrides)
         })
@@ -240,9 +236,9 @@ impl Analysis {
         &mut self.interner
     }
 
-    // The standard-library namespace a symbol's stub was declared in, for showing a stdlib name's origin
-    // package on hover. `None` when the symbol is not a stdlib stub.
-    pub fn stub_namespace(&self, symbol: Symbol) -> Option<&'static str> {
+    // The namespace a symbol's stub was declared in (shipped package or project stub file), for
+    // showing the name's origin package on hover. `None` when the symbol is not a stub.
+    pub fn stub_namespace(&self, symbol: Symbol) -> Option<Symbol> {
         self.stub_library.namespace_of(symbol)
     }
 

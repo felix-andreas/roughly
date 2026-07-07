@@ -753,6 +753,7 @@ fn variable_definition_summary(
     // select among the whole set by argument types.
     if let Some(symbol) = local_naming.non_locals.get(&expression_id)
         && let Some(namespace) = database.stub_namespace(*symbol)
+        && let Some(namespace) = database.interner().resolve(namespace)
     {
         let overload_count = database.stub_overload_schemes(*symbol).len();
         if overload_count > 1 {
@@ -2074,6 +2075,7 @@ pub fn completion(
             detail: Some(render_user_facing_scheme(database.interner(), scheme)),
             documentation: database
                 .stub_namespace(symbol)
+                .and_then(|namespace| database.interner().resolve(namespace))
                 .map(|namespace| format!("From the `{namespace}` package.")),
             takes_arguments: match &scheme.body {
                 CoreType::Function(function_type) => Some(

@@ -37,7 +37,7 @@ use {
             BindingInfo, DocumentKind, DocumentNamingComputation, NamesGlobal, NamesLocal,
             resolve_document_locally,
         },
-        stdlib::StubLibrary,
+        stdlib::{ProjectStubSource, StubLibrary},
         tree::new_parser,
         type_syntax::type_name_token_range,
         typecheck::{
@@ -316,13 +316,14 @@ impl RoughlyQueries {
         Self::with_project_stubs(Vec::new())
     }
 
-    // Builds the query group with project-supplied `.Rtypes` override sources folded over the shipped stub
-    // corpus, so a project stub overrides a shipped one of the same name. The stubs load through the very
-    // interner every body interns through, so a user reference to a base name and the stub's own binding
-    // share one `Symbol` id (no cross-interner mismatch is representable), mirroring
-    // `Analysis::new_with_stub_library`. The assembled library stays a set-once input — it is read once
-    // at construction and never re-read on an edit.
-    pub fn with_project_stubs(project_stub_sources: Vec<String>) -> RoughlyQueries {
+    // Builds the query group with project-supplied `.Rtypes` stub files folded over the shipped stub
+    // corpus, so a project stub overrides a shipped one of the same name (and a file's name declares
+    // its namespace for `pkg::name` reads). The stubs load through the very interner every body
+    // interns through, so a user reference to a base name and the stub's own binding share one
+    // `Symbol` id (no cross-interner mismatch is representable), mirroring
+    // `Analysis::new_with_stub_library`. The assembled library stays a set-once input — it is read
+    // once at construction and never re-read on an edit.
+    pub fn with_project_stubs(project_stub_sources: Vec<ProjectStubSource>) -> RoughlyQueries {
         let lowering = RefCell::new(LoweringContext::new());
         let stubs = StubLibrary::load_with_overrides(
             lowering.borrow_mut().interner_mut(),

@@ -353,10 +353,11 @@ Three things are useful to know:
   precision penalty for using base R.
 - **`pkg::name` works.** A qualified read has the same type as the bare name; an
   unknown package or a name the package does not export gets a warning.
-- **Projects can override or extend the stubs.** Drop `.Rtypes` files under
-  `<project>/stubs/` — a declaration there replaces the shipped one of the same
-  name. Repeating a name declares an ordered overload set. See
-  [Stdlib Stubs](/stdlib-stubs) for the format and rules.
+- **Projects can override, extend — or type whole packages.** Drop `.Rtypes` files
+  under `<project>/stubs/` — a declaration there replaces the shipped one of the
+  same name, and the file's name declares a namespace: `stubs/dplyr.Rtypes` makes
+  `dplyr::mutate` a known, typed read. Repeating a name declares an ordered
+  overload set. See [Stdlib Stubs](/stdlib-stubs) for the format and rules.
 
 ## Strict mode
 

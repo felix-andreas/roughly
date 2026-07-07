@@ -575,7 +575,7 @@ impl<'a> IdeDatabase for EngineIdeRef<'a> {
         self.caches.document_kinds.get(&document_id).copied()
     }
 
-    fn stub_namespace(&self, symbol: Symbol) -> Option<&'static str> {
+    fn stub_namespace(&self, symbol: Symbol) -> Option<Symbol> {
         self.stubs.namespace_of(symbol)
     }
 

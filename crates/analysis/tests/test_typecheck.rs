@@ -209,14 +209,17 @@ fn mutations_without_an_active_snapshot_are_permanent() {
 // The shipped corpus always ends a set with an `Any` fallback, so the no-match error is only
 // reachable through a project override — which is why this lives here and not in a fixture.
 mod overload_sets {
-    use analysis::{
-        Document,
-        diagnostic::Diagnostic,
-        lower::{self, LoweringContext},
-        stdlib::StubLibrary,
-        tree::new_parser,
-        typecheck::{TypeDefinitionEnvironment, inference_state_with_builtins},
-        types::{Atomic, CoreType},
+    use {
+        analysis::{
+            Document,
+            diagnostic::Diagnostic,
+            lower::{self, LoweringContext},
+            stdlib::{ProjectStubSource, StubLibrary},
+            tree::new_parser,
+            typecheck::{TypeDefinitionEnvironment, inference_state_with_builtins},
+            types::{Atomic, CoreType},
+        },
+        std::path::PathBuf,
     };
 
     const OVERRIDE_SOURCE: &str =
@@ -230,7 +233,10 @@ mod overload_sets {
         let mut inference_state = inference_state_with_builtins(&mut lowering_context);
         let stub_library = StubLibrary::load_with_overrides(
             lowering_context.interner_mut(),
-            &[OVERRIDE_SOURCE.to_owned()],
+            &[ProjectStubSource {
+                path: PathBuf::from("stubs/wrappers.Rtypes"),
+                source: OVERRIDE_SOURCE.to_owned(),
+            }],
         );
         stub_library.seed_into(&mut inference_state);
         let type_definitions = TypeDefinitionEnvironment::from_module(&module);
@@ -297,5 +303,97 @@ mod overload_sets {
             infer_last_type("sum(1, 2)\n").expect("sum should accept doubles"),
             CoreType::Scalar(Atomic::Double)
         );
+    }
+}
+
+// A project stub file's name declares its namespace (`stubs/dplyr.Rtypes` → `dplyr`), so qualified
+// reads of user-typed third-party packages validate and type like shipped-namespace reads. Lives
+// here (not in a fixture) because the fixture runner builds its `Analysis` without project stubs.
+mod project_stub_namespaces {
+    use {
+        analysis::{
+            Analysis, CheckConfig, Document, LintConfig,
+            stdlib::{ProjectStubSource, StubLibrary},
+            tree::new_parser,
+        },
+        std::path::{Path, PathBuf},
+    };
+
+    fn diagnostics_with_stub(stub_file: &str, stub_source: &str, code: &str) -> Vec<String> {
+        let stubs = vec![ProjectStubSource {
+            path: PathBuf::from(format!("stubs/{stub_file}")),
+            source: stub_source.to_owned(),
+        }];
+        let mut analysis_state = Analysis::new_with_stub_library(
+            PathBuf::from("/pkg"),
+            LintConfig::default(),
+            CheckConfig {
+                unused: false,
+                typing: true,
+                strict: false,
+            },
+            move |interner| StubLibrary::load_with_overrides(interner, &stubs),
+        );
+        let mut parser = new_parser().expect("parser should build");
+        let document = Document::parse(&mut parser, code).expect("code should parse");
+        analysis_state.add_document(PathBuf::from("R/main.R"), document);
+        analysis::run_full(&mut analysis_state);
+        let document_id = analysis_state
+            .document_id_for_path(Path::new("R/main.R"))
+            .expect("document id");
+        analysis_state
+            .document_diagnostics(document_id)
+            .into_iter()
+            .map(|diagnostic| diagnostic.message)
+            .collect()
+    }
+
+    #[test]
+    fn project_stub_file_declares_its_namespace_for_qualified_reads() {
+        let diagnostics = diagnostics_with_stub(
+            "dplyr.Rtypes",
+            "mutate : fn(Any, ...: Any) -> Any\n",
+            "result <- dplyr::mutate(1L, doubled = 2L)\n",
+        );
+        assert_eq!(diagnostics, Vec::<String>::new());
+    }
+
+    #[test]
+    fn unknown_namespace_still_warns() {
+        let diagnostics = diagnostics_with_stub(
+            "dplyr.Rtypes",
+            "mutate : fn(Any, ...: Any) -> Any\n",
+            "result <- foobar::bazqux(1L)\n",
+        );
+        assert_eq!(
+            diagnostics,
+            vec!["unknown package namespace `foobar`.".to_owned()]
+        );
+    }
+
+    #[test]
+    fn project_namespace_does_not_export_undeclared_names() {
+        let diagnostics = diagnostics_with_stub(
+            "dplyr.Rtypes",
+            "mutate : fn(Any, ...: Any) -> Any\n",
+            "result <- dplyr::filter(1L)\n",
+        );
+        assert_eq!(
+            diagnostics,
+            vec!["`filter` is not exported by `dplyr`.".to_owned()]
+        );
+    }
+
+    #[test]
+    fn overriding_a_shipped_name_keeps_it_exported_from_its_shipped_namespace() {
+        // The override wins `sd`'s type from a differently-named file, but `stats` still declares
+        // `sd`, so the qualified read must stay clean — exports are declaration-level, not
+        // winner-level.
+        let diagnostics = diagnostics_with_stub(
+            "mystats.Rtypes",
+            "sd : fn(...: Any) -> double\n",
+            "deviation <- stats::sd(c(1, 2, 3))\n",
+        );
+        assert_eq!(diagnostics, Vec::<String>::new());
     }
 }

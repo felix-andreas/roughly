@@ -301,11 +301,7 @@ impl EngineWorker {
         for (path, error_message) in &project_stubs.unreadable {
             tracing::warn!(?path, %error_message, "skipping unreadable project stub override");
         }
-        let project_stub_sources = project_stubs
-            .sources
-            .into_iter()
-            .map(|stub_source| stub_source.source)
-            .collect();
+        let project_stub_sources = project_stubs.sources;
 
         let mut worker = Self {
             client,

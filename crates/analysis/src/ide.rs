@@ -57,9 +57,9 @@ pub trait IdeDatabase {
     // a standalone script (top-level bindings are document-local slots). Completion offers a script's
     // top-level bindings as locals; a package file's arrive through the global namespace instead.
     fn document_kind(&self, document_id: DocumentId) -> Option<DocumentKind>;
-    // The standard-library namespace a symbol's stub was declared in (`base`, `stats`, …), for showing a
-    // stdlib name's origin package on hover. `None` when the symbol is not a stdlib stub.
-    fn stub_namespace(&self, symbol: Symbol) -> Option<&'static str>;
+    // The namespace a symbol's stub was declared in (`base`, `stats`, …, or a project stub file's
+    // namespace), for showing the name's origin package on hover. `None` when the symbol is not a stub.
+    fn stub_namespace(&self, symbol: Symbol) -> Option<Symbol>;
     // Every standard-library stub name with its scheme, for the stdlib completion source.
     fn stub_schemes(&self) -> Vec<(Symbol, &TypeScheme)>;
     // The full declared overload set of a stub name, in declaration order; empty for non-stubs.
@@ -134,7 +134,7 @@ impl IdeDatabase for Analysis {
         self.document_kind(document_id)
     }
 
-    fn stub_namespace(&self, symbol: Symbol) -> Option<&'static str> {
+    fn stub_namespace(&self, symbol: Symbol) -> Option<Symbol> {
         self.stub_namespace(symbol)
     }
 

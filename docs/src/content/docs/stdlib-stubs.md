@@ -145,6 +145,15 @@ project supplies **replaces** the shipped declaration of the same name — a pro
 type or add a name the shipped corpus omits. A missing directory, an unreadable file, or a malformed
 line is skipped: overrides are optional and one bad line must never block analysis.
 
+**A project stub file's name declares its namespace**: `stubs/dplyr.Rtypes` declares the namespace
+`dplyr`, so its declarations type bare reads *and* validate qualified reads — `dplyr::mutate` is a
+known-namespace read with the stub's type, while `dplyr::filter` warns "not exported" until the file
+declares `filter`. This is how a project types a third-party package today (hand-written; automatic
+CRAN generation is the proposed §7 tier). Exports are declaration-level, not winner-level: a project
+file overriding a shipped name's type does not remove the name from its shipped namespace, so
+`stats::sd` stays valid under an `sd` override. Hover shows a name's origin as the namespace of its
+winning declaration.
+
 Skipped never means silent. `roughly check` reports every dropped override declaration as an error
 on its stub line (a line that fails to parse, or a declaration naming an unresolvable type) and
 treats an unreadable override file as an I/O failure, and the editor shows the same problems as
@@ -205,9 +214,11 @@ loaded, parsed, and interned once, and are never invalidated by user edits.
 
 The `StubLibrary` is a **flat set-once map**: `values: Symbol -> StubValue`, where each entry pairs
 the name's ordered scheme list (one scheme per declaration — see
-[overload sets](#overloads-and-generics)) with the declaration's source range and the shipped
-namespace it came from (`base`, `stats`, ... — `None` for a project override, which inherits the
-shipped tag when it overrides a shipped name). It is not partitioned by namespace.
+[overload sets](#overloads-and-generics)) with the declaration's source range and the namespace of
+its winning declaration (`base`, `stats`, ..., or a project stub's file stem) for hover display.
+Typing is not partitioned by namespace; alongside the flat map, a per-namespace export table
+(namespace → declared names, built from every source) answers `pkg::name` validation, so an
+override winning a name's type never un-exports it from its declaring namespace.
 
 - Every shipped `.Rtypes` file (all six) is harvested into the one flat map, folded in file order —
   a later *source* redeclaring a name replaces its whole entry (the same rule that governs project
@@ -218,7 +229,7 @@ shipped tag when it overrides a shipped name). It is not partitioned by namespac
   environment binding; a multi-scheme name additionally registers its overload set for call-site
   selection.
 - `pkg::name` resolves against the same flat map: the qualified read has the stub's type exactly
-  like the bare name, and the retained namespace tag powers the validation warnings (unknown
+  like the bare name, and the per-namespace export table powers the validation warnings (unknown
   namespace; name not exported by that namespace) specified in the Typing Reference under
   [Namespace access](/typing-reference#namespace-access).
 
