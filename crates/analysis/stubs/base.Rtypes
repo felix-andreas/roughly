@@ -329,6 +329,8 @@ setdiff : <T> fn(x: T[], y: T[]) -> T[]
 setdiff : fn(x: Any, y: Any) -> Any
 append : <T> fn(x: T[], values: T[], [after]: integer) -> T[]
 append : fn(x: Any, values: Any, [after]: Any) -> Any
+replace : <T> fn(x: T[], list: Any, values: T[]) -> T[]
+replace : fn(x: Any, list: Any, values: Any) -> Any
 sample : <T> fn(x: T[], [size]: integer, [replace]: logical, [prob]: Any) -> T[]
 sample : fn(x: Any, [size]: Any, [replace]: logical, [prob]: Any) -> Any
 sample.int : fn(n: Any, [size]: Any, [replace]: logical, [prob]: Any, [useHash]: logical) -> integer[]
