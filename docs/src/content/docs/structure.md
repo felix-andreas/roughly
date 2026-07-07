@@ -55,6 +55,8 @@ Keep it focused on the file split and the role of each file.
   - compatibility logic
   - the irreducible builtin kernel (operators and core constructors)
   - interface extraction
+  - `typecheck/environment.rs` — the variable-slot environment: bind/lookup, undo-logged entry
+    writes, branch joins, captured-write notes, and the loop fixed point
   - `typecheck/operand.rs` — free-standing helpers behind the core: operand classification and
     numeric promotion for the builtin operators, comparison-family shapes, guard-refinement
     filtering, and the small pure `CoreType` transformations around unification and scheme import
