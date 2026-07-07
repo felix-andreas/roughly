@@ -1622,6 +1622,28 @@ fn resolve_surface_type(
     match surface_type {
         SurfaceType::Named(name, arguments) => {
             if local_type_parameters.contains(name) {
+                // A type parameter is not a generic: applying arguments to it is a semantic
+                // error, not a reference to the (shadowed) global of the same name.
+                if !arguments.is_empty() {
+                    let name_text = interner.resolve(*name).unwrap_or("<unknown>");
+                    diagnostics.push(Diagnostic::annotation_error(
+                        range,
+                        format!(
+                            "`{name_text}` is a type parameter here and takes no type arguments."
+                        ),
+                    ));
+                    for argument in arguments {
+                        resolve_surface_type(
+                            argument,
+                            local_type_parameters,
+                            range,
+                            resolved,
+                            rope,
+                            interner,
+                            diagnostics,
+                        );
+                    }
+                }
                 return;
             }
             if let Some(type_info) = resolved.get(name) {

@@ -3992,10 +3992,14 @@ impl InferenceState {
             }
             SurfaceType::Scalar(atomic) => Ok(CoreType::Scalar(*atomic)),
             SurfaceType::Named(name, arguments) => {
-                if arguments.is_empty()
-                    && let Some(core_type) = substitutions.get(name)
-                {
-                    return Ok(core_type.clone());
+                if let Some(core_type) = substitutions.get(name) {
+                    if arguments.is_empty() {
+                        return Ok(core_type.clone());
+                    }
+                    // Applying type arguments to a type parameter is a naming diagnostic; lowering
+                    // through the (shadowed) global of the same name would silently resolve the
+                    // misuse, so it degrades to the same silent skip a wrong arity gets.
+                    return Err(InferenceError::UnresolvedAnnotationType { symbol: *name });
                 }
 
                 let lowered_arguments = arguments

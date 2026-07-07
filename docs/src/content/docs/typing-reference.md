@@ -689,7 +689,7 @@ The same generic application syntax is used by `@new` when introducing a value o
 
 Type argument counts must match the declared parameter count exactly.
 
-In `@type NAME<T, U, ...> {TYPE}` and `@alias NAME<T, U, ...> {TYPE}`, the declared type parameters are in scope only within `TYPE`.
+In `@type NAME<T, U, ...> {TYPE}` and `@alias NAME<T, U, ...> {TYPE}`, the declared type parameters are in scope only within `TYPE`. A type parameter shadows a project-global type of the same name, and it is not a generic: applying type arguments to it (`Wrap<integer>` where `Wrap` is a parameter) is an annotation error rather than a reference to the shadowed global.
 
 - `Pair<integer, character>` is valid for `Pair<T, U>`
 - `Pair<integer>` is an error for `Pair<T, U>`

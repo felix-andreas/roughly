@@ -490,3 +490,15 @@ error[type-error] expected a numeric value (`integer` or `double`), found `chara
 f <- function(count) count + count
 #++++
 No diagnostics.
+
+#---- applied_type_parameter_is_rejected
+#: @alias Wrap<T> {list{v: T}}
+
+#: @alias Outer<Wrap> {Wrap<integer>}
+
+#: Outer<character>
+x <- list(v = 1L)
+#++++
+error[annotation-error] `Wrap` is a type parameter here and takes no type arguments.
+--> 3:1-3:38
+| #: @alias Outer<Wrap> {Wrap<integer>}

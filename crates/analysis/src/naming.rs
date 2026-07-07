@@ -927,6 +927,29 @@ impl<'a> TypeResolver<'a> {
         match surface_type {
             SurfaceType::Named(name, arguments) => {
                 if local_type_parameters.contains(name) {
+                    // A type parameter is not a generic: applying arguments to it is a semantic
+                    // error, not a reference to the (shadowed) global of the same name.
+                    if !arguments.is_empty() {
+                        let name_text = self.interner.resolve(*name).unwrap_or("<unknown>");
+                        push_diagnostic(
+                            self.diagnostics,
+                            document_id,
+                            Diagnostic::annotation_error(
+                                range,
+                                format!(
+                                    "`{name_text}` is a type parameter here and takes no type arguments."
+                                ),
+                            ),
+                        );
+                        for argument in arguments {
+                            self.resolve_surface_type(
+                                argument,
+                                local_type_parameters,
+                                range,
+                                document_id,
+                            );
+                        }
+                    }
                     return;
                 }
 
