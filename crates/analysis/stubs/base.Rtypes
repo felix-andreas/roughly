@@ -377,6 +377,7 @@ integer : fn([length]: Any) -> integer[]
 double : fn([length]: Any) -> double[]
 numeric : fn([length]: Any) -> double[]
 character : fn([length]: Any) -> character[]
+complex : fn([length.out]: Any, [real]: Any, [imaginary]: Any, [modulus]: Any, [argument]: Any) -> complex[]
 matrix : fn([data]: Any, [nrow]: Any, [ncol]: Any, [byrow]: logical, [dimnames]: Any) -> Any
 array : fn([data]: Any, [dim]: Any, [dimnames]: Any) -> Any
 factor : fn([x]: Any, [levels]: Any, [labels]: Any, [exclude]: Any, [ordered]: logical, [nmax]: Any) -> Any
