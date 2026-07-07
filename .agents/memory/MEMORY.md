@@ -16,6 +16,7 @@ Companion documents (kept separate only because they are larger in scope): `back
 - **Next candidates:** unused-parameters lint; `related_information` pairs; shape erasure on comparison/`/`/`^` results; `identity`/`apply`/`slot` stub declarations (fixture helper renames first); NAMESPACE import support (user-flagged, design sketch in backlog); precise `missing()` supplied-state narrowing (design first). **Check in with the user before:** the third constraint kind (two-flexible-operand comparison / traits tripwire), letrec recursion, order-dependent compat commits, fixed-point strict attribution.
 - The landing-page hero animation is user-owned (do not validate or touch it). NOTES.md is human-maintained (never edit).
 - The widened whole-workspace CI is staged in `.github/pending-ci.yml`; a human must `git mv` it into `.github/workflows/`.
+- Flake seen once under full-workspace parallel load: an LSP harness test died at shutdown with "mainloop error: the underlying channel reached EOF" / "emit Stop failed: ServiceStopped" (`test_lsp.rs` context.shutdown path); passes alone and on suite rerun. If it recurs, harden the harness shutdown (tolerate ServiceStopped on Stop emit) rather than the test.
 
 ## Mid-term
 

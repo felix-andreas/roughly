@@ -24,9 +24,11 @@ pub fn convert_diagnostic(
     encoding: PositionEncoding,
 ) -> Diagnostic {
     // The unnecessary tag lets editors render dead code faded instead of (or alongside) squiggled —
-    // the conventional presentation for an assignment whose value is never read.
-    let tags = (diagnostic.code == analysis::DiagnosticCode::Unused)
-        .then(|| vec![DiagnosticTag::UNNECESSARY]);
+    // the conventional presentation for an assignment whose value is never read or a parameter no
+    // read uses.
+    let tags = (diagnostic.code == analysis::DiagnosticCode::Unused
+        || diagnostic.code == analysis::DiagnosticCode::Lint(analysis::Lint::UnusedParameter))
+    .then(|| vec![DiagnosticTag::UNNECESSARY]);
     Diagnostic {
         range: position::tree_sitter_range_to_lsp(rope, encoding, diagnostic.range),
         severity: Some(convert_severity(diagnostic.severity)),

@@ -22,8 +22,8 @@ pub use crate::{
         run_full, strict_origin_diagnostics, typecheck,
     },
     diagnostic::{
-        Diagnostic, DiagnosticCode, Diagnostics, DocumentDiagnostics, Severity, render_core_type,
-        render_diagnostics, render_type_scheme,
+        Diagnostic, DiagnosticCode, Diagnostics, DocumentDiagnostics, Lint, Severity,
+        render_core_type, render_diagnostics, render_type_scheme,
     },
     document::{Document, DocumentChange, DocumentId, DocumentParseError},
     hir::{
