@@ -170,23 +170,27 @@ pub fn check(
             }
         }
 
-        let override_sources = project_stubs.sources.clone();
+        // NAMESPACE import validation against the loaded stubs (shipped + project): a warning per
+        // `importFrom(pkg, name)` naming something a known namespace does not export. The stubs
+        // are the only export source the checker has, so unknown namespaces are not checked. Built
+        // from the same discovered sources the analysis loads, so the two can never disagree.
         let namespace_path = root.join("NAMESPACE");
+        let namespace_exports = analysis::stdlib::stub_names_by_namespace(&project_stubs.sources);
+
+        let override_sources = project_stubs.sources.clone();
         let mut analysis_state =
             Analysis::new_with_stub_library(root, config.lint, config.check, move |interner| {
                 analysis::stdlib::StubLibrary::load_with_overrides(interner, &override_sources)
             });
 
-        // NAMESPACE import validation against the loaded stubs (shipped + project): a warning per
-        // `importFrom(pkg, name)` naming something a known namespace does not export. The stubs
-        // are the only export source the checker has, so unknown namespaces are not checked.
         if let Ok(namespace_source) = std::fs::read_to_string(&namespace_path) {
             let rope = Rope::from_str(&namespace_source);
-            for diagnostic in diagnostics::convert_diagnostics(
-                analysis_state.namespace_problems(&namespace_source),
-                &rope,
-                PositionEncoding::Utf8,
-            ) {
+            let imports = analysis::namespace::parse_namespace_imports(&namespace_source);
+            let problems =
+                analysis::namespace::namespace_import_problems(&imports, &namespace_exports);
+            for diagnostic in
+                diagnostics::convert_diagnostics(problems, &rope, PositionEncoding::Utf8)
+            {
                 if min_severity == MinSeverity::Error
                     && diagnostic.severity != Some(DiagnosticSeverity::ERROR)
                 {

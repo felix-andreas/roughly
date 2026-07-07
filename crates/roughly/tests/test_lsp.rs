@@ -579,6 +579,56 @@ async fn deeply_nested_documents_do_not_kill_the_server() {
     context.shutdown().await;
 }
 
+// A NAMESPACE buffer is served standalone (like a `.Rtypes` stub): opening it publishes
+// import-validation warnings against the stub corpus, and a later edit republishes. The typo on a
+// known namespace warns; an unknown (unstubbed) namespace stays quiet.
+#[tokio::test]
+async fn namespace_buffer_publishes_import_validation() {
+    let mut context = setup_test(&[]).await;
+    let uri = context.file_uri("NAMESPACE");
+
+    context
+        .open_file(
+            &uri,
+            "import(stats)\nimportFrom(stats, sd, medain)\nimportFrom(dplyr, mutate)\n",
+        )
+        .await;
+    let published = recv_diagnostics(&mut context.diagnostics_receiver, &uri, TIMEOUT).await;
+    assert_eq!(
+        published.diagnostics.len(),
+        1,
+        "only the known-namespace typo warns: {:?}",
+        published.diagnostics
+    );
+    let diagnostic = &published.diagnostics[0];
+    assert!(
+        diagnostic
+            .message
+            .contains("`medain` is not exported by `stats`."),
+        "unexpected message: {diagnostic:?}"
+    );
+    assert_eq!(
+        diagnostic.range.start.line, 1,
+        "warns on the importFrom line"
+    );
+
+    // Fixing the typo republishes a clean report.
+    context.change_file(
+        &uri,
+        1,
+        Range::new(Position::new(1, 22), Position::new(1, 28)),
+        "median",
+    );
+    let published = recv_diagnostics(&mut context.diagnostics_receiver, &uri, TIMEOUT).await;
+    assert!(
+        published.diagnostics.is_empty(),
+        "the corrected NAMESPACE is clean: {:?}",
+        published.diagnostics
+    );
+
+    context.shutdown().await;
+}
+
 #[tokio::test]
 async fn initialize_without_r_directory() {
     let mut context = setup_test_with_r_dir(false, &[]).await;

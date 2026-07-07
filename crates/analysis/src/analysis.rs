@@ -389,13 +389,6 @@ impl Analysis {
         self.documents.get(&document_id)
     }
 
-    // Validates a package NAMESPACE source against the loaded stub corpus: one warning per
-    // `importFrom(pkg, name)` whose namespace the stubs know but do not export `name` from.
-    pub fn namespace_problems(&mut self, source: &str) -> Vec<Diagnostic> {
-        let imports = crate::namespace::parse_namespace_imports(source, &mut self.interner);
-        crate::namespace::namespace_import_problems(&imports, &self.stub_library, &self.interner)
-    }
-
     pub fn document_id_for_path(&self, path: &Path) -> Option<DocumentId> {
         self.document_ids_by_path.get(path).copied()
     }

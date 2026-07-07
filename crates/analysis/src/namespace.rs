@@ -3,27 +3,30 @@
 // validates the imported names against the stub corpus's namespaces. Resolution semantics are
 // deliberately unchanged — stubbed names already resolve bare — so the value here is catching
 // import typos against namespaces the stubs actually know.
+//
+// The whole module is interner-free (it works on the raw import name strings and a string-keyed
+// export table), so a live editor buffer can be validated without touching the shared interner —
+// the same isolation the `.Rtypes` stub-buffer path keeps.
 use {
     crate::{
         diagnostic::Diagnostic,
-        interner::{Interner, Symbol},
-        stdlib::StubLibrary,
         tree::{self, kind},
     },
+    std::collections::{BTreeMap, BTreeSet},
     tree_sitter::{Node, Range},
 };
 
 pub struct NamespaceImport {
-    pub namespace: Symbol,
+    pub namespace: String,
     // `None` for a whole-namespace `import(pkg)`; `Some` for one `importFrom(pkg, name)` name.
-    pub name: Option<Symbol>,
+    pub name: Option<String>,
     pub range: Range,
 }
 
 // The `import`/`importFrom` directives of a NAMESPACE source, in file order. Directives R would
 // reject (a malformed file, non-name arguments) are skipped rather than reported: R itself is the
 // authority on NAMESPACE syntax, and this pass only wants the import facts.
-pub fn parse_namespace_imports(source: &str, interner: &mut Interner) -> Vec<NamespaceImport> {
+pub fn parse_namespace_imports(source: &str) -> Vec<NamespaceImport> {
     let Ok(mut parser) = tree::new_parser() else {
         return Vec::new();
     };
@@ -58,7 +61,7 @@ pub fn parse_namespace_imports(source: &str, interner: &mut Interner) -> Vec<Nam
                 // `import(pkg, ...)` may list several namespaces; `except = ...` keyword
                 // arguments are not name values and fall out of the extraction below.
                 for value in values {
-                    if let Some((namespace, range)) = name_argument(value, source, interner) {
+                    if let Some((namespace, range)) = name_argument(value, source) {
                         imports.push(NamespaceImport {
                             namespace,
                             name: None,
@@ -69,16 +72,15 @@ pub fn parse_namespace_imports(source: &str, interner: &mut Interner) -> Vec<Nam
             }
             "importFrom" => {
                 let mut values = values.into_iter();
-                let Some((namespace, _)) = values
-                    .next()
-                    .and_then(|value| name_argument(value, source, interner))
+                let Some((namespace, _)) =
+                    values.next().and_then(|value| name_argument(value, source))
                 else {
                     continue;
                 };
                 for value in values {
-                    if let Some((name, range)) = name_argument(value, source, interner) {
+                    if let Some((name, range)) = name_argument(value, source) {
                         imports.push(NamespaceImport {
-                            namespace,
+                            namespace: namespace.clone(),
                             name: Some(name),
                             range,
                         });
@@ -91,28 +93,24 @@ pub fn parse_namespace_imports(source: &str, interner: &mut Interner) -> Vec<Nam
     imports
 }
 
-// One warning per `importFrom(pkg, name)` whose namespace the stub corpus knows but whose name it
-// does not export — the same fact `pkg::name` validation checks, surfaced at the import site.
+// One warning per `importFrom(pkg, name)` whose namespace the export table knows but whose name it
+// does not list — the same fact `pkg::name` validation checks, surfaced at the import site.
 // Unknown namespaces produce nothing: without stubs there is no export set to check against.
 pub fn namespace_import_problems(
     imports: &[NamespaceImport],
-    stub_library: &StubLibrary,
-    interner: &Interner,
+    exports_by_namespace: &BTreeMap<String, BTreeSet<String>>,
 ) -> Vec<Diagnostic> {
     imports
         .iter()
         .filter_map(|import| {
-            let name = import.name?;
-            if !stub_library.is_known_namespace(import.namespace)
-                || stub_library.namespace_exports(import.namespace, name)
-            {
+            let name = import.name.as_ref()?;
+            let exports = exports_by_namespace.get(&import.namespace)?;
+            if exports.contains(name) {
                 return None;
             }
-            let namespace_name = interner.resolve(import.namespace).unwrap_or("<unknown>");
-            let name_text = interner.resolve(name).unwrap_or("<unknown>");
             Some(Diagnostic::naming_warning(
                 import.range,
-                format!("`{name_text}` is not exported by `{namespace_name}`."),
+                format!("`{name}` is not exported by `{}`.", import.namespace),
             ))
         })
         .collect()
@@ -120,22 +118,15 @@ pub fn namespace_import_problems(
 
 // A directive argument that names something: a bare identifier or a string literal (R accepts
 // both spellings in NAMESPACE files).
-fn name_argument(
-    value: Node<'_>,
-    source: &str,
-    interner: &mut Interner,
-) -> Option<(Symbol, Range)> {
+fn name_argument(value: Node<'_>, source: &str) -> Option<(String, Range)> {
     match value.kind_id() {
-        kind::IDENTIFIER => Some((interner.intern(&source[value.byte_range()]), value.range())),
+        kind::IDENTIFIER => Some((source[value.byte_range()].to_owned(), value.range())),
         kind::STRING => {
             let mut cursor = value.walk();
             let content = value
                 .named_children(&mut cursor)
                 .find(|child| child.kind_id() == kind::STRING_CONTENT)?;
-            Some((
-                interner.intern(&source[content.byte_range()]),
-                value.range(),
-            ))
+            Some((source[content.byte_range()].to_owned(), value.range()))
         }
         _ => None,
     }
@@ -143,13 +134,11 @@ fn name_argument(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use {super::*, crate::stdlib::stub_names_by_namespace};
 
     fn problems_for(source: &str) -> Vec<String> {
-        let mut interner = Interner::new();
-        let stub_library = StubLibrary::load(&mut interner);
-        let imports = parse_namespace_imports(source, &mut interner);
-        namespace_import_problems(&imports, &stub_library, &interner)
+        let exports = stub_names_by_namespace(&[]);
+        namespace_import_problems(&parse_namespace_imports(source), &exports)
             .into_iter()
             .map(|diagnostic| diagnostic.message)
             .collect()

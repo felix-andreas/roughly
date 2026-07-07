@@ -293,16 +293,52 @@ pub fn shipped_stub_names_by_namespace() -> Vec<(&'static str, Vec<String>)> {
     SHIPPED_STUBS
         .iter()
         .map(|&(namespace, source)| {
-            let (declarations, _errors) = parse_stub_declarations(source, &mut interner);
-            let mut names = declarations
-                .iter()
-                .filter_map(|declaration| interner.resolve(declaration.name))
-                .map(str::to_owned)
-                .collect::<Vec<_>>();
+            let mut names = stub_source_declared_names(source, &mut interner);
             names.sort();
             names.dedup();
             (namespace, names)
         })
+        .collect()
+}
+
+// The full export table — each namespace mapped to its declared names — across the shipped corpus
+// plus the given project override stubs, folded exactly as the loader folds them (a project file's
+// namespace is its file stem, matching `load_with_overrides`). Interner-free and string-keyed, so
+// the NAMESPACE validator can run against a live editor buffer without touching the shared
+// interner. Built once per session (set-once ambient state), not per validation.
+pub fn stub_names_by_namespace(
+    project_sources: &[ProjectStubSource],
+) -> BTreeMap<String, BTreeSet<String>> {
+    let mut interner = Interner::default();
+    let mut exports: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let shipped = SHIPPED_STUBS
+        .iter()
+        .map(|&(namespace, source)| (namespace.to_owned(), source));
+    let project = project_sources.iter().filter_map(|stub_source| {
+        let namespace = stub_source
+            .path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .filter(|stem| !stem.is_empty())?;
+        Some((namespace.to_owned(), stub_source.source.as_str()))
+    });
+    for (namespace, source) in shipped.chain(project) {
+        exports
+            .entry(namespace)
+            .or_default()
+            .extend(stub_source_declared_names(source, &mut interner));
+    }
+    exports
+}
+
+// The names one stub source declares, resolved to owned strings against `interner`. Uses the real
+// stub declaration parser so it cannot drift from what the loader harvests.
+fn stub_source_declared_names(source: &str, interner: &mut Interner) -> Vec<String> {
+    let (declarations, _errors) = parse_stub_declarations(source, interner);
+    declarations
+        .iter()
+        .filter_map(|declaration| interner.resolve(declaration.name))
+        .map(str::to_owned)
         .collect()
 }
 

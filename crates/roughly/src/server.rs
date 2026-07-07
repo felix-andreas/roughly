@@ -167,6 +167,14 @@ struct EngineWorker {
     // engine input, so live stub edits publish parse diagnostics from their own buffer and never
     // route through the engine's document inputs.
     stub_documents: HashMap<PathBuf, ropey::Rope>,
+    // Open `NAMESPACE` buffers, served the same server-side way as stub documents: import
+    // validation runs against `namespace_exports` (below) from the buffer, never through the
+    // engine's document inputs.
+    namespace_documents: HashMap<PathBuf, ropey::Rope>,
+    // The stub corpus's per-namespace export table (shipped + project), string-keyed and built
+    // once at construction like the corpus itself, so NAMESPACE `importFrom` validation never
+    // touches the shared interner.
+    namespace_exports: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
     // Whether the one-time "configuration lives in roughly.toml" notice was already shown for an
     // editor-settings payload the server does not apply.
     warned_about_editor_configuration: bool,
@@ -304,6 +312,9 @@ impl EngineWorker {
             tracing::warn!(?path, %error_message, "skipping unreadable project stub override");
         }
         let project_stub_sources = project_stubs.sources;
+        // The NAMESPACE export table is built from the same discovered sources the engine loads,
+        // before they move into the engine, so the two views cannot disagree.
+        let namespace_exports = analysis::stdlib::stub_names_by_namespace(&project_stub_sources);
 
         let mut worker = Self {
             client,
@@ -320,6 +331,8 @@ impl EngineWorker {
             next_file_id: 0,
             documents: HashMap::new(),
             stub_documents: HashMap::new(),
+            namespace_documents: HashMap::new(),
+            namespace_exports,
             warned_about_editor_configuration: false,
             symbol_items_cache: HashMap::new(),
             input_writes_since_eviction: 0,
@@ -498,6 +511,20 @@ impl EngineWorker {
     // `FileDiagnostics`, gating the typing/strict/unused classes by config exactly as production's
     // `document_diagnostics` does. Type errors stay raw and are rendered here against the engine's interner +
     // fallback range (single source for the error set).
+    // Import-validation diagnostics for one live `NAMESPACE` buffer, checked against the set-once
+    // export table. Interner-free like the stub-buffer path, so the buffer never touches the
+    // engine's shared interner.
+    fn namespace_document_diagnostics(
+        &self,
+        rope: &ropey::Rope,
+    ) -> Vec<crate::lsp_types::Diagnostic> {
+        let text = rope.to_string();
+        let imports = analysis::namespace::parse_namespace_imports(&text);
+        let problems =
+            analysis::namespace::namespace_import_problems(&imports, &self.namespace_exports);
+        diagnostics::convert_diagnostics(problems, rope, self.position_encoding)
+    }
+
     fn convert_document_diagnostics(&self, path: &Path) -> Vec<crate::lsp_types::Diagnostic> {
         let file = self
             .file_ids
@@ -940,6 +967,25 @@ impl EngineWorker {
             return;
         }
 
+        if is_namespace_document(&path) {
+            let rope = ropey::Rope::from_str(text);
+            self.namespace_documents.insert(path, rope.clone());
+            if !self.client_supports_pull_diagnostics {
+                let diagnostics = self.namespace_document_diagnostics(&rope);
+                if let Err(error) = self
+                    .client
+                    .publish_diagnostics(PublishDiagnosticsParams::new(
+                        uri,
+                        diagnostics,
+                        Some(params.text_document.version),
+                    ))
+                {
+                    tracing::error!(?error, "failed to publish namespace diagnostics");
+                }
+            }
+            return;
+        }
+
         let document = Document::parse(&mut self.parser, text)
             .unwrap_or_else(|_| panic!("failed to parse open document buffer {}", path.display()));
         self.documents.insert(path.clone(), document.clone());
@@ -973,6 +1019,10 @@ impl EngineWorker {
         tracing::debug!(?path, "did close");
 
         if self.stub_documents.remove(&path).is_some() {
+            return;
+        }
+
+        if self.namespace_documents.remove(&path).is_some() {
             return;
         }
 
@@ -1014,28 +1064,7 @@ impl EngineWorker {
         tracing::debug!(?path, "did change");
 
         if let Some(rope) = self.stub_documents.get_mut(&path) {
-            for change in content_changes {
-                match change.range {
-                    None => *rope = ropey::Rope::from_str(&change.text),
-                    Some(range) => {
-                        let start = position::lsp_position_to_internal(
-                            rope,
-                            self.position_encoding,
-                            range.start,
-                        );
-                        let end = position::lsp_position_to_internal(
-                            rope,
-                            self.position_encoding,
-                            range.end,
-                        );
-                        let start_char =
-                            rope.line_to_char(start.line_index) + start.character_index;
-                        let end_char = rope.line_to_char(end.line_index) + end.character_index;
-                        rope.remove(start_char..end_char);
-                        rope.insert(start_char, &change.text);
-                    }
-                }
-            }
+            apply_rope_changes(rope, content_changes, self.position_encoding);
             if !self.client_supports_pull_diagnostics {
                 let rope = self.stub_documents[&path].clone();
                 let diagnostics = stub_document_diagnostics(&rope, self.position_encoding);
@@ -1048,6 +1077,25 @@ impl EngineWorker {
                     ))
                 {
                     tracing::error!(?error, "failed to publish stub diagnostics");
+                }
+            }
+            return;
+        }
+
+        if let Some(rope) = self.namespace_documents.get_mut(&path) {
+            apply_rope_changes(rope, content_changes, self.position_encoding);
+            if !self.client_supports_pull_diagnostics {
+                let rope = self.namespace_documents[&path].clone();
+                let diagnostics = self.namespace_document_diagnostics(&rope);
+                if let Err(error) = self
+                    .client
+                    .publish_diagnostics(PublishDiagnosticsParams::new(
+                        uri,
+                        diagnostics,
+                        Some(params.text_document.version),
+                    ))
+                {
+                    tracing::error!(?error, "failed to publish namespace diagnostics");
                 }
             }
             return;
@@ -1292,6 +1340,19 @@ impl EngineWorker {
                 return Ok(empty_full_diagnostic_report());
             };
             let items = stub_document_diagnostics(rope, self.position_encoding);
+            return Ok(diagnostic_report(
+                items,
+                params.previous_result_id.as_deref(),
+            ));
+        }
+
+        // A NAMESPACE buffer is likewise served standalone: its report is the import validation the
+        // push path serves, against the live rope. An unopened NAMESPACE answers empty.
+        if is_namespace_document(&path) {
+            let Some(rope) = self.namespace_documents.get(&path).cloned() else {
+                return Ok(empty_full_diagnostic_report());
+            };
+            let items = self.namespace_document_diagnostics(&rope);
             return Ok(diagnostic_report(
                 items,
                 params.previous_result_id.as_deref(),
@@ -2861,6 +2922,33 @@ fn diagnostics_result_id(items: &[Diagnostic]) -> String {
 fn is_stub_document(path: &std::path::Path) -> bool {
     path.extension()
         .is_some_and(|extension| extension == "Rtypes")
+}
+
+// A package `NAMESPACE` file, recognized by name like R itself does.
+fn is_namespace_document(path: &std::path::Path) -> bool {
+    path.file_name().is_some_and(|name| name == "NAMESPACE")
+}
+
+// Applies LSP content changes to a server-side buffer rope (stub and NAMESPACE documents): a
+// range-less change replaces the whole document, a ranged change splices the resolved char span.
+fn apply_rope_changes(
+    rope: &mut ropey::Rope,
+    changes: Vec<crate::lsp_types::TextDocumentContentChangeEvent>,
+    encoding: PositionEncoding,
+) {
+    for change in changes {
+        match change.range {
+            None => *rope = ropey::Rope::from_str(&change.text),
+            Some(range) => {
+                let start = position::lsp_position_to_internal(rope, encoding, range.start);
+                let end = position::lsp_position_to_internal(rope, encoding, range.end);
+                let start_char = rope.line_to_char(start.line_index) + start.character_index;
+                let end_char = rope.line_to_char(end.line_index) + end.character_index;
+                rope.remove(start_char..end_char);
+                rope.insert(start_char, &change.text);
+            }
+        }
+    }
 }
 
 // Diagnostics for one `.Rtypes` stub buffer: the declarations the loader would drop (parse failures

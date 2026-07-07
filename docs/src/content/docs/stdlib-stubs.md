@@ -235,11 +235,14 @@ override winning a name's type never un-exports it from its declaring namespace.
 
 ### NAMESPACE import validation
 
-`roughly check` also validates a package's `NAMESPACE` file against the loaded stubs: every
-`importFrom(pkg, name)` whose namespace the stub corpus knows (shipped or project) but does not
-export `name` warns on the import site (`` `medain` is not exported by `stats`. ``). Namespaces
-without stubs are not checked — the stubs are the only export source the checker has — and
-resolution semantics are unchanged: stubbed names resolve bare with or without an import.
+Both `roughly check` and the language server validate a package's `NAMESPACE` file against the
+loaded stubs: every `importFrom(pkg, name)` whose namespace the stub corpus knows (shipped or
+project) but does not export `name` warns on the import site (`` `medain` is not exported by
+`stats`. ``). Namespaces without stubs are not checked — the stubs are the only export source the
+checker has — and resolution semantics are unchanged: stubbed names resolve bare with or without an
+import. The check is interner-free (a string-keyed export table built once from the loaded corpus),
+so an open `NAMESPACE` editor buffer is validated live without touching the engine's shared
+interner — the same isolation the `.Rtypes` stub-buffer path keeps.
 
 **Not yet built (future namespacing):**
 
