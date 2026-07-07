@@ -119,6 +119,9 @@ as.character : fn(x: Any) -> character
 as.logical : fn(x: Any) -> logical
 as.vector : fn(x: Any, [mode]: character) -> Any
 as.list : fn(x: Any) -> list[Any]
+# `unlist` flattens nesting and coerces to one atomic vector, so its element type depends on the
+# whole (possibly nested, possibly mixed) contents — `Any`, like the other shape-erasing coercions.
+unlist : fn(x: Any, [recursive]: logical, [use.names]: logical) -> Any
 # Coercions to types the stub grammar cannot name yet (factor, data.frame, date/time, language objects).
 as.factor : fn(x: Any) -> factor
 as.data.frame : fn(x: Any, [row.names]: Any, [optional]: logical, ...: Any, [stringsAsFactors]: logical) -> data.frame
