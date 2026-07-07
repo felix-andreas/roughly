@@ -21,16 +21,16 @@ No diagnostics.
 
 #---- top_level_call_resolves_callee_and_argument
 value <- 1L
-identity <- function(x) x
-identity(value)
+mirror <- function(x) x
+mirror(value)
 #++++
 Assign(value@b0)
   Integer(1L)
-Assign(identity@b2)
+Assign(mirror@b2)
   Function(x@b1)
     Symbol(x@b1)
 Call
-  Symbol(identity@?)
+  Symbol(mirror@?)
   Argument
     Symbol(value@?)
 

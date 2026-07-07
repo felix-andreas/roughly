@@ -1,12 +1,12 @@
 #==== generalization
 #---- polymorphic_function_binding_shows_scheme
 #---- R/main.R
-identity <- function(x) x
+mirror <- function(x) x
 #++++ any
 #!!!! inlay_hints hints.inlay
 R/main.R
 #++++
-1:9: <T> fn(x: T) -> T
+1:7: <T> fn(x: T) -> T
 
 #---- variable_typed_local_stays_suppressed
 #---- R/main.R

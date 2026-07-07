@@ -1,15 +1,15 @@
 #==== audit_cross_file
 #---- polymorphic_identity_two_instantiations
 #---- R/a.R
-identity <- function(value) value
+mirror <- function(value) value
 #++++
 No diagnostics.
 #---- R/b.R
 #: integer
-a <- identity(1L)
+a <- mirror(1L)
 
 #: character
-b <- identity("x")
+b <- mirror("x")
 #++++
 No diagnostics.
 
@@ -237,15 +237,15 @@ error[syntax-error] Syntax Error: invalid semantics: type name `Shape` is alread
 #==== audit_cross_file_scripts
 #---- script_polymorphic_package_function
 #---- R/a.R
-identity <- function(value) value
+mirror <- function(value) value
 #++++
 No diagnostics.
 #---- scripts/use.R
 #: integer
-a <- identity(1L)
+a <- mirror(1L)
 
 #: character
-b <- identity("x")
+b <- mirror("x")
 #++++
 No diagnostics.
 

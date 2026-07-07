@@ -228,14 +228,14 @@ integer
 #==== generalized_functions
 #---- one_type_variable
 #---- R/main.R
-identity <- function(x) x
-identity
+mirror <- function(x) x
+mirror
 #++++ any
-#!!!! hover identity.hover
+#!!!! hover mirror.hover
 R/main.R:2:1
 #++++
 ```
-identity : <T> fn(x: T) -> T
+mirror : <T> fn(x: T) -> T
 ```
 
 Package global, defined at `R/main.R:1:1`

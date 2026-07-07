@@ -16,12 +16,12 @@ error[type-error] expected `integer`, found `double`
 | value <- 1.5
 
 #---- call_too_many_positional
-identity <- function(x) x
-identity(1L, 2L, 3L)
+mirror <- function(x) x
+mirror(1L, 2L, 3L)
 #++++
 error[type-error] This call passes 3 positional argument(s), but the function accepts 1.
---> 2:1-2:9
-| identity(1L, 2L, 3L)
+--> 2:1-2:7
+| mirror(1L, 2L, 3L)
 
 #---- call_too_few_required
 #: fn(a: integer, b: integer) -> integer
@@ -33,12 +33,12 @@ error[type-error] This call passes 1 positional argument(s), but the function ac
 | add(1L)
 
 #---- call_named_arg_not_in_interface
-identity <- function(x) x
-identity(z = 1L)
+mirror <- function(x) x
+mirror(z = 1L)
 #++++
 error[type-error] This call uses named argument(s) `z`, but the function accepts named parameter(s) `x`.
---> 2:1-2:17
-| identity(z = 1L)
+--> 2:1-2:15
+| mirror(z = 1L)
 
 #---- call_argument_type_mismatch
 #: fn(count: integer) -> integer

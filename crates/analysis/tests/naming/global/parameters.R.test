@@ -1,9 +1,9 @@
 #==== parameters
 #---- function_parameter_referenced_in_body
 #---- R/main.R
-identity <- function(x) x
+mirror <- function(x) x
 #++++
-Assign(identity@b1)
+Assign(mirror@b1)
   Function(x@b0)
     Symbol(x@b0)
 
@@ -22,20 +22,20 @@ Assign(pair@b2)
 
 #---- unused_parameter_still_introduces_binding
 #---- R/main.R
-identity <- function(x, y) x
+mirror <- function(x, y) x
 #++++
-Assign(identity@b2)
+Assign(mirror@b2)
   Function(x@b0, y@b1)
     Symbol(x@b0)
 
 #---- parameter_referenced_after_local_statement
 #---- R/main.R
-identity <- function(x) {
+mirror <- function(x) {
   helper <- 1L
   x
 }
 #++++
-Assign(identity@b2)
+Assign(mirror@b2)
   Function(x@b0)
     Block
       Assign(helper@b1)

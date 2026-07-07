@@ -205,13 +205,13 @@ No diagnostics.
 #: @forall T
 #: @param value {T}
 #: @return {T}
-identity <- function(value) value
+mirror <- function(value) value
 #++++
 No diagnostics.
 
 #---- compact_forall_identity
 #: <T> fn(value: T) -> T
-identity <- function(value) value
+mirror <- function(value) value
 #++++
 No diagnostics.
 

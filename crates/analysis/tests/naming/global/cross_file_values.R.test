@@ -28,16 +28,16 @@ value <- 1L
 Assign(value@b0)
   Integer(1L)
 #---- R/b.R
-identity <- function(x) x
+mirror <- function(x) x
 #++++
-Assign(identity@b2)
+Assign(mirror@b2)
   Function(x@b1)
     Symbol(x@b1)
 #---- R/c.R
-identity(value)
+mirror(value)
 #++++
 Call
-  Symbol(identity@b2)
+  Symbol(mirror@b2)
   Argument
     Symbol(value@b0)
 

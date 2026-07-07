@@ -1,6 +1,6 @@
 #==== inferred_functions
 #---- identity_function
-identity <- function(x) x
+mirror <- function(x) x
 #++++
 fn(x: ?1) -> ?1
 
@@ -54,36 +54,36 @@ character
 #==== calls
 #---- annotated_named_parameter_accepts_named_argument
 #: fn(count: integer) -> integer
-identity <- function(count) count
-identity(count = 1L)
+mirror <- function(count) count
+mirror(count = 1L)
 #++++
 fn(count: integer) -> integer
 integer
 
 #---- annotated_identity_call
 #: fn(count: integer) -> integer
-identity <- function(count) count
-identity(1L)
+mirror <- function(count) count
+mirror(1L)
 #++++
 fn(count: integer) -> integer
 integer
 
 #---- positional_only_function_rejects_named_argument
 #: fn(integer) -> integer
-identity <- function(value) value
-identity(value = 1L)
+mirror <- function(value) value
+mirror(value = 1L)
 #++++
 error: named parameter mismatch
 
 #---- missing_required_argument
-identity <- function(x) x
-identity()
+mirror <- function(x) x
+mirror()
 #++++
 error: function arity mismatch
 
 #---- extra_argument
-identity <- function(x) x
-identity(1L, 2L)
+mirror <- function(x) x
+mirror(1L, 2L)
 #++++
 error: function arity mismatch
 
@@ -98,8 +98,8 @@ error: function arity mismatch
 
 #---- call_argument_type_mismatch
 #: fn(integer) -> integer
-identity <- function(value) value
-identity("hello")
+mirror <- function(value) value
+mirror("hello")
 #++++
 error: type mismatch
 
@@ -111,8 +111,8 @@ error: expected function
 
 #==== named_argument_calls
 #---- inferred_function_accepts_named_argument
-identity <- function(x) x
-identity(x = 1L)
+mirror <- function(x) x
+mirror(x = 1L)
 #++++
 fn(x: ?1) -> ?1
 integer
@@ -126,8 +126,8 @@ fn(count: integer, label: character) -> character
 character
 
 #---- unknown_named_argument_is_rejected
-identity <- function(x) x
-identity(y = 1L)
+mirror <- function(x) x
+mirror(y = 1L)
 #++++
 error: named parameter mismatch
 

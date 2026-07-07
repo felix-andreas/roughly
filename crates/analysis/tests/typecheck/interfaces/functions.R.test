@@ -1,11 +1,11 @@
 #==== exports
 #---- exports_bindings_and_aliases
 #: @alias Formatter {fn(integer) -> character}
-identity <- function(x) x
+mirror <- function(x) x
 render <- function(count) "ok"
 #++++
 alias Formatter = fn(integer) -> character
-identity: <T> fn(x: T) -> T
+mirror: <T> fn(x: T) -> T
 render: <T> fn(count: T) -> character
 
 #---- interface_keeps_latest_binding_shape

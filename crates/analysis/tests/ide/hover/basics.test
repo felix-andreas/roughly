@@ -45,9 +45,9 @@ range: 1:30 to 1:39
 #==== nesting
 #---- call_targets
 #---- R/main.R
-identity <- function(argument) argument
+mirror <- function(argument) argument
 value <- 1L
-result <- identity(value)
+result <- mirror(value)
 #++++ any
 #!!!! hover assign.hover
 R/main.R:3:1
@@ -61,7 +61,7 @@ Local variable, defined at `R/main.R:3:1`
 R/main.R:3:12
 #++++
 ```
-identity : fn(argument: integer) -> integer
+mirror : fn(argument: integer) -> integer
 ```
 
 Package global, defined at `R/main.R:1:1`
@@ -69,8 +69,10 @@ Package global, defined at `R/main.R:1:1`
 R/main.R:3:19
 #++++
 ```
-integer
+value : integer
 ```
+
+Package global, defined at `R/main.R:2:1`
 #!!!! hover argument.hover
 R/main.R:3:20
 #++++

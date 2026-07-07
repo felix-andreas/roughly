@@ -41,9 +41,9 @@ TypeDefinition Pair<T, U> = list{first: T, second: U}
 #---- namespace_get_lowers
 stats::sd
 #++++
-NamespaceGet(Symbol(1), Symbol(570))
+NamespaceGet(Symbol(1), Symbol(571))
 
 #---- internal_namespace_get_lowers
 stats:::sd
 #++++
-NamespaceGet(Symbol(1), Symbol(570))
+NamespaceGet(Symbol(1), Symbol(571))

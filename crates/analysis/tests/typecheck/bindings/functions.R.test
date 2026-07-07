@@ -10,9 +10,9 @@ label <- "ok"
 label: character
 
 #---- identity_binding
-identity <- function(x) x
+mirror <- function(x) x
 #++++
-identity: <T> fn(x: T) -> T
+mirror: <T> fn(x: T) -> T
 
 #---- first_binding
 first <- function(x, y) x
@@ -38,10 +38,10 @@ const_integer <- function(x) 1L
 const_integer: <T> fn(x: T) -> integer
 
 #---- alias_of_polymorphic_binding
-identity <- function(x) x
-alias <- identity
+mirror <- function(x) x
+alias <- mirror
 #++++
-identity: <T> fn(x: T) -> T
+mirror: <T> fn(x: T) -> T
 alias: <T> fn(x: T) -> T
 
 #---- annotated_monomorphic_binding

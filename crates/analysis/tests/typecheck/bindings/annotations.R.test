@@ -39,9 +39,9 @@ value: integer | NULL
 #: @forall T
 #: @param value {T}
 #: @return {T}
-identity <- function(value) value
+mirror <- function(value) value
 #++++
-identity: <T> fn(value: T) -> T
+mirror: <T> fn(value: T) -> T
 
 #---- list_array_checked_annotation
 #: list[integer]
@@ -63,9 +63,9 @@ value: list{name: character, age: double}
 
 #---- compact_forall_binding
 #: <T> fn(value: T) -> T
-identity <- function(value) value
+mirror <- function(value) value
 #++++
-identity: <T> fn(value: T) -> T
+mirror: <T> fn(value: T) -> T
 
 #---- constrained_binder_scheme_keeps_its_constraint
 #: <T: numeric> fn(values: T) -> T
@@ -111,6 +111,6 @@ pad: <T, U> fn(value: T, [width]: U) -> T
 #==== polymorphic_annotation
 #---- generic_identity_keeps_declared_scheme
 #: <T> fn(value: T) -> T
-identity <- function(value) value
+mirror <- function(value) value
 #++++
-identity: <T> fn(value: T) -> T
+mirror: <T> fn(value: T) -> T

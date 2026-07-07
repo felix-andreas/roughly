@@ -5,8 +5,8 @@
 integer
 
 #---- assignment_then_call
-identity <- function(x) x
-identity(1L)
+mirror <- function(x) x
+mirror(1L)
 #++++
 fn(x: ?1) -> ?1
 integer

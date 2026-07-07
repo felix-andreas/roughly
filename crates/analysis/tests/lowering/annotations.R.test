@@ -104,10 +104,10 @@ Assign f
 #: @forall T
 #: @param value {T}
 #: @return {T}
-identity <- function(value) value
+mirror <- function(value) value
 #++++
 #: <T> fn(value: T) -> T
-Assign identity
+Assign mirror
   Function (value)
     Symbol(value)
 

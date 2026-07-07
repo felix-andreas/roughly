@@ -10,10 +10,10 @@ alias Formatter = fn(integer) -> character
 value: integer
 
 #---- latest_binding_wins_in_interface
-identity <- function(x) x
-identity <- function(x) 1L
+mirror <- function(x) x
+mirror <- function(x) 1L
 #++++
-identity: <T> fn(x: T) -> integer
+mirror: <T> fn(x: T) -> integer
 
 #---- generic_alias_export
 #: @alias Box<T> {list{value: T}}

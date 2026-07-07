@@ -98,6 +98,7 @@ is.symbol : fn(x: Any) -> logical
 is.call : fn(x: Any) -> logical
 is.primitive : fn(x: Any) -> logical
 is.element : fn(el: Any, set: Any) -> logical
+identity : <T> fn(x: T) -> T
 # `missing(arg)` tests whether a formal was supplied. The argument is a parameter name R treats as
 # a promise; the checker sees an ordinary call, and `Any` accepts every argument shape.
 missing : fn(x: Any) -> logical

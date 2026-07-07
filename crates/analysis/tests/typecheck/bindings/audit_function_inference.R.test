@@ -1,8 +1,8 @@
 #==== audit_function_inference
-#---- identity
-identity <- function(x) x
+#---- mirror
+mirror <- function(x) x
 #++++
-identity: <T> fn(x: T) -> T
+mirror: <T> fn(x: T) -> T
 
 #---- first_of_two
 first <- function(x, y) x
@@ -106,19 +106,19 @@ f <- function(x) {
 f: <T> fn(x: T) -> T
 
 #---- let_polymorphism_two_uses
-identity <- function(x) x
-a <- identity(1L)
-b <- identity("foo")
+mirror <- function(x) x
+a <- mirror(1L)
+b <- mirror("foo")
 #++++
-identity: <T> fn(x: T) -> T
+mirror: <T> fn(x: T) -> T
 a: integer
 b: character
 
 #---- alias_of_polymorphic
-identity <- function(x) x
-alias <- identity
+mirror <- function(x) x
+alias <- mirror
 #++++
-identity: <T> fn(x: T) -> T
+mirror: <T> fn(x: T) -> T
 alias: <T> fn(x: T) -> T
 
 #---- return_arithmetic_result
