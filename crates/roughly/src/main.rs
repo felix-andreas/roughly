@@ -29,7 +29,10 @@ fn main() -> ExitCode {
             .unwrap_or_else(Vec::new),
     );
 
-    match cli.command {
+    // Commands run on a thread with an explicit large stack rather than the main thread: the
+    // recursive tree walks (the formatter above all) need more than a constrained `ulimit -s`
+    // main stack provides on the deepest trees the grammar produces.
+    let command = move || match cli.command {
         Command::Check {
             files,
             output,
@@ -58,7 +61,14 @@ fn main() -> ExitCode {
             ),
             Debug::Ast { path } => exit_code(cli::ast(&path).map(|()| Outcome::Clean)),
         },
-    }
+    };
+    std::thread::Builder::new()
+        .name("roughly-command".to_owned())
+        .stack_size(roughly::ANALYSIS_STACK_SIZE)
+        .spawn(command)
+        .expect("command thread should spawn")
+        .join()
+        .expect("command thread should not panic")
 }
 
 // The exit codes are a documented contract (see the docs getting-started page): 0 clean, 1

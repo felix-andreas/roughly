@@ -97,6 +97,7 @@ pub async fn run(experimental_features: ExperimentalFeatures) {
         };
         std::thread::Builder::new()
             .name("roughly-engine".to_owned())
+            .stack_size(crate::ANALYSIS_STACK_SIZE)
             .spawn(move || run_worker(seed, receiver))
             .expect("engine worker thread should spawn");
 

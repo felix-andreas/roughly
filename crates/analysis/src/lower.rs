@@ -13,7 +13,7 @@ use {
         types::{Annotation, Atomic, AttachedAnnotation},
     },
     ropey::Rope,
-    tree_sitter::{Node, Range, TreeCursor},
+    tree_sitter::{Node, Range},
 };
 
 #[derive(Debug)]
@@ -1135,20 +1135,79 @@ fn annotation_parse_diagnostic(range: Range, error: TypeParseError) -> Diagnosti
     }
 }
 
-fn collect_syntax_errors(node: Node<'_>, rope: &Rope) -> Vec<Diagnostic> {
+// The syntax-error walk over a malformed tree. Iterative with an explicit frame stack: tree-sitter's
+// error recovery nests ERROR nodes as deeply as the source nests, and unlike lowering (which caps its
+// depth and degrades to `Unsupported`) this walk must reach every error node to report it, so a
+// recursive formulation would overflow the stack on deeply nested malformed input.
+//
+// Each node visit has three parts, mirrored from the natural recursion: pre-order per-kind checks
+// (`enter_syntax_error_node`), a fold of the children's "handled" verdicts, and a post-order
+// fallback that reports the raw error text only when no descendant produced a more precise message.
+fn collect_syntax_errors(root: Node<'_>, rope: &Rope) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    collect_syntax_errors_recursive(&mut node.walk(), rope, &mut diagnostics);
+    let mut stack = match enter_syntax_error_node(root, rope, &mut diagnostics) {
+        Entered::Done(_) => return diagnostics,
+        Entered::Descend(frame) => vec![frame],
+    };
+    // The verdict of the most recently completed child, folded into its parent's frame at the top
+    // of each iteration.
+    let mut returned = false;
+    while let Some(frame) = stack.last_mut() {
+        frame.handled |= returned;
+        returned = false;
+        match frame.children.next() {
+            Some(child) => match enter_syntax_error_node(child, rope, &mut diagnostics) {
+                Entered::Done(handled) => returned = handled,
+                Entered::Descend(child_frame) => stack.push(child_frame),
+            },
+            None => {
+                let frame = stack.pop().expect("frame observed by last_mut");
+                let mut handled = frame.handled;
+                if !handled && frame.node.is_error() {
+                    handled = true;
+                    let raw = rope.byte_slice(frame.node.byte_range()).to_string();
+                    match raw.as_str() {
+                        "(" | "{" | "[" | "[[" => diagnostics.push(Diagnostic::syntax_error(
+                            frame.node.range(),
+                            format!("unexpected opening delimiter {raw}"),
+                        )),
+                        ")" | "}" | "]" | "]]" => diagnostics.push(Diagnostic::syntax_error(
+                            frame.node.range(),
+                            format!("unexpected closing delimiter {raw}"),
+                        )),
+                        _ => diagnostics.push(Diagnostic::syntax_error(
+                            frame.node.range(),
+                            format!("Syntax Error: unexpected {raw:?}"),
+                        )),
+                    }
+                }
+                returned = handled;
+            }
+        }
+    }
     diagnostics
 }
 
-fn collect_syntax_errors_recursive(
-    cursor: &mut TreeCursor<'_>,
+struct SyntaxErrorFrame<'tree> {
+    node: Node<'tree>,
+    children: std::vec::IntoIter<Node<'tree>>,
+    handled: bool,
+}
+
+enum Entered<'tree> {
+    // The subtree finished during the pre-order half: it is clean, or a recognized control-flow
+    // head consumed it. Carries the subtree's "handled" verdict.
+    Done(bool),
+    Descend(SyntaxErrorFrame<'tree>),
+}
+
+fn enter_syntax_error_node<'tree>(
+    node: Node<'tree>,
     rope: &Rope,
     diagnostics: &mut Vec<Diagnostic>,
-) -> bool {
-    let node = cursor.node();
+) -> Entered<'tree> {
     if !(node.is_error() || node.has_error()) {
-        return false;
+        return Entered::Done(false);
     }
 
     match node.kind_id() {
@@ -1215,54 +1274,29 @@ fn collect_syntax_errors_recursive(
         && let Some((range, message)) = control_flow_head_syntax_error(node, rope)
     {
         diagnostics.push(Diagnostic::syntax_error(range, message));
-        return true;
+        return Entered::Done(true);
     }
 
-    let mut handled_error = false;
-    if cursor.goto_first_child() {
-        if node.is_error() {
-            let child = cursor.node();
-            match child.kind_id() {
-                kind::LPAREN | kind::LBRACE | kind::LBRACKET | kind::DOUBLE_LBRACKET => {
-                    diagnostics.push(Diagnostic::syntax_error(
-                        child.range(),
-                        format!("missing closing delimiter {}", child.kind()),
-                    ));
-                }
-                _ => {}
+    let mut tree_cursor = node.walk();
+    let children: Vec<Node<'tree>> = node.children(&mut tree_cursor).collect();
+    if node.is_error()
+        && let Some(child) = children.first()
+    {
+        match child.kind_id() {
+            kind::LPAREN | kind::LBRACE | kind::LBRACKET | kind::DOUBLE_LBRACKET => {
+                diagnostics.push(Diagnostic::syntax_error(
+                    child.range(),
+                    format!("missing closing delimiter {}", child.kind()),
+                ));
             }
-        }
-
-        loop {
-            handled_error |= collect_syntax_errors_recursive(cursor, rope, diagnostics);
-
-            if !cursor.goto_next_sibling() {
-                cursor.goto_parent();
-                break;
-            }
+            _ => {}
         }
     }
-
-    if !handled_error && node.is_error() {
-        handled_error = true;
-        let raw = rope.byte_slice(node.byte_range()).to_string();
-        match raw.as_str() {
-            "(" | "{" | "[" | "[[" => diagnostics.push(Diagnostic::syntax_error(
-                node.range(),
-                format!("unexpected opening delimiter {raw}"),
-            )),
-            ")" | "}" | "]" | "]]" => diagnostics.push(Diagnostic::syntax_error(
-                node.range(),
-                format!("unexpected closing delimiter {raw}"),
-            )),
-            _ => diagnostics.push(Diagnostic::syntax_error(
-                node.range(),
-                format!("Syntax Error: unexpected {raw:?}"),
-            )),
-        }
-    }
-
-    handled_error
+    Entered::Descend(SyntaxErrorFrame {
+        node,
+        children: children.into_iter(),
+        handled: false,
+    })
 }
 
 fn control_flow_head_syntax_error(node: Node<'_>, rope: &Rope) -> Option<(Range, &'static str)> {

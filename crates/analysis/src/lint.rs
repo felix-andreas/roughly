@@ -72,12 +72,44 @@ fn push_lint(
     });
 }
 
+// Iterative DFS with the shared cursor and one inherited state per ancestor depth. The linter also
+// runs on tree-sitter error-recovery output, which nests as deeply as the source does, so a
+// per-node recursion would overflow the stack on deeply nested documents.
 fn traverse(
     cursor: &mut TreeCursor<'_>,
     diagnostics: &mut Vec<Diagnostic>,
     rope: &Rope,
     config: LintConfig,
-    mut state: TraversalState,
+    state: TraversalState,
+) {
+    let mut inherited = vec![state];
+    loop {
+        let mut state = *inherited.last().expect("root state present");
+        visit_node(cursor, diagnostics, rope, config, &mut state);
+        if cursor.goto_first_child() {
+            inherited.push(state);
+            continue;
+        }
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                return;
+            }
+            inherited.pop();
+        }
+    }
+}
+
+// One node's lint checks. Mutations to `state` apply to the node's descendants only; the cursor may
+// scan the node's children (the arguments arm) but always returns to the node itself.
+fn visit_node(
+    cursor: &mut TreeCursor<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+    rope: &Rope,
+    config: LintConfig,
+    state: &mut TraversalState,
 ) {
     let node = cursor.node();
 
@@ -206,17 +238,6 @@ fn traverse(
             }
         }
         _ => {}
-    }
-
-    if cursor.goto_first_child() {
-        loop {
-            traverse(cursor, diagnostics, rope, config, state);
-
-            if !cursor.goto_next_sibling() {
-                cursor.goto_parent();
-                break;
-            }
-        }
     }
 }
 

@@ -522,6 +522,63 @@ async fn initialize_reports_capabilities() {
     context.shutdown().await;
 }
 
+// Deeply nested input must never abort the server. The two depths straddle the grammar's
+// error-recovery onset: the shallower file parses clean (lowering degrades past its depth cap with
+// a diagnostic), the deeper one parses into a deeply nested ERROR tree (the syntax-error walk must
+// not recurse per level). Formatting and a follow-up open prove the worker thread survived.
+#[tokio::test]
+async fn deeply_nested_documents_do_not_kill_the_server() {
+    let mut context = setup_test(&[]).await;
+
+    let valid = format!("value <- {}1{}\n", "f(".repeat(900), ")".repeat(900));
+    let valid_uri = context.file_uri("R/deep_valid.R");
+    context.open_file(&valid_uri, &valid).await;
+    let published = recv_diagnostics(&mut context.diagnostics_receiver, &valid_uri, TIMEOUT).await;
+    assert!(
+        published
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("nested too deeply")),
+        "the lowering depth cap reports a diagnostic instead of overflowing"
+    );
+
+    let malformed = format!("value <- {}1{}\n", "f(".repeat(2000), ")".repeat(2000));
+    let malformed_uri = context.file_uri("R/deep_malformed.R");
+    context.open_file(&malformed_uri, &malformed).await;
+    let published =
+        recv_diagnostics(&mut context.diagnostics_receiver, &malformed_uri, TIMEOUT).await;
+    assert!(
+        !published.diagnostics.is_empty(),
+        "the deep error tree reports its syntax errors"
+    );
+
+    // Formatting recurses over the tree as well; it must answer or refuse without dying.
+    let _ = context
+        .server
+        .formatting(DocumentFormattingParams {
+            text_document: TextDocumentIdentifier {
+                uri: valid_uri.clone(),
+            },
+            options: FormattingOptions {
+                tab_size: 2,
+                insert_spaces: true,
+                ..FormattingOptions::default()
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await;
+
+    let probe_uri = context.file_uri("R/probe.R");
+    context.open_file(&probe_uri, "x <- 1\n").await;
+    let published = recv_diagnostics(&mut context.diagnostics_receiver, &probe_uri, TIMEOUT).await;
+    assert!(
+        published.diagnostics.is_empty(),
+        "the server still answers cleanly after the deep documents"
+    );
+
+    context.shutdown().await;
+}
+
 #[tokio::test]
 async fn initialize_without_r_directory() {
     let mut context = setup_test_with_r_dir(false, &[]).await;
