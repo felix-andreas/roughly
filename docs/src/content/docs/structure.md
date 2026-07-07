@@ -49,12 +49,15 @@ Keep it focused on the file split and the role of each file.
     (definite-assignment warnings and the unused dead-store check)
   - `resolve_document_locally` (file-local naming) and package-global resolution
 
-- `typecheck.rs`
+- `typecheck.rs` (+ `typecheck/`)
   - semantic checking
   - inference internals
   - compatibility logic
   - the irreducible builtin kernel (operators and core constructors)
   - interface extraction
+  - `typecheck/operand.rs` — free-standing helpers behind the core: operand classification and
+    numeric promotion for the builtin operators, comparison-family shapes, guard-refinement
+    filtering, and the small pure `CoreType` transformations around unification and scheme import
 
 - `stub.rs` + `stdlib.rs` + `stubs/*.Rtypes`
   - `stub.rs` parses the declaration-only stub format (`name : <type-expr>` lines, reusing the type-expression parser)
