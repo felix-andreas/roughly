@@ -1,7 +1,7 @@
 use {
     crate::{
         interner::{Interner, Symbol},
-        typecheck::{InferenceError, OperandExpectation, RECURSION_LIMIT, SubscriptKind},
+        typecheck::{InferenceError, OperandExpectation, RECURSION_LIMIT},
         types::{
             Atomic, Constraint, CoreType, FunctionType, InferenceVariableId, QuantifiedVariable,
             TypeScheme,
@@ -790,25 +790,6 @@ impl Diagnostic {
                     *range,
                     format!(
                         "position {position} does not exist in `{}`",
-                        type_renderer.render(container)
-                    ),
-                )
-            }
-            InferenceError::NonLiteralSubscript {
-                container,
-                by,
-                range,
-                expression_id: _,
-            } => {
-                let detail = match by {
-                    SubscriptKind::Position => "position",
-                    SubscriptKind::FieldName => "field name",
-                };
-                let mut type_renderer = TypeRenderer::user_facing(interner);
-                (
-                    *range,
-                    format!(
-                        "cannot index `{}` without a statically known {detail}",
                         type_renderer.render(container)
                     ),
                 )

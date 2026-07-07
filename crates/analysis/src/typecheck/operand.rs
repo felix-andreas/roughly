@@ -490,17 +490,6 @@ pub(super) fn widen_error_container_to_union(
             range,
             expression_id,
         },
-        InferenceError::NonLiteralSubscript {
-            by,
-            range,
-            expression_id,
-            ..
-        } => InferenceError::NonLiteralSubscript {
-            container: Box::new(union_type.clone()),
-            by,
-            range,
-            expression_id,
-        },
         InferenceError::NotAList {
             range,
             expression_id,

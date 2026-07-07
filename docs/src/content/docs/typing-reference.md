@@ -1098,6 +1098,10 @@ lexical scoping.
 - a function call evaluates to the callee's return type
 - if the callee expression is `Unknown`, the call evaluates to `Unknown`
 - if the callee's return type is `Unknown`, the call evaluates to `Unknown`
+- if the callee is a **union whose members are all function types** (the dispatch-table idiom:
+  `handlers[[name]](...)`), the call must be valid against **every** member — the value could be
+  any of them — and evaluates to the union of the member return types; each member is checked in
+  an isolated probe, so no member's argument bindings leak into another's
 - function calls also follow the named, positional, and optional parameter rules defined under `Function types`
 
 A function call is a type error when:
@@ -1188,17 +1192,23 @@ Runtime indexing failures are not modeled by the type system.
 - for map-like `list[named: T]`, name-based `[[` returns `T | NULL`; positional and computed `[[`
   return `T` (runtime indexing failures are not modeled, as for array-like lists)
 
-For tuple-like lists, positional `[[` is allowed only when the index is known statically as a literal position.
+For tuple-like lists, `[[` with a literal position is precise; a computed position is the union
+of the item types.
 
 - if the literal position exists, the result is that element's type
-- if the position is not known statically as a literal, the access is a type error
+- if a literal position does not exist, the access is a type error
+- if the position is not known statically as a literal, the result is the **union of the item
+  types** (a computed position could reach any item — the same rule `for` iteration over a
+  fixed-shape list uses)
 
-For fixed-shape record-like lists, `[[` is allowed with a literal field name or a literal position
-(record fields are declaration-ordered, so `x[[1L]]` extracts the first field exactly as R does).
+For fixed-shape record-like lists, `[[` with a literal field name or literal position is precise;
+a computed index is the union of the field types (record fields are declaration-ordered, so
+`x[[1L]]` extracts the first field exactly as R does).
 
 - if the literal field exists, the result is that field's type
 - if the literal position exists, the result is that position's field type
-- if the index is neither a literal name nor a literal position, the access is a type error
+- if the index is neither a literal name nor a literal position, the result is the **union of
+  the field types** — this is what types the dispatch-table idiom, `handlers[[name]](...)`
 - if a literal field name or position does not exist, the access is a type error
 
 Runtime indexing failures are not modeled by the type system.
@@ -1228,7 +1238,7 @@ For a homogeneous fixed-shape list the union collapses, so the result matches th
 `$`, `[`, and `[[` on an opaque nominal type (`data.frame`, `factor`, ...) yield `Unknown` without
 further checking; see [Nominal types](#nominal-types) for the rule and its rationale.
 
-Some indexing forms remain unsupported for now. In particular, this document does not currently define `[` on vectors, and tuple-like or fixed-shape record-like `[[` access requires statically known literal indices or names.
+Some indexing forms remain unsupported for now. In particular, this document does not currently define `[` on vectors.
 
 ### Numeric inference variables
 

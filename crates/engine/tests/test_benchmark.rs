@@ -26,15 +26,16 @@
 //!    changed-input tracking (`DESIGN.md` §8) or sharded per-module def-maps.
 //!    Production's O(package) term, by contrast, is HM re-inference plus a per-round interface-table
 //!    rebuild and a type-definition-fingerprint render over every module — far costlier per unit N, which
-//!    is why the engine is an order of magnitude faster at every size even though both grow.
+//!    is why the engine is 50-90x faster at every size even though both grow. (Allocation churn per
+//!    edit, unlike wall time, IS flat in N — see `test_memory.rs`'s `churn_per_body_edit`.)
 //!
 //! Measured here (release, mid-chain body edit; your hardware will differ, but the *shape* is stable):
 //!
 //! ```text
 //!     LoC    files   new per-edit   old per-edit   ratio   recompute  PSI/PTD refolds
-//!    9 375    1 000       1.05 ms       13.8  ms   13.2x       2        0 / 0
-//!   93 750   10 000      21.3  ms      233    ms   10.9x       2        0 / 0
-//!  281 250   30 000      72.7  ms      771    ms   10.6x       2        0 / 0
+//!    9 375    1 000       1.9 ms        167 ms     86.5x       2        0 / 0
+//!   93 750   10 000      39.1 ms      1 950 ms     49.9x       2        0 / 0
+//!  281 250   30 000     120.9 ms      6 235 ms     51.6x       2        0 / 0
 //! ```
 //!
 //! # Layout

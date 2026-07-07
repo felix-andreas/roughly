@@ -22,11 +22,12 @@ list(1L, "foo")[[2L]]
 #++++
 character
 
-#---- tuple_nonliteral_position_is_rejected
+#---- tuple_nonliteral_position_unions_items
 index <- 2L
 list(1L, "foo")[[index]]
 #++++
-error: non-literal subscript
+integer
+integer | character
 
 #---- record_literal_name_returns_field_type
 list(foo = 1L, bar = "foo")[["bar"]]

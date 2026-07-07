@@ -5,7 +5,7 @@
 use {
     super::{
         InferenceEntry, InferenceError, InferenceState, ResolutionContext,
-        operand::{callee_overload_symbol, is_whole_number_double_literal},
+        operand::{callee_overload_symbol, erase_variables, is_whole_number_double_literal},
     },
     crate::{
         hir::{Argument, Expression, HirArena},
@@ -95,6 +95,45 @@ impl InferenceState {
                 resolution_context,
                 type_definitions,
             ),
+            // A call through a union of functions — the dispatch-table idiom,
+            // `handlers[[name]](...)` — must be valid for every member, since the value could be
+            // any of them. Each member's signature is probed against the arguments in an isolated
+            // snapshot and the call's type is the union of the member returns; returns are
+            // variable-erased because the probe bindings that produced them roll back.
+            CoreType::Union(members)
+                if members
+                    .iter()
+                    .all(|member| matches!(member, CoreType::Function(_))) =>
+            {
+                let mut return_types = Vec::with_capacity(members.len());
+                for member in members {
+                    let CoreType::Function(function_type) = member else {
+                        unreachable!("guarded by the all-functions match arm condition");
+                    };
+                    let snapshot = self.snapshot();
+                    let member_return = self.infer_function_call(
+                        function_type,
+                        arguments,
+                        callee,
+                        expression,
+                        arena,
+                        resolution_context,
+                        type_definitions,
+                    );
+                    match member_return {
+                        Ok(return_type) => {
+                            let resolved = self.resolve(return_type)?;
+                            self.rollback_to(snapshot);
+                            return_types.push(erase_variables(resolved));
+                        }
+                        Err(error) => {
+                            self.rollback_to(snapshot);
+                            return Err(error);
+                        }
+                    }
+                }
+                Ok(CoreType::union_of(return_types))
+            }
             other_type => Err(InferenceError::ExpectedFunction {
                 actual_type: Box::new(other_type),
                 range: callee.range,

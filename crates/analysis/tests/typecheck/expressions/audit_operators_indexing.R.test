@@ -107,11 +107,12 @@ list(1L, "foo")[[5L]]
 #++++
 error: position does not exist
 
-#---- double_bracket_tuple_nonliteral_rejected
+#---- double_bracket_tuple_nonliteral_unions_items
 i <- 1L
 list(1L, "foo")[[i]]
 #++++
-error: non-literal subscript
+integer
+integer | character
 
 #---- double_bracket_record_literal_name
 list(foo = 1L, bar = "x")[["foo"]]

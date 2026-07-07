@@ -18,7 +18,7 @@ use {
     crate::{
         hir::{Argument, Expression, HirArena},
         interner::Symbol,
-        typecheck::{BuiltinKind, OperandExpectation, SubscriptKind, TypeDefinitionEnvironment},
+        typecheck::{BuiltinKind, OperandExpectation, TypeDefinitionEnvironment},
         types::{Atomic, Constraint, CoreType, InferenceVariableId, RecordField},
     },
 };
@@ -854,13 +854,11 @@ impl InferenceState {
                 }
             }
             CoreType::Tuple(items) => {
+                // A computed position could reach any item, so the extraction is the union of the
+                // item types — the same rule `for` iteration over a fixed-shape list uses. Only a
+                // *literal* position is precise (and still errors when out of range).
                 let Some(index) = integer_literal_position(index_expression) else {
-                    return Err(InferenceError::NonLiteralSubscript {
-                        container: Box::new(CoreType::Tuple(items)),
-                        by: SubscriptKind::Position,
-                        range: expression.range,
-                        expression_id: expression.id,
-                    });
+                    return Ok(CoreType::union_of(items));
                 };
                 match items.get(index).cloned() {
                     Some(item_type) => Ok(item_type),
@@ -886,13 +884,14 @@ impl InferenceState {
                         }),
                     };
                 }
+                // A computed name could reach any field (the dispatch-table idiom,
+                // `handlers[[name]](...)`), so the extraction is the union of the field types —
+                // mirroring `for` iteration over a record. Only a *literal* name is precise (and
+                // still errors when the field does not exist).
                 let Some(name) = literal_name_symbol(index_expression) else {
-                    return Err(InferenceError::NonLiteralSubscript {
-                        container: Box::new(CoreType::Record(fields)),
-                        by: SubscriptKind::FieldName,
-                        range: expression.range,
-                        expression_id: expression.id,
-                    });
+                    return Ok(CoreType::union_of(
+                        fields.into_iter().map(|field| field.value).collect(),
+                    ));
                 };
                 match fields.iter().find(|field| field.name == name) {
                     Some(field) => Ok(field.value.clone()),

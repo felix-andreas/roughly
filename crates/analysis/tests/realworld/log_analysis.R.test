@@ -78,3 +78,44 @@ count_levels <- function(lines) {
 error[type-error] expected a numeric value (`integer` or `double`), found `character`
 --> 13:22-13:33
 |     total <- total + entry$level
+
+#==== dispatch_tables
+#---- handler_table_dispatch_is_clean
+# The dispatch-table idiom: a record of handlers indexed by a computed name
+# yields the union of the handler types, and calling through that union checks
+# the call against every member.
+handlers <- list(
+  add = function(left, right) left + right,
+  subtract = function(left, right) left - right,
+  multiply = function(left, right) left * right
+)
+
+apply_operation <- function(name, left, right) {
+  handler <- handlers[[name]]
+  handler(left, right)
+}
+
+report <- function() {
+  total <- apply_operation("add", 2, 3)
+  difference <- apply_operation("subtract", total, 1)
+  sprintf("total %.1f, difference %.1f", total, difference)
+}
+#++++
+No diagnostics.
+
+#---- mixed_arity_handler_table_is_caught
+# A one-argument handler in the same table makes two-argument dispatch unsound:
+# the union call must be valid for every member.
+handlers <- list(
+  add = function(left, right) left + right,
+  shout = function(text) toupper(text)
+)
+
+broken <- function(name) {
+  handler <- handlers[[name]]
+  handler(1, 2)
+}
+#++++
+error[type-error] This call passes 2 positional argument(s), but the function accepts 1.
+--> 10:3-10:10
+|   handler(1, 2)

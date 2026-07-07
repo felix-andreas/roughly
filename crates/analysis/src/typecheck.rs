@@ -99,12 +99,6 @@ pub enum OperandExpectation {
     Comparable,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SubscriptKind {
-    Position,
-    FieldName,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InferenceError {
     UnknownInferenceVariable(InferenceVariableId),
@@ -237,12 +231,6 @@ pub enum InferenceError {
     PositionDoesNotExist {
         position: usize,
         container: Box<CoreType>,
-        range: Range,
-        expression_id: ExpressionId,
-    },
-    NonLiteralSubscript {
-        container: Box<CoreType>,
-        by: SubscriptKind,
         range: Range,
         expression_id: ExpressionId,
     },

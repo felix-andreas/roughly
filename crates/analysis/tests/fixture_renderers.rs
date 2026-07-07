@@ -33,7 +33,6 @@ pub fn render_expression_error_kind(error: &InferenceError) -> &'static str {
         InferenceError::DollarOnAtomicVector { .. } => "error: dollar on atomic vector",
         InferenceError::FieldDoesNotExist { .. } => "error: field does not exist",
         InferenceError::PositionDoesNotExist { .. } => "error: position does not exist",
-        InferenceError::NonLiteralSubscript { .. } => "error: non-literal subscript",
         InferenceError::UnsupportedSubset { .. } => "error: unsupported `[` subset",
         InferenceError::RecursionLimitExceeded => "error: recursion limit exceeded",
         InferenceError::AnnotationParameterNameMismatch { .. } => {
