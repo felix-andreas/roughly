@@ -58,3 +58,34 @@ broken <- function() {
 error[type-error] expected function, found `integer`
 --> 3:3-3:8
 |   total(2L)
+
+#---- post_dots_option_cannot_be_filled_positionally
+# R runtime: "argument \"strict\" is missing, with no default" — formals after
+# `...` are name-only, so the trailing TRUE lands in the dots.
+join_fields <- function(..., strict) {
+  if (strict) {
+    paste(..., sep = ",")
+  } else {
+    paste(...)
+  }
+}
+broken <- function() {
+  join_fields("a", "b", TRUE)
+}
+#++++
+error[type-error] This call passes 3 positional argument(s), but the function accepts 1.
+--> 11:3-11:14
+|   join_fields("a", "b", TRUE)
+
+#---- typed_rest_parameter_rejects_a_wrong_element
+#: fn(...: double) -> double
+total_of <- function(...) {
+  sum(...)
+}
+broken <- function() {
+  total_of(1.5, "two")
+}
+#++++
+error[type-error] expected `double`, found `character`
+--> 6:17-6:22
+|   total_of(1.5, "two")
