@@ -42,9 +42,6 @@ user experience:
   ```
   And it should use indent size of formatter. the typing formatter needs much better coverage
 
-developer tooling:
-- restructure justfile to infer kind from alpha or beta-postfix
-
 stubs:
 - is analysis/stubs the right place or should we save it top level?
 - do we have a script to verify the stubs are exhaustive?

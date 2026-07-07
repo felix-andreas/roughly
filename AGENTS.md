@@ -1,4 +1,4 @@
-# Roughly
+# Overview
 
 Roughly is a language tool for R, built as a language server plus CLI. It aims to be world class at three things: code analysis on the level of rust-analyzer — with a static type checker at its core — plus code formatting and linting.
 
@@ -12,76 +12,24 @@ Crates:
 
 The project is built by AI agents driving development, with light human steering. Agents keep two written homes current: the docs site (`docs/`) holds the authoritative, user- and contributor-facing specs (they are contracts — mandatory to keep accurate), and `.agents/memory/MEMORY.md` is the agent knowledge base (engineering state, priorities, debt, and non-obvious design rationale, so they are not rediscovered). Update both in the same session as the work that changes them.
 
-## Goals
+# Goals
 
 - Deliver high-quality diagnostics for R in the style of Rust and Elm: clear, precise, actionable wording; avoid overly internal or theory-heavy language when user-facing wording would be clearer; prefer precise source ranges over coarse fallback ranges.
 - Provide full editor tooling — hover, completion, goto-definition, references, rename, inlay hints — and preserve the semantic information those features need whenever practical.
 - Provide first-class formatting and linting alongside analysis.
 - Scale to very large code bases, including more than 300,000 LoC; performance matters.
 
-### Incremental analysis
+# Incremental analysis (we need to revise this section)
 
 Incremental analysis is a top priority and is not properly implemented yet. The target behavior: keep single-file rechecking fast while still reporting dependent type errors across the project when project-visible names change.
 
 Designing this properly requires research before committing to a model: study and compare how mature language servers implement incrementality (for example rust-analyzer's salsa-based query model and other LSP implementations). Discuss the chosen direction with the user and record it on the docs architecture page (`docs/src/content/docs/architecture.md`) before taking large implementation steps.
 
-# Communication
-
-Respond terse like smart caveman. All technical substance stay. Only fluff die.
-
-## Persistence
-
-ACTIVE EVERY RESPONSE. No revert after many turns. No filler drift. Still active if unsure. Off only: "stop caveman" / "normal mode".
-
-Default: **full**. Switch: `/caveman lite|full|ultra`.
-
-## Rules
-
-Drop: articles (a/an/the), filler (just/really/basically/actually/simply), pleasantries (sure/certainly/of course/happy to), hedging. Fragments OK. Short synonyms (big not extensive, fix not "implement a solution for"). Technical terms exact. Code blocks unchanged. Errors quoted exact.
-
-Pattern: `[thing] [action] [reason]. [next step].`
-
-Not: "Sure! I'd be happy to help you with that. The issue you're experiencing is likely caused by..."
-Yes: "Bug in auth middleware. Token expiry check use `<` not `<=`. Fix:"
-
-## Intensity
-
-| Level | What change |
-|-------|------------|
-| **lite** | No filler/hedging. Keep articles + full sentences. Professional but tight |
-| **full** | Drop articles, fragments OK, short synonyms. Classic caveman |
-| **ultra** | Abbreviate (DB/auth/config/req/res/fn/impl), strip conjunctions, arrows for causality (X → Y), one word when one word enough |
-
-Example — "Why React component re-render?"
-- lite: "Your component re-renders because you create a new object reference each render. Wrap it in `useMemo`."
-- full: "New object ref each render. Inline object prop = new ref = re-render. Wrap in `useMemo`."
-- ultra: "Inline obj prop → new ref → re-render. `useMemo`."
-
-Example — "Explain database connection pooling."
-- lite: "Connection pooling reuses open connections instead of creating new ones per request. Avoids repeated handshake overhead."
-- full: "Pool reuse open DB connections. No new connection per request. Skip handshake overhead."
-- ultra: "Pool = reuse DB conn. Skip handshake → fast under load."
-
-## Auto-Clarity
-
-Drop caveman for: security warnings, irreversible action confirmations, multi-step sequences where fragment order risks misread, user asks to clarify or repeats question. Resume caveman after clear part done.
-
-Example — destructive op:
-> **Warning:** This will permanently delete all rows in the `users` table and cannot be undone.
-> ```sql
-> DROP TABLE users;
-> ```
-> Caveman resume. Verify backup exist first.
-
-## Boundaries
-
-Code/commits/PRs: write normal. "stop caveman" or "normal mode": revert. Level persist until changed or session end.
-
 # Working autonomously
 
-When working autonomously on a larger goal — a workflow, a multi-step change, or any task that spans several logical units — commit after each logical step that builds and passes its tests, instead of saving everything for one final commit. A logical step is a self-contained, reviewable unit (one feature, one fix, one refactor) that leaves the tree green. This keeps progress reviewable and recoverable. Do not commit broken or untested intermediate states, and never commit the human's notes (they live in `.local/`, untracked).
+When working autonomously on a larger goal — a workflow, a multi-step change, or any task that spans several logical units — commit and push after each logical step, instead of saving everything for one final commit.
 
-# Knowledge base and documentation
+# Knowledge base and documentation (we can reduce repeition/duplication with MEMORY.md)
 
 There are two written homes. Keep both current; spend the minimum that keeps them useful, and prefer bullet points.
 
@@ -97,13 +45,7 @@ There are two written homes. Keep both current; spend the minimum that keeps the
   - Contributing: `architecture.md`, `structure.md` (the `analysis` crate file layout), and `testing.md` (the fixture contract).
   - Treat docs as a first-class deliverable: when behavior, design, or the fixture contract changes, update the relevant page in the same session and keep it in genuinely good shape — clear, accurate, no stale status. Do not rewrite a spec to paper over a temporary implementation gap; note the gap instead.
 
-How agents work here:
-
-- You drive development. Edit specs and memory directly when implementing agreed-direction work; record the rationale in long-term memory and keep fixtures aligned. Check in with the user first only for genuinely contentious or irreversible design forks (and before large incremental-analysis changes).
-- If a spec is outdated, contradictory, or no longer matches the implementation, fix it — or flag it to the user — rather than leaving it stale.
-- The human's direct feedback to you lives in `.local/` (untracked); read it, never commit it.
-
-## Skills
+# Skills
 
 If the user says:
 
@@ -114,7 +56,7 @@ If the user says:
 - `implementation check`: compare the implementation against the docs specs and report contract or architecture mismatches.
 - `session check`: end-of-session closure pass. Verify that decisions, open questions, and newly discovered work are captured in `.agents/memory/MEMORY.md` or the docs (watch for side investigations that created uncaptured follow-up work), and that memory and the docs are consistent with the implementation; report anything still hanging.
 
-## Rust coding guidelines
+# Rust coding guidelines
 
 * Do not write organizational comments or comments that summarize the code. Comments should only be written in order to explain "why" the code is written in some way in the case there is a reason that is tricky / non-obvious.
 * Comments must be **context-free**. Never reference internal milestones, phases, process history, ticket/PR names, or commit hashes (e.g. "R0", "M3", "Phase 4", "gate (c)", "3f", "the spike", "added in the cutover"). A reader with zero project history must understand every comment — explain the "why" in domain terms, not in terms of when or how the code came to be.
@@ -133,7 +75,7 @@ If the user says:
 * Do not optimize for the smallest safe fix. When you touch an area, bring it to the intended shape for that change, remove dead paths or temporary seams, and pay down nearby technical debt needed to keep the code coherent. You are responsible for code quality, not just feature delivery.
 * Avoid helper-function indirection when logic is only used once and does not materially improve testability or readability. Prefer inlining small one-off solutions unless doing so would create large duplication.
 
-## Design bar
+# Design bar
 
 - We require world-class implementation quality, not merely passing behavior.
 - Use the simplest correct data model and implementation that can express the required semantics.
@@ -146,7 +88,7 @@ If the user says:
 - Optimize for very fast incremental analysis and low memory churn.
 - If you notice a structural design problem, you must surface it early and explicitly instead of working around it.
 
-## Design review trigger
+# Design review trigger
 
 If you see any of the following, you must stop and call it out to the user before continuing implementation:
 
@@ -164,7 +106,7 @@ When surfacing such a problem, you must explain:
 - the simpler target shape
 - the expected impact on correctness, simplicity, performance, and incremental analysis
 
-## Error handling
+# Error handling
 
 - Do not swallow analysis, synchronization, or document-loading errors anywhere in the project.
 - If an operation is required to keep analysis state coherent, surface the failure immediately with `panic!` rather than logging and continuing with corrupted or stale state.
