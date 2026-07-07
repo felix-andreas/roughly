@@ -80,6 +80,9 @@ pub struct LintConfig {
     pub boolean_shorthand: LintLevel,
     pub missing_comma: LintLevel,
     pub trailing_comma: LintLevel,
+    // Default-off: R signatures legitimately carry ignored formals (S3 methods must match their
+    // generic), so `Default` behaves as `Off` for this lint and a project opts in explicitly.
+    pub unused_parameter: LintLevel,
 }
 
 // A lint's configured level: keep its default severity, force a severity, or disable it. The
@@ -464,6 +467,11 @@ impl Analysis {
                     self.interner(),
                 ));
             }
+            diagnostics.extend(crate::naming::unused_parameter_diagnostics(
+                &output.output,
+                self.interner(),
+                self.lint_config.unused_parameter,
+            ));
         }
         if let Some(output) = &self.package_naming_output
             && let Some(package_diagnostics) = output.diagnostics.get(&document_id)

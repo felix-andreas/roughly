@@ -53,6 +53,9 @@ fn push_lint(
         Lint::AssignmentOperator => config.assignment_operator,
         Lint::BooleanShorthand => config.boolean_shorthand,
         Lint::NamingStyle => LintLevel::Default,
+        // Not a syntax lint: emitted from naming output (`naming::unused_parameter_diagnostics`),
+        // never through this tree-walk path.
+        Lint::UnusedParameter => LintLevel::Off,
     };
     let severity = match level {
         LintLevel::Off => return,

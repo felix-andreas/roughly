@@ -51,7 +51,12 @@ assignment-operator = "off"
 boolean-shorthand = "error"
 missing-comma = "warn"
 trailing-comma = "warn"
+unused-parameter = "warn"  # default off: opt in to flag never-used function parameters
 ```
+
+`unused-parameter` is **off by default** — R signatures legitimately carry ignored formals (an S3
+method must match its generic's signature; callbacks receive arguments they ignore) — so it only
+speaks when a project opts in. Parameters named with a leading `.` or `_` are never reported.
 
 For one-off exceptions, prefer a [suppression comment](/linter#suppressing-diagnostics) over turning a lint off project-wide.
 

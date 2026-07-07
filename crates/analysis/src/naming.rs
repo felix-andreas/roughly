@@ -45,6 +45,8 @@ pub struct NamesLocal {
     // Computed from the reaching-write sets during resolution; surfaced as diagnostics only when
     // the `unused` check is enabled.
     pub unused_assignments: Vec<UnusedAssignment>,
+    // Parameters no read resolves to, for the default-off `unused-parameter` lint.
+    pub unused_parameters: Vec<UnusedAssignment>,
     // Slots read or super-assigned from inside a function nested below the slot's frame. A closure
     // can run at any later time, so every write to a captured slot stays observable (never a dead
     // store) and captured reads must tolerate writes made after the closure's definition.
@@ -389,6 +391,37 @@ pub fn unused_diagnostics(local_naming: &NamesLocal, interner: &Interner) -> Vec
                 unused.range,
                 format!("`{name}` is assigned but never used."),
             )
+        })
+        .collect()
+}
+
+// The `unused-parameter` lint findings: one per parameter no read resolves to. Default-off — R
+// signatures legitimately carry ignored formals (an S3 method must match its generic; callbacks
+// ignore arguments) — so `LintLevel::Default` yields nothing and the lint speaks only when a
+// project opts in via `[lint] unused-parameter`.
+pub fn unused_parameter_diagnostics(
+    local_naming: &NamesLocal,
+    interner: &Interner,
+    level: crate::analysis::LintLevel,
+) -> Vec<Diagnostic> {
+    let severity = match level {
+        crate::analysis::LintLevel::Default | crate::analysis::LintLevel::Off => return Vec::new(),
+        crate::analysis::LintLevel::Warn => crate::diagnostic::Severity::Warning,
+        crate::analysis::LintLevel::Error => crate::diagnostic::Severity::Error,
+    };
+    local_naming
+        .unused_parameters
+        .iter()
+        .map(|unused| {
+            let name = interner.resolve(unused.symbol).unwrap_or("<unknown>");
+            Diagnostic {
+                severity,
+                code: crate::diagnostic::DiagnosticCode::Lint(
+                    crate::diagnostic::Lint::UnusedParameter,
+                ),
+                message: format!("parameter `{name}` is never used."),
+                range: unused.range,
+            }
         })
         .collect()
 }
@@ -1131,6 +1164,10 @@ struct DocumentNamingContext<'a> {
     loop_memo: HashMap<ExpressionId, (FlowState, FlowState)>,
     assignment_writes: Vec<AssignmentWrite>,
     write_indexes_by_expression: HashMap<ExpressionId, u32>,
+    // Every binding some read resolved to, and every parameter binding seen, for the
+    // unused-parameter lint: a parameter no read ever touched is reportable.
+    read_bindings: BTreeSet<BindingId>,
+    parameter_bindings: Vec<(Symbol, Range, BindingId)>,
     // Diagnostics and the maybe-undefined set are recorded only on a loop region's final walk, so
     // fixed-point pre-passes cannot emit duplicates from not-yet-stable flow states.
     emit: bool,
@@ -1154,6 +1191,8 @@ impl<'a> DocumentNamingContext<'a> {
             loop_memo: HashMap::new(),
             assignment_writes: Vec::new(),
             write_indexes_by_expression: HashMap::new(),
+            read_bindings: BTreeSet::new(),
+            parameter_bindings: Vec::new(),
             emit: true,
             named_type_annotation_expressions: BTreeSet::new(),
             diagnostics: Vec::new(),
@@ -1166,6 +1205,7 @@ impl<'a> DocumentNamingContext<'a> {
             self.resolve_expression(*expression_id);
         }
         self.collect_unused_assignments();
+        self.collect_unused_parameters();
         DocumentNamingComputation {
             naming: self.document_naming,
             diagnostics: self.diagnostics,
@@ -1206,6 +1246,29 @@ impl<'a> DocumentNamingContext<'a> {
                     symbol: write.symbol,
                     range: write.range,
                 });
+        }
+    }
+
+    // A parameter no read ever resolved to. Loop re-walks make binding creation idempotent by
+    // site, so a parameter may appear several times here; the set lookup keeps one report per
+    // binding. Dot- and underscore-prefixed names are intentional throwaways, as for assignments.
+    fn collect_unused_parameters(&mut self) {
+        let mut reported = BTreeSet::new();
+        for &(symbol, range, binding_id) in &self.parameter_bindings {
+            if self.read_bindings.contains(&binding_id) || !reported.insert(binding_id) {
+                continue;
+            }
+            let name = self
+                .interner
+                .resolve(symbol)
+                .unwrap_or("")
+                .trim_matches('`');
+            if name.starts_with('.') || name.starts_with('_') {
+                continue;
+            }
+            self.document_naming
+                .unused_parameters
+                .push(UnusedAssignment { symbol, range });
         }
     }
 
@@ -1292,6 +1355,8 @@ impl<'a> DocumentNamingContext<'a> {
                     scope.slots.insert(parameter.symbol, binding_id);
                     self.flow
                         .insert(binding_id, BTreeSet::from([Reach::Implicit]));
+                    self.parameter_bindings
+                        .push((parameter.symbol, parameter.range, binding_id));
                 }
                 self.scopes.push(scope);
                 // Defaults are evaluated in the function frame with every parameter in scope, so
@@ -1865,6 +1930,7 @@ impl<'a> DocumentNamingContext<'a> {
                         .used = true;
                 }
             }
+            self.read_bindings.insert(binding_id);
             return Some((binding_id, unassigned_reachable));
         }
         None

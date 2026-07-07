@@ -397,3 +397,49 @@ mod project_stub_namespaces {
         assert_eq!(diagnostics, Vec::<String>::new());
     }
 }
+
+// The default-off `unused-parameter` lint: a parameter no read resolves to is reported once the
+// project opts in, dot-/underscore-prefixed names stay silent, and the default level emits
+// nothing. Lives here because fixture runners build their `Analysis` with a fixed default config.
+mod unused_parameter_lint {
+    use {
+        analysis::{Analysis, CheckConfig, Document, LintConfig, LintLevel, tree::new_parser},
+        std::path::{Path, PathBuf},
+    };
+
+    fn messages(lint_config: LintConfig, code: &str) -> Vec<String> {
+        let mut analysis_state =
+            Analysis::new(PathBuf::from("/pkg"), lint_config, CheckConfig::default());
+        let mut parser = new_parser().expect("parser should build");
+        let document = Document::parse(&mut parser, code).expect("code should parse");
+        analysis_state.add_document(PathBuf::from("R/main.R"), document);
+        analysis::run_full(&mut analysis_state);
+        let document_id = analysis_state
+            .document_id_for_path(Path::new("R/main.R"))
+            .expect("document id");
+        analysis_state
+            .document_diagnostics(document_id)
+            .into_iter()
+            .map(|diagnostic| diagnostic.message)
+            .collect()
+    }
+
+    const CODE: &str = "shout <- function(text, volume, .ignored) {\n  toupper(text)\n}\n";
+
+    #[test]
+    fn opted_in_reports_the_unread_parameter_and_skips_throwaway_names() {
+        let lint_config = LintConfig {
+            unused_parameter: LintLevel::Warn,
+            ..LintConfig::default()
+        };
+        assert_eq!(
+            messages(lint_config, CODE),
+            vec!["parameter `volume` is never used.".to_owned()]
+        );
+    }
+
+    #[test]
+    fn default_level_stays_silent() {
+        assert_eq!(messages(LintConfig::default(), CODE), Vec::<String>::new());
+    }
+}

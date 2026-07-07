@@ -52,6 +52,9 @@ Semantics checks enforce coding conventions and best practices that won't necess
 - **`assignment-operator`**: Recommends using `<-` rather than `=` for variable assignment
 - **`missing-comma`** / **`trailing-comma`**: Flags a missing comma between call arguments and an unnecessary trailing comma after the last one
 - **`boolean-shorthand`**: Use `TRUE` and `FALSE` over `T` and `F`
+- **`unused-parameter`** *(off by default)*: Flags function parameters no read ever uses. Off
+  unless enabled in `roughly.toml` (`[lint] unused-parameter = "warn"`), because R signatures
+  legitimately carry ignored formals; `.`/`_`-prefixed names are never reported
 
 Example:
 ```r

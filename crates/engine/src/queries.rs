@@ -808,6 +808,7 @@ impl QueryGroup for RoughlyQueries {
 
             Key::Diagnostics(file) => {
                 bump(&self.counters.diagnostics, *file);
+                let config = engine.fetch::<Config>(Key::Config);
                 let check = engine.fetch::<ModuleCheck>(Key::Typecheck(*file));
                 let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(*file));
                 let module = engine.fetch::<Module>(Key::Lower(*file));
@@ -830,8 +831,15 @@ impl QueryGroup for RoughlyQueries {
                 );
                 // Computed unconditionally (like `strict_diagnostics`); the consumer gates it on the `unused`
                 // check, matching production's `check_config.unused` in `Analysis::document_diagnostics`.
-                let unused =
+                let mut unused =
                     analysis::naming::unused_diagnostics(&naming.naming, lowering.interner());
+                // The unused-parameter lint applies its configured level at emission (default off),
+                // exactly like production; the `Config` fetch above records the dependency edge.
+                unused.extend(analysis::naming::unused_parameter_diagnostics(
+                    &naming.naming,
+                    lowering.interner(),
+                    config.lint.unused_parameter,
+                ));
                 Stored::new(FileDiagnostics {
                     naming: naming.diagnostics.clone(),
                     package_naming: (*package_naming).clone(),
