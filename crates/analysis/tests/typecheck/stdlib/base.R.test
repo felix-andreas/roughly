@@ -842,3 +842,15 @@ join2 <- function(left, right) {
 join2("a")
 #++++
 error: function arity mismatch
+
+#---- negated_missing_test_also_marks_optional
+pick <- function(x) {
+  if (!missing(x)) {
+    return(x + 1L)
+  }
+  0L
+}
+pick(2L)
+#++++
+fn([x]: ?1) -> ?1 | integer
+integer

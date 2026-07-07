@@ -1668,7 +1668,21 @@ An unannotated `function(...)` expression infers a function type directly from i
 - a parameter with a default value is optional at call sites
 - a formal the body tests with `missing(name)` is also optional at call sites — R's
   optional-without-default idiom (`function(name, punct) if (missing(punct)) … else …punct…` may
-  be called without `punct`); reading an omitted formal outside its guard is not yet flow-checked
+  be called without `punct`)
+- `missing(name)` on a **defaultless** formal of the current function also narrows the formal's
+  supplied state along the branch edges, exactly like a type guard:
+  - on the edge where `missing(name)` is true, reading `name` is an error (R would fail the read
+    at run time: "argument is missing, with no default"); writing it is legal and supplies it
+    (`if (missing(punct)) punct <- "!"`)
+  - on the edge where `missing(name)` is false, the formal is supplied and reads are ordinary;
+    a diverging true edge (`if (missing(x)) stop(...)`) leaves the rest of the body on the
+    supplied edge, and `!missing(name)` swaps the edges
+  - after the branches rejoin, the formal counts as unsupplied only if it is unsupplied on **both**
+    edges, so only definite runtime failures are reported
+  - a formal with a default is never narrowed: reading it while unsupplied evaluates the default,
+    which is legal
+  - `missing()` applies only to the immediate function's own formals, matching R; an enclosing
+    function's formal is not narrowed inside a nested function
 - a `...` formal becomes a **rest parameter** with element type `Any`, at the position it holds in
   the formal list — `function(x, ...) …` infers as `fn(x: T, ...: Any) -> …`, and calls check
   against it by the [rest-parameter rules](#function-calls) (surplus positionals and unmatched

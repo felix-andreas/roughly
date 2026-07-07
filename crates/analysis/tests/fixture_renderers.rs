@@ -29,6 +29,7 @@ pub fn render_expression_error_kind(error: &InferenceError) -> &'static str {
         InferenceError::NamedParameterMismatch { .. } => "error: named parameter mismatch",
         InferenceError::NotAList { .. } => "error: not a list",
         InferenceError::NotIterable { .. } => "error: not iterable",
+        InferenceError::MissingArgumentRead { .. } => "error: missing argument read",
         InferenceError::DollarOnAtomicVector { .. } => "error: dollar on atomic vector",
         InferenceError::FieldDoesNotExist { .. } => "error: field does not exist",
         InferenceError::PositionDoesNotExist { .. } => "error: position does not exist",

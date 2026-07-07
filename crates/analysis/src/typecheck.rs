@@ -41,6 +41,10 @@ pub enum InferenceEntry {
 pub struct Binding {
     pub type_scheme: TypeScheme,
     pub range: Range,
+    // The slot is a defaultless parameter on a control-flow edge where `missing(name)` held, so a
+    // read would fail at run time (R: "argument is missing, with no default"). Set only by the
+    // missing()-guard refinement; any write to the slot clears it.
+    pub unsupplied: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,6 +100,10 @@ struct GuardRefinement {
     range: Range,
     true_type: Option<CoreType>,
     false_type: Option<CoreType>,
+    // Per-edge supplied state for a `missing(name)` guard on a defaultless parameter: reads on
+    // the unsupplied edge error. Type guards leave both edges supplied.
+    true_unsupplied: bool,
+    false_unsupplied: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,6 +233,11 @@ pub enum InferenceError {
         range: Range,
         expression_id: ExpressionId,
     },
+    MissingArgumentRead {
+        symbol: Symbol,
+        range: Range,
+        expression_id: ExpressionId,
+    },
     DollarOnAtomicVector {
         actual: Box<CoreType>,
         range: Range,
@@ -286,6 +299,10 @@ pub struct InferenceState {
     // `local` and `return` at lowering). `None` for a bare state.
     stop_symbol: Option<Symbol>,
     missing_symbol: Option<Symbol>,
+    // The current function frame's defaultless parameter slots — the only slots a `missing(name)`
+    // guard may narrow. Saved and replaced (not extended) around each body: R's `missing()`
+    // applies only to the immediate function's own formals.
+    missing_narrowable: BTreeSet<BindingId>,
     // Sites that introduce a genuine `Unknown` into the type lattice, collected while recording is
     // enabled (the authoritative round-2 check). Strict mode reports these origins; ordinary
     // propagation of `Unknown` is never recorded here, so a single root cause yields one diagnostic.
@@ -1069,7 +1086,11 @@ impl InferenceState {
     pub fn bind_global_scheme(&mut self, symbol: Symbol, type_scheme: TypeScheme, range: Range) {
         self.set_environment_entry(
             EnvironmentKey::Global(symbol),
-            Some(Binding { type_scheme, range }),
+            Some(Binding {
+                type_scheme,
+                range,
+                unsupplied: false,
+            }),
         );
     }
 
@@ -1084,7 +1105,11 @@ impl InferenceState {
     fn bind_local_scheme(&mut self, binding_id: BindingId, type_scheme: TypeScheme, range: Range) {
         self.set_environment_entry(
             EnvironmentKey::Local(binding_id),
-            Some(Binding { type_scheme, range }),
+            Some(Binding {
+                type_scheme,
+                range,
+                unsupplied: false,
+            }),
         );
     }
 
@@ -1214,6 +1239,8 @@ impl InferenceState {
                     return Ok(Some(left));
                 }
                 let range = left.range;
+                // Definitely-missing only when both merging paths agree; a supplied path clears it.
+                let unsupplied = left.unsupplied && right.unsupplied;
                 let left_type = self.instantiate_type_scheme(&left.type_scheme)?;
                 let right_type = self.instantiate_type_scheme(&right.type_scheme)?;
                 let left_type = self.resolve(left_type)?;
@@ -1229,6 +1256,7 @@ impl InferenceState {
                 Ok(Some(Binding {
                     type_scheme: TypeScheme::monomorphic(joined),
                     range,
+                    unsupplied,
                 }))
             }
         }
@@ -1557,6 +1585,17 @@ impl InferenceState {
                         .get(&expression.id)
                     {
                         self.log_loop_access(EnvironmentKey::Local(*binding_id));
+                        // A defaultless parameter on a `missing(name)`-true edge: R would fail
+                        // this read at run time, so it is an error, not a type.
+                        if let Some(binding) = self.lookup_local_name(*binding_id)
+                            && binding.unsupplied
+                        {
+                            return Err(InferenceError::MissingArgumentRead {
+                                symbol: *symbol,
+                                range: expression.range,
+                                expression_id: expression.id,
+                            });
+                        }
                         // A read captured by a closure must stay sound for calls made after later
                         // writes to the slot, so it resolves to the accumulated join of all the
                         // frame's writes rather than the definition-point entry (only slots that
@@ -2263,6 +2302,7 @@ impl InferenceState {
         self.log_loop_access(key);
         let current = self.environment.get(&key).cloned();
         let written_binding = Binding {
+            unsupplied: false,
             type_scheme: TypeScheme::monomorphic(written),
             range: expression.range,
         };
@@ -2581,6 +2621,14 @@ impl InferenceState {
         // Early returns join the trailing value: `function() { if (c) return("a"); 5 }` is
         // `character | double`. The frame is popped before the `?` so an erroring body leaves the
         // stack balanced.
+        let saved_missing_narrowable = std::mem::take(&mut self.missing_narrowable);
+        if let Some(parameter_binding_ids) = &parameter_binding_ids {
+            for (parameter, binding_id) in parameters.iter().zip(parameter_binding_ids) {
+                if parameter.default.is_none() {
+                    self.missing_narrowable.insert(*binding_id);
+                }
+            }
+        }
         self.return_type_frames.push(Vec::new());
         let body_result = self.infer_body_with_capture_discovery(
             body,
@@ -2588,6 +2636,7 @@ impl InferenceState {
             resolution_context,
             type_definitions,
         );
+        self.missing_narrowable = saved_missing_narrowable;
         let early_returns = self
             .return_type_frames
             .pop()
@@ -2627,9 +2676,9 @@ impl InferenceState {
         // R parameters are always matchable by name and by position, so inferred function types carry
         // every parameter as a named parameter; parameters with a default value are optional at call
         // sites, and so is a formal the body tests with `missing(name)` — R's optional-without-default
-        // idiom (the guarded uses are what make omitting it legal; unguarded uses of an omitted
-        // formal are not flow-checked yet). A `...` formal becomes a rest parameter with element
-        // `Any` at its formal position (the values reaching it are not tracked into the body).
+        // idiom (reads on a `missing(name)`-true edge are flow-checked and error). A `...` formal
+        // becomes a rest parameter with element `Any` at its formal position (the values reaching
+        // it are not tracked into the body).
         let mut missing_tested = std::collections::BTreeSet::new();
         if let Some(missing_symbol) = self.missing_symbol {
             crate::hir::formals_tested_by_missing(arena, body, missing_symbol, &mut missing_tested);
@@ -2733,6 +2782,7 @@ impl InferenceState {
                 Some(Binding {
                     type_scheme: TypeScheme::monomorphic(true_type.clone()),
                     range: refinement.range,
+                    unsupplied: refinement.true_unsupplied,
                 }),
             );
         }
@@ -2761,6 +2811,7 @@ impl InferenceState {
                         Some(Binding {
                             type_scheme: TypeScheme::monomorphic(false_type.clone()),
                             range: refinement.range,
+                            unsupplied: refinement.false_unsupplied,
                         }),
                     );
                 }
@@ -2787,6 +2838,7 @@ impl InferenceState {
                         Some(Binding {
                             type_scheme: TypeScheme::monomorphic(false_type.clone()),
                             range: refinement.range,
+                            unsupplied: refinement.false_unsupplied,
                         }),
                     );
                 }
@@ -2880,15 +2932,19 @@ impl InferenceState {
                     range: refinement.range,
                     true_type: refinement.false_type,
                     false_type: refinement.true_type,
+                    true_unsupplied: refinement.false_unsupplied,
+                    false_unsupplied: refinement.true_unsupplied,
                 })),
             ExpressionKind::Call { callee, arguments } => {
                 let callee_expression = arena.get(*callee);
                 let ExpressionKind::Symbol(callee_symbol) = &callee_expression.kind else {
                     return Ok(None);
                 };
-                let Some(predicate) = self.guard_predicates.get(callee_symbol).copied() else {
+                let is_missing_guard = Some(*callee_symbol) == self.missing_symbol;
+                let predicate = self.guard_predicates.get(callee_symbol).copied();
+                if !is_missing_guard && predicate.is_none() {
                     return Ok(None);
-                };
+                }
                 // A local binding shadowing the predicate name wins, exactly as in resolution.
                 if let Some(context) = resolution_context
                     && context
@@ -2929,6 +2985,28 @@ impl InferenceState {
                 };
                 let entry_type = self.instantiate_type_scheme(&binding.type_scheme)?;
                 let entry_type = self.resolve(entry_type)?;
+                // `missing(x)` on one of the current frame's defaultless parameters: the true
+                // edge marks the slot unsupplied (reads there would fail at run time), the false
+                // edge marks it supplied. The entry's type is unchanged on both edges.
+                if is_missing_guard {
+                    let EnvironmentKey::Local(binding_id) = key else {
+                        return Ok(None);
+                    };
+                    if !self.missing_narrowable.contains(&binding_id) {
+                        return Ok(None);
+                    }
+                    return Ok(Some(GuardRefinement {
+                        key,
+                        range: binding.range,
+                        true_type: Some(entry_type.clone()),
+                        false_type: Some(entry_type),
+                        true_unsupplied: true,
+                        false_unsupplied: false,
+                    }));
+                }
+                let Some(predicate) = predicate else {
+                    return Ok(None);
+                };
                 Ok(
                     refine_guarded_type(&entry_type, predicate).map(|(true_type, false_type)| {
                         GuardRefinement {
@@ -2936,6 +3014,8 @@ impl InferenceState {
                             range: binding.range,
                             true_type,
                             false_type,
+                            true_unsupplied: false,
+                            false_unsupplied: false,
                         }
                     }),
                 )
@@ -3090,6 +3170,7 @@ impl InferenceState {
                     Some(Binding {
                         type_scheme: TypeScheme::monomorphic(item_type.clone()),
                         range: *range,
+                        unsupplied: false,
                     }),
                 );
             }
@@ -3133,6 +3214,7 @@ impl InferenceState {
                     Some(Binding {
                         type_scheme: TypeScheme::monomorphic(CoreType::Unknown),
                         range,
+                        unsupplied: false,
                     }),
                 );
                 let symbol = match key {

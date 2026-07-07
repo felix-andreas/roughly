@@ -58,3 +58,46 @@ report <- function() {
 }
 #++++
 No diagnostics.
+
+#---- missing_guard_write_and_early_exit_are_clean
+# The two canonical missing() idioms: fill the omitted formal on the missing
+# branch, or stop() so only the supplied edge continues — plus the negated
+# guard returning early on the supplied edge.
+fill_default <- function(name, punct) {
+  if (missing(punct)) {
+    punct <- "!"
+  }
+  paste0(name, punct)
+}
+
+require_x <- function(x) {
+  if (missing(x)) stop("x is required")
+  x + 1L
+}
+
+pick <- function(x) {
+  if (!missing(x)) {
+    return(x + 1L)
+  }
+  0L
+}
+
+use_all <- function() {
+  paste(fill_default("a"), require_x(1L), pick(), sep = " ")
+}
+#++++
+No diagnostics.
+
+#---- reading_a_missing_formal_is_an_error
+# Reading the formal on the branch where missing() held would fail at run
+# time ("argument is missing, with no default"), so it is a checked error.
+describe <- function(name, punct) {
+  if (missing(punct)) {
+    return(nchar(punct))
+  }
+  paste0(name, punct)
+}
+#++++
+error[type-error] reading `punct` here would fail at run time: this branch runs only when `punct` is missing, and it has no default.
+--> 5:18-5:23
+|     return(nchar(punct))

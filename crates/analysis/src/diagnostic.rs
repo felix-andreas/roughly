@@ -736,6 +736,19 @@ impl Diagnostic {
                     ),
                 )
             }
+            InferenceError::MissingArgumentRead {
+                symbol,
+                range,
+                expression_id: _,
+            } => {
+                let name = interner.resolve(*symbol).unwrap_or("<unknown>");
+                (
+                    *range,
+                    format!(
+                        "reading `{name}` here would fail at run time: this branch runs only when `{name}` is missing, and it has no default."
+                    ),
+                )
+            }
             InferenceError::DollarOnAtomicVector {
                 actual,
                 range,
