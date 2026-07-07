@@ -37,3 +37,29 @@ summary_report <- function() {
 }
 #++++
 No diagnostics.
+
+#---- matrix_margins_with_forwarded_reductions
+# apply with an overloaded reduction callback, identity piping, and a
+# missing()-guarded formatter — the stub-unlock idioms together.
+summarize_matrix <- function(values) {
+  m <- as.matrix(values)
+  row_totals <- apply(m, 1L, sum)
+  col_totals <- apply(m, 2L, sum, na.rm = TRUE)
+  list(rows = identity(row_totals), cols = col_totals)
+}
+
+format_total <- function(value, unit) {
+  text <- as.character(value)
+  if (missing(unit)) {
+    text
+  } else {
+    paste0(text, " ", unit)
+  }
+}
+
+report <- function() {
+  totals <- summarize_matrix(c(1.5, 2.5, 3.5))
+  format_total(length(totals$rows), "rows")
+}
+#++++
+No diagnostics.
