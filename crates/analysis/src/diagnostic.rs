@@ -722,6 +722,20 @@ impl Diagnostic {
                     format!("expected a list, found `{}`", type_renderer.render(actual)),
                 )
             }
+            InferenceError::NotIterable {
+                actual,
+                range,
+                expression_id: _,
+            } => {
+                let mut type_renderer = TypeRenderer::user_facing(interner);
+                (
+                    *range,
+                    format!(
+                        "this `for` sequence is `{}`, which cannot be iterated — expected a vector or list.",
+                        type_renderer.render(actual)
+                    ),
+                )
+            }
             InferenceError::DollarOnAtomicVector {
                 actual,
                 range,

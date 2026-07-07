@@ -104,7 +104,7 @@ flag <- TRUE
 items <- if (flag) c(1L, 2L) else function(x) x
 for (item in items) item
 #++++
-error: type mismatch
+error: not iterable
 
 #==== fields_and_elements
 #---- shared_field_over_union_of_records

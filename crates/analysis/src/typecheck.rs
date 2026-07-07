@@ -220,6 +220,11 @@ pub enum InferenceError {
         range: Range,
         expression_id: ExpressionId,
     },
+    NotIterable {
+        actual: Box<CoreType>,
+        range: Range,
+        expression_id: ExpressionId,
+    },
     DollarOnAtomicVector {
         actual: Box<CoreType>,
         range: Range,
@@ -3193,13 +3198,19 @@ impl InferenceState {
         )?;
         let sequence_type =
             self.resolve_structural(inferred_sequence, type_definitions, Some(sequence))?;
-        let Some(item_type) = iterable_item_type(&sequence_type) else {
-            return Err(InferenceError::TypeMismatch {
-                expected: Box::new(CoreType::vector(Atomic::Integer)),
-                actual: Box::new(sequence_type),
-                range: Some(range),
-                expression_id: Some(sequence.id),
-            });
+        let item_type = match iterable_item_type(&sequence_type) {
+            Some(item_type) => item_type,
+            // An unresolved inference variable stays unconstrained: R iterates vectors *and*
+            // lists, and no single unification can express "either", so the loop variable
+            // degrades to `Unknown` rather than committing the sequence to one shape.
+            None if matches!(sequence_type, CoreType::Variable(_)) => CoreType::Unknown,
+            None => {
+                return Err(InferenceError::NotIterable {
+                    actual: Box::new(sequence_type),
+                    range: sequence.range,
+                    expression_id: sequence.id,
+                });
+            }
         };
 
         let variable_key = match resolution_context.and_then(|context| {
@@ -7853,6 +7864,15 @@ fn widen_error_container_to_union(error: InferenceError, union_type: &CoreType) 
             range,
             expression_id,
         },
+        InferenceError::NotIterable {
+            range,
+            expression_id,
+            ..
+        } => InferenceError::NotIterable {
+            actual: Box::new(union_type.clone()),
+            range,
+            expression_id,
+        },
         InferenceError::DollarOnAtomicVector {
             range,
             expression_id,
@@ -7905,6 +7925,17 @@ fn iterable_item_type(core_type: &CoreType) -> Option<CoreType> {
             }
             Some(CoreType::union_of(item_types))
         }
+        // `for (x in NULL)` runs zero iterations and is legal R; the loop variable holds the
+        // union of no members.
+        CoreType::Null => Some(CoreType::Null),
+        // Gradual types iterate as themselves: `Any` sequences yield `Any` items, and an
+        // `Unknown` sequence must not spray a second error on the loop.
+        CoreType::Any => Some(CoreType::Any),
+        CoreType::Unknown => Some(CoreType::Unknown),
+        // Opaque nominals (`data.frame` above all) are containers whose element shape the
+        // checker cannot see; iterating them is idiomatic R, so the item degrades to `Any`
+        // rather than erroring.
+        CoreType::Nominal(..) => Some(CoreType::Any),
         _ => None,
     }
 }

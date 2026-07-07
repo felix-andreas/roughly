@@ -1480,6 +1480,16 @@ iterations and with the pre-loop state (see `Control-flow joins`).
   - the empty list `list()` is iterable with element type `NULL` (the union of zero item types)
   - a union of iterables iterates member-wise: `integer[] | character[]` binds the loop variable
     as `integer | character`
+  - `NULL` is iterable and runs zero iterations (legal R), binding the loop variable as `NULL`
+  - `Any` iterates with `Any` items; `Unknown` iterates with `Unknown` items (an already-failed
+    source does not produce a second error on the loop)
+  - an opaque nominal value iterates with `Any` items (its element shape is not visible to the
+    checker)
+  - a still-unresolved inference variable (an unannotated parameter, say) is **not constrained**
+    by iteration — R iterates vectors and lists, and neither shape may be committed for the
+    caller — so the loop variable degrades to `Unknown`
+  - any other source (a function, say) is an error reported on the source expression: ``this
+    `for` sequence is `fn() -> integer`, which cannot be iterated — expected a vector or list.``
 - the iteration source is evaluated once, before any iteration
 - does not itself change the type of the iterated value outside the loop
 - inside the loop body, the bound name has the iterated element type; it is re-initialized from

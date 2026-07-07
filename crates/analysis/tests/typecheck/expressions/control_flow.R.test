@@ -198,7 +198,29 @@ error: type mismatch
 #---- for_over_function_is_rejected
 for (item in function(x) x) item
 #++++
-error: type mismatch
+error: not iterable
+
+#---- for_over_null_runs_zero_iterations
+for (item in NULL) item
+#++++
+NULL
+
+#---- for_over_any_yields_any_items
+#: fn(values: Any) -> NULL
+consume <- function(values) {
+  for (item in values) item
+  NULL
+}
+#++++
+fn(values: Any) -> NULL
+
+#---- for_over_unannotated_parameter_stays_unconstrained
+drain <- function(items) {
+  for (item in items) item
+  items
+}
+#++++
+fn(items: ?1) -> ?1
 
 #==== branch_unification
 #---- unknown_branch_propagates

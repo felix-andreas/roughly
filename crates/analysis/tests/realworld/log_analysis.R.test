@@ -1,0 +1,80 @@
+#==== log_processing
+#---- log_analyzer_is_clean
+# A log analyzer: strsplit's typed list-of-vectors feeds positional [[
+# extraction, parsed entries travel as named-list records, switch ranks
+# levels with a default arm, a closure counter mutates its captured total
+# through <<-, and a nullable search result is is.null-guarded at the caller.
+
+parse_line <- function(line) {
+  parts <- strsplit(line, " :: ")[[1L]]
+  list(level = tolower(trimws(parts[[1L]])), message = parts[[2L]])
+}
+
+#: fn(level: character) -> integer
+rank_of <- function(level) {
+  switch(level, error = 3L, warn = 2L, 1L)
+}
+
+make_counter <- function() {
+  total <- 0L
+  function() {
+    total <<- total + 1L
+    total
+  }
+}
+
+#: fn(lines: character[], prefix: character) -> character | NULL
+first_with_prefix <- function(lines, prefix) {
+  for (line in lines) {
+    if (startsWith(line, prefix)) {
+      return(line)
+    }
+  }
+  NULL
+}
+
+analyze <- function() {
+  lines <- c("ERROR :: disk full", "INFO :: started", "WARN :: low memory")
+  seen <- make_counter()
+  worst <- 0L
+  for (line in lines) {
+    entry <- parse_line(line)
+    seen()
+    rank <- rank_of(entry$level)
+    if (rank > worst) {
+      worst <- rank
+    }
+  }
+  first_error <- first_with_prefix(lines, "ERROR")
+  summary <- if (is.null(first_error)) {
+    "no errors"
+  } else {
+    first_error
+  }
+  sprintf("%d lines, worst rank %d, first error: %s", seen(), worst, summary)
+}
+#++++
+No diagnostics.
+
+#==== log_processing_bugs
+#---- summing_a_character_field
+# Accumulating the wrong record field: the level is a character column, and
+# adding it into an integer counter is the classic wrong-column bug.
+
+parse_line <- function(line) {
+  parts <- strsplit(line, " :: ")[[1L]]
+  list(level = parts[[1L]], message = parts[[2L]])
+}
+
+count_levels <- function(lines) {
+  total <- 0L
+  for (line in lines) {
+    entry <- parse_line(line)
+    total <- total + entry$level
+  }
+  total
+}
+#++++
+error[type-error] expected a numeric value (`integer` or `double`), found `character`
+--> 13:22-13:33
+|     total <- total + entry$level
