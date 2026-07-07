@@ -171,10 +171,37 @@ pub fn check(
         }
 
         let override_sources = project_stubs.sources.clone();
+        let namespace_path = root.join("NAMESPACE");
         let mut analysis_state =
             Analysis::new_with_stub_library(root, config.lint, config.check, move |interner| {
                 analysis::stdlib::StubLibrary::load_with_overrides(interner, &override_sources)
             });
+
+        // NAMESPACE import validation against the loaded stubs (shipped + project): a warning per
+        // `importFrom(pkg, name)` naming something a known namespace does not export. The stubs
+        // are the only export source the checker has, so unknown namespaces are not checked.
+        if let Ok(namespace_source) = std::fs::read_to_string(&namespace_path) {
+            let rope = Rope::from_str(&namespace_source);
+            for diagnostic in diagnostics::convert_diagnostics(
+                analysis_state.namespace_problems(&namespace_source),
+                &rope,
+                PositionEncoding::Utf8,
+            ) {
+                if min_severity == MinSeverity::Error
+                    && diagnostic.severity != Some(DiagnosticSeverity::ERROR)
+                {
+                    continue;
+                }
+                n_diagnostics += 1;
+                match output {
+                    OutputFormat::Human => {
+                        render_human_diagnostic(&namespace_path, &rope, &diagnostic, &[])
+                    }
+                    OutputFormat::Json => render_json_diagnostic(&namespace_path, &diagnostic, &[]),
+                }
+            }
+        }
+
         let mut checked_paths = Vec::with_capacity(paths.len());
         for path in paths {
             n_files += 1;

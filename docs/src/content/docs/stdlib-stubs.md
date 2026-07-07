@@ -233,11 +233,21 @@ override winning a name's type never un-exports it from its declaring namespace.
   namespace; name not exported by that namespace) specified in the Typing Reference under
   [Namespace access](/typing-reference#namespace-access).
 
+### NAMESPACE import validation
+
+`roughly check` also validates a package's `NAMESPACE` file against the loaded stubs: every
+`importFrom(pkg, name)` whose namespace the stub corpus knows (shipped or project) but does not
+export `name` warns on the import site (`` `medain` is not exported by `stats`. ``). Namespaces
+without stubs are not checked — the stubs are the only export source the checker has — and
+resolution semantics are unchanged: stubbed names resolve bare with or without an import.
+
 **Not yet built (future namespacing):**
 
 - A per-namespace map (`namespace -> {Symbol -> scheme}`) that keeps the shipped packages separate rather
   than folded flat (today two shipped packages cannot declare the same name with different types).
 - `library(pkg)` attaching a namespace on demand (see §7).
+- Gating bare third-party resolution on NAMESPACE imports (R-correct, but a deliberate strictness
+  decision — today's flat fold is intentionally permissive).
 
 ### Incremental hygiene
 

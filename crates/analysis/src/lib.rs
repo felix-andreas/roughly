@@ -6,6 +6,7 @@ pub mod ide;
 pub mod interner;
 pub mod lint;
 pub mod lower;
+pub mod namespace;
 pub mod naming;
 pub mod s4;
 pub mod stdlib;

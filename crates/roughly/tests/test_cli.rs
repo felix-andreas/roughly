@@ -218,6 +218,34 @@ fn check_related_notes_render_on_both_surfaces() {
     );
 }
 
+// importFrom naming something a stubbed namespace does not export warns on the NAMESPACE file;
+// spelled-right imports and unknown (unstubbed) namespaces stay quiet.
+#[test]
+fn check_validates_namespace_imports_against_stubs() {
+    let directory = project(&[
+        ("R/main.R", "x <- 1\n"),
+        (
+            "NAMESPACE",
+            "import(stats)\nimportFrom(stats, sd, medain)\nimportFrom(dplyr, mutate)\n",
+        ),
+    ]);
+    let output = roughly(directory.path(), &["check", "."]);
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
+    assert!(
+        rendered.contains("`medain` is not exported by `stats`."),
+        "expected the typo warning, got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("mutate") && !rendered.contains("`sd`"),
+        "unknown namespaces and real exports must stay quiet: {rendered}"
+    );
+    assert!(
+        rendered.contains("NAMESPACE:2:23"),
+        "expected a precise range on the NAMESPACE file, got: {rendered}"
+    );
+}
+
 #[test]
 fn check_min_severity_error_ignores_warnings() {
     let directory = project(&[("warn.R", "x = 1\n")]);
