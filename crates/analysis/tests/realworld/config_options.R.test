@@ -35,3 +35,26 @@ describe_config <- function() {
 }
 #++++
 No diagnostics.
+
+#---- optional_without_default_via_missing_guard
+# R's optional-without-default idiom: the caller may omit `punct` because
+# every use is missing()-guarded; positional [[ extracts from a named list.
+settings <- list(host = "localhost", port = 8080L)
+
+describe <- function(name, punct) {
+  label <- toupper(name)
+  if (missing(punct)) {
+    label
+  } else {
+    paste0(label, punct)
+  }
+}
+
+report <- function() {
+  first <- settings[[1L]]
+  header <- describe("connection")
+  loud <- describe("connection", "!")
+  paste(header, loud, first, sep = " | ")
+}
+#++++
+No diagnostics.

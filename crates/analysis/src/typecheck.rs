@@ -6311,6 +6311,19 @@ impl InferenceState {
                 }
             }
             CoreType::Record(fields) => {
+                // Record fields are declaration-ordered, so R's positional `[[` extracts the
+                // field at that position exactly like a tuple item.
+                if let Some(index) = integer_literal_position(index_expression) {
+                    return match fields.get(index) {
+                        Some(field) => Ok(field.value.clone()),
+                        None => Err(InferenceError::PositionDoesNotExist {
+                            position: index + 1,
+                            container: Box::new(CoreType::Record(fields)),
+                            range: expression.range,
+                            expression_id: expression.id,
+                        }),
+                    };
+                }
                 let Some(name) = literal_name_symbol(index_expression) else {
                     return Err(InferenceError::NonLiteralSubscript {
                         container: Box::new(CoreType::Record(fields)),

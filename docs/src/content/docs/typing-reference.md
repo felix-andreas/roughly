@@ -1193,11 +1193,13 @@ For tuple-like lists, positional `[[` is allowed only when the index is known st
 - if the literal position exists, the result is that element's type
 - if the position is not known statically as a literal, the access is a type error
 
-For fixed-shape record-like lists, name-based `[[` is allowed only when the field name is known statically as a literal name.
+For fixed-shape record-like lists, `[[` is allowed with a literal field name or a literal position
+(record fields are declaration-ordered, so `x[[1L]]` extracts the first field exactly as R does).
 
 - if the literal field exists, the result is that field's type
-- if the field name is not known statically as a literal, the access is a type error
-- if a literal field name is known statically and does not exist, the access is a type error
+- if the literal position exists, the result is that position's field type
+- if the index is neither a literal name nor a literal position, the access is a type error
+- if a literal field name or position does not exist, the access is a type error
 
 Runtime indexing failures are not modeled by the type system.
 

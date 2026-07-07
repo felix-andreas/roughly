@@ -151,3 +151,18 @@ integer
 list(1L, "foo", TRUE)[[2]]
 #++++
 character
+
+#---- record_positional_double_bracket_extracts_the_field
+config <- list(host = "localhost", port = 8080L)
+config[[1L]]
+config[[2L]]
+#++++
+list{host: character, port: integer}
+character
+integer
+
+#---- record_positional_double_bracket_out_of_range
+config <- list(host = "localhost")
+config[[3L]]
+#++++
+error: position does not exist
