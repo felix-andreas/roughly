@@ -6267,16 +6267,13 @@ impl InferenceState {
                 }
             }
             CoreType::List(item_type) => Ok(*item_type),
+            // Mirrors the map-like vector arm: a literal name may be absent at runtime (`T | NULL`),
+            // while positional and computed access extract an item like R does on any list.
             CoreType::NamedList(item_type) => {
                 if literal_name_symbol(index_expression).is_some() {
                     Ok(nullable_type(*item_type))
                 } else {
-                    Err(InferenceError::NonLiteralSubscript {
-                        container: Box::new(CoreType::NamedList(item_type)),
-                        by: SubscriptKind::FieldName,
-                        range: expression.range,
-                        expression_id: expression.id,
-                    })
+                    Ok(*item_type)
                 }
             }
             CoreType::Tuple(items) => {

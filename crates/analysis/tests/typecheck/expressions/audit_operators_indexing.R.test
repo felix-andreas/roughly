@@ -326,12 +326,13 @@ logical
 #++++
 logical[]
 
-#---- map_list_positional_double_bracket_rejected
+#---- map_list_positional_double_bracket_extracts_the_item
 #: list[named: integer]
 v <- list(foo = 1L)
 v[[1L]]
 #++++
-error: non-literal subscript
+list[named: integer]
+integer
 
 #---- array_vector_variable_positional_index
 i <- 1L

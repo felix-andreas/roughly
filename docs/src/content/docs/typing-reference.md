@@ -1185,7 +1185,8 @@ Runtime indexing failures are not modeled by the type system.
 `[[` is allowed on lists.
 
 - for array-like `list[T]`, `[[` returns `T`
-- for map-like `list[named: T]`, name-based `[[` returns `T | NULL`
+- for map-like `list[named: T]`, name-based `[[` returns `T | NULL`; positional and computed `[[`
+  return `T` (runtime indexing failures are not modeled, as for array-like lists)
 
 For tuple-like lists, positional `[[` is allowed only when the index is known statically as a literal position.
 
