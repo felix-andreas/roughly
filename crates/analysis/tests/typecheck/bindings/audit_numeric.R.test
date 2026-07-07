@@ -323,4 +323,4 @@ f: <T: numeric> fn(x: T) -> logical
 #---- range_over_numeric_var_is_double
 rangef <- function(n) 1:n
 #++++
-rangef: <T: numeric> fn(n: T) -> double[]
+rangef: <T: scalar numeric> fn(n: T) -> double[]

@@ -1381,6 +1381,10 @@ Logical negation `!` accepts only `logical` operands:
 - a whole-number `double` literal operand such as `1` or `10` counts as `integer` here, matching R's runtime behavior for `:`
 - otherwise, if either operand is `double`, the result is `double[]`
 - array-like or non-numeric operands are type errors
+- an inference-variable operand (an unannotated parameter, `1:n`) acquires the **scalar numeric**
+  bound — a scalar `integer` or `double` — so passing a numeric vector through the enclosing
+  function is a type error at the call, matching R's endpoint truncation warning being a bug; the
+  result is `double[]` since the endpoint may instantiate at `double`
 
 Examples:
 
