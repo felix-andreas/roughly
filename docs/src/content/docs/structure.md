@@ -50,14 +50,15 @@ Keep it focused on the file split and the role of each file.
   - `resolve_document_locally` (file-local naming) and package-global resolution
 
 - `typecheck.rs` (+ `typecheck/`)
-  - semantic checking
-  - inference internals
-  - compatibility logic
-  - the irreducible builtin kernel (operators and core constructors)
-  - interface extraction
+  - the root holds the shared types (`InferenceState`, `Binding`, `InferenceError`, `ModuleCheck`,
+    the type-definition environment), the module/expression entry points, assignment and function
+    inference, and interface extraction; the clusters below live in submodules
   - `typecheck/annotations.rs` — annotation application: harvesting `#:` schemes, applying
     checked and trusting annotations, lowering surface types with type-parameter substitutions,
     and nominal-representation projection
+  - `typecheck/operators.rs` — the irreducible builtin kernel: arithmetic with R's shape/atomic
+    promotion, comparison with the flexible-operand scalar claim, `:`, unary forms, `&&`/`||`,
+    `c()`, `switch`, `list()`, and the `[` / `[[` / `$` indexing forms
   - `typecheck/calls.rs` — call checking: R's argument matcher (name-aware, positional, and
     rest-parameter matching), ordered overload probing, the callback-forwarding probe, and the
     argument compatibility check
@@ -115,7 +116,7 @@ Keep it focused on the file split and the role of each file.
 ## Deferred split
 
 - the scheme-expressible standard library lives in `stub.rs` + `stdlib.rs` + `stubs/*.Rtypes`; only the irreducible builtin kernel (operators and core constructors) remains in `typecheck.rs`
-- interface extraction stays inside `typecheck.rs` for now; compatibility logic now lives in `typecheck/unify.rs`
+- interface extraction stays inside `typecheck.rs`'s root; the other planned typecheck seams are done (see the `typecheck/` submodules above)
 
 ## Role of this document
 
