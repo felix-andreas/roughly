@@ -785,3 +785,38 @@ grow <- function() {
 }
 #++++
 fn() -> double[] | NULL
+
+#==== callback_forwarding
+#---- lapply_forwards_named_arguments_into_the_callback
+words <- c("alpha", "beta")
+lapply(words, gsub, pattern = "a", replacement = "o")
+#++++
+character[]
+list[character]
+
+#---- lapply_forwards_positional_arguments_after_the_element
+words <- c("alpha", "beta")
+lapply(words, gsub, "a", "o")
+#++++
+character[]
+list[character]
+
+#---- lapply_accepts_a_callback_with_surplus_optional_formals
+words <- c("alpha", "beta")
+lapply(words, nchar)
+#++++
+character[]
+list[integer]
+
+#---- lapply_over_an_atomic_vector_types_the_elements
+values <- c(1L, 2L, 3L)
+lapply(values, function(value) value + 1L)
+#++++
+integer[]
+list[integer]
+
+#---- forwarded_argument_with_a_wrong_type_is_rejected
+words <- c("alpha", "beta")
+lapply(words, gsub, pattern = 1L, replacement = "o")
+#++++
+error: type mismatch

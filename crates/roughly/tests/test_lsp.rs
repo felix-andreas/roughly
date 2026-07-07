@@ -2222,7 +2222,7 @@ async fn signature_help_sends_generalized_label_with_parameter_offsets() {
     let signature = &help.signatures[0];
     assert_eq!(
         signature.label,
-        "<T, U> fn(x: list[T], f: fn(T) -> U) -> list[U]"
+        "<T: atomic, U> fn(x: list[T] | T[], f: fn(T) -> U, ...: Any) -> list[U]"
     );
     let parameters = signature
         .parameters
@@ -2240,7 +2240,10 @@ async fn signature_help_sends_generalized_label_with_parameter_offsets() {
             }
         })
         .collect::<Vec<_>>();
-    assert_eq!(parameter_texts, ["x: list[T]", "f: fn(T) -> U"]);
+    assert_eq!(
+        parameter_texts,
+        ["x: list[T] | T[]", "f: fn(T) -> U", "...: Any"]
+    );
     assert_eq!(help.active_parameter, Some(0));
 
     context.shutdown().await;
@@ -2284,7 +2287,10 @@ async fn signature_help_falls_back_to_substring_parameter_labels() {
             }
         })
         .collect::<Vec<_>>();
-    assert_eq!(parameter_texts, ["x: list[T]", "f: fn(T) -> U"]);
+    assert_eq!(
+        parameter_texts,
+        ["x: list[T] | T[]", "f: fn(T) -> U", "...: Any"]
+    );
 
     context.shutdown().await;
 }

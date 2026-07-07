@@ -6,9 +6,10 @@ result <- lapply()
 #!!!! signature_help lapply.sig
 R/main.R:1:18
 #++++
-<T, U> fn(x: list[T], f: fn(T) -> U) -> list[U]
-param 0: x: list[T]
+<T: atomic, U> fn(x: list[T] | T[], f: fn(T) -> U, ...: Any) -> list[U]
+param 0: x: list[T] | T[]
 param 1: f: fn(T) -> U
+param 2: ...: Any
 active parameter: 0
 
 #---- lapply_resolved_call_shows_instantiation
@@ -18,9 +19,10 @@ result <- lapply(list(1L, 2L), function(item) item)
 #!!!! signature_help lapply.sig
 R/main.R:1:31
 #++++
-fn(x: list[integer], f: fn(integer) -> integer) -> list[integer]
-param 0: x: list[integer]
+fn(x: list[integer] | integer[], f: fn(integer) -> integer, ...: Any) -> list[integer]
+param 0: x: list[integer] | integer[]
 param 1: f: fn(integer) -> integer
+param 2: ...: Any
 active parameter: 1
 
 #==== user_defined

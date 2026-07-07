@@ -1716,6 +1716,27 @@ Examples:
 - a function of type `fn(integer) -> integer` is rejected where `fn(integer | NULL) -> integer` is
   expected, because the expected interface may pass `NULL`, which the actual function does not accept
 
+#### Callback forwarding at variadic call sites
+
+R's apply family invokes its callback as `FUN(element, ...)`, forwarding the caller's surplus
+arguments — so a callback with more formals than the declared interface is still correct when the
+call forwards the difference. At a call to a **variadic** function, a function-typed argument that
+fails the plain interface check is re-checked as that forwarded invocation:
+
+- forwarded **named** arguments (the ones the rest parameter would absorb) consume the callback's
+  same-named formals first, each checked against its formal's type
+- the interface's parameter types — the elements the callee will pass — then fill the callback's
+  remaining formals in order, followed by forwarded **positional** arguments
+- formals the invocation leaves unfilled must have defaults
+- the callback's return type must satisfy the interface's return type (covariant)
+- the re-check is a probe: on failure nothing it bound survives, and the reported error is the
+  plain interface mismatch
+
+Consequences: `lapply(words, gsub, pattern = "a", replacement = "o")` checks `gsub(word,
+pattern = "a", replacement = "o")` and types as `list[character]`; `lapply(words, nchar)` accepts
+`nchar`'s optional display formals; a forwarded argument of the wrong type fails the probe and the
+call errors.
+
 Variadic compatibility is conservative:
 
 - a variadic function type is compatible only with another variadic function type; their rest element types are contravariant, like ordinary parameters, and the fixed prefixes must match by the rules above

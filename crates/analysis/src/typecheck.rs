@@ -5628,6 +5628,48 @@ impl InferenceState {
         let mut next_positional_index = 0;
         let mut remaining_named_parameters = function_type.named_parameters;
 
+        // Which arguments the rest parameter will absorb, decided up front with the same
+        // accounting the loop below applies (no type checks). Needed before the loop because a
+        // function-typed argument earlier in the call may be checked against the arguments
+        // forwarded to it later in the call (`lapply(x, gsub, pattern = "a")`).
+        let forwarded_argument_indexes = if variadic_element.is_some() {
+            let mut consumed_named = Vec::new();
+            let mut positional_seen = 0usize;
+            let mut pre_rest_slots = pre_rest_remaining;
+            let mut forwarded = Vec::new();
+            for (index, argument) in arguments.iter().enumerate() {
+                match argument.name {
+                    Some(name) => {
+                        let declared_index =
+                            expected_named_parameters.iter().position(|expected| {
+                                *expected == name && !consumed_named.contains(&name)
+                            });
+                        match declared_index {
+                            Some(declared_index) => {
+                                consumed_named.push(name);
+                                if declared_index < pre_rest_slots {
+                                    pre_rest_slots -= 1;
+                                }
+                            }
+                            None => forwarded.push(index),
+                        }
+                    }
+                    None => {
+                        if positional_seen < positional_parameters.len() {
+                            positional_seen += 1;
+                        } else if pre_rest_slots > 0 {
+                            pre_rest_slots -= 1;
+                        } else {
+                            forwarded.push(index);
+                        }
+                    }
+                }
+            }
+            forwarded
+        } else {
+            Vec::new()
+        };
+
         for (argument, inferred_argument) in arguments.iter().zip(argument_types) {
             let arg_expr = arena.get(argument.expression);
             let inferred_argument = inferred_argument.clone();
@@ -5665,12 +5707,23 @@ impl InferenceState {
                 if parameter_index < pre_rest_remaining {
                     pre_rest_remaining -= 1;
                 }
-                self.check_argument(
-                    parameter.value,
-                    inferred_argument,
+                if let Err(error) = self.check_argument(
+                    parameter.value.clone(),
+                    inferred_argument.clone(),
                     arg_expr,
                     type_definitions,
-                )?;
+                ) && !self.forwarding_callback_probe(
+                    &parameter.value,
+                    &inferred_argument,
+                    &forwarded_argument_indexes,
+                    arguments,
+                    argument_types,
+                    arg_expr,
+                    arena,
+                    type_definitions,
+                )? {
+                    return Err(error);
+                }
                 continue;
             }
 
@@ -5691,12 +5744,23 @@ impl InferenceState {
             if pre_rest_remaining > 0 {
                 let parameter = remaining_named_parameters.remove(0);
                 pre_rest_remaining -= 1;
-                self.check_argument(
-                    parameter.value,
-                    inferred_argument,
+                if let Err(error) = self.check_argument(
+                    parameter.value.clone(),
+                    inferred_argument.clone(),
                     arg_expr,
                     type_definitions,
-                )?;
+                ) && !self.forwarding_callback_probe(
+                    &parameter.value,
+                    &inferred_argument,
+                    &forwarded_argument_indexes,
+                    arguments,
+                    argument_types,
+                    arg_expr,
+                    arena,
+                    type_definitions,
+                )? {
+                    return Err(error);
+                }
                 continue;
             }
 
@@ -5735,6 +5799,186 @@ impl InferenceState {
         }
 
         self.resolve(return_type)
+    }
+
+    // The forwarding retry for a callback argument of a variadic callee. R's apply family invokes
+    // `FUN(element, ...)`, so a callback with more formals than the declared interface is still
+    // correct when the caller forwards the difference — `lapply(x, gsub, pattern = "a",
+    // replacement = "o")` calls `gsub(x[[i]], pattern = "a", replacement = "o")`, and formals the
+    // forwarding leaves unfilled may default. When the plain interface check fails, this simulates
+    // that invocation against the callback's real signature: forwarded named arguments consume
+    // same-named formals, the interface's parameter types then fill the remaining formals in order
+    // together with forwarded positionals, leftovers must be optional, and the callback's return
+    // must satisfy the interface's. Runs as a probe: bindings commit only on success, and a failed
+    // probe reports the original interface mismatch, not the simulation's.
+    #[allow(clippy::too_many_arguments)]
+    fn forwarding_callback_probe(
+        &mut self,
+        expected_parameter: &CoreType,
+        actual_argument: &CoreType,
+        forwarded_argument_indexes: &[usize],
+        arguments: &[Argument],
+        argument_types: &[CoreType],
+        callback_expression: &Expression,
+        arena: &HirArena,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<bool, InferenceError> {
+        let CoreType::Function(expected_callback) = self.resolve(expected_parameter.clone())?
+        else {
+            return Ok(false);
+        };
+        let CoreType::Function(actual_callback) = self.resolve(actual_argument.clone())? else {
+            return Ok(false);
+        };
+
+        let snapshot = self.snapshot();
+        let result = self.forwarding_callback_probe_inner(
+            &expected_callback,
+            &actual_callback,
+            forwarded_argument_indexes,
+            arguments,
+            argument_types,
+            callback_expression,
+            arena,
+            type_definitions,
+        );
+        match result {
+            Ok(true) => {
+                self.commit(snapshot);
+                Ok(true)
+            }
+            Ok(false) | Err(_) => {
+                self.rollback_to(snapshot);
+                Ok(false)
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn forwarding_callback_probe_inner(
+        &mut self,
+        expected_callback: &FunctionType<CoreType>,
+        actual_callback: &FunctionType<CoreType>,
+        forwarded_argument_indexes: &[usize],
+        arguments: &[Argument],
+        argument_types: &[CoreType],
+        callback_expression: &Expression,
+        arena: &HirArena,
+        type_definitions: &TypeDefinitionEnvironment,
+    ) -> Result<bool, InferenceError> {
+        let mut open_positionals = actual_callback.parameters.clone();
+        let mut open_named = actual_callback.named_parameters.clone();
+        let mut pre_rest_open = match &actual_callback.variadic {
+            Some(variadic) => variadic.preceding_named,
+            None => open_named.len(),
+        };
+        let actual_rest_element = actual_callback
+            .variadic
+            .as_ref()
+            .map(|variadic| (*variadic.element).clone());
+
+        // Forwarded named arguments consume the callback's same-named formals first, as R matches
+        // names before positions.
+        let mut forwarded_positionals = Vec::new();
+        for &index in forwarded_argument_indexes {
+            let argument = &arguments[index];
+            let argument_type = argument_types[index].clone();
+            let argument_expression = arena.get(argument.expression);
+            match argument.name {
+                Some(name) => {
+                    match open_named
+                        .iter()
+                        .position(|parameter| parameter.name == name)
+                    {
+                        Some(position) => {
+                            let parameter = open_named.remove(position);
+                            if position < pre_rest_open {
+                                pre_rest_open -= 1;
+                            }
+                            self.check_argument(
+                                parameter.value,
+                                argument_type,
+                                argument_expression,
+                                type_definitions,
+                            )?;
+                        }
+                        None => match &actual_rest_element {
+                            Some(element) => self.check_argument(
+                                element.clone(),
+                                argument_type,
+                                argument_expression,
+                                type_definitions,
+                            )?,
+                            None => return Ok(false),
+                        },
+                    }
+                }
+                None => forwarded_positionals.push(index),
+            }
+        }
+
+        // The interface's parameter types are the elements the callee will pass; they fill the
+        // callback's remaining formals in order, before the forwarded positionals.
+        let mut element_types = expected_callback.parameters.clone();
+        element_types.extend(
+            expected_callback
+                .named_parameters
+                .iter()
+                .map(|parameter| parameter.value.clone()),
+        );
+
+        enum Filled {
+            Element(CoreType),
+            Forwarded(usize),
+        }
+        let sequence = element_types
+            .into_iter()
+            .map(Filled::Element)
+            .chain(forwarded_positionals.into_iter().map(Filled::Forwarded));
+        for filled in sequence {
+            let (argument_type, blame_expression) = match filled {
+                Filled::Element(element) => (element, callback_expression),
+                Filled::Forwarded(index) => (
+                    argument_types[index].clone(),
+                    arena.get(arguments[index].expression),
+                ),
+            };
+            let formal = if !open_positionals.is_empty() {
+                Some(open_positionals.remove(0))
+            } else if pre_rest_open > 0 {
+                pre_rest_open -= 1;
+                Some(open_named.remove(0).value)
+            } else {
+                None
+            };
+            match formal {
+                Some(formal) => {
+                    self.check_argument(formal, argument_type, blame_expression, type_definitions)?
+                }
+                None => match &actual_rest_element {
+                    Some(element) => self.check_argument(
+                        element.clone(),
+                        argument_type,
+                        blame_expression,
+                        type_definitions,
+                    )?,
+                    None => return Ok(false),
+                },
+            }
+        }
+
+        // Every formal the invocation leaves unfilled must have a default.
+        if !open_positionals.is_empty() || open_named.iter().any(|parameter| !parameter.optional) {
+            return Ok(false);
+        }
+
+        // The callback's result flows out through the interface's return type (covariant).
+        self.check_compatibility(
+            (*actual_callback.return_type).clone(),
+            (*expected_callback.return_type).clone(),
+            type_definitions,
+            Some(callback_expression),
+        )
     }
 
     // Arguments are checked with compatibility, not unification, so coercions like

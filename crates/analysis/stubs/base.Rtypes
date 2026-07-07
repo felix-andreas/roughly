@@ -127,10 +127,10 @@ as.function : Any
 as.environment : Any
 
 # Character helpers: elementwise, scalar-claim, Any-param (R coerces non-character input).
-# `nchar`'s optional formals (`type`, `allowNA`, `keepNA`) are deliberately NOT declared: function
-# compatibility requires matching parameter counts, so declaring them would break the idiomatic
-# callback use `lapply(words, nchar)`. Extra-optional-tolerant function compatibility would lift this.
-nchar : fn(x: Any) -> integer
+# `nchar`'s optional formals are declarable because callback positions tolerate surplus optional
+# formals: `lapply(words, nchar)` re-checks the callback as the forwarded invocation the callee
+# performs, so extra defaults no longer break the idiom.
+nchar : fn(x: Any, [type]: character, [allowNA]: logical, [keepNA]: logical) -> integer
 nzchar : fn(x: Any, [keepNA]: logical) -> logical
 toupper : fn(x: Any) -> character
 tolower : fn(x: Any) -> character
@@ -398,7 +398,7 @@ colMeans : fn(x: Any, [na.rm]: logical, [dims]: Any) -> double[]
 # accumulator separately (`U`) so `init =` folds check precisely; without an init R seeds the fold
 # from the first element (forcing `U = T`), which one scheme cannot state, and `accumulate = TRUE`
 # returns the list of intermediates rather than `U` — both need overload sets.
-lapply : <T, U> fn(x: list[T], f: fn(T) -> U) -> list[U]
+lapply : <T, U> fn(x: list[T] | T[], f: fn(T) -> U, ...: Any) -> list[U]
 Filter : <T> fn(f: fn(T) -> logical, x: list[T]) -> list[T]
 Find : <T> fn(f: fn(T) -> logical, x: list[T]) -> T | NULL
 Position : <T> fn(f: fn(T) -> logical, x: list[T]) -> integer | NULL
