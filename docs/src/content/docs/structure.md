@@ -55,6 +55,9 @@ Keep it focused on the file split and the role of each file.
   - compatibility logic
   - the irreducible builtin kernel (operators and core constructors)
   - interface extraction
+  - `typecheck/annotations.rs` — annotation application: harvesting `#:` schemes, applying
+    checked and trusting annotations, lowering surface types with type-parameter substitutions,
+    and nominal-representation projection
   - `typecheck/calls.rs` — call checking: R's argument matcher (name-aware, positional, and
     rest-parameter matching), ordered overload probing, the callback-forwarding probe, and the
     argument compatibility check
