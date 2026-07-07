@@ -365,7 +365,7 @@ fn close_reverts_unsaved_edits_but_keeps_saved_edits() {
 
     // Open the on-disk file and add a line that references an undefined name (an unsaved edit).
     lifecycle.did_open(PATH, "good <- 1L\n");
-    lifecycle.did_change(PATH, line_range(1, 0, 0), "y <- missing(2L)\n");
+    lifecycle.did_change(PATH, line_range(1, 0, 0), "y <- zzz_unknown(2L)\n");
     let edited = lifecycle.diagnostics(PATH);
     assert!(
         has_code(&edited, DiagnosticCode::Unresolved),
@@ -383,7 +383,7 @@ fn close_reverts_unsaved_edits_but_keeps_saved_edits() {
     // Reopen, reintroduce the bad edit, then SAVE it to disk. Now a close preserves the diagnostic because
     // the engine's disk text carries the edit.
     lifecycle.did_open(PATH, "good <- 1L\n");
-    lifecycle.did_change(PATH, line_range(1, 0, 0), "y <- missing(2L)\n");
+    lifecycle.did_change(PATH, line_range(1, 0, 0), "y <- zzz_unknown(2L)\n");
     lifecycle.did_save(PATH);
     lifecycle.did_close(PATH);
     let after_save_close = lifecycle.diagnostics(PATH);
@@ -410,7 +410,7 @@ fn watched_change_to_open_file_is_ignored() {
 
     // An external tool rewrites the on-disk file to something with an unresolved reference. Because the file
     // is open, the watcher ignores it and the engine keeps the clean buffer text.
-    lifecycle.watched_write(PATH, "b <- missing(1L)\n");
+    lifecycle.watched_write(PATH, "b <- zzz_unknown(1L)\n");
     assert!(
         lifecycle.diagnostics(PATH).is_empty(),
         "a watched change to an open file is ignored; the buffer stays authoritative: {:#?}",

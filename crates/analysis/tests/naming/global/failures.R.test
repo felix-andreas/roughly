@@ -210,7 +210,7 @@ deviation <- stats::sd(c(1, 2, 3))
 #++++
 Assign(deviation@b0)
   Call
-    NamespaceGet(Symbol(1), Symbol(569))
+    NamespaceGet(Symbol(1), Symbol(570))
     Argument
       Call
         Symbol(c@?)
@@ -227,7 +227,7 @@ result <- foobar::bazqux(1L)
 #++++
 Assign(result@b0)
   Call
-    NamespaceGet(Symbol(876), Symbol(877))
+    NamespaceGet(Symbol(877), Symbol(878))
     Argument
       Integer(1L)
 
@@ -241,7 +241,7 @@ result <- stats::bazqux(1L)
 #++++
 Assign(result@b0)
   Call
-    NamespaceGet(Symbol(1), Symbol(876))
+    NamespaceGet(Symbol(1), Symbol(877))
     Argument
       Integer(1L)
 

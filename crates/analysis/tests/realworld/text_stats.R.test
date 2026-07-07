@@ -37,3 +37,19 @@ report_words <- function() {
 }
 #++++
 No diagnostics.
+
+#---- functional_pipeline_with_forwarded_callbacks
+# The apply-family idiom: callbacks with more formals than fn(T) -> U,
+# completed by forwarded arguments exactly as R invokes them.
+normalize_words <- function(words) {
+  cleaned <- lapply(words, gsub, pattern = "[^a-z]", replacement = "")
+  lengths <- lapply(words, nchar)
+  list(cleaned = cleaned, lengths = lengths)
+}
+
+report <- function() {
+  stats <- normalize_words(c("alpha!", "beta?"))
+  length(stats$cleaned) + length(stats$lengths)
+}
+#++++
+No diagnostics.

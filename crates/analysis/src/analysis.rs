@@ -1349,7 +1349,7 @@ mod tests {
             CheckConfig::default(),
         );
         let document_id = analysis
-            .add_document_from_source(path.clone(), "missing")
+            .add_document_from_source(path.clone(), "zzz_unknown")
             .expect("document should parse");
 
         resolve_package(&mut analysis);
@@ -1371,10 +1371,10 @@ mod tests {
                         },
                         end: TextPosition {
                             line_index: 0,
-                            character_index: "missing".len(),
+                            character_index: "zzz_unknown".len(),
                         },
                     },
-                    text: "missing(".to_owned(),
+                    text: "zzz_unknown(".to_owned(),
                 }],
             )
             .expect("edit should succeed");

@@ -16,20 +16,20 @@ error[type-error] This call passes 2 positional argument(s), but the function ac
 | identity(1L, 2L)
 
 #---- unknown_callee_in_call
-missing(1L)
+zzz_unknown(1L)
 #++++
-warning[unresolved] I could not resolve `missing` in this package, its imports, or builtins.
---> 1:1-1:8
-| missing(1L)
+warning[unresolved] I could not resolve `zzz_unknown` in this package, its imports, or builtins.
+--> 1:1-1:12
+| zzz_unknown(1L)
 
 #---- unknown_callee_after_valid_polymorphic_use
 identity <- function(x) x
 identity(1L)
-missing(identity("ok"))
+zzz_unknown(identity("ok"))
 #++++
-warning[unresolved] I could not resolve `missing` in this package, its imports, or builtins.
---> 3:1-3:8
-| missing(identity("ok"))
+warning[unresolved] I could not resolve `zzz_unknown` in this package, its imports, or builtins.
+--> 3:1-3:12
+| zzz_unknown(identity("ok"))
 
 #---- named_argument_not_in_interface
 identity <- function(x) x

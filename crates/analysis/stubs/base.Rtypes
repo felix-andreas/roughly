@@ -98,6 +98,9 @@ is.symbol : fn(x: Any) -> logical
 is.call : fn(x: Any) -> logical
 is.primitive : fn(x: Any) -> logical
 is.element : fn(el: Any, set: Any) -> logical
+# `missing(arg)` tests whether a formal was supplied. The argument is a parameter name R treats as
+# a promise; the checker sees an ordinary call, and `Any` accepts every argument shape.
+missing : fn(x: Any) -> logical
 
 # Elementwise NA/finiteness predicates: one logical PER ELEMENT in R (unlike the predicates above);
 # scalar-claim so `if (is.na(x))` stays clean on scalars.
