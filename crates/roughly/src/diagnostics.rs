@@ -27,7 +27,8 @@ pub fn convert_diagnostic(
     // the conventional presentation for an assignment whose value is never read or a parameter no
     // read uses.
     let tags = (diagnostic.code == analysis::DiagnosticCode::Unused
-        || diagnostic.code == analysis::DiagnosticCode::Lint(analysis::Lint::UnusedParameter))
+        || diagnostic.code == analysis::DiagnosticCode::Lint(analysis::Lint::UnusedParameter)
+        || diagnostic.code == analysis::DiagnosticCode::Lint(analysis::Lint::UnusedImport))
     .then(|| vec![DiagnosticTag::UNNECESSARY]);
     Diagnostic {
         range: position::tree_sitter_range_to_lsp(rope, encoding, diagnostic.range),

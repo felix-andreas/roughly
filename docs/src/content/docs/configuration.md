@@ -52,11 +52,18 @@ boolean-shorthand = "error"
 missing-comma = "warn"
 trailing-comma = "warn"
 unused-parameter = "warn"  # default off: opt in to flag never-used function parameters
+unused-import = "warn"     # default off: opt in to flag never-used NAMESPACE imports
 ```
 
 `unused-parameter` is **off by default** — R signatures legitimately carry ignored formals (an S3
 method must match its generic's signature; callbacks receive arguments they ignore) — so it only
 speaks when a project opts in. Parameters named with a leading `.` or `_` are never reported.
+
+`unused-import` is also **off by default**. When enabled, it flags an `importFrom(pkg, name)` in the
+package's `NAMESPACE` whose `name` appears in no checked source. Usage is a conservative token scan
+(any token equal to the name counts — including `pkg::name` and operator spellings like `%>%`), so
+it under-reports rather than risk a false positive; whole-namespace `import(pkg)` directives are not
+checked.
 
 For one-off exceptions, prefer a [suppression comment](/linter#suppressing-diagnostics) over turning a lint off project-wide.
 

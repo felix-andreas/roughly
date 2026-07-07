@@ -170,12 +170,19 @@ pub fn check(
             }
         }
 
-        // NAMESPACE import validation against the loaded stubs (shipped + project): a warning per
-        // `importFrom(pkg, name)` naming something a known namespace does not export. The stubs
-        // are the only export source the checker has, so unknown namespaces are not checked. Built
-        // from the same discovered sources the analysis loads, so the two can never disagree.
+        // NAMESPACE diagnostics are emitted after the per-file loop (below), because the
+        // `unused-import` lint needs the token set of every checked source. The export table (for
+        // the typo check) and the parsed imports are set up here from the same discovered sources
+        // the analysis loads, so the two views can never disagree; `config.lint` is read before it
+        // moves into the analysis.
         let namespace_path = root.join("NAMESPACE");
         let namespace_exports = analysis::stdlib::stub_names_by_namespace(&project_stubs.sources);
+        let namespace_source = std::fs::read_to_string(&namespace_path).ok();
+        let namespace_imports = namespace_source
+            .as_deref()
+            .map(analysis::namespace::parse_namespace_imports)
+            .unwrap_or_default();
+        let unused_import_level = config.lint.unused_import;
 
         let override_sources = project_stubs.sources.clone();
         let mut analysis_state =
@@ -183,29 +190,7 @@ pub fn check(
                 analysis::stdlib::StubLibrary::load_with_overrides(interner, &override_sources)
             });
 
-        if let Ok(namespace_source) = std::fs::read_to_string(&namespace_path) {
-            let rope = Rope::from_str(&namespace_source);
-            let imports = analysis::namespace::parse_namespace_imports(&namespace_source);
-            let problems =
-                analysis::namespace::namespace_import_problems(&imports, &namespace_exports);
-            for diagnostic in
-                diagnostics::convert_diagnostics(problems, &rope, PositionEncoding::Utf8)
-            {
-                if min_severity == MinSeverity::Error
-                    && diagnostic.severity != Some(DiagnosticSeverity::ERROR)
-                {
-                    continue;
-                }
-                n_diagnostics += 1;
-                match output {
-                    OutputFormat::Human => {
-                        render_human_diagnostic(&namespace_path, &rope, &diagnostic, &[])
-                    }
-                    OutputFormat::Json => render_json_diagnostic(&namespace_path, &diagnostic, &[]),
-                }
-            }
-        }
-
+        let mut used_tokens = std::collections::BTreeSet::new();
         let mut checked_paths = Vec::with_capacity(paths.len());
         for path in paths {
             n_files += 1;
@@ -218,6 +203,7 @@ pub fn check(
                     continue;
                 }
             };
+            analysis::namespace::collect_used_tokens(&source, &mut used_tokens);
             if analysis_state
                 .add_document_from_source(path.clone(), &source)
                 .is_err()
@@ -269,6 +255,39 @@ pub fn check(
                         render_human_diagnostic(&path, rope, diagnostic, related)
                     }
                     OutputFormat::Json => render_json_diagnostic(&path, diagnostic, related),
+                }
+            }
+        }
+
+        // Package-level NAMESPACE diagnostics: the import-typo check (a warning per `importFrom`
+        // naming something a known namespace does not export) and the opt-in `unused-import` lint
+        // (an imported name that appears in no checked source's token set). Emitted last so the
+        // lint sees the whole package.
+        if let Some(namespace_source) = &namespace_source {
+            let rope = Rope::from_str(namespace_source);
+            let mut problems = analysis::namespace::namespace_import_problems(
+                &namespace_imports,
+                &namespace_exports,
+            );
+            problems.extend(analysis::namespace::unused_import_diagnostics(
+                &namespace_imports,
+                &used_tokens,
+                unused_import_level,
+            ));
+            for diagnostic in
+                diagnostics::convert_diagnostics(problems, &rope, PositionEncoding::Utf8)
+            {
+                if min_severity == MinSeverity::Error
+                    && diagnostic.severity != Some(DiagnosticSeverity::ERROR)
+                {
+                    continue;
+                }
+                n_diagnostics += 1;
+                match output {
+                    OutputFormat::Human => {
+                        render_human_diagnostic(&namespace_path, &rope, &diagnostic, &[])
+                    }
+                    OutputFormat::Json => render_json_diagnostic(&namespace_path, &diagnostic, &[]),
                 }
             }
         }

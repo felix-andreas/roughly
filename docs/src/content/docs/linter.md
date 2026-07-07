@@ -55,6 +55,10 @@ Semantics checks enforce coding conventions and best practices that won't necess
 - **`unused-parameter`** *(off by default)*: Flags function parameters no read ever uses. Off
   unless enabled in `roughly.toml` (`[lint] unused-parameter = "warn"`), because R signatures
   legitimately carry ignored formals; `.`/`_`-prefixed names are never reported
+- **`unused-import`** *(off by default)*: Flags an `importFrom(pkg, name)` in the `NAMESPACE` whose
+  `name` appears in no checked source. Off unless enabled (`[lint] unused-import = "warn"`); usage is
+  a conservative token scan (a name used via `pkg::name` or an operator import like `%>%` counts), so
+  it never false-positives on a real use, and whole-namespace `import(pkg)` is not checked
 
 Example:
 ```r

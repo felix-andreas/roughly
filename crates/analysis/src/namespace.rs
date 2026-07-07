@@ -116,6 +116,81 @@ pub fn namespace_import_problems(
         .collect()
 }
 
+// The `unused-import` lint findings: one per `importFrom(pkg, name)` whose `name` appears nowhere
+// in `used_tokens` — the set of every token text used across the package's R sources. Default-off
+// (`LintLevel::Default`/`Off` yield nothing) because a package may import a name only to re-export
+// it or for a side effect, and usage is a deliberately conservative token scan (any token equal to
+// the name counts as a use, including `pkg::name` and operator spellings), so it under-reports
+// rather than risk a false positive. Whole-namespace `import(pkg)` directives are not checked.
+pub fn unused_import_diagnostics(
+    imports: &[NamespaceImport],
+    used_tokens: &BTreeSet<String>,
+    level: crate::analysis::LintLevel,
+) -> Vec<Diagnostic> {
+    let severity = match level {
+        crate::analysis::LintLevel::Default | crate::analysis::LintLevel::Off => return Vec::new(),
+        crate::analysis::LintLevel::Warn => crate::diagnostic::Severity::Warning,
+        crate::analysis::LintLevel::Error => crate::diagnostic::Severity::Error,
+    };
+    imports
+        .iter()
+        .filter_map(|import| {
+            let name = import.name.as_ref()?;
+            if used_tokens.contains(name) {
+                return None;
+            }
+            Some(Diagnostic {
+                severity,
+                code: crate::diagnostic::DiagnosticCode::Lint(
+                    crate::diagnostic::Lint::UnusedImport,
+                ),
+                message: format!(
+                    "imported name `{name}` from `{}` is never used.",
+                    import.namespace
+                ),
+                range: import.range,
+                related: Vec::new(),
+            })
+        })
+        .collect()
+}
+
+// Every token's text across an R source, for the conservative `unused-import` usage scan. Uses the
+// real parser so it sees exactly the tokens R does (identifiers, operators like `%>%`, string
+// contents), never a hand-rolled scanner that could drift.
+pub fn collect_used_tokens(source: &str, out: &mut BTreeSet<String>) {
+    let Ok(mut parser) = tree::new_parser() else {
+        return;
+    };
+    let Some(parsed) = parser.parse(source, None) else {
+        return;
+    };
+    let mut cursor = parsed.root_node().walk();
+    let mut descend = true;
+    loop {
+        if descend {
+            let node = cursor.node();
+            // Leaf tokens (no named children we need to recurse past) carry the surface text; take
+            // every node's own leaf text when it has no children.
+            if node.child_count() == 0 {
+                out.insert(source[node.byte_range()].to_owned());
+            }
+        }
+        if descend && cursor.goto_first_child() {
+            continue;
+        }
+        if cursor.goto_next_sibling() {
+            descend = true;
+            continue;
+        }
+        if cursor.goto_parent() {
+            descend = false;
+            continue;
+        }
+        break;
+    }
+}
+
 // A directive argument that names something: a bare identifier or a string literal (R accepts
 // both spellings in NAMESPACE files).
 fn name_argument(value: Node<'_>, source: &str) -> Option<(String, Range)> {
@@ -168,5 +243,54 @@ mod tests {
             "export(run)\nS3method(print, thing)\nimportFrom(\"stats\", \"nope_not_real\")\n",
         );
         assert_eq!(problems, ["`nope_not_real` is not exported by `stats`."]);
+    }
+
+    fn unused_for(
+        namespace: &str,
+        sources: &[&str],
+        level: crate::analysis::LintLevel,
+    ) -> Vec<String> {
+        let imports = parse_namespace_imports(namespace);
+        let mut used = BTreeSet::new();
+        for source in sources {
+            collect_used_tokens(source, &mut used);
+        }
+        unused_import_diagnostics(&imports, &used, level)
+            .into_iter()
+            .map(|diagnostic| diagnostic.message)
+            .collect()
+    }
+
+    #[test]
+    fn unused_import_is_flagged_when_opted_in() {
+        let unused = unused_for(
+            "importFrom(stats, sd, median)\n",
+            &["x <- sd(values)\n"],
+            crate::analysis::LintLevel::Warn,
+        );
+        assert_eq!(
+            unused,
+            ["imported name `median` from `stats` is never used."]
+        );
+    }
+
+    #[test]
+    fn used_names_including_namespaced_and_operators_are_not_flagged() {
+        let unused = unused_for(
+            "importFrom(dplyr, mutate, filter)\nimportFrom(magrittr, \"%>%\")\n",
+            &["out <- df %>% mutate(x = 1)\ny <- dplyr::filter(df, x > 0)\n"],
+            crate::analysis::LintLevel::Warn,
+        );
+        assert!(unused.is_empty(), "{unused:?}");
+    }
+
+    #[test]
+    fn unused_import_is_silent_by_default() {
+        let unused = unused_for(
+            "importFrom(stats, median)\n",
+            &["x <- 1\n"],
+            crate::analysis::LintLevel::Default,
+        );
+        assert!(unused.is_empty(), "{unused:?}");
     }
 }

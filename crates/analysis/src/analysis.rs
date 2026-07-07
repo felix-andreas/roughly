@@ -83,6 +83,9 @@ pub struct LintConfig {
     // Default-off: R signatures legitimately carry ignored formals (S3 methods must match their
     // generic), so `Default` behaves as `Off` for this lint and a project opts in explicitly.
     pub unused_parameter: LintLevel,
+    // Default-off: a package may `importFrom` a name for re-export or a side effect, and usage
+    // detection is a conservative token scan, so a project opts in explicitly.
+    pub unused_import: LintLevel,
 }
 
 // A lint's configured level: keep its default severity, force a severity, or disable it. The

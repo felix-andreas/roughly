@@ -309,6 +309,7 @@ pub enum Lint {
     AssignmentOperator,
     BooleanShorthand,
     UnusedParameter,
+    UnusedImport,
 }
 
 impl Lint {
@@ -320,6 +321,7 @@ impl Lint {
             Lint::AssignmentOperator => "assignment-operator",
             Lint::BooleanShorthand => "boolean-shorthand",
             Lint::UnusedParameter => "unused-parameter",
+            Lint::UnusedImport => "unused-import",
         }
     }
 }

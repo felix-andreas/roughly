@@ -246,6 +246,43 @@ fn check_validates_namespace_imports_against_stubs() {
     );
 }
 
+// The `unused-import` lint is off by default and fires only when opted in; a name used anywhere in
+// the package (including via `pkg::name`) is not flagged, an unused one is.
+#[test]
+fn check_flags_unused_imports_when_opted_in() {
+    let files: &[(&str, &str)] = &[
+        ("R/main.R", "run <- function() stats::sd(c(1, 2))\n"),
+        ("NAMESPACE", "importFrom(stats, sd, median)\n"),
+    ];
+
+    // Default: silent.
+    let default_run = roughly(project(files).path(), &["check", "."]);
+    assert_eq!(
+        exit_code(&default_run),
+        0,
+        "stderr: {}",
+        stderr(&default_run)
+    );
+
+    // Opted in: `median` is flagged, `sd` (used via stats::sd) is not.
+    let opted_in = project(&[
+        files[0],
+        files[1],
+        ("roughly.toml", "[lint]\nunused-import = \"warn\"\n"),
+    ]);
+    let output = roughly(opted_in.path(), &["check", "."]);
+    let rendered = stderr(&output);
+    assert_eq!(exit_code(&output), 1, "stderr: {rendered}");
+    assert!(
+        rendered.contains("imported name `median` from `stats` is never used."),
+        "expected the unused-import warning, got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("`sd`"),
+        "a name used via pkg::name must not be flagged: {rendered}"
+    );
+}
+
 #[test]
 fn check_min_severity_error_ignores_warnings() {
     let directory = project(&[("warn.R", "x = 1\n")]);
