@@ -1271,6 +1271,15 @@ Map-like vectors may participate via compatibility with array-like vectors.
 
 Arithmetic does not preserve map-likeness.
 
+**Shape of a flexible operand.** An operand whose shape is still an inference variable (an
+unannotated parameter) is treated as **scalar-like** in the shape rules below and in the comparison
+rules — a deliberate scalar claim, the same compromise the standard-library corpus applies to
+elementwise functions: a scalar result coerces into every vector position, so the claim can never
+produce a false error downstream, at the cost of not tracking vector-in/vector-out shape through
+such a function. The exception is an operand carrying the atomic-element bound (`T[]` — a generic
+vector), whose operator results are genuinely vector-shaped (see
+[Type parameters and generic application](#type-parameters-and-generic-application)).
+
 #### Binary `+`, `-`, and `*`
 
 Binary `+`, `-`, and `*` use these rules:
