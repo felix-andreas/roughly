@@ -57,9 +57,9 @@ double_count <- function(count) count + count
 double_count: fn(count: integer) -> integer
 
 #---- higher_order_apply_binding
-apply <- function(f, value) f(value)
+invoke <- function(f, value) f(value)
 #++++
-apply: <T, U> fn(f: fn(T) -> U, value: T) -> U
+invoke: <T, U> fn(f: fn(T) -> U, value: T) -> U
 
 #---- numeric_param_plus_literal
 increment <- function(x) x + 1L

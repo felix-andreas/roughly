@@ -40,18 +40,18 @@ error[type-error] This call passes 2 positional argument(s), but the function ac
 | mirror("ok", "extra")
 
 #---- polymorphic_higher_order_apply
-apply <- function(f) function(x) f(x)
+invoke <- function(f) function(x) f(x)
 mirror <- function(x) x
-int_apply <- apply(mirror)
+int_apply <- invoke(mirror)
 first <- int_apply(1L)
 second <- int_apply("ok")
 #++++
 No diagnostics.
 
 #---- polymorphic_higher_order_conflict
-apply <- function(f) function(x) f(x + 1L)
+invoke <- function(f) function(x) f(x + 1L)
 mirror <- function(x) x
-mixed_apply <- apply(mirror)
+mixed_apply <- invoke(mirror)
 mixed_apply("ok")
 #++++
 error[type-error] expected a numeric value (`integer` or `double`), found `character`

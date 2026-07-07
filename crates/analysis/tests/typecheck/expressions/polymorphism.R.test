@@ -51,12 +51,12 @@ integer
 integer
 
 #---- repeated_fresh_instantiation_in_higher_order_calls
-apply <- function(f, value) f(value)
+invoke <- function(f, value) f(value)
 const_integer <- function(x) 1L
 mirror <- function(x) x
-apply(const_integer, "hello")
-apply(mirror, 1L)
-apply(mirror, "hello")
+invoke(const_integer, "hello")
+invoke(mirror, 1L)
+invoke(mirror, "hello")
 #++++
 fn(f: fn(?1) -> ?2, value: ?1) -> ?2
 fn(x: ?1) -> integer

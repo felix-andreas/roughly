@@ -402,6 +402,10 @@ colMeans : fn(x: Any, [na.rm]: logical, [dims]: Any) -> double[]
 # accumulator separately (`U`) so `init =` folds check precisely; without an init R seeds the fold
 # from the first element (forcing `U = T`), which one scheme cannot state, and `accumulate = TRUE`
 # returns the list of intermediates rather than `U` — both need overload sets.
+# `apply`'s result shape is value-dependent (a vector or a list, by what FUN returns per slice), so
+# the return stays `Any`; the callback position still checks, and forwarded arguments complete
+# callbacks with more formals.
+apply : fn(X: Any, MARGIN: Any, FUN: fn(Any) -> Any, ...: Any) -> Any
 lapply : <T, U> fn(x: list[T] | T[], f: fn(T) -> U, ...: Any) -> list[U]
 Filter : <T> fn(f: fn(T) -> logical, x: list[T]) -> list[T]
 Find : <T> fn(f: fn(T) -> logical, x: list[T]) -> T | NULL

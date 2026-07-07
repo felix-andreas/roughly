@@ -70,9 +70,9 @@ maybe <- function(x) if (x) 1L
 maybe: fn(x: logical) -> integer | NULL
 
 #---- higher_order_apply
-apply <- function(f, value) f(value)
+invoke <- function(f, value) f(value)
 #++++
-apply: <T, U> fn(f: fn(T) -> U, value: T) -> U
+invoke: <T, U> fn(f: fn(T) -> U, value: T) -> U
 
 #---- higher_order_compose
 compose <- function(f, g, x) f(g(x))

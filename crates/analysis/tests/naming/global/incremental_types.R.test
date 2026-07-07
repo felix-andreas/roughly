@@ -98,10 +98,10 @@ error[syntax-error] Syntax Error: invalid semantics: `@new` requires a nominal t
 #---- arity_flip_on_non_dirty_referrer
 #---- R/a.R
 #: @type Slot {integer}
-slot <- 1L
+compartment <- 1L
 #++++
 TypeDefinition(Slot = integer)
-Assign(slot@b0)
+Assign(compartment@b0)
   Integer(1L)
 #---- R/b.R
 #: Slot
@@ -112,10 +112,10 @@ Assign(value@b1)
 #.... slot_gains_type_parameter
 #---- R/a.R
 #: @type Slot<T> {list{value: T}}
-slot <- 1L
+compartment <- 1L
 #++++
 TypeDefinition(Slot<T> = list{value: T})
-Assign(slot@b0)
+Assign(compartment@b0)
   Integer(1L)
 #---- R/b.R
 #: Slot
