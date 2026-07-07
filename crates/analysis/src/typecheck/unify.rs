@@ -412,9 +412,29 @@ impl InferenceState {
             }
             // A value fits an expected union when it fits any member. Each attempt is its own
             // probe (`check_compatibility` rolls back failed attempts), so an earlier failing
-            // member leaks no bindings into a later one.
+            // member leaks no bindings into a later one. Concrete members are tried before a bare
+            // (unbound) type variable: a value that already fits a concrete member — `NULL` fitting
+            // the `NULL` in an instantiated `T | NULL` — must match it and bind nothing, rather than
+            // bind the variable, which would greedily pin `T` from this argument and rob a later
+            // argument of the chance to determine it (the `or_else(NULL, "x")` case: `T` should come
+            // from the fallback, not from the `NULL` value).
             (actual_type, CoreType::Union(expected_members)) => {
+                let mut variable_members = Vec::new();
                 for member in expected_members {
+                    if matches!(self.resolve(member.clone())?, CoreType::Variable(_)) {
+                        variable_members.push(member);
+                        continue;
+                    }
+                    if self.check_compatibility(
+                        actual_type.clone(),
+                        member,
+                        type_definitions,
+                        expression,
+                    )? {
+                        return Ok(true);
+                    }
+                }
+                for member in variable_members {
                     if self.check_compatibility(
                         actual_type.clone(),
                         member,

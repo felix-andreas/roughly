@@ -45,9 +45,12 @@ first_word <- function(text) {
 summarize <- function() {
   limit <- or_else(lookup_limit("requests"), 100L)
   label <- or_else(first_word("anonymous user"), "anonymous")
+  # A bare NULL value: `T` is determined by the fallback argument, not pinned to
+  # NULL by the literal, so this is `character`.
+  fallback_label <- or_else(NULL, "anonymous")
   doubled <- map_option(lookup_limit("cache"), function(size) size * 2L)
   effective <- or_else(doubled, 0L)
-  sprintf("%s: limit %d, effective %d", label, limit, effective)
+  sprintf("%s/%s: limit %d, effective %d", label, fallback_label, limit, effective)
 }
 #++++
 No diagnostics.
