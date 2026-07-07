@@ -280,6 +280,7 @@ pub struct InferenceState {
     // The symbol for `stop`, whose call unconditionally diverges (recognized by bare name, like
     // `local` and `return` at lowering). `None` for a bare state.
     stop_symbol: Option<Symbol>,
+    missing_symbol: Option<Symbol>,
     // Sites that introduce a genuine `Unknown` into the type lattice, collected while recording is
     // enabled (the authoritative round-2 check). Strict mode reports these origins; ordinary
     // propagation of `Unknown` is never recorded here, so a single root cause yields one diagnostic.
@@ -681,6 +682,7 @@ pub fn inference_state_with_builtins_in_interner(interner: &mut Interner) -> Inf
         inference_state.guard_predicates.insert(symbol, *predicate);
     }
     inference_state.stop_symbol = Some(interner.intern("stop"));
+    inference_state.missing_symbol = Some(interner.intern("missing"));
 
     inference_state
 }
@@ -2619,8 +2621,14 @@ impl InferenceState {
 
         // R parameters are always matchable by name and by position, so inferred function types carry
         // every parameter as a named parameter; parameters with a default value are optional at call
-        // sites. A `...` formal becomes a rest parameter with element `Any` at its formal position
-        // (the values reaching it are not tracked into the body).
+        // sites, and so is a formal the body tests with `missing(name)` — R's optional-without-default
+        // idiom (the guarded uses are what make omitting it legal; unguarded uses of an omitted
+        // formal are not flow-checked yet). A `...` formal becomes a rest parameter with element
+        // `Any` at its formal position (the values reaching it are not tracked into the body).
+        let mut missing_tested = std::collections::BTreeSet::new();
+        if let Some(missing_symbol) = self.missing_symbol {
+            crate::hir::formals_tested_by_missing(arena, body, missing_symbol, &mut missing_tested);
+        }
         let named_parameter_types = parameters
             .iter()
             .zip(parameter_types)
@@ -2628,7 +2636,7 @@ impl InferenceState {
                 RecordField::with_optional(
                     parameter.symbol,
                     parameter_type,
-                    parameter.has_default(),
+                    parameter.has_default() || missing_tested.contains(&parameter.symbol),
                 )
             })
             .collect();

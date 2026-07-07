@@ -820,3 +820,25 @@ words <- c("alpha", "beta")
 lapply(words, gsub, pattern = 1L, replacement = "o")
 #++++
 error: type mismatch
+
+#==== missing_guarded_formals
+#---- missing_tested_formal_is_optional_at_call_sites
+greet <- function(name, punct) {
+  if (missing(punct)) {
+    name
+  } else {
+    punct
+  }
+}
+greet("ada")
+#++++
+fn(name: ?1, [punct]: ?1) -> ?1
+character
+
+#---- unguarded_formal_stays_required
+join2 <- function(left, right) {
+  paste0(left, right)
+}
+join2("a")
+#++++
+error: function arity mismatch

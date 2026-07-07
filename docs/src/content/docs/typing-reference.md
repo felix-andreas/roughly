@@ -1644,6 +1644,9 @@ An unannotated `function(...)` expression infers a function type directly from i
 
 - every parameter appears as a named parameter using its definition name, because R parameters are always matchable both by name and by position
 - a parameter with a default value is optional at call sites
+- a formal the body tests with `missing(name)` is also optional at call sites — R's
+  optional-without-default idiom (`function(name, punct) if (missing(punct)) … else …punct…` may
+  be called without `punct`); reading an omitted formal outside its guard is not yet flow-checked
 - a `...` formal becomes a **rest parameter** with element type `Any`, at the position it holds in
   the formal list — `function(x, ...) …` infers as `fn(x: T, ...: Any) -> …`, and calls check
   against it by the [rest-parameter rules](#function-calls) (surplus positionals and unmatched

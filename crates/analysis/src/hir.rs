@@ -387,6 +387,103 @@ pub fn contains_loop_exit(arena: &HirArena, root: ExpressionId) -> bool {
     }
 }
 
+// The formal names a function body tests with `missing(name)` — R's optional-without-default
+// idiom, where a caller may omit the formal because every use is guarded. Recognized on the bare
+// callee name with a single bare-name argument, like the other syntactic special forms. Nested
+// `Function` literals are skipped: R's `missing` works only on the enclosing function's own
+// formals, so an inner function's test says nothing about ours.
+pub fn formals_tested_by_missing(
+    arena: &HirArena,
+    root: ExpressionId,
+    missing_symbol: Symbol,
+    out: &mut std::collections::BTreeSet<Symbol>,
+) {
+    match &arena.get(root).kind {
+        ExpressionKind::Call { callee, arguments } => {
+            if let ExpressionKind::Symbol(callee_symbol) = &arena.get(*callee).kind
+                && *callee_symbol == missing_symbol
+                && let [argument] = arguments.as_slice()
+                && argument.name.is_none()
+                && let ExpressionKind::Symbol(formal) = &arena.get(argument.expression).kind
+            {
+                out.insert(*formal);
+                return;
+            }
+            formals_tested_by_missing(arena, *callee, missing_symbol, out);
+            for argument in arguments {
+                formals_tested_by_missing(arena, argument.expression, missing_symbol, out);
+            }
+        }
+        ExpressionKind::Block { expressions, .. } => {
+            for expression in expressions {
+                formals_tested_by_missing(arena, *expression, missing_symbol, out);
+            }
+        }
+        ExpressionKind::Assign { target, value, .. } => {
+            if let AssignTarget::Replacement { lhs } = target {
+                formals_tested_by_missing(arena, *lhs, missing_symbol, out);
+            }
+            formals_tested_by_missing(arena, *value, missing_symbol, out);
+        }
+        ExpressionKind::Local { body } => {
+            formals_tested_by_missing(arena, *body, missing_symbol, out)
+        }
+        ExpressionKind::If {
+            condition,
+            consequence,
+            alternative,
+        } => {
+            formals_tested_by_missing(arena, *condition, missing_symbol, out);
+            formals_tested_by_missing(arena, *consequence, missing_symbol, out);
+            if let Some(alternative) = alternative {
+                formals_tested_by_missing(arena, *alternative, missing_symbol, out);
+            }
+        }
+        ExpressionKind::For { sequence, body, .. } => {
+            formals_tested_by_missing(arena, *sequence, missing_symbol, out);
+            formals_tested_by_missing(arena, *body, missing_symbol, out);
+        }
+        ExpressionKind::While { condition, body } => {
+            formals_tested_by_missing(arena, *condition, missing_symbol, out);
+            formals_tested_by_missing(arena, *body, missing_symbol, out);
+        }
+        ExpressionKind::Repeat { body } => {
+            formals_tested_by_missing(arena, *body, missing_symbol, out)
+        }
+        ExpressionKind::UnaryMinus { value } | ExpressionKind::UnaryNot { value } => {
+            formals_tested_by_missing(arena, *value, missing_symbol, out)
+        }
+        ExpressionKind::Subset { value, arguments }
+        | ExpressionKind::Subset2 { value, arguments } => {
+            formals_tested_by_missing(arena, *value, missing_symbol, out);
+            for argument in arguments {
+                formals_tested_by_missing(arena, argument.expression, missing_symbol, out);
+            }
+        }
+        ExpressionKind::Dollar { value, .. } | ExpressionKind::Slot { value, .. } => {
+            formals_tested_by_missing(arena, *value, missing_symbol, out)
+        }
+        ExpressionKind::Return { value } => {
+            if let Some(value) = value {
+                formals_tested_by_missing(arena, *value, missing_symbol, out);
+            }
+        }
+        ExpressionKind::Function { .. }
+        | ExpressionKind::NamespaceGet { .. }
+        | ExpressionKind::Break
+        | ExpressionKind::Next
+        | ExpressionKind::Null
+        | ExpressionKind::Logical(_)
+        | ExpressionKind::Integer(_)
+        | ExpressionKind::Double(_)
+        | ExpressionKind::Character(_)
+        | ExpressionKind::AtomicConstant(_)
+        | ExpressionKind::StringLiteralName(_)
+        | ExpressionKind::Symbol(_)
+        | ExpressionKind::Unsupported => {}
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Definition {
     pub kind: DefinitionKind,
