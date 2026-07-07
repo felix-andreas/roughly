@@ -467,7 +467,7 @@ error[type-error] field `b` does not exist in `list{a: integer}`
 x <- 1L
 x$foo
 #++++
-error[type-error] expected a list, found `integer`
+error[type-error] R's `$` operator is invalid on atomic vectors; this value is `integer` — extract an element with `[[` instead.
 --> 2:1-2:6
 | x$foo
 

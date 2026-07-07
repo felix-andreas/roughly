@@ -28,6 +28,7 @@ pub fn render_expression_error_kind(error: &InferenceError) -> &'static str {
         InferenceError::FunctionArityMismatch { .. } => "error: function arity mismatch",
         InferenceError::NamedParameterMismatch { .. } => "error: named parameter mismatch",
         InferenceError::NotAList { .. } => "error: not a list",
+        InferenceError::DollarOnAtomicVector { .. } => "error: dollar on atomic vector",
         InferenceError::FieldDoesNotExist { .. } => "error: field does not exist",
         InferenceError::PositionDoesNotExist { .. } => "error: position does not exist",
         InferenceError::NonLiteralSubscript { .. } => "error: non-literal subscript",

@@ -220,6 +220,11 @@ pub enum InferenceError {
         range: Range,
         expression_id: ExpressionId,
     },
+    DollarOnAtomicVector {
+        actual: Box<CoreType>,
+        range: Range,
+        expression_id: ExpressionId,
+    },
     FieldDoesNotExist {
         field: Symbol,
         container: Box<CoreType>,
@@ -6120,7 +6125,15 @@ impl InferenceState {
         match value_type {
             CoreType::Unknown => Ok(CoreType::Unknown),
             CoreType::Any => Ok(CoreType::Any),
-            CoreType::NamedVector(element) => Ok(nullable_type(*element)),
+            // R rejects `$` on every atomic vector ("$ operator is invalid for atomic vectors"),
+            // named ones included — element extraction is `[[`'s job.
+            atomic @ (CoreType::Scalar(_) | CoreType::Vector(_) | CoreType::NamedVector(_)) => {
+                Err(InferenceError::DollarOnAtomicVector {
+                    actual: Box::new(atomic),
+                    range: expression.range,
+                    expression_id: expression.id,
+                })
+            }
             CoreType::NamedList(item_type) => Ok(nullable_type(*item_type)),
             CoreType::Record(fields) => match fields.iter().find(|field| field.name == name) {
                 Some(field) => Ok(field.value.clone()),
@@ -7557,6 +7570,15 @@ fn widen_error_container_to_union(error: InferenceError, union_type: &CoreType) 
             expression_id,
             ..
         } => InferenceError::NotAList {
+            actual: Box::new(union_type.clone()),
+            range,
+            expression_id,
+        },
+        InferenceError::DollarOnAtomicVector {
+            range,
+            expression_id,
+            ..
+        } => InferenceError::DollarOnAtomicVector {
             actual: Box::new(union_type.clone()),
             range,
             expression_id,

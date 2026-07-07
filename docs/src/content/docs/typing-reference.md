@@ -1163,7 +1163,10 @@ shadows the name disables its overload set — the binding wins everywhere, call
 
 `[` is the general subsetting operator in R. In the current supported semantics, it is defined only for certain list forms.
 
-`$name` is syntactic sugar for `[["name"]]`.
+`$name` behaves as `[["name"]]` on lists, records, and the tolerated opaque nominals — but **not**
+on atomic vectors: R rejects `$` on every atomic vector (`$ operator is invalid for atomic
+vectors`), named ones included, so `c(foo = 1L)$foo` is a type error that points at `[[` while
+`c(foo = 1L)[["foo"]]` extracts `integer | NULL`.
 
 Backtick-quoted names follow the same rule.
 

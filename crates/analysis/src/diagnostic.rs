@@ -696,6 +696,20 @@ impl Diagnostic {
                     format!("expected a list, found `{}`", type_renderer.render(actual)),
                 )
             }
+            InferenceError::DollarOnAtomicVector {
+                actual,
+                range,
+                expression_id: _,
+            } => {
+                let mut type_renderer = TypeRenderer::user_facing(interner);
+                (
+                    *range,
+                    format!(
+                        "R's `$` operator is invalid on atomic vectors; this value is `{}` — extract an element with `[[` instead.",
+                        type_renderer.render(actual)
+                    ),
+                )
+            }
             InferenceError::FieldDoesNotExist {
                 field,
                 container,

@@ -128,12 +128,11 @@ values$foo
 list[named: integer]
 integer | NULL
 
-#---- dollar_on_named_vector_is_nullable
+#---- dollar_on_named_vector_is_rejected
 counts <- c(foo = 1L, bar = 2L)
 counts$foo
 #++++
-integer[named]
-integer | NULL
+error: dollar on atomic vector
 
 #---- dollar_missing_record_field_is_rejected
 list(foo = 1L)$bar

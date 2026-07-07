@@ -204,10 +204,10 @@ v$foo
 list[named: integer]
 integer | NULL
 
-#---- dollar_named_vector_nullable
+#---- dollar_named_vector_rejected
 c(foo = 1L, bar = 2L)$foo
 #++++
-integer | NULL
+error: dollar on atomic vector
 
 #---- double_bracket_on_function_rejected
 f <- function(x) x
@@ -302,7 +302,7 @@ error: unsupported `[` subset
 x <- 1L
 x$foo
 #++++
-error: not a list
+error: dollar on atomic vector
 
 #---- map_like_vector_bracket_rejected
 #: integer[named]
