@@ -1,0 +1,59 @@
+#==== functional_idioms
+#---- recursion_defaults_and_composition_are_clean
+# Everyday functional R that must type without a false positive: self-recursion,
+# default arguments, nested if/else-if returning one type, a higher-order
+# function that returns a closure, and function composition.
+countdown <- function(n) {
+  if (n <= 0L) 0L else countdown(n - 1L)
+}
+
+greet <- function(name, greeting = "Hello") {
+  paste(greeting, name)
+}
+
+clamp <- function(x, lo, hi) {
+  if (x < lo) {
+    lo
+  } else if (x > hi) {
+    hi
+  } else {
+    x
+  }
+}
+
+compose <- function(f, g) {
+  function(x) f(g(x))
+}
+
+run <- function() {
+  depth <- countdown(5L)
+  hello <- greet("Ada")
+  hi <- greet("Bob", "Hi")
+  bounded <- clamp(12L, 0L, 10L)
+  inc_then_double <- compose(function(x) x * 2L, function(x) x + 1L)
+  list(depth = depth, hello = hello, hi = hi, bounded = bounded, out = inc_then_double(5L))
+}
+#++++
+No diagnostics.
+
+#---- higher_order_stub_combinators_are_clean
+# The base functional combinators over a homogeneous list: Filter keeps the
+# element type, Negate builds a predicate, Reduce folds with a typed init.
+keep_positive <- function(values) {
+  Filter(function(x) x > 0L, values)
+}
+
+is_present <- Negate(is.null)
+
+sum_all <- function(values) {
+  Reduce(function(acc, x) acc + x, values, 0L)
+}
+
+run <- function() {
+  kept <- keep_positive(list(1L, -2L, 3L))
+  present <- is_present(5L)
+  total <- sum_all(list(1L, 2L, 3L))
+  list(kept = kept, present = present, total = total)
+}
+#++++
+No diagnostics.
