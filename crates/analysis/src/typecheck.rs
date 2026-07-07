@@ -3355,16 +3355,27 @@ impl InferenceState {
             return Ok(true);
         }
 
+        // A failed unification means "not compatible", but a blown recursion limit is a resource
+        // guard, not a verdict — swallowing it into `false` would turn a pathological type into a
+        // silently wrong answer instead of the loud limit error.
         if let CoreType::Variable(actual_var) = actual_type {
-            return Ok(self
-                .unify_internal(CoreType::Variable(actual_var), expected_type, None)
-                .is_ok());
+            return match self.unify_internal(CoreType::Variable(actual_var), expected_type, None) {
+                Ok(_) => Ok(true),
+                Err(InferenceError::RecursionLimitExceeded) => {
+                    Err(InferenceError::RecursionLimitExceeded)
+                }
+                Err(_) => Ok(false),
+            };
         }
 
         if let CoreType::Variable(expected_var) = expected_type {
-            return Ok(self
-                .unify_internal(actual_type, CoreType::Variable(expected_var), None)
-                .is_ok());
+            return match self.unify_internal(actual_type, CoreType::Variable(expected_var), None) {
+                Ok(_) => Ok(true),
+                Err(InferenceError::RecursionLimitExceeded) => {
+                    Err(InferenceError::RecursionLimitExceeded)
+                }
+                Err(_) => Ok(false),
+            };
         }
 
         match (actual_type, expected_type) {
