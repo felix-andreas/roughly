@@ -55,6 +55,9 @@ Keep it focused on the file split and the role of each file.
   - compatibility logic
   - the irreducible builtin kernel (operators and core constructors)
   - interface extraction
+  - `typecheck/calls.rs` — call checking: R's argument matcher (name-aware, positional, and
+    rest-parameter matching), ordered overload probing, the callback-forwarding probe, and the
+    argument compatibility check
   - `typecheck/environment.rs` — the variable-slot environment: bind/lookup, undo-logged entry
     writes, branch joins, captured-write notes, and the loop fixed point
   - `typecheck/unify.rs` — the unification core: variable allocation (fresh and rigid), the

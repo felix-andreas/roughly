@@ -6,11 +6,11 @@
 // parent module.
 use {
     super::{
-        InferenceEntry, InferenceError, InferenceState, RECURSION_LIMIT, Snapshot, UndoStep,
+        InferenceEntry, InferenceError, InferenceState, Level, RECURSION_LIMIT, Snapshot, UndoStep,
         Variance,
         operand::{
             atomic_widens_to, constraint_is_satisfied, constraint_violation_error,
-            nullable_single_member,
+            import_core_type, nullable_single_member,
         },
         parameter_variances,
     },
@@ -1599,5 +1599,205 @@ impl InferenceState {
             unified_variadic,
             unified_return_type,
         ))
+    }
+
+    pub(super) fn resolve_variable(
+        &mut self,
+        variable: InferenceVariableId,
+    ) -> Result<CoreType, InferenceError> {
+        let Some(entry) = self.entries.get(&variable).cloned() else {
+            return Err(InferenceError::UnknownInferenceVariable(variable));
+        };
+
+        match entry {
+            InferenceEntry::Unbound { .. } => Ok(CoreType::Variable(variable)),
+            InferenceEntry::Redirect(other_variable) => {
+                let resolved_type = self.resolve_variable(other_variable)?;
+                self.compress_variable(variable, &resolved_type)?;
+                Ok(resolved_type)
+            }
+            InferenceEntry::Bound(bound_type) => {
+                let resolved_type = self.resolve(bound_type)?;
+                self.compress_variable(variable, &resolved_type)?;
+                Ok(resolved_type)
+            }
+        }
+    }
+
+    pub(super) fn compress_variable(
+        &mut self,
+        variable: InferenceVariableId,
+        resolved_type: &CoreType,
+    ) -> Result<(), InferenceError> {
+        if !self.entries.contains_key(&variable) {
+            return Err(InferenceError::UnknownInferenceVariable(variable));
+        }
+
+        let compressed_entry = match resolved_type {
+            CoreType::Variable(other_variable) if *other_variable != variable => {
+                InferenceEntry::Redirect(*other_variable)
+            }
+            other_type => InferenceEntry::Bound(other_type.clone()),
+        };
+        self.set_entry(variable, compressed_entry);
+
+        Ok(())
+    }
+
+    pub(super) fn bind_variable(
+        &mut self,
+        variable: InferenceVariableId,
+        core_type: CoreType,
+        expression: Option<&Expression>,
+    ) -> Result<(), InferenceError> {
+        if self.occurs_in(variable, &core_type)? {
+            return Err(InferenceError::OccursCheckFailed {
+                variable,
+                in_type: Box::new(core_type),
+                range: expression.map(|current_expression| current_expression.range),
+                expression_id: expression.map(|current_expression| current_expression.id),
+            });
+        }
+
+        // A rigid (skolem) variable models a universally quantified annotation parameter; binding it
+        // to a concrete type would specialize a `<T>` the body promised to handle for every T.
+        if self.rigid_variables.contains_key(&variable) {
+            return Err(InferenceError::TypeMismatch {
+                expected: Box::new(self.rigid_display(variable)),
+                actual: Box::new(core_type),
+                range: expression.map(|current| current.range),
+                expression_id: expression.map(|current| current.id),
+            });
+        }
+
+        let Some(entry) = self.entries.get(&variable).cloned() else {
+            return Err(InferenceError::UnknownInferenceVariable(variable));
+        };
+        if let InferenceEntry::Unbound { level, constraint } = entry {
+            // A constrained variable may only be bound to a type that satisfies its bound. When
+            // the bound type is itself a variable the constraint propagates there instead, and
+            // when it is concrete and unsatisfying `constrain_type` reports the violation.
+            self.constrain_type(core_type.clone(), constraint, expression)?;
+            // Anything reachable from the bound type escapes to this variable's scope, so
+            // inner variables drop to its level and stay monomorphic there.
+            self.lower_levels_to(&core_type, level)?;
+        }
+
+        if !self.entries.contains_key(&variable) {
+            return Err(InferenceError::UnknownInferenceVariable(variable));
+        }
+        self.set_entry(variable, InferenceEntry::Bound(core_type));
+        Ok(())
+    }
+
+    pub(super) fn lower_levels_to(
+        &mut self,
+        core_type: &CoreType,
+        level: Level,
+    ) -> Result<(), InferenceError> {
+        for variable in self.free_type_variables_in_core_type(core_type)? {
+            let lowered_entry = match self.entries.get(&variable) {
+                None => return Err(InferenceError::UnknownInferenceVariable(variable)),
+                Some(InferenceEntry::Unbound {
+                    level: variable_level,
+                    constraint,
+                }) if *variable_level > level => Some(InferenceEntry::Unbound {
+                    level,
+                    constraint: *constraint,
+                }),
+                Some(_) => None,
+            };
+            if let Some(entry) = lowered_entry {
+                self.set_entry(variable, entry);
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn unify_variables(
+        &mut self,
+        left: InferenceVariableId,
+        right: InferenceVariableId,
+    ) -> Result<CoreType, InferenceError> {
+        if left == right {
+            return Ok(CoreType::Variable(left));
+        }
+
+        let Some(left_entry) = self.entries.get(&left) else {
+            return Err(InferenceError::UnknownInferenceVariable(left));
+        };
+        if !matches!(left_entry, InferenceEntry::Unbound { .. }) {
+            let resolved_left = self.resolve_variable(left)?;
+            let resolved_right = self.resolve_variable(right)?;
+            return self.unify(resolved_left, resolved_right);
+        }
+
+        let Some(right_entry) = self.entries.get(&right) else {
+            return Err(InferenceError::UnknownInferenceVariable(right));
+        };
+        if !matches!(right_entry, InferenceEntry::Unbound { .. }) {
+            let resolved_left = self.resolve_variable(left)?;
+            let resolved_right = self.resolve_variable(right)?;
+            return self.unify(resolved_left, resolved_right);
+        }
+
+        // Two distinct skolems are different universals and cannot be unified. When exactly one side
+        // is rigid it must survive the union so its identity (and rigidity) is preserved; the
+        // flexible variable redirects to it.
+        let left_rigid = self.rigid_variables.contains_key(&left);
+        let right_rigid = self.rigid_variables.contains_key(&right);
+        if left_rigid && right_rigid {
+            return Err(InferenceError::TypeMismatch {
+                expected: Box::new(self.rigid_display(left)),
+                actual: Box::new(self.rigid_display(right)),
+                range: None,
+                expression_id: None,
+            });
+        }
+        let (survivor, redirected) = if left_rigid {
+            (left, right)
+        } else {
+            (right, left)
+        };
+
+        let (redirected_level, redirected_constraint) = match self.entries.get(&redirected) {
+            Some(InferenceEntry::Unbound { level, constraint }) => (*level, *constraint),
+            _ => return Err(InferenceError::UnknownInferenceVariable(redirected)),
+        };
+        let merged_survivor = match self.entries.get(&survivor) {
+            Some(InferenceEntry::Unbound { level, constraint }) => Some(InferenceEntry::Unbound {
+                level: (*level).min(redirected_level),
+                constraint: (*constraint).join(redirected_constraint),
+            }),
+            _ => None,
+        };
+        if let Some(entry) = merged_survivor {
+            self.set_entry(survivor, entry);
+        }
+
+        if !self.entries.contains_key(&redirected) {
+            return Err(InferenceError::UnknownInferenceVariable(redirected));
+        }
+        self.set_entry(redirected, InferenceEntry::Redirect(survivor));
+
+        Ok(CoreType::Variable(survivor))
+    }
+
+    // Interface schemes computed by another `InferenceState` carry variable ids that mean
+    // nothing here, so importing re-binds quantified variables to fresh local ids and erases
+    // any stray free variable to `Unknown`.
+    pub fn import_scheme(&mut self, type_scheme: &TypeScheme) -> TypeScheme {
+        let mut substitutions = BTreeMap::new();
+        let mut quantified_variables = Vec::with_capacity(type_scheme.quantified_variables.len());
+        for quantified in &type_scheme.quantified_variables {
+            let fresh = self.fresh_constrained_variable(quantified.constraint);
+            substitutions.insert(quantified.variable, fresh);
+            quantified_variables.push(QuantifiedVariable::new(fresh, quantified.constraint));
+        }
+
+        TypeScheme {
+            quantified_variables,
+            body: import_core_type(&type_scheme.body, &substitutions),
+        }
     }
 }
