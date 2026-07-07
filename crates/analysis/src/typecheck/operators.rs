@@ -67,45 +67,50 @@ impl InferenceState {
                 )
                 .map(Some),
             BuiltinKind::Plus => self
-                .infer_builtin_plus(
+                .infer_binary_numeric(
                     arguments,
                     expression,
+                    NumericResultAtomic::Promote,
                     arena,
                     resolution_context,
                     type_definitions,
                 )
                 .map(Some),
             BuiltinKind::Minus => self
-                .infer_builtin_minus(
+                .infer_binary_numeric(
                     arguments,
                     expression,
+                    NumericResultAtomic::Promote,
                     arena,
                     resolution_context,
                     type_definitions,
                 )
                 .map(Some),
             BuiltinKind::Multiply => self
-                .infer_builtin_multiply(
+                .infer_binary_numeric(
                     arguments,
                     expression,
+                    NumericResultAtomic::Promote,
                     arena,
                     resolution_context,
                     type_definitions,
                 )
                 .map(Some),
             BuiltinKind::Divide => self
-                .infer_builtin_divide(
+                .infer_binary_numeric(
                     arguments,
                     expression,
+                    NumericResultAtomic::AlwaysDouble,
                     arena,
                     resolution_context,
                     type_definitions,
                 )
                 .map(Some),
             BuiltinKind::Power => self
-                .infer_builtin_power(
+                .infer_binary_numeric(
                     arguments,
                     expression,
+                    NumericResultAtomic::AlwaysDouble,
                     arena,
                     resolution_context,
                     type_definitions,
@@ -157,96 +162,6 @@ impl InferenceState {
                 )
                 .map(Some),
         }
-    }
-
-    pub(super) fn infer_builtin_plus(
-        &mut self,
-        arguments: &[Argument],
-        expression: &Expression,
-        arena: &HirArena,
-        resolution_context: Option<&ResolutionContext<'_>>,
-        type_definitions: &TypeDefinitionEnvironment,
-    ) -> Result<CoreType, InferenceError> {
-        self.infer_binary_numeric(
-            arguments,
-            expression,
-            NumericResultAtomic::Promote,
-            arena,
-            resolution_context,
-            type_definitions,
-        )
-    }
-
-    pub(super) fn infer_builtin_minus(
-        &mut self,
-        arguments: &[Argument],
-        expression: &Expression,
-        arena: &HirArena,
-        resolution_context: Option<&ResolutionContext<'_>>,
-        type_definitions: &TypeDefinitionEnvironment,
-    ) -> Result<CoreType, InferenceError> {
-        self.infer_binary_numeric(
-            arguments,
-            expression,
-            NumericResultAtomic::Promote,
-            arena,
-            resolution_context,
-            type_definitions,
-        )
-    }
-
-    pub(super) fn infer_builtin_multiply(
-        &mut self,
-        arguments: &[Argument],
-        expression: &Expression,
-        arena: &HirArena,
-        resolution_context: Option<&ResolutionContext<'_>>,
-        type_definitions: &TypeDefinitionEnvironment,
-    ) -> Result<CoreType, InferenceError> {
-        self.infer_binary_numeric(
-            arguments,
-            expression,
-            NumericResultAtomic::Promote,
-            arena,
-            resolution_context,
-            type_definitions,
-        )
-    }
-
-    pub(super) fn infer_builtin_divide(
-        &mut self,
-        arguments: &[Argument],
-        expression: &Expression,
-        arena: &HirArena,
-        resolution_context: Option<&ResolutionContext<'_>>,
-        type_definitions: &TypeDefinitionEnvironment,
-    ) -> Result<CoreType, InferenceError> {
-        self.infer_binary_numeric(
-            arguments,
-            expression,
-            NumericResultAtomic::AlwaysDouble,
-            arena,
-            resolution_context,
-            type_definitions,
-        )
-    }
-
-    pub(super) fn infer_builtin_power(
-        &mut self,
-        arguments: &[Argument],
-        expression: &Expression,
-        arena: &HirArena,
-        resolution_context: Option<&ResolutionContext<'_>>,
-        type_definitions: &TypeDefinitionEnvironment,
-    ) -> Result<CoreType, InferenceError> {
-        self.infer_binary_numeric(
-            arguments,
-            expression,
-            NumericResultAtomic::AlwaysDouble,
-            arena,
-            resolution_context,
-            type_definitions,
-        )
     }
 
     pub(super) fn infer_binary_numeric(

@@ -1499,7 +1499,14 @@ impl InferenceState {
             };
 
             let unified_value = self.unify_internal(left_field.value, right_value, expression)?;
-            unified_fields.push(RecordField::new(left_field.name, unified_value));
+            // Keep the left interface's optionality, like `unify_functions` keeps the left
+            // parameter names: record syntax cannot declare optional fields today, but the shared
+            // `RecordField` carrier must not silently drop the flag if that changes.
+            unified_fields.push(RecordField::with_optional(
+                left_field.name,
+                unified_value,
+                left_field.optional,
+            ));
         }
 
         Ok(CoreType::Record(unified_fields))

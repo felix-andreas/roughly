@@ -23,10 +23,6 @@ impl InferenceState {
         self.bind_global_scheme(symbol, TypeScheme::monomorphic(core_type), range);
     }
 
-    pub fn bind_name(&mut self, symbol: Symbol, core_type: CoreType, range: Range) {
-        self.bind_global_name(symbol, core_type, range);
-    }
-
     pub fn bind_global_scheme(&mut self, symbol: Symbol, type_scheme: TypeScheme, range: Range) {
         self.set_environment_entry(
             EnvironmentKey::Global(symbol),
@@ -36,10 +32,6 @@ impl InferenceState {
                 unsupplied: false,
             }),
         );
-    }
-
-    pub fn bind_scheme(&mut self, symbol: Symbol, type_scheme: TypeScheme, range: Range) {
-        self.bind_global_scheme(symbol, type_scheme, range);
     }
 
     pub(super) fn bind_local_name(
