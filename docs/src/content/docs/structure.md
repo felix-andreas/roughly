@@ -57,6 +57,10 @@ Keep it focused on the file split and the role of each file.
   - interface extraction
   - `typecheck/environment.rs` — the variable-slot environment: bind/lookup, undo-logged entry
     writes, branch joins, captured-write notes, and the loop fixed point
+  - `typecheck/unify.rs` — the unification core: variable allocation (fresh and rigid), the
+    snapshot / rollback / commit machinery probes ride on, constraint raising, resolution,
+    `unify` and its structural cases, directional `check_compatibility`, scheme instantiation and
+    generalization, and function-type unification
   - `typecheck/operand.rs` — free-standing helpers behind the core: operand classification and
     numeric promotion for the builtin operators, comparison-family shapes, guard-refinement
     filtering, and the small pure `CoreType` transformations around unification and scheme import
@@ -102,7 +106,7 @@ Keep it focused on the file split and the role of each file.
 ## Deferred split
 
 - the scheme-expressible standard library lives in `stub.rs` + `stdlib.rs` + `stubs/*.Rtypes`; only the irreducible builtin kernel (operators and core constructors) remains in `typecheck.rs`
-- keep compatibility logic and interface extraction inside `typecheck.rs` for now; split those out only after the `typecheck` structure stabilizes
+- interface extraction stays inside `typecheck.rs` for now; compatibility logic now lives in `typecheck/unify.rs`
 
 ## Role of this document
 
