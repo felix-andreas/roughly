@@ -132,6 +132,31 @@ like a variable slot: a later top-level read resolves to it, with the maybe-unde
 below when an unassigned path also reaches. A conditional reassignment of a name that already has
 an unconditional top-level definition keeps resolving to the package-global winner.
 
+### Replacement-form assignment
+
+A replacement-form assignment (`x$field <- v`, `x[["name"]] <- v`, `x[[key]] <- v`, `x@slot <- v`)
+reads the base variable, applies the write, and writes the result back to the base's slot, so the
+slot's type reflects the update:
+
+- a **known-field** write — `x$field <- v` or `x[["literal"]] <- v` — on a record-like `x` sets
+  that field's type to `v`'s type (adding the field if absent); a subsequent `x$field` reads the
+  updated type. The same write on an **empty** `list()` starts a record-like `list{field: V}`.
+- a **computed-key** write — `x[[key]] <- v` with a non-literal key — cannot name a field
+  statically, so it refines the container's element type rather than a specific field:
+  - an **empty** `list()` becomes a map-like `list[named: V]`
+  - a map-like `list[named: T]` becomes `list[named: T | V]`
+  - an array-like `list[T]` becomes `list[T | V]` (stays array-like — its reads are not nullable)
+  - a record-like or fixed-shape (tuple-like) container is left unchanged: a dynamic write does
+    not statically alter a shape whose fields are individually known, and widening it would lose
+    precision the code has not given up
+- the accessor spine and index/key expressions are ordinary reads (their own errors surface); a
+  replacement whose accessor spine has no variable at its root (`f(x)$a <- v`) is refused as an
+  unsupported construct (`Unknown`, a strict-mode origin)
+
+Because a map-like name read is `T | NULL` (the key may be absent — see
+[`[[` on lists](#-on-lists)), building a map with computed-key writes and then reading a key back
+yields `V | NULL`; guard it (`is.null`) before a use that needs `V`.
+
 ### Control-flow joins
 
 A read of a variable sees every write that can reach it, so control flow **joins** the states a

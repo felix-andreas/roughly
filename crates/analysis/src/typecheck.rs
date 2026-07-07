@@ -1711,20 +1711,65 @@ impl InferenceState {
             }
             _ => None,
         };
-        let (Some(field_name), CoreType::Record(fields)) = (field_name, prior_type) else {
-            return Ok(prior_type.clone());
-        };
-
         let value_type = self.resolve(value_type.clone())?;
-        let mut updated_fields = fields.clone();
-        match updated_fields
-            .iter_mut()
-            .find(|field| field.name == field_name)
-        {
-            Some(field) => field.value = value_type,
-            None => updated_fields.push(RecordField::new(field_name, value_type)),
+
+        // A known-field write (`$field` / `[["literal"]]`) names a field statically.
+        if let Some(field_name) = field_name {
+            match prior_type {
+                CoreType::Record(fields) => {
+                    let mut updated_fields = fields.clone();
+                    match updated_fields
+                        .iter_mut()
+                        .find(|field| field.name == field_name)
+                    {
+                        Some(field) => field.value = value_type,
+                        None => updated_fields.push(RecordField::new(field_name, value_type)),
+                    }
+                    return Ok(CoreType::Record(updated_fields));
+                }
+                // A known-field write to an empty `list()` starts a record-like shape.
+                CoreType::Tuple(items) if items.is_empty() => {
+                    return Ok(CoreType::Record(vec![RecordField::new(
+                        field_name, value_type,
+                    )]));
+                }
+                _ => return Ok(prior_type.clone()),
+            }
         }
-        Ok(CoreType::Record(updated_fields))
+
+        // A computed-key write (`x[[key]] <- v` with a non-literal key) cannot name a field, so it
+        // refines the container's element type. A record-like or fixed-shape tuple keeps its
+        // statically-known shape (widening it would discard precision the code has not given up);
+        // the reachable list shapes join the written type into their element. Only a single-index
+        // `[[<-` on the base counts — an `@slot` write, a `[<-`, or a multi-index `[[` does not.
+        let is_computed_subset2 = matches!(
+            &arena.get(lhs).kind,
+            ExpressionKind::Subset2 { value, arguments }
+                if *value == base_id
+                    && matches!(
+                        arguments.as_slice(),
+                        [argument] if argument.name.is_none()
+                    )
+        );
+        if !is_computed_subset2 {
+            return Ok(prior_type.clone());
+        }
+        match prior_type {
+            CoreType::Tuple(items) if items.is_empty() => {
+                Ok(CoreType::NamedList(Box::new(value_type)))
+            }
+            CoreType::NamedList(element) => {
+                Ok(CoreType::NamedList(Box::new(CoreType::union_of(vec![
+                    (**element).clone(),
+                    value_type,
+                ]))))
+            }
+            CoreType::List(element) => Ok(CoreType::List(Box::new(CoreType::union_of(vec![
+                (**element).clone(),
+                value_type,
+            ])))),
+            _ => Ok(prior_type.clone()),
+        }
     }
 
     // Joins a written type into an environment entry as a monotype (the super-assignment rule).
