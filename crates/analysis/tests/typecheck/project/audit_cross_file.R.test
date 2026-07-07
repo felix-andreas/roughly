@@ -43,12 +43,14 @@ x <- 1L
 warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
 --> 1:1-1:8
 | x <- 1L
+note: the later binding is here. --> R/b.R:1:1
 #---- R/b.R
 x <- "text"
 #++++
 warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
 --> 1:1-1:12
 | x <- "text"
+note: the earlier binding is here. --> R/a.R:1:1
 #---- R/c.R
 #: character
 y <- x
@@ -62,12 +64,14 @@ x <- 1L
 warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
 --> 1:1-1:8
 | x <- 1L
+note: the later binding is here. --> R/b.R:1:1
 #---- R/b.R
 x <- "text"
 #++++
 warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
 --> 1:1-1:12
 | x <- "text"
+note: the earlier binding is here. --> R/a.R:1:1
 #---- R/c.R
 #: integer
 y <- x
@@ -83,12 +87,14 @@ f <- function(value) value
 warning[naming] Top-level binding `f` is overwritten by a later top-level binding in this package.
 --> 1:1-1:27
 | f <- function(value) value
+note: the later binding is here. --> R/b.R:1:1
 #---- R/b.R
 f <- function(x) x + 1L
 #++++
 warning[naming] Top-level binding `f` overwrites an earlier top-level binding in this package.
 --> 1:1-1:24
 | f <- function(x) x + 1L
+note: the earlier binding is here. --> R/a.R:1:1
 #---- R/c.R
 r <- f("x")
 #++++

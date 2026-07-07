@@ -19,6 +19,7 @@ Assign(g@b0)
 warning[naming] Top-level binding `g` is overwritten by a later top-level binding in this package.
 --> 1:1-1:8
 | g <- 1L
+note: the later binding is here. --> R/c.R:1:1
 #---- R/b.R
 g
 #++++
@@ -32,6 +33,7 @@ Assign(g@b1)
 warning[naming] Top-level binding `g` overwrites an earlier top-level binding in this package.
 --> 1:1-1:8
 | g <- 2L
+note: the earlier binding is here. --> R/a.R:1:1
 #.... later_definer_drops
 #---- R/a.R
 g <- 1L
@@ -58,6 +60,7 @@ Assign(g@b0)
 warning[naming] Top-level binding `g` is overwritten by a later top-level binding in this package.
 --> 1:1-1:8
 | g <- 1L
+note: the later binding is here. --> R/b.R:1:1
 #---- R/b.R
 g <- 2L
 #++++
@@ -67,10 +70,12 @@ Assign(g@b1)
 warning[naming] Top-level binding `g` overwrites an earlier top-level binding in this package.
 --> 1:1-1:8
 | g <- 2L
+note: the earlier binding is here. --> R/a.R:1:1
 
 warning[naming] Top-level binding `g` is overwritten by a later top-level binding in this package.
 --> 1:1-1:8
 | g <- 2L
+note: the later binding is here. --> R/c.R:1:1
 #---- R/c.R
 g <- 3L
 #++++
@@ -80,6 +85,7 @@ Assign(g@b2)
 warning[naming] Top-level binding `g` overwrites an earlier top-level binding in this package.
 --> 1:1-1:8
 | g <- 3L
+note: the earlier binding is here. --> R/b.R:1:1
 #---- R/d.R
 g
 #++++
@@ -94,6 +100,7 @@ Assign(g@b0)
 warning[naming] Top-level binding `g` is overwritten by a later top-level binding in this package.
 --> 1:1-1:8
 | g <- 1L
+note: the later binding is here. --> R/b.R:1:1
 #---- R/b.R
 g <- 2L
 #++++
@@ -103,6 +110,7 @@ Assign(g@b1)
 warning[naming] Top-level binding `g` overwrites an earlier top-level binding in this package.
 --> 1:1-1:8
 | g <- 2L
+note: the earlier binding is here. --> R/a.R:1:1
 #---- R/c.R
 c_other <- 3L
 #++++
@@ -154,6 +162,7 @@ Assign(g@b0)
 warning[naming] Top-level binding `g` is overwritten by a later top-level binding in this package.
 --> 1:1-1:8
 | g <- 2L
+note: the later binding is here. --> R/b.R:1:1
 #---- R/b.R
 g <- 1L
 #++++
@@ -163,6 +172,7 @@ Assign(g@b1)
 warning[naming] Top-level binding `g` overwrites an earlier top-level binding in this package.
 --> 1:1-1:8
 | g <- 1L
+note: the earlier binding is here. --> R/a.R:1:1
 #---- R/c.R
 g
 #++++

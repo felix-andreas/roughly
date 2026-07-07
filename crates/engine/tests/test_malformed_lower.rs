@@ -35,6 +35,10 @@ fn diagnostics_for(source: &str) -> std::rc::Rc<FileDiagnostics> {
         Key::DocumentKind(FILE),
         analysis::naming::DocumentKind::Package,
     );
+    engine.set_input(
+        Key::FileName(FILE),
+        std::path::PathBuf::from("/pkg/R/file_0.R"),
+    );
     engine.fetch::<FileDiagnostics>(Key::Diagnostics(FILE))
 }
 

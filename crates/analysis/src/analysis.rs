@@ -709,6 +709,7 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
         &extra_modules,
         &naming_locals,
         &ropes,
+        &analysis_state.document_paths,
         analysis_state.interner(),
         &analysis_state.stub_library,
     );

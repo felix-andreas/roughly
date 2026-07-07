@@ -50,6 +50,7 @@ use {
     std::{
         cell::{Cell, Ref, RefCell},
         collections::{BTreeMap, BTreeSet, HashMap},
+        path::PathBuf,
     },
     tree_sitter::{Parser, Point, Range},
 };
@@ -83,6 +84,11 @@ pub enum Key {
     /// **Names-only** export set of a file (sorted [`Symbol`]s). The explicit value-eq cutoff that keeps a
     /// body edit from re-folding `PackageSymbolIndex`.
     ExportedNames(FileId),
+    /// One file's *last* top-level binding site for one symbol (`None` when the file does not
+    /// top-level-assign it). The narrow per-(file, symbol) fact behind overwrite-warning notes:
+    /// its value moves only when that binding's range moves, so value-equality keeps neighbour
+    /// files' diagnostics green across unrelated edits.
+    TopLevelSite(FileId, Symbol),
     /// The lone all-files fold: `name → winning file`, names only. Recomputes only on *structural* export
     /// edits (add/remove/rename a top-level binding, add/remove/reclassify a file), not on body edits.
     PackageSymbolIndex,
@@ -795,6 +801,16 @@ impl QueryGroup for RoughlyQueries {
                 }
             }
 
+            Key::TopLevelSite(file, symbol) => {
+                let module = engine.fetch::<Module>(Key::Lower(*file));
+                let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(*file));
+                Stored::new(
+                    analysis::naming::document_package_definition_sites(&module, &naming.naming)
+                        .get(symbol)
+                        .copied(),
+                )
+            }
+
             Key::Lint(file) => {
                 bump(&self.counters.lint, *file);
                 // Lint is a pure function of the parse tree and the `[lint]` config; it needs no interner.
@@ -1311,6 +1327,42 @@ fn package_naming_diagnostics(
             );
         }
     }
+    // Overwrite-note inputs, fetched before the interner borrow like every cross-file fact: the
+    // path-neighbouring definers' binding sites and file names (narrow per-(file, symbol) facts,
+    // so an unrelated edit in a neighbour leaves this file green via value equality), plus this
+    // file's own name for notes pointing at a same-file occurrence. The optional fetches are
+    // tombstone hardening: if a neighbour was just deleted and this stale chain is validated
+    // before the fold recompute drops the edge, the note is skipped instead of resurrecting the
+    // removed input. Every live file must have `FileName` set (never-set inputs still panic).
+    let own_file_name = engine
+        .fetch_optional::<PathBuf>(Key::FileName(file))
+        .map(|name| (*name).clone());
+    let mut neighbour_sites: BTreeMap<(Symbol, FileId), Option<(PathBuf, Range)>> = BTreeMap::new();
+    if !is_script {
+        for (name, candidates) in &definer_order {
+            let Some(position) = candidates.iter().position(|candidate| *candidate == file) else {
+                continue;
+            };
+            let mut neighbours = Vec::new();
+            if position > 0 {
+                neighbours.push(candidates[position - 1]);
+            }
+            if position + 1 < candidates.len() {
+                neighbours.push(candidates[position + 1]);
+            }
+            for neighbour in neighbours {
+                let site = *engine.fetch::<Option<Range>>(Key::TopLevelSite(neighbour, *name));
+                let neighbour_name = engine
+                    .fetch_optional::<PathBuf>(Key::FileName(neighbour))
+                    .map(|name| (*name).clone());
+                let entry = match (neighbour_name, site) {
+                    (Some(path), Some(range)) => Some((path, range)),
+                    _ => None,
+                };
+                neighbour_sites.insert((*name, neighbour), entry);
+            }
+        }
+    }
 
     // (T)/(C) inputs: the status of every type name this file references, plus — for the duplicate-type
     // diagnostic, package only — every type name it declares. A script's own declarations shadow package
@@ -1383,16 +1435,19 @@ fn package_naming_diagnostics(
 
         // (B) builtin shadow + (A) overwrite pairs, per top-level assignment. Overwrite combines the
         // file's position in the path-ordered candidate list with repeated assignments within the file.
-        let mut occurrence_totals: BTreeMap<Symbol, usize> = BTreeMap::new();
+        let mut occurrence_sites: BTreeMap<Symbol, Vec<Range>> = BTreeMap::new();
         for expression_id in &module.expressions {
             if let Some(target) = module
                 .arena
                 .get(*expression_id)
                 .kind
                 .simple_assignment_target()
-                && top_level_binding(local_naming, *expression_id).is_some()
+                && let Some(binding) = top_level_binding(local_naming, *expression_id)
             {
-                *occurrence_totals.entry(target).or_default() += 1;
+                occurrence_sites
+                    .entry(target)
+                    .or_default()
+                    .push(binding.range);
             }
         }
         let mut occurrences_seen: BTreeMap<Symbol, usize> = BTreeMap::new();
@@ -1433,28 +1488,82 @@ fn package_naming_diagnostics(
             *occurrences_seen
                 .get_mut(&target)
                 .expect("occurrence counter exists") += 1;
-            let occurrences_in_document = occurrence_totals.get(&target).copied().unwrap_or(1);
+            let document_occurrences = occurrence_sites
+                .get(&target)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let occurrences_in_document = document_occurrences.len().max(1);
             let has_earlier = document_position > 0 || occurrence_index > 0;
             let has_later = document_position + 1 < candidate_count
                 || occurrence_index + 1 < occurrences_in_document;
+            let neighbour_note = |position: usize, message: &str| {
+                definer_order
+                    .get(&target)
+                    .and_then(|candidates| candidates.get(position))
+                    .and_then(|neighbour| neighbour_sites.get(&(target, *neighbour)).cloned())
+                    .flatten()
+                    .map(|(path, range)| {
+                        vec![analysis::diagnostic::RelatedLocation {
+                            path,
+                            range,
+                            message: message.to_owned(),
+                        }]
+                    })
+                    .unwrap_or_default()
+            };
+            let own_note = |range: Range, message: &str| {
+                own_file_name
+                    .clone()
+                    .map(|path| {
+                        vec![analysis::diagnostic::RelatedLocation {
+                            path,
+                            range,
+                            message: message.to_owned(),
+                        }]
+                    })
+                    .unwrap_or_default()
+            };
 
             if has_earlier {
                 let name = interner.resolve(target).unwrap_or("<unknown>");
-                diagnostics.push(Diagnostic::naming_warning(
+                let related = if occurrence_index > 0 {
+                    document_occurrences
+                        .get(occurrence_index - 1)
+                        .map(|range| own_note(*range, "the earlier binding is here."))
+                        .unwrap_or_default()
+                } else {
+                    neighbour_note(
+                        document_position.wrapping_sub(1),
+                        "the earlier binding is here.",
+                    )
+                };
+                let mut diagnostic = Diagnostic::naming_warning(
                     binding.range,
                     format!(
                         "Top-level binding `{name}` overwrites an earlier top-level binding in this package."
                     ),
-                ));
+                );
+                diagnostic.related = related;
+                diagnostics.push(diagnostic);
             }
             if has_later {
                 let name = interner.resolve(target).unwrap_or("<unknown>");
-                diagnostics.push(Diagnostic::naming_warning(
+                let related = if occurrence_index + 1 < occurrences_in_document {
+                    document_occurrences
+                        .get(occurrence_index + 1)
+                        .map(|range| own_note(*range, "the later binding is here."))
+                        .unwrap_or_default()
+                } else {
+                    neighbour_note(document_position + 1, "the later binding is here.")
+                };
+                let mut diagnostic = Diagnostic::naming_warning(
                     binding.range,
                     format!(
                         "Top-level binding `{name}` is overwritten by a later top-level binding in this package."
                     ),
-                ));
+                );
+                diagnostic.related = related;
+                diagnostics.push(diagnostic);
             }
         }
     }

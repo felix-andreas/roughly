@@ -8,27 +8,28 @@ use {
             CodeActionProviderCapability, CodeActionResponse, Command, CompletionItem,
             CompletionItemKind, CompletionItemLabelDetails, CompletionList, CompletionOptions,
             CompletionParams, CompletionResponse, Diagnostic, DiagnosticOptions,
-            DiagnosticServerCancellationData, DiagnosticServerCapabilities, DiagnosticSeverity,
-            DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
-            DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
-            DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
-            DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentFormattingParams,
-            DocumentHighlight, DocumentHighlightParams, DocumentRangeFormattingParams,
-            DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, Documentation,
-            FileChangeType, FileSystemWatcher, FoldingRange, FoldingRangeKind, FoldingRangeParams,
-            FoldingRangeProviderCapability, FullDocumentDiagnosticReport, GlobPattern, Hover,
-            HoverContents, HoverParams, HoverProviderCapability, InitializeParams,
-            InitializeResult, InitializedParams, InlayHint, InlayHintKind, InlayHintLabel,
-            InlayHintParams, InsertTextFormat, Location, MarkupContent, MarkupKind, MessageType,
-            NumberOrString, OneOf, ParameterInformation, ParameterLabel, Position,
-            PublishDiagnosticsParams, Range, ReferenceParams, Registration, RegistrationParams,
-            RelatedFullDocumentDiagnosticReport, RelatedUnchangedDocumentDiagnosticReport,
-            RelativePattern, RenameParams, SaveOptions, SemanticToken, SemanticTokenType,
-            SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
-            SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
-            ServerCapabilities, ServerInfo, ShowMessageParams, SignatureHelp, SignatureHelpOptions,
-            SignatureHelpParams, SignatureInformation, SymbolKind, TextDocumentSyncCapability,
-            TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
+            DiagnosticRelatedInformation, DiagnosticServerCancellationData,
+            DiagnosticServerCapabilities, DiagnosticSeverity, DidChangeTextDocumentParams,
+            DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
+            DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+            DocumentDiagnosticParams, DocumentDiagnosticReport, DocumentDiagnosticReportResult,
+            DocumentFormattingParams, DocumentHighlight, DocumentHighlightParams,
+            DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
+            DocumentSymbolResponse, Documentation, FileChangeType, FileSystemWatcher, FoldingRange,
+            FoldingRangeKind, FoldingRangeParams, FoldingRangeProviderCapability,
+            FullDocumentDiagnosticReport, GlobPattern, Hover, HoverContents, HoverParams,
+            HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+            InlayHint, InlayHintKind, InlayHintLabel, InlayHintParams, InsertTextFormat, Location,
+            MarkupContent, MarkupKind, MessageType, NumberOrString, OneOf, ParameterInformation,
+            ParameterLabel, Position, PublishDiagnosticsParams, Range, ReferenceParams,
+            Registration, RegistrationParams, RelatedFullDocumentDiagnosticReport,
+            RelatedUnchangedDocumentDiagnosticReport, RelativePattern, RenameParams, SaveOptions,
+            SemanticToken, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions,
+            SemanticTokensLegend, SemanticTokensOptions, SemanticTokensParams,
+            SemanticTokensResult, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
+            ShowMessageParams, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+            SignatureInformation, SymbolKind, TextDocumentSyncCapability, TextDocumentSyncKind,
+            TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
             TypeDefinitionProviderCapability, UnchangedDocumentDiagnosticReport, Url,
             WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
             notification::{DidChangeWatchedFiles, Notification},
@@ -539,7 +540,58 @@ impl EngineWorker {
         let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(file));
         let rendered =
             analysis::diagnostic::apply_suppressions(rendered, &parsed.0.rope().to_string());
-        diagnostics::convert_diagnostics(rendered, parsed.0.rope(), self.position_encoding)
+        // Related locations may point into *other* documents, so they are mapped here — where the
+        // path-to-URI table and per-document position conversion live — rather than inside the
+        // per-rope diagnostic conversion.
+        let related_information: Vec<_> = rendered
+            .iter()
+            .map(|diagnostic| {
+                if diagnostic.related.is_empty() {
+                    return None;
+                }
+                Some(
+                    diagnostic
+                        .related
+                        .iter()
+                        .map(|related| {
+                            // The note's range is byte-based in the *target* document, so it is
+                            // encoded against that document's rope; an untracked target degrades
+                            // to byte columns exactly like `to_lsp_range_in`.
+                            let range = match self.parsed_for(&related.path) {
+                                Some(parsed) => position::tree_sitter_range_to_lsp(
+                                    parsed.0.rope(),
+                                    self.position_encoding,
+                                    related.range,
+                                ),
+                                None => Range::new(
+                                    Position::new(
+                                        related.range.start_point.row as u32,
+                                        related.range.start_point.column as u32,
+                                    ),
+                                    Position::new(
+                                        related.range.end_point.row as u32,
+                                        related.range.end_point.column as u32,
+                                    ),
+                                ),
+                            };
+                            DiagnosticRelatedInformation {
+                                location: Location {
+                                    uri: self.document_uri(&related.path),
+                                    range,
+                                },
+                                message: related.message.clone(),
+                            }
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        let mut converted =
+            diagnostics::convert_diagnostics(rendered, parsed.0.rope(), self.position_encoding);
+        for (diagnostic, related) in converted.iter_mut().zip(related_information) {
+            diagnostic.related_information = related;
+        }
+        converted
     }
 
     fn convert_location(&self, location: analysis::ide::Location) -> Location {
@@ -652,6 +704,7 @@ impl EngineWorker {
         if let Some(file) = self.file_ids.remove(path) {
             self.engine.remove_input(&Key::SourceText(file));
             self.engine.remove_input(&Key::DocumentKind(file));
+            self.engine.remove_input(&Key::FileName(file));
             self.paths.remove(file);
             self.maybe_evict_stale_memos();
         }

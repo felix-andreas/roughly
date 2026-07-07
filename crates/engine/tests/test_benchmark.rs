@@ -98,6 +98,12 @@ fn mid_chain_edit_file(file_count: usize) -> FileId {
     (middle - (middle % CHAIN_LEN) + CHAIN_LEN / 2) as FileId
 }
 
+// The on-disk path both engines report for a file — kept identical so cross-file diagnostic notes
+// (which embed the neighbour's path) stay byte-comparable between the two pipelines.
+fn package_path(index: usize) -> PathBuf {
+    PathBuf::from(format!("/pkg/R/file_{index:06}.R"))
+}
+
 // File 0 is `ITEMS_PER_FILE` lines; every other file is `2 * ITEMS_PER_FILE`. Size by the dominant term.
 fn file_count_for_loc(target_loc: usize) -> usize {
     (target_loc / (2 * ITEMS_PER_FILE)).max(4)
@@ -136,6 +142,7 @@ fn build_new_engine(file_count: usize) -> Engine<RoughlyQueries> {
             parse_source_input(&generate_source(index, false)),
         );
         engine.set_input(Key::DocumentKind(index as FileId), DocumentKind::Package);
+        engine.set_input(Key::FileName(index as FileId), package_path(index));
     }
     engine
 }
@@ -188,10 +195,6 @@ fn measure_new_per_edit(
 // Old engine (production `analysis`): build, then measure a per-edit recheck
 // ----------------------------------------------------------------------------------------------------
 
-fn old_path(index: usize) -> PathBuf {
-    PathBuf::from(format!("/pkg/R/file_{index:06}.R"))
-}
-
 fn build_old_engine(file_count: usize) -> Analysis {
     let mut analysis_state = Analysis::new(
         PathBuf::from("/pkg"),
@@ -204,7 +207,7 @@ fn build_old_engine(file_count: usize) -> Analysis {
     );
     for index in 0..file_count {
         analysis_state
-            .add_document_from_source(old_path(index), &generate_source(index, false))
+            .add_document_from_source(package_path(index), &generate_source(index, false))
             .expect("benchmark source should parse");
     }
     run_full(&mut analysis_state);
@@ -221,7 +224,7 @@ fn measure_old_per_edit(
         let returns_double = round % 2 == 0;
         analysis_state
             .add_document_from_source(
-                old_path(edit_file),
+                package_path(edit_file),
                 &generate_source(edit_file, returns_double),
             )
             .expect("benchmark edit should parse");

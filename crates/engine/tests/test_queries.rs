@@ -17,14 +17,21 @@
 //
 // Files: a.R defines `x`, b.R references `x`, c.R references nothing external.
 
-use engine::{
-    Engine,
-    queries::{Config, FileId, Key, RoughlyQueries, parse_source_input},
+use {
+    engine::{
+        Engine,
+        queries::{Config, FileId, Key, RoughlyQueries, parse_source_input},
+    },
+    std::path::PathBuf,
 };
 
 const A: FileId = 0; // defines `x`
 const B: FileId = 1; // references `x`
 const C: FileId = 2; // references nothing external
+
+fn file_name(file: FileId) -> PathBuf {
+    PathBuf::from(format!("/pkg/R/file_{file}.R"))
+}
 
 fn setup(sources: &[(FileId, &str)]) -> Engine<RoughlyQueries> {
     let mut engine = Engine::new(RoughlyQueries::new());
@@ -37,6 +44,7 @@ fn setup(sources: &[(FileId, &str)]) -> Engine<RoughlyQueries> {
             Key::DocumentKind(*file),
             analysis::naming::DocumentKind::Package,
         );
+        engine.set_input(Key::FileName(*file), file_name(*file));
     }
     engine
 }
@@ -255,6 +263,7 @@ fn package_naming_diagnostics_are_incremental() {
     let package_naming_c_pre_delete = engine.group().package_naming_diagnostics_runs(C);
     engine.remove_input(&Key::SourceText(A));
     engine.remove_input(&Key::DocumentKind(A));
+    engine.remove_input(&Key::FileName(A));
     engine.set_input(Key::ProjectFiles, vec![B, C]);
     let _ = engine.fetch::<engine::queries::FileDiagnostics>(Key::Diagnostics(B));
     let _ = engine.fetch::<engine::queries::FileDiagnostics>(Key::Diagnostics(C));

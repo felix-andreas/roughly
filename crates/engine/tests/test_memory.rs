@@ -116,6 +116,10 @@ fn build_and_warm_new_engine(file_count: usize) -> Engine<RoughlyQueries> {
             parse_source_input(&generate_source(index)),
         );
         engine.set_input(Key::DocumentKind(index as FileId), DocumentKind::Package);
+        engine.set_input(
+            Key::FileName(index as FileId),
+            PathBuf::from(format!("/pkg/R/file_{index:06}.R")),
+        );
     }
     for index in 0..file_count as FileId {
         let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(index));
@@ -165,6 +169,7 @@ fn edit_stream_growth_is_bounded_by_eviction() {
         },
     );
     engine.set_input(Key::DocumentKind(0), DocumentKind::Package);
+    engine.set_input(Key::FileName(0), PathBuf::from("/pkg/R/file_0.R"));
     engine.set_input(Key::SourceText(0), parse_source_input("value <- start()\n"));
     let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(0));
     let baseline = engine.slot_count();
@@ -221,6 +226,7 @@ fn edit_stream_growth_is_bounded_by_eviction() {
         },
     );
     fresh.set_input(Key::DocumentKind(0), DocumentKind::Package);
+    fresh.set_input(Key::FileName(0), PathBuf::from("/pkg/R/file_0.R"));
     fresh.set_input(
         Key::SourceText(0),
         parse_source_input("value <- name_5()\n"),

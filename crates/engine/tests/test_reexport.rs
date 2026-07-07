@@ -21,6 +21,7 @@ use {
         Engine,
         queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries, parse_source_input},
     },
+    std::path::PathBuf,
 };
 
 fn setup(sources: &[(FileId, &str)]) -> Engine<RoughlyQueries> {
@@ -31,6 +32,10 @@ fn setup(sources: &[(FileId, &str)]) -> Engine<RoughlyQueries> {
     for (file, source) in sources {
         engine.set_input(Key::SourceText(*file), parse_source_input(source));
         engine.set_input(Key::DocumentKind(*file), DocumentKind::Package);
+        engine.set_input(
+            Key::FileName(*file),
+            PathBuf::from(format!("/pkg/R/file_{file}.R")),
+        );
     }
     engine
 }

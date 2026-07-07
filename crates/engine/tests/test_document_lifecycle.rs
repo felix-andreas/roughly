@@ -39,7 +39,7 @@ use {
         Engine,
         queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries, parse_source_input},
     },
-    std::collections::BTreeMap,
+    std::{collections::BTreeMap, path::PathBuf},
     tree_sitter::{Parser, Range},
 };
 
@@ -118,12 +118,14 @@ impl Lifecycle {
         id
     }
 
-    // Mirror of `EngineWorker::set_source_input`: set the file's text and kind inputs, allocating a stable
-    // id on first sight. Does not touch `ProjectFiles`.
+    // Mirror of `EngineWorker::set_source_input`: set the file's text, name, and kind inputs, allocating a
+    // stable id on first sight. Does not touch `ProjectFiles`.
     fn set_source_input(&mut self, path: &str, text: &str) {
         let file = self.file_id_for(path);
         self.engine
             .set_input(Key::SourceText(file), parse_source_input(text));
+        self.engine
+            .set_input(Key::FileName(file), PathBuf::from(path));
         self.engine.set_input(
             Key::DocumentKind(file),
             if is_package_path(path) {
@@ -139,6 +141,7 @@ impl Lifecycle {
         if let Some(file) = self.file_ids.remove(path) {
             self.engine.remove_input(&Key::SourceText(file));
             self.engine.remove_input(&Key::DocumentKind(file));
+            self.engine.remove_input(&Key::FileName(file));
         }
     }
 

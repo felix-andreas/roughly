@@ -63,6 +63,7 @@ Assign(x@b0)
 warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
 --> 1:1-1:8
 | x <- 1L
+note: the later binding is here. --> R/b.R:1:1
 #---- R/b.R
 x <- 2L
 #++++
@@ -72,6 +73,7 @@ Assign(x@b1)
 warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
 --> 1:1-1:8
 | x <- 2L
+note: the earlier binding is here. --> R/a.R:1:1
 
 #---- duplicate_top_level_value_names_across_three_files_produce_full_warning_chain
 #---- R/a.R
@@ -83,6 +85,7 @@ Assign(x@b0)
 warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
 --> 1:1-1:8
 | x <- 1L
+note: the later binding is here. --> R/b.R:1:1
 #---- R/b.R
 x <- 2L
 #++++
@@ -92,10 +95,12 @@ Assign(x@b1)
 warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
 --> 1:1-1:8
 | x <- 2L
+note: the earlier binding is here. --> R/a.R:1:1
 
 warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
 --> 1:1-1:8
 | x <- 2L
+note: the later binding is here. --> R/c.R:1:1
 #---- R/c.R
 x <- 3L
 #++++
@@ -105,6 +110,7 @@ Assign(x@b2)
 warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
 --> 1:1-1:8
 | x <- 3L
+note: the earlier binding is here. --> R/b.R:1:1
 
 #==== type_conflicts
 #---- duplicate_type_names_across_several_files_mark_every_conflicting_declaration
@@ -144,6 +150,7 @@ Assign(x@b0)
 warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
 --> 1:1-1:8
 | x <- 1L
+note: the later binding is here. --> R/b.R:1:1
 #---- R/b.R
 x <- 2L
 #++++
@@ -153,6 +160,7 @@ Assign(x@b1)
 warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
 --> 1:1-1:8
 | x <- 2L
+note: the earlier binding is here. --> R/a.R:1:1
 #---- R/c.R
 f <- function() {
   x <- 3L

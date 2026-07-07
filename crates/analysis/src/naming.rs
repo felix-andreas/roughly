@@ -12,7 +12,10 @@ use {
         types::{Annotation, AttachedAnnotation, NamedTypeRef, SurfaceType},
     },
     ropey::Rope,
-    std::collections::{BTreeMap, BTreeSet, HashMap},
+    std::{
+        collections::{BTreeMap, BTreeSet, HashMap},
+        path::PathBuf,
+    },
     tree_sitter::Range,
 };
 
@@ -130,11 +133,13 @@ pub(crate) fn rebuild_package_naming(
     extra_modules: &[(DocumentId, &Module)],
     locals: &HashMap<DocumentId, NamesLocal>,
     ropes: &HashMap<DocumentId, Rope>,
+    document_paths: &HashMap<DocumentId, PathBuf>,
     interner: &Interner,
     stub_library: &StubLibrary,
 ) -> PackageNamingComputation {
     let (types, duplicate_type_names) = build_type_index(package_modules);
     let candidate_order = build_candidate_order(package_modules, locals);
+    let candidate_sites = build_candidate_sites(package_modules, locals);
     let global_bindings = winners_from_candidate_order(&candidate_order);
 
     let mut diagnostics = HashMap::<DocumentId, Vec<Diagnostic>>::new();
@@ -152,6 +157,8 @@ pub(crate) fn rebuild_package_naming(
                 duplicate_type_names: &duplicate_type_names,
                 global_bindings: &global_bindings,
                 candidate_order: &candidate_order,
+                candidate_sites: &candidate_sites,
+                document_paths,
                 interner,
                 stub_library,
             });
@@ -176,6 +183,8 @@ pub(crate) fn rebuild_package_naming(
                 duplicate_type_names: &duplicate_type_names,
                 global_bindings: &global_bindings,
                 candidate_order: &candidate_order,
+                candidate_sites: &candidate_sites,
+                document_paths,
                 interner,
                 stub_library,
             });
@@ -208,6 +217,10 @@ pub(crate) struct PackageDocumentDiagnosticContext<'a> {
     pub duplicate_type_names: &'a BTreeSet<Symbol>,
     pub global_bindings: &'a BTreeMap<Symbol, DocumentId>,
     pub candidate_order: &'a BTreeMap<Symbol, Vec<DocumentId>>,
+    // Parallel to `candidate_order` (same membership and order), each candidate's binding site, so
+    // the overwrite warnings can attach a note pointing at the neighbouring document's binding.
+    pub candidate_sites: &'a BTreeMap<Symbol, Vec<(DocumentId, Range)>>,
+    pub document_paths: &'a HashMap<DocumentId, PathBuf>,
     pub interner: &'a Interner,
     // The stdlib stub corpus (base-environment names). A reference to a stub name resolves to its
     // base scheme, so it is neither an unresolved reference nor a shadow-free target; a binding over
@@ -244,8 +257,9 @@ pub(crate) fn package_document_diagnostics(
         // Overwrite warnings are per top-level *assignment*, not per document: `x <- 1; x <- 2` in one
         // file overwrites within that file. So a name's earlier/later neighbours can be in a path-earlier
         // or path-later document (its position in the candidate order) *or* an earlier/later assignment
-        // to the same name in this document. The two are combined below.
-        let mut occurrence_totals = BTreeMap::<Symbol, usize>::new();
+        // to the same name in this document. The two are combined below; the per-occurrence ranges
+        // let each warning attach a note pointing at its neighbouring binding.
+        let mut occurrence_sites = BTreeMap::<Symbol, Vec<Range>>::new();
         for expression_id in &context.module.expressions {
             if let Some(target) = context
                 .module
@@ -253,11 +267,35 @@ pub(crate) fn package_document_diagnostics(
                 .get(*expression_id)
                 .kind
                 .simple_assignment_target()
-                && top_level_binding(context.local_naming, *expression_id).is_some()
+                && let Some(binding) = top_level_binding(context.local_naming, *expression_id)
             {
-                *occurrence_totals.entry(target).or_default() += 1;
+                occurrence_sites
+                    .entry(target)
+                    .or_default()
+                    .push(binding.range);
             }
         }
+        let related_site =
+            |target: Symbol, document_id: DocumentId, range: Range, message: &str| {
+                let path = context
+                    .document_paths
+                    .get(&document_id)
+                    .cloned()
+                    .unwrap_or_default();
+                let _ = target;
+                crate::diagnostic::RelatedLocation {
+                    path,
+                    range,
+                    message: message.to_owned(),
+                }
+            };
+        let neighbour_document_site = |target: Symbol, position: usize| {
+            context
+                .candidate_sites
+                .get(&target)
+                .and_then(|sites| sites.get(position))
+                .copied()
+        };
 
         let mut occurrences_seen = BTreeMap::<Symbol, usize>::new();
         for expression_id in &context.module.expressions {
@@ -303,28 +341,74 @@ pub(crate) fn package_document_diagnostics(
             *occurrences_seen
                 .get_mut(&target)
                 .expect("occurrence counter exists") += 1;
-            let occurrences_in_document = occurrence_totals.get(&target).copied().unwrap_or(1);
+            let document_occurrences = occurrence_sites
+                .get(&target)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let occurrences_in_document = document_occurrences.len().max(1);
             let has_earlier = document_position > 0 || occurrence_index > 0;
             let has_later = document_position + 1 < candidate_count
                 || occurrence_index + 1 < occurrences_in_document;
 
             if has_earlier {
                 let name = interner.resolve(target).unwrap_or("<unknown>");
-                diagnostics.push(Diagnostic::naming_warning(
+                // The nearest earlier binding: the previous occurrence in this document, else the
+                // path-previous document's site.
+                let earlier = if occurrence_index > 0 {
+                    document_occurrences
+                        .get(occurrence_index - 1)
+                        .map(|range| (context.document_id, *range))
+                } else {
+                    neighbour_document_site(target, document_position.wrapping_sub(1))
+                };
+                let related = earlier
+                    .map(|(document_id, range)| {
+                        vec![related_site(
+                            target,
+                            document_id,
+                            range,
+                            "the earlier binding is here.",
+                        )]
+                    })
+                    .unwrap_or_default();
+                let mut diagnostic = Diagnostic::naming_warning(
                     binding.range,
                     format!(
                         "Top-level binding `{name}` overwrites an earlier top-level binding in this package."
                     ),
-                ));
+                );
+                diagnostic.related = related;
+                diagnostics.push(diagnostic);
             }
             if has_later {
                 let name = interner.resolve(target).unwrap_or("<unknown>");
-                diagnostics.push(Diagnostic::naming_warning(
+                // The nearest later binding: the next occurrence in this document, else the
+                // path-next document's site.
+                let later = if occurrence_index + 1 < occurrences_in_document {
+                    document_occurrences
+                        .get(occurrence_index + 1)
+                        .map(|range| (context.document_id, *range))
+                } else {
+                    neighbour_document_site(target, document_position + 1)
+                };
+                let related = later
+                    .map(|(document_id, range)| {
+                        vec![related_site(
+                            target,
+                            document_id,
+                            range,
+                            "the later binding is here.",
+                        )]
+                    })
+                    .unwrap_or_default();
+                let mut diagnostic = Diagnostic::naming_warning(
                     binding.range,
                     format!(
                         "Top-level binding `{name}` is overwritten by a later top-level binding in this package."
                     ),
-                ));
+                );
+                diagnostic.related = related;
+                diagnostics.push(diagnostic);
             }
         }
     }
@@ -500,6 +584,26 @@ pub(crate) fn build_candidate_order(
     candidate_order
 }
 
+// Each candidate document's definition site per symbol, parallel to `build_candidate_order` (same
+// membership, same order), so an overwrite warning can point its note at the neighbouring
+// document's binding.
+pub(crate) fn build_candidate_sites(
+    package_modules: &[(DocumentId, &Module)],
+    locals: &HashMap<DocumentId, NamesLocal>,
+) -> BTreeMap<Symbol, Vec<(DocumentId, Range)>> {
+    let mut candidate_sites = BTreeMap::<Symbol, Vec<(DocumentId, Range)>>::new();
+    for (document_id, module) in package_modules {
+        let local_naming = expect_local_naming(locals, *document_id);
+        for (target, range) in document_package_definition_sites(module, local_naming) {
+            candidate_sites
+                .entry(target)
+                .or_default()
+                .push((*document_id, range));
+        }
+    }
+    candidate_sites
+}
+
 // The package-global names a single document defines. The membership rule, shared with
 // `build_candidate_order` so the candidate index and the rebuild oracle can never disagree: a target
 // counts when it is the target of a top-level `Assign` that resolves to a top-level binding.
@@ -534,6 +638,36 @@ fn collect_package_definitions(
             collect_package_definitions(module, local_naming, expressions, symbols);
         }
     }
+}
+
+// The range of each package-global name's *last* top-level binding in one document — the occurrence
+// that survives into the package winner chain, which is the site an overwrite note should point at.
+// Same membership walk as `document_package_definitions`, kept as a separate value so the
+// names-only membership rule (an engine value-equality cutoff) never becomes range-sensitive.
+pub fn document_package_definition_sites(
+    module: &Module,
+    local_naming: &NamesLocal,
+) -> BTreeMap<Symbol, Range> {
+    fn collect(
+        module: &Module,
+        local_naming: &NamesLocal,
+        expressions: &[ExpressionId],
+        sites: &mut BTreeMap<Symbol, Range>,
+    ) {
+        for expression_id in expressions {
+            let kind = &module.arena.get(*expression_id).kind;
+            if let Some(target) = kind.simple_assignment_target() {
+                if let Some(binding) = top_level_binding(local_naming, *expression_id) {
+                    sites.insert(target, binding.range);
+                }
+            } else if let ExpressionKind::Block { expressions, .. } = kind {
+                collect(module, local_naming, expressions, sites);
+            }
+        }
+    }
+    let mut sites = BTreeMap::new();
+    collect(module, local_naming, &module.expressions, &mut sites);
+    sites
 }
 
 pub(crate) fn winners_from_candidate_order(

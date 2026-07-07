@@ -6,7 +6,7 @@ use {
         position::PositionEncoding,
         server, tree, utils,
     },
-    analysis::{self, Analysis},
+    analysis::{self, Analysis, diagnostic::RelatedLocation},
     console::style,
     ignore::Walk,
     ropey::Rope,
@@ -161,9 +161,11 @@ pub fn check(
                     diagnostics::convert_stub_problem(&problem, &rope, PositionEncoding::Utf8);
                 match output {
                     OutputFormat::Human => {
-                        render_human_diagnostic(&stub_source.path, &rope, &diagnostic)
+                        render_human_diagnostic(&stub_source.path, &rope, &diagnostic, &[])
                     }
-                    OutputFormat::Json => render_json_diagnostic(&stub_source.path, &diagnostic),
+                    OutputFormat::Json => {
+                        render_json_diagnostic(&stub_source.path, &diagnostic, &[])
+                    }
                 }
             }
         }
@@ -214,13 +216,17 @@ pub fn check(
                 .document(&path)
                 .unwrap_or_else(|| panic!("analysis document missing for {}", path.display()));
             let rope = document.rope();
-            let diagnostics = diagnostics::convert_diagnostics(
-                analysis_state.document_diagnostics(document_id),
-                rope,
-                PositionEncoding::Utf8,
-            );
+            // Related locations point into *other* documents, so they render from their own
+            // byte-based ranges rather than through this document's rope conversion.
+            let raw_diagnostics = analysis_state.document_diagnostics(document_id);
+            let related: Vec<Vec<RelatedLocation>> = raw_diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.related.clone())
+                .collect();
+            let diagnostics =
+                diagnostics::convert_diagnostics(raw_diagnostics, rope, PositionEncoding::Utf8);
 
-            for diagnostic in diagnostics {
+            for (diagnostic, related) in diagnostics.iter().zip(&related) {
                 if min_severity == MinSeverity::Error
                     && diagnostic.severity != Some(DiagnosticSeverity::ERROR)
                 {
@@ -228,8 +234,10 @@ pub fn check(
                 }
                 n_diagnostics += 1;
                 match output {
-                    OutputFormat::Human => render_human_diagnostic(&path, rope, &diagnostic),
-                    OutputFormat::Json => render_json_diagnostic(&path, &diagnostic),
+                    OutputFormat::Human => {
+                        render_human_diagnostic(&path, rope, diagnostic, related)
+                    }
+                    OutputFormat::Json => render_json_diagnostic(&path, diagnostic, related),
                 }
             }
         }
@@ -250,9 +258,14 @@ pub fn check(
 }
 
 // Renders one diagnostic rustc-style on stderr: the message, a `--> path:line:column` header, the
-// source line(s), and a caret underline. Rendered lines and columns are 1-based; the diagnostic's
-// range stays 0-based internally.
-fn render_human_diagnostic(path: &Path, rope: &Rope, diagnostic: &Diagnostic) {
+// source line(s), a caret underline, and one `note:` line per related location. Rendered lines and
+// columns are 1-based; the diagnostic's range stays 0-based internally.
+fn render_human_diagnostic(
+    path: &Path,
+    rope: &Rope,
+    diagnostic: &Diagnostic,
+    related: &[RelatedLocation],
+) {
     log(
         match diagnostic.severity {
             Some(DiagnosticSeverity::WARNING) => LogLevel::Warn,
@@ -318,12 +331,28 @@ fn render_human_diagnostic(path: &Path, rope: &Rope, diagnostic: &Diagnostic) {
             }
         }
     );
+    // Related ranges live in *other* documents, whose text is not at hand here; their byte-based
+    // positions render directly (line and byte column, both 1-based), matching the target document's
+    // `-->` header for any plain-ASCII line.
+    for entry in related {
+        eprintln!(
+            "{}{} {} {} {} {}:{}:{}",
+            " ".repeat(gutter_width),
+            style("=").bold().blue(),
+            style("note:").bold(),
+            entry.message,
+            style("-->").bold().blue(),
+            entry.path.display(),
+            entry.range.start_point.row + 1,
+            entry.range.start_point.column + 1,
+        );
+    }
     eprintln!();
 }
 
 // Renders one diagnostic as a JSON Lines record on stdout for CI use. Positions are 1-based like
 // the human renderer; the field names are a documented contract (see the getting-started page).
-fn render_json_diagnostic(path: &Path, diagnostic: &Diagnostic) {
+fn render_json_diagnostic(path: &Path, diagnostic: &Diagnostic, related: &[RelatedLocation]) {
     let severity = match diagnostic.severity {
         Some(DiagnosticSeverity::WARNING) => "warning",
         Some(DiagnosticSeverity::INFORMATION) => "information",
@@ -334,6 +363,19 @@ fn render_json_diagnostic(path: &Path, diagnostic: &Diagnostic) {
         NumberOrString::Number(number) => number.to_string(),
         NumberOrString::String(string) => string.clone(),
     });
+    let related = related
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "path": entry.path.display().to_string(),
+                "line": entry.range.start_point.row + 1,
+                "column": entry.range.start_point.column + 1,
+                "endLine": entry.range.end_point.row + 1,
+                "endColumn": entry.range.end_point.column + 1,
+                "message": entry.message,
+            })
+        })
+        .collect::<Vec<_>>();
     let record = serde_json::json!({
         "path": path.display().to_string(),
         "line": diagnostic.range.start.line + 1,
@@ -343,6 +385,7 @@ fn render_json_diagnostic(path: &Path, diagnostic: &Diagnostic) {
         "severity": severity,
         "code": code,
         "message": diagnostic.message,
+        "related": related,
     });
     println!("{record}");
 }

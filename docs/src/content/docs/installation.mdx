@@ -113,7 +113,10 @@ Lines](https://jsonlines.org)); progress and error messages stay on stderr, so s
 ```
 
 `line`/`column`/`endLine`/`endColumn` are 1-based, `severity` is `"error"` or `"warning"`, and
-`code` is the diagnostic's stable code. These field names are a contract — safe to build CI on.
+`code` is the diagnostic's stable code. `related` lists the locations a diagnostic points at beyond
+its own range — for example, each "overwrites an earlier top-level binding" warning names the
+sibling binding site — as `{path, line, column, endLine, endColumn, message}` objects (empty when a
+diagnostic stands alone). These field names are a contract — safe to build CI on.
 
 ### Exit codes
 
@@ -125,7 +128,7 @@ Lines](https://jsonlines.org)); progress and error messages stay on stderr, so s
 | 1 | Findings — any diagnostic, warnings included (`check`); files that would be reformatted (`fmt --check`, `fmt --diff`) |
 | 2 | Usage, configuration, or I/O error |
 
-There is no severity threshold yet: a warnings-only `check` run still exits 1.
+A warnings-only `check` run exits 1 by default; pass `--min-severity error` to gate on errors only.
 
 ## Next steps
 

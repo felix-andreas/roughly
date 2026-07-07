@@ -45,6 +45,7 @@ impl Host {
         for (id, source) in files {
             engine.set_input(Key::SourceText(*id), parse_source_input(source));
             engine.set_input(Key::DocumentKind(*id), DocumentKind::Package);
+            engine.set_input(Key::FileName(*id), package_path(*id));
             paths.insert(*id, package_path(*id));
         }
         engine.set_input(

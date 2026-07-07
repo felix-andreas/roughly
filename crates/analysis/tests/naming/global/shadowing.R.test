@@ -153,6 +153,7 @@ Assign(x@b0)
 warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
 --> 1:1-1:8
 | x <- 1L
+note: the later binding is here. --> R/b.R:1:1
 #---- R/b.R
 x <- x
 #++++
@@ -162,6 +163,7 @@ Assign(x@b1)
 warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
 --> 1:1-1:7
 | x <- x
+note: the earlier binding is here. --> R/a.R:1:1
 #---- R/c.R
 x
 #++++
@@ -178,6 +180,7 @@ Assign(x@b0)
 warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
 --> 1:1-1:8
 | x <- 1L
+note: the later binding is here. --> R/b.R:1:1
 #---- R/b.R
 x <- 2L
 #++++
@@ -187,6 +190,7 @@ Assign(x@b1)
 warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
 --> 1:1-1:8
 | x <- 2L
+note: the earlier binding is here. --> R/a.R:1:1
 #---- R/c.R
 f <- function() {
   x <- 3L
@@ -210,6 +214,7 @@ Assign(x@b0)
 warning[naming] Top-level binding `x` is overwritten by a later top-level binding in this package.
 --> 1:1-1:8
 | x <- 1L
+note: the later binding is here. --> R/b.R:1:1
 #---- R/b.R
 x <- 2L
 #++++
@@ -219,6 +224,7 @@ Assign(x@b1)
 warning[naming] Top-level binding `x` overwrites an earlier top-level binding in this package.
 --> 1:1-1:8
 | x <- 2L
+note: the earlier binding is here. --> R/a.R:1:1
 #---- R/c.R
 f <- function(x) x
 #++++
