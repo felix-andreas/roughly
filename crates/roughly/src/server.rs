@@ -614,6 +614,8 @@ impl EngineWorker {
         let file = self.file_id_for(path);
         self.engine
             .set_input(Key::SourceText(file), ParsedDocument(document));
+        self.engine
+            .set_input(Key::FileName(file), path.to_path_buf());
         self.engine.set_input(
             Key::DocumentKind(file),
             if is_package {

@@ -103,6 +103,7 @@ fn build_engine(workspace: &Workspace) -> (Engine<RoughlyQueries>, PathTable) {
     let mut paths = PathTable::new(PathBuf::from(BASE));
     for (id, state) in &workspace.files {
         engine.set_input(Key::SourceText(*id), parse_source_input(&state.source));
+        engine.set_input(Key::FileName(*id), absolute_path(*id, state.package));
         engine.set_input(
             Key::DocumentKind(*id),
             if state.package {
@@ -436,11 +437,13 @@ fn sync_engine(
         if !next.files.contains_key(id) {
             engine.remove_input(&Key::SourceText(*id));
             engine.remove_input(&Key::DocumentKind(*id));
+            engine.remove_input(&Key::FileName(*id));
             paths.remove(*id);
         }
     }
     for (id, state) in &next.files {
         engine.set_input(Key::SourceText(*id), parse_source_input(&state.source));
+        engine.set_input(Key::FileName(*id), absolute_path(*id, state.package));
         engine.set_input(
             Key::DocumentKind(*id),
             if state.package {

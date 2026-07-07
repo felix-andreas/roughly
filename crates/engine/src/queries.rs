@@ -72,6 +72,9 @@ pub enum Key {
     ProjectFiles,
     /// Project check configuration (`[check]` flags). Low churn; `Typecheck` records it.
     Config,
+    /// A file's workspace-relative display path, for diagnostics whose story names another file
+    /// (related locations). Set once alongside the first `SourceText` write; changes only on rename.
+    FileName(FileId),
 
     // --- Derived ----------------------------------------------------------------------------------
     Parse(FileId),
@@ -481,7 +484,11 @@ impl QueryGroup for RoughlyQueries {
 
     fn execute(&self, engine: &Engine<Self>, key: &Key) -> Stored {
         match key {
-            Key::SourceText(_) | Key::DocumentKind(_) | Key::ProjectFiles | Key::Config => {
+            Key::SourceText(_)
+            | Key::DocumentKind(_)
+            | Key::ProjectFiles
+            | Key::Config
+            | Key::FileName(_) => {
                 panic!("input queries are never executed")
             }
 

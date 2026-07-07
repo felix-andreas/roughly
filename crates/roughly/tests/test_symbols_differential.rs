@@ -127,6 +127,7 @@ fn document_and_workspace_symbols_match_the_analysis_oracle() {
     let mut paths = PathTable::new(PathBuf::from(BASE));
     for (id, source) in &files {
         engine.set_input(Key::SourceText(*id), parse_source_input(source));
+        engine.set_input(Key::FileName(*id), package_path(*id));
         engine.set_input(Key::DocumentKind(*id), DocumentKind::Package);
         paths.insert(*id, package_path(*id));
     }

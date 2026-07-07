@@ -176,6 +176,7 @@ fn sync_engine(engine: &mut Engine<RoughlyQueries>, previous: &Workspace, next: 
         if !next.files.contains_key(id) {
             engine.remove_input(&Key::SourceText(*id));
             engine.remove_input(&Key::DocumentKind(*id));
+            engine.remove_input(&Key::FileName(*id));
         }
     }
     // Set every current file's inputs. Re-setting an unchanged input is cheap (value-eq backdating leaves
@@ -183,6 +184,7 @@ fn sync_engine(engine: &mut Engine<RoughlyQueries>, previous: &Workspace, next: 
     // exercises the no-op cutoff path.
     for (id, state) in &next.files {
         engine.set_input(Key::SourceText(*id), parse_source_input(&state.source));
+        engine.set_input(Key::FileName(*id), absolute_path(*id, state.package));
         engine.set_input(
             Key::DocumentKind(*id),
             if state.package {
