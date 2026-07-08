@@ -72,6 +72,10 @@ use {
 const ITEMS_PER_FILE: usize = 5;
 const CHAIN_LEN: usize = 8;
 
+// Builds one file's source for a given file index; the benchmark scenarios pair two of these to
+// toggle the edit target between rounds.
+type SourceBuilder = Box<dyn Fn(usize) -> String>;
+
 // One file's source. `returns_double` flips every function's return literal `1L` (integer) -> `1.0`
 // (double): a BODY-ONLY edit (the exported name set `g_i_*` is byte-for-byte identical) that nonetheless
 // changes each function's inferred scheme, so the file's referrer genuinely re-typechecks — exercising
@@ -392,11 +396,7 @@ fn benchmark_invalidation_cliffs() {
 
     // Each scenario toggles between two sources for the edit target; per round: set input, fetch the
     // working set (timed), then sweep the rest (timed separately).
-    let scenarios: [(
-        &str,
-        Box<dyn Fn(usize) -> String>,
-        Box<dyn Fn(usize) -> String>,
-    ); 3] = [
+    let scenarios: [(&str, SourceBuilder, SourceBuilder); 3] = [
         (
             "body edit",
             Box::new(|index| generate_source(index, false)),
