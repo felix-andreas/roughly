@@ -61,8 +61,9 @@ No diagnostics.
 #---- structural_access_on_unannotated_params_is_clean
 # Structural access over an unannotated parameter is everyday R: a recursive
 # tree fold reads `$` fields off a node whose shape is never annotated, and
-# generic accessors index with `[[` / `$`. The parameter stays unconstrained,
-# the access types as `Unknown`, and none of it is a false "not a list".
+# generic accessors index with `[[`, `$`, and `[`. The parameter stays
+# unconstrained, the access types as `Unknown`, and none of it is a false
+# "not a list" / "unsupported `[`".
 sum_tree <- function(node) {
   if (is.null(node)) {
     0L
@@ -75,11 +76,14 @@ first_element <- function(x) x[[1L]]
 
 field_of <- function(record) record$payload
 
+leading_slice <- function(x) x[1L]
+
 run <- function() {
   total <- sum_tree(NULL)
   head <- first_element(list(1L, 2L))
   payload <- field_of(list(payload = "ok"))
-  list(total = total, head = head, payload = payload)
+  front <- leading_slice(list(1L, 2L))
+  list(total = total, head = head, payload = payload, front = front)
 }
 #++++
 No diagnostics.

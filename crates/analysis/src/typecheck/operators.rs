@@ -737,6 +737,19 @@ impl InferenceState {
                 );
                 Ok(CoreType::Unknown)
             }
+            // An unresolved inference variable — an unannotated parameter sliced with `[`
+            // (`function(x) x[1L]`) — cannot be structurally resolved here, so the slice is
+            // `Unknown` rather than a rejection: the same sound-by-refusal the `Nominal` arm above
+            // takes, and the tolerance `[[`/`$` give the same subject. The variable is left
+            // unconstrained; the `Unknown` is a strict-mode origin.
+            CoreType::Variable(_) => {
+                self.record_strict_origin(
+                    expression.id,
+                    expression.range,
+                    StrictOriginKind::UnsupportedConstruct,
+                );
+                Ok(CoreType::Unknown)
+            }
             other_type => Err(InferenceError::UnsupportedSubset {
                 actual: Box::new(other_type),
                 range: expression.range,
