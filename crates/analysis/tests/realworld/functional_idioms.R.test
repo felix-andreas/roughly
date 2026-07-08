@@ -87,3 +87,27 @@ run <- function() {
 }
 #++++
 No diagnostics.
+
+#---- combine_tolerates_non_concrete_arguments
+# `c(...)` over an argument whose element type is not statically known — an
+# unannotated parameter, a trusted `Any`, or an `Unknown` from an unmodeled
+# construct — yields `Unknown` instead of a false "expected integer, found T".
+prepend_zero <- function(x) c(x, 0L)
+
+with_any <- function() {
+  #: @trust Any
+  head <- 1L
+  c(head, 2L, 3L)
+}
+
+with_unknown <- function() {
+  config <- 1L
+  port <- config@port
+  c(port, 8080L)
+}
+
+run <- function() {
+  list(a = prepend_zero(c(1L, 2L)), b = with_any(), d = with_unknown())
+}
+#++++
+No diagnostics.

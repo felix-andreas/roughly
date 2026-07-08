@@ -93,3 +93,8 @@ integer[]
 c(list(1L), 2L)
 #++++
 error: type mismatch
+
+#---- combine_with_unannotated_param_is_unknown
+function(x) c(x, 1L)
+#++++
+fn(x: ?1) -> Unknown

@@ -1464,6 +1464,13 @@ Examples:
   accumulator seeded with `NULL` therefore combines cleanly — with `acc` of type
   `double[] | NULL`, `c(acc, 1.0)` is `double[]`
 - every non-`NULL` argument must be an atomic vector type; lists are not supported
+- a non-concrete argument whose element type is not statically known — `Any`, `Unknown`, or an
+  unresolved inference variable (an unannotated parameter, `function(x) c(x, 1L)`) — is tolerated
+  rather than rejected: the combined element atomic is indeterminate, so the whole result is
+  `Unknown` (a strict-mode origin when the argument is an unresolved variable). This keeps `c` from
+  a false "expected `integer`, found `T`" on generic wrappers and from cascading on an
+  already-`Unknown` value; claiming a concrete element type would be unsound, since a later argument
+  could widen the atomic
 - mixed atomic arguments coerce to the widest type along R's coercion hierarchy
   `logical < integer < double < complex < character`; `raw` does not participate and only combines
   with `raw`
@@ -1478,6 +1485,8 @@ Examples:
 - `c(1L, NA)` returns `integer[]`
 - `c(1L, "a")` returns `character[]`
 - `c(foo = 1L, bar = 2L)` returns `integer[named]`
+- `function(x) c(x, 1L)` infers as `fn(x: T) -> Unknown` (the unannotated `x` leaves the element
+  atomic indeterminate)
 
 ### Assignment operator `<-`
 

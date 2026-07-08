@@ -1087,7 +1087,7 @@ impl InferenceState {
     pub(super) fn infer_builtin_combine(
         &mut self,
         arguments: &[Argument],
-        _expression: &Expression,
+        expression: &Expression,
         arena: &HirArena,
         resolution_context: Option<&ResolutionContext<'_>>,
         type_definitions: &TypeDefinitionEnvironment,
@@ -1099,6 +1099,7 @@ impl InferenceState {
         let mut item_atomic = None;
         let mut all_arguments_are_named = true;
         let mut saw_non_null_argument = false;
+        let mut result_indeterminate = false;
 
         for argument in arguments {
             let arg_expr = arena.get(argument.expression);
@@ -1117,6 +1118,31 @@ impl InferenceState {
             }
             saw_non_null_argument = true;
             all_arguments_are_named &= argument.name.is_some();
+
+            // A non-concrete argument whose element atomic is not statically known — `Any`
+            // (compatible with everything), `Unknown` (which must never cascade), or an unresolved
+            // inference variable (an unannotated parameter, `function(x) c(x, 1L)`) — cannot pin the
+            // combined element type. R's `c` still returns a vector, but its element atomic is
+            // indeterminate here, so the whole result is `Unknown` rather than a rejection or an
+            // unsound concrete claim (a later argument could widen the atomic). A variable is left
+            // unconstrained and marked a strict-mode origin, mirroring `$`/`[[`/`[` on the same
+            // subject.
+            match &resolved_argument {
+                CoreType::Any | CoreType::Unknown => {
+                    result_indeterminate = true;
+                    continue;
+                }
+                CoreType::Variable(_) => {
+                    self.record_strict_origin(
+                        expression.id,
+                        expression.range,
+                        StrictOriginKind::UnsupportedConstruct,
+                    );
+                    result_indeterminate = true;
+                    continue;
+                }
+                _ => {}
+            }
 
             // A union argument combines member-wise. Its `NULL` members contribute nothing —
             // R drops `NULL` inside `c(...)`, so the idiomatic accumulator seeded with `c()`
@@ -1159,6 +1185,9 @@ impl InferenceState {
 
         if !saw_non_null_argument {
             return Ok(CoreType::Null);
+        }
+        if result_indeterminate {
+            return Ok(CoreType::Unknown);
         }
         let combined_atomic = item_atomic.unwrap_or(Atomic::Integer);
         if all_arguments_are_named {

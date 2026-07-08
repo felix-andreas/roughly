@@ -77,6 +77,14 @@ warning[strict] strict mode: this expression has an undetermined type (`Unknown`
 --> 1:22-1:27
 | slice <- function(x) x[1L]
 
+#---- combine_of_unannotated_param_is_a_strict_origin
+#---- R/main.R
+grow <- function(x) c(x, 1L)
+#++++
+warning[strict] strict mode: this expression has an undetermined type (`Unknown`)
+--> 1:21-1:29
+| grow <- function(x) c(x, 1L)
+
 #==== per_file_directive
 #---- strict_off_directive_silences_a_strict_file
 #---- R/main.R
