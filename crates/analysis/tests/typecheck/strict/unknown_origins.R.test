@@ -53,6 +53,22 @@ y <- x
 #++++
 No diagnostics.
 
+#---- dollar_on_unannotated_param_is_a_strict_origin
+#---- R/main.R
+get_value <- function(node) node$value
+#++++
+warning[strict] strict mode: this expression has an undetermined type (`Unknown`)
+--> 1:29-1:39
+| get_value <- function(node) node$value
+
+#---- double_bracket_on_unannotated_param_is_a_strict_origin
+#---- R/main.R
+first <- function(x) x[[1L]]
+#++++
+warning[strict] strict mode: this expression has an undetermined type (`Unknown`)
+--> 1:22-1:29
+| first <- function(x) x[[1L]]
+
 #==== per_file_directive
 #---- strict_off_directive_silences_a_strict_file
 #---- R/main.R

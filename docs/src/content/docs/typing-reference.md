@@ -1263,6 +1263,20 @@ For a homogeneous fixed-shape list the union collapses, so the result matches th
 `$`, `[`, and `[[` on an opaque nominal type (`data.frame`, `factor`, ...) yield `Unknown` without
 further checking; see [Nominal types](#nominal-types) for the rule and its rationale.
 
+#### Indexing an unresolved inference variable
+
+`$` and `[[` on an unresolved inference variable — an unannotated parameter whose shape is never
+pinned down, as in `function(node) node$value` or `function(x) x[[1L]]` — yield `Unknown` rather
+than a "not a list" error, and leave the variable unconstrained. Reading fields and elements off a
+value whose shape the author never wrote down is how idiomatic R walks recursive and generic data
+(a tree fold, a generic accessor), so refusing here would flag ordinary code. The access is instead
+sound-by-refusal and surfaced as an unsupported construct under [strict mode](#strict-mode), exactly
+as for an opaque nominal. Recovering the field or element type by constraining the variable to a
+record-with-field or indexable shape is future work.
+
+`[` on an unresolved variable is not yet tolerated this way — it still reports `[` as unsupported on
+that type.
+
 Some indexing forms remain unsupported for now. In particular, this document does not currently define `[` on vectors.
 
 ### Numeric inference variables

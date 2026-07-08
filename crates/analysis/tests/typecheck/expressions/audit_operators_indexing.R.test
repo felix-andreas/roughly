@@ -231,6 +231,16 @@ cfg$a$b
 list{a: list{b: integer}}
 integer
 
+#---- dollar_on_unannotated_param_yields_unknown
+function(x) x$field
+#++++
+fn(x: ?1) -> Unknown
+
+#---- double_bracket_on_unannotated_param_yields_unknown
+function(x) x[[1L]]
+#++++
+fn(x: ?1) -> Unknown
+
 #==== audit_operators_indexing_nominal
 #---- nominal_dollar_projects
 #: @type Person {list{name: character}}

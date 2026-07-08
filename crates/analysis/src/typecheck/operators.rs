@@ -914,6 +914,19 @@ impl InferenceState {
                 );
                 Ok(CoreType::Unknown)
             }
+            // An unresolved inference variable — an unannotated parameter indexed with `[[`
+            // (`function(x) x[[1L]]`) — cannot be structurally resolved here, so the element is
+            // `Unknown` rather than a rejection: the same sound-by-refusal the `Nominal` arm above
+            // takes, and the way arithmetic tolerates an unconstrained operand. The variable is left
+            // unconstrained; the `Unknown` is a strict-mode origin.
+            CoreType::Variable(_) => {
+                self.record_strict_origin(
+                    expression.id,
+                    expression.range,
+                    StrictOriginKind::UnsupportedConstruct,
+                );
+                Ok(CoreType::Unknown)
+            }
             other_type => Err(InferenceError::NotAList {
                 actual: Box::new(other_type),
                 range: expression.range,
@@ -997,6 +1010,20 @@ impl InferenceState {
             // Refusing loudly here would error on the most idiomatic R there is, so the access is
             // `Unknown` — sound-by-refusal, surfaced under strict mode.
             CoreType::Nominal(..) => {
+                self.record_strict_origin(
+                    expression.id,
+                    expression.range,
+                    StrictOriginKind::UnsupportedConstruct,
+                );
+                Ok(CoreType::Unknown)
+            }
+            // An unresolved inference variable — an unannotated parameter used as a `$` subject
+            // (`function(node) node$value`, idiomatic R) — cannot be structurally resolved here, so
+            // the access is `Unknown` rather than a rejection, matching how arithmetic tolerates an
+            // unconstrained operand. The variable is left unconstrained (a structural
+            // record-with-field constraint that would recover the field type is future work); the
+            // `Unknown` is a strict-mode origin, so strict mode still nudges an annotation.
+            CoreType::Variable(_) => {
                 self.record_strict_origin(
                     expression.id,
                     expression.range,
