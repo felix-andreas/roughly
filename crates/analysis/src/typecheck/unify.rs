@@ -274,10 +274,21 @@ impl InferenceState {
         }
         match self.resolve(core_type)? {
             CoreType::Variable(variable) => {
-                // A rigid skolem stands for every possible T; it cannot carry a constraint (e.g. a
-                // `<T>` body that does `value + 1L` would require T to be numeric, which the declared
-                // unconstrained `<T>` does not promise).
+                // A rigid skolem stands for every T its binder admits, so a required bound the
+                // binder already declares is satisfied (`<T: numeric>` used as `value + 1L`),
+                // while a bound the binder does not promise stays refused — a plain `<T>` body
+                // doing arithmetic must not invent constraints the annotation never declared.
                 if self.rigid_variables.contains_key(&variable) {
+                    let declared = match self.entries.get(&variable) {
+                        Some(InferenceEntry::Unbound {
+                            constraint: declared,
+                            ..
+                        }) => *declared,
+                        _ => Constraint::Unconstrained,
+                    };
+                    if declared.join(constraint) == declared {
+                        return Ok(());
+                    }
                     return Err(InferenceError::ConstraintViolation {
                         constraint,
                         actual: Box::new(self.rigid_display(variable)),

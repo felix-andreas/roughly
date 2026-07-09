@@ -601,6 +601,13 @@ composes with positional bounds exactly like an inferred one: `T: numeric` used 
 holds both bounds and instantiates only to a scalar `integer` or `double` (see
 [Numeric inference variables](#numeric-inference-variables)).
 
+The constraint works in both directions. It restricts what callers may instantiate `T` to, and it
+is a promise the annotated function's own **body may rely on**: with `<T: numeric> fn(x: T) -> T`,
+the body may use `x` numerically (`x + 1L`, `x > 0L`) because every admissible instantiation is
+numeric. A bound the binder does not declare stays refused — a plain `<T>` body doing arithmetic is
+a type error, since the annotation admits non-numeric arguments — and `atomic` does not imply
+`numeric`.
+
 For now, universal binders are rank-1 only.
 
 - a `<...>` binder is allowed only at the outermost level of a user-facing type expression

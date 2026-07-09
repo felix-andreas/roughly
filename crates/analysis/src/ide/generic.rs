@@ -1371,7 +1371,10 @@ fn annotation_insert_edit(
         .to_string()
         .get(..expression.range.start_point.column)?
         .to_owned();
-    let rendered = render_generalized_type(database.interner(), core_type);
+    let rendered =
+        render_generalized_type_with_constraints(database.interner(), core_type, &|variable| {
+            database.variable_constraint(document_id, variable)
+        });
     Some(TextEdit {
         range: collapsed_range(Point::new(expression.range.start_point.row, 0)),
         replacement_text: format!("{indentation}#: {rendered}\n"),

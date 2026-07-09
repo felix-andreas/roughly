@@ -180,3 +180,31 @@ character
 f <- function(x) NULL
 #++++
 error: invalid vector element
+
+#---- numeric_binder_authorizes_body_arithmetic
+#: <T: numeric> fn(x: T) -> T
+add_one <- function(x) x + 1L
+add_one(2L)
+#++++
+fn(x: ?1) -> ?1
+integer
+
+#---- unconstrained_binder_still_refuses_body_arithmetic
+#: <T> fn(x: T) -> T
+add_one <- function(x) x + 1L
+#++++
+error: constraint violation
+
+#---- atomic_binder_does_not_authorize_arithmetic
+#: <T: atomic> fn(x: T[]) -> T[]
+bump <- function(x) x + 1L
+#++++
+error: constraint violation
+
+#---- numeric_binder_authorizes_comparison
+#: <T: numeric> fn(x: T) -> logical
+positive <- function(x) x > 0L
+positive(1.5)
+#++++
+fn(x: ?1) -> logical
+logical
