@@ -128,3 +128,19 @@ run <- function() {
 }
 #++++
 No diagnostics.
+
+#---- script_preamble_library_calls_are_clean
+# The opening lines of nearly every real script: `library`/`require`/`help`
+# evaluate their first argument non-standardly (the bare name IS the package
+# or topic name), so none of these warn unresolved.
+library(stats)
+require(utils)
+
+lookup_docs <- function() help(mean)
+
+run <- function() {
+  values <- rnorm(10L)
+  mean(values)
+}
+#++++
+No diagnostics.

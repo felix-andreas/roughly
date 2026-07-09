@@ -586,10 +586,16 @@ fn lower_call(
         return ExpressionKind::Return { value };
     }
 
+    // `library(pkg)` / `require(pkg)` / `help(topic)` evaluate their first argument
+    // non-standardly: the bare name is the package or topic *name* — `library(stats)` is
+    // `library("stats")` — not a value reference, so it lowers as the character literal it means.
+    // Resolving it as a name would warn unresolved on the opening lines of nearly every script.
+    let quoted_argument = nse_quoted_argument(node, function, rope);
+
     let callee = lower_node_with_rope(function, rope, lowering_context);
     let arguments = node
         .child_by_field_id(field::ARGUMENTS)
-        .map(|arguments| lower_arguments(arguments, rope, lowering_context))
+        .map(|arguments| lower_arguments(arguments, quoted_argument, rope, lowering_context))
         .unwrap_or_default();
 
     ExpressionKind::Call { callee, arguments }
@@ -615,6 +621,37 @@ fn single_local_argument<'tree>(
         return None;
     }
     argument.child_by_field_id(field::VALUE)
+}
+
+// The value node of the non-standardly evaluated first argument of `library(pkg)`,
+// `require(pkg)`, or `help(topic)`: `Some` only when `function` is one of those bare identifiers
+// and the first argument in source order is positional (unnamed) with a bare-identifier value.
+// Any other shape — a string argument, a named first argument (`package = pkg`), a qualified
+// callee — is left as an ordinary call. Like `local`, the syntactic call to the bare name is the
+// construct; rebinding `library` to an ordinary function is not modeled.
+fn nse_quoted_argument<'tree>(
+    call: Node<'tree>,
+    function: Node<'_>,
+    rope: &Rope,
+) -> Option<Node<'tree>> {
+    if function.kind_id() != kind::IDENTIFIER {
+        return None;
+    }
+    if !matches!(
+        node_text(function, rope).as_str(),
+        "library" | "require" | "help"
+    ) {
+        return None;
+    }
+    let arguments = call.child_by_field_id(field::ARGUMENTS)?;
+    let argument = (0..arguments.named_child_count())
+        .filter_map(|index| arguments.named_child(index))
+        .find(|child| child.kind_id() == kind::ARGUMENT)?;
+    if argument.child_by_field_id(field::NAME).is_some() {
+        return None;
+    }
+    let value = argument.child_by_field_id(field::VALUE)?;
+    (value.kind_id() == kind::IDENTIFIER).then_some(value)
 }
 
 // The value node of a `return(<expr>)` / `return()` call: `Some` only when `function` is the bare
@@ -713,6 +750,7 @@ fn lower_extract_operator(
 
 fn lower_arguments(
     arguments: Node<'_>,
+    quoted_argument: Option<Node<'_>>,
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> Vec<Argument> {
@@ -735,7 +773,18 @@ fn lower_arguments(
 
         let expression = child
             .child_by_field_id(field::VALUE)
-            .map(|value| lower_node_with_rope(value, rope, lowering_context))
+            .map(|value| {
+                if quoted_argument.is_some_and(|quoted| quoted.id() == value.id()) {
+                    // A non-standardly evaluated bare name (`library(stats)`): the identifier is
+                    // the string it names, not a value reference (see `nse_quoted_argument`).
+                    lowering_context.expression(
+                        value.range(),
+                        ExpressionKind::Character(node_text(value, rope)),
+                    )
+                } else {
+                    lower_node_with_rope(value, rope, lowering_context)
+                }
+            })
             .unwrap_or_else(|| {
                 lowering_context.expression(child.range(), ExpressionKind::Unsupported)
             });

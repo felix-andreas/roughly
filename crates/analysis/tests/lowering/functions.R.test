@@ -58,3 +58,43 @@ Call
     Integer("1L")
   Argument y:
     Integer("2L")
+
+#---- library_bare_name_lowers_as_character
+library(stats)
+#++++
+Call
+  Symbol(library)
+  Argument:
+    Character("stats")
+
+#---- require_bare_name_lowers_as_character
+require(utils)
+#++++
+Call
+  Symbol(require)
+  Argument:
+    Character("utils")
+
+#---- help_bare_name_lowers_as_character
+help(mean)
+#++++
+Call
+  Symbol(help)
+  Argument:
+    Character("mean")
+
+#---- library_string_stays_a_string
+library("stats")
+#++++
+Call
+  Symbol(library)
+  Argument:
+    Character("\"stats\"")
+
+#---- library_named_first_argument_stays_a_reference
+library(package = stats)
+#++++
+Call
+  Symbol(library)
+  Argument package:
+    Symbol(stats)

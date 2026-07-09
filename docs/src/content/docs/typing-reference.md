@@ -125,6 +125,13 @@ environment semantics: a scope holds one variable per name, and assignment mutat
   local and do not leak to the enclosing scope, while references still see enclosing names. The
   syntactic single-argument `local(...)` call is treated as this construct; rebinding `local` to a
   user function does not change that (a current limitation)
+- `library(pkg)`, `require(pkg)`, and `help(topic)` evaluate their first argument non-standardly:
+  a bare name there is the package or topic **name** (`library(stats)` means `library("stats")`),
+  not a value reference, so it is read as that character literal and never resolved (or warned
+  about) as a variable. This applies to the syntactic call to the bare function name whose first
+  argument is positional and a bare identifier; a string argument, a named first argument
+  (`library(package = pkg)`), or a qualified callee is an ordinary call, and rebinding `library`
+  to a user function does not change the quoting (the same limitation as `local`)
 
 At a package document's top level, conditionally executed assignments (inside a top-level `if`,
 `for`, `while`, or `repeat`) are not package-visible, but within the same document they behave
