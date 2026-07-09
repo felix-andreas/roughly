@@ -510,11 +510,12 @@ fn cross_file_nominal_new_and_use() {
 
 #[test]
 fn stdlib_base_name_use_resolves_via_real_stubs() {
-    // Deferral 1: base names resolve to their stub schemes, so a well-typed `nchar` use checks clean and a
-    // mis-typed one errors — neither possible with an empty stub library.
+    // Deferral 1: base names resolve to their stub schemes — not possible with an empty stub
+    // library. `nchar` declares its subject as `Any` (R's nchar accepts any coercible value), so
+    // both calls check clean; the differential asserts the engine and the from-scratch pipeline
+    // agree on the resolution either way.
     let mut driver = Driver::new(typing_strict_config());
     driver.set_package("stub-ok", 0, "size <- nchar(\"hello\")");
-    // `nchar : fn(character) -> integer`, so passing an integer mismatches.
     driver.set_package("stub-bad", 0, "size <- nchar(1L)");
     driver.set_package("stub-value", 0, "half <- pi");
 }
