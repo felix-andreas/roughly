@@ -899,6 +899,12 @@ A union type `A | B | ...` describes a value that has one of the member types. A
   - nested function types
   - list and map-like list annotations
 - a union describes which shapes a value can take; it does not merge or coerce its members
+- a type may be **parenthesized for grouping**: `(TYPE)` means exactly `TYPE` and adds no structure
+  of its own. Grouping is what makes a union with a *function-type member* writable — in
+  `fn() -> integer | NULL` the `->` extends over the whole union (a function returning
+  `integer | NULL`), so the optional callback is written `(fn() -> integer) | NULL`, which is also
+  the form such a union renders as. A `<T>` binder may not appear inside parentheses; binders stay
+  at the outermost level of an annotation
 
 Examples:
 
@@ -907,6 +913,7 @@ Examples:
 - `character[] | NULL`
 - `integer[] | character[]`
 - `fn(count: integer | NULL) -> character | logical | NULL`
+- `(fn() -> integer) | NULL` — an optional callback: a function returning `integer`, or `NULL`
 
 Not allowed:
 

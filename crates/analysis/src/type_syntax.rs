@@ -1326,6 +1326,14 @@ impl StopContext {
         right_angle: true,
     };
 
+    const GROUP: Self = Self {
+        comma: false,
+        right_bracket: false,
+        right_brace: false,
+        right_paren: true,
+        right_angle: false,
+    };
+
     fn stops_on(self, byte: u8) -> bool {
         (self.comma && byte == b',')
             || (self.right_bracket && byte == b']')
@@ -1492,6 +1500,17 @@ impl<'a> TypeParser<'a> {
             return Err(unsupported_construct(
                 "higher-rank polymorphism is not supported. type parameter binders may only appear at the outermost level.",
             ));
+        }
+
+        // A parenthesized group: `(TYPE)` means exactly `TYPE` and builds no node of its own. This
+        // is what makes a union with a function-type member writable — in `fn() -> integer | NULL`
+        // the `->` extends over the whole union, so the optional callback needs
+        // `(fn() -> integer) | NULL`, the same form the renderers already emit.
+        if self.consume_byte(b'(') {
+            let inner_type = self.parse_type_until(StopContext::GROUP)?;
+            self.skip_ascii_whitespace();
+            self.expect_byte(b')', "missing closing delimiter )")?;
+            return Ok(inner_type);
         }
 
         if self.consume_keyword("list") {

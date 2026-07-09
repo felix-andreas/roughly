@@ -85,3 +85,33 @@ broken <- function() {
 error[type-error] expected `fn(character) -> T`, found `fn(n: U) -> U`
 --> 8:22-8:40
 |   map_option("text", function(n) n + 1L)
+
+#==== optional_callbacks
+#---- optional_callback_annotation_is_writable_and_narrows
+# The optional-callback idiom, annotated with a parenthesized function member:
+# `(fn() -> integer) | NULL`. The `is.null` guard narrows the union, so the
+# callback is callable on the false edge, and both `NULL` and a conforming
+# function are accepted at the call site.
+#: @param on_done {(fn() -> integer) | NULL}
+finish <- function(on_done) {
+  if (is.null(on_done)) 0L else on_done()
+}
+
+run <- function() {
+  list(quiet = finish(NULL), loud = finish(function() 42L))
+}
+#++++
+No diagnostics.
+
+#==== optional_callbacks_bugs
+#---- callback_with_the_wrong_result_type_is_caught
+#: @param on_done {(fn() -> integer) | NULL}
+finish <- function(on_done) {
+  if (is.null(on_done)) 0L else on_done()
+}
+
+run <- function() finish(function() "text")
+#++++
+error[type-error] expected `(fn() -> integer) | NULL`, found `fn() -> character`
+--> 6:26-6:43
+| run <- function() finish(function() "text")

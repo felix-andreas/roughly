@@ -154,6 +154,57 @@ integer[] | character[] | NULL
 #++++
 integer[] | character[] | NULL
 
+#==== grouped_unions
+#---- function_member_union
+(fn() -> integer) | NULL
+#++++
+(fn() -> integer) | NULL
+
+#---- function_member_union_with_parameters
+(fn(x: integer) -> character) | NULL
+#++++
+(fn(x: integer) -> character) | NULL
+
+#---- two_function_members
+(fn() -> integer) | (fn() -> character)
+#++++
+(fn() -> integer) | (fn() -> character)
+
+#---- redundant_group_collapses
+(integer)
+#++++
+integer
+
+#---- grouped_union_flattens
+(integer | character) | NULL
+#++++
+integer | character | NULL
+
+#---- group_in_parameter_position
+fn(callback: (fn() -> integer) | NULL) -> integer
+#++++
+fn(callback: (fn() -> integer) | NULL) -> integer
+
+#---- group_as_list_item
+list[(fn() -> integer) | NULL]
+#++++
+list[(fn() -> integer) | NULL]
+
+#---- unclosed_group
+(integer
+#++++
+InvalidSyntax { message: "missing closing delimiter )" }
+
+#---- empty_group
+()
+#++++
+InvalidSyntax { message: "expected a type." }
+
+#---- binder_inside_group_rejected
+(<T> fn(x: T) -> T) | NULL
+#++++
+UnsupportedConstruct { message: "higher-rank polymorphism is not supported. type parameter binders may only appear at the outermost level." }
+
 #==== invalid_unions
 #---- invalid_null_null_union
 NULL | NULL
