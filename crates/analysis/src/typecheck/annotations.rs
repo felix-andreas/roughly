@@ -211,7 +211,18 @@ impl InferenceState {
                 type_definitions,
                 Some(expression),
             ) {
-                Ok(CoreType::Function(function_type)) => Some(function_type),
+                Ok(CoreType::Function(mut function_type)) => {
+                    // An elided return on a checked definition annotation is inferred from the
+                    // body, not read as `NULL`: the lowered placeholder return is swapped for a
+                    // fresh inference variable, which the body's return-compatibility check then
+                    // binds (compatibility against an unbound variable unifies). A written
+                    // `-> NULL` / `@returns {NULL}` is not elided and stays enforced.
+                    if surface_return_is_elided(surface_type) {
+                        function_type.return_type =
+                            Box::new(CoreType::Variable(self.fresh_variable()));
+                    }
+                    Some(function_type)
+                }
                 Ok(_) | Err(InferenceError::UnresolvedAnnotationType { .. }) => None,
                 Err(error) => return Err(error),
             },
@@ -307,6 +318,12 @@ impl InferenceState {
             SurfaceType::Any => Ok(CoreType::Any),
             SurfaceType::Unknown => Ok(CoreType::Unknown),
             SurfaceType::Null => Ok(CoreType::Null),
+            // An elided return type means `NULL` in every position with no body to infer from
+            // (nested function types, trusted coercions, non-literal values). The one position
+            // that infers instead — a checked annotation on a function definition — swaps the
+            // lowered return for a fresh inference variable afterwards (see
+            // `checked_function_annotation`).
+            SurfaceType::ElidedReturn => Ok(CoreType::Null),
             SurfaceType::Union(members) => {
                 let lowered = members
                     .iter()
@@ -609,5 +626,16 @@ impl InferenceState {
             Err(InferenceError::UnresolvedAnnotationType { .. }) => Ok(None),
             Err(error) => Err(error),
         }
+    }
+}
+
+// Whether a function annotation's return slot was left unwritten, peeling a `<T>` binder wrapper.
+fn surface_return_is_elided(surface_type: &SurfaceType) -> bool {
+    match surface_type {
+        SurfaceType::Function(function_type) => {
+            matches!(*function_type.return_type, SurfaceType::ElidedReturn)
+        }
+        SurfaceType::Binders(_, inner_type) => surface_return_is_elided(inner_type),
+        _ => false,
     }
 }

@@ -1599,7 +1599,10 @@ Additional rules:
 - duplicate type parameter names in the same annotation block are errors
 - `@forall` directives must appear before any `@param`, `@return`, or `@returns` directive
 - the bracket syntax for optional parameters follows JSDoc-style notation
-- if no `@return` or `@returns` annotation is provided, the function type defaults to returning `NULL`
+- if no `@return` or `@returns` annotation is provided, the return type is **elided**: on a checked
+  annotation of a function definition it is inferred from the function's body (see
+  [Elided return types](#elided-return-types)); in every position with no body to infer from it
+  means `NULL`
 - at most one `@return` or `@returns` directive may appear in the block
 - `@param` directives must appear before `@return` or `@returns`
 
@@ -1669,7 +1672,8 @@ written after it fill by name only (see [Function calls](#function-calls)).
 
 Additional rules:
 
-- if the return type is omitted, it is implicitly `NULL`
+- if the return type is omitted, it is **elided** — inferred from the body on a checked definition
+  annotation, `NULL` everywhere else (see [Elided return types](#elided-return-types))
 - when a compact function annotation starts with `<...>`, the binder introduces rank-1 type parameters for the whole function type
 - compact function annotations do not use `fn<T>(...)`; the supported binder form is `<T> fn(...) -> ...`
 
@@ -1686,6 +1690,29 @@ wrap <- function(x, ...) paste0(x, ": ", paste(...))
 The annotation's `...` must appear in the same position as the function's `...` formal — both
 count the parameters declared before it (see
 [Function type compatibility](#function-type-compatibility)).
+
+### Elided return types
+
+Both annotation styles allow the return type to be left unwritten: an expanded block with no
+`@return`/`@returns` line, or a compact `fn(...)` with no `-> RETURN_TYPE`. An elided return is not
+the same as a written `NULL`; what it means depends on whether there is a function body to infer
+from:
+
+- on a **checked annotation of a function definition** — the annotation sits on a `function(...)`
+  literal whose body is checked against it — the return type is **inferred from the body**, exactly
+  as it would be with no annotation at all. Annotating only the parameters is the common partial
+  form (`@param u {integer}` on `add_one <- function(u) u + 1L` infers `fn(u: integer) -> integer`),
+  and it must not silently pin the return
+- in every position with **no body to infer from**, an elided return means `NULL`, matching R
+  functions that are called for their side effects. This covers a nested function *type* (a callback
+  parameter such as `@param cb {fn(integer)}`), a [trusted coercion](#trusted-coercions) or
+  [`@if-unknown` coercion](#unknown-only-coercions) (which adopt exactly the written type without
+  consulting the body), and an annotation on a value that is not a function literal (`g <- f` with a
+  `#: fn(integer)` annotation)
+
+A function that genuinely returns `NULL` can always say so explicitly with `@returns {NULL}` or
+`-> NULL`, and that explicit form is enforced: a body returning anything non-`NULL` against it is a
+type error.
 
 Examples:
 

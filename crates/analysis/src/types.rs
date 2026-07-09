@@ -53,6 +53,12 @@ pub enum SurfaceType {
     Any,
     Unknown,
     Null,
+    // A function return type the source left unwritten (`fn(integer)` with no `->`, an expanded
+    // block with no `@returns`). Elision is not the same as a written `NULL`: on a checked
+    // annotation of a function definition the return is inferred from the body, while every
+    // position with no body to infer from (nested function types, trusted coercions) reads it as
+    // `NULL`. The parsers only ever produce this in a function's return slot.
+    ElidedReturn,
     // Invariant: normalized — flattened (no `Union` member), structurally deduplicated, `Null`
     // last, no `Any`/`Unknown` member (they absorb the union), and at least two members. Build
     // through `SurfaceType::union_of`.

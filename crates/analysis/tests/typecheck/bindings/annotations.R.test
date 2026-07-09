@@ -5,6 +5,31 @@ log_count <- function(count) { }
 #++++
 log_count: fn(count: integer) -> NULL
 
+#---- compact_elided_return_is_inferred_from_the_body
+#: fn(count: integer)
+add_one <- function(count) count + 1L
+#++++
+add_one: fn(count: integer) -> integer
+
+#---- expanded_param_only_return_is_inferred_from_the_body
+#: @param count {integer}
+add_one <- function(count) count + 1L
+#++++
+add_one: fn(count: integer) -> integer
+
+#---- forall_with_elided_return_generalizes
+#: @forall T
+#: @param value {T}
+mirror <- function(value) value
+#++++
+mirror: <T> fn(value: T) -> T
+
+#---- trusted_elided_return_stays_null
+#: @trust fn(count: integer)
+log_count <- function(count) count
+#++++
+log_count: fn(count: integer) -> NULL
+
 #---- scalar_checked_annotation
 #: integer
 value <- 1L

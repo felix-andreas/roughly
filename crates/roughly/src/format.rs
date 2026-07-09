@@ -1534,6 +1534,7 @@ fn annotation_parameter_names_are_plain(parsed: &TypeSyntax, interner: &Interner
             SurfaceType::Any
             | SurfaceType::Unknown
             | SurfaceType::Null
+            | SurfaceType::ElidedReturn
             | SurfaceType::Scalar(_) => true,
         }
     }

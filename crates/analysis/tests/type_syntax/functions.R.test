@@ -1,6 +1,11 @@
 #==== basic_functions
-#---- null_return_by_default
+#---- elided_return_renders_elided
 fn(integer)
+#++++
+fn(integer)
+
+#---- explicit_null_return_renders_the_arrow
+fn(integer) -> NULL
 #++++
 fn(integer) -> NULL
 
@@ -95,10 +100,10 @@ fn(count: integer, [label]: character) -> logical
 #++++
 fn(value: double) -> integer
 
-#---- expanded_without_return_defaults_to_null
+#---- expanded_without_return_is_elided
 @param count {integer}
 #++++
-fn(count: integer) -> NULL
+fn(count: integer)
 
 #---- expanded_higher_order_parameter
 @param formatter {fn(integer) -> character}

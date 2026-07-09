@@ -357,13 +357,35 @@ error[type-error] expected `Unknown`, found `integer`
 --> 2:1-2:3
 | 1L
 
-#---- compact_fn_omitted_return_body_value
+#---- compact_fn_elided_return_is_inferred_from_the_body
 #: fn(count: integer)
+f <- function(count) count
+#++++
+No diagnostics.
+
+#---- compact_fn_explicit_null_return_is_enforced
+#: fn(count: integer) -> NULL
 f <- function(count) count
 #++++
 error[type-error] expected `NULL`, found `integer`
 --> 2:1-2:27
 | f <- function(count) count
+
+#---- nested_callback_elided_return_still_means_null
+#: @param cb {fn(integer)}
+run_cb <- function(cb) cb(1L)
+run_cb(function(x) x + 1L)
+#++++
+error[type-error] expected `fn(integer) -> NULL`, found `fn(x: T) -> T`
+--> 3:8-3:26
+| run_cb(function(x) x + 1L)
+
+#---- nested_callback_elided_return_accepts_a_null_callback
+#: @param cb {fn(integer)}
+run_cb <- function(cb) cb(1L)
+run_cb(function(x) NULL)
+#++++
+No diagnostics.
 
 #---- compact_fn_nullable_params
 #: fn(count: integer | NULL) -> integer | NULL

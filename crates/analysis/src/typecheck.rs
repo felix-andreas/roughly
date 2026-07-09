@@ -659,7 +659,11 @@ fn accumulate_parameter_variances(
                 accumulate_parameter_variances(item, polarity, parameters, variances);
             }
         }
-        SurfaceType::Any | SurfaceType::Unknown | SurfaceType::Null | SurfaceType::Scalar(_) => {}
+        SurfaceType::Any
+        | SurfaceType::Unknown
+        | SurfaceType::Null
+        | SurfaceType::ElidedReturn
+        | SurfaceType::Scalar(_) => {}
     }
 }
 

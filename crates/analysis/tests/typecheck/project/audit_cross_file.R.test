@@ -13,6 +13,18 @@ b <- mirror("x")
 #++++
 No diagnostics.
 
+#---- partial_annotation_return_is_inferred_across_files
+#---- R/a.R
+#: @param count {integer}
+add_one <- function(count) count + 1L
+#++++
+No diagnostics.
+#---- R/b.R
+#: integer
+total <- add_one(2L) + 10L
+#++++
+No diagnostics.
+
 #---- numeric_scheme_accepts_numeric
 #---- R/a.R
 add_one <- function(x) x + 1L

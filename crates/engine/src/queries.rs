@@ -2001,7 +2001,11 @@ fn resolve_surface_type(
                 diagnostics,
             );
         }
-        SurfaceType::Any | SurfaceType::Unknown | SurfaceType::Null | SurfaceType::Scalar(_) => {}
+        SurfaceType::Any
+        | SurfaceType::Unknown
+        | SurfaceType::Null
+        | SurfaceType::ElidedReturn
+        | SurfaceType::Scalar(_) => {}
     }
 }
 
@@ -2152,7 +2156,11 @@ fn collect_surface_type_references(
             nested.extend(type_parameters.iter().map(|parameter| parameter.name));
             collect_surface_type_references(inner_type, &nested, references);
         }
-        SurfaceType::Any | SurfaceType::Unknown | SurfaceType::Null | SurfaceType::Scalar(_) => {}
+        SurfaceType::Any
+        | SurfaceType::Unknown
+        | SurfaceType::Null
+        | SurfaceType::ElidedReturn
+        | SurfaceType::Scalar(_) => {}
     }
 }
 

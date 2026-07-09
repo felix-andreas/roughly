@@ -998,9 +998,11 @@ fn surface_type_contains_named_type(surface_type: &SurfaceType) -> bool {
                 || surface_type_contains_named_type(&function_type.return_type)
         }
         SurfaceType::Binders(_, inner_type) => surface_type_contains_named_type(inner_type),
-        SurfaceType::Any | SurfaceType::Unknown | SurfaceType::Null | SurfaceType::Scalar(_) => {
-            false
-        }
+        SurfaceType::Any
+        | SurfaceType::Unknown
+        | SurfaceType::Null
+        | SurfaceType::ElidedReturn
+        | SurfaceType::Scalar(_) => false,
     }
 }
 
@@ -1234,6 +1236,7 @@ impl<'a> TypeResolver<'a> {
             SurfaceType::Any
             | SurfaceType::Unknown
             | SurfaceType::Null
+            | SurfaceType::ElidedReturn
             | SurfaceType::Scalar(_) => {}
         }
     }

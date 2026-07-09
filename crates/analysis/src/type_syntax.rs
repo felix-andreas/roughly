@@ -93,6 +93,10 @@ pub fn render_surface_type(surface_type: &SurfaceType, interner: &Interner) -> S
         SurfaceType::Any => "Any".to_owned(),
         SurfaceType::Unknown => "Unknown".to_owned(),
         SurfaceType::Null => "NULL".to_owned(),
+        // Only reachable if an elided return is rendered outside a function's return slot, which
+        // the parsers never produce; the function arm below renders the elision by omitting the
+        // arrow entirely.
+        SurfaceType::ElidedReturn => "NULL".to_owned(),
         SurfaceType::Union(members) => members
             .iter()
             .map(|member| {
@@ -201,11 +205,14 @@ pub fn render_surface_type(surface_type: &SurfaceType, interner: &Interner) -> S
                 }
                 None => rendered_parts.extend(rendered_named_parameters),
             }
-            format!(
-                "fn({}) -> {}",
-                rendered_parts.join(", "),
-                render_surface_type(&function_type.return_type, interner)
-            )
+            match function_type.return_type.as_ref() {
+                SurfaceType::ElidedReturn => format!("fn({})", rendered_parts.join(", ")),
+                return_type => format!(
+                    "fn({}) -> {}",
+                    rendered_parts.join(", "),
+                    render_surface_type(return_type, interner)
+                ),
+            }
         }
         SurfaceType::Binders(type_parameters, inner_type) => {
             let rendered_params = type_parameters
@@ -768,7 +775,11 @@ fn validate_surface_type(surface_type: &SurfaceType) -> Result<(), TypeParseErro
             validate_surface_type(&func.return_type)?;
         }
         SurfaceType::Binders(_, inner) => validate_surface_type(inner)?,
-        SurfaceType::Any | SurfaceType::Unknown | SurfaceType::Null | SurfaceType::Scalar(_) => {}
+        SurfaceType::Any
+        | SurfaceType::Unknown
+        | SurfaceType::Null
+        | SurfaceType::ElidedReturn
+        | SurfaceType::Scalar(_) => {}
     }
     Ok(())
 }
@@ -920,7 +931,7 @@ pub fn parse_expanded_block_surface_type(
 
     let mut type_parameters = Vec::new();
     let mut named_parameters = Vec::new();
-    let mut return_type = SurfaceType::Null;
+    let mut return_type = SurfaceType::ElidedReturn;
     let mut seen_return = false;
 
     for_each_expanded_annotation_directive(trimmed_text, |directive| {
@@ -1845,7 +1856,7 @@ impl<'a> TypeParser<'a> {
             self.expect_byte(b'>', "expected `>` after `-` in function return type.")?;
             self.parse_type_until(StopContext::ROOT)?
         } else {
-            SurfaceType::Null
+            SurfaceType::ElidedReturn
         };
 
         Ok(SurfaceType::Function(FunctionType::with_variadic(

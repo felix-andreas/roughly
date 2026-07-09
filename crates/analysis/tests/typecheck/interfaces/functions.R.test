@@ -20,6 +20,12 @@ double_count <- function(count) count + count
 #++++
 double_count: fn(count: integer) -> integer
 
+#---- elided_return_export_carries_the_inferred_return
+#: fn(count: integer)
+add_one <- function(count) count + 1L
+#++++
+add_one: fn(count: integer) -> integer
+
 #---- higher_order_export
 #: fn(transform: fn(integer) -> character, count: integer) -> character
 apply_transform <- function(transform, count) transform(count)

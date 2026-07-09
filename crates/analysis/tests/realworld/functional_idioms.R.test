@@ -111,3 +111,20 @@ run <- function() {
 }
 #++++
 No diagnostics.
+
+#---- partial_annotation_leaves_the_return_inferred
+# Annotating only the parameters is the idiomatic partial form: the elided
+# return is inferred from the body instead of silently pinning `NULL`, so a
+# checked param annotation never rejects a value-returning function.
+#: @param base {double}
+#: @param exponent {integer}
+power <- function(base, exponent) base^exponent
+
+#: fn(name: character)
+greet <- function(name) paste("Hello,", name)
+
+run <- function() {
+  list(eight = power(2.0, 3L), hi = greet("Ada"))
+}
+#++++
+No diagnostics.
