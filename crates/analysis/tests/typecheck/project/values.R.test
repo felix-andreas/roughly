@@ -211,3 +211,42 @@ No diagnostics.
 result <- ring_one(1L)
 #++++
 No diagnostics.
+
+#==== error_tolerant_lowering
+#---- broken_tail_keeps_earlier_exports
+#---- R/a.R
+helper <- function() 1L
+oops <- function() (
+#++++
+error[syntax-error] Syntax Error: unexpected "<- function() ("
+--> 2:6-2:21
+| oops <- function() (
+#---- R/b.R
+result <- helper()
+#++++
+No diagnostics.
+
+#---- broken_value_keeps_annotated_scheme
+#---- R/a.R
+#: fn() -> integer
+get_count <- function() {
+#++++
+error[syntax-error] Syntax Error: missing closing delimiter }
+--> 2:25-2:26
+| get_count <- function() {
+#---- R/b.R
+total <- get_count() + 1L
+#++++
+No diagnostics.
+
+#---- dangling_assignment_defines_unknown
+#---- R/a.R
+count <-
+#++++
+error[syntax-error] Syntax Error: missing rhs for operator <-
+--> 1:7-1:9
+| count <-
+#---- R/b.R
+mirrored <- count
+#++++
+No diagnostics.

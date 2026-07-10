@@ -246,7 +246,13 @@ pub enum ExpressionKind {
         namespace: Symbol,
         name: Symbol,
     },
+    // A complete construct the checker does not model (unusual but valid R). Types as `Unknown`
+    // and is strict-relevant: strict mode points at it as an `Unknown` origin.
     Unsupported,
+    // A hole where the source failed to parse (an error or zero-width recovery region). Types as
+    // `Unknown` like `Unsupported`, but is NOT strict-relevant — the syntax diagnostic already
+    // covers the region, so the checker draws no conclusion from it at all.
+    Missing,
 }
 
 // Which environment an assignment writes. R's `<-`/`=`/`->` mutate the current frame; `<<-`/`->>`
@@ -383,7 +389,8 @@ pub fn contains_loop_exit(arena: &HirArena, root: ExpressionId) -> bool {
         | ExpressionKind::StringLiteralName(_)
         | ExpressionKind::Symbol(_)
         | ExpressionKind::Function { .. }
-        | ExpressionKind::Unsupported => false,
+        | ExpressionKind::Unsupported
+        | ExpressionKind::Missing => false,
     }
 }
 
@@ -480,7 +487,8 @@ pub fn formals_tested_by_missing(
         | ExpressionKind::AtomicConstant(_)
         | ExpressionKind::StringLiteralName(_)
         | ExpressionKind::Symbol(_)
-        | ExpressionKind::Unsupported => {}
+        | ExpressionKind::Unsupported
+        | ExpressionKind::Missing => {}
     }
 }
 
@@ -786,6 +794,7 @@ impl Module {
             ExpressionKind::Break => out.push_str(&format!("{prefix}Break\n")),
             ExpressionKind::Next => out.push_str(&format!("{prefix}Next\n")),
             ExpressionKind::Unsupported => out.push_str(&format!("{prefix}Unsupported\n")),
+            ExpressionKind::Missing => out.push_str(&format!("{prefix}Missing\n")),
         }
     }
 }

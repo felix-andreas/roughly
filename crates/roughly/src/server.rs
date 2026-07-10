@@ -615,14 +615,20 @@ impl EngineWorker {
         let lowering = self
             .engine
             .fetch::<LoweringResult>(Key::LoweringDiagnostics(file));
-        let lint = self.engine.fetch::<Vec<analysis::Diagnostic>>(Key::Lint(file));
+        let lint = self
+            .engine
+            .fetch::<Vec<analysis::Diagnostic>>(Key::Lint(file));
         let config = self.engine_config();
 
         let mut rendered = Vec::new();
         rendered.extend(naming.diagnostics.iter().cloned());
         rendered.extend(lowering.diagnostics.iter().cloned());
         rendered.extend(lint.iter().cloned());
-        if lowering.module.strict_override.unwrap_or(config.check.strict) {
+        if lowering
+            .module
+            .strict_override
+            .unwrap_or(config.check.strict)
+        {
             for diagnostic in &mut rendered {
                 diagnostic.escalate_unresolved_to_error();
             }
@@ -965,9 +971,10 @@ impl EngineWorker {
             {
                 Ok(diagnostics) => {
                     let uri = self.document_uri(&path);
-                    if let Err(error) = self.client.publish_diagnostics(
-                        PublishDiagnosticsParams::new(uri, diagnostics, None),
-                    ) {
+                    if let Err(error) = self
+                        .client
+                        .publish_diagnostics(PublishDiagnosticsParams::new(uri, diagnostics, None))
+                    {
                         tracing::error!(?error, "failed to publish diagnostics");
                     }
                 }

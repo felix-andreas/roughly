@@ -122,16 +122,18 @@ pub fn lower_with_diagnostics(
     document: &Document,
     lowering_context: &mut LoweringContext,
 ) -> LoweringResult {
+    // A tree with syntax errors still lowers: well-formed statements keep their definitions (so a
+    // file's exports do not vanish while one construct is mid-edit) and broken regions become
+    // `Missing` holes the checker draws no conclusions from. The syntax errors lead the diagnostic
+    // list — the broken region explains any downstream oddity reported after it.
     let root = document.tree().root_node();
-    if root.has_error() {
-        return LoweringResult {
-            module: Module::new(HirArena::new(), Vec::new(), Vec::new()),
-            diagnostics: collect_syntax_errors(root, document.rope()),
-        };
-    }
-
     let module = lower(document, lowering_context);
-    let diagnostics = lowering_context.take_diagnostics();
+    let mut diagnostics = lowering_context.take_diagnostics();
+    if root.has_error() {
+        let mut merged = collect_syntax_errors(root, document.rope());
+        merged.append(&mut diagnostics);
+        diagnostics = merged;
+    }
 
     LoweringResult {
         module,
@@ -186,6 +188,15 @@ fn lower_node_inner(
     rope: &Rope,
     lowering_context: &mut LoweringContext,
 ) -> ExpressionId {
+    // A subtree containing any parse error lowers as a hole: semantic conclusions drawn from a
+    // half-typed region are unreliable, and the syntax diagnostic already marks it. The one
+    // salvaged shape is an assignment whose name side is intact — the definition stays visible
+    // (its export does not vanish while its value is mid-edit) with the value degraded to a hole.
+    if node.is_missing() || node.has_error() {
+        let kind = lower_broken_assignment(node, rope, lowering_context)
+            .unwrap_or(ExpressionKind::Missing);
+        return lowering_context.annotated_expression(node.range(), None, kind);
+    }
     let kind = match node.kind_id() {
         kind::IDENTIFIER => ExpressionKind::Symbol(intern_node_text(node, rope, lowering_context)),
         kind::NULL => ExpressionKind::Null,
@@ -246,6 +257,66 @@ fn lower_namespace_operator(
         namespace: intern_node_text(lhs, rope, lowering_context),
         name: intern_node_text(rhs, rope, lowering_context),
     }
+}
+
+fn is_assignment_node(node: Node<'_>) -> bool {
+    node.kind_id() == kind::BINARY_OPERATOR
+        && node
+            .child_by_field_id(field::OPERATOR)
+            .is_some_and(|operator| {
+                matches!(
+                    operator.kind_id(),
+                    kind::LEFT_ASSIGN
+                        | kind::EQUAL
+                        | kind::LEFT_ASSIGN2
+                        | kind::RIGHT_ASSIGN
+                        | kind::RIGHT_ASSIGN2
+                )
+            })
+}
+
+// The salvage for a broken assignment: when a `name <- …` subtree carries a parse error but the
+// name side and the operator are themselves intact, the definition is kept with its value degraded
+// to a hole. The export then stays present (typed `Unknown`, or its annotated scheme) while the
+// value is mid-edit, so dependents neither lose resolution nor see a wrong type. Only plain
+// variable targets qualify — a replacement target (`x[i] <- …`) defines nothing new, and a broken
+// target side leaves nothing trustworthy to keep.
+fn lower_broken_assignment(
+    node: Node<'_>,
+    rope: &Rope,
+    lowering_context: &mut LoweringContext,
+) -> Option<ExpressionKind> {
+    if node.is_missing() || node.kind_id() != kind::BINARY_OPERATOR {
+        return None;
+    }
+    let operator = node.child_by_field_id(field::OPERATOR)?;
+    if operator.is_missing() {
+        return None;
+    }
+    let (target_side, scope) = match operator.kind_id() {
+        kind::LEFT_ASSIGN | kind::EQUAL => (field::LHS, AssignmentScope::Local),
+        kind::LEFT_ASSIGN2 => (field::LHS, AssignmentScope::Enclosing),
+        kind::RIGHT_ASSIGN => (field::RHS, AssignmentScope::Local),
+        kind::RIGHT_ASSIGN2 => (field::RHS, AssignmentScope::Enclosing),
+        _ => return None,
+    };
+    let target_node = node.child_by_field_id(target_side)?;
+    if target_node.has_error()
+        || target_node.is_missing()
+        || target_node.kind_id() != kind::IDENTIFIER
+    {
+        return None;
+    }
+    let target = AssignTarget::Variable {
+        symbol: intern_node_text(target_node, rope, lowering_context),
+        range: target_node.range(),
+    };
+    let value = lowering_context.expression(node.range(), ExpressionKind::Missing);
+    Some(ExpressionKind::Assign {
+        target,
+        scope,
+        value,
+    })
 }
 
 fn lower_binary_operator(
@@ -939,6 +1010,31 @@ fn lower_sequence(
             continue;
         };
 
+        // An ERROR recovery node in statement position often swallows the complete, well-formed
+        // statements after the broken one (an unclosed delimiter absorbs the rest of the file).
+        // Its named children are ordinary nodes, so recursing salvages what did parse — but only
+        // complete statements are worth keeping: a definition's export must survive a sibling
+        // being mid-edit, while loose fragments (a bare name, an unclosed call's arguments) would
+        // turn one syntax error into a pile of unreliable semantic diagnostics on the same spot.
+        // Assignments and `#:` type definitions pass the filter; fragment expressions are dropped
+        // — their region is already covered by the syntax error, and the arena entries they
+        // lowered are unreachable from the module roots. Reuses the expression recursion budget
+        // so a pathologically nested error tree degrades instead of overflowing.
+        if child.is_error() && lowering_context.depth < LOWER_RECURSION_LIMIT {
+            lowering_context.depth += 1;
+            let salvaged = lower_sequence(child, rope, lowering_context, sequence_context);
+            lowering_context.depth -= 1;
+            items.extend(salvaged.into_iter().filter(|item| match item {
+                LoweredSequenceItem::Definition { .. } => true,
+                LoweredSequenceItem::Expression(expression_id) => matches!(
+                    lowering_context.arena.get(*expression_id).kind,
+                    ExpressionKind::Assign { .. }
+                ),
+            }));
+            child_index += 1;
+            continue;
+        }
+
         if child.kind_id() == kind::COMMENT {
             let text = node_text(child, rope);
             let trimmed = text.trim_start();
@@ -1111,11 +1207,24 @@ fn lower_sequence(
         }
 
         if child.kind_id() != kind::COMMENT {
-            items.push(LoweredSequenceItem::Expression(lower_node_with_rope(
-                child,
-                rope,
-                lowering_context,
-            )));
+            // Error recovery can split one broken statement into a well-formed fragment followed
+            // by an ERROR sibling on the same line (`oops <- function() (` parses as the name
+            // `oops` plus an ERROR holding the rest). The fragment is half of the broken
+            // statement, not a real reference — lowering it would turn the one syntax error into
+            // an extra bogus semantic diagnostic on the same spot. Assignments still lower (their
+            // salvage keeps the definition with a hole value); anything else sharing the ERROR's
+            // line is dropped.
+            let split_fragment = !is_assignment_node(child)
+                && node.named_child(child_index + 1).is_some_and(|next| {
+                    next.is_error() && next.range().start_point.row == child.range().end_point.row
+                });
+            if !split_fragment {
+                items.push(LoweredSequenceItem::Expression(lower_node_with_rope(
+                    child,
+                    rope,
+                    lowering_context,
+                )));
+            }
         }
 
         child_index += 1;

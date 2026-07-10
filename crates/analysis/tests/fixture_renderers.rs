@@ -481,6 +481,7 @@ fn render_named_expression(
         ExpressionKind::Break => lines.push(format!("{prefix}Break")),
         ExpressionKind::Next => lines.push(format!("{prefix}Next")),
         ExpressionKind::Unsupported => lines.push(format!("{prefix}Unsupported")),
+        ExpressionKind::Missing => lines.push(format!("{prefix}Missing")),
     }
 }
 
@@ -683,6 +684,7 @@ fn render_locally_named_expression(
         ExpressionKind::Break => lines.push(format!("{prefix}Break")),
         ExpressionKind::Next => lines.push(format!("{prefix}Next")),
         ExpressionKind::Unsupported => lines.push(format!("{prefix}Unsupported")),
+        ExpressionKind::Missing => lines.push(format!("{prefix}Missing")),
     }
 }
 

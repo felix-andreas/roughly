@@ -2739,8 +2739,7 @@ async fn semantic_classes_arrive_with_the_settled_wave() {
         .open_file(&file_uri, "main <- function() missing_helper()\n")
         .await;
 
-    let first =
-        recv_first_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
+    let first = recv_first_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
     assert!(
         !first
             .diagnostics
@@ -2782,8 +2781,7 @@ async fn burst_of_edits_settles_on_the_final_text() {
     // next edit when it arrives in time), so wait until the settled set reflects the final text.
     let deadline = tokio::time::Instant::now() + TIMEOUT;
     loop {
-        let settled =
-            recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
+        let settled = recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
         if settled
             .diagnostics
             .iter()
@@ -3350,7 +3348,8 @@ async fn stub_documents_are_served_with_parse_diagnostics() {
         )
         .await;
 
-    let published = recv_first_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
+    let published =
+        recv_first_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
     assert_eq!(
         published.diagnostics.len(),
         1,
@@ -3366,7 +3365,8 @@ async fn stub_documents_are_served_with_parse_diagnostics() {
         Range::new(Position::new(1, 0), Position::new(1, 25)),
         "nchar : fn(x: character) -> integer",
     );
-    let after_fix = recv_first_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
+    let after_fix =
+        recv_first_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
     assert!(
         after_fix.diagnostics.is_empty(),
         "fixed stub publishes no diagnostics, got: {:?}",

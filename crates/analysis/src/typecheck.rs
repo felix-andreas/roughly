@@ -9,8 +9,8 @@ use {
         lower::LoweringContext,
         naming::{BindingId, NamesGlobal, NamesLocal, find_binding, find_exported_binding},
         types::{
-            Atomic, Constraint, CoreType, FunctionType, InferenceVariableId, RecordField,
-            RestParameter, SurfaceType, TypeScheme,
+            Annotation, Atomic, Constraint, CoreType, FunctionType, InferenceVariableId,
+            RecordField, RestParameter, SurfaceType, TypeScheme,
         },
     },
     std::collections::{BTreeMap, BTreeSet},
@@ -1365,6 +1365,9 @@ impl InferenceState {
                 );
                 Ok(CoreType::Unknown)
             }
+            // A parse hole: the syntax diagnostic already covers the region, so the checker draws
+            // no conclusion from it — `Unknown` without even a strict origin.
+            ExpressionKind::Missing => Ok(CoreType::Unknown),
         }
     }
 
@@ -1816,6 +1819,26 @@ impl InferenceState {
     ) -> Result<CoreType, InferenceError> {
         let annotation = expression.annotation.as_ref();
         let value_expression = arena.get(value);
+
+        // A parse hole proves nothing and its syntax error already marks the spot, so a checked
+        // annotation on a broken value binds its DECLARED type unchecked — the definition keeps
+        // its contract for dependents while the value is mid-edit — instead of demanding proof
+        // from `Unknown` (a guaranteed false mismatch).
+        if matches!(value_expression.kind, ExpressionKind::Missing)
+            && let Some(annotation) = annotation
+            && annotation.applies_to_binding()
+            && let Annotation::Type { surface_type, .. } = annotation.annotation()
+        {
+            return match self.lower_annotation_surface_type(
+                surface_type,
+                type_definitions,
+                Some(expression),
+            ) {
+                Ok(declared) => Ok(declared),
+                Err(InferenceError::UnresolvedAnnotationType { .. }) => Ok(CoreType::Unknown),
+                Err(error) => Err(error),
+            };
+        }
 
         // A checked function annotation on a function literal drives the body inference directly
         // (parameters and return are checked inside `infer_function_expression`). The binding-level

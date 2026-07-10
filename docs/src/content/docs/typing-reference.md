@@ -1926,6 +1926,27 @@ apply_renderer <- function(render_count, count) { render_count(count) }
 - this allows checking to continue even when the checker cannot model the construct precisely
 - whether an unsupported construct also produces a diagnostic is a construct-specific decision
 
+## Syntax errors
+
+A file with syntax errors is still analyzed. Analysis is error-tolerant, with one governing rule:
+**a broken region reports its syntax error and nothing else** — the checker draws no semantic
+conclusions from source that failed to parse.
+
+- every well-formed statement in the file is analyzed normally: definitions keep their exports,
+  references resolve, and genuine type errors outside the broken region still surface
+- a broken statement contributes nothing — no names, no reads, no diagnostics beyond the syntax
+  error covering it
+- a broken **assignment** whose name side is intact keeps its definition: the value degrades to a
+  hole that types as `Unknown`, so dependents neither lose resolution nor see a wrong type while
+  the value is mid-edit; the hole is not a strict-mode origin (the syntax error already marks it)
+- a **checked annotation** on such a broken definition binds its declared type unchecked — the
+  definition keeps its contract for callers until the value parses again, at which point the value
+  is checked against the annotation as usual
+
+The practical consequence in an editor: while one construct is half-typed, the rest of the file —
+and every other file in the package — keeps its diagnostics, hovers, and completions stable; the
+only new squiggle is the syntax error itself.
+
 ### S4 slot access
 
 `x@slot` reads (and `x@slot <- v` writes) an S4 object slot. S4 objects are not modeled, but the

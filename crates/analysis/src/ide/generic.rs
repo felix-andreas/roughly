@@ -926,6 +926,7 @@ fn render_expression_hover(database: &dyn IdeDatabase, expression: &Expression) 
         ExpressionKind::Break => "Break".to_owned(),
         ExpressionKind::Next => "Next".to_owned(),
         ExpressionKind::Unsupported => "Unsupported".to_owned(),
+        ExpressionKind::Missing => "Missing".to_owned(),
     });
 
     lines.join("\n")

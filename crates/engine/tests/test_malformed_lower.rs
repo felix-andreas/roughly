@@ -1,13 +1,14 @@
-// The engine's `Lower` query must lower a file whose tree carries any error node to an *empty* `Module`,
-// so a transiently-malformed keystroke emits no naming/type/strict diagnostics — matching what the
-// `analysis` from-scratch path suppresses off a broken error-recovery tree. The differential oracle
-// cannot guard this: its edit generator only produces well-formed input, so a partial-tree divergence
-// would never appear in a generated stream. These cases pin the invariant directly.
+// Lowering is error-tolerant: a file whose tree carries error nodes keeps its well-formed
+// definitions (broken values degrade to `Missing` holes) but must emit NO semantic diagnostics for
+// the broken regions themselves — a transiently-malformed keystroke reports its syntax error and
+// nothing else, matching the `analysis` from-scratch path. The differential oracle cannot guard
+// this: its edit generator only produces well-formed input, so a partial-tree divergence would
+// never appear in a generated stream. These cases pin the no-cascade invariant directly.
 //
-// Each malformed case is paired with a well-formed control that DOES produce the diagnostic, so the
-// assertions are tight: removing the `!root_node().has_error()` short-circuit in the `Lower` query lowers
-// the error-recovery HIR instead, the control's diagnostic reappears on the malformed input, and the
-// corresponding empty-diagnostics assertion fails.
+// Each malformed case is paired with a well-formed control that DOES produce the diagnostic, so
+// the assertions are tight: if holes started resolving names, checking types, or recording strict
+// origins, the control's diagnostic would reappear on the malformed input and the corresponding
+// empty-diagnostics assertion would fail.
 
 use engine::{
     Engine,
@@ -50,7 +51,7 @@ fn assert_no_semantic_diagnostics(source: &str) {
             && diagnostics.type_errors.is_empty()
             && diagnostics.strict_diagnostics.is_empty()
             && diagnostics.unused.is_empty(),
-        "malformed input must lower to an empty module and emit no semantic diagnostics, but got \
+        "a broken region must emit no semantic diagnostics beyond its syntax error, but got \
          naming={} package_naming={} type_errors={} strict={} unused={}",
         diagnostics.naming.len(),
         diagnostics.package_naming.len(),

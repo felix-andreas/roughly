@@ -330,7 +330,7 @@ The engine uses non-thread-safe interior pointers, so it is not shared across th
 
 Parallel evaluation is deliberately not adopted: a correct parallel red-green engine is research-grade, and because evaluation is demand-driven there is no eager cold pass for it to fan out across cores. The shared-pointer and memo-table types are kept behind thin aliases so a future parallel retrofit, if ever justified by measurement, stays localized.
 
-A known limit of the first wave's usefulness: a tree with any syntax error currently lowers to an *empty module* (the file's exports vanish until the tree parses again), so while a construct is half-typed, the package index flaps per keystroke — measured contained (about 2× a body edit), but error-tolerant lowering that keeps the error-free top-level items is the designed follow-up.
+Lowering itself is **error-tolerant**, which is what makes the first wave useful mid-edit: a tree with syntax errors keeps every well-formed statement (a broken assignment even keeps its definition, with the value degraded to a typed hole — an annotated definition keeps its *declared* scheme), so a file's exports do not flap while one construct is half-typed. The committed engine witness pins the consequence: a malformed round-trip re-folds the package symbol index **zero** times and re-typechecks only the edited file. Broken regions emit their syntax error and nothing else — holes resolve no names, prove no types, and record no strict origins (see the typing reference on syntax errors).
 
 ### Differential correctness
 

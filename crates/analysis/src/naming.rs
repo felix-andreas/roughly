@@ -1721,7 +1721,8 @@ impl<'a> DocumentNamingContext<'a> {
             | ExpressionKind::StringLiteralName(_)
             | ExpressionKind::Break
             | ExpressionKind::Next
-            | ExpressionKind::Unsupported => {}
+            | ExpressionKind::Unsupported
+            | ExpressionKind::Missing => {}
         }
     }
 

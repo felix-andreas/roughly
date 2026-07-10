@@ -323,13 +323,14 @@ fn malformed_source(index: usize) -> String {
     source
 }
 
-// The committed witness for the malformed-flip cliff: entering and leaving a broken state each
-// re-fold the all-files symbol index (the exported-name set genuinely changes), and the recompute
-// set stays bounded by the edited file's referrers — the storm is per-symbol-narrow, not O(package)
-// inference. Pinning the counters keeps the cliff's cost visible: an accidental coarse dependency
-// (e.g. typecheck reading the whole index) would blow the recompute assertion immediately.
+// The committed witness for the malformed-flip behavior: error-tolerant lowering salvages the
+// well-formed definitions of a file whose tail is mid-edit, so entering and leaving a broken state
+// keeps the exported-name set IDENTICAL — the all-files symbol index does not re-fold at all, the
+// edited file's own schemes revalidate equal (early cutoff), and no other file recomputes. During
+// the broken window the referrer keeps resolving the edited file's names: a half-typed construct
+// no longer floods dependents with unresolved-name errors.
 #[test]
-fn malformed_flip_refolds_index_but_recompute_stays_bounded() {
+fn malformed_flip_keeps_exports_stable_and_recompute_bounded() {
     let file_count = 300;
     let edit_file: FileId = mid_chain_edit_file(file_count);
 
@@ -346,6 +347,12 @@ fn malformed_flip_refolds_index_but_recompute_stays_bounded() {
         parse_source_input(&malformed_source(edit_file as usize)),
     );
     warm_new_engine(&engine, file_count);
+    let referrer = edit_file + 1;
+    let broken_window = engine.fetch::<FileDiagnostics>(Key::Diagnostics(referrer));
+    assert!(
+        broken_window.package_naming.is_empty() && broken_window.type_errors.is_empty(),
+        "the referrer keeps resolving the edited file's exports while its tail is broken"
+    );
     engine.set_input(
         Key::SourceText(edit_file),
         parse_source_input(&generate_source(edit_file as usize, false)),
@@ -355,14 +362,15 @@ fn malformed_flip_refolds_index_but_recompute_stays_bounded() {
     let group = engine.group();
     assert_eq!(
         group.package_symbol_index_runs() - index_before,
-        2,
-        "each side of a malformed round-trip re-folds the all-files symbol index once"
+        0,
+        "a malformed round-trip leaves the exported-name set unchanged, so the all-files \
+         symbol index never re-folds"
     );
     let recompute = total_typecheck_runs(&engine, file_count) - typecheck_before;
-    assert!(
-        recompute <= 4,
-        "a malformed round-trip re-typechecks only the edited file and its referrer per side, \
-         got {recompute}"
+    assert_eq!(
+        recompute, 2,
+        "a malformed round-trip re-typechecks only the edited file per side (schemes cut off \
+         before the referrer)"
     );
 }
 

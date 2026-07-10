@@ -289,3 +289,18 @@ Deliberate limits, for soundness and zero false positives:
 ## Expanded annotation syntax: `@param name {TYPE}`
 
 **DECIDED (user-proposed, ratified).** The expanded parameter directive is `@param name {TYPE}` / `@param [name] {TYPE}` — name first, braced type second — replacing the JSDoc-ordered `@param name {TYPE}`. Rationale: (1) the wrapping payload (the type) becomes the trailing element, so multi-line types continue cleanly under the directive instead of leaving the name dangling after the closing braces; (2) one shape across all directives (`@type Name {TYPE}`, `@alias Name<T> {TYPE}`, `@param name {TYPE}`); (3) the grammar becomes unambiguous — the name is a single identifier token right after the directive, which retires the swallow-the-tail-as-name ambiguity and leaves room for an optional trailing description as a first-class extension. The old order is rejected with a targeted error naming the new form, not a generic parse failure. `@return {TYPE}` / `@forall` are unchanged.
+
+# Decision record: error-tolerant lowering (syntax errors do not erase a file)
+
+**Status:** decided and implemented (agent-owned decision under the delegated ownership mandate).
+
+Previous shape: any error node in a tree short-circuited `lower_with_diagnostics` to an EMPTY module, so one half-typed keystroke dropped the file's whole export set — the package symbol index re-folded on every keystroke inside a broken window, dependents flooded with unresolved-name errors, and diagnostics/hover/completion for the rest of the file went dark. The single source of truth for "what exists mid-edit" was the parse tree's error bit, applied at file granularity.
+
+Chosen shape (statement granularity, rust-analyzer-style):
+- Well-formed statements always lower; a broken file keeps every export whose statement parsed.
+- A broken statement contributes NOTHING (no names, no reads, no cascading diagnostics) — "a broken region reports its syntax error and nothing else" (typing-reference §Syntax errors is the contract).
+- Two salvage shapes inside broken regions: (a) sequence-level — an ERROR node's well-formed assignment children lower normally, fragments are filtered by kind (`ExpressionKind::Assign` keeps, everything else drops), and a well-formed non-assignment fragment sharing a line with a following ERROR sibling is dropped as the split half of the broken statement; (b) expression-level — a broken assignment with an intact name side keeps its definition with the value degraded to `ExpressionKind::Missing`.
+- `Missing` is a distinct HIR kind from `Unsupported`: both type `Unknown`, but `Missing` records no strict origin (the syntax error already covers the region) while `Unsupported` stays strict-relevant (a complete construct the checker cannot model).
+- A checked annotation on a `Missing`-valued definition binds its DECLARED type unchecked (a hole proves nothing; demanding proof is a guaranteed false mismatch), so annotated definitions keep their contract for callers mid-edit — zero downstream invalidation.
+
+Impact: correctness — no false unresolved/type errors from half-typed code (pinned by `test_malformed_lower` controls + the `error_tolerant_lowering` project fixtures); simplicity — one policy sentence governs all cases; performance — the malformed-flip engine witness went from "2 index refolds + referrer recheck" to "0 refolds, edited-file-only recheck" (exports byte-equal across the flip, early cutoff does the rest); incremental analysis — the highest-churn edit state (typing inside a construct) now has the smallest blast radius.
