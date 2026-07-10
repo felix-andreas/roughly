@@ -2763,6 +2763,75 @@ async fn semantic_classes_arrive_with_the_settled_wave() {
 }
 
 #[tokio::test]
+async fn breaking_one_file_leaves_its_dependents_untouched() {
+    // The mid-edit stability contract, end to end: breaking a definition file with an unclosed
+    // brace must not disturb a dependent file — its exports survive (error-tolerant lowering), so
+    // the dependent's settled diagnostics stay clean — while the broken file itself reports the
+    // syntax error and nothing else.
+    let mut context = setup_test(&[]).await;
+
+    let library_uri = context.file_uri("R/library.R");
+    let consumer_uri = context.file_uri("R/consumer.R");
+    context
+        .open_file(&library_uri, "shared_helper <- function() 1L\n")
+        .await;
+    context
+        .open_file(&consumer_uri, "value <- shared_helper()\n")
+        .await;
+    let settled = recv_diagnostics(&mut context.diagnostics_receiver, &consumer_uri, TIMEOUT).await;
+    assert!(
+        settled.diagnostics.is_empty(),
+        "the consumer starts clean: {:?}",
+        settled.diagnostics
+    );
+
+    // Break the library mid-edit: append an unclosed function definition. Settled publishes from
+    // the open step may still be in flight (they are idle-deferred), so wait until the settled
+    // wave that carries the syntax error.
+    context.change_file(
+        &library_uri,
+        1,
+        Range::new(Position::new(1, 0), Position::new(1, 0)),
+        "broken <- function() {\n",
+    );
+    let broken = loop {
+        let settled =
+            recv_diagnostics(&mut context.diagnostics_receiver, &library_uri, TIMEOUT).await;
+        if !settled.diagnostics.is_empty() {
+            break settled;
+        }
+    };
+    assert!(
+        broken.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .to_lowercase()
+            .contains("delimiter")
+            || diagnostic.message.to_lowercase().contains("syntax")),
+        "the broken file reports its syntax error: {:?}",
+        broken.diagnostics
+    );
+    assert_eq!(
+        broken.diagnostics.len(),
+        1,
+        "…and nothing else: {:?}",
+        broken.diagnostics
+    );
+
+    // Saving while broken refreshes every open document; the consumer must still be clean —
+    // `shared_helper` never stopped resolving.
+    context.save_file(&consumer_uri);
+    let after_break =
+        recv_diagnostics(&mut context.diagnostics_receiver, &consumer_uri, TIMEOUT).await;
+    assert!(
+        after_break.diagnostics.is_empty(),
+        "the consumer is untouched while its dependency is mid-edit: {:?}",
+        after_break.diagnostics
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
 async fn burst_of_edits_settles_on_the_final_text() {
     // A typing burst: edits supersede the deferred semantic publish (idle work yields to queued
     // jobs), and the diagnostics eventually settle on the final text — an unresolved reference
