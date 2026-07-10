@@ -110,32 +110,108 @@ fn spawn_server_with_experimental_features(
         .expect("failed to spawn roughly server")
 }
 
-async fn recv_diagnostics(
-    receiver: &mut mpsc::UnboundedReceiver<PublishDiagnosticsParams>,
+// The push channel plus a stash: deferred semantic publishes for different documents interleave in
+// idle order (most recently edited first), so a wait targeted at one URI must keep — not drop — the
+// publishes it skips for other URIs, or a later wait for those documents would hang.
+struct DiagnosticsChannel {
+    receiver: mpsc::UnboundedReceiver<PublishDiagnosticsParams>,
+    stash: Vec<PublishDiagnosticsParams>,
+}
+
+impl DiagnosticsChannel {
+    fn try_recv_any(&mut self) -> Option<PublishDiagnosticsParams> {
+        if !self.stash.is_empty() {
+            return Some(self.stash.remove(0));
+        }
+        self.receiver.try_recv().ok()
+    }
+}
+
+// The FIRST publish for `uri`, whichever wave it is. For engine documents an edit publishes twice —
+// the cheap per-file wave (versioned) then the settled semantic wave (version-less) — so this is for
+// single-wave documents (stub/NAMESPACE buffers) and for asserting on the first wave itself; most
+// tests want `recv_diagnostics`.
+async fn recv_first_diagnostics(
+    channel: &mut DiagnosticsChannel,
     uri: &Url,
     timeout_duration: Duration,
 ) -> PublishDiagnosticsParams {
+    if let Some(index) = channel.stash.iter().position(|params| params.uri == *uri) {
+        return channel.stash.remove(index);
+    }
     tokio::time::timeout(timeout_duration, async {
         loop {
-            let params = receiver.recv().await.expect("diagnostics channel closed");
+            let params = channel
+                .receiver
+                .recv()
+                .await
+                .expect("diagnostics channel closed");
             if params.uri == *uri {
                 return params;
             }
+            channel.stash.push(params);
         }
     })
     .await
     .expect("timed out waiting for diagnostics")
 }
 
-async fn drain_diagnostics(receiver: &mut mpsc::UnboundedReceiver<PublishDiagnosticsParams>) {
-    while receiver.try_recv().is_ok() {}
+// The SETTLED diagnostics for `uri`: skips (and consumes) the versioned first-wave publishes and
+// returns the next version-less publish — the full semantic set (deferred publishes and
+// save-driven refreshes are version-less by construction). Publishes for other URIs are stashed
+// for their own waits.
+async fn recv_diagnostics(
+    channel: &mut DiagnosticsChannel,
+    uri: &Url,
+    timeout_duration: Duration,
+) -> PublishDiagnosticsParams {
+    if let Some(index) = channel
+        .stash
+        .iter()
+        .position(|params| params.uri == *uri && params.version.is_none())
+    {
+        let params = channel.stash.remove(index);
+        // The step's own first wave (stashed before its settled wave) is consumed with it; stashed
+        // publishes for other URIs keep their order.
+        let kept_prefix: Vec<_> = channel
+            .stash
+            .drain(..index)
+            .filter(|stashed| stashed.uri != *uri)
+            .collect();
+        channel.stash.splice(..0, kept_prefix);
+        return params;
+    }
+    tokio::time::timeout(timeout_duration, async {
+        loop {
+            let params = channel
+                .receiver
+                .recv()
+                .await
+                .expect("diagnostics channel closed");
+            if params.uri == *uri {
+                if params.version.is_none() {
+                    return params;
+                }
+                // This step's first wave: consumed, not stashed.
+                continue;
+            }
+            channel.stash.push(params);
+        }
+    })
+    .await
+    .expect("timed out waiting for diagnostics")
+}
+
+async fn drain_diagnostics(channel: &mut DiagnosticsChannel) {
+    channel.stash.clear();
+    while channel.receiver.try_recv().is_ok() {}
 }
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 
 struct TestContext {
     server: async_lsp::ServerSocket,
-    diagnostics_receiver: mpsc::UnboundedReceiver<PublishDiagnosticsParams>,
+    diagnostics_receiver: DiagnosticsChannel,
     refresh_receiver: mpsc::UnboundedReceiver<()>,
     messages_receiver: mpsc::UnboundedReceiver<ShowMessageParams>,
     mainloop_handle: tokio::task::JoinHandle<()>,
@@ -231,7 +307,10 @@ async fn setup_test_inner(
 
     TestContext {
         server,
-        diagnostics_receiver,
+        diagnostics_receiver: DiagnosticsChannel {
+            receiver: diagnostics_receiver,
+            stash: Vec::new(),
+        },
         refresh_receiver,
         messages_receiver,
         mainloop_handle,
@@ -593,7 +672,7 @@ async fn namespace_buffer_publishes_import_validation() {
             "import(stats)\nimportFrom(stats, sd, medain)\nimportFrom(dplyr, mutate)\n",
         )
         .await;
-    let published = recv_diagnostics(&mut context.diagnostics_receiver, &uri, TIMEOUT).await;
+    let published = recv_first_diagnostics(&mut context.diagnostics_receiver, &uri, TIMEOUT).await;
     assert_eq!(
         published.diagnostics.len(),
         1,
@@ -619,7 +698,7 @@ async fn namespace_buffer_publishes_import_validation() {
         Range::new(Position::new(1, 22), Position::new(1, 28)),
         "median",
     );
-    let published = recv_diagnostics(&mut context.diagnostics_receiver, &uri, TIMEOUT).await;
+    let published = recv_first_diagnostics(&mut context.diagnostics_receiver, &uri, TIMEOUT).await;
     assert!(
         published.diagnostics.is_empty(),
         "the corrected NAMESPACE is clean: {:?}",
@@ -2610,6 +2689,118 @@ async fn pull_diagnostics_match_pushed_across_files() {
 }
 
 #[tokio::test]
+async fn first_wave_publishes_syntax_errors_before_semantics() {
+    // The push path publishes twice per sync: the cheap per-file classes immediately (versioned),
+    // then the settled semantic set (version-less). A syntax error must be in the FIRST wave — it
+    // must never wait on type checking or the package index.
+    let mut context = setup_test(&[]).await;
+
+    let broken_uri = context.file_uri("R/broken.R");
+    context.open_file(&broken_uri, "f <- function( {\n").await;
+
+    let first =
+        recv_first_diagnostics(&mut context.diagnostics_receiver, &broken_uri, TIMEOUT).await;
+    assert!(
+        first.version.is_some(),
+        "the first wave carries the document version"
+    );
+    assert!(
+        first
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("unexpected")),
+        "the syntax error is already in the first wave: {:?}",
+        first.diagnostics
+    );
+
+    let settled = recv_diagnostics(&mut context.diagnostics_receiver, &broken_uri, TIMEOUT).await;
+    for wave_one in &first.diagnostics {
+        assert!(
+            settled
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message == wave_one.message),
+            "the settled wave supersets the first wave; missing: {}",
+            wave_one.message
+        );
+    }
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn semantic_classes_arrive_with_the_settled_wave() {
+    // An unresolved package-level reference needs the package index, so it belongs to the deferred
+    // wave: absent from the first publish, present in the settled one.
+    let mut context = setup_test(&[]).await;
+
+    let file_uri = context.file_uri("R/unresolved.R");
+    context
+        .open_file(&file_uri, "main <- function() missing_helper()\n")
+        .await;
+
+    let first =
+        recv_first_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
+    assert!(
+        !first
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("missing_helper")),
+        "package naming is not part of the first wave: {:?}",
+        first.diagnostics
+    );
+
+    let settled = recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
+    assert!(
+        settled
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("missing_helper")),
+        "the settled wave carries the unresolved reference: {:?}",
+        settled.diagnostics
+    );
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
+async fn burst_of_edits_settles_on_the_final_text() {
+    // A typing burst: edits supersede the deferred semantic publish (idle work yields to queued
+    // jobs), and the diagnostics eventually settle on the final text — an unresolved reference
+    // introduced by the last edit.
+    let mut context = setup_test(&[]).await;
+
+    let file_uri = context.file_uri("R/burst.R");
+    context.open_file(&file_uri, "x <- 1\n").await;
+
+    // Three rapid whole-line rewrites; the last references an undefined function.
+    context.replace_file_full(&file_uri, 1, "x <- 12\n");
+    context.replace_file_full(&file_uri, 2, "x <- 123\n");
+    context.replace_file_full(&file_uri, 3, "x <- gone_fn()\n");
+
+    // Settled publishes for intermediate states may or may not appear (they are cancelled by the
+    // next edit when it arrives in time), so wait until the settled set reflects the final text.
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    loop {
+        let settled =
+            recv_diagnostics(&mut context.diagnostics_receiver, &file_uri, TIMEOUT).await;
+        if settled
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("gone_fn"))
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "diagnostics never settled on the final text"
+        );
+    }
+
+    context.shutdown().await;
+}
+
+#[tokio::test]
 async fn pull_capable_client_suppresses_push() {
     let mut context = setup_test_with_pull_diagnostics(&[]).await;
 
@@ -2620,7 +2811,7 @@ async fn pull_capable_client_suppresses_push() {
     // process did_open, then assert nothing landed on the push channel.
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(
-        context.diagnostics_receiver.try_recv().is_err(),
+        context.diagnostics_receiver.try_recv_any().is_none(),
         "a pull-capable client must not receive pushed diagnostics"
     );
 
@@ -3079,7 +3270,7 @@ async fn stub_type_name_jumps_to_its_type_declaration() {
             "@type frame\nload_it : fn(x: character) -> frame\n",
         )
         .await;
-    let _ = recv_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
+    let _ = recv_first_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
 
     let response = context
         .server
@@ -3117,7 +3308,7 @@ async fn stub_documents_get_semantic_tokens() {
             "@type frame\nload_it : fn(x: character) -> frame\n",
         )
         .await;
-    let _ = recv_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
+    let _ = recv_first_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
 
     let tokens = context
         .server
@@ -3159,7 +3350,7 @@ async fn stub_documents_are_served_with_parse_diagnostics() {
         )
         .await;
 
-    let published = recv_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
+    let published = recv_first_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
     assert_eq!(
         published.diagnostics.len(),
         1,
@@ -3175,7 +3366,7 @@ async fn stub_documents_are_served_with_parse_diagnostics() {
         Range::new(Position::new(1, 0), Position::new(1, 25)),
         "nchar : fn(x: character) -> integer",
     );
-    let after_fix = recv_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
+    let after_fix = recv_first_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
     assert!(
         after_fix.diagnostics.is_empty(),
         "fixed stub publishes no diagnostics, got: {:?}",
@@ -3191,7 +3382,7 @@ async fn stub_documents_are_served_with_parse_diagnostics() {
         "bad : Frobnicate",
     );
     let after_harvest_failure =
-        recv_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
+        recv_first_diagnostics(&mut context.diagnostics_receiver, &stub_uri, TIMEOUT).await;
     assert_eq!(
         after_harvest_failure.diagnostics.len(),
         1,

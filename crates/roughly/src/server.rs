@@ -39,7 +39,9 @@ use {
         symbols,
     },
     analysis::{
-        self, Document, DocumentChange, TextPosition, TextRange, ide, naming::DocumentKind,
+        self, Document, DocumentChange, TextPosition, TextRange, ide,
+        lower::LoweringResult,
+        naming::{DocumentKind, DocumentNamingComputation},
     },
     async_lsp::{
         ClientSocket, ErrorCode, LanguageClient, LanguageServer, ResponseError,
@@ -89,10 +91,12 @@ pub async fn run(experimental_features: ExperimentalFeatures) {
         // to it over the channel + shares the cancellation token.
         let (sender, receiver) = mpsc::channel::<Job>();
         let cancel = Arc::new(AtomicBool::new(false));
+        let idle_interrupt = Arc::new(AtomicBool::new(false));
         let seed = WorkerSeed {
             client: client.clone(),
             experimental_features,
             cancel: cancel.clone(),
+            idle_interrupt: idle_interrupt.clone(),
             runtime: runtime.clone(),
         };
         std::thread::Builder::new()
@@ -110,7 +114,11 @@ pub async fn run(experimental_features: ExperimentalFeatures) {
             .layer(LifecycleLayer::default())
             .layer(CatchUnwindLayer::default())
             .layer(ClientProcessMonitorLayer::new(client.clone()))
-            .service(Router::from_language_server(ServerState { sender, cancel }))
+            .service(Router::from_language_server(ServerState {
+                sender,
+                cancel,
+                idle_interrupt,
+            }))
     });
 
     // Prefer truly asynchronous piped stdin/stdout without blocking tasks.
@@ -140,6 +148,11 @@ struct EngineWorker {
     // mutating notification; the worker stores `false` at the start of each read and installs it around
     // the read's engine fetches, so a newer edit abandons an in-flight read (latest-edit-wins).
     cancel: Arc<AtomicBool>,
+    // Preemption token for idle-time work (deferred semantic publishes, the background prime): the
+    // frontend stores `true` before enqueuing ANY job, and an idle unit installs it around its engine
+    // fetches — so any incoming edit, read, or notification abandons in-flight idle work rather than
+    // queuing behind it. Distinct from `cancel` so a mere read never aborts another read.
+    idle_interrupt: Arc<AtomicBool>,
     // The tokio runtime handle, to spawn the rare async client-requests (capability registration,
     // workspace diagnostic refresh) — a `std::thread` worker cannot `.await` directly.
     runtime: tokio::runtime::Handle,
@@ -206,6 +219,16 @@ struct EngineWorker {
     // with the cursor between the parens (or `name()$0` past them for a zero-argument function) —
     // instead of the bare name.
     client_supports_snippets: bool,
+    // Push-mode documents whose full (semantic) diagnostics publish is still owed: an edit publishes
+    // the cheap per-file classes immediately and defers the semantic bundle to worker idle time, so
+    // typing never waits on type checking. Most-recently-edited last (idle units pop from the back,
+    // serving the document the user is looking at first). Always empty for pull clients.
+    pending_semantic_publishes: Vec<PathBuf>,
+    // Package files not yet warmed by the background prime; drained one file per idle unit (behind
+    // every pending semantic publish) so the first interactive fetch after a cold start finds the
+    // interface graph already computed. Prime results are never published — push clients only ever
+    // see diagnostics for open documents.
+    prime_queue: std::collections::VecDeque<PathBuf>,
 }
 
 // One LSP operation handed to the worker. `Initialize` is special: it CONSTRUCTS the worker state
@@ -229,6 +252,7 @@ struct WorkerSeed {
     client: ClientSocket,
     experimental_features: ExperimentalFeatures,
     cancel: Arc<AtomicBool>,
+    idle_interrupt: Arc<AtomicBool>,
     runtime: tokio::runtime::Handle,
 }
 
@@ -242,6 +266,7 @@ impl EngineWorker {
             client,
             experimental_features,
             cancel,
+            idle_interrupt,
             runtime,
         } = seed;
 
@@ -319,6 +344,7 @@ impl EngineWorker {
         let mut worker = Self {
             client,
             cancel,
+            idle_interrupt,
             runtime,
             config,
             pending_config_error,
@@ -343,6 +369,8 @@ impl EngineWorker {
             client_supports_diagnostic_refresh,
             client_supports_parameter_label_offsets,
             client_supports_snippets,
+            pending_semantic_publishes: Vec::new(),
+            prime_queue: std::collections::VecDeque::new(),
         };
 
         let workspace_r_path = worker.workspace_r_path();
@@ -565,6 +593,51 @@ impl EngineWorker {
             }
         }
 
+        self.finish_document_diagnostics(file, rendered)
+    }
+
+    // The cheap subset of `convert_document_diagnostics`: only the classes that are pure per-file
+    // functions of the parse — syntax (lowering), lint, and local naming. Everything that needs the
+    // package index or type inference (package naming, type errors, strict origins, unused) arrives
+    // with the deferred semantic publish. Must stay a faithful subset of the full set so the
+    // superseding publish only ever adds squiggles for identical text, never moves or removes one —
+    // which is why strict escalation applies here too (same gate as the full path).
+    fn first_wave_document_diagnostics(&self, path: &Path) -> Vec<crate::lsp_types::Diagnostic> {
+        let file = self
+            .file_ids
+            .get(path)
+            .copied()
+            .expect("diagnostics document present in engine file ids");
+
+        let naming = self
+            .engine
+            .fetch::<DocumentNamingComputation>(Key::LocalNaming(file));
+        let lowering = self
+            .engine
+            .fetch::<LoweringResult>(Key::LoweringDiagnostics(file));
+        let lint = self.engine.fetch::<Vec<analysis::Diagnostic>>(Key::Lint(file));
+        let config = self.engine_config();
+
+        let mut rendered = Vec::new();
+        rendered.extend(naming.diagnostics.iter().cloned());
+        rendered.extend(lowering.diagnostics.iter().cloned());
+        rendered.extend(lint.iter().cloned());
+        if lowering.module.strict_override.unwrap_or(config.check.strict) {
+            for diagnostic in &mut rendered {
+                diagnostic.escalate_unresolved_to_error();
+            }
+        }
+
+        self.finish_document_diagnostics(file, rendered)
+    }
+
+    // The shared rendering tail: suppressions, cross-document related-location mapping, and LSP
+    // conversion against the document's rope.
+    fn finish_document_diagnostics(
+        &self,
+        file: FileId,
+        rendered: Vec<analysis::Diagnostic>,
+    ) -> Vec<crate::lsp_types::Diagnostic> {
         let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(file));
         let rendered =
             analysis::diagnostic::apply_suppressions(rendered, &parsed.0.rope().to_string());
@@ -819,8 +892,8 @@ impl EngineWorker {
     // not reliably available — cross-file naming diagnostics move even when type checking is off —
     // so conservatively refresh everything; these events are infrequent. Pull clients own the
     // request cadence (push is suppressed for them), so they are asked to re-pull — without that,
-    // their non-visible dependents would go stale; push clients get every open document republished
-    // from the engine.
+    // their non-visible dependents would go stale; push clients get every open document owed a
+    // deferred semantic publish, served at worker idle time so a save never blocks the queue.
     fn refresh_all_diagnostics(&mut self) {
         if self.client_supports_pull_diagnostics {
             if self.client_supports_diagnostic_refresh {
@@ -838,13 +911,80 @@ impl EngineWorker {
             if !self.file_ids.contains_key(&open_path) {
                 continue;
             }
-            let open_uri = self.document_uri(&open_path);
-            let diagnostics = self.convert_document_diagnostics(&open_path);
-            if let Err(error) = self
-                .client
-                .publish_diagnostics(PublishDiagnosticsParams::new(open_uri, diagnostics, None))
+            self.defer_semantic_publish(open_path);
+        }
+    }
+
+    // Publish the cheap per-file diagnostics for a just-synced document and owe it the full semantic
+    // publish (served at worker idle time). Wave one carries the client's document version; the
+    // deferred wave publishes version-less, marking it as the settled set.
+    fn publish_first_wave_and_defer_semantic(&mut self, path: &Path, uri: Url, version: i32) {
+        let diagnostics = self.first_wave_document_diagnostics(path);
+        if let Err(error) = self
+            .client
+            .publish_diagnostics(PublishDiagnosticsParams::new(
+                uri,
+                diagnostics,
+                Some(version),
+            ))
+        {
+            tracing::error!(?error, "failed to publish diagnostics");
+        }
+        self.defer_semantic_publish(path.to_path_buf());
+    }
+
+    fn defer_semantic_publish(&mut self, path: PathBuf) {
+        self.pending_semantic_publishes
+            .retain(|pending| pending != &path);
+        self.pending_semantic_publishes.push(path);
+    }
+
+    fn has_idle_work(&self) -> bool {
+        !self.pending_semantic_publishes.is_empty() || !self.prime_queue.is_empty()
+    }
+
+    // One unit of idle-time work, run only when the job queue was observed empty: the semantic
+    // publish for the most recently edited document, or — with nothing owed — one file of the
+    // background prime. Both run under the idle-interrupt token, so any job the frontend enqueues
+    // abandons the unit mid-computation; abandoned work is requeued and retried at the next idle
+    // slot. Resetting the token here races the frontend's store-then-send by a few instructions;
+    // losing that race costs one completed-but-superseded unit (the queued job runs right after),
+    // never a wrong publish — a unit reads engine state that reflects every applied edit, and the
+    // publish it makes is correct for that state.
+    fn run_idle_unit(&mut self) {
+        self.idle_interrupt.store(false, Ordering::Relaxed);
+        let token = self.idle_interrupt.clone();
+        if let Some(path) = self.pending_semantic_publishes.pop() {
+            // The document may have been closed (or retracted) since it was owed a publish.
+            if !self.open_documents.contains(&path) || !self.file_ids.contains_key(&path) {
+                return;
+            }
+            match self
+                .engine
+                .with_cancellation(token, || self.convert_document_diagnostics(&path))
             {
-                tracing::error!(?error, "failed to publish diagnostics");
+                Ok(diagnostics) => {
+                    let uri = self.document_uri(&path);
+                    if let Err(error) = self.client.publish_diagnostics(
+                        PublishDiagnosticsParams::new(uri, diagnostics, None),
+                    ) {
+                        tracing::error!(?error, "failed to publish diagnostics");
+                    }
+                }
+                Err(Cancelled) => self.pending_semantic_publishes.push(path),
+            }
+            return;
+        }
+        if let Some(path) = self.prime_queue.pop_front() {
+            // A file can leave the tracked set while queued (deleted, retracted on close).
+            let Some(file) = self.file_ids.get(&path).copied() else {
+                return;
+            };
+            let outcome = self.engine.with_cancellation(token, || {
+                self.engine.fetch::<FileDiagnostics>(Key::Diagnostics(file));
+            });
+            if outcome.is_err() {
+                self.prime_queue.push_front(path);
             }
         }
     }
@@ -929,6 +1069,21 @@ impl EngineWorker {
             }
             tracing::info!("registered file watching for R files");
         });
+
+        // Warm the package in the background: every package file's diagnostics bundle is fetched at
+        // worker idle time, so the first interactive request after a cold start (a pull, an edit's
+        // semantic publish, a hover) finds the interface graph computed instead of paying
+        // whole-project inference. Path order keeps the walk deterministic; any incoming job
+        // preempts the prime between files and cancels it within one.
+        let mut prime_paths: Vec<PathBuf> = self
+            .file_ids
+            .keys()
+            .filter(|path| path.starts_with(&workspace_r_path))
+            .cloned()
+            .collect();
+        prime_paths.sort();
+        self.prime_queue = prime_paths.into();
+        tracing::info!(files = self.prime_queue.len(), "background prime queued");
     }
 
     //
@@ -995,17 +1150,7 @@ impl EngineWorker {
         self.rebuild_project_files();
 
         if !self.client_supports_pull_diagnostics {
-            let diagnostics = self.convert_document_diagnostics(&path);
-            if let Err(error) = self
-                .client
-                .publish_diagnostics(PublishDiagnosticsParams::new(
-                    uri,
-                    diagnostics,
-                    Some(params.text_document.version),
-                ))
-            {
-                tracing::error!(?error, "failed to publish diagnostics");
-            }
+            self.publish_first_wave_and_defer_semantic(&path, uri, params.text_document.version);
         }
     }
 
@@ -1028,6 +1173,8 @@ impl EngineWorker {
 
         self.open_documents.remove(&path);
         self.documents.remove(&path);
+        self.pending_semantic_publishes
+            .retain(|pending| pending != &path);
         if self.is_package_path(&path) {
             // A closed package file still on disk reverts to its on-disk text (discarding unsaved buffer
             // edits); the file set is unchanged, so no `rebuild_project_files`. The read can race a
@@ -1167,17 +1314,7 @@ impl EngineWorker {
         self.set_parsed_input(&path, document, is_package);
 
         if !self.client_supports_pull_diagnostics {
-            let diagnostics = self.convert_document_diagnostics(&path);
-            if let Err(error) = self
-                .client
-                .publish_diagnostics(PublishDiagnosticsParams::new(
-                    uri.clone(),
-                    diagnostics,
-                    Some(params.text_document.version),
-                ))
-            {
-                tracing::error!(?error, "failed to publish diagnostics");
-            }
+            self.publish_first_wave_and_defer_semantic(&path, uri, params.text_document.version);
         }
 
         tracing::debug!(elapsed = start.elapsed().as_millis());
@@ -2450,9 +2587,23 @@ impl EngineWorker {
 fn run_worker(seed: WorkerSeed, receiver: mpsc::Receiver<Job>) {
     let mut seed = Some(seed);
     let mut worker: Option<EngineWorker> = None;
-    while let Ok(job) = receiver.recv() {
-        let outcome = catch_unwind(AssertUnwindSafe(|| match job {
-            Job::Initialize(params, reply) => {
+    loop {
+        // Jobs always take priority over idle work (deferred semantic publishes, the background
+        // prime): while idle work is owed, poll non-blockingly and spend each empty poll on ONE
+        // idle unit before polling again; with nothing owed, block on the channel as before.
+        let next_job = match &worker {
+            Some(state) if state.has_idle_work() => match receiver.try_recv() {
+                Ok(job) => Some(job),
+                Err(mpsc::TryRecvError::Empty) => None,
+                Err(mpsc::TryRecvError::Disconnected) => return,
+            },
+            _ => match receiver.recv() {
+                Ok(job) => Some(job),
+                Err(_) => return,
+            },
+        };
+        let outcome = catch_unwind(AssertUnwindSafe(|| match next_job {
+            Some(Job::Initialize(params, reply)) => {
                 let seed = seed
                     .take()
                     .expect("initialize arrives once (LifecycleLayer rejects a second one)");
@@ -2462,7 +2613,7 @@ fn run_worker(seed: WorkerSeed, receiver: mpsc::Receiver<Job>) {
                     tracing::error!("initialize reply receiver dropped");
                 }
             }
-            Job::Read(closure) => {
+            Some(Job::Read(closure)) => {
                 let worker = worker
                     .as_mut()
                     .expect("requests before initialize are rejected by LifecycleLayer");
@@ -2474,10 +2625,15 @@ fn run_worker(seed: WorkerSeed, receiver: mpsc::Receiver<Job>) {
             // `initialize`, and there is no analysis state yet for a dropped one to corrupt — so
             // drop, don't die. (Post-initialize document-sync failures still panic; that policy is
             // about corrupting live state, which does not exist here.)
-            Job::Write(closure) => match worker.as_mut() {
+            Some(Job::Write(closure)) => match worker.as_mut() {
                 Some(worker) => closure(worker),
                 None => tracing::warn!("dropping a notification that arrived before initialize"),
             },
+            // The empty poll above: reachable only when the worker exists and owes idle work.
+            None => worker
+                .as_mut()
+                .expect("idle work exists only after initialize")
+                .run_idle_unit(),
         }));
         if outcome.is_err() {
             // A read closure catches its own `Cancelled` inside `with_cancellation`, which restores the
@@ -2492,12 +2648,15 @@ fn run_worker(seed: WorkerSeed, receiver: mpsc::Receiver<Job>) {
     }
 }
 
-// The async-lsp frontend: stateless except the channel to the worker, the shared cancellation token, and
-// a client handle for the rare error message. Every handler serializes its params into a `Job` and (for
+// The async-lsp frontend: stateless except the channel to the worker, the shared tokens, and a client
+// handle for the rare error message. Every handler serializes its params into a `Job` and (for
 // requests) awaits the worker's reply over a oneshot — never touching the `!Send` engine directly.
+// Every send first flips `idle_interrupt`, so in-flight idle work on the worker (a deferred semantic
+// publish, a prime file) yields to the job instead of finishing ahead of it.
 struct ServerState {
     sender: mpsc::Sender<Job>,
     cancel: Arc<AtomicBool>,
+    idle_interrupt: Arc<AtomicBool>,
 }
 
 impl ServerState {
@@ -2508,6 +2667,7 @@ impl ServerState {
         T: Send + 'static,
         F: FnOnce(&mut EngineWorker) -> Result<T, ResponseError> + Send + 'static,
     {
+        self.idle_interrupt.store(true, Ordering::Relaxed);
         let (reply, receive) = oneshot::channel();
         let job = Job::Read(Box::new(move |worker| {
             let _ = reply.send(build(worker));
@@ -2525,6 +2685,7 @@ impl ServerState {
         F: FnOnce(&mut EngineWorker) + Send + 'static,
     {
         self.cancel.store(true, Ordering::Relaxed);
+        self.idle_interrupt.store(true, Ordering::Relaxed);
         // These notifications carry document-sync edits (`did_open`/`did_change`/`did_save`). A dead
         // worker channel means the edit cannot be applied, so analysis state would silently diverge from
         // the document; there is no response channel to report the failure on. A desynced analysis state
@@ -2535,11 +2696,13 @@ impl ServerState {
         ControlFlow::Continue(())
     }
 
-    // A notification that does not mutate engine inputs (no token flip needed).
+    // A notification that does not mutate engine inputs (no `cancel` flip needed — in-flight reads
+    // stay valid).
     fn notify<F>(&self, build: F) -> ControlFlow<async_lsp::Result<()>>
     where
         F: FnOnce(&mut EngineWorker) + Send + 'static,
     {
+        self.idle_interrupt.store(true, Ordering::Relaxed);
         // As with `notify_edit`, a dead worker channel drops a state mutation with no way to report it,
         // leaving analysis state incoherent; fail loudly rather than continue in a corrupt state.
         if self.sender.send(Job::Write(Box::new(build))).is_err() {
