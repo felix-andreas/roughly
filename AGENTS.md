@@ -19,11 +19,13 @@ The project is built by AI agents driving development, with light human steering
 - Provide first-class formatting and linting alongside analysis.
 - Scale to very large code bases, including more than 300,000 LoC; performance matters.
 
-# Incremental analysis (we need to revise this section)
+# Ownership mandate
 
-Incremental analysis is a top priority and is not properly implemented yet. The target behavior: keep single-file rechecking fast while still reporting dependent type errors across the project when project-visible names change.
+The user has delegated full technical ownership to the agents: empty the backlog and bring the project to the best possible state — rust-analyzer quality. That explicitly covers code structure, crate boundaries, naming, performance, pipeline architecture, semantic correctness, and judged deduplication. Do not optimize for "safe, risk-free" minimal diffs; bring code to its intended shape, including large refactors, and take responsibility for the outcome. Design decisions that previously required a user check-in are now the agent's to make: decide, implement, and record the decision and rationale in `.agents/memory/decisions.md` (or the docs page it belongs to) in the same session. Two standing constraints: keep working on the current feature branch, and do not open new pull requests.
 
-Designing this properly requires research before committing to a model: study and compare how mature language servers implement incrementality (for example rust-analyzer's salsa-based query model and other LSP implementations). Discuss the chosen direction with the user and record it on the docs architecture page (`docs/src/content/docs/architecture.md`) before taking large implementation steps.
+# Incremental analysis
+
+Implemented: the `engine` crate is a red-green memoized query core with per-symbol interface firewalls, cooperative cancellation, and idle-time diagnostics scheduling; the architecture page (`docs/src/content/docs/architecture.md`) is the contract — read it before touching the engine or the server's scheduling, and keep it accurate. Known deferred levers live in `backlog.md` (sub-linear validation walk, durability tiers).
 
 # Working autonomously
 
@@ -90,7 +92,7 @@ If the user says:
 
 # Design review trigger
 
-If you see any of the following, you must stop and call it out to the user before continuing implementation:
+If you see any of the following, do not work around it — stop, design the fix, and implement it (recording the decision in `decisions.md` when it settles an architectural question):
 
 - multiple sources of truth
 - duplicated metadata
@@ -99,12 +101,7 @@ If you see any of the following, you must stop and call it out to the user befor
 - repeated cloning or copying introduced only to maintain convenience state
 - a design that feels more complicated than the semantics require
 
-When surfacing such a problem, you must explain:
-
-- the current source of truth
-- what is duplicated or structurally weak
-- the simpler target shape
-- the expected impact on correctness, simplicity, performance, and incremental analysis
+The recorded decision must state: the previous source of truth, what was duplicated or structurally weak, the chosen target shape, and the expected impact on correctness, simplicity, performance, and incremental analysis.
 
 # Error handling
 
