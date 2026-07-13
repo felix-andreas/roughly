@@ -2053,7 +2053,7 @@ impl InferenceState {
         resolution_context: Option<&ResolutionContext<'_>>,
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<CoreType, InferenceError> {
-        let annotation = expression.annotation.as_ref();
+        let annotation = expression.annotation.as_deref();
         let value_expression = arena.get(value);
 
         // A parse hole proves nothing and its syntax error already marks the spot, so a checked

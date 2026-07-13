@@ -155,7 +155,10 @@ impl DefinitionItem {
 pub struct Expression {
     pub id: ExpressionId,
     pub range: Range,
-    pub annotation: Option<AttachedAnnotation>,
+    // Boxed because annotations are rare (`#:` comments on some definitions) while `Expression` is
+    // the arena's bulk: carrying the ~130-byte annotation inline in every node roughly doubled the
+    // retained HIR of a large workspace.
+    pub annotation: Option<Box<AttachedAnnotation>>,
     pub kind: ExpressionKind,
 }
 
@@ -169,7 +172,7 @@ impl Expression {
         Self {
             id,
             range,
-            annotation,
+            annotation: annotation.map(Box::new),
             kind,
         }
     }

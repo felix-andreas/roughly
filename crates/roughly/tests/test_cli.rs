@@ -465,9 +465,11 @@ fn analysis_stats_prints_the_full_breakdown() {
         "cold analysis",
         "typecheck (+interfaces)",
         "slowest files (typecheck):",
-        "incremental (body edit on",
+        "incremental (typing burst:",
         "edited-file diagnostics",
         "workspace revalidate",
+        "recomputed query bodies:",
+        "validation walk (slots)",
     ] {
         assert!(
             report.contains(section),

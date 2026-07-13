@@ -626,11 +626,12 @@ impl QueryGroup for RoughlyQueries {
                 // malformed one rather than panicking.
                 // Projects the module out of the one `lower_with_diagnostics` run owned by
                 // `LoweringDiagnostics` (the file used to be lowered twice — once here, once for
-                // the diagnostics). The module's own value-eq stays the type-only cutoff the
-                // granularity proofs rely on; the malformed-input empty-module semantics live in
-                // `lower_with_diagnostics` itself.
+                // the diagnostics). The projection shares the module's allocation
+                // (`Stored::from_shared`) rather than deep-copying a second HIR per file. The
+                // module's own value-eq stays the type-only cutoff the granularity proofs rely on;
+                // the malformed-input empty-module semantics live in `lower_with_diagnostics` itself.
                 let result = engine.fetch::<LoweringResult>(Key::LoweringDiagnostics(*file));
-                Stored::new(result.module.clone())
+                Stored::from_shared(result.module.clone())
             }
 
             Key::LocalNaming(file) => {
@@ -989,7 +990,7 @@ impl QueryGroup for RoughlyQueries {
                         Stored::new(lower_with_diagnostics(&parsed.0, &mut lowering))
                     }
                     None => Stored::new(LoweringResult {
-                        module: Module::new(HirArena::new(), Vec::new(), Vec::new()),
+                        module: Shared::new(Module::new(HirArena::new(), Vec::new(), Vec::new())),
                         diagnostics: Vec::new(),
                     }),
                 }

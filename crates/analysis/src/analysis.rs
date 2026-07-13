@@ -24,6 +24,7 @@ use {
         fs::File,
         io::BufReader,
         path::{Path, PathBuf},
+        rc::Rc,
     },
     tree_sitter::Parser,
 };
@@ -47,7 +48,7 @@ pub struct Analysis {
     document_paths: HashMap<DocumentId, PathBuf>,
     non_package_documents: HashSet<DocumentId>,
     lint_outputs: HashMap<DocumentId, LintOutput>,
-    lowering_outputs: HashMap<DocumentId, DocumentOutput<Module>>,
+    lowering_outputs: HashMap<DocumentId, DocumentOutput<Rc<Module>>>,
     document_naming_outputs: HashMap<DocumentId, DocumentOutput<NamesLocal>>,
     // Materialized package type index: each uniquely-defined type name's `TypeInfo`, plus the set of
     // names defined more than once (kept out of the resolved index, diagnosed as duplicates). Rebuilt
@@ -403,7 +404,7 @@ impl Analysis {
     pub fn module(&self, document_id: DocumentId) -> Option<&Module> {
         self.lowering_outputs
             .get(&document_id)
-            .map(|output| &output.output)
+            .map(|output| &*output.output)
     }
 
     pub fn document_naming(&self, document_id: DocumentId) -> Option<&NamesLocal> {

@@ -154,6 +154,16 @@ impl Stored {
             equals: equals::<T>,
         }
     }
+
+    /// Wrap an already-shared value without copying it. This is how one projection query hands out
+    /// a component of another query's value by pointer: the memo slot holds the same allocation, so
+    /// a large value (a lowered module) is retained once even when two queries expose it.
+    pub fn from_shared<T: Any + PartialEq>(value: Shared<T>) -> Stored {
+        Stored {
+            value,
+            equals: equals::<T>,
+        }
+    }
 }
 
 /// The set of queries the host defines, and how to compute the derived ones.

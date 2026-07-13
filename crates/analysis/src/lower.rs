@@ -13,6 +13,7 @@ use {
         types::{Annotation, Atomic, AttachedAnnotation},
     },
     ropey::Rope,
+    std::rc::Rc,
     tree_sitter::{Node, Range},
 };
 
@@ -27,9 +28,12 @@ pub struct LoweringContext {
     depth: usize,
 }
 
+// The module rides behind `Rc` so a consumer that exposes it separately from the diagnostics (the
+// engine's `Lower` projection out of its `LoweringDiagnostics` memo) shares the one allocation
+// instead of retaining a second deep copy of every file's HIR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoweringResult {
-    pub module: Module,
+    pub module: Rc<Module>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -136,7 +140,7 @@ pub fn lower_with_diagnostics(
     }
 
     LoweringResult {
-        module,
+        module: Rc::new(module),
         diagnostics,
     }
 }
@@ -1295,12 +1299,12 @@ fn attach_annotation_to_expression(
     arena: &mut HirArena,
 ) {
     let expression = arena.get_mut(expression_id);
-    expression.annotation = Some(match expression.kind {
+    expression.annotation = Some(Box::new(match expression.kind {
         ExpressionKind::Assign { .. } => {
             AttachedAnnotation::binding_and_expression(annotation.clone(), annotation_range)
         }
         _ => AttachedAnnotation::expression(annotation.clone(), annotation_range),
-    });
+    }));
 }
 
 fn annotation_parse_diagnostic(range: Range, error: TypeParseError) -> Diagnostic {
