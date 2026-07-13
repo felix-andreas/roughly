@@ -55,10 +55,11 @@ use {
         tracing::TracingLayer,
     },
     engine::{
-        Cancelled, Durability, Engine, Shared,
+        Cancelled, Durability, Engine,
         ide_view::{EngineIde, PathTable},
         queries::{
-            Config as EngineConfig, FileDiagnostics, FileId, Key, ParsedDocument, RoughlyQueries,
+            Config as EngineConfig, FileDiagnostics, FileId, Key, RoughlyQueries, SourceText,
+            source_input,
         },
     },
     futures::future::BoxFuture,
@@ -452,12 +453,24 @@ impl EngineWorker {
         self.documents.get(path)
     }
 
-    // The engine's parsed document (rope + tree) for a path, or None if the path is not a tracked file.
-    // Used to encode OUTGOING ranges — which may target a closed cross-file document the engine still holds,
-    // where the open-buffer set is insufficient — against the correct document's rope.
-    fn parsed_for(&self, path: &Path) -> Option<Shared<ParsedDocument>> {
+    // The engine-held rope for a path, or None if the path is not a tracked file. Used to encode
+    // OUTGOING ranges — which may target a closed cross-file document the engine still holds,
+    // where the open-buffer set is insufficient — against the correct document's text. Encoding
+    // needs the text only, so no tree is ever materialized for it.
+    fn rope_for(&self, path: &Path) -> Option<ropey::Rope> {
         let file = self.file_ids.get(path).copied()?;
-        Some(self.engine.fetch::<ParsedDocument>(Key::Parse(file)))
+        let source = self
+            .engine
+            .fetch_optional::<SourceText>(Key::SourceText(file))?;
+        Some(source.rope().clone())
+    }
+
+    // A path's full document (rope + tree): the open buffer's incrementally-maintained tree, or an
+    // on-demand parse cached by the query group. For tree-consuming reads (semantic tokens, the
+    // symbol outline) on possibly-unopened files.
+    fn document_for_path(&self, path: &Path) -> Option<Document> {
+        let file = self.file_ids.get(path).copied()?;
+        self.engine.group().document_for(&self.engine, file)
     }
 
     // Run an engine read under the shared cancellation token (the worker resets it to `false` before each
@@ -497,10 +510,8 @@ impl EngineWorker {
     // UTF-16 — so it warns: reaching it means a range was produced for a document the engine does
     // not hold, which is worth surfacing even though the degraded range is usually still usable.
     fn to_lsp_range_in(&self, path: &Path, range: TextRange) -> Range {
-        match self.parsed_for(path) {
-            Some(parsed) => {
-                position::internal_range_to_lsp(parsed.0.rope(), self.position_encoding, range)
-            }
+        match self.rope_for(path) {
+            Some(rope) => position::internal_range_to_lsp(&rope, self.position_encoding, range),
             None => {
                 tracing::warn!(
                     ?path,
@@ -521,12 +532,10 @@ impl EngineWorker {
     }
 
     fn to_lsp_position_in(&self, path: &Path, position: TextPosition) -> Position {
-        match self.parsed_for(path) {
-            Some(parsed) => position::internal_position_to_lsp(
-                parsed.0.rope(),
-                self.position_encoding,
-                position,
-            ),
+        match self.rope_for(path) {
+            Some(rope) => {
+                position::internal_position_to_lsp(&rope, self.position_encoding, position)
+            }
             None => {
                 tracing::warn!(
                     ?path,
@@ -649,9 +658,9 @@ impl EngineWorker {
         file: FileId,
         rendered: Vec<analysis::Diagnostic>,
     ) -> Vec<crate::lsp_types::Diagnostic> {
-        let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(file));
+        let source = self.engine.fetch::<SourceText>(Key::SourceText(file));
         let rendered =
-            analysis::diagnostic::apply_suppressions(rendered, &parsed.0.rope().to_string());
+            analysis::diagnostic::apply_suppressions(rendered, &source.rope().to_string());
         // Related locations may point into *other* documents, so they are mapped here — where the
         // path-to-URI table and per-document position conversion live — rather than inside the
         // per-rope diagnostic conversion.
@@ -669,9 +678,9 @@ impl EngineWorker {
                             // The note's range is byte-based in the *target* document, so it is
                             // encoded against that document's rope; an untracked target degrades
                             // to byte columns exactly like `to_lsp_range_in`.
-                            let range = match self.parsed_for(&related.path) {
-                                Some(parsed) => position::tree_sitter_range_to_lsp(
-                                    parsed.0.rope(),
+                            let range = match self.rope_for(&related.path) {
+                                Some(rope) => position::tree_sitter_range_to_lsp(
+                                    &rope,
                                     self.position_encoding,
                                     related.range,
                                 ),
@@ -699,7 +708,7 @@ impl EngineWorker {
             })
             .collect();
         let mut converted =
-            diagnostics::convert_diagnostics(rendered, parsed.0.rope(), self.position_encoding);
+            diagnostics::convert_diagnostics(rendered, source.rope(), self.position_encoding);
         for (diagnostic, related) in converted.iter_mut().zip(related_information) {
             diagnostic.related_information = related;
         }
@@ -732,9 +741,13 @@ impl EngineWorker {
                 if let Some(items) = self.symbol_items_cache.get(&path) {
                     return (path, items.clone());
                 }
-                let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(file));
+                let document = self
+                    .engine
+                    .group()
+                    .document_for(&self.engine, file)
+                    .expect("symbol candidate paths are live tracked files");
                 let items =
-                    index::index(parsed.0.tree().root_node(), parsed.0.rope(), false, false);
+                    index::index(document.tree().root_node(), document.rope(), false, false);
                 self.symbol_items_cache.insert(path.clone(), items.clone());
                 (path, items)
             })
@@ -765,15 +778,26 @@ impl EngineWorker {
     // Set (or update) a file's engine source inputs. Does not touch `ProjectFiles`; the caller invokes
     // `rebuild_project_files` when the file SET changes (add/remove), not on a text-only edit.
     fn set_source_input(&mut self, path: &Path, text: String, is_package: bool) {
-        let mut parser = analysis::tree::new_parser().expect("server parser should initialize");
-        let document = Document::parse(&mut parser, &text)
-            .unwrap_or_else(|_| panic!("failed to parse source input {}", path.display()));
-        self.set_parsed_input(path, document, is_package);
+        // No parse: the on-disk corpus is fed rope-only, so loading a workspace parses nothing and
+        // no tree is retained for files nobody edits — a tree is derived (and briefly cached) only
+        // when one of the file's tree-reading queries actually runs.
+        self.set_engine_source(path, source_input(&text), is_package);
     }
 
     // Feeds an already-parsed document into the engine — the one parse per edit. Open buffers pass
-    // their incrementally-maintained document here, so a keystroke never re-parses the file.
+    // their incrementally-maintained document here, so a keystroke never re-parses the file; the
+    // tree rides along on the input only for open documents (a closed document's tree would
+    // otherwise be retained for the rest of the session).
     fn set_parsed_input(&mut self, path: &Path, document: Document, is_package: bool) {
+        let source = if self.open_documents.contains(path) {
+            SourceText::from_document(&document)
+        } else {
+            SourceText::from_rope(document.rope().clone())
+        };
+        self.set_engine_source(path, source, is_package);
+    }
+
+    fn set_engine_source(&mut self, path: &Path, source: SourceText, is_package: bool) {
         self.symbol_items_cache.remove(path);
         let file = self.file_id_for(path);
         // Open documents are the high-churn inputs (every keystroke lands here); everything else — the
@@ -786,7 +810,7 @@ impl EngineWorker {
             Durability::HIGH
         };
         self.engine
-            .set_input_durable(Key::SourceText(file), ParsedDocument(document), durability);
+            .set_input_durable(Key::SourceText(file), source, durability);
         self.engine
             .set_input_durable(Key::FileName(file), path.to_path_buf(), Durability::HIGH);
         self.engine.set_input_durable(
@@ -1904,12 +1928,12 @@ impl EngineWorker {
             })));
         }
 
-        let Some(parsed) = self.parsed_for(&path) else {
+        let Some(document) = self.document_for_path(&path) else {
             return Ok(None);
         };
-        let rope = parsed.0.rope();
+        let rope = document.rope();
         let mut comment_nodes = Vec::new();
-        collect_comment_nodes(parsed.0.tree().root_node(), &mut comment_nodes);
+        collect_comment_nodes(document.tree().root_node(), &mut comment_nodes);
 
         // Absolute (line, utf-position) of the previous emitted token, for the delta encoding the LSP
         // protocol requires.
@@ -2524,8 +2548,10 @@ impl EngineWorker {
         };
         // Document symbols are requested on every keystroke and only need top-level symbols, so
         // they read the engine's parsed tree directly rather than running any analysis phase.
-        let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(file));
-        let items = index::index(parsed.0.tree().root_node(), parsed.0.rope(), false, false);
+        let Some(document) = self.engine.group().document_for(&self.engine, file) else {
+            return Ok(None);
+        };
+        let items = index::index(document.tree().root_node(), document.rope(), false, false);
         let mut symbols: Vec<DocumentSymbol> =
             symbols::document(&items, &|range| self.to_lsp_range_in(&path, range));
 
@@ -2539,7 +2565,7 @@ impl EngineWorker {
             .iter()
             .map(|definition| {
                 position::tree_sitter_range_to_lsp(
-                    parsed.0.rope(),
+                    document.rope(),
                     self.position_encoding,
                     definition.range,
                 )

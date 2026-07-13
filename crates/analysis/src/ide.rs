@@ -37,6 +37,18 @@ pub trait IdeDatabase {
     fn document_id_for_path(&self, path: &Path) -> Option<DocumentId>;
     fn path_for_document_id(&self, document_id: DocumentId) -> Option<&Path>;
     fn document_by_id(&self, document_id: DocumentId) -> Option<&Document>;
+    // A document's text without its tree. Scans that only re-lex text (annotation type names)
+    // read through this so a tree-on-demand implementor never parses for them.
+    fn document_rope(&self, document_id: DocumentId) -> Option<&ropey::Rope>;
+    // The documents that can possibly contain an occurrence of `name` — a conservative text
+    // prefilter for the whole-project occurrence scans (an identifier or S4 string spelled `name`
+    // implies `name` appears in the document text). The default is every document; an implementor
+    // whose trees are parsed on demand narrows this so a scan only materializes the trees of
+    // documents that textually mention the name.
+    fn candidate_document_ids(&self, name: &str) -> Vec<DocumentId> {
+        let _ = name;
+        self.all_document_ids()
+    }
     fn module(&self, document_id: DocumentId) -> Option<&Module>;
     fn document_naming(&self, document_id: DocumentId) -> Option<&NamesLocal>;
     fn package_naming(&self) -> Option<&NamesGlobal>;
@@ -96,6 +108,11 @@ impl IdeDatabase for Analysis {
 
     fn document_by_id(&self, document_id: DocumentId) -> Option<&Document> {
         self.document_by_id(document_id)
+    }
+
+    fn document_rope(&self, document_id: DocumentId) -> Option<&ropey::Rope> {
+        self.document_by_id(document_id)
+            .map(|document| document.rope())
     }
 
     fn module(&self, document_id: DocumentId) -> Option<&Module> {

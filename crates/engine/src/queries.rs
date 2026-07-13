@@ -53,7 +53,7 @@ use {
         collections::{BTreeMap, BTreeSet, HashMap},
         path::PathBuf,
     },
-    tree_sitter::{Parser, Point, Range},
+    tree_sitter::{Parser, Point, Range, Tree},
 };
 
 /// A workspace file. The `analysis` crate keys documents by [`DocumentId`]; the engine keys queries by
@@ -64,7 +64,9 @@ pub type FileId = u32;
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Key {
     // --- Inputs (set from outside, never executed) -------------------------------------------------
-    /// Per-file source text — the high-churn input; every keystroke is a `set_input`.
+    /// Per-file source text (see [`SourceText`]) — the high-churn input; every keystroke is a
+    /// `set_input`. Open documents carry the host's incrementally-parsed tree; the corpus is
+    /// rope-only and a tree is derived on demand through [`RoughlyQueries::document_for`].
     SourceText(FileId),
     /// Package-vs-script classification, a *separate* fine-grained input so a text-only edit does not
     /// invalidate naming through a kind read.
@@ -79,7 +81,6 @@ pub enum Key {
     FileName(FileId),
 
     // --- Derived ----------------------------------------------------------------------------------
-    Parse(FileId),
     Lower(FileId),
     LocalNaming(FileId),
     /// **Names-only** export set of a file (sorted [`Symbol`]s). The explicit value-eq cutoff that keeps a
@@ -238,22 +239,57 @@ pub struct Config {
     pub lint: LintConfig,
 }
 
-/// Parses a source string into the `SourceText` input value. Hosts that already hold an
-/// incrementally-maintained [`Document`] (the language server's open buffers) feed it directly
-/// instead — that is the whole point of the parsed input: one parse per edit, done by the host.
-pub fn parse_source_input(source: &str) -> ParsedDocument {
-    let mut parser = analysis::tree::new_parser().expect("tree-sitter parser should initialize");
-    let document = Document::parse(&mut parser, source).expect("engine input source should parse");
-    ParsedDocument(document)
+/// Builds the rope-only `SourceText` input value for a file that is not open in an editor — the
+/// workspace corpus read from disk. No parse happens here; a tree is derived on demand (and cached
+/// briefly) only when one of the file's tree-reading queries actually recomputes.
+pub fn source_input(text: &str) -> SourceText {
+    SourceText {
+        rope: Rope::from_str(text),
+        tree: None,
+    }
 }
 
-/// The `Parse` value. [`Document`] is not `PartialEq`, but its tree is a pure function of the source, so
-/// rope equality is a sound cutoff proxy: equal source ⇒ equal parse for everything downstream reads.
-pub struct ParsedDocument(pub Document);
+/// The `SourceText` input value: the document text, plus — for open documents — the host's
+/// incrementally-maintained tree-sitter tree.
+///
+/// The corpus (files not open in an editor) is fed **rope-only**: a retained parse tree costs
+/// ~60× the source bytes, so keeping one per file dominated the resident set at large scale
+/// (~400 MiB of trees at 300k LoC), while the tree is a pure function of the text and is read only
+/// when one of the file's tree-consuming queries recomputes. Those consumers go through
+/// [`RoughlyQueries::document_for`], which uses the input's tree when present and otherwise parses
+/// on demand into a small reused cache. Open documents keep carrying their tree so a keystroke
+/// never re-parses from scratch.
+pub struct SourceText {
+    rope: Rope,
+    tree: Option<Tree>,
+}
 
-impl PartialEq for ParsedDocument {
+impl SourceText {
+    /// The input value for an open document: the host's rope and incrementally-parsed tree, both
+    /// cheaply shared (rope chunks and tree subtrees are reference-counted).
+    pub fn from_document(document: &Document) -> SourceText {
+        SourceText {
+            rope: document.rope().clone(),
+            tree: Some(document.tree().clone()),
+        }
+    }
+
+    /// The rope-only input value for a document that is not open in an editor, from an
+    /// already-built rope (see [`source_input`] for the from-text variant).
+    pub fn from_rope(rope: Rope) -> SourceText {
+        SourceText { rope, tree: None }
+    }
+
+    pub fn rope(&self) -> &Rope {
+        &self.rope
+    }
+}
+
+/// Equality is rope equality: the tree is a pure function of the source, so equal source ⇒ equal
+/// derived values, whether or not a tree happens to be carried.
+impl PartialEq for SourceText {
     fn eq(&self, other: &Self) -> bool {
-        self.0.rope() == other.0.rope()
+        self.rope == other.rope
     }
 }
 
@@ -349,8 +385,17 @@ pub struct RoughlyQueries {
     // rebuilding it seeded every whole-file inference with ~500 stub scheme imports otherwise.
     // Valid for the group's lifetime: builtins and the stub corpus are set-once ambient state.
     inference_template: RefCell<Option<InferenceState>>,
+    // Recently parsed documents for rope-only inputs, most recently used last. Purely a cache: an
+    // entry is served only when its rope equals the input's current rope, so staleness is
+    // impossible; a miss re-parses. Bounded so trees never accumulate for the whole corpus — the
+    // point of rope-only inputs. Sized to cover one file's recompute burst (a file's tree-reading
+    // queries run adjacently) plus a few navigation targets.
+    parsed_documents: RefCell<Vec<(FileId, Document)>>,
     counters: Counters,
 }
+
+// How many on-demand parses [`RoughlyQueries::document_for`] keeps alive.
+const PARSED_DOCUMENT_CACHE_CAPACITY: usize = 16;
 
 impl RoughlyQueries {
     pub fn new() -> RoughlyQueries {
@@ -375,8 +420,42 @@ impl RoughlyQueries {
             parser: RefCell::new(new_parser().expect("engine query group: R grammar should load")),
             stubs,
             inference_template: RefCell::new(None),
+            parsed_documents: RefCell::new(Vec::new()),
             counters: Counters::default(),
         }
+    }
+
+    /// A file's document (rope + tree), or `None` for a removed input (a tombstone). The one way
+    /// tree-consuming code reads a file: the input's own tree when the host supplied one (open
+    /// documents), else a cached or on-demand parse of the input's rope. Reading through this from
+    /// a query body records exactly a `SourceText` dependency; calling it outside a body (an IDE
+    /// prime, the LSP host) records nothing and can never run a query body — `SourceText` is an
+    /// input, so the fetch cannot recompute anything (safe even while the interner is borrowed).
+    pub fn document_for(&self, engine: &Engine<RoughlyQueries>, file: FileId) -> Option<Document> {
+        let source = engine.fetch_optional::<SourceText>(Key::SourceText(file))?;
+        if let Some(tree) = &source.tree {
+            return Some(Document::new(source.rope.clone(), tree.clone()));
+        }
+        let mut cache = self.parsed_documents.borrow_mut();
+        if let Some(index) = cache
+            .iter()
+            .position(|(cached_file, cached)| *cached_file == file && *cached.rope() == source.rope)
+        {
+            let entry = cache.remove(index);
+            let document = entry.1.clone();
+            cache.push(entry);
+            return Some(document);
+        }
+        bump(&self.counters.parse, file);
+        let mut parser = self.parser.borrow_mut();
+        let tree = analysis::tree::parse_rope(&mut parser, &source.rope, None)
+            .expect("engine: on-demand parse should succeed");
+        let document = Document::new(source.rope.clone(), tree);
+        if cache.len() >= PARSED_DOCUMENT_CACHE_CAPACITY {
+            cache.remove(0);
+        }
+        cache.push((file, document.clone()));
+        Some(document)
     }
 
     /// Intern a name through the shared interner, so a test can name the [`Symbol`] a body produced.
@@ -593,25 +672,6 @@ impl QueryGroup for RoughlyQueries {
                 panic!("input queries are never executed")
             }
 
-            Key::Parse(file) => {
-                bump(&self.counters.parse, *file);
-                // The input already carries the parsed document — the host parses once (open files
-                // maintain their tree incrementally across keystrokes), so this query only projects
-                // it. Read through `fetch_optional`: a removed input (a tombstone) degrades to an
-                // empty document instead of panicking, so a stale dependency edge walked into
-                // `Parse(f)` after a deletion yields an empty parse rather than resurrecting the
-                // removed input (tombstone hardening; see `Engine::fetch_optional`).
-                match engine.fetch_optional::<ParsedDocument>(Key::SourceText(*file)) {
-                    Some(parsed) => Stored::new(ParsedDocument(parsed.0.clone())),
-                    None => {
-                        let mut parser = self.parser.borrow_mut();
-                        let document = Document::parse(&mut parser, "")
-                            .expect("engine query: the empty tombstone source should parse");
-                        Stored::new(ParsedDocument(document))
-                    }
-                }
-            }
-
             Key::Lower(file) => {
                 bump(&self.counters.lower, *file);
                 // Replicate production's `lower_with_diagnostics` short-circuit (`analysis::lower`): a parse
@@ -621,8 +681,7 @@ impl QueryGroup for RoughlyQueries {
                 // structurally cannot reach, survive), so without this the engine would emit downstream
                 // diagnostics off a partial tree that production drops — a real live-editing divergence, since
                 // most keystrokes are transiently malformed. The same empty module is the tombstone-hardening
-                // degradation: a removed parse (`fetch_optional` -> `None`, not reachable on today's graph
-                // since `Parse` is derived, but defensive against a future fetch reorder) is treated like a
+                // degradation: a removed source (`document_for` -> `None`) is treated like a
                 // malformed one rather than panicking.
                 // Projects the module out of the one `lower_with_diagnostics` run owned by
                 // `LoweringDiagnostics` (the file used to be lowered twice — once here, once for
@@ -984,10 +1043,10 @@ impl QueryGroup for RoughlyQueries {
                 // empty module + `collect_syntax_errors` on a malformed tree and otherwise returns
                 // the module with the lowering-pass diagnostics. `Lower` projects the module out.
                 // A removed source degrades to an empty result (tombstone hardening).
-                match engine.fetch_optional::<ParsedDocument>(Key::Parse(*file)) {
-                    Some(parsed) => {
+                match self.document_for(engine, *file) {
+                    Some(document) => {
                         let mut lowering = self.lowering.borrow_mut();
-                        Stored::new(lower_with_diagnostics(&parsed.0, &mut lowering))
+                        Stored::new(lower_with_diagnostics(&document, &mut lowering))
                     }
                     None => Stored::new(LoweringResult {
                         module: Shared::new(Module::new(HirArena::new(), Vec::new(), Vec::new())),
@@ -1010,8 +1069,8 @@ impl QueryGroup for RoughlyQueries {
                 bump(&self.counters.lint, *file);
                 // Lint is a pure function of the parse tree and the `[lint]` config; it needs no interner.
                 let config = engine.fetch::<Config>(Key::Config);
-                match engine.fetch_optional::<ParsedDocument>(Key::Parse(*file)) {
-                    Some(parsed) => Stored::new(lint_analyze(&parsed.0, config.lint)),
+                match self.document_for(engine, *file) {
+                    Some(document) => Stored::new(lint_analyze(&document, config.lint)),
                     None => Stored::new(Vec::<Diagnostic>::new()),
                 }
             }
@@ -1486,9 +1545,12 @@ fn package_naming_diagnostics(
     file: FileId,
 ) -> Vec<Diagnostic> {
     let module = engine.fetch::<Module>(Key::Lower(file));
-    // The type-reference diagnostic narrows to the offending name by re-lexing the document, so the
-    // parse (its rope) is fetched up front with the other cross-file facts, before the interner borrow.
-    let parsed = engine.fetch::<ParsedDocument>(Key::Parse(file));
+    // The type-reference diagnostic narrows to the offending name by re-lexing the document text,
+    // so the source (its rope — no tree is needed) is fetched up front with the other cross-file
+    // facts, before the interner borrow. A tombstoned source yields no diagnostics.
+    let Some(source) = engine.fetch_optional::<SourceText>(Key::SourceText(file)) else {
+        return Vec::new();
+    };
     let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(file));
     let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(file));
     let local_naming = &naming.naming;
@@ -1823,7 +1885,7 @@ fn package_naming_diagnostics(
         &module,
         local_naming,
         &resolved_types,
-        parsed.0.rope(),
+        source.rope(),
         interner,
         &mut diagnostics,
     );
@@ -2375,9 +2437,8 @@ fn fallback_range(engine: &Engine<RoughlyQueries>) -> Range {
         if *kind != DocumentKind::Package {
             continue;
         }
-        let parsed = engine.fetch::<ParsedDocument>(Key::SourceText(*file));
-        let first_line_length = parsed
-            .0
+        let source = engine.fetch::<SourceText>(Key::SourceText(*file));
+        let first_line_length = source
             .rope()
             .get_line(0)
             .map(|line| line.len_bytes())

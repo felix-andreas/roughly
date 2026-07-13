@@ -59,10 +59,7 @@ use {
     },
     engine::{
         Engine,
-        queries::{
-            Config, FileDiagnostics, FileId, Key, ParsedDocument, RoughlyQueries,
-            parse_source_input,
-        },
+        queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries, SourceText, source_input},
     },
     std::{
         collections::BTreeMap,
@@ -183,7 +180,7 @@ fn sync_engine(engine: &mut Engine<RoughlyQueries>, previous: &Workspace, next: 
     // dependents green), so unconditionally setting the whole current state each step is correct and also
     // exercises the no-op cutoff path.
     for (id, state) in &next.files {
-        engine.set_input(Key::SourceText(*id), parse_source_input(&state.source));
+        engine.set_input(Key::SourceText(*id), source_input(&state.source));
         engine.set_input(Key::FileName(*id), absolute_path(*id, state.package));
         engine.set_input(
             Key::DocumentKind(*id),
@@ -245,8 +242,8 @@ fn engine_diagnostics(
         }
     }
     // Mirrors production's suppression-comment filter at assembly.
-    let parsed = engine.fetch::<ParsedDocument>(Key::SourceText(id));
-    analysis::diagnostic::apply_suppressions(rendered, &parsed.0.rope().to_string())
+    let source = engine.fetch::<SourceText>(Key::SourceText(id));
+    analysis::diagnostic::apply_suppressions(rendered, &source.rope().to_string())
 }
 
 // ----------------------------------------------------------------------------------------------------

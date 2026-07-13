@@ -22,6 +22,44 @@ pub fn line_character_to_byte_index(rope: &Rope, position: TextPosition) -> Opti
         .then_some(line_start_byte + position.character_index)
 }
 
+// Whether the rope's text contains `needle` as a byte substring, without materializing the rope.
+// Chunk-wise `str::contains` plus a carry buffer covering matches that straddle a chunk boundary.
+// The conservative text prefilter behind `IdeDatabase::candidate_document_ids`.
+pub fn rope_contains(rope: &Rope, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if rope.len_bytes() < needle.len() {
+        return false;
+    }
+    let needle_bytes = needle.as_bytes();
+    let carry_length = needle_bytes.len() - 1;
+    let mut carry: Vec<u8> = Vec::with_capacity(2 * carry_length.max(1));
+    for chunk in rope.chunks() {
+        if chunk.contains(needle) {
+            return true;
+        }
+        if carry_length == 0 {
+            continue;
+        }
+        // A straddling match must start inside `carry` (a match fully inside the chunk was found
+        // above), so `carry` extended by the chunk's first `carry_length` bytes covers it.
+        let boundary_take = chunk.len().min(carry_length);
+        carry.extend_from_slice(&chunk.as_bytes()[..boundary_take]);
+        if carry
+            .windows(needle_bytes.len())
+            .any(|window| window == needle_bytes)
+        {
+            return true;
+        }
+        // Slide: keep the last `carry_length` bytes of everything seen so far.
+        carry.extend_from_slice(&chunk.as_bytes()[boundary_take..]);
+        let excess = carry.len().saturating_sub(carry_length);
+        carry.drain(..excess);
+    }
+    false
+}
+
 pub fn node_text(rope: &Rope, node: Node<'_>) -> Option<String> {
     let byte_range = node.start_byte()..node.end_byte();
     if byte_range.start > byte_range.end {

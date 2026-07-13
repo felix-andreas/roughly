@@ -12,7 +12,7 @@
 
 use engine::{
     Engine,
-    queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries, parse_source_input},
+    queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries, source_input},
 };
 
 const FILE: FileId = 0;
@@ -31,7 +31,7 @@ fn diagnostics_for(source: &str) -> std::rc::Rc<FileDiagnostics> {
             lint: Default::default(),
         },
     );
-    engine.set_input(Key::SourceText(FILE), parse_source_input(source));
+    engine.set_input(Key::SourceText(FILE), source_input(source));
     engine.set_input(
         Key::DocumentKind(FILE),
         analysis::naming::DocumentKind::Package,

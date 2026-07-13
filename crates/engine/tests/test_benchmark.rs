@@ -61,7 +61,7 @@ use {
     analysis::{Analysis, CheckConfig, LintConfig, naming::DocumentKind, run_full},
     engine::{
         Durability, Engine,
-        queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries, parse_source_input},
+        queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries, source_input},
     },
     std::{
         path::PathBuf,
@@ -158,7 +158,7 @@ fn build_new_engine(file_count: usize) -> Engine<RoughlyQueries> {
     for index in 0..file_count {
         engine.set_input_durable(
             Key::SourceText(index as FileId),
-            parse_source_input(&generate_source(index, false)),
+            source_input(&generate_source(index, false)),
             Durability::HIGH,
         );
         engine.set_input_durable(
@@ -178,11 +178,7 @@ fn build_new_engine(file_count: usize) -> Engine<RoughlyQueries> {
 // An editor keystroke: the open document's text is the one low-durability input, exactly as the
 // language server feeds it.
 fn open_file_edit(engine: &mut Engine<RoughlyQueries>, file: FileId, source: &str) {
-    engine.set_input_durable(
-        Key::SourceText(file),
-        parse_source_input(source),
-        Durability::LOW,
-    );
+    engine.set_input_durable(Key::SourceText(file), source_input(source), Durability::LOW);
 }
 
 // The cold pass: fetch every file's diagnostics so every memo in the package is warm. After this the
@@ -300,7 +296,7 @@ fn body_edit_recheck_is_blast_radius_bounded() {
     // BODY-ONLY edit: every `g_{edit}_*` returns double instead of integer. Same exported name set.
     engine.set_input(
         Key::SourceText(edit_file),
-        parse_source_input(&generate_source(edit_file as usize, true)),
+        source_input(&generate_source(edit_file as usize, true)),
     );
     // Re-fetch EVERY file's diagnostics, so any file that *would* recompute does — the delta below is
     // then the true package-wide recompute set, not an artifact of which files we chose to fetch.
@@ -378,7 +374,7 @@ fn malformed_flip_keeps_exports_stable_and_recompute_bounded() {
     // everything after each flip so every file that would recompute does.
     engine.set_input(
         Key::SourceText(edit_file),
-        parse_source_input(&malformed_source(edit_file as usize)),
+        source_input(&malformed_source(edit_file as usize)),
     );
     warm_new_engine(&engine, file_count);
     let referrer = edit_file + 1;
@@ -389,7 +385,7 @@ fn malformed_flip_keeps_exports_stable_and_recompute_bounded() {
     );
     engine.set_input(
         Key::SourceText(edit_file),
-        parse_source_input(&generate_source(edit_file as usize, false)),
+        source_input(&generate_source(edit_file as usize, false)),
     );
     warm_new_engine(&engine, file_count);
 

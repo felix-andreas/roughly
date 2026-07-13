@@ -10,7 +10,7 @@ use {
     engine::{
         Engine,
         ide_view::PathTable,
-        queries::{Config, FileId, Key, ParsedDocument, RoughlyQueries, parse_source_input},
+        queries::{Config, FileId, Key, RoughlyQueries, source_input},
     },
     roughly::{
         index::{self, Item},
@@ -77,14 +77,17 @@ fn engine_package_items(
     package_ids
         .iter()
         .map(|file| {
-            let parsed = engine.fetch::<ParsedDocument>(Key::Parse(*file));
+            let document = engine
+                .group()
+                .document_for(engine, *file)
+                .expect("engine document");
             let path = paths
                 .path(DocumentId(*file))
                 .expect("engine path")
                 .to_path_buf();
             (
                 path,
-                items_for(parsed.0.tree().root_node(), parsed.0.rope()),
+                items_for(document.tree().root_node(), document.rope()),
             )
         })
         .collect()
@@ -126,7 +129,7 @@ fn document_and_workspace_symbols_match_the_analysis_oracle() {
     let mut engine = Engine::new(RoughlyQueries::new());
     let mut paths = PathTable::new(PathBuf::from(BASE));
     for (id, source) in &files {
-        engine.set_input(Key::SourceText(*id), parse_source_input(source));
+        engine.set_input(Key::SourceText(*id), source_input(source));
         engine.set_input(Key::FileName(*id), package_path(*id));
         engine.set_input(Key::DocumentKind(*id), DocumentKind::Package);
         paths.insert(*id, package_path(*id));

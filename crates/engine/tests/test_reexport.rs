@@ -19,7 +19,7 @@ use {
     },
     engine::{
         Engine,
-        queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries, parse_source_input},
+        queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries, source_input},
     },
     std::path::PathBuf,
 };
@@ -30,7 +30,7 @@ fn setup(sources: &[(FileId, &str)]) -> Engine<RoughlyQueries> {
     engine.set_input(Key::ProjectFiles, files);
     engine.set_input(Key::Config, Config::default());
     for (file, source) in sources {
-        engine.set_input(Key::SourceText(*file), parse_source_input(source));
+        engine.set_input(Key::SourceText(*file), source_input(source));
         engine.set_input(Key::DocumentKind(*file), DocumentKind::Package);
         engine.set_input(
             Key::FileName(*file),
@@ -92,10 +92,7 @@ fn monotone_reexport_chain_converges_to_concrete() {
     );
 
     // Edit the concrete base: integer -> string. The change must propagate up the whole chain.
-    engine.set_input(
-        Key::SourceText(2),
-        parse_source_input("c <- function() \"two\""),
-    );
+    engine.set_input(Key::SourceText(2), source_input("c <- function() \"two\""));
     let scheme_a_after = global_scheme(&engine, a);
     let scheme_c_after = global_scheme(&engine, c);
     assert_ne!(
@@ -182,7 +179,7 @@ fn very_deep_chain_does_not_overflow_the_stack() {
     // Edit the concrete base: the head's revalidation walks the whole chain depth again.
     engine.set_input(
         Key::SourceText(LINKS - 1),
-        parse_source_input(&format!("d{} <- function() \"two\"", LINKS - 1)),
+        source_input(&format!("d{} <- function() \"two\"", LINKS - 1)),
     );
     let scheme_head_after = global_scheme(&engine, head);
     assert_ne!(

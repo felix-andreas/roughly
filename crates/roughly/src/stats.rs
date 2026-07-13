@@ -15,7 +15,8 @@ use {
     engine::{
         Durability, Engine,
         queries::{
-            Config as EngineConfig, FileDiagnostics, FileId, Key, ParsedDocument, RoughlyQueries,
+            Config as EngineConfig, FileDiagnostics, FileId, Key, RoughlyQueries, SourceText,
+            source_input,
         },
     },
     ignore::Walk,
@@ -90,15 +91,16 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), crate::cli::CommandEr
         Durability::HIGH,
     );
 
-    // Phase 1: parse. The host parses (the engine's source input IS the parsed document, exactly
-    // as the server feeds open buffers), so parse time is measured here per file.
+    // Phase 1: load. The corpus is fed rope-only, exactly as the server loads a workspace from
+    // disk; parsing happens on demand inside the first tree-reading query of each file (`lower`),
+    // so this phase is file reading and rope construction.
     let rss_baseline = resident_set_bytes();
     let mut parser = analysis::tree::new_parser().map_err(|error| {
         eprintln!("error: failed to initialize the parser: {error}");
         crate::cli::CommandError
     })?;
     let mut files: Vec<FileRecord> = Vec::with_capacity(entries.len());
-    let mut parse_total = Duration::ZERO;
+    let mut load_total = Duration::ZERO;
     let mut package_count = 0usize;
     for (index, (is_package, _, path)) in entries.iter().enumerate() {
         let source = match std::fs::read_to_string(path) {
@@ -110,22 +112,12 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), crate::cli::CommandEr
         };
         let loc = source.lines().count();
         let start = Instant::now();
-        let document = match Document::parse(&mut parser, &source) {
-            Ok(document) => document,
-            Err(error) => {
-                eprintln!("warning: failed to parse {}: {error:?}", path.display());
-                continue;
-            }
-        };
-        let parse_time = start.elapsed();
-        parse_total += parse_time;
+        let input = source_input(&source);
+        let load_time = start.elapsed();
+        load_total += load_time;
 
         let file = index as FileId;
-        engine.set_input_durable(
-            Key::SourceText(file),
-            ParsedDocument(document),
-            Durability::HIGH,
-        );
+        engine.set_input_durable(Key::SourceText(file), input, Durability::HIGH);
         engine.set_input_durable(Key::FileName(file), path.clone(), Durability::HIGH);
         engine.set_input_durable(
             Key::DocumentKind(file),
@@ -150,7 +142,7 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), crate::cli::CommandEr
         files.iter().map(|record| record.file).collect::<Vec<_>>(),
         Durability::HIGH,
     );
-    let rss_after_parse = resident_set_bytes();
+    let rss_after_load = resident_set_bytes();
 
     // Phases 2-5: staged fetches. Memoization makes the attribution honest — each stage reuses
     // everything the stages before it computed, so its wall time is its own marginal cost. The
@@ -193,7 +185,7 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), crate::cli::CommandEr
             + rendered.lint.len();
     }
     let rss_after_diagnostics = resident_set_bytes();
-    let cold_total = parse_total + lower_total + naming_total + typecheck_total + diagnostics_total;
+    let cold_total = load_total + lower_total + naming_total + typecheck_total + diagnostics_total;
 
     let symbol_count = engine
         .fetch::<NamesGlobal>(Key::PackageSymbolIndex)
@@ -227,11 +219,17 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), crate::cli::CommandEr
         );
     };
     let delta = |before: Option<u64>, after: Option<u64>| Some((before?, after?));
-    phase("parse", parse_total, delta(rss_baseline, rss_after_parse));
     phase(
-        "lower",
+        "load (read + ropes)",
+        load_total,
+        delta(rss_baseline, rss_after_load),
+    );
+    // `lower` includes each file's one on-demand parse (the staged `diagnostics` phase re-parses
+    // for lint — the server's per-file warm-up pays a single parse instead).
+    phase(
+        "lower (+parse)",
         lower_total,
-        delta(rss_after_parse, rss_after_lower),
+        delta(rss_after_load, rss_after_lower),
     );
     phase(
         "local naming",
@@ -307,7 +305,7 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), crate::cli::CommandEr
                 Ok(document) => {
                     engine.set_input_durable(
                         Key::SourceText(record.file),
-                        ParsedDocument(document),
+                        SourceText::from_document(&document),
                         Durability::LOW,
                     );
                     let start = Instant::now();

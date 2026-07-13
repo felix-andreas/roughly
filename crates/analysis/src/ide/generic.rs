@@ -1522,21 +1522,11 @@ fn identifier_occurrences(
     target: SymbolTarget,
     scope: OccurrenceScope,
 ) -> Vec<SymbolOccurrence> {
-    let document_ids = match target {
-        SymbolTarget::Local { document_id, .. } => vec![document_id],
-        SymbolTarget::Global {
-            export_document_id, ..
-        } => match scope {
-            OccurrenceScope::Declaration => vec![export_document_id],
-            OccurrenceScope::All => database.all_document_ids(),
-        },
-    };
-    let mut occurrences = Vec::new();
-
     // Cheap text prefilter: an identifier whose spelled source differs from the target's name can
-    // never resolve to the target, so skip full resolution for it. Same-spelled identifiers still
+    // never resolve to the target, so skip full resolution for it (and, for the whole-project
+    // scope, skip entire documents that never spell the name). Same-spelled identifiers still
     // go through `symbol_target_for_identifier`, preserving shadowing correctness. If the name
-    // cannot be resolved (it always should), fall back to resolving every identifier.
+    // cannot be resolved (it always should), fall back to resolving every identifier everywhere.
     let target_name = match target {
         SymbolTarget::Global { symbol, .. } => database.interner().resolve(symbol),
         SymbolTarget::Local {
@@ -1547,6 +1537,20 @@ fn identifier_occurrences(
             .and_then(|naming| naming.bindings.get(&binding_id))
             .and_then(|binding| database.interner().resolve(binding.symbol)),
     };
+
+    let document_ids = match target {
+        SymbolTarget::Local { document_id, .. } => vec![document_id],
+        SymbolTarget::Global {
+            export_document_id, ..
+        } => match scope {
+            OccurrenceScope::Declaration => vec![export_document_id],
+            OccurrenceScope::All => match target_name {
+                Some(name) => database.candidate_document_ids(name),
+                None => database.all_document_ids(),
+            },
+        },
+    };
+    let mut occurrences = Vec::new();
 
     for scoped_document_id in document_ids {
         let scoped_path = database
@@ -1723,12 +1727,13 @@ fn type_name_occurrences(
             .path_for_document_id(document_id)
             .unwrap_or_else(|| panic!("missing path for document {document_id:?}"))
             .to_path_buf();
-        let document = database
-            .document_by_id(document_id)
+        // Re-lexing reads only the document text, so this never materializes a tree.
+        let rope = database
+            .document_rope(document_id)
             .unwrap_or_else(|| panic!("missing document {document_id:?}"));
 
-        for block in annotation_blocks(document.rope()) {
-            let tokens = type_tokens_in_range(document.rope(), block);
+        for block in annotation_blocks(rope) {
+            let tokens = type_tokens_in_range(rope, block);
             if tokens
                 .iter()
                 .any(|token| token.role == TypeTokenRole::TypeParameter && token.text == name)
@@ -1814,6 +1819,29 @@ pub fn cursor_on_annotation_type_name(document: &Document, position: TextPositio
     type_token_at(document, point).is_some_and(|token| token.role == TypeTokenRole::TypeName)
 }
 
+/// The name text whose occurrences a references/rename/goto request at this position scans for —
+/// an annotation type name, an identifier's spelled text, or an S4 string-literal name, mirroring
+/// `symbol_occurrences_at`'s discrimination. A tree-on-demand implementor primes its per-request
+/// caches with exactly the documents [`IdeDatabase::candidate_document_ids`] will select for this
+/// name. `None` means the position holds no symbol; the caller falls back to priming everything.
+pub fn occurrence_prefilter_name(document: &Document, position: TextPosition) -> Option<String> {
+    let point = Point::new(position.line_index, position.character_index);
+    if let Some(token) = type_token_at(document, point)
+        && token.role == TypeTokenRole::TypeName
+    {
+        return Some(token.text);
+    }
+    if let Some(identifier) = identifier_at_position(document.tree(), position) {
+        return Some(
+            document
+                .rope()
+                .byte_slice(identifier.byte_range())
+                .to_string(),
+        );
+    }
+    s4_symbol_at(document.tree(), document.rope(), point).map(|symbol| symbol.name)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct S4Symbol {
     name: String,
@@ -1849,7 +1877,9 @@ fn s4_occurrences(
     scope: OccurrenceScope,
 ) -> Vec<SymbolOccurrence> {
     let mut occurrences = Vec::new();
-    for document_id in database.all_document_ids() {
+    // An occurrence of the class/generic spells its name in a string literal, so the text
+    // prefilter is conservative for declarations and references alike.
+    for document_id in database.candidate_document_ids(&target.name) {
         let document_path = database
             .path_for_document_id(document_id)
             .unwrap_or_else(|| panic!("missing path for document {document_id:?}"))

@@ -26,7 +26,7 @@
 use {
     crate::{
         Engine, Shared,
-        queries::{FileId, Key, ParsedDocument, RoughlyQueries},
+        queries::{FileId, Key, RoughlyQueries, SourceText},
     },
     analysis::{
         document::{Document, DocumentId},
@@ -42,6 +42,7 @@ use {
         typecheck::ModuleCheck,
         types::{Constraint, CoreType, InferenceVariableId, TypeScheme},
     },
+    ropey::Rope,
     std::{
         collections::{BTreeMap, BTreeSet, HashMap},
         path::{Path, PathBuf},
@@ -171,8 +172,8 @@ impl<'engine> EngineIde<'engine> {
         position: TextPosition,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
-        let _target = self.paths.id(path)?;
-        let caches = self.prime_all_files();
+        let target = self.paths.id(path)?;
+        let caches = self.prime_occurrence_scan(target, position);
         let interner = self.engine.group().interner_ref();
         let database =
             EngineIdeRef::new(&caches, &interner, self.paths, self.engine.group().stubs());
@@ -185,8 +186,8 @@ impl<'engine> EngineIde<'engine> {
         position: TextPosition,
         new_name: &str,
     ) -> Option<RenameResult> {
-        let _target = self.paths.id(path)?;
-        let caches = self.prime_all_files();
+        let target = self.paths.id(path)?;
+        let caches = self.prime_occurrence_scan(target, position);
         let interner = self.engine.group().interner_ref();
         let database =
             EngineIdeRef::new(&caches, &interner, self.paths, self.engine.group().stubs());
@@ -224,7 +225,7 @@ impl<'engine> EngineIde<'engine> {
     fn prime_hover(&self, target: DocumentId) -> Caches {
         let mut caches = self.empty_caches();
         // The target's parse (rope) is read directly to re-lex a `#:` type annotation the cursor sits in.
-        self.prime_parse(&mut caches, target);
+        self.prime_document(&mut caches, target);
         self.prime_module(&mut caches, target);
         self.prime_naming(&mut caches, target);
         self.prime_check(&mut caches, target);
@@ -253,7 +254,7 @@ impl<'engine> EngineIde<'engine> {
     // gate and feature agree.
     fn prime_completion(&self, target: DocumentId, position: TextPosition) -> Caches {
         let mut caches = self.empty_caches();
-        self.prime_parse(&mut caches, target);
+        self.prime_document(&mut caches, target);
         self.prime_document_kind(&mut caches, target);
         self.prime_module(&mut caches, target);
         self.prime_check(&mut caches, target);
@@ -262,7 +263,7 @@ impl<'engine> EngineIde<'engine> {
             self.engine
                 .fetch::<Vec<GlobalCompletionEntry>>(Key::PackageCompletionIndex),
         );
-        if self.target_is_annotation_body(target, position) {
+        if self.target_is_annotation_body(&caches, target, position) {
             for file in caches.all_ids.clone() {
                 self.prime_module(&mut caches, file);
             }
@@ -275,27 +276,31 @@ impl<'engine> EngineIde<'engine> {
     // discriminator reads only the target's tree+rope+point, so it needs no interner.
     fn prime_definition(&self, target: DocumentId, position: TextPosition) -> Caches {
         let mut caches = self.empty_caches();
-        self.prime_parse(&mut caches, target);
+        self.prime_document(&mut caches, target);
         self.prime_module(&mut caches, target);
         self.prime_naming(&mut caches, target);
         self.prime_package_naming(&mut caches);
         for export in self.referenced_export_files(target, &caches) {
-            self.prime_parse(&mut caches, export);
+            self.prime_document(&mut caches, export);
             self.prime_module(&mut caches, export);
             self.prime_naming(&mut caches, export);
         }
-        if self.target_is_s4(target, position) {
-            for file in caches.all_ids.clone() {
-                self.prime_parse(&mut caches, file);
+        // The S4 path (a string-literal class/generic name) scans candidate files' trees, and the
+        // annotation-type-name path re-lexes every document's rope — both are cross-file text
+        // scans, so only they prime the rope set (keeping ordinary goto-definition constant-scope
+        // at rest). The S4 scan narrows to documents that textually mention the name
+        // (`candidate_document_ids`), so the prime materializes trees for exactly that set.
+        if self.target_is_s4(&caches, target, position) {
+            self.prime_ropes(&mut caches);
+            if let Some(document) = caches.parses.get(&target)
+                && let Some(name) = generic::occurrence_prefilter_name(document, position)
+            {
+                for file in Self::candidate_ids(&caches, &name) {
+                    self.prime_document(&mut caches, file);
+                }
             }
-        }
-        // A type name inside a `#:` annotation resolves to its `@type`/`@alias` declaration by
-        // re-lexing every document's annotation text, and the declaration may live in any package
-        // file — so every document's parse must be primed for the cross-file scan.
-        if self.target_is_annotation_type_name(target, position) {
-            for file in caches.all_ids.clone() {
-                self.prime_parse(&mut caches, file);
-            }
+        } else if self.target_is_annotation_type_name(&caches, target, position) {
+            self.prime_ropes(&mut caches);
         }
         caches
     }
@@ -305,7 +310,7 @@ impl<'engine> EngineIde<'engine> {
     // like inlay hints plus naming.
     fn prime_code_actions(&self, target: DocumentId) -> Caches {
         let mut caches = self.empty_caches();
-        self.prime_parse(&mut caches, target);
+        self.prime_document(&mut caches, target);
         self.prime_module(&mut caches, target);
         self.prime_naming(&mut caches, target);
         self.prime_check(&mut caches, target);
@@ -313,32 +318,43 @@ impl<'engine> EngineIde<'engine> {
     }
 
     // type definition: the target's parse/module/checked types resolve the cursor's nominal type;
-    // the declaration scan re-lexes every document's annotations, so all parses are primed.
+    // the declaration scan re-lexes every document's annotation text off the always-primed ropes.
     fn prime_type_definition(&self, target: DocumentId) -> Caches {
         let mut caches = self.empty_caches();
-        self.prime_parse(&mut caches, target);
+        self.prime_document(&mut caches, target);
         self.prime_module(&mut caches, target);
         self.prime_check(&mut caches, target);
-        for file in caches.all_ids.clone() {
-            self.prime_parse(&mut caches, file);
-        }
+        self.prime_ropes(&mut caches);
         caches
     }
 
-    // references / rename (whole-project scans): every file's parse + module + naming, plus the package index. The
-    // occurrence scan text-prefilters per identifier, but the fact scope is the whole project.
-    fn prime_all_files(&self) -> Caches {
+    // references / rename (whole-project scans): the target's facts plus parse + module + naming
+    // of every *candidate* file — the documents whose text mentions the name under the cursor
+    // (`candidate_document_ids` serves the scan from the same predicate). A position that names
+    // nothing recognizable falls back to priming every file.
+    fn prime_occurrence_scan(&self, target: DocumentId, position: TextPosition) -> Caches {
         let mut caches = self.empty_caches();
-        let file_count = caches.all_ids.len();
-        caches.parses.reserve(file_count);
-        caches.modules.reserve(file_count);
-        caches.namings.reserve(file_count);
-        for file in caches.all_ids.clone() {
-            self.prime_parse(&mut caches, file);
+        self.prime_ropes(&mut caches);
+        self.prime_document(&mut caches, target);
+        self.prime_module(&mut caches, target);
+        self.prime_naming(&mut caches, target);
+        self.prime_package_naming(&mut caches);
+        let candidates = match caches
+            .parses
+            .get(&target)
+            .and_then(|document| generic::occurrence_prefilter_name(document, position))
+        {
+            Some(name) => Self::candidate_ids(&caches, &name),
+            None => caches.all_ids.clone(),
+        };
+        caches.parses.reserve(candidates.len());
+        caches.modules.reserve(candidates.len());
+        caches.namings.reserve(candidates.len());
+        for file in candidates {
+            self.prime_document(&mut caches, file);
             self.prime_module(&mut caches, file);
             self.prime_naming(&mut caches, file);
         }
-        self.prime_package_naming(&mut caches);
         caches
     }
 
@@ -353,11 +369,43 @@ impl<'engine> EngineIde<'engine> {
         }
     }
 
-    fn prime_parse(&self, caches: &mut Caches, document_id: DocumentId) {
-        caches.parses.entry(document_id).or_insert_with(|| {
-            self.engine
-                .fetch::<ParsedDocument>(Key::Parse(document_id.0))
-        });
+    fn prime_document(&self, caches: &mut Caches, document_id: DocumentId) {
+        if let std::collections::hash_map::Entry::Vacant(entry) = caches.parses.entry(document_id)
+            && let Some(document) = self.engine.group().document_for(self.engine, document_id.0)
+        {
+            entry.insert(document);
+        }
+    }
+
+    // Every document's rope, from the `SourceText` inputs directly — no tree is materialized and
+    // no query body can run (inputs validate in O(1)), so this is cheap enough to prime for every
+    // request. It backs `document_rope` (annotation re-lex scans) and the text prefilter behind
+    // `candidate_document_ids`.
+    fn prime_ropes(&self, caches: &mut Caches) {
+        for document_id in caches.all_ids.clone() {
+            caches.ropes.entry(document_id).or_insert_with(|| {
+                self.engine
+                    .fetch_optional::<SourceText>(Key::SourceText(document_id.0))
+                    .map(|source| source.rope().clone())
+            });
+        }
+    }
+
+    // The documents a whole-project occurrence scan for `name` can touch, mirrored by
+    // `EngineIdeRef::candidate_document_ids`: the primed set and the served set must agree, so both
+    // filter the same ropes with the same predicate.
+    fn candidate_ids(caches: &Caches, name: &str) -> Vec<DocumentId> {
+        caches
+            .all_ids
+            .iter()
+            .copied()
+            .filter(|id| {
+                caches.ropes.get(id).is_some_and(|rope| {
+                    rope.as_ref()
+                        .is_some_and(|rope| analysis::text::rope_contains(rope, name))
+                })
+            })
+            .collect()
     }
 
     fn prime_module(&self, caches: &mut Caches, document_id: DocumentId) {
@@ -421,20 +469,36 @@ impl<'engine> EngineIde<'engine> {
     }
 
     // Whether the cursor sits on an S4 string-literal symbol (class/generic name), which the identifier
-    // naming analysis never sees and `analysis::ide` resolves structurally over *every* file's tree.
-    fn target_is_s4(&self, target: DocumentId, position: TextPosition) -> bool {
-        let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(target.0));
-        generic::cursor_is_s4_symbol(&parsed.0, position)
+    // naming analysis never sees and `analysis::ide` resolves structurally over candidate files' trees.
+    fn target_is_s4(&self, caches: &Caches, target: DocumentId, position: TextPosition) -> bool {
+        caches
+            .parses
+            .get(&target)
+            .is_some_and(|document| generic::cursor_is_s4_symbol(document, position))
     }
 
-    fn target_is_annotation_type_name(&self, target: DocumentId, position: TextPosition) -> bool {
-        let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(target.0));
-        generic::cursor_on_annotation_type_name(&parsed.0, position)
+    fn target_is_annotation_type_name(
+        &self,
+        caches: &Caches,
+        target: DocumentId,
+        position: TextPosition,
+    ) -> bool {
+        caches
+            .parses
+            .get(&target)
+            .is_some_and(|document| generic::cursor_on_annotation_type_name(document, position))
     }
 
-    fn target_is_annotation_body(&self, target: DocumentId, position: TextPosition) -> bool {
-        let parsed = self.engine.fetch::<ParsedDocument>(Key::Parse(target.0));
-        generic::cursor_in_annotation_body(&parsed.0, position)
+    fn target_is_annotation_body(
+        &self,
+        caches: &Caches,
+        target: DocumentId,
+        position: TextPosition,
+    ) -> bool {
+        caches
+            .parses
+            .get(&target)
+            .is_some_and(|document| generic::cursor_in_annotation_body(document, position))
     }
 }
 
@@ -444,7 +508,12 @@ impl<'engine> EngineIde<'engine> {
 /// every file three times, and nothing iterates these — `all_ids` carries the ordering.
 #[derive(Default)]
 struct Caches {
-    parses: HashMap<DocumentId, Shared<ParsedDocument>>,
+    // Owned documents (rope + tree): the input's tree for open documents, an on-demand parse
+    // otherwise. Primed per feature for exactly the documents its scans read.
+    parses: HashMap<DocumentId, Document>,
+    // Every document's rope (`None` for a tombstoned input), always primed: text-only scans and
+    // the candidate prefilter read these instead of materializing trees.
+    ropes: HashMap<DocumentId, Option<Rope>>,
     modules: HashMap<DocumentId, Shared<Module>>,
     namings: HashMap<DocumentId, Shared<DocumentNamingComputation>>,
     checks: HashMap<DocumentId, Shared<ModuleCheck>>,
@@ -503,7 +572,24 @@ impl<'a> IdeDatabase for EngineIdeRef<'a> {
             self.caches.parses.contains_key(&document_id),
             "ide: document {document_id:?} not primed for document_by_id"
         );
-        self.caches.parses.get(&document_id).map(|parsed| &parsed.0)
+        self.caches.parses.get(&document_id)
+    }
+
+    fn document_rope(&self, document_id: DocumentId) -> Option<&Rope> {
+        debug_assert!(
+            self.caches.ropes.contains_key(&document_id),
+            "ide: document {document_id:?} not primed for document_rope"
+        );
+        self.caches.ropes.get(&document_id)?.as_ref()
+    }
+
+    fn candidate_document_ids(&self, name: &str) -> Vec<DocumentId> {
+        debug_assert_eq!(
+            self.caches.ropes.len(),
+            self.caches.all_ids.len(),
+            "ide: candidate filtering requires every document's rope primed"
+        );
+        EngineIde::candidate_ids(self.caches, name)
     }
 
     fn module(&self, document_id: DocumentId) -> Option<&Module> {

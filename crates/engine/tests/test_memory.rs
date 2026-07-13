@@ -21,7 +21,7 @@ use {
     analysis::{Analysis, CheckConfig, LintConfig, naming::DocumentKind, run_full},
     engine::{
         Engine,
-        queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries, parse_source_input},
+        queries::{Config, FileDiagnostics, FileId, Key, RoughlyQueries, source_input},
     },
     std::{
         alloc::{GlobalAlloc, Layout, System},
@@ -127,7 +127,7 @@ fn build_and_warm_new_engine(file_count: usize) -> Engine<RoughlyQueries> {
     for index in 0..file_count {
         engine.set_input(
             Key::SourceText(index as FileId),
-            parse_source_input(&generate_source(index)),
+            source_input(&generate_source(index)),
         );
         engine.set_input(Key::DocumentKind(index as FileId), DocumentKind::Package);
         engine.set_input(
@@ -184,7 +184,7 @@ fn edit_stream_growth_is_bounded_by_eviction() {
     );
     engine.set_input(Key::DocumentKind(0), DocumentKind::Package);
     engine.set_input(Key::FileName(0), PathBuf::from("/pkg/R/file_0.R"));
-    engine.set_input(Key::SourceText(0), parse_source_input("value <- start()\n"));
+    engine.set_input(Key::SourceText(0), source_input("value <- start()\n"));
     let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(0));
     let baseline = engine.slot_count();
 
@@ -194,7 +194,7 @@ fn edit_stream_growth_is_bounded_by_eviction() {
     for index in 0..300u32 {
         engine.set_input(
             Key::SourceText(0),
-            parse_source_input(&format!("value <- name_{index}()\n")),
+            source_input(&format!("value <- name_{index}()\n")),
         );
         let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(0));
     }
@@ -220,10 +220,7 @@ fn edit_stream_growth_is_bounded_by_eviction() {
     // Part 2: an edit that references an *evicted* symbol again forces the dropped per-symbol keys
     // to recompute through a live dependent — the answer must equal a fresh engine's for the same
     // final state, not crash and not go stale.
-    engine.set_input(
-        Key::SourceText(0),
-        parse_source_input("value <- name_5()\n"),
-    );
+    engine.set_input(Key::SourceText(0), source_input("value <- name_5()\n"));
     let revalidated = engine.fetch::<FileDiagnostics>(Key::Diagnostics(0));
 
     let mut fresh = Engine::new(RoughlyQueries::new());
@@ -241,10 +238,7 @@ fn edit_stream_growth_is_bounded_by_eviction() {
     );
     fresh.set_input(Key::DocumentKind(0), DocumentKind::Package);
     fresh.set_input(Key::FileName(0), PathBuf::from("/pkg/R/file_0.R"));
-    fresh.set_input(
-        Key::SourceText(0),
-        parse_source_input("value <- name_5()\n"),
-    );
+    fresh.set_input(Key::SourceText(0), source_input("value <- name_5()\n"));
     let fresh_result = fresh.fetch::<FileDiagnostics>(Key::Diagnostics(0));
     // Raw type errors carry interner Symbols, whose ids depend on each engine's interning history;
     // every rendered (string-bearing) field must match exactly, and the raw ones by shape.
@@ -338,7 +332,7 @@ fn churn_per_body_edit() {
     for round in 0..2 {
         engine.set_input(
             Key::SourceText(edit_file),
-            parse_source_input(&generate_edited_source(edit_file as usize, round % 2 == 0)),
+            source_input(&generate_edited_source(edit_file as usize, round % 2 == 0)),
         );
         let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(edit_file));
         let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(referrer));
@@ -349,7 +343,7 @@ fn churn_per_body_edit() {
     for round in 0..ROUNDS {
         engine.set_input(
             Key::SourceText(edit_file),
-            parse_source_input(&generate_edited_source(edit_file as usize, round % 2 == 0)),
+            source_input(&generate_edited_source(edit_file as usize, round % 2 == 0)),
         );
         let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(edit_file));
         let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(referrer));
