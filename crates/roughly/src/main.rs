@@ -51,6 +51,9 @@ fn main() -> ExitCode {
             cli::server(experimental_features);
             ExitCode::SUCCESS
         }
+        Command::AnalysisStats { path } => {
+            exit_code(roughly::stats::analysis_stats(path.as_deref()).map(|()| Outcome::Clean))
+        }
         Command::Debug(dev) => match dev {
             Debug::Index {
                 paths,
@@ -134,6 +137,11 @@ enum Command {
         /// Enable verbose logging (ignored for now)
         #[clap(short, long, default_value_t = false)]
         verbose: bool,
+    },
+    /// Profile the analysis over a workspace: per-phase timings, slowest files, incremental cost
+    AnalysisStats {
+        /// Workspace directory (or a file whose package root is used); defaults to `.`
+        path: Option<PathBuf>,
     },
     /// Debugging and development commands
     #[command(subcommand)]

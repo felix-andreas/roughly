@@ -440,7 +440,7 @@ fn render_json_diagnostic(path: &Path, diagnostic: &Diagnostic, related: &[Relat
     println!("{record}");
 }
 
-fn analysis_root_for_target(target: &Path) -> PathBuf {
+pub(crate) fn analysis_root_for_target(target: &Path) -> PathBuf {
     if target.is_dir() {
         return target.to_path_buf();
     }

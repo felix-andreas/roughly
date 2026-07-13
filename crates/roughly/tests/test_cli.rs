@@ -442,3 +442,62 @@ fn usage_error_exits_two() {
     let output = roughly(directory.path(), &["bogus-subcommand"]);
     assert_eq!(exit_code(&output), 2, "stderr: {}", stderr(&output));
 }
+
+//
+// ANALYSIS-STATS
+//
+
+// The performance diagnosis runs the full pipeline and prints every report section; the workspace
+// here has a cross-file reference so the interface layer genuinely participates.
+#[test]
+fn analysis_stats_prints_the_full_breakdown() {
+    let directory = project(&[
+        ("R/lib.R", "make_count <- function() 1L\n"),
+        ("R/use.R", "total <- make_count() + 1L\n"),
+        ("roughly.toml", "[check]\ntyping = true\n"),
+    ]);
+    let output = roughly(directory.path(), &["analysis-stats"]);
+    assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
+    let report = stdout(&output);
+    for section in [
+        "workspace:",
+        "2 package files",
+        "cold analysis",
+        "typecheck (+interfaces)",
+        "slowest files (typecheck):",
+        "incremental (body edit on",
+        "edited-file diagnostics",
+        "workspace revalidate",
+    ] {
+        assert!(
+            report.contains(section),
+            "missing section {section:?} in report:\n{report}"
+        );
+    }
+    assert!(
+        !report.contains("note: [check] typing is off"),
+        "typing is on in this workspace's config, so no forcing note:\n{report}"
+    );
+}
+
+// Without a configuration the type checker defaults off; the diagnosis forces it on and says so.
+#[test]
+fn analysis_stats_notes_when_it_forces_typing_on() {
+    let directory = project(&[("R/a.R", "f <- function(x) x + 1\n")]);
+    let output = roughly(directory.path(), &["analysis-stats"]);
+    assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
+    assert!(
+        stdout(&output).contains("note: [check] typing is off in the configuration"),
+        "report:\n{}",
+        stdout(&output)
+    );
+}
+
+// A target without any R files is a usage error (exit 2), not an empty report.
+#[test]
+fn analysis_stats_rejects_a_workspace_without_r_files() {
+    let directory = project(&[("README.md", "no code here\n")]);
+    let output = roughly(directory.path(), &["analysis-stats"]);
+    assert_eq!(exit_code(&output), 2);
+    assert!(stderr(&output).contains("no R files"));
+}
