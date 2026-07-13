@@ -10,7 +10,7 @@
 
 ## Open — semantics
 
-- **Recursion strict attribution (letrec part b):** letrec is DONE (naming + monomorphic typing; decisions.md; typing-reference §Assignment). Open: top-level recursion pinned by the interface fixed point converges to a scheme containing `Unknown` with no strict origin anywhere — record an origin on the binding whose converged scheme retains `Unknown`, identically in both pipelines (differential must stay byte-exact). Mutual-local-recursion policy decided: per-binding visibility, earlier-defined closure's forward reference stays a loud refusal (block-letrec is a possible extension).
+- **Recursion strict attribution:** recursion is now typed everywhere it soundly can be (local letrec; top-level mutual groups generalize together — decisions.md), and top-level SELF-recursion deliberately keeps the tolerant `Unknown` (tree-fold shapes need recursive types). Open: strict mode records no origin on those deliberately-`Unknown` self-recursive schemes — attribution needs an origin on the binding, identically in both pipelines (differential must stay byte-exact).
 - **Design forks, decide-and-implement (one `decisions.md` entry each):** third constraint kind (two-flexible-operand comparison — the recorded traits tripwire); order-dependent compatibility commits. (NAMESPACE bare-resolution gating: DECIDED — stays ungated; the shipped corpus is R's default-attached search path, gating falls out of the post-beta import model; decisions.md.)
 - Overload candidates when touched: `is`, `extends`, `grep(value =)`, `cor` (vector vs matrix — needs matrix nominals). `Date`/`POSIXct` arithmetic refuses loudly today — revisit if real code makes it noisy.
 

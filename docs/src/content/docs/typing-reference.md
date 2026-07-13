@@ -1535,8 +1535,15 @@ Examples:
   `fn(integer) -> integer`, and a call violating the recursively-inferred signature is an error.
   Recursion is monomorphic: the recursive uses share one instantiation (no polymorphic
   recursion). Mutual recursion between two *local* closures is out of letrec's per-binding reach —
-  the earlier closure's reference to the later name stays a loud unresolved reference — while
-  top-level mutual recursion resolves through the package interface fixed point
+  the earlier closure's reference to the later name stays a loud unresolved reference. At the
+  package top level, a **mutually recursive group** (two or more definitions referencing each
+  other) is inferred as one letrec group and generalized together after the whole file — the pair
+  `is_even`/`is_odd` exports `<T: numeric> fn(n: T) -> logical`. A **self-recursive** top-level
+  function deliberately keeps the interface fixed point's `Unknown` return instead: heterogeneous
+  self-recursion — the idiomatic tree fold, whose parameter would need the recursive type
+  `T = double | list[T]` — is untypeable in this system, and pinning the parameter through the
+  recursive call would manufacture call-site false positives; the `Unknown` is gradual tolerance,
+  and unannotated consumers flow through it
 
 Examples:
 

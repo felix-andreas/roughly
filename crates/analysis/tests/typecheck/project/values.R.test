@@ -300,3 +300,32 @@ f <- function() declared_name + genuinely_undefined
 warning[unresolved] I could not resolve `genuinely_undefined` in this package, its imports, or builtins.
 --> 1:33-1:52
 | f <- function() declared_name + genuinely_undefined
+
+#==== top_level_recursion
+#---- self_recursive_top_level_function_stays_tolerant
+#---- R/fact.R
+# A package-level self-recursive function keeps the fixed point's Unknown return on purpose:
+# heterogeneous self-recursion (the tree fold T = double | list[T]) is untypeable in HM, and
+# pinning the parameter through the recursive call manufactures call-site false positives.
+# Unannotated consumers tolerate the Unknown; the mutual case below shows the typed contrast.
+top_fact <- function(k) {
+  if (k <= 1L) 1L else k * top_fact(k - 1L)
+}
+#++++
+No diagnostics.
+#---- R/use.R
+total <- top_fact(4L) + 1L
+#++++
+No diagnostics.
+
+#---- mutual_top_level_recursion_types_through
+#---- R/pair.R
+is_even <- function(n) if (n == 0L) TRUE else is_odd(n - 1L)
+is_odd <- function(n) if (n == 0L) FALSE else is_even(n - 1L)
+#++++
+No diagnostics.
+#---- R/use.R
+#: logical
+check <- is_even(4L)
+#++++
+No diagnostics.

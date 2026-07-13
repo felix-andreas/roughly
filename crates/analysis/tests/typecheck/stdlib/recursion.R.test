@@ -35,3 +35,19 @@ pair <- function() {
 }
 #++++
 error: unknown name
+
+#---- mutual_top_level_pair_schemes
+is_even <- function(n) if (n == 0L) TRUE else is_odd(n - 1L)
+is_odd <- function(n) if (n == 0L) FALSE else is_even(n - 1L)
+is_even(4L)
+#++++
+fn(n: integer) -> logical
+fn(integer) -> logical
+logical
+
+#---- mutual_pair_without_in_file_call
+even2 <- function(n) if (n == 0L) TRUE else odd2(n - 1L)
+odd2 <- function(n) if (n == 0L) FALSE else even2(n - 1L)
+#++++
+fn(n: ?1) -> logical
+fn(?1) -> logical

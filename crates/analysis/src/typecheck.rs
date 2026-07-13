@@ -330,6 +330,13 @@ pub struct InferenceState {
     // such slots resolve here instead of the definition-point environment entry, making them sound
     // for closure calls that happen after later writes.
     captured_write_joins: BTreeMap<BindingId, CoreType>,
+    // The whole-file letrec members: each top-level function-valued assignment target, pre-bound
+    // before any statement of the module is inferred (see `check_module_with_naming`), keyed by
+    // symbol so the assignment itself reuses the variable its earlier readers constrained. Members
+    // stay monomorphic until the whole module is inferred (mutual members constrain each other
+    // across statements), then one finalization pass defaults + generalizes each. Cleared per
+    // module.
+    module_letrec_placeholders: BTreeMap<Symbol, ModuleLetrecMember>,
     // Set when the current walk wrote a slot in `NamesLocal::capture_repass_slots`; the innermost
     // enclosing function body re-runs once so its captured reads see the completed write join.
     wrote_repass_slot: bool,
@@ -667,6 +674,16 @@ fn accumulate_parameter_variances(
     }
 }
 
+// One whole-file letrec member: the shared inference variable, the top-level expression that is
+// its (last-writer) definition, the local slot the definition also binds, and the definition range.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ModuleLetrecMember {
+    variable: InferenceVariableId,
+    defining_expression: ExpressionId,
+    binding_id: Option<BindingId>,
+    range: Range,
+}
+
 pub fn inference_state_with_builtins(lowering_context: &mut LoweringContext) -> InferenceState {
     inference_state_with_builtins_in_interner(lowering_context.interner_mut())
 }
@@ -793,6 +810,8 @@ impl InferenceState {
         self.loop_memos.clear();
         self.captured_write_joins.clear();
 
+        self.bind_module_letrec_placeholders(module);
+
         // When a top-level slot is captured by a closure and written after that capture, the
         // whole document runs a discovery pass first (the per-function-body re-pass cannot see
         // top-level writes made after the closure): the first pass completes the captured-write
@@ -869,6 +888,8 @@ impl InferenceState {
         }
         self.pending_enclosing_writes.clear();
         self.wrote_repass_slot = false;
+
+        errors.extend(self.finalize_module_letrec_members());
 
         let expression_types_by_id = self.take_recorded_expression_types();
         // Keep only origins whose expression still resolves to `Unknown` in the final substitution.
@@ -947,12 +968,147 @@ impl InferenceState {
             .collect()
     }
 
+    // Whole-file letrec: every top-level function-valued assignment target is pre-bound to a
+    // fresh monomorphic variable before any statement is inferred, so recursion in all its
+    // top-level forms — self-reference, mutual reference, a forward reference from an earlier
+    // body to a later definition — unifies with the eventually-inferred function type instead
+    // of importing the interface fixed point's Unknown-pinned scheme. The per-assignment
+    // letrec placeholder reuses these variables (`module_letrec_placeholders`), which is what
+    // joins an earlier body's constraints with the definition's final type. R semantics: a
+    // closure body only runs after the whole file has loaded, so every top-level binding is
+    // in scope by then.
+    fn bind_module_letrec_placeholders(&mut self, module: &Module) {
+        // Candidates: every top-level function-valued assignment, last writer per symbol (like the
+        // package symbol index). Only candidates on a reference CYCLE — a self-recursive function
+        // or a mutually-recursive group — become letrec members: a placeholder makes a member
+        // monomorphic within its own file (its later in-file uses constrain the shared variable
+        // instead of instantiating a scheme), a cost only recursion justifies.
+        let mut candidates: BTreeMap<Symbol, (ExpressionId, ExpressionId, Range)> = BTreeMap::new();
+        for expression_id in &module.expressions {
+            let expression = module.arena.get(*expression_id);
+            let ExpressionKind::Assign {
+                target: AssignTarget::Variable { symbol, .. },
+                scope: AssignmentScope::Local,
+                value,
+            } = &expression.kind
+            else {
+                continue;
+            };
+            if !matches!(
+                module.arena.get(*value).kind,
+                ExpressionKind::Function { .. }
+            ) {
+                continue;
+            }
+            candidates.insert(*symbol, (*expression_id, *value, expression.range));
+        }
+
+        // The reference edges among candidates, overapproximated by source-range containment: a
+        // `Symbol` expression lying inside a candidate's function value that names another
+        // candidate is an edge. (A local variable shadowing a candidate name inside a body adds a
+        // false edge — the overapproximation only widens the member set, never drops recursion.)
+        let mut edges: BTreeMap<Symbol, BTreeSet<Symbol>> = BTreeMap::new();
+        for (symbol, (_, value, _)) in &candidates {
+            let value_range = module.arena.get(*value).range;
+            let mut referenced = BTreeSet::new();
+            for expression in module.arena.expressions() {
+                if expression.range.start_byte >= value_range.start_byte
+                    && expression.range.end_byte <= value_range.end_byte
+                    && let ExpressionKind::Symbol(read) = &expression.kind
+                    && candidates.contains_key(read)
+                {
+                    referenced.insert(*read);
+                }
+            }
+            edges.insert(*symbol, referenced);
+        }
+        // Only MUTUAL cycles (two or more members) get placeholders. A pure self-recursive
+        // function keeps the tolerant fixed-point path: heterogeneous self-recursion — the
+        // idiomatic tree fold `T = double | list[T]` — is untypeable in HM, and pinning its
+        // parameter through the recursive call manufactures false positives at call sites; its
+        // `Unknown` is deliberate gradual tolerance. A mutual group, by contrast, was previously
+        // pinned to `Unknown` wholesale and false-errored annotated consumers.
+        let on_mutual_cycle = |start: Symbol| -> bool {
+            let mut stack: Vec<Symbol> = edges
+                .get(&start)
+                .map(|targets| {
+                    targets
+                        .iter()
+                        .copied()
+                        .filter(|target| *target != start)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut seen = BTreeSet::new();
+            while let Some(symbol) = stack.pop() {
+                if symbol == start {
+                    return true;
+                }
+                if seen.insert(symbol)
+                    && let Some(targets) = edges.get(&symbol)
+                {
+                    stack.extend(targets.iter().copied());
+                }
+            }
+            false
+        };
+
+        // Members live one level below the module scope: unification level-adjusts every variable
+        // the group's bodies share up to the placeholders' level, so the placeholders must sit
+        // deeper than the level finalization generalizes at — otherwise a genuinely polymorphic
+        // member exports a *free* variable, which a consuming document erases to `Unknown`.
+        // `finalize_module_letrec_members` exits this level before generalizing.
+        self.enter_level();
+        self.module_letrec_placeholders.clear();
+        for (symbol, (expression_id, _, range)) in &candidates {
+            if !on_mutual_cycle(*symbol) {
+                continue;
+            }
+            let variable = self.fresh_variable();
+            self.module_letrec_placeholders.insert(
+                *symbol,
+                ModuleLetrecMember {
+                    variable,
+                    defining_expression: *expression_id,
+                    binding_id: None,
+                    range: *range,
+                },
+            );
+            self.bind_global_name(*symbol, CoreType::Variable(variable), *range);
+        }
+    }
+
+    // The module letrec finalization: with every statement inferred, the mutual group is fully
+    // constrained — default the escaping numerics and generalize each member, rebinding the same
+    // environment keys its definition wrote. Failures poison only their own member.
+    fn finalize_module_letrec_members(&mut self) -> Vec<InferenceError> {
+        self.exit_level();
+        let mut errors = Vec::new();
+        for (symbol, member) in std::mem::take(&mut self.module_letrec_placeholders) {
+            let finalized = self
+                .resolve(CoreType::Variable(member.variable))
+                .and_then(|resolved| self.default_free_numeric(resolved))
+                .and_then(|defaulted| self.generalize(defaulted));
+            match finalized {
+                Ok(generalized) => {
+                    if let Some(binding_id) = member.binding_id {
+                        self.bind_local_scheme(binding_id, generalized.clone(), member.range);
+                    }
+                    self.bind_global_scheme(symbol, generalized, member.range);
+                }
+                Err(error) => errors.push(error),
+            }
+        }
+        errors
+    }
+
     fn infer_module_with_context(
         &mut self,
         module: &Module,
         resolution_context: Option<&ResolutionContext<'_>>,
         type_definitions: &TypeDefinitionEnvironment,
     ) -> Result<Vec<CoreType>, InferenceError> {
+        self.bind_module_letrec_placeholders(module);
         let mut inferred_types = Vec::with_capacity(module.expressions.len());
 
         for expression_id in &module.expressions {
@@ -963,6 +1119,9 @@ impl InferenceState {
                 resolution_context,
                 type_definitions,
             )?);
+        }
+        if let Some(error) = self.finalize_module_letrec_members().into_iter().next() {
+            return Err(error);
         }
 
         Ok(inferred_types)
@@ -1390,16 +1549,35 @@ impl InferenceState {
         // pre-bound to a fresh variable before the body is inferred, and the variable unifies
         // with the inferred function type afterwards. Recursive calls thereby constrain the
         // function's own parameters and return instead of typing as a silent unbound `Unknown`.
+        // A top-level definition reuses the module letrec variable (see the whole-file pre-pass)
+        // so mutual and forward references — inferred before this assignment ran — share the very
+        // same variable this assignment unifies with its inferred type. Members stay monomorphic
+        // here; the module finalization pass generalizes them together.
+        let module_letrec_member = matches!(arena.get(value).kind, ExpressionKind::Function { .. })
+            && self
+                .module_letrec_placeholders
+                .get(&target)
+                .is_some_and(|member| member.defining_expression == expression.id);
         let recursion_placeholder =
             if matches!(arena.get(value).kind, ExpressionKind::Function { .. }) {
-                let variable = self.fresh_variable();
-                match resolution_context.and_then(|context| {
+                let variable = if module_letrec_member {
+                    self.module_letrec_placeholders[&target].variable
+                } else {
+                    self.fresh_variable()
+                };
+                let local_binding = resolution_context.and_then(|context| {
                     context
                         .local_naming
                         .expression_resolutions
                         .get(&expression.id)
                         .copied()
-                }) {
+                });
+                if module_letrec_member
+                    && let Some(member) = self.module_letrec_placeholders.get_mut(&target)
+                {
+                    member.binding_id = local_binding;
+                }
+                match local_binding {
                     Some(binding_id) => self.bind_local_name(
                         binding_id,
                         CoreType::Variable(variable),
@@ -1461,7 +1639,11 @@ impl InferenceState {
                     .get(&expression.id)
                     .copied()
                 {
-                    let generalized_scheme = self.generalize(binding_type.clone())?;
+                    let generalized_scheme = if module_letrec_member {
+                        TypeScheme::monomorphic(binding_type.clone())
+                    } else {
+                        self.generalize(binding_type.clone())?
+                    };
                     self.bind_local_scheme(binding_id, generalized_scheme, expression.range);
                     self.note_slot_write(
                         resolution_context.local_naming,
@@ -1476,7 +1658,11 @@ impl InferenceState {
             }
 
             self.set_environment_entry(EnvironmentKey::Global(target), None);
-            let generalized_scheme = self.generalize(binding_type.clone())?;
+            let generalized_scheme = if module_letrec_member {
+                TypeScheme::monomorphic(binding_type.clone())
+            } else {
+                self.generalize(binding_type.clone())?
+            };
             // The recursion placeholder pre-bound the per-site local slot, and the export
             // extraction reads the local entry before the global one — keep them consistent.
             if let Some(binding_id) = resolution_context
@@ -1491,7 +1677,11 @@ impl InferenceState {
             return Ok(binding_type);
         }
 
-        let generalized_scheme = self.generalize(binding_type.clone())?;
+        let generalized_scheme = if module_letrec_member {
+            TypeScheme::monomorphic(binding_type.clone())
+        } else {
+            self.generalize(binding_type.clone())?
+        };
         if let Some(resolution_context) = resolution_context
             && let Some(binding_id) = resolution_context
                 .local_naming
