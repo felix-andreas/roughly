@@ -797,6 +797,22 @@ impl EngineWorker {
         self.set_engine_source(path, source, is_package);
     }
 
+    // Mirrors `open_documents` into the engine's `OpenFiles` input (sorted file ids), the seam
+    // that keeps the all-files folds' per-keystroke validation O(open). It must track exactly the
+    // paths whose `SourceText` is fed at LOW durability — both are driven by `open_documents`, so
+    // the invariant holds by construction. Called on open/close (and retraction), never per
+    // keystroke: the set only changes there, and folds are value-identical for any contents.
+    fn sync_open_files_input(&mut self) {
+        let mut open: Vec<FileId> = self
+            .open_documents
+            .iter()
+            .filter_map(|path| self.file_ids.get(path).copied())
+            .collect();
+        open.sort_unstable();
+        self.engine
+            .set_input_durable(Key::OpenFiles, open, Durability::HIGH);
+    }
+
     fn set_engine_source(&mut self, path: &Path, source: SourceText, is_package: bool) {
         self.symbol_items_cache.remove(path);
         let file = self.file_id_for(path);
@@ -852,6 +868,7 @@ impl EngineWorker {
             self.engine.remove_input(&Key::DocumentKind(file));
             self.engine.remove_input(&Key::FileName(file));
             self.paths.remove(file);
+            self.sync_open_files_input();
             self.maybe_evict_stale_memos();
         }
         self.virtual_document_uris.remove(path);
@@ -1192,6 +1209,7 @@ impl EngineWorker {
         let is_package = self.is_package_path(&path);
         self.set_parsed_input(&path, document, is_package);
         self.rebuild_project_files();
+        self.sync_open_files_input();
 
         if !self.client_supports_pull_diagnostics {
             self.publish_first_wave_and_defer_semantic(&path, uri, params.text_document.version);
@@ -1217,6 +1235,7 @@ impl EngineWorker {
 
         self.open_documents.remove(&path);
         self.documents.remove(&path);
+        self.sync_open_files_input();
         self.pending_semantic_publishes
             .retain(|pending| pending != &path);
         if self.is_package_path(&path) {

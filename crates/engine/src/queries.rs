@@ -48,6 +48,7 @@ use {
         types::{Annotation, CoreType, NamedTypeRef, SurfaceType, TypeScheme},
     },
     ropey::Rope,
+    rustc_hash::FxHashMap,
     std::{
         cell::{Cell, Ref, RefCell},
         collections::{BTreeMap, BTreeSet, HashMap},
@@ -79,6 +80,14 @@ pub enum Key {
     /// A file's workspace-relative display path, for diagnostics whose story names another file
     /// (related locations). Set once alongside the first `SourceText` write; changes only on rename.
     FileName(FileId),
+    /// The open-document file set, **sorted ascending** — a *defaulted* input: a host that never
+    /// sets it (the CLI, tests) gets the empty set from a one-time derived execution, and a later
+    /// `set_input` overrides that. It exists purely as the performance seam splitting each
+    /// all-files fold into a durable (non-open) sub-fold plus an open-file overlay: the split is
+    /// value-identical for *any* contents (a misclassified file merely lands in the other half),
+    /// but per-keystroke validation is O(open) only when this lists exactly the LOW-durability
+    /// `SourceText` files. Changes on open/close only.
+    OpenFiles,
 
     // --- Derived ----------------------------------------------------------------------------------
     Lower(FileId),
@@ -94,8 +103,16 @@ pub enum Key {
     /// The lone all-files fold: `name → winning file`, names only, carried in the IDE-facing
     /// [`NamesGlobal`] shape so reads borrow it without a per-request rebuild. Recomputes only on
     /// *structural* export edits (add/remove/rename a top-level binding, add/remove/reclassify a
-    /// file), not on body edits.
+    /// file), not on body edits. Split into [`Key::DurableSymbolIndex`] plus an open-file overlay,
+    /// so a keystroke validates O(open) edges instead of walking every file's edge.
     PackageSymbolIndex,
+    /// The non-open half of [`Key::PackageSymbolIndex`]: each name's winning `(position, file)`
+    /// among the files *not* in [`Key::OpenFiles`], keyed by `ProjectFiles` position so the
+    /// overlay can replay path-order last-writer-wins exactly. Reads only durable inputs, so a
+    /// keystroke validates it in O(1) via the durability fast path — this is what makes the
+    /// public fold's per-keystroke walk O(open). The same split (durable sub-fold + overlay)
+    /// applies to every all-files fold below.
+    DurableSymbolIndex,
     /// One file's exported globals as ready-made completion entries (label, item kind, callability) —
     /// [`analysis::ide::generic::GlobalCompletionEntry`] per exported symbol. Value-eq: a body edit
     /// that changes no export name or defining shape recomputes to an equal value and cuts off before
@@ -103,15 +120,22 @@ pub enum Key {
     CompletionExports(FileId),
     /// The package-wide completion source: every global's entry from its winning file, in symbol
     /// order. Folded from [`Key::CompletionExports`] per package file; a completion request fetches
-    /// this one value instead of touching every file's module and naming.
+    /// this one value instead of touching every file's module and naming. Split like the symbol
+    /// index: durable winners' entries come from [`Key::DurableCompletionIndex`].
     PackageCompletionIndex,
+    /// The non-open half of [`Key::PackageCompletionIndex`]: the durable index winners' completion
+    /// entries, keyed by symbol for the overlay merge.
+    DurableCompletionIndex,
     /// One file's `globalVariables(c(...))` declarations, unquoted and sorted. Value-eq: body
     /// edits that touch no declaration cut off before the package fold.
     DeclaredGlobals(FileId),
     /// The package-wide `globalVariables` name set, folded from [`Key::DeclaredGlobals`] over
     /// package files. The could-not-resolve emitter skips these names — they are bound
-    /// dynamically by design.
+    /// dynamically by design. Split: the non-open half is [`Key::DurableDeclaredGlobals`].
     PackageDeclaredGlobals,
+    /// The non-open half of [`Key::PackageDeclaredGlobals`] (a plain set union, so the overlay
+    /// just unions the open files' declarations on top).
+    DurableDeclaredGlobals,
     /// **Declarations-only** view of one file's module for the type environment fold: the file's lowered
     /// [`Module`] held by shared pointer but compared by its `@type`/`@alias` declarations only (see
     /// [`TypeDefinitionsModule`]). The cutoff seam that keeps a body edit from re-folding
@@ -125,8 +149,13 @@ pub enum Key {
     /// identical) cuts off at the view and **never re-folds here**; the value is also `TypeDefinitionEnvironment`
     /// (value-eq), so even a structural edit that leaves the declarations equal cuts off before
     /// `Typecheck`/`GlobalScheme` re-run. Scripts fold this plus their own module (script-local
-    /// declarations shadow package ones) directly in `infer_file`.
+    /// declarations shadow package ones) directly in `infer_file`. Split: the non-open
+    /// declaration-bearing views come from [`Key::DurableTypeDefinitionModules`].
     PackageTypeDefinitions,
+    /// The non-open half of [`Key::PackageTypeDefinitions`]: the position-tagged declarations-only
+    /// views of the non-open package modules that actually carry `@type`/`@alias` declarations
+    /// (almost every module carries none and folds as a no-op, so this stays tiny).
+    DurableTypeDefinitionModules,
     /// The package-wide fallback diagnostic range: byte `0..len` of the first package file's first line,
     /// matching `Analysis::fallback_range`. `Diagnostic::from_inference_error` uses it for the handful of
     /// inference errors that carry no specific source range, so the engine reproduces production's range
@@ -181,8 +210,12 @@ pub enum Key {
     /// its info, plus the set of names defined by more than one package site (kept *out* of the
     /// resolved map and flagged as duplicates). The naming analog of [`Key::PackageSymbolIndex`],
     /// folded from [`Key::FileTypeDefinitions`] over package files. Value-eq, so a non-type edit cuts
-    /// off. (`analysis::naming::build_type_index`.)
+    /// off. (`analysis::naming::build_type_index`.) Split: non-open sites come from
+    /// [`Key::DurableTypeIndexSites`] (resolution counts sites per name, so overlay order is free).
     PackageTypeIndex,
+    /// The non-open half of [`Key::PackageTypeIndex`]: each type name's declaration sites across
+    /// the non-open package files.
+    DurableTypeIndexSites,
     /// The firewall projecting one type name's status (undefined / defined / duplicate) out of
     /// [`Key::PackageTypeIndex`]. Value-eq per name, so changing type `X` re-runs only the files that
     /// reference or define `X` — a type reverse-dependency hop, here emergent from the firewall.
@@ -190,16 +223,24 @@ pub enum Key {
     /// The package-wide ordered definer lists: each package-global name mapped to the files whose
     /// top-level bindings define it, in `ProjectFiles` (path) order — the full candidate list that
     /// [`Key::PackageSymbolIndex`] reduces to a last-writer winner. Folded from [`Key::ExportedNames`]
-    /// over package files. Value-eq. (`analysis::naming::build_candidate_order`.)
+    /// over package files. Value-eq. (`analysis::naming::build_candidate_order`.) Split: non-open
+    /// definer positions come from [`Key::DurableCandidateOrder`]; the overlay inserts open files'
+    /// contributions by position, reproducing path order exactly.
     PackageCandidateOrder,
+    /// The non-open half of [`Key::PackageCandidateOrder`]: each name's `(position, file)` definer
+    /// list over non-open package files, ascending by position.
+    DurableCandidateOrder,
     /// The firewall projecting one name's ordered definer list out of [`Key::PackageCandidateOrder`].
     /// Value-eq per name (the overwrite analog of [`Key::DefiningItem`]): adding or removing a definer
     /// of `X` re-runs only `X`'s co-definers' overwrite diagnostics.
     DefinerOrder(Symbol),
     /// The package-wide ordered *type* definer lists: each `@type`/`@alias` name mapped to the files
     /// declaring it, in `ProjectFiles` (path) order. The type analog of [`Key::PackageCandidateOrder`],
-    /// folded from [`Key::FileTypeDefinitions`] names over package files. Value-eq.
+    /// folded from [`Key::FileTypeDefinitions`] names over package files. Value-eq. Split like the
+    /// candidate order: [`Key::DurableTypeCandidateOrder`] holds the non-open positions.
     TypeCandidateOrder,
+    /// The non-open half of [`Key::TypeCandidateOrder`].
+    DurableTypeCandidateOrder,
     /// The firewall projecting one type name's ordered definer list out of [`Key::TypeCandidateOrder`].
     /// Value-eq per name: moving a definition of type `X` between files re-runs only `X`'s
     /// co-definers' duplicate-type diagnostics.
@@ -302,6 +343,7 @@ impl PartialEq for SourceText {
 /// this the environment folded `Lower(f)` directly and re-folded on every keystroke (an O(package) recompute
 /// for a body edit that changed no type), exactly the regression the names-only `ExportedNames` cutoff
 /// avoids for the symbol index.
+#[derive(Clone)]
 pub struct TypeDefinitionsModule(pub Shared<Module>);
 
 impl PartialEq for TypeDefinitionsModule {
@@ -594,7 +636,7 @@ impl RoughlyQueries {
     /// (e.g. one whole-file inference per interface-SCC fixed-point round), which is what the
     /// workspace diagnosis tool prints after its incremental probe.
     pub fn execution_totals(&self) -> Vec<(&'static str, u64)> {
-        fn total<K>(counter: &RefCell<HashMap<K, u64>>) -> u64 {
+        fn total<K>(counter: &RefCell<FxHashMap<K, u64>>) -> u64 {
             counter.borrow().values().sum()
         }
         vec![
@@ -672,6 +714,13 @@ impl QueryGroup for RoughlyQueries {
                 panic!("input queries are never executed")
             }
 
+            Key::OpenFiles => {
+                // The defaulted input: a host that never sets it has no open documents. Executed at
+                // most once (it reads nothing, so it can never be invalidated); a host `set_input`
+                // replaces this slot with a real input from then on.
+                Stored::new(Vec::<FileId>::new())
+            }
+
             Key::Lower(file) => {
                 bump(&self.counters.lower, *file);
                 // Replicate production's `lower_with_diagnostics` short-circuit (`analysis::lower`): a parse
@@ -716,28 +765,68 @@ impl QueryGroup for RoughlyQueries {
                 Stored::new(package_definition_names(&module, &naming.naming))
             }
 
-            Key::PackageSymbolIndex => {
-                self.counters
-                    .package_symbol_index
-                    .set(self.counters.package_symbol_index.get() + 1);
+            Key::DurableSymbolIndex => {
+                // The non-open half, keyed by `ProjectFiles` position (ascending insert = path-last
+                // wins). A file contributes only when its `DocumentKind` is `Package` (a script flip
+                // drops it exactly as a deletion would). Reads no open file, so its durability stays
+                // HIGH and a keystroke greens it in O(1) without walking its O(package) edges.
                 let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
-                // Path-last / last-writer-wins over the project files, in `ProjectFiles` order. A file
-                // contributes only when its `DocumentKind` is `Package` (a script flip drops it exactly
-                // as a deletion would), so the index reads `DocumentKind(f)` per file too. The value is
-                // the IDE-facing `NamesGlobal` shape directly, so a read borrows the memo instead of
-                // rebuilding a package-sized map per request.
-                let mut global_bindings: BTreeMap<Symbol, DocumentId> = BTreeMap::new();
-                for file in files.iter() {
+                let open = engine.fetch::<Vec<FileId>>(Key::OpenFiles);
+                let mut winners: BTreeMap<Symbol, (usize, FileId)> = BTreeMap::new();
+                for (position, file) in files.iter().enumerate() {
+                    if open.binary_search(file).is_ok() {
+                        continue;
+                    }
                     let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
                     if *kind != DocumentKind::Package {
                         continue;
                     }
                     let names = engine.fetch::<Vec<Symbol>>(Key::ExportedNames(*file));
                     for name in names.iter() {
-                        global_bindings.insert(*name, DocumentId(*file));
+                        winners.insert(*name, (position, *file));
                     }
                 }
-                Stored::new(NamesGlobal { global_bindings })
+                Stored::new(winners)
+            }
+
+            Key::PackageSymbolIndex => {
+                self.counters
+                    .package_symbol_index
+                    .set(self.counters.package_symbol_index.get() + 1);
+                // Path-last / last-writer-wins over the project files: the durable (non-open)
+                // winners overlaid with the open files' exports, compared by `ProjectFiles`
+                // position — byte-identical to folding every file directly, but a keystroke
+                // validates only the durable half (O(1) green) plus the open files' edges. The
+                // value is the IDE-facing `NamesGlobal` shape directly, so a read borrows the memo
+                // instead of rebuilding a package-sized map per request.
+                let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
+                let open = engine.fetch::<Vec<FileId>>(Key::OpenFiles);
+                let durable =
+                    engine.fetch::<BTreeMap<Symbol, (usize, FileId)>>(Key::DurableSymbolIndex);
+                let mut winners: BTreeMap<Symbol, (usize, FileId)> = (*durable).clone();
+                for file in open.iter() {
+                    let Some(position) = files.iter().position(|candidate| candidate == file)
+                    else {
+                        continue;
+                    };
+                    let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
+                    if *kind != DocumentKind::Package {
+                        continue;
+                    }
+                    let names = engine.fetch::<Vec<Symbol>>(Key::ExportedNames(*file));
+                    for name in names.iter() {
+                        let entry = winners.entry(*name).or_insert((position, *file));
+                        if position >= entry.0 {
+                            *entry = (position, *file);
+                        }
+                    }
+                }
+                Stored::new(NamesGlobal {
+                    global_bindings: winners
+                        .into_iter()
+                        .map(|(name, (_, file))| (name, DocumentId(file)))
+                        .collect(),
+                })
             }
 
             Key::CompletionExports(file) => {
@@ -754,17 +843,17 @@ impl QueryGroup for RoughlyQueries {
                 ))
             }
 
-            Key::PackageCompletionIndex => {
-                // Fold the per-file entries down to each name's package winner. The per-file query
-                // recomputes to an equal value on body edits (names, kinds and arity shapes are
-                // unchanged), so this fold — like the symbol index it mirrors — re-runs only on
-                // structural export edits.
-                let index = engine.fetch::<NamesGlobal>(Key::PackageSymbolIndex);
+            Key::DurableCompletionIndex => {
+                // The durable index winners' entries, keyed by symbol for the overlay merge. Reads
+                // `CompletionExports` only of non-open files (the durable index's winners), so a
+                // keystroke greens it in O(1).
+                let durable =
+                    engine.fetch::<BTreeMap<Symbol, (usize, FileId)>>(Key::DurableSymbolIndex);
                 let mut by_file: BTreeMap<FileId, Vec<Symbol>> = BTreeMap::new();
-                for (symbol, document) in index.global_bindings.iter() {
-                    by_file.entry(document.0).or_default().push(*symbol);
+                for (symbol, (_, file)) in durable.iter() {
+                    by_file.entry(*file).or_default().push(*symbol);
                 }
-                let mut entries: Vec<GlobalCompletionEntry> = Vec::new();
+                let mut entries: BTreeMap<Symbol, GlobalCompletionEntry> = BTreeMap::new();
                 for (file, winners) in by_file {
                     let exports =
                         engine.fetch::<Vec<GlobalCompletionEntry>>(Key::CompletionExports(file));
@@ -772,10 +861,49 @@ impl QueryGroup for RoughlyQueries {
                         exports
                             .iter()
                             .filter(|entry| winners.binary_search(&entry.symbol).is_ok())
-                            .cloned(),
+                            .map(|entry| (entry.symbol, entry.clone())),
                     );
                 }
-                entries.sort_by_key(|entry| entry.symbol);
+                Stored::new(entries)
+            }
+
+            Key::PackageCompletionIndex => {
+                // Each name's entry from its package winner, in symbol order: open winners' entries
+                // come from their files' `CompletionExports`, everything else from the durable
+                // half. The per-file query recomputes to an equal value on body edits (names, kinds
+                // and arity shapes are unchanged), so this fold — like the symbol index it mirrors
+                // — re-runs only on structural export edits, and a keystroke validates O(open).
+                let index = engine.fetch::<NamesGlobal>(Key::PackageSymbolIndex);
+                let open = engine.fetch::<Vec<FileId>>(Key::OpenFiles);
+                let durable = engine
+                    .fetch::<BTreeMap<Symbol, GlobalCompletionEntry>>(Key::DurableCompletionIndex);
+                let mut open_by_file: BTreeMap<FileId, Vec<Symbol>> = BTreeMap::new();
+                for (symbol, document) in index.global_bindings.iter() {
+                    if open.binary_search(&document.0).is_ok() {
+                        open_by_file.entry(document.0).or_default().push(*symbol);
+                    }
+                }
+                let mut open_entries: BTreeMap<Symbol, GlobalCompletionEntry> = BTreeMap::new();
+                for (file, winners) in open_by_file {
+                    let exports =
+                        engine.fetch::<Vec<GlobalCompletionEntry>>(Key::CompletionExports(file));
+                    open_entries.extend(
+                        exports
+                            .iter()
+                            .filter(|entry| winners.binary_search(&entry.symbol).is_ok())
+                            .map(|entry| (entry.symbol, entry.clone())),
+                    );
+                }
+                let mut entries: Vec<GlobalCompletionEntry> =
+                    Vec::with_capacity(index.global_bindings.len());
+                for (symbol, document) in index.global_bindings.iter() {
+                    let entry = if open.binary_search(&document.0).is_ok() {
+                        open_entries.get(symbol)
+                    } else {
+                        durable.get(symbol)
+                    };
+                    entries.extend(entry.cloned());
+                }
                 Stored::new(entries)
             }
 
@@ -785,10 +913,39 @@ impl QueryGroup for RoughlyQueries {
                 Stored::new(declared_global_variables(&module, lowering.interner()))
             }
 
-            Key::PackageDeclaredGlobals => {
+            Key::DurableDeclaredGlobals => {
                 let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
+                let open = engine.fetch::<Vec<FileId>>(Key::OpenFiles);
                 let mut declared: BTreeSet<String> = BTreeSet::new();
                 for file in files.iter() {
+                    if open.binary_search(file).is_ok() {
+                        continue;
+                    }
+                    let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
+                    if *kind != DocumentKind::Package {
+                        continue;
+                    }
+                    declared.extend(
+                        engine
+                            .fetch::<Vec<String>>(Key::DeclaredGlobals(*file))
+                            .iter()
+                            .cloned(),
+                    );
+                }
+                Stored::new(declared)
+            }
+
+            Key::PackageDeclaredGlobals => {
+                // A set union, so the overlay is the trivial merge: the durable (non-open) union
+                // plus the open files' declarations.
+                let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
+                let open = engine.fetch::<Vec<FileId>>(Key::OpenFiles);
+                let mut declared: BTreeSet<String> =
+                    (*engine.fetch::<BTreeSet<String>>(Key::DurableDeclaredGlobals)).clone();
+                for file in open.iter() {
+                    if !files.contains(file) {
+                        continue;
+                    }
                     let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
                     if *kind != DocumentKind::Package {
                         continue;
@@ -809,30 +966,68 @@ impl QueryGroup for RoughlyQueries {
                 Stored::new(TypeDefinitionsModule(module))
             }
 
+            Key::DurableTypeDefinitionModules => {
+                // The position-tagged declarations-only views of the non-open package modules that
+                // actually declare types (`from_modules` reads nothing but `module.definitions`, so
+                // declaration-free modules fold as no-ops and are dropped here — the value stays a
+                // handful of shared pointers). Ascending by position.
+                let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
+                let open = engine.fetch::<Vec<FileId>>(Key::OpenFiles);
+                let mut modules: Vec<(usize, TypeDefinitionsModule)> = Vec::new();
+                for (position, file) in files.iter().enumerate() {
+                    if open.binary_search(file).is_ok() {
+                        continue;
+                    }
+                    let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
+                    if *kind != DocumentKind::Package {
+                        continue;
+                    }
+                    let view =
+                        engine.fetch::<TypeDefinitionsModule>(Key::TypeDefinitionsModule(*file));
+                    if !view.0.definitions.is_empty() {
+                        modules.push((position, TypeDefinitionsModule(view.0.clone())));
+                    }
+                }
+                Stored::new(modules)
+            }
+
             Key::PackageTypeDefinitions => {
                 self.counters
                     .package_type_definitions
                     .set(self.counters.package_type_definitions.get() + 1);
                 // Fold every package module's top-level `@type`/`@alias` declarations, exactly as
-                // production's `TypeDefinitionEnvironment::from_modules` over `package_document_ids`. A
-                // file contributes only when its `DocumentKind` is `Package`, matching the index fold and
-                // the package document set. Folds the per-file `TypeDefinitionsModule` *views* rather than
-                // `Lower` directly: a body edit recomputes the view but it compares equal on declarations
-                // and cuts off, so this fold does not re-run on a keystroke that changes no type — the
-                // O(package) recompute the names-only `ExportedNames` cutoff likewise spares the symbol index.
+                // production's `TypeDefinitionEnvironment::from_modules` over `package_document_ids`:
+                // the durable (non-open) declaration-bearing views merged with the open files' views
+                // in `ProjectFiles` position order, which `from_modules`' last-wins insert makes
+                // byte-identical to folding every module directly. Folds the per-file
+                // `TypeDefinitionsModule` *views* rather than `Lower` directly: a body edit
+                // recomputes the view but it compares equal on declarations and cuts off, so this
+                // fold does not re-run on a keystroke that changes no type.
                 let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
-                let mut modules = Vec::new();
-                for file in files.iter() {
+                let open = engine.fetch::<Vec<FileId>>(Key::OpenFiles);
+                let durable = engine.fetch::<Vec<(usize, TypeDefinitionsModule)>>(
+                    Key::DurableTypeDefinitionModules,
+                );
+                let mut modules: Vec<(usize, TypeDefinitionsModule)> = (*durable).clone();
+                for file in open.iter() {
+                    let Some(position) = files.iter().position(|candidate| candidate == file)
+                    else {
+                        continue;
+                    };
                     let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
-                    if *kind == DocumentKind::Package {
-                        modules.push(
-                            engine
-                                .fetch::<TypeDefinitionsModule>(Key::TypeDefinitionsModule(*file)),
-                        );
+                    if *kind != DocumentKind::Package {
+                        continue;
+                    }
+                    let view =
+                        engine.fetch::<TypeDefinitionsModule>(Key::TypeDefinitionsModule(*file));
+                    if !view.0.definitions.is_empty() {
+                        modules.push((position, TypeDefinitionsModule(view.0.clone())));
                     }
                 }
-                let mut type_definitions =
-                    TypeDefinitionEnvironment::from_modules(modules.iter().map(|view| &*view.0));
+                modules.sort_by_key(|(position, _)| *position);
+                let mut type_definitions = TypeDefinitionEnvironment::from_modules(
+                    modules.iter().map(|(_, view)| &*view.0),
+                );
                 self.stubs.seed_type_definitions(&mut type_definitions);
                 Stored::new(type_definitions)
             }
@@ -913,17 +1108,51 @@ impl QueryGroup for RoughlyQueries {
                 Stored::new(file_type_definitions(&module))
             }
 
+            Key::DurableTypeIndexSites => {
+                let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
+                let open = engine.fetch::<Vec<FileId>>(Key::OpenFiles);
+                let mut sites: BTreeMap<Symbol, Vec<EngineTypeInfo>> = BTreeMap::new();
+                for file in files.iter() {
+                    if open.binary_search(file).is_ok() {
+                        continue;
+                    }
+                    let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
+                    if *kind != DocumentKind::Package {
+                        continue;
+                    }
+                    let definitions = engine.fetch::<BTreeMap<Symbol, Vec<EngineTypeInfo>>>(
+                        Key::FileTypeDefinitions(*file),
+                    );
+                    for (name, infos) in definitions.iter() {
+                        sites
+                            .entry(*name)
+                            .or_default()
+                            .extend(infos.iter().copied());
+                    }
+                }
+                Stored::new(sites)
+            }
+
             Key::PackageTypeIndex => {
                 self.counters
                     .package_type_index
                     .set(self.counters.package_type_index.get() + 1);
                 // Fold every package module's type declarations into the naming-level index, exactly as
                 // `build_type_index` folds `document_type_definitions`: one site resolves the name, two or
-                // more mark it a duplicate (and keep it unresolved). Reads `FileTypeDefinitions` (the
+                // more mark it a duplicate (and keep it unresolved) — a per-name site *count*, so the
+                // durable/open merge order is immaterial. Reads `FileTypeDefinitions` (the
                 // declarations-only cutoff) so a body edit that changes no declaration cuts off here.
                 let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
-                let mut sites: BTreeMap<Symbol, Vec<EngineTypeInfo>> = BTreeMap::new();
-                for file in files.iter() {
+                let open = engine.fetch::<Vec<FileId>>(Key::OpenFiles);
+                let mut sites: BTreeMap<Symbol, Vec<EngineTypeInfo>> =
+                    (*engine.fetch::<BTreeMap<Symbol, Vec<EngineTypeInfo>>>(
+                        Key::DurableTypeIndexSites,
+                    ))
+                    .clone();
+                for file in open.iter() {
+                    if !files.contains(file) {
+                        continue;
+                    }
                     let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
                     if *kind != DocumentKind::Package {
                         continue;
@@ -970,24 +1199,58 @@ impl QueryGroup for RoughlyQueries {
                 Stored::new(status)
             }
 
-            Key::PackageCandidateOrder => {
-                self.counters
-                    .package_candidate_order
-                    .set(self.counters.package_candidate_order.get() + 1);
-                // Path-ordered definer lists: append each package file (in `ProjectFiles` order) onto the
-                // candidate list of every name it defines. Reads the same `ExportedNames` cutoff as the
-                // symbol index, so a body edit cuts off here too. (`build_candidate_order`.)
+            Key::DurableCandidateOrder => {
                 let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
-                let mut order: BTreeMap<Symbol, Vec<FileId>> = BTreeMap::new();
-                for file in files.iter() {
+                let open = engine.fetch::<Vec<FileId>>(Key::OpenFiles);
+                let mut order: BTreeMap<Symbol, Vec<(usize, FileId)>> = BTreeMap::new();
+                for (position, file) in files.iter().enumerate() {
+                    if open.binary_search(file).is_ok() {
+                        continue;
+                    }
                     let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
                     if *kind != DocumentKind::Package {
                         continue;
                     }
                     let names = engine.fetch::<Vec<Symbol>>(Key::ExportedNames(*file));
                     for name in names.iter() {
-                        order.entry(*name).or_default().push(*file);
+                        order.entry(*name).or_default().push((position, *file));
                     }
+                }
+                Stored::new(order)
+            }
+
+            Key::PackageCandidateOrder => {
+                self.counters
+                    .package_candidate_order
+                    .set(self.counters.package_candidate_order.get() + 1);
+                // Path-ordered definer lists: each name's candidate list of every package file that
+                // defines it, in `ProjectFiles` order — the durable positions merged with the open
+                // files' contributions and sorted by position, byte-identical to appending each file
+                // in order. Reads the same `ExportedNames` cutoff as the symbol index, so a body
+                // edit cuts off here too. (`build_candidate_order`.)
+                let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
+                let open = engine.fetch::<Vec<FileId>>(Key::OpenFiles);
+                let durable = engine
+                    .fetch::<BTreeMap<Symbol, Vec<(usize, FileId)>>>(Key::DurableCandidateOrder);
+                let mut positioned: BTreeMap<Symbol, Vec<(usize, FileId)>> = (*durable).clone();
+                for file in open.iter() {
+                    let Some(position) = files.iter().position(|candidate| candidate == file)
+                    else {
+                        continue;
+                    };
+                    let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
+                    if *kind != DocumentKind::Package {
+                        continue;
+                    }
+                    let names = engine.fetch::<Vec<Symbol>>(Key::ExportedNames(*file));
+                    for name in names.iter() {
+                        positioned.entry(*name).or_default().push((position, *file));
+                    }
+                }
+                let mut order: BTreeMap<Symbol, Vec<FileId>> = BTreeMap::new();
+                for (name, mut candidates) in positioned {
+                    candidates.sort_by_key(|(position, _)| *position);
+                    order.insert(name, candidates.into_iter().map(|(_, file)| file).collect());
                 }
                 Stored::new(order)
             }
@@ -999,13 +1262,14 @@ impl QueryGroup for RoughlyQueries {
                 Stored::new(order.get(name).cloned().unwrap_or_default())
             }
 
-            Key::TypeCandidateOrder => {
-                // Path-ordered type definer lists: append each package file (in `ProjectFiles`
-                // order) onto the definer list of every type name it declares. Reads the
-                // `FileTypeDefinitions` declarations-only cutoff, so a body edit cuts off here.
+            Key::DurableTypeCandidateOrder => {
                 let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
-                let mut order: BTreeMap<Symbol, Vec<FileId>> = BTreeMap::new();
-                for file in files.iter() {
+                let open = engine.fetch::<Vec<FileId>>(Key::OpenFiles);
+                let mut order: BTreeMap<Symbol, Vec<(usize, FileId)>> = BTreeMap::new();
+                for (position, file) in files.iter().enumerate() {
+                    if open.binary_search(file).is_ok() {
+                        continue;
+                    }
                     let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
                     if *kind != DocumentKind::Package {
                         continue;
@@ -1014,8 +1278,42 @@ impl QueryGroup for RoughlyQueries {
                         Key::FileTypeDefinitions(*file),
                     );
                     for name in definitions.keys() {
-                        order.entry(*name).or_default().push(*file);
+                        order.entry(*name).or_default().push((position, *file));
                     }
+                }
+                Stored::new(order)
+            }
+
+            Key::TypeCandidateOrder => {
+                // Path-ordered type definer lists, merged from the durable positions plus the open
+                // files' declarations exactly like `PackageCandidateOrder`. Reads the
+                // `FileTypeDefinitions` declarations-only cutoff, so a body edit cuts off here.
+                let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
+                let open = engine.fetch::<Vec<FileId>>(Key::OpenFiles);
+                let durable = engine.fetch::<BTreeMap<Symbol, Vec<(usize, FileId)>>>(
+                    Key::DurableTypeCandidateOrder,
+                );
+                let mut positioned: BTreeMap<Symbol, Vec<(usize, FileId)>> = (*durable).clone();
+                for file in open.iter() {
+                    let Some(position) = files.iter().position(|candidate| candidate == file)
+                    else {
+                        continue;
+                    };
+                    let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
+                    if *kind != DocumentKind::Package {
+                        continue;
+                    }
+                    let definitions = engine.fetch::<BTreeMap<Symbol, Vec<EngineTypeInfo>>>(
+                        Key::FileTypeDefinitions(*file),
+                    );
+                    for name in definitions.keys() {
+                        positioned.entry(*name).or_default().push((position, *file));
+                    }
+                }
+                let mut order: BTreeMap<Symbol, Vec<FileId>> = BTreeMap::new();
+                for (name, mut candidates) in positioned {
+                    candidates.sort_by_key(|(position, _)| *position);
+                    order.insert(name, candidates.into_iter().map(|(_, file)| file).collect());
                 }
                 Stored::new(order)
             }
@@ -2468,36 +2766,36 @@ fn synthetic_range() -> Range {
 
 #[derive(Default)]
 struct Counters {
-    parse: RefCell<HashMap<FileId, u64>>,
-    lower: RefCell<HashMap<FileId, u64>>,
-    local_naming: RefCell<HashMap<FileId, u64>>,
-    exported_names: RefCell<HashMap<FileId, u64>>,
+    parse: RefCell<FxHashMap<FileId, u64>>,
+    lower: RefCell<FxHashMap<FileId, u64>>,
+    local_naming: RefCell<FxHashMap<FileId, u64>>,
+    exported_names: RefCell<FxHashMap<FileId, u64>>,
     package_symbol_index: Cell<u64>,
-    type_definitions_module: RefCell<HashMap<FileId, u64>>,
+    type_definitions_module: RefCell<FxHashMap<FileId, u64>>,
     package_type_definitions: Cell<u64>,
     fallback_range: Cell<u64>,
-    defining_item: RefCell<HashMap<Symbol, u64>>,
-    exported_schemes: RefCell<HashMap<FileId, u64>>,
-    global_scheme: RefCell<HashMap<Symbol, u64>>,
-    interface_deps: RefCell<HashMap<Symbol, u64>>,
-    symbol_scc: RefCell<HashMap<Symbol, u64>>,
-    interface_scc: RefCell<HashMap<Vec<Symbol>, u64>>,
-    file_type_definitions: RefCell<HashMap<FileId, u64>>,
+    defining_item: RefCell<FxHashMap<Symbol, u64>>,
+    exported_schemes: RefCell<FxHashMap<FileId, u64>>,
+    global_scheme: RefCell<FxHashMap<Symbol, u64>>,
+    interface_deps: RefCell<FxHashMap<Symbol, u64>>,
+    symbol_scc: RefCell<FxHashMap<Symbol, u64>>,
+    interface_scc: RefCell<FxHashMap<Vec<Symbol>, u64>>,
+    file_type_definitions: RefCell<FxHashMap<FileId, u64>>,
     package_type_index: Cell<u64>,
-    type_name_status: RefCell<HashMap<Symbol, u64>>,
+    type_name_status: RefCell<FxHashMap<Symbol, u64>>,
     package_candidate_order: Cell<u64>,
-    definer_order: RefCell<HashMap<Symbol, u64>>,
-    package_naming_diagnostics: RefCell<HashMap<FileId, u64>>,
-    lowering_diagnostics: RefCell<HashMap<FileId, u64>>,
-    lint: RefCell<HashMap<FileId, u64>>,
-    typecheck: RefCell<HashMap<FileId, u64>>,
-    diagnostics: RefCell<HashMap<FileId, u64>>,
+    definer_order: RefCell<FxHashMap<Symbol, u64>>,
+    package_naming_diagnostics: RefCell<FxHashMap<FileId, u64>>,
+    lowering_diagnostics: RefCell<FxHashMap<FileId, u64>>,
+    lint: RefCell<FxHashMap<FileId, u64>>,
+    typecheck: RefCell<FxHashMap<FileId, u64>>,
+    diagnostics: RefCell<FxHashMap<FileId, u64>>,
 }
 
-fn bump<K: Eq + std::hash::Hash>(counter: &RefCell<HashMap<K, u64>>, key: K) {
+fn bump<K: Eq + std::hash::Hash>(counter: &RefCell<FxHashMap<K, u64>>, key: K) {
     *counter.borrow_mut().entry(key).or_default() += 1;
 }
 
-fn per_key<K: Eq + std::hash::Hash>(counter: &RefCell<HashMap<K, u64>>, key: K) -> u64 {
+fn per_key<K: Eq + std::hash::Hash>(counter: &RefCell<FxHashMap<K, u64>>, key: K) -> u64 {
     counter.borrow().get(&key).copied().unwrap_or(0)
 }

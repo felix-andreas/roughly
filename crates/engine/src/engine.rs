@@ -64,17 +64,19 @@ pub mod queries;
 // `analysis` (for the shared `IdeDatabase` orchestration) and `queries`.
 pub mod ide_view;
 
-use std::{
-    any::Any,
-    cell::{Cell, RefCell},
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-    hash::Hash,
-    panic::{AssertUnwindSafe, catch_unwind, panic_any, resume_unwind},
-    rc::Rc,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
+use {
+    rustc_hash::{FxHashMap, FxHashSet},
+    std::{
+        any::Any,
+        cell::{Cell, RefCell},
+        fmt::Debug,
+        hash::Hash,
+        panic::{AssertUnwindSafe, catch_unwind, panic_any, resume_unwind},
+        rc::Rc,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
     },
 };
 
@@ -86,7 +88,7 @@ pub type Shared<T> = Rc<T>;
 /// The memo table type, aliased alongside [`Shared`] as the second half of the concurrency hedge: a
 /// parallel retrofit replaces this single `RefCell<HashMap<…>>` with a concurrency-safe map (sharded /
 /// `RwLock` / lock-free) in one place, leaving the red-green algorithm untouched.
-type MemoTable<K> = RefCell<HashMap<K, Slot<K>>>;
+type MemoTable<K> = RefCell<FxHashMap<K, Slot<K>>>;
 
 /// The engine's logical clock. Bumped once per [`Engine::set_input`]; memos are validated against it.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -205,7 +207,7 @@ pub struct Engine<G: QueryGroup> {
     // cycle (a derived body transitively fetching itself); without this marker that recurses until the
     // stack overflows. The one *intended* cycle (the package-interface fixed-point) is resolved inside a
     // single body and never re-enters `fetch` on its own key, so it never trips this guard.
-    computing: RefCell<HashSet<G::Key>>,
+    computing: RefCell<FxHashSet<G::Key>>,
     // The cancellation token of the in-flight [`Engine::fetch_cancellable`], if any. `None` for the plain
     // [`Engine::fetch`] path, which is therefore byte-for-byte unchanged: [`Engine::check_cancelled`] is a
     // no-op without an installed token. Only this `Arc<AtomicBool>` ever crosses a thread (a newer edit
@@ -226,9 +228,9 @@ impl<G: QueryGroup> Engine<G> {
             revision: Cell::new(Revision::START),
             last_change: Cell::new([Revision::START; Durability::LEVELS]),
             validations: Cell::new(0),
-            slots: RefCell::new(HashMap::new()),
+            slots: RefCell::new(FxHashMap::default()),
             dependency_stack: RefCell::new(Vec::new()),
-            computing: RefCell::new(HashSet::new()),
+            computing: RefCell::new(FxHashSet::default()),
             cancellation: RefCell::new(None),
         }
     }
@@ -253,6 +255,19 @@ impl<G: QueryGroup> Engine<G> {
     /// exists to bound; the regression tests pin it.
     pub fn validation_count(&self) -> u64 {
         self.validations.get()
+    }
+
+    /// The keys of every slot verified at the *current* revision — the unique slots the revision's
+    /// validation walk has touched so far. Observability for the workspace diagnosis tool: grouping
+    /// these by key kind attributes a keystroke's walk to the query families that grow it.
+    pub fn slots_verified_this_revision(&self) -> Vec<G::Key> {
+        let revision = self.revision.get();
+        self.slots
+            .borrow()
+            .iter()
+            .filter(|(_, slot)| slot.verified_at == revision)
+            .map(|(key, _)| key.clone())
+            .collect()
     }
 
     /// Set or replace an input at [`Durability::LOW`] — the right call for high-churn inputs (an open

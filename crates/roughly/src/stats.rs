@@ -21,6 +21,7 @@ use {
     },
     ignore::Walk,
     std::{
+        collections::BTreeMap,
         path::{Path, PathBuf},
         time::{Duration, Instant},
     },
@@ -294,6 +295,22 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), crate::cli::CommandEr
     if let Some(slowest) = by_typecheck.first().map(|record| record.file)
         && let Some(record) = files.iter().find(|record| record.file == slowest)
     {
+        // Declare the probe file open (as an editor's did_open would): list it in `OpenFiles` and
+        // downgrade its source to open-document durability (same text). Then settle the one-time
+        // open-event revalidation walk, so the burst measures steady-state keystrokes: the durable
+        // halves of the all-files folds exclude the open file and green out in O(1) per keystroke.
+        engine.set_input_durable(Key::OpenFiles, vec![record.file], Durability::HIGH);
+        match Document::parse(&mut parser, &record.source) {
+            Ok(document) => engine.set_input_durable(
+                Key::SourceText(record.file),
+                SourceText::from_document(&document),
+                Durability::LOW,
+            ),
+            Err(error) => {
+                eprintln!("warning: incremental probe open failed to parse: {error:?}");
+            }
+        }
+        let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(record.file));
         let totals_before = engine.group().execution_totals();
         let validations_before = engine.validation_count();
         let mut keystroke_times = Vec::with_capacity(TYPING_BURST);
@@ -320,6 +337,10 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), crate::cli::CommandEr
             }
         }
         if !probe_failed {
+            let mut validated_kinds: BTreeMap<&'static str, u64> = BTreeMap::new();
+            for key in engine.slots_verified_this_revision() {
+                *validated_kinds.entry(key_kind(&key)).or_default() += 1;
+            }
             let totals_after_burst = engine.group().execution_totals();
             let validations_after_burst = engine.validation_count();
             let start = Instant::now();
@@ -374,6 +395,13 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), crate::cli::CommandEr
                 (validations_after_burst - validations_before) as f64 / TYPING_BURST as f64,
                 validations_after_sweep - validations_after_burst,
             );
+            println!();
+            println!("  slots validated by the last keystroke (unique, by query):");
+            let mut kinds: Vec<(&'static str, u64)> = validated_kinds.into_iter().collect();
+            kinds.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+            for (kind, count) in kinds {
+                println!("    {kind:<28} {count:>11}");
+            }
         }
     }
 
@@ -386,6 +414,56 @@ struct FileRecord {
     loc: usize,
     source: String,
     typecheck: Duration,
+}
+
+// The key's query family, for the per-keystroke walk attribution table.
+fn key_kind(key: &Key) -> &'static str {
+    match key {
+        Key::SourceText(_) => "source text",
+        Key::DocumentKind(_) => "document kind",
+        Key::ProjectFiles => "project files",
+        Key::Config => "config",
+        Key::FileName(_) => "file name",
+        Key::OpenFiles => "open files",
+        Key::Lower(_) => "lower",
+        Key::LocalNaming(_) => "local naming",
+        Key::ExportedNames(_) => "exported names",
+        Key::TopLevelSite(..) => "top-level site",
+        Key::PackageSymbolIndex => "package symbol index",
+        Key::DurableSymbolIndex => "durable symbol index",
+        Key::CompletionExports(_) => "completion exports",
+        Key::PackageCompletionIndex => "package completion index",
+        Key::DurableCompletionIndex => "durable completion index",
+        Key::DeclaredGlobals(_) => "declared globals",
+        Key::PackageDeclaredGlobals => "package declared globals",
+        Key::DurableDeclaredGlobals => "durable declared globals",
+        Key::TypeDefinitionsModule(_) => "type definitions module",
+        Key::PackageTypeDefinitions => "package type definitions",
+        Key::DurableTypeDefinitionModules => "durable type definition modules",
+        Key::FallbackRange => "fallback range",
+        Key::DefiningItem(_) => "defining item",
+        Key::InterfaceDeps(_) => "interface deps",
+        Key::SymbolScc(_) => "symbol scc",
+        Key::GlobalScheme(_) => "global scheme",
+        Key::ExportedSchemes(_) => "exported schemes",
+        Key::InterfaceScc(_) => "interface scc",
+        Key::FileTypeDefinitions(_) => "file type definitions",
+        Key::PackageTypeIndex => "package type index",
+        Key::DurableTypeIndexSites => "durable type index sites",
+        Key::TypeNameStatus(_) => "type name status",
+        Key::PackageCandidateOrder => "package candidate order",
+        Key::DurableCandidateOrder => "durable candidate order",
+        Key::DefinerOrder(_) => "definer order",
+        Key::TypeCandidateOrder => "type candidate order",
+        Key::DurableTypeCandidateOrder => "durable type candidate order",
+        Key::TypeDefinerOrder(_) => "type definer order",
+        Key::TypeDefinitionSites(..) => "type definition sites",
+        Key::PackageNamingDiagnostics(_) => "package naming diagnostics",
+        Key::LoweringDiagnostics(_) => "lowering diagnostics",
+        Key::Lint(_) => "lint",
+        Key::Typecheck(_) => "typecheck",
+        Key::Diagnostics(_) => "diagnostics",
+    }
 }
 
 const MEBIBYTE: f64 = 1024.0 * 1024.0;

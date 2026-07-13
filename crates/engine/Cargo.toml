@@ -13,5 +13,6 @@ path = "src/engine.rs"
 # the generic engine core in `engine.rs` stays analysis-free, the R layer lives in `queries.rs`.
 analysis = { path = "../analysis" }
 ropey.workspace = true
+rustc-hash.workspace = true
 stacker = "0.1.24"
 tree-sitter.workspace = true

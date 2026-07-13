@@ -755,20 +755,34 @@ fn ide_reads_at_rest_touch_constant_validation_work() {
     });
 }
 
-// After an open-document keystroke, the first read of the new revision walks the all-files folds'
-// edges (each an O(1) durability check) plus the edited file's own chain — but never the unopened
-// files' chains. The bound is a small multiple of N; without durability the walk recursed through
-// every file's parse/lower/naming chain and sat several times higher. (Measured shape at this N:
-// ~2.6k touched with durability, ~7.5k+ without.)
+// After an open-document keystroke, the first read of the new revision walks the open files'
+// fold-overlay edges plus the edited file's own chain — never the unopened files' chains (their
+// durable sub-folds green in O(1) via durability). The walk is therefore bounded by a constant
+// independent of the package size: the same keystroke at 100 and at 300 files must touch the
+// same number of memos. Before the fold split the folds walked one edge per file and this sat
+// at ~2.6k (durability-bounded but O(N)); without durability it recursed to ~7.5k+.
 #[test]
 fn open_file_edit_walk_is_durability_bounded() {
-    let file_count = 300;
+    let touched_small = post_keystroke_walk(100);
+    let touched_large = post_keystroke_walk(300);
+    assert!(
+        touched_large <= touched_small + 8,
+        "a post-keystroke diagnostics read touched {touched_large} memos at 300 files vs \
+         {touched_small} at 100; the walk must be size-independent — durable sub-folds green in \
+         O(1) and only the open-file overlay edges plus the edited chain are walked"
+    );
+}
+
+// One steady-state open-document keystroke at `file_count` files: open the mid-chain file (list it
+// in `OpenFiles` and downgrade its source, exactly as the server's did_open does), settle the
+// one-time open-event flush, then measure the walk of a genuine body edit's first reads.
+fn post_keystroke_walk(file_count: usize) -> u64 {
     let edit_file = mid_chain_edit_file(file_count);
     let referrer = edit_file + 1;
     let mut engine = build_new_engine(file_count);
     warm_new_engine(&engine, file_count);
 
-    // Open the edit target (downgrade, same text), and settle the one-time flush walk.
+    engine.set_input_durable(Key::OpenFiles, vec![edit_file], Durability::HIGH);
     open_file_edit(
         &mut engine,
         edit_file,
@@ -785,11 +799,5 @@ fn open_file_edit_walk_is_durability_bounded() {
     let before = engine.validation_count();
     let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(edit_file));
     let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(referrer));
-    let touched = engine.validation_count() - before;
-    assert!(
-        touched as usize <= 12 * file_count,
-        "a post-keystroke diagnostics read touched {touched} memos at {file_count} files; \
-         the unopened files' chains must validate O(1) via durability, leaving only the \
-         fold edges and the edited chain"
-    );
+    engine.validation_count() - before
 }
