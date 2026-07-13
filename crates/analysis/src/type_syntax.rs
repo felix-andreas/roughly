@@ -2114,7 +2114,15 @@ mod utils {
         let remaining = &text[start..];
         let mut characters = remaining.char_indices();
         let (_, first_character) = characters.next()?;
-        if !is_identifier_start(first_character) {
+        // R identifiers may start with a dot (`.data`, `.x`) as long as a letter or underscore
+        // follows — `.5` is a number and `...` is the rest parameter, so a dot followed by
+        // anything else is not a name.
+        let dot_start = first_character == '.'
+            && remaining[first_character.len_utf8()..]
+                .chars()
+                .next()
+                .is_some_and(|second| second == '_' || second.is_alphabetic());
+        if !is_identifier_start(first_character) && !dot_start {
             return None;
         }
 

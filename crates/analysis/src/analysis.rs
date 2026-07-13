@@ -670,6 +670,7 @@ pub fn resolve_package(analysis_state: &mut Analysis) {
             *document_id,
             module,
             analysis_state.interner(),
+            &analysis_state.stub_library,
             document_kind,
         );
         analysis_state.document_naming_outputs.insert(

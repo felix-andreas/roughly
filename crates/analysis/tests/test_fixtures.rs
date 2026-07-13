@@ -980,10 +980,12 @@ fn run_naming_local_fixture(fixture: &Fixture) -> Result<Vec<Vec<FixtureRunFile>
     let module = lower::lower(&document, &mut lowering_context);
     let lowering_diagnostics = lowering_context.take_diagnostics();
     let document_id = DocumentId(0);
+    let stub_library = StubLibrary::load(lowering_context.interner_mut());
     let local_naming = resolve_document_locally(
         document_id,
         &module,
         lowering_context.interner(),
+        &stub_library,
         DocumentKind::Package,
     );
     let rendered_hir = render_locally_named_hir(

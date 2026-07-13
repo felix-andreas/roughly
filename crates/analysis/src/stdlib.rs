@@ -4,7 +4,7 @@ use {
         interner::Symbol,
         stub::{parse_stub_declarations, parse_stub_file},
         typecheck::{InferenceState, TypeDefinitionEnvironment},
-        types::TypeScheme,
+        types::{SurfaceType, TypeScheme},
     },
     std::{
         collections::{BTreeMap, BTreeSet},
@@ -42,6 +42,10 @@ pub const STUB_EXTENSION: &str = "Rtypes";
 #[derive(Debug, Clone, Default)]
 pub struct StubLibrary {
     values: BTreeMap<Symbol, StubValue>,
+    // Names declared `@masked`: their calls evaluate rest-absorbed arguments in a data mask. The
+    // shape is what the naming walk needs to decide, structurally, which arguments the rest
+    // parameter absorbs (it has no types at that point).
+    masked_rest: BTreeMap<Symbol, MaskedRestShape>,
     // Opaque nominal types the corpus declares (`@type data.frame`), keyed to their declaration
     // range. Seeded under every type-definition environment so a stub (or user annotation) can
     // name them; a project's own `@type`/`@alias` of the same name shadows the stub type.
@@ -119,10 +123,17 @@ impl StubLibrary {
         }
 
         let mut values = BTreeMap::new();
+        let mut masked_rest = BTreeMap::new();
         let mut exports_by_namespace: BTreeMap<Symbol, BTreeSet<Symbol>> = BTreeMap::new();
         for (namespace, source) in sources {
-            let declared =
-                harvest_stub_source(interner, source, namespace, &type_definitions, &mut values);
+            let declared = harvest_stub_source(
+                interner,
+                source,
+                namespace,
+                &type_definitions,
+                &mut values,
+                &mut masked_rest,
+            );
             if let Some(namespace) = namespace {
                 exports_by_namespace
                     .entry(namespace)
@@ -137,9 +148,16 @@ impl StubLibrary {
         );
         Self {
             values,
+            masked_rest,
             type_declarations,
             exports_by_namespace,
         }
+    }
+
+    /// The masked-rest shape of a `@masked`-declared name, for the naming walk's structural
+    /// which-arguments-does-the-rest-absorb decision. `None` for every other name.
+    pub fn masked_rest(&self, symbol: Symbol) -> Option<&MaskedRestShape> {
+        self.masked_rest.get(&symbol)
     }
 
     // Seeds the corpus's opaque nominal types into a type-definition environment. Call after the
@@ -427,12 +445,23 @@ fn seed_stub_source_types(
 // itself. A declaration whose type expression fails to lower into a scheme is skipped, and lines
 // that fail to parse are dropped by the declaration parser, so a malformed project stub degrades
 // gracefully rather than aborting analysis.
+/// What the naming walk needs to replay R's argument matching for a `@masked` call without any
+/// types: how many purely positional slots precede the rest parameter, which declared names match
+/// by keyword, and how many of those names fill positionally before the rest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MaskedRestShape {
+    pub positional_count: usize,
+    pub declared_names: BTreeSet<Symbol>,
+    pub preceding_named: usize,
+}
+
 fn harvest_stub_source(
     interner: &mut Interner,
     source: &str,
     namespace: Option<Symbol>,
     type_definitions: &TypeDefinitionEnvironment,
     values: &mut BTreeMap<Symbol, StubValue>,
+    masked_rest: &mut BTreeMap<Symbol, MaskedRestShape>,
 ) -> BTreeSet<Symbol> {
     let (declarations, _errors) = parse_stub_declarations(source, interner);
     let mut inference_state = InferenceState::new();
@@ -440,6 +469,23 @@ fn harvest_stub_source(
     let mut harvested_in_this_source = BTreeSet::new();
     for declaration in declarations {
         declared_in_this_source.insert(declaration.name);
+        if declaration.masked
+            && let SurfaceType::Function(function) = &declaration.surface_type
+            && let Some(variadic) = &function.variadic
+        {
+            masked_rest.insert(
+                declaration.name,
+                MaskedRestShape {
+                    positional_count: function.parameters.len(),
+                    declared_names: function
+                        .named_parameters
+                        .iter()
+                        .map(|parameter| parameter.name)
+                        .collect(),
+                    preceding_named: variadic.preceding_named,
+                },
+            );
+        }
         let Ok(scheme) =
             inference_state.harvest_annotation_scheme(&declaration.surface_type, type_definitions)
         else {

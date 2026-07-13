@@ -579,6 +579,7 @@ impl QueryGroup for RoughlyQueries {
                     DocumentId(*file),
                     &module,
                     lowering.interner(),
+                    &self.stubs,
                     *kind,
                 ))
             }

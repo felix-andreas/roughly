@@ -17,6 +17,10 @@ pub struct StubDeclaration {
     pub name: Symbol,
     pub surface_type: SurfaceType,
     pub range: Range,
+    // Declared `name : @masked fn(...)`: calls to this function evaluate the arguments its rest
+    // parameter absorbs inside a data mask (dplyr-style non-standard evaluation), so bare names
+    // there are column references, not unresolved variables.
+    pub masked: bool,
 }
 
 // One parsed type declaration from a stub file: `@type NAME` declares an opaque nominal type — a
@@ -92,10 +96,11 @@ pub fn parse_stub_file(source: &str, interner: &mut Interner) -> StubFile {
         }
 
         match parse_declaration_line(content, interner) {
-            Ok((name, surface_type)) => stub_file.values.push(StubDeclaration {
+            Ok((name, surface_type, masked)) => stub_file.values.push(StubDeclaration {
                 name,
                 surface_type,
                 range: line_range(line_index, line_start_byte, raw_line),
+                masked,
             }),
             Err(message) => stub_file.errors.push(StubParseError {
                 line: line_index,
@@ -123,12 +128,12 @@ pub fn parse_stub_declarations(
 fn parse_declaration_line(
     content: &str,
     interner: &mut Interner,
-) -> Result<(Symbol, SurfaceType), String> {
+) -> Result<(Symbol, SurfaceType, bool), String> {
     let separator = top_level_colon(content)
         .ok_or_else(|| "expected `name : type` but found no `:` separator.".to_owned())?;
 
     let name_text = content[..separator].trim();
-    let type_text = content[separator + 1..].trim();
+    let mut type_text = content[separator + 1..].trim();
 
     if name_text.is_empty() {
         return Err("expected a name before `:`.".to_owned());
@@ -136,13 +141,28 @@ fn parse_declaration_line(
     if !is_stub_name(name_text) {
         return Err(format!("`{name_text}` is not a valid declaration name."));
     }
+
+    let masked = if let Some(rest) = type_text.strip_prefix("@masked") {
+        type_text = rest.trim_start();
+        true
+    } else {
+        false
+    };
     if type_text.is_empty() {
         return Err(format!("expected a type after `{name_text} :`."));
     }
 
     let surface_type =
         parse_surface_type(type_text, interner).map_err(|error| render_type_error(&error))?;
-    Ok((interner.intern(name_text), surface_type))
+    if masked
+        && !matches!(&surface_type, SurfaceType::Function(function) if function.variadic.is_some())
+    {
+        return Err(format!(
+            "`@masked` on `{name_text}` requires a variadic function type — the mask covers the \
+             arguments the `...` rest parameter absorbs."
+        ));
+    }
+    Ok((interner.intern(name_text), surface_type, masked))
 }
 
 fn top_level_colon(content: &str) -> Option<usize> {

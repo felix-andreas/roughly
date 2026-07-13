@@ -752,9 +752,11 @@ pub fn resolve_document_locally(
     document_id: DocumentId,
     module: &Module,
     interner: &Interner,
+    stub_library: &StubLibrary,
     document_kind: DocumentKind,
 ) -> DocumentNamingComputation {
-    let mut context = DocumentNamingContext::new(document_id, &module.arena, interner);
+    let mut context =
+        DocumentNamingContext::new(document_id, &module.arena, interner, stub_library);
     // A script executes top-down like one big function body, so its top level is an ordinary
     // variable-slot frame. A package document's top level is the package-global namespace instead:
     // direct assignments are per-site package definitions resolved through winner semantics, and
@@ -1451,6 +1453,7 @@ struct DocumentNamingContext<'a> {
     document_id: DocumentId,
     arena: &'a HirArena,
     interner: &'a Interner,
+    stub_library: &'a StubLibrary,
     next_binding_id: u32,
     scopes: Vec<Scope>,
     // Names assigned by an unconditional top-level (or bare-block) assignment so far. A conditional
@@ -1491,11 +1494,17 @@ struct DocumentNamingContext<'a> {
 }
 
 impl<'a> DocumentNamingContext<'a> {
-    fn new(document_id: DocumentId, arena: &'a HirArena, interner: &'a Interner) -> Self {
+    fn new(
+        document_id: DocumentId,
+        arena: &'a HirArena,
+        interner: &'a Interner,
+        stub_library: &'a StubLibrary,
+    ) -> Self {
         Self {
             document_id,
             arena,
             interner,
+            stub_library,
             next_binding_id: 0,
             scopes: Vec::new(),
             top_level_names: BTreeSet::new(),
@@ -1806,20 +1815,45 @@ impl<'a> DocumentNamingContext<'a> {
                 // The base data-masking family evaluates every argument after the data in the
                 // data's frame; a locally shadowed name is an ordinary function and masks nothing
                 // (the callee resolved to a slot above, mirroring the guard-predicate rule).
-                let masked_family = {
-                    let callee_expression = self.arena.get(*callee);
-                    matches!(&callee_expression.kind, ExpressionKind::Symbol(symbol)
-                    if !self
-                        .document_naming
-                        .expression_resolutions
-                        .contains_key(&callee_expression.id)
-                        && matches!(
-                            self.interner.resolve(*symbol),
-                            Some("with" | "within" | "subset" | "transform")
-                        ))
+                let callee_expression = self.arena.get(*callee);
+                let callee_locally_resolved = self
+                    .document_naming
+                    .expression_resolutions
+                    .contains_key(&callee_expression.id);
+                let masked_family = matches!(&callee_expression.kind, ExpressionKind::Symbol(symbol)
+                if !callee_locally_resolved
+                    && matches!(
+                        self.interner.resolve(*symbol),
+                        Some("with" | "within" | "subset" | "transform")
+                    ));
+                // A `@masked` stub callee (a dplyr-style verb declared in a `.Rtypes` file, bare
+                // or `pkg::name`): the arguments its rest parameter absorbs evaluate in the data's
+                // frame, decided structurally with the declaration's shape.
+                let masked_rest = match &callee_expression.kind {
+                    ExpressionKind::Symbol(symbol) if !callee_locally_resolved => {
+                        self.stub_library.masked_rest(*symbol)
+                    }
+                    ExpressionKind::NamespaceGet { name, .. } => {
+                        self.stub_library.masked_rest(*name)
+                    }
+                    _ => None,
                 };
+                let mut positional_slots = masked_rest
+                    .map(|shape| shape.positional_count + shape.preceding_named)
+                    .unwrap_or(0);
                 for (argument_index, argument) in arguments.iter().enumerate() {
-                    let masked = masked_family && argument_index > 0;
+                    let masked = match (masked_rest, argument.name) {
+                        (Some(shape), Some(name)) => !shape.declared_names.contains(&name),
+                        (Some(_), None) => {
+                            if positional_slots > 0 {
+                                positional_slots -= 1;
+                                false
+                            } else {
+                                true
+                            }
+                        }
+                        (None, _) => masked_family && argument_index > 0,
+                    };
                     if masked {
                         self.mask_depth += 1;
                     }

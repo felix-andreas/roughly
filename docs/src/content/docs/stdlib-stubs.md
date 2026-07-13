@@ -94,7 +94,21 @@ project's own source, and separate `.Rtypes` files exist for foreign packages (b
 be annotated at the source. `.Rtypes` reuses the same type grammar as the inline form, so the two are one
 notation in two carriers.
 
-### Overloads and generics
+### Masked (data-masking) functions
+
+A declaration may carry the `@masked` attribute before its function type:
+
+```
+summarise : @masked fn(.data: Any, ...: Any) -> Any
+```
+
+It marks the function as evaluating its rest-absorbed arguments in a data mask (dplyr-style
+non-standard evaluation): bare names in those argument positions are treated as column
+references — no unresolved-name warnings — while arguments matching declared formals resolve
+normally. `@masked` requires a variadic function type. See the typing reference's
+"Data-masked evaluation (NSE)" section for the full semantics.
+
+## Overloads and generics
 
 **Repeating a name declares an ordered overload set.** Each further declaration of the same name
 *within one source* appends a candidate:

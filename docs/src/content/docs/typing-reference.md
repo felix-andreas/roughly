@@ -2037,6 +2037,19 @@ Names inside a mask that *do* resolve — a local variable used in `j`, a standa
 like `sum` — keep their ordinary resolution and typing. Base-R indexing (`m[i, j]`) carries no
 data.table marker and keeps full lexical checking.
 
+A project `.Rtypes` stub can declare its own masking function with the `@masked` attribute —
+the way to teach Roughly a dplyr-style verb:
+
+```
+filter : @masked fn(.data: Any, ...: Any) -> Any
+mutate : @masked fn(.data: Any, ...: Any) -> Any
+```
+
+Calls to a `@masked` name (bare or `pkg::name`) evaluate the arguments the `...` rest parameter
+absorbs inside the data's frame: bare names there are column references. Arguments matching the
+declared formals (`.data` above) resolve normally, a locally defined function of the same name
+masks nothing, and `@masked` on a non-variadic declaration is a stub error.
+
 For dynamic bindings outside any recognized mask, the ecosystem-standard escape hatch works: a
 top-level `globalVariables(c("a", "b"))` / `utils::globalVariables(...)` call (literal string
 arguments) declares those names as dynamically bound for the whole package, and could-not-resolve

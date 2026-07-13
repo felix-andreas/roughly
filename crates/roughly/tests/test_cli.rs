@@ -613,3 +613,46 @@ fn global_variables_declarations_suppress_unresolved_warnings() {
         );
     }
 }
+
+// A project stub can declare a dplyr-style verb `@masked`: the arguments its `...` rest parameter
+// absorbs evaluate in the data's frame, so bare column references there stop warning — for the
+// bare and the `pkg::name` call forms alike — while a locally shadowed name masks nothing.
+#[test]
+fn masked_stub_verbs_mask_rest_absorbed_arguments() {
+    let directory = project(&[
+        (
+            "stubs/dplyr.Rtypes",
+            "filter : @masked fn(.data: Any, ...: Any) -> Any\nmutate : @masked fn(.data: Any, ...: Any) -> Any\n",
+        ),
+        (
+            "R/pipeline.R",
+            "report <- function(df) {\n  filtered <- dplyr::filter(df, amount > 100)\n  mutate(filtered, doubled = amount * 2)\n}\ncontrol <- function() {\n  filter <- function(x) x\n  filter(shadowed_undefined)\n}\n",
+        ),
+        ("roughly.toml", "[check]\ntyping = true\n"),
+    ]);
+    let output = roughly(directory.path(), &["check"]);
+    assert_eq!(exit_code(&output), 1);
+    let report = stderr(&output);
+    assert!(report.contains("shadowed_undefined"), "report:\n{report}");
+    for column in ["amount", "doubled"] {
+        assert!(
+            !report.contains(&format!("`{column}`")),
+            "masked column `{column}` must not warn:\n{report}"
+        );
+    }
+}
+
+// `@masked` demands a variadic function type — the mask covers what `...` absorbs.
+#[test]
+fn masked_attribute_requires_a_variadic_function() {
+    let directory = project(&[
+        ("stubs/broken.Rtypes", "f : @masked fn(x: Any) -> Any\n"),
+        ("R/a.R", "y <- 1L\n"),
+    ]);
+    let output = roughly(directory.path(), &["check"]);
+    assert!(
+        stderr(&output).contains("requires a variadic function type"),
+        "report:\n{}",
+        stderr(&output)
+    );
+}
