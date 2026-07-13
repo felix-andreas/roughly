@@ -11,37 +11,37 @@ named <- text["name"]
 #!!!! hover null.hover
 R/main.R:1:12
 #++++
-```
+```roughly-type
 NULL
 ```
 #!!!! hover logical.hover
 R/main.R:2:9
 #++++
-```
+```roughly-type
 logical
 ```
 #!!!! hover integer.hover
 R/main.R:3:10
 #++++
-```
+```roughly-type
 integer
 ```
 #!!!! hover double.hover
 R/main.R:4:10
 #++++
-```
+```roughly-type
 double
 ```
 #!!!! hover character.hover
 R/main.R:5:10
 #++++
-```
+```roughly-type
 character
 ```
 #!!!! hover string_literal_name.hover
 R/main.R:6:16
 #++++
-```
+```roughly-type
 character
 ```
 
@@ -58,7 +58,7 @@ trusted <- 3L
 #!!!! hover checked.hover
 R/main.R:2:1
 #++++
-```
+```roughly-type
 checked : integer
 ```
 
@@ -70,7 +70,7 @@ Local variable, defined at `R/main.R:4:1`
 #!!!! hover trusted.hover
 R/main.R:6:1
 #++++
-```
+```roughly-type
 trusted : integer
 ```
 
@@ -98,13 +98,13 @@ Local variable, defined at `R/main.R:4:1`
 #!!!! hover type.hover
 R/main.R:1:5
 #++++
-```
+```roughly-type
 type Person = list{name: character}
 ```
 #!!!! hover_debug type_debug.hover
 R/main.R:1:5
 #++++
-```
+```roughly-type
 type Person = list{name: character}
 ```
 
@@ -126,13 +126,13 @@ range: 1:1 to 1:40
 #!!!! hover alias.hover
 R/main.R:2:5
 #++++
-```
+```roughly-type
 alias Identifier = character
 ```
 #!!!! hover generic_type.hover
 R/main.R:3:5
 #++++
-```
+```roughly-type
 type Pair<T, U> = list{first: T, second: U}
 ```
 
@@ -147,7 +147,7 @@ wrapper <- function(flag) {
 #!!!! hover maybe_undefined.hover
 R/main.R:3:3
 #++++
-```
+```roughly-type
 value : integer
 ```
 
@@ -169,7 +169,7 @@ f <- function(flag) {
 #!!!! hover joined_read.hover
 R/main.R:6:3
 #++++
-```
+```roughly-type
 x : integer
 ```
 
@@ -188,7 +188,7 @@ f <- function(flag) {
 #!!!! hover union_read.hover
 R/main.R:6:3
 #++++
-```
+```roughly-type
 x : integer | character
 ```
 
@@ -207,7 +207,7 @@ f <- function() {
 #!!!! hover accumulator_read.hover
 R/main.R:6:3
 #++++
-```
+```roughly-type
 total : integer
 ```
 
@@ -221,7 +221,7 @@ value <- 1L
 #!!!! hover after_expression.hover
 R/main.R:1:12
 #++++
-```
+```roughly-type
 integer
 ```
 
@@ -234,7 +234,7 @@ mirror
 #!!!! hover mirror.hover
 R/main.R:2:1
 #++++
-```
+```roughly-type
 mirror : <T> fn(x: T) -> T
 ```
 
@@ -248,7 +248,7 @@ pair
 #!!!! hover pair.hover
 R/main.R:2:1
 #++++
-```
+```roughly-type
 pair : <T, U> fn(x: T, y: U) -> T
 ```
 
@@ -263,7 +263,7 @@ value
 #!!!! hover value.hover
 R/main.R:2:1
 #++++
-```
+```roughly-type
 value : Unknown
 ```
 
@@ -276,7 +276,7 @@ undefined_fn(1L)
 #!!!! hover call.hover
 R/main.R:1:1
 #++++
-```
+```roughly-type
 undefined_fn : Unknown
 ```
 
@@ -345,7 +345,7 @@ value <- if (TRUE) 1L else "foo"
 #!!!! hover union_binding.hover
 R/main.R:1:1
 #++++
-```
+```roughly-type
 value : integer | character
 ```
 
@@ -358,7 +358,7 @@ for (item in list(a = 1L, b = "two")) item
 #!!!! hover loop_element.hover
 R/main.R:1:39
 #++++
-```
+```roughly-type
 item : integer | character
 ```
 
@@ -372,7 +372,7 @@ print(1L)
 #!!!! hover stub_print.hover
 R/main.R:1:1
 #++++
-```
+```roughly-type
 print : fn(
   x: integer,
   ...: Any,
@@ -396,7 +396,7 @@ length(c(1L, 2L))
 #!!!! hover stub_length.hover
 R/main.R:1:1
 #++++
-```
+```roughly-type
 length : fn(x: Any) -> integer
 ```
 
@@ -409,7 +409,7 @@ total <- sum(1L, 2L)
 #!!!! hover stub_sum.hover
 R/main.R:1:11
 #++++
-```
+```roughly-type
 sum : fn(...: integer[] | logical[], [na.rm]: logical) -> integer
 ```
 

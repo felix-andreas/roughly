@@ -7,7 +7,7 @@ add_one
 #!!!! hover binding.hover
 R/main.R:2:1
 #++++
-```
+```roughly-type
 add_one : <T: numeric> fn(x: T) -> T
 ```
 
@@ -21,7 +21,7 @@ make
 #!!!! hover binding.hover
 R/main.R:2:1
 #++++
-```
+```roughly-type
 make : <T> fn(x: T) -> list{T, integer}
 ```
 
@@ -34,7 +34,7 @@ wrap <- function(first, second) second
 #!!!! hover second_use.hover
 R/main.R:1:33
 #++++
-```
+```roughly-type
 second : T
 ```
 

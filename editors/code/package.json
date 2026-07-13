@@ -58,6 +58,12 @@
 	"contributes": {
 		"languages": [
 			{
+				"id": "roughly-type",
+				"aliases": [
+					"Roughly type notation"
+				]
+			},
+			{
 				"id": "r",
 				"aliases": [
 					"R",
@@ -82,6 +88,11 @@
 				"injectTo": [
 					"source.r"
 				]
+			},
+			{
+				"language": "roughly-type",
+				"scopeName": "source.roughly-type",
+				"path": "./roughly-type.tmLanguage.json"
 			}
 		],
 		"commands": [

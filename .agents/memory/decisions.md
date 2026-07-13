@@ -358,3 +358,13 @@ Chosen shape — the classic `let rec` rule, scoped to function-valued assignmen
 Deliberate scope limits, pinned by fixtures: `<<-`-defined recursion keeps the silent-`Unknown` behavior (rare; the enclosing-slot join semantics make a placeholder ambiguous); mutual recursion between two local closures stays a loud unresolved reference on the earlier-defined one (letrec visibility is per binding, not per block — full block-letrec is a recorded possible extension); top-level mutual recursion already resolves through the package interface fixed point, whose oscillation guard pins genuinely cyclic schemes to `Unknown`. Strict attribution for top-level recursion whose converged scheme retains `Unknown` (an origin on the binding) remains the open part (b) in the backlog — it needs identical attribution in both pipelines to keep the differential byte-exact.
 
 Impact: correctness — recursive helpers get real schemes and violations of recursively-inferred signatures are caught (`countdown("not an integer")` errors; previously silent); the polymorphic-identity and cross-file suites pin zero regressions; simplicity — one pre-bind + one unify on the existing assignment path; performance — one extra variable per function-valued assignment, negligible.
+
+# Decision record: bare-name resolution stays ungated by NAMESPACE imports
+
+**Status:** decided (agent-owned decision under the delegated ownership mandate); the full import model stays post-beta.
+
+The fork: should a bare name resolving only via the stub corpus (`median` → the stats stub) require the package to import it (`importFrom(stats, median)` / `library(stats)`), or resolve unconditionally?
+
+Decision: **unconditional resolution against the shipped corpus is correct, not a shortcut.** The shipped namespaces — base, stats, utils, methods, graphics, grDevices — are exactly the packages R attaches in every default session, so a bare `median` genuinely resolves at run time in the environments R code actually runs in. Project `.Rtypes` stubs are explicitly user-authored: writing one declares "my project uses these names" — gating them on NAMESPACE entries would only make the user say the same thing twice. What NAMESPACE gating would really buy — per-file visibility for *non-default* packages, masking warnings, `library()` attach ordering — requires the full import model (typing-design §6), which remains post-beta; when that lands, gating falls out of it naturally rather than being bolted on ahead of it. Until then, the NAMESPACE surface stays what it is today: import validation (typo detection against the corpus) and the opt-in `unused-import` lint.
+
+Impact: no behavior change — this closes the fork by ratifying the current shape and pointing the future work at the import model.

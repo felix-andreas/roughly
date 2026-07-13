@@ -73,7 +73,7 @@ pub fn hover(database: &dyn IdeDatabase, path: &Path, position: TextPosition) ->
             let expression = module.arena.try_get(expression_id)?;
 
             if let Some(core_type) = database.checked_expression_type(document_id, expression_id) {
-                contents.push(code_block(&hover_type_line(
+                contents.push(type_code_block(&hover_type_line(
                     database.interner(),
                     hovered_name(database, expression),
                     core_type,
@@ -85,7 +85,7 @@ pub fn hover(database: &dyn IdeDatabase, path: &Path, position: TextPosition) ->
                 // A stub overload set records no checked type on the callee (the set has no single
                 // type); show the committed candidate — or the primary declaration for a bare
                 // reference — so the name still hovers with a signature.
-                contents.push(code_block(&line));
+                contents.push(type_code_block(&line));
             }
             if let Some(summary) = variable_definition_summary(database, document_id, expression_id)
             {
@@ -115,7 +115,9 @@ pub fn hover(database: &dyn IdeDatabase, path: &Path, position: TextPosition) ->
                 .definitions
                 .iter()
                 .find(|definition| definition.id == definition_id)?;
-            contents.push(code_block(&render_definition_summary(database, definition)));
+            contents.push(type_code_block(&render_definition_summary(
+                database, definition,
+            )));
             debug.push(DebugSection {
                 title: "Lowering".to_owned(),
                 body: code_block(&render_definition_hover(database, definition)),
@@ -615,6 +617,13 @@ fn active_parameter(
 
 fn code_block(body: &str) -> String {
     format!("```\n{body}\n```")
+}
+
+// The fence for type-notation content (`name : TYPE`, declaration summaries): tagged with the
+// `roughly-type` language id so clients that registered the shipped grammar highlight it; a
+// client without the grammar renders it as plain text.
+fn type_code_block(body: &str) -> String {
+    format!("```roughly-type\n{body}\n```")
 }
 
 // The type line for a hovered stub name whose declaration is an overload set: the committed
