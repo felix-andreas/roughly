@@ -443,7 +443,8 @@ pub fn completion(
     resolve_package(analysis);
     // Typed field completion (`record$` and `record[["`) reads the subject's checked type.
     typecheck(analysis);
-    generic::completion(&*analysis, path, position)
+    let global_entries = generic::global_completion_entries(&*analysis);
+    generic::completion(&*analysis, path, position, &global_entries)
 }
 
 #[cfg(test)]

@@ -33,7 +33,7 @@ use {
         hir::{ExpressionId, Module},
         ide::{
             CodeAction, CompletionResult, HoverInfo, IdeDatabase, InlayHint, Location,
-            RenameResult, SignatureHelp, generic,
+            RenameResult, SignatureHelp, generic, generic::GlobalCompletionEntry,
         },
         interner::{Interner, Symbol},
         naming::{DocumentKind, DocumentNamingComputation, NamesGlobal, NamesLocal},
@@ -148,7 +148,12 @@ impl<'engine> EngineIde<'engine> {
         let interner = self.engine.group().interner_ref();
         let database =
             EngineIdeRef::new(&caches, &interner, self.paths, self.engine.group().stubs());
-        generic::completion(&database, path, position)
+        let global_entries = caches
+            .completion_index
+            .as_deref()
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        generic::completion(&database, path, position, global_entries)
     }
 
     pub fn definition(&self, path: &Path, position: TextPosition) -> Option<Vec<Location>> {
@@ -223,12 +228,11 @@ impl<'engine> EngineIde<'engine> {
         self.prime_module(&mut caches, target);
         self.prime_naming(&mut caches, target);
         self.prime_check(&mut caches, target);
-        let package_naming = self.synthesize_package_naming();
-        for export in self.referenced_export_files(target, &package_naming) {
+        self.prime_package_naming(&mut caches);
+        for export in self.referenced_export_files(target, &caches) {
             self.prime_module(&mut caches, export);
             self.prime_naming(&mut caches, export);
         }
-        caches.package_naming = Some(package_naming);
         caches
     }
 
@@ -242,32 +246,27 @@ impl<'engine> EngineIde<'engine> {
 
     // completion: the target's parse (local bindings + context come from its tree), document kind (a
     // script's top-level bindings complete as locals), module + checked types (typed `$`/`[["` field
-    // completion), plus module+naming of every package file (the global loop computes each matching
-    // global's kind from its export file). A cursor inside a `#:` annotation completes type names
-    // against the project's `@type`/`@alias` declarations, so that position additionally primes every
-    // module — the same predicate the generic completion branches on, so gate and feature agree.
+    // completion), plus the memoized package-wide completion index — the global source is served from
+    // that one fold, so no other file's module or naming is touched. A cursor inside a `#:` annotation
+    // completes type names against the project's `@type`/`@alias` declarations, so that position
+    // additionally primes every module — the same predicate the generic completion branches on, so
+    // gate and feature agree.
     fn prime_completion(&self, target: DocumentId, position: TextPosition) -> Caches {
         let mut caches = self.empty_caches();
         self.prime_parse(&mut caches, target);
         self.prime_document_kind(&mut caches, target);
         self.prime_module(&mut caches, target);
         self.prime_check(&mut caches, target);
-        let package_naming = self.synthesize_package_naming();
-        for export in package_naming
-            .global_bindings
-            .values()
-            .copied()
-            .collect::<BTreeSet<_>>()
-        {
-            self.prime_module(&mut caches, export);
-            self.prime_naming(&mut caches, export);
-        }
+        self.prime_package_naming(&mut caches);
+        caches.completion_index = Some(
+            self.engine
+                .fetch::<Vec<GlobalCompletionEntry>>(Key::PackageCompletionIndex),
+        );
         if self.target_is_annotation_body(target, position) {
             for file in caches.all_ids.clone() {
                 self.prime_module(&mut caches, file);
             }
         }
-        caches.package_naming = Some(package_naming);
         caches
     }
 
@@ -279,8 +278,8 @@ impl<'engine> EngineIde<'engine> {
         self.prime_parse(&mut caches, target);
         self.prime_module(&mut caches, target);
         self.prime_naming(&mut caches, target);
-        let package_naming = self.synthesize_package_naming();
-        for export in self.referenced_export_files(target, &package_naming) {
+        self.prime_package_naming(&mut caches);
+        for export in self.referenced_export_files(target, &caches) {
             self.prime_parse(&mut caches, export);
             self.prime_module(&mut caches, export);
             self.prime_naming(&mut caches, export);
@@ -298,7 +297,6 @@ impl<'engine> EngineIde<'engine> {
                 self.prime_parse(&mut caches, file);
             }
         }
-        caches.package_naming = Some(package_naming);
         caches
     }
 
@@ -331,12 +329,16 @@ impl<'engine> EngineIde<'engine> {
     // occurrence scan text-prefilters per identifier, but the fact scope is the whole project.
     fn prime_all_files(&self) -> Caches {
         let mut caches = self.empty_caches();
+        let file_count = caches.all_ids.len();
+        caches.parses.reserve(file_count);
+        caches.modules.reserve(file_count);
+        caches.namings.reserve(file_count);
         for file in caches.all_ids.clone() {
             self.prime_parse(&mut caches, file);
             self.prime_module(&mut caches, file);
             self.prime_naming(&mut caches, file);
         }
-        caches.package_naming = Some(self.synthesize_package_naming());
+        self.prime_package_naming(&mut caches);
         caches
     }
 
@@ -395,31 +397,21 @@ impl<'engine> EngineIde<'engine> {
             .collect()
     }
 
-    // The package-global binding map, synthesized from `PackageSymbolIndex` (name → winning file) into the
-    // `NamesGlobal` shape `analysis::ide` expects. Held owned in `Caches` so its `&NamesGlobal` is tied to
-    // the cache borrow exactly like `Analysis::package_naming`'s.
-    fn synthesize_package_naming(&self) -> NamesGlobal {
-        let index = self
-            .engine
-            .fetch::<BTreeMap<Symbol, FileId>>(Key::PackageSymbolIndex);
-        NamesGlobal {
-            global_bindings: index
-                .iter()
-                .map(|(symbol, file)| (*symbol, DocumentId(*file)))
-                .collect(),
-        }
+    // The package-global binding map: the `PackageSymbolIndex` memo *is* the `NamesGlobal` shape
+    // `analysis::ide` expects, so priming it is a shared-pointer clone, never a per-request rebuild.
+    fn prime_package_naming(&self, caches: &mut Caches) {
+        caches.package_naming = Some(self.engine.fetch::<NamesGlobal>(Key::PackageSymbolIndex));
     }
 
     // The export files of the package globals the target references — interner-free (reads the target's
-    // recorded `non_locals` symbols and the synthesized index). Deduped.
-    fn referenced_export_files(
-        &self,
-        target: DocumentId,
-        package_naming: &NamesGlobal,
-    ) -> BTreeSet<DocumentId> {
+    // recorded `non_locals` symbols and the primed index). Deduped.
+    fn referenced_export_files(&self, target: DocumentId, caches: &Caches) -> BTreeSet<DocumentId> {
         let naming = self
             .engine
             .fetch::<DocumentNamingComputation>(Key::LocalNaming(target.0));
+        let Some(package_naming) = caches.package_naming.as_ref() else {
+            return BTreeSet::new();
+        };
         naming
             .naming
             .non_locals
@@ -446,17 +438,19 @@ impl<'engine> EngineIde<'engine> {
     }
 }
 
-/// The per-call fact cache: owned `Rc` snapshots of every memo the feature reads, plus the synthesized
-/// package binding map and the project file set. Its references back the `&T` the [`IdeDatabase`] impl
-/// returns, exactly as `Analysis`'s retained maps do.
+/// The per-call fact cache: owned `Rc` snapshots of every memo the feature reads, plus the project
+/// file set. Its references back the `&T` the [`IdeDatabase`] impl returns, exactly as `Analysis`'s
+/// retained maps do. Hash maps, not ordered maps: a whole-project prime (references/rename) inserts
+/// every file three times, and nothing iterates these — `all_ids` carries the ordering.
 #[derive(Default)]
 struct Caches {
-    parses: BTreeMap<DocumentId, Shared<ParsedDocument>>,
-    modules: BTreeMap<DocumentId, Shared<Module>>,
-    namings: BTreeMap<DocumentId, Shared<DocumentNamingComputation>>,
-    checks: BTreeMap<DocumentId, Shared<ModuleCheck>>,
-    document_kinds: BTreeMap<DocumentId, DocumentKind>,
-    package_naming: Option<NamesGlobal>,
+    parses: HashMap<DocumentId, Shared<ParsedDocument>>,
+    modules: HashMap<DocumentId, Shared<Module>>,
+    namings: HashMap<DocumentId, Shared<DocumentNamingComputation>>,
+    checks: HashMap<DocumentId, Shared<ModuleCheck>>,
+    document_kinds: HashMap<DocumentId, DocumentKind>,
+    package_naming: Option<Shared<NamesGlobal>>,
+    completion_index: Option<Shared<Vec<GlobalCompletionEntry>>>,
     all_ids: Vec<DocumentId>,
 }
 
@@ -535,7 +529,7 @@ impl<'a> IdeDatabase for EngineIdeRef<'a> {
     }
 
     fn package_naming(&self) -> Option<&NamesGlobal> {
-        self.caches.package_naming.as_ref()
+        self.caches.package_naming.as_deref()
     }
 
     fn checked_expression_type(

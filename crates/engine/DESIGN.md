@@ -36,8 +36,8 @@ What a general framework would provide out of the box, and how the engine handle
 | Cancellation | present | §6 — single-engine cooperative cancellation via an `Arc<AtomicBool>` token, unwinding a `Cancelled` sentinel caught at `fetch_cancellable` |
 | Input removal / deletion | present | `remove_input` leaves a tombstone slot so dependents revalidate without re-executing an absent input (§2, §3) |
 | Parallelism | not implemented | single-engine, demand-driven; a `Shared<T>` / memo-map alias localizes a future retrofit (§6) |
-| Memo eviction | not implemented | `slot_count()` exposes table size; a possible later addition |
-| Durability tiers | not adopted | the stdlib-stub input is set once and never invalidates; a coarse "high-durability input" marker would suffice if measurement showed a need |
+| Memo eviction | present | `evict_stale_memos` drops derived slots not read within a revision horizon; the LSP host runs it periodically (§2) |
+| Durability tiers | present | two levels (`LOW` = open documents, `HIGH` = everything else); a memo records the min durability it transitively read and greens O(1) when no input at that level changed — so a keystroke never walks the unopened files' chains (§2, §8) |
 
 ---
 
@@ -52,15 +52,34 @@ What a general framework would provide out of the box, and how the engine handle
 - `QueryGroup` — host trait: `type Key` enumerates every query; `execute(&self, engine, key)` is the
   derived-query body dispatcher. `&self` carries host instrumentation (for example exec counters).
 - `Engine<G>` — the database: `revision`, a single `slots: HashMap<Key, Slot>` table (inputs and derived
-  unified), and a `dependency_stack` for runtime dependency recording.
-  - `set_input` (`&mut self`) — bump the revision, value-equality backdate `changed_at`.
+  unified), a `dependency_stack` for runtime dependency recording, and a per-durability `last_change`
+  clock.
+  - `set_input` / `set_input_durable` (`&mut self`) — bump the revision, value-equality backdate
+    `changed_at`. Every input carries a `Durability` (`LOW` for open documents, `HIGH` for everything
+    else, `set_input` defaulting to `LOW`); a genuine change also stamps `last_change` at every level
+    at or below the input's strongest durability across the transition.
   - `fetch::<T>` (`&self`) — record-as-dependency, validate, return `Rc<T>`.
-  - `validate` — the red-green decision: green-by-revision / green-by-early-cutoff / red-recompute.
-  - `recompute` — push a frame, run the body, collect recorded dependencies, apply cutoff propagation.
+  - `validate` — the red-green decision: green-by-revision / green-by-durability /
+    green-by-early-cutoff / red-recompute. The durability check is the O(1) fast path: a memo whose
+    recorded durability level saw no input change since its `verified_at` cannot differ, no walk
+    needed.
+  - `recompute` — push a frame, run the body, collect recorded dependencies and their durability
+    minimum, apply cutoff propagation.
 
-A `Slot` stores `value`, `verified_at`, `changed_at`, `dependencies`, `is_input`. The comparator is **not**
-stored per slot — recompute always compares the new value against the old using the freshly produced
-comparator (same query ⇒ same type), so there is one source of the equality function, not a mirrored copy.
+A `Slot` stores `value`, `verified_at`, `changed_at`, `durability`, `dependencies`, `is_input`. The
+comparator is **not** stored per slot — recompute always compares the new value against the old using the
+freshly produced comparator (same query ⇒ same type), so there is one source of the equality function, not
+a mirrored copy.
+
+Durability transitions are the subtle part, and both directions are sound by construction. A **downgrade**
+(`HIGH → LOW`: a file opened in the editor, re-fed with equal text) refuses the value backdate and counts
+as a change at the *old* level, so every dependent deep-validates once; because an equal-value chain
+greens by early cutoff without recomputing, the validation walk itself re-records each visited memo's
+durability minimum — otherwise a value-stable dependent would keep a stale `HIGH` record and the next
+keystroke would be invisible to its fast path (a stale read; `test_engine.rs`
+`durability_downgrade_flushes_through_cutoff_nodes` pins this). An **upgrade** (`LOW → HIGH`: a closed
+document reverting to disk) keeps the backdate; dependents stay pessimistically `LOW` until their next
+deep walk re-mins them up.
 
 ### The red-green algorithm
 
@@ -353,13 +372,19 @@ at 10k / 100k / 300k LoC:
   edited file plus its referrers' HM inference and triggers **zero** O(package) recomputation.
   `package_symbol_index` does not re-fold (names-only cutoff) and the package type-definitions view does
   not re-fold (a declarations-only view cutoff, the type-side analog of the exported-name set).
-- **Wall time scales roughly linearly in N**, because confirming the all-files folds are unchanged is an
-  O(package) **validation walk** — one cheap hash-lookup plus early-cutoff bump per file, no inference.
-  `validate` clones a memo's dependency list only when it will actually walk it, not on the
-  green-by-revision/input fast path, avoiding an O(fan-in × N) blow-up when a high-fan-in fold is
-  revalidated from many callers. Driving the residual O(N) validation sub-linear (durability /
-  changed-input tracking, or sharded per-module def-maps) is possible future work.
-- **Eviction** is not implemented (`slot_count()` exposes table size).
+- **Wall time scales roughly linearly in N with a small constant**, because confirming the all-files
+  folds are unchanged is an O(package) **validation walk** over the folds' own dependency edges. Each
+  edge is an O(1) durability check: an open-document keystroke is a `LOW` change, every unopened file's
+  chain is recorded `HIGH`, so the walk never recurses into those chains (`validate` re-records each
+  memo's durability minimum as it walks, which is what keeps the records truthful across open/close
+  transitions). `validate` also clones a memo's dependency list only when it will actually walk it,
+  avoiding an O(fan-in × N) blow-up when a high-fan-in fold is revalidated from many callers. Driving
+  the residual O(N) edge walk itself sub-linear (splitting each fold into a durable sub-fold over
+  unopened files plus an open-file overlay, giving O(open) validation) is possible future work; the
+  committed witnesses in `test_benchmark.rs` pin both the at-rest constant prime scope and the
+  durability-bounded post-keystroke walk.
+- **Eviction**: `evict_stale_memos` bounds the table across long sessions (the LSP host runs it every
+  1024 input writes).
 
 Parallelism (§6) is a possible later optimization for workspace-wide batch operations, localized behind the
 `Shared<T>` / memo-table aliases.

@@ -30,6 +30,7 @@ use {
         diagnostic::{Diagnostic, render_type_scheme},
         document::{Document, DocumentId},
         hir::{DefinitionKind, ExpressionId, ExpressionKind, HirArena, Module},
+        ide::generic::{GlobalCompletionEntry, document_completion_exports},
         interner::{Interner, Symbol},
         lint::analyze as lint_analyze,
         lower::{LoweringContext, LoweringResult, lower_with_diagnostics},
@@ -89,9 +90,20 @@ pub enum Key {
     /// its value moves only when that binding's range moves, so value-equality keeps neighbour
     /// files' diagnostics green across unrelated edits.
     TopLevelSite(FileId, Symbol),
-    /// The lone all-files fold: `name → winning file`, names only. Recomputes only on *structural* export
-    /// edits (add/remove/rename a top-level binding, add/remove/reclassify a file), not on body edits.
+    /// The lone all-files fold: `name → winning file`, names only, carried in the IDE-facing
+    /// [`NamesGlobal`] shape so reads borrow it without a per-request rebuild. Recomputes only on
+    /// *structural* export edits (add/remove/rename a top-level binding, add/remove/reclassify a
+    /// file), not on body edits.
     PackageSymbolIndex,
+    /// One file's exported globals as ready-made completion entries (label, item kind, callability) —
+    /// [`analysis::ide::generic::GlobalCompletionEntry`] per exported symbol. Value-eq: a body edit
+    /// that changes no export name or defining shape recomputes to an equal value and cuts off before
+    /// the package fold.
+    CompletionExports(FileId),
+    /// The package-wide completion source: every global's entry from its winning file, in symbol
+    /// order. Folded from [`Key::CompletionExports`] per package file; a completion request fetches
+    /// this one value instead of touching every file's module and naming.
+    PackageCompletionIndex,
     /// **Declarations-only** view of one file's module for the type environment fold: the file's lowered
     /// [`Module`] held by shared pointer but compared by its `@type`/`@alias` declarations only (see
     /// [`TypeDefinitionsModule`]). The cutoff seam that keeps a body edit from re-folding
@@ -580,8 +592,10 @@ impl QueryGroup for RoughlyQueries {
                 let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
                 // Path-last / last-writer-wins over the project files, in `ProjectFiles` order. A file
                 // contributes only when its `DocumentKind` is `Package` (a script flip drops it exactly
-                // as a deletion would), so the index reads `DocumentKind(f)` per file too.
-                let mut winners: BTreeMap<Symbol, FileId> = BTreeMap::new();
+                // as a deletion would), so the index reads `DocumentKind(f)` per file too. The value is
+                // the IDE-facing `NamesGlobal` shape directly, so a read borrows the memo instead of
+                // rebuilding a package-sized map per request.
+                let mut global_bindings: BTreeMap<Symbol, DocumentId> = BTreeMap::new();
                 for file in files.iter() {
                     let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
                     if *kind != DocumentKind::Package {
@@ -589,10 +603,49 @@ impl QueryGroup for RoughlyQueries {
                     }
                     let names = engine.fetch::<Vec<Symbol>>(Key::ExportedNames(*file));
                     for name in names.iter() {
-                        winners.insert(*name, *file);
+                        global_bindings.insert(*name, DocumentId(*file));
                     }
                 }
-                Stored::new(winners)
+                Stored::new(NamesGlobal { global_bindings })
+            }
+
+            Key::CompletionExports(file) => {
+                let module = engine.fetch::<Module>(Key::Lower(*file));
+                let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(*file));
+                let exported = engine.fetch::<Vec<Symbol>>(Key::ExportedNames(*file));
+                // The interner borrow must start after every fetch above (their bodies intern).
+                let lowering = self.lowering.borrow();
+                Stored::new(document_completion_exports(
+                    &module,
+                    &naming.naming,
+                    lowering.interner(),
+                    &exported,
+                ))
+            }
+
+            Key::PackageCompletionIndex => {
+                // Fold the per-file entries down to each name's package winner. The per-file query
+                // recomputes to an equal value on body edits (names, kinds and arity shapes are
+                // unchanged), so this fold — like the symbol index it mirrors — re-runs only on
+                // structural export edits.
+                let index = engine.fetch::<NamesGlobal>(Key::PackageSymbolIndex);
+                let mut by_file: BTreeMap<FileId, Vec<Symbol>> = BTreeMap::new();
+                for (symbol, document) in index.global_bindings.iter() {
+                    by_file.entry(document.0).or_default().push(*symbol);
+                }
+                let mut entries: Vec<GlobalCompletionEntry> = Vec::new();
+                for (file, winners) in by_file {
+                    let exports =
+                        engine.fetch::<Vec<GlobalCompletionEntry>>(Key::CompletionExports(file));
+                    entries.extend(
+                        exports
+                            .iter()
+                            .filter(|entry| winners.binary_search(&entry.symbol).is_ok())
+                            .cloned(),
+                    );
+                }
+                entries.sort_by_key(|entry| entry.symbol);
+                Stored::new(entries)
             }
 
             Key::TypeDefinitionsModule(file) => {
@@ -638,10 +691,10 @@ impl QueryGroup for RoughlyQueries {
 
             Key::DefiningItem(symbol) => {
                 bump(&self.counters.defining_item, *symbol);
-                let index = engine.fetch::<BTreeMap<Symbol, FileId>>(Key::PackageSymbolIndex);
+                let index = engine.fetch::<NamesGlobal>(Key::PackageSymbolIndex);
                 // Firewall: project this one symbol's winner. Value-eq per symbol means an index change
                 // for some *other* symbol re-projects to the same value here and cuts off.
-                Stored::new(index.get(symbol).copied())
+                Stored::new(index.global_bindings.get(symbol).map(|document| document.0))
             }
 
             Key::InterfaceDeps(symbol) => {
@@ -978,8 +1031,14 @@ fn infer_file(
     // script-local `@type`/`@alias` declarations shadow package definitions of the same name — exactly
     // production's split (`type_definitions` for package docs, `from_modules(package ++ own)` for scripts).
     let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(file));
-    let type_definitions = if *kind == DocumentKind::Package {
-        (*engine.fetch::<TypeDefinitionEnvironment>(Key::PackageTypeDefinitions)).clone()
+    // Kept as locals so both arms can lend `&TypeDefinitionEnvironment` without cloning the
+    // package-wide environment into every inference body.
+    let package_type_definitions;
+    let script_type_definitions;
+    let type_definitions: &TypeDefinitionEnvironment = if *kind == DocumentKind::Package {
+        package_type_definitions =
+            engine.fetch::<TypeDefinitionEnvironment>(Key::PackageTypeDefinitions);
+        &package_type_definitions
     } else {
         let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
         let mut package_modules = Vec::new();
@@ -993,16 +1052,15 @@ fn infer_file(
                 );
             }
         }
-        let mut script_type_definitions = TypeDefinitionEnvironment::from_modules(
+        let mut built = TypeDefinitionEnvironment::from_modules(
             package_modules
                 .iter()
                 .map(|view| &*view.0)
                 .chain([&*module]),
         );
-        group
-            .stubs
-            .seed_type_definitions(&mut script_type_definitions);
-        script_type_definitions
+        group.stubs.seed_type_definitions(&mut built);
+        script_type_definitions = built;
+        &script_type_definitions
     };
 
     let mut lowering = group.lowering.borrow_mut();
@@ -1039,7 +1097,7 @@ fn infer_file(
         &module,
         local_naming,
         &package_naming,
-        &type_definitions,
+        type_definitions,
     );
     let exports = inference_state.exported_value_schemes(&module, local_naming);
     (check, exports)

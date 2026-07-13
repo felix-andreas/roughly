@@ -1966,12 +1966,77 @@ fn push_string_occurrence(
 // Completion
 //
 
+/// One package global as the completion source sees it: label, item kind, and whether calling it
+/// takes arguments. Precomputed per export file (and folded package-wide by the engine) so a
+/// completion request filters ready-made entries instead of re-deriving each global's kind from its
+/// export file's module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalCompletionEntry {
+    pub symbol: Symbol,
+    pub label: String,
+    pub kind: CompletionItemKind,
+    pub takes_arguments: Option<bool>,
+}
+
+/// The completion entries for one file's exported globals, in the given symbol order. Skips symbols
+/// without a resolvable label; a symbol whose defining shape is not a simple assignment falls back to
+/// a variable entry, exactly like the per-request path it replaces.
+pub fn document_completion_exports(
+    module: &Module,
+    local_naming: &NamesLocal,
+    interner: &Interner,
+    exported: &[Symbol],
+) -> Vec<GlobalCompletionEntry> {
+    exported
+        .iter()
+        .filter_map(|symbol| {
+            let label = interner.resolve(*symbol)?.to_owned();
+            let (kind, takes_arguments) = match find_exported_binding(module, local_naming, *symbol)
+            {
+                Some(binding_id) => binding_completion_kind(module, local_naming, binding_id),
+                None => (CompletionItemKind::Variable, None),
+            };
+            Some(GlobalCompletionEntry {
+                symbol: *symbol,
+                label,
+                kind,
+                takes_arguments,
+            })
+        })
+        .collect()
+}
+
+/// The whole project's global completion entries, derived on demand from the database's package
+/// naming. The engine serves completion from a memoized package-wide fold instead; this builder is
+/// the from-scratch path for hosts that retain full analysis state.
+pub fn global_completion_entries(database: &dyn IdeDatabase) -> Vec<GlobalCompletionEntry> {
+    let Some(package_naming) = database.package_naming() else {
+        return Vec::new();
+    };
+    package_naming
+        .global_bindings
+        .iter()
+        .filter_map(|(symbol, export_document_id)| {
+            let label = database.interner().resolve(*symbol)?.to_owned();
+            let (kind, takes_arguments) =
+                global_completion_kind(database, *export_document_id, *symbol);
+            Some(GlobalCompletionEntry {
+                symbol: *symbol,
+                label,
+                kind,
+                takes_arguments,
+            })
+        })
+        .collect()
+}
+
 // Matches the workspace-symbol cap. The full global namespace can exceed 20k entries; returning it
 // all produces a huge payload and lets the client cache a complete list and stop re-querying.
 pub fn completion(
     database: &dyn IdeDatabase,
     path: &Path,
     position: TextPosition,
+    global_entries: &[GlobalCompletionEntry],
 ) -> Option<CompletionResult> {
     let document_id = database.document_id_for_path(path)?;
     let document = database.document_by_id(document_id)?;
@@ -2038,26 +2103,18 @@ pub fn completion(
         items.push(local_item);
     }
 
-    if let Some(package_naming) = database.package_naming() {
-        for (symbol, export_document_id) in &package_naming.global_bindings {
-            let Some(label) = database.interner().resolve(*symbol) else {
-                continue;
-            };
-            if !query_matches(label, &query) {
-                continue;
-            }
-
-            let (kind, takes_arguments) =
-                global_completion_kind(database, *export_document_id, *symbol);
-            items.push(CompletionItem {
-                label: label.to_owned(),
-                kind,
-                source: CompletionItemSource::Global,
-                detail: None,
-                documentation: None,
-                takes_arguments,
-            });
+    for entry in global_entries {
+        if !query_matches(&entry.label, &query) {
+            continue;
         }
+        items.push(CompletionItem {
+            label: entry.label.clone(),
+            kind: entry.kind,
+            source: CompletionItemSource::Global,
+            detail: None,
+            documentation: None,
+            takes_arguments: entry.takes_arguments,
+        });
     }
 
     // The standard-library corpus, with each stub's scheme as the item detail. A project global of

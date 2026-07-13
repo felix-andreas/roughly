@@ -154,6 +154,107 @@ fn independent_chains_do_not_cross_invalidate() {
     );
 }
 
+// --- Durability -----------------------------------------------------------------------------------
+//
+// The Text chain plays the open document (LOW); the Other chain plays an unopened on-disk file (HIGH).
+// The fast path must skip the durable chain's validation walk entirely after a LOW edit, and durability
+// transitions (open = downgrade, close = upgrade) must never let a dependent skip a real change.
+
+// After a LOW edit, validating a HIGH memo is O(1): one step for the memo itself, no walk into its
+// dependencies. The step counter is the observable — without the fast path the walk visits the
+// dependency (`Other`) too.
+#[test]
+fn durable_chain_validates_in_one_step_after_a_low_edit() {
+    let mut engine = fresh();
+    engine.set_input_durable(Key::Text, "hello".to_owned(), engine::Durability::LOW);
+    engine.set_input_durable(Key::Other, "abc".to_owned(), engine::Durability::HIGH);
+    let _ = engine.fetch::<usize>(Key::Doubled);
+    let _ = engine.fetch::<usize>(Key::OtherLength);
+
+    engine.set_input_durable(Key::Text, "hello!".to_owned(), engine::Durability::LOW);
+    let before = engine.validation_count();
+    assert_eq!(*engine.fetch::<usize>(Key::OtherLength), 3);
+    assert_eq!(
+        engine.validation_count() - before,
+        1,
+        "a durable memo must green out without walking its dependencies"
+    );
+    assert_eq!(engine.group().other_length_runs.get(), 1);
+}
+
+// Opening a document downgrades its input (HIGH -> LOW) without changing the value. The downgrade must
+// flush dependents' recorded durability — otherwise a later LOW keystroke would be invisible to their
+// fast path and they would serve a stale value forever.
+#[test]
+fn durability_downgrade_then_edit_recomputes_dependents() {
+    let mut engine = fresh();
+    engine.set_input_durable(Key::Other, "abc".to_owned(), engine::Durability::HIGH);
+    assert_eq!(*engine.fetch::<usize>(Key::OtherLength), 3);
+
+    // The open: same text, weaker durability.
+    engine.set_input_durable(Key::Other, "abc".to_owned(), engine::Durability::LOW);
+    assert_eq!(*engine.fetch::<usize>(Key::OtherLength), 3);
+
+    // The keystroke: a LOW change the re-recorded dependent must observe.
+    engine.set_input_durable(Key::Other, "abcdef".to_owned(), engine::Durability::LOW);
+    assert_eq!(
+        *engine.fetch::<usize>(Key::OtherLength),
+        6,
+        "a post-downgrade edit must not be skipped by a stale durable record"
+    );
+}
+
+// The downgrade must reach dependents whose VALUES never change: `Length` recomputes equal on the
+// downgrade (backdated), so `Doubled` greens by early cutoff without recomputing — and the walk must
+// still re-record `Doubled`'s durability as LOW, or the next keystroke would be invisible to its fast
+// path and it would serve a stale value.
+#[test]
+fn durability_downgrade_flushes_through_cutoff_nodes() {
+    let mut engine = fresh();
+    engine.set_input_durable(Key::Text, "hello".to_owned(), engine::Durability::HIGH);
+    assert_eq!(*engine.fetch::<usize>(Key::Doubled), 10);
+
+    // The open: same text, weaker durability. Length recomputes to an equal value (cutoff), Doubled
+    // stays green through the walk.
+    engine.set_input_durable(Key::Text, "hello".to_owned(), engine::Durability::LOW);
+    assert_eq!(*engine.fetch::<usize>(Key::Doubled), 10);
+    assert_eq!(
+        engine.group().doubled_runs.get(),
+        1,
+        "the equal-value downgrade must not recompute the cutoff node"
+    );
+
+    // The keystroke: the cutoff node's fast path must see it.
+    engine.set_input_durable(Key::Text, "hello!!".to_owned(), engine::Durability::LOW);
+    assert_eq!(
+        *engine.fetch::<usize>(Key::Doubled),
+        14,
+        "a LOW edit after the downgrade must reach a value-stable dependent"
+    );
+}
+
+// Closing a document upgrades its input (LOW -> HIGH) with the on-disk value. The equal-value upgrade
+// backdates (no recompute), and a later HIGH change still reaches dependents that recorded LOW.
+#[test]
+fn durability_upgrade_backdates_and_later_changes_still_propagate() {
+    let mut engine = fresh();
+    engine.set_input_durable(Key::Other, "abc".to_owned(), engine::Durability::LOW);
+    assert_eq!(*engine.fetch::<usize>(Key::OtherLength), 3);
+
+    // The close: same text, stronger durability — dependents stay green.
+    engine.set_input_durable(Key::Other, "abc".to_owned(), engine::Durability::HIGH);
+    assert_eq!(*engine.fetch::<usize>(Key::OtherLength), 3);
+    assert_eq!(
+        engine.group().other_length_runs.get(),
+        1,
+        "upgrade backdates"
+    );
+
+    // A later on-disk change (watcher event) at HIGH.
+    engine.set_input_durable(Key::Other, "abcd".to_owned(), engine::Durability::HIGH);
+    assert_eq!(*engine.fetch::<usize>(Key::OtherLength), 4);
+}
+
 // --- Accidental-cycle guard (B1) -----------------------------------------------------------------
 //
 // The core assumes an acyclic recorded dependency graph. The one intended cycle (the package-interface

@@ -53,7 +53,7 @@ use {
         tracing::TracingLayer,
     },
     engine::{
-        Cancelled, Engine, Shared,
+        Cancelled, Durability, Engine, Shared,
         ide_view::{EngineIde, PathTable},
         queries::{
             Config as EngineConfig, FileDiagnostics, FileId, Key, ParsedDocument, RoughlyQueries,
@@ -394,7 +394,9 @@ impl EngineWorker {
         }
 
         worker.rebuild_project_files();
-        worker.engine.set_input(Key::Config, worker.engine_config());
+        worker
+            .engine
+            .set_input_durable(Key::Config, worker.engine_config(), Durability::HIGH);
 
         let result = initialize_result(worker.position_encoding, worker.experimental_features);
         (worker, result)
@@ -771,17 +773,27 @@ impl EngineWorker {
     fn set_parsed_input(&mut self, path: &Path, document: Document, is_package: bool) {
         self.symbol_items_cache.remove(path);
         let file = self.file_id_for(path);
+        // Open documents are the high-churn inputs (every keystroke lands here); everything else — the
+        // unopened package corpus, names, kinds — is durable, so a keystroke's validation walk skips
+        // those files' chains entirely. Open-ness flips durability at open/close through this same
+        // funnel: `did_open`/`did_close` update `open_documents` before re-feeding the text.
+        let durability = if self.open_documents.contains(path) {
+            Durability::LOW
+        } else {
+            Durability::HIGH
+        };
         self.engine
-            .set_input(Key::SourceText(file), ParsedDocument(document));
+            .set_input_durable(Key::SourceText(file), ParsedDocument(document), durability);
         self.engine
-            .set_input(Key::FileName(file), path.to_path_buf());
-        self.engine.set_input(
+            .set_input_durable(Key::FileName(file), path.to_path_buf(), Durability::HIGH);
+        self.engine.set_input_durable(
             Key::DocumentKind(file),
             if is_package {
                 DocumentKind::Package
             } else {
                 DocumentKind::Script
             },
+            Durability::HIGH,
         );
         self.paths.insert(file, path.to_path_buf());
         self.maybe_evict_stale_memos();
@@ -842,7 +854,8 @@ impl EngineWorker {
             .into_iter()
             .map(|(_, _, file)| file)
             .collect::<Vec<_>>();
-        self.engine.set_input(Key::ProjectFiles, project);
+        self.engine
+            .set_input_durable(Key::ProjectFiles, project, Durability::HIGH);
     }
 
     fn report_error(&self, message: String) {
@@ -951,14 +964,11 @@ impl EngineWorker {
 
     // One unit of idle-time work, run only when the job queue was observed empty: the semantic
     // publish for the most recently edited document, or — with nothing owed — one file of the
-    // background prime. Both run under the idle-interrupt token, so any job the frontend enqueues
-    // abandons the unit mid-computation; abandoned work is requeued and retried at the next idle
-    // slot. Resetting the token here races the frontend's store-then-send by a few instructions;
-    // losing that race costs one completed-but-superseded unit (the queued job runs right after),
-    // never a wrong publish — a unit reads engine state that reflects every applied edit, and the
-    // publish it makes is correct for that state.
+    // background prime. Both run under the idle-interrupt token — reset by the worker loop before
+    // the empty poll that led here — so any job the frontend enqueues after that poll abandons the
+    // unit at its next cancellation check; abandoned work is requeued and retried at the next idle
+    // slot.
     fn run_idle_unit(&mut self) {
-        self.idle_interrupt.store(false, Ordering::Relaxed);
         let token = self.idle_interrupt.clone();
         if let Some(path) = self.pending_semantic_publishes.pop() {
             // The document may have been closed (or retracted) since it was owed a publish.
@@ -1431,7 +1441,8 @@ impl EngineWorker {
         }
         // The file set and/or config may have changed across the batch.
         self.rebuild_project_files();
-        self.engine.set_input(Key::Config, self.engine_config());
+        self.engine
+            .set_input_durable(Key::Config, self.engine_config(), Durability::HIGH);
         // A config change can move diagnostics in every document (e.g. toggling `[check] strict`),
         // so apply it to client-visible diagnostics immediately rather than on the next edit.
         if config_changed {
@@ -2598,12 +2609,23 @@ fn run_worker(seed: WorkerSeed, receiver: mpsc::Receiver<Job>) {
         // Jobs always take priority over idle work (deferred semantic publishes, the background
         // prime): while idle work is owed, poll non-blockingly and spend each empty poll on ONE
         // idle unit before polling again; with nothing owed, block on the channel as before.
+        //
+        // The interrupt token is reset here, BEFORE the empty poll — paired with the frontend's
+        // send-then-flag order this makes preemption lossless: a job enqueued before the poll is
+        // simply received; a job enqueued after it flags the token after this reset, so the idle
+        // unit observes it at its next cancellation check. (The reverse pairing can drop a flag
+        // between the poll and the unit and stall the job behind a whole idle unit.) The cost of
+        // the token staying stale-true after a received job is one spuriously abandoned — and
+        // requeued — idle unit.
         let next_job = match &worker {
-            Some(state) if state.has_idle_work() => match receiver.try_recv() {
-                Ok(job) => Some(job),
-                Err(mpsc::TryRecvError::Empty) => None,
-                Err(mpsc::TryRecvError::Disconnected) => return,
-            },
+            Some(state) if state.has_idle_work() => {
+                state.idle_interrupt.store(false, Ordering::Relaxed);
+                match receiver.try_recv() {
+                    Ok(job) => Some(job),
+                    Err(mpsc::TryRecvError::Empty) => None,
+                    Err(mpsc::TryRecvError::Disconnected) => return,
+                }
+            }
             _ => match receiver.recv() {
                 Ok(job) => Some(job),
                 Err(_) => return,
@@ -2658,8 +2680,9 @@ fn run_worker(seed: WorkerSeed, receiver: mpsc::Receiver<Job>) {
 // The async-lsp frontend: stateless except the channel to the worker, the shared tokens, and a client
 // handle for the rare error message. Every handler serializes its params into a `Job` and (for
 // requests) awaits the worker's reply over a oneshot — never touching the `!Send` engine directly.
-// Every send first flips `idle_interrupt`, so in-flight idle work on the worker (a deferred semantic
-// publish, a prime file) yields to the job instead of finishing ahead of it.
+// Every send then flips `idle_interrupt`, so in-flight idle work on the worker (a deferred semantic
+// publish, a prime file) yields to the job instead of finishing ahead of it; see the worker loop's
+// reset-before-poll pairing for why this order is the lossless one.
 struct ServerState {
     sender: mpsc::Sender<Job>,
     cancel: Arc<AtomicBool>,
@@ -2674,7 +2697,6 @@ impl ServerState {
         T: Send + 'static,
         F: FnOnce(&mut EngineWorker) -> Result<T, ResponseError> + Send + 'static,
     {
-        self.idle_interrupt.store(true, Ordering::Relaxed);
         let (reply, receive) = oneshot::channel();
         let job = Job::Read(Box::new(move |worker| {
             let _ = reply.send(build(worker));
@@ -2682,6 +2704,9 @@ impl ServerState {
         if self.sender.send(job).is_err() {
             return box_future(Err(worker_gone_error()));
         }
+        // Send first, flag second: the worker resets this token before every empty idle poll, so a
+        // flag stored after our send is guaranteed observed by any idle unit that poll admitted.
+        self.idle_interrupt.store(true, Ordering::Relaxed);
         Box::pin(async move { receive.await.unwrap_or_else(|_| Err(worker_gone_error())) })
     }
 
@@ -2692,7 +2717,6 @@ impl ServerState {
         F: FnOnce(&mut EngineWorker) + Send + 'static,
     {
         self.cancel.store(true, Ordering::Relaxed);
-        self.idle_interrupt.store(true, Ordering::Relaxed);
         // These notifications carry document-sync edits (`did_open`/`did_change`/`did_save`). A dead
         // worker channel means the edit cannot be applied, so analysis state would silently diverge from
         // the document; there is no response channel to report the failure on. A desynced analysis state
@@ -2700,6 +2724,8 @@ impl ServerState {
         if self.sender.send(Job::Write(Box::new(build))).is_err() {
             panic!("analysis worker is gone; cannot apply a document-sync edit");
         }
+        // Send-then-flag, mirroring `read` (the worker resets the token before each empty idle poll).
+        self.idle_interrupt.store(true, Ordering::Relaxed);
         ControlFlow::Continue(())
     }
 
@@ -2709,12 +2735,13 @@ impl ServerState {
     where
         F: FnOnce(&mut EngineWorker) + Send + 'static,
     {
-        self.idle_interrupt.store(true, Ordering::Relaxed);
         // As with `notify_edit`, a dead worker channel drops a state mutation with no way to report it,
         // leaving analysis state incoherent; fail loudly rather than continue in a corrupt state.
         if self.sender.send(Job::Write(Box::new(build))).is_err() {
             panic!("analysis worker is gone; cannot apply a state mutation");
         }
+        // Send-then-flag, mirroring `read` (the worker resets the token before each empty idle poll).
+        self.idle_interrupt.store(true, Ordering::Relaxed);
         ControlFlow::Continue(())
     }
 }
