@@ -406,6 +406,10 @@ fn lower_binary_operator(
         | kind::DOUBLE_STAR
         | kind::CARET
         | kind::COLON
+        // data.table's `:=` (column assignment inside `DT[...]`): lowered like any binary call so
+        // both operands stay visible to naming and the IDE; the data-mask recognizer silences the
+        // column names, and the `:=` callee itself resolves nowhere (masked too).
+        | kind::COLON_EQUAL
         | kind::LT
         | kind::LTE
         | kind::GT

@@ -330,3 +330,19 @@ Chosen shape: **the guard itself carries the missing information, so consume it.
 Deliberate consequence, pinned as a fixture: testing a parameter for `NULL` and then using it *unguarded* afterwards is now a genuine finding (`if (is.null(x)) 0L else 1L; x + 1L` errors) — the test declared `NULL` a possible inhabitant, and the annotated form of the same code already behaved this way, so the model is now consistent rather than lenient-when-unannotated.
 
 Impact: correctness — kills the last recorded idiom false positive from the sweep, with zero regressions across every fixture suite and the realworld corpus (no expectation changed anywhere else); simplicity — ~20 lines in one function, reusing the union machinery end to end; performance — one extra variable + union per shaped guard, negligible; incremental analysis — unaffected (a per-file inference detail).
+
+# Decision record: data-masked NSE resolution (data.table / with-family)
+
+**Status:** decided and implemented (agent-owned decision under the delegated ownership mandate; user-reported pain: data.table code drowned in could-not-resolve warnings).
+
+Previous shape: every bare name in `DT[region == "west", .(total = sum(amount)), by = product]` failed lexical resolution and produced a could-not-resolve warning (plus type errors from the base index-arity rules), because data.table evaluates i/j/by in the data's own frame — the same false-positive class R CMD check and lintr hit on NSE code. `:=` lowered to `Unsupported`, hiding its operands from the IDE entirely.
+
+Chosen shape — structural mask recognition in the naming walk, diagnostic suppression at the emission edge:
+- Two recognizers set a mask depth during resolution: a `[` bracket whose arguments carry an unambiguous data.table signature (`by =`/`keyby =` argument names; `:=` or `.()` calls; `.SD`/`.N`/`.I`/`.BY`/`.GRP`/`.EACHI` symbols — none of which occur in base indexing, so `m[i, j]` is untouched), and the base masking family `with`/`within`/`subset`/`transform` (callee not locally shadowed), which masks arguments after the data.
+- A read that fails lexical resolution inside a mask is recorded in `NamesLocal.masked_reads` **in addition to** `non_locals` — masked names still resolve stubs and package globals normally (a `sum` in `j` keeps its scheme; the first design that kept masked reads out of `non_locals` lost stub typing and was revised). Both could-not-resolve emitters (the analysis package pass and the engine's per-file query) skip masked ids; the typecheck fallthrough for unresolved non-locals was already silent `Unknown` with no strict origin.
+- The recognized bracket itself lands in `NamesLocal.masked_subsets` and types as silent `Unknown` before the base index-arity rules (`[.data.table` returns shapes those rules must not judge).
+- `:=` now lowers as an ordinary binary call so its operands stay visible to naming, hover, and the mask.
+
+Deliberately NOT silenced: anything that resolves (locals, stubs, globals) keeps full checking inside masks; base indexing keeps lexical resolution and its warnings. Strict mode stays silent on masked column reads — NSE is a recognized dynamic construct with intended semantics, not an unmodeled hole. Future extension recorded in the backlog: honor `utils::globalVariables()` and generalize the mask marker into `.Rtypes` stub syntax so dplyr verbs can declare masked parameters.
+
+Impact: correctness — kills the dominant NSE false-positive class with zero regressions (all suites; base-R control fixtures pin the non-masked behavior); simplicity — one mask-depth integer and two sets on the existing naming result, suppression at the existing emission edges; performance — a shallow per-bracket marker scan, negligible; incremental analysis — unaffected (per-file naming facts).

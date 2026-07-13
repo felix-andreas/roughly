@@ -556,3 +556,32 @@ fn unknown_typing_directive_value_is_reported() {
         stderr(&output)
     );
 }
+
+// data.table's non-standard evaluation: bare column references inside a bracket carrying the
+// data.table signature (`by =`, `:=`, `.()`, `.SD`-family) and inside the base `with`/`subset`
+// family resolve as data-masked columns — no unresolved-name warnings — while base indexing
+// keeps them.
+#[test]
+fn data_masked_column_references_do_not_warn() {
+    let directory = project(&[
+        (
+            "R/dt.R",
+            "summarize_sales <- function(dt) {\n  dt[region == \"west\", .(total = sum(amount)), by = product]\n  dt[, revenue := price * quantity]\n  with(dt, mean(score_col))\n}\n",
+        ),
+        ("R/plain.R", "pick <- function(m) m[not_a_column]\n"),
+        ("roughly.toml", "[check]\ntyping = true\n"),
+    ]);
+    let output = roughly(directory.path(), &["check"]);
+    assert_eq!(exit_code(&output), 1);
+    let report = stderr(&output);
+    assert!(
+        report.contains("not_a_column"),
+        "base indexing keeps its unresolved warning:\n{report}"
+    );
+    for column in ["region", "amount", "product", "revenue", "score_col"] {
+        assert!(
+            !report.contains(&format!("`{column}`")),
+            "masked column `{column}` must not warn:\n{report}"
+        );
+    }
+}

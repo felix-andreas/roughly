@@ -3,7 +3,7 @@ use {
         diagnostic::Diagnostic,
         document::DocumentId,
         hir::{
-            AssignTarget, AssignmentScope, DefinitionItem, DefinitionKind, ExpressionId,
+            Argument, AssignTarget, AssignmentScope, DefinitionItem, DefinitionKind, ExpressionId,
             ExpressionKind, HirArena, Module, ModuleId, contains_loop_exit, replacement_base,
         },
         interner::{Interner, Symbol},
@@ -40,6 +40,15 @@ pub struct NamesLocal {
     pub expression_resolutions: BTreeMap<ExpressionId, BindingId>,
     pub maybe_undefined_expressions: BTreeSet<ExpressionId>,
     pub non_locals: BTreeMap<ExpressionId, Symbol>,
+    // Reads inside a data-masked argument position (a data.table `[...]` with NSE markers, the
+    // `with`/`subset` family) that no lexical slot resolves: column references evaluated in the
+    // data's own frame at run time. Kept out of `non_locals` so they draw no could-not-resolve
+    // diagnostic; the checker types them as silent `Unknown`.
+    pub masked_reads: BTreeSet<ExpressionId>,
+    // The bracket expressions whose index arguments were data-masked (a data.table signature was
+    // recognized). The checker types the whole subset as silent `Unknown` — `[.data.table` is a
+    // dynamic dispatch the base indexing rules must not judge.
+    pub masked_subsets: BTreeSet<ExpressionId>,
     // `pkg::name` reads, in tree order. Validity against the stub corpus is a package-level fact
     // (the corpus lives there), so the local walk only records the raw triple.
     pub namespace_reads: Vec<NamespaceRead>,
@@ -465,6 +474,8 @@ pub(crate) fn package_document_diagnostics(
             || is_namespace_symbol(*symbol, context.document_id)
             || is_builtin_symbol(interner, *symbol)
             || context.stub_library.contains(*symbol)
+            // A data-masked read that resolves nowhere is a column reference, not a typo.
+            || context.local_naming.masked_reads.contains(expression_id)
         {
             continue;
         }
@@ -1369,6 +1380,9 @@ struct DocumentNamingContext<'a> {
     // package top level, where it routes writes between per-site definitions and document slots;
     // inside a frame every write targets the frame regardless.
     conditional_depth: usize,
+    // Depth of enclosing data-masked argument positions. A read that fails lexical resolution
+    // inside a mask is a column reference, not an unresolved name.
+    mask_depth: usize,
     // Loop bodies are re-walked to a fixed point, so binding creation must be idempotent across
     // walks: one binding per (site, symbol), keyed by the site's byte range.
     bindings_by_site: HashMap<(usize, usize, Symbol), BindingId>,
@@ -1405,6 +1419,7 @@ impl<'a> DocumentNamingContext<'a> {
             scopes: Vec::new(),
             top_level_names: BTreeSet::new(),
             conditional_depth: 0,
+            mask_depth: 0,
             bindings_by_site: HashMap::new(),
             flow: FlowState::new(),
             loop_memo: HashMap::new(),
@@ -1509,6 +1524,7 @@ impl<'a> DocumentNamingContext<'a> {
                     // write was seen; the later pass's resolution replaces it (and vice versa), so
                     // the final walk always leaves exactly one of the two records.
                     self.document_naming.non_locals.remove(&expression_id);
+                    self.document_naming.masked_reads.remove(&expression_id);
                     self.document_naming
                         .expression_resolutions
                         .insert(expression_id, binding_id);
@@ -1532,6 +1548,14 @@ impl<'a> DocumentNamingContext<'a> {
                     self.document_naming
                         .non_locals
                         .insert(expression_id, *symbol);
+                    // A masked read is still a non-local (a stub or package global it names — a
+                    // `sum` inside `j` — resolves normally); the mask only suppresses the
+                    // could-not-resolve diagnostic when nothing resolves it.
+                    if self.mask_depth > 0 {
+                        self.document_naming.masked_reads.insert(expression_id);
+                    } else {
+                        self.document_naming.masked_reads.remove(&expression_id);
+                    }
                 }
             },
             ExpressionKind::Block { expressions, .. } => {
@@ -1698,12 +1722,53 @@ impl<'a> DocumentNamingContext<'a> {
             }
             ExpressionKind::Call { callee, arguments } => {
                 self.resolve_expression(*callee);
+                // The base data-masking family evaluates every argument after the data in the
+                // data's frame; a locally shadowed name is an ordinary function and masks nothing
+                // (the callee resolved to a slot above, mirroring the guard-predicate rule).
+                let masked_family = {
+                    let callee_expression = self.arena.get(*callee);
+                    matches!(&callee_expression.kind, ExpressionKind::Symbol(symbol)
+                    if !self
+                        .document_naming
+                        .expression_resolutions
+                        .contains_key(&callee_expression.id)
+                        && matches!(
+                            self.interner.resolve(*symbol),
+                            Some("with" | "within" | "subset" | "transform")
+                        ))
+                };
+                for (argument_index, argument) in arguments.iter().enumerate() {
+                    let masked = masked_family && argument_index > 0;
+                    if masked {
+                        self.mask_depth += 1;
+                    }
+                    self.resolve_expression(argument.expression);
+                    if masked {
+                        self.mask_depth -= 1;
+                    }
+                }
+            }
+            ExpressionKind::Subset { value, arguments } => {
+                self.resolve_expression(*value);
+                // A bracket call carrying an unambiguous data.table signature (`by =`, `:=`,
+                // `.()`, `.SD`-family symbols) evaluates its index arguments in the data's frame,
+                // so bare names there are column references. Base-R indexing (`m[i, j]`) carries
+                // none of the markers and resolves as before.
+                let masked = arguments
+                    .iter()
+                    .any(|argument| self.argument_has_data_table_marker(argument));
+                if masked {
+                    self.document_naming.masked_subsets.insert(expression_id);
+                    self.mask_depth += 1;
+                }
                 for argument in arguments {
                     self.resolve_expression(argument.expression);
                 }
+                if masked {
+                    self.mask_depth -= 1;
+                }
             }
-            ExpressionKind::Subset { value, arguments }
-            | ExpressionKind::Subset2 { value, arguments } => {
+            ExpressionKind::Subset2 { value, arguments } => {
                 self.resolve_expression(*value);
                 for argument in arguments {
                     self.resolve_expression(argument.expression);
@@ -1826,6 +1891,42 @@ impl<'a> DocumentNamingContext<'a> {
     // A plain `name <- value` assignment: resolves the write, records it for the unused check
     // (killing every earlier write to the slot on this path), and maps the assignment expression
     // to the written binding.
+    // Whether one bracket argument carries an unambiguous data.table NSE signature: a `by =` /
+    // `keyby =` name, or a `:=` / `.()` call or `.SD`-family symbol anywhere in its expression.
+    fn argument_has_data_table_marker(&self, argument: &Argument) -> bool {
+        if let Some(name) = argument.name
+            && matches!(self.interner.resolve(name), Some("by" | "keyby"))
+        {
+            return true;
+        }
+        self.expression_has_data_table_marker(argument.expression, 0)
+    }
+
+    fn expression_has_data_table_marker(&self, expression_id: ExpressionId, depth: usize) -> bool {
+        // Markers sit at the argument's top level or just inside `.()`; a shallow bound keeps the
+        // scan O(argument) even on pathological nesting.
+        if depth > 16 {
+            return false;
+        }
+        match &self.arena.get(expression_id).kind {
+            ExpressionKind::Symbol(symbol) => matches!(
+                self.interner.resolve(*symbol),
+                Some(".SD" | ".N" | ".I" | ".BY" | ".GRP" | ".EACHI")
+            ),
+            ExpressionKind::Call { callee, arguments } => {
+                if let ExpressionKind::Symbol(symbol) = &self.arena.get(*callee).kind
+                    && matches!(self.interner.resolve(*symbol), Some("." | ":="))
+                {
+                    return true;
+                }
+                arguments.iter().any(|argument| {
+                    self.expression_has_data_table_marker(argument.expression, depth + 1)
+                })
+            }
+            _ => false,
+        }
+    }
+
     fn resolve_variable_write(
         &mut self,
         expression_id: ExpressionId,

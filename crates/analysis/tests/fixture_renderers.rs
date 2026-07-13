@@ -337,7 +337,13 @@ fn render_named_expression(
                 .map(|(binding_document_id, binding_id)| {
                     render_binding_label(binding_document_id, binding_id)
                 })
-                .unwrap_or_else(|| "?".to_owned());
+                .unwrap_or_else(|| {
+                    if local_naming_result.masked_reads.contains(&expression_id) {
+                        "masked".to_owned()
+                    } else {
+                        "?".to_owned()
+                    }
+                });
             lines.push(format!("{prefix}Symbol({name}@{binding})"));
         }
         ExpressionKind::Block { expressions, .. } => {
@@ -540,7 +546,13 @@ fn render_locally_named_expression(
                 .expression_resolutions
                 .get(&expression_id)
                 .map(|binding_id| render_binding_label(*binding_id))
-                .unwrap_or_else(|| "?".to_owned());
+                .unwrap_or_else(|| {
+                    if local_naming_result.masked_reads.contains(&expression_id) {
+                        "masked".to_owned()
+                    } else {
+                        "?".to_owned()
+                    }
+                });
             lines.push(format!("{prefix}Symbol({name}@{binding})"));
         }
         ExpressionKind::Block { expressions, .. } => {

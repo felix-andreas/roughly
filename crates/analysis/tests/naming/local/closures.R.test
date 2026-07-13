@@ -213,3 +213,94 @@ Assign(f@b1)
       Symbol(outer_value@b2)
 
 No diagnostics.
+
+#==== data_masking
+#---- data_table_brackets_mask_column_references
+report <- function(dt) {
+  dt[region == "west", .(total = sum(amount)), by = product]
+}
+#++++
+Assign(report@b0)
+  Function(dt@b1)
+    Block
+      Subset
+        Symbol(dt@b1)
+        Argument
+          Call
+            Symbol(==@masked)
+            Argument
+              Symbol(region@masked)
+            Argument
+              Character("\"west\"")
+        Argument
+          Call
+            Symbol(.@masked)
+            Argument(total)
+              Call
+                Symbol(sum@masked)
+                Argument
+                  Symbol(amount@masked)
+        Argument(by)
+          Symbol(product@masked)
+
+No diagnostics.
+
+#---- walrus_marks_the_mask
+add_revenue <- function(dt) {
+  dt[, revenue := price * quantity]
+}
+#++++
+Assign(add_revenue@b0)
+  Function(dt@b1)
+    Block
+      Subset
+        Symbol(dt@b1)
+        Argument
+          Call
+            Symbol(:=@masked)
+            Argument
+              Symbol(revenue@masked)
+            Argument
+              Call
+                Symbol(*@masked)
+                Argument
+                  Symbol(price@masked)
+                Argument
+                  Symbol(quantity@masked)
+
+No diagnostics.
+
+#---- base_indexing_stays_lexical
+pick <- function(m) {
+  m[not_a_column]
+}
+#++++
+Assign(pick@b0)
+  Function(m@b1)
+    Block
+      Subset
+        Symbol(m@b1)
+        Argument
+          Symbol(not_a_column@?)
+
+No diagnostics.
+
+#---- with_family_masks_after_the_data
+peek <- function(dt) {
+  with(dt, mean(score_col))
+}
+#++++
+Assign(peek@b0)
+  Function(dt@b1)
+    Block
+      Call
+        Symbol(with@?)
+        Argument
+          Symbol(dt@b1)
+        Argument
+          Call
+            Symbol(mean@masked)
+            Argument
+              Symbol(score_col@masked)
+
+No diagnostics.

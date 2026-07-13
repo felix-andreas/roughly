@@ -250,3 +250,28 @@ error[syntax-error] Syntax Error: missing rhs for operator <-
 mirrored <- count
 #++++
 No diagnostics.
+
+#==== data_masking
+#---- data_table_syntax_produces_no_noise
+#---- R/dt.R
+summarize_sales <- function(dt) {
+  dt[region == "west", .(total = sum(amount)), by = product]
+}
+add_revenue <- function(dt) {
+  dt[, revenue := price * quantity]
+}
+peek <- function(dt) {
+  with(dt, mean(score_col))
+}
+#++++
+No diagnostics.
+
+#---- base_indexing_still_reports_unresolved_names
+#---- R/plain.R
+pick <- function(m) {
+  m[not_a_column]
+}
+#++++
+warning[unresolved] I could not resolve `not_a_column` in this package, its imports, or builtins.
+--> 2:5-2:17
+|   m[not_a_column]

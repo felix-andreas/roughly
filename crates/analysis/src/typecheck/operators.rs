@@ -661,6 +661,19 @@ impl InferenceState {
             )?;
         }
 
+        // A bracket the naming walk recognized as data.table syntax (`by =`, `:=`, `.()`,
+        // `.SD`-family): `[.data.table` evaluates its indexes in the data's frame and returns a
+        // shape no base indexing rule covers — silent `Unknown`, like the masked column reads
+        // inside it.
+        if let Some(resolution_context) = resolution_context
+            && resolution_context
+                .local_naming
+                .masked_subsets
+                .contains(&expression.id)
+        {
+            return Ok(CoreType::Unknown);
+        }
+
         // An Unknown/Any subject stays Unknown/Any even under an unsupported index shape — the
         // subject's own gap was already diagnosed, so `m[i, j]` must not cascade an arity error.
         if matches!(value_type, CoreType::Unknown) {

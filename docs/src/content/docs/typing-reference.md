@@ -2008,6 +2008,26 @@ switches in both directions:
 - the directive changes only which diagnostics are published for that file — inference and every
   other check are untouched, so hover and the other IDE features keep working under `off`
 
+### Data-masked evaluation (NSE)
+
+R evaluates some argument positions inside a data frame's own environment, where bare names are
+column references no lexical scope can see. Roughly recognizes these positions structurally and
+treats reads there that resolve to no binding as **column references**: silent `Unknown`, no
+could-not-resolve warning, no strict origin.
+
+Recognized masks:
+
+- a `[` call carrying an unambiguous **data.table signature** — a `by =` / `keyby =` argument, a
+  `:=` column assignment, a `.()` list call, or a `.SD` / `.N` / `.I` / `.BY` / `.GRP` / `.EACHI`
+  special — masks all of that bracket's index arguments, and the whole bracket expression types as
+  `Unknown` (base indexing rules do not judge `[.data.table`)
+- the base masking family `with()`, `within()`, `subset()`, `transform()` masks every argument
+  after the data (a locally defined function of the same name masks nothing)
+
+Names inside a mask that *do* resolve — a local variable used in `j`, a standard-library function
+like `sum` — keep their ordinary resolution and typing. Base-R indexing (`m[i, j]`) carries no
+data.table marker and keeps full lexical checking.
+
 ### What strict mode flags
 
 In strict mode, an expression or binding whose inferred type is `Unknown` at the point it is

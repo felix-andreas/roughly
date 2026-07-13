@@ -1737,7 +1737,9 @@ fn package_naming_diagnostics(
     for (expression_id, symbol) in &local_naming.non_locals {
         let resolves = defining.get(symbol).copied().flatten().is_some()
             || is_builtin(interner, *symbol)
-            || group.stubs.contains(*symbol);
+            || group.stubs.contains(*symbol)
+            // A data-masked read that resolves nowhere is a column reference, not a typo.
+            || local_naming.masked_reads.contains(expression_id);
         if resolves {
             continue;
         }
