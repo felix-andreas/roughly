@@ -1,39 +1,38 @@
-# Static Typing for R
+# analysis
 
-This crate explores a static type system for a subset of R.
+The analysis engine behind [Roughly](https://roughly.felixandreas.me): parsing, lowering to HIR,
+name resolution, a Hindley–Milner static type checker for R, and the IDE-query layer (hover,
+completion, goto-definition, references, rename, inlay hints, signature help) that the language
+server and the CLI serve.
 
-The goal is to make a useful subset of R statically checkable while keeping the resulting types, diagnostics, and language-tooling output readable to R programmers.
+Because R has no type-annotation syntax, annotations are written in `#:` comments using a
+JSDoc-like notation, so annotated code stays fully compatible with ordinary R tooling. Standard
+library signatures come from a declaration-only `.Rtypes` stub corpus that projects can extend
+and override.
 
-It is intended to stay practical on large code bases, not only on small examples.
+## Design goals
 
-This is still a work in progress. The supported language subset, the exact type behavior, and some user-facing details are still evolving.
+- Hindley–Milner inference as the foundation; sound within the supported subset
+  (unsupported constructs are refused loudly, never silently mistyped)
+- Rust- and Elm-quality diagnostics: clear, precise, actionable wording with precise ranges
+- preserve the semantic information editor features need (hover, inlay hints, completion detail)
+- stay fast on very large code bases — the sibling `engine` crate memoizes these passes
+  incrementally; this crate also provides the from-scratch checker used by the CLI batch path
+  and as the differential-testing oracle
 
-## Goals
+## Where things are documented
 
-The project is guided by a few broad design goals:
+The authoritative, always-current documentation lives on the docs site:
 
-- use Hindley-Milner style inference as the foundation
-- aim for a sound type checker within the supported subset
-- treat the supported subset as value-like to avoid early variance problems that arise with mutable state
-- use JSDoc-style comment annotations, inspired by [TypeScript's supported JSDoc types](https://www.typescriptlang.org/docs/handbook/jsdoc-supported-types.html), so typing does not require changing R syntax or adding a compilation step to run programs
-- aim for Rust- and Elm-like diagnostics: clear, precise, and actionable
-- preserve semantic information needed for tooling such as hover and inlay hints
-- stay viable on very large code bases
+- [Typing Reference](https://roughly.felixandreas.me/typing-reference) — the semantics contract:
+  supported types, unions, vector and list shapes, guard narrowing, strict mode, data-masked
+  evaluation (NSE), per-file typing directives
+- [Typing guide](https://roughly.felixandreas.me/typing) — the tutorial
+- Contributing pages — architecture, this crate's file structure, and the fixture-testing
+  contract
 
-It also has clear non-goals for v1:
+## Out of scope (for now)
 
-- full coverage of base R syntax and semantics
-- S3 dispatch modeling
-- S4 dispatch modeling
-- NSE and metaprogramming completeness
+- S3/S4 dispatch modeling (S4 slots are lowered; dispatch is not)
+- NSE and metaprogramming completeness beyond the recognized data-masking forms
 - environment and reference semantics
-
-The `analysis` design docs (architecture, file structure, and the testing contract) live in the Roughly [docs site](https://roughly.felixandreas.me) under Contributing; the agent knowledge base lives in `.agents/memory/`.
-For the current supported semantics, see the [Typing Reference](https://roughly.felixandreas.me/typing-reference). Today the checker focuses on a small set of ideas:
-
-- atomic R types such as `logical`, `integer`, `double`, and `character`
-- scalar-like, array-like, and map-like vector shapes
-- tuple-like, record-like, array-like, and map-like `list(...)` values
-- function types written in `#:` comments
-- explicit `Any`, `Unknown`, and `NULL`
-- nullable unions written as `T | NULL`

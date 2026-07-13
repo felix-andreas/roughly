@@ -16,7 +16,7 @@
 
 ## Open — editor & polish
 
-- Hover type fences: VS Code DONE (the fences are tagged `roughly-type` and the extension ships a standalone grammar for that language id alongside the `#:` injection grammar). Zed still renders the fence plain — its extension needs an equivalent fence-language registration.
+- Hover type fences (user-confirmed: no highlighting in current editor builds): the server tags the fences `roughly-type` and the VS Code extension in-repo ships a grammar for that id — needs a released extension update to reach users. Zed renders the fence plain until its extension registers an equivalent fence language (tree-sitter grammar required); consider falling back to tagging fences `r` for Zed if that proves distant.
 - Callback-idiom stub sweep: declare optional formals on single-parameter-capped stubs when touched (`nchar`-style).
 
 ## Open — structure & performance

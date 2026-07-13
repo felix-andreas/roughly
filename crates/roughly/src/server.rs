@@ -192,7 +192,6 @@ struct EngineWorker {
     namespace_exports: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
     // Whether the one-time "configuration lives in roughly.toml" notice was already shown for an
     // editor-settings payload the server does not apply.
-    warned_about_editor_configuration: bool,
     // Memoized per-file symbol items for workspace-symbol search; entries are dropped at the input
     // write paths, so the cache can never serve a stale tree.
     symbol_items_cache: HashMap<PathBuf, Vec<Item>>,
@@ -361,7 +360,6 @@ impl EngineWorker {
             stub_documents: HashMap::new(),
             namespace_documents: HashMap::new(),
             namespace_exports,
-            warned_about_editor_configuration: false,
             symbol_items_cache: HashMap::new(),
             input_writes_since_eviction: 0,
             virtual_document_uris: HashMap::new(),
@@ -1352,10 +1350,10 @@ impl EngineWorker {
         tracing::debug!(?path, "did save");
 
         if !self.open_documents.contains(&path) {
-            self.report_error(format!(
-                "received did_save for non-open document {}",
-                path.display()
-            ));
+            // Protocol-legal traffic for documents this server never tracked as open R sources —
+            // Zed sends did_save for `roughly.toml` and other workspace buffers. The config file's
+            // own reload runs off the file watcher, so there is nothing to do here.
+            tracing::debug!(?path, "ignoring did_save for a non-open document");
             return;
         }
 
@@ -1463,18 +1461,10 @@ impl EngineWorker {
         if params.settings.is_null() {
             return;
         }
-        if self.warned_about_editor_configuration {
-            return;
-        }
-        self.warned_about_editor_configuration = true;
-        if let Err(error) = self.client.show_message(ShowMessageParams {
-            typ: MessageType::INFO,
-            message: "Roughly is configured through roughly.toml in the workspace root; \
-                      editor settings sent via workspace/didChangeConfiguration are not applied."
-                .to_owned(),
-        }) {
-            tracing::warn!(?error, "failed to send the configuration notice");
-        }
+        // Some clients (Zed) send a non-empty settings payload in every session, so a user-facing
+        // message here is unavoidable noise rather than signal. The configuration contract —
+        // `roughly.toml` only — is documented; the ignored payload is logged for debugging.
+        tracing::debug!("ignoring workspace/didChangeConfiguration settings (roughly.toml only)");
     }
 
     //

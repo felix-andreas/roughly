@@ -133,3 +133,22 @@ Unknown
 result <- (1L + "x")@slot
 #++++
 error: invalid operand
+
+#==== whole_number_literal_operands
+#---- double_literal_times_parameter_returns_double
+# R semantics: `2` is a double literal, and double * integer is double at run time
+# (`typeof(2 * 5L)` is "double"), so the inferred return is faithfully `double` — the
+# whole-number-literal-counts-as-integer rule applies at parameter positions and `:` endpoints,
+# deliberately NOT to arithmetic results. An integer-preserving double_it needs `2L * x`.
+double_it <- function(x) 2 * x
+double_it(5L)
+#++++
+fn(x: ?1) -> double
+double
+
+#---- integer_literal_times_parameter_preserves_integer
+int_double_it <- function(x) 2L * x
+int_double_it(5L)
+#++++
+fn(x: ?1) -> ?1
+integer
