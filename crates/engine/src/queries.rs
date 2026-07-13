@@ -36,7 +36,7 @@ use {
         lower::{LoweringContext, LoweringResult, lower_with_diagnostics},
         naming::{
             BindingInfo, DocumentKind, DocumentNamingComputation, NamesGlobal, NamesLocal,
-            resolve_document_locally,
+            declared_global_variables, resolve_document_locally,
         },
         stdlib::{ProjectStubSource, StubLibrary},
         tree::new_parser,
@@ -104,6 +104,13 @@ pub enum Key {
     /// order. Folded from [`Key::CompletionExports`] per package file; a completion request fetches
     /// this one value instead of touching every file's module and naming.
     PackageCompletionIndex,
+    /// One file's `globalVariables(c(...))` declarations, unquoted and sorted. Value-eq: body
+    /// edits that touch no declaration cut off before the package fold.
+    DeclaredGlobals(FileId),
+    /// The package-wide `globalVariables` name set, folded from [`Key::DeclaredGlobals`] over
+    /// package files. The could-not-resolve emitter skips these names — they are bound
+    /// dynamically by design.
+    PackageDeclaredGlobals,
     /// **Declarations-only** view of one file's module for the type environment fold: the file's lowered
     /// [`Module`] held by shared pointer but compared by its `@type`/`@alias` declarations only (see
     /// [`TypeDefinitionsModule`]). The cutoff seam that keeps a body edit from re-folding
@@ -646,6 +653,30 @@ impl QueryGroup for RoughlyQueries {
                 }
                 entries.sort_by_key(|entry| entry.symbol);
                 Stored::new(entries)
+            }
+
+            Key::DeclaredGlobals(file) => {
+                let module = engine.fetch::<Module>(Key::Lower(*file));
+                let lowering = self.lowering.borrow();
+                Stored::new(declared_global_variables(&module, lowering.interner()))
+            }
+
+            Key::PackageDeclaredGlobals => {
+                let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
+                let mut declared: BTreeSet<String> = BTreeSet::new();
+                for file in files.iter() {
+                    let kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*file));
+                    if *kind != DocumentKind::Package {
+                        continue;
+                    }
+                    declared.extend(
+                        engine
+                            .fetch::<Vec<String>>(Key::DeclaredGlobals(*file))
+                            .iter()
+                            .cloned(),
+                    );
+                }
+                Stored::new(declared)
             }
 
             Key::TypeDefinitionsModule(file) => {
@@ -1734,12 +1765,17 @@ fn package_naming_diagnostics(
 
     // (D) could-not-resolve — every document. One per reference occurrence that resolves to neither a
     // package global nor a builtin nor a stub.
+    let declared_globals = engine.fetch::<BTreeSet<String>>(Key::PackageDeclaredGlobals);
     for (expression_id, symbol) in &local_naming.non_locals {
         let resolves = defining.get(symbol).copied().flatten().is_some()
             || is_builtin(interner, *symbol)
             || group.stubs.contains(*symbol)
             // A data-masked read that resolves nowhere is a column reference, not a typo.
-            || local_naming.masked_reads.contains(expression_id);
+            || local_naming.masked_reads.contains(expression_id)
+            // A `globalVariables()`-declared name is bound dynamically by design.
+            || interner
+                .resolve(*symbol)
+                .is_some_and(|name| declared_globals.contains(name));
         if resolves {
             continue;
         }

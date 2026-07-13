@@ -151,6 +151,10 @@ pub(crate) fn rebuild_package_naming(
     let candidate_order = build_candidate_order(package_modules, locals);
     let candidate_sites = build_candidate_sites(package_modules, locals);
     let global_bindings = winners_from_candidate_order(&candidate_order);
+    let declared_globals: BTreeSet<String> = package_modules
+        .iter()
+        .flat_map(|(_, module)| declared_global_variables(module, interner))
+        .collect();
 
     let mut diagnostics = HashMap::<DocumentId, Vec<Diagnostic>>::new();
     for (document_id, module) in package_modules {
@@ -166,6 +170,7 @@ pub(crate) fn rebuild_package_naming(
                 types: &types,
                 duplicate_type_names: &duplicate_type_names,
                 global_bindings: &global_bindings,
+                declared_globals: &declared_globals,
                 candidate_order: &candidate_order,
                 candidate_sites: &candidate_sites,
                 type_candidate_sites: &type_candidate_sites,
@@ -193,6 +198,7 @@ pub(crate) fn rebuild_package_naming(
                 types: &script_types,
                 duplicate_type_names: &duplicate_type_names,
                 global_bindings: &global_bindings,
+                declared_globals: &declared_globals,
                 candidate_order: &candidate_order,
                 candidate_sites: &candidate_sites,
                 type_candidate_sites: &type_candidate_sites,
@@ -228,6 +234,9 @@ pub(crate) struct PackageDocumentDiagnosticContext<'a> {
     pub types: &'a BTreeMap<Symbol, TypeInfo>,
     pub duplicate_type_names: &'a BTreeSet<Symbol>,
     pub global_bindings: &'a BTreeMap<Symbol, DocumentId>,
+    // Names declared via `globalVariables()` anywhere in the package: could-not-resolve is
+    // suppressed for them (they are bound dynamically by design).
+    pub declared_globals: &'a BTreeSet<String>,
     pub candidate_order: &'a BTreeMap<Symbol, Vec<DocumentId>>,
     // Parallel to `candidate_order` (same membership and order), each candidate's binding site, so
     // the overwrite warnings can attach a note pointing at the neighbouring document's binding.
@@ -476,6 +485,10 @@ pub(crate) fn package_document_diagnostics(
             || context.stub_library.contains(*symbol)
             // A data-masked read that resolves nowhere is a column reference, not a typo.
             || context.local_naming.masked_reads.contains(expression_id)
+            // A `globalVariables()`-declared name is bound dynamically by design.
+            || interner
+                .resolve(*symbol)
+                .is_some_and(|name| context.declared_globals.contains(name))
         {
             continue;
         }
@@ -781,6 +794,74 @@ pub fn find_binding(
 // order) top-level `Assign` of `symbol`, recursing into bare top-level `{ }` blocks so a block-bound
 // global is found. The bare-block recursion mirrors `document_package_definitions`, keeping the export
 // lookup in step with the membership rule that admitted the global in the first place.
+/// The names a module declares via top-level `globalVariables(c("a", "b"))` /
+/// `utils::globalVariables(...)` calls — the ecosystem-standard escape hatch for names bound
+/// dynamically (non-standard evaluation, generated bindings). Reads of these names resolve
+/// nowhere lexically on purpose, so the package pass suppresses their could-not-resolve
+/// diagnostics. Only direct top-level calls with literal string arguments are recognized;
+/// returned unquoted, sorted, deduplicated.
+pub fn declared_global_variables(module: &Module, interner: &Interner) -> Vec<String> {
+    let mut declared = Vec::new();
+    for expression_id in &module.expressions {
+        let ExpressionKind::Call { callee, arguments } = &module.arena.get(*expression_id).kind
+        else {
+            continue;
+        };
+        let is_global_variables = match &module.arena.get(*callee).kind {
+            ExpressionKind::Symbol(symbol) => interner.resolve(*symbol) == Some("globalVariables"),
+            ExpressionKind::NamespaceGet { namespace, name } => {
+                interner.resolve(*namespace) == Some("utils")
+                    && interner.resolve(*name) == Some("globalVariables")
+            }
+            _ => false,
+        };
+        if !is_global_variables {
+            continue;
+        }
+        let Some(first_argument) = arguments.first() else {
+            continue;
+        };
+        collect_string_literal_names(module, first_argument.expression, &mut declared);
+    }
+    declared.sort();
+    declared.dedup();
+    declared
+}
+
+// The literal names inside a `globalVariables` argument: a single string, or a `c(...)` of
+// strings (non-literal entries are skipped — only what is statically knowable is declared).
+fn collect_string_literal_names(
+    module: &Module,
+    expression_id: ExpressionId,
+    declared: &mut Vec<String>,
+) {
+    match &module.arena.get(expression_id).kind {
+        ExpressionKind::Character(quoted) => {
+            let unquoted = quoted
+                .strip_prefix('"')
+                .and_then(|rest| rest.strip_suffix('"'))
+                .or_else(|| {
+                    quoted
+                        .strip_prefix('\'')
+                        .and_then(|rest| rest.strip_suffix('\''))
+                });
+            if let Some(name) = unquoted
+                && !name.is_empty()
+            {
+                declared.push(name.to_owned());
+            }
+        }
+        ExpressionKind::Call { callee, arguments } => {
+            if matches!(&module.arena.get(*callee).kind, ExpressionKind::Symbol(_)) {
+                for argument in arguments {
+                    collect_string_literal_names(module, argument.expression, declared);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 pub fn find_exported_binding(
     module: &Module,
     local_naming: &NamesLocal,

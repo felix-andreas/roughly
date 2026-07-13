@@ -275,3 +275,28 @@ pick <- function(m) {
 warning[unresolved] I could not resolve `not_a_column` in this package, its imports, or builtins.
 --> 2:5-2:17
 |   m[not_a_column]
+
+#---- global_variables_declarations_suppress_unresolved
+#---- R/globals.R
+utils::globalVariables(c("generated_col", "another_col"))
+globalVariables("single_name")
+#++++
+No diagnostics.
+#---- R/use.R
+use_them <- function() {
+  generated_col + another_col + single_name
+}
+#++++
+No diagnostics.
+
+#---- undeclared_names_still_warn_alongside_declarations
+#---- R/globals.R
+utils::globalVariables("declared_name")
+#++++
+No diagnostics.
+#---- R/use.R
+f <- function() declared_name + genuinely_undefined
+#++++
+warning[unresolved] I could not resolve `genuinely_undefined` in this package, its imports, or builtins.
+--> 1:33-1:52
+| f <- function() declared_name + genuinely_undefined

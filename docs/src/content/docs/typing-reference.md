@@ -2037,6 +2037,11 @@ Names inside a mask that *do* resolve — a local variable used in `j`, a standa
 like `sum` — keep their ordinary resolution and typing. Base-R indexing (`m[i, j]`) carries no
 data.table marker and keeps full lexical checking.
 
+For dynamic bindings outside any recognized mask, the ecosystem-standard escape hatch works: a
+top-level `globalVariables(c("a", "b"))` / `utils::globalVariables(...)` call (literal string
+arguments) declares those names as dynamically bound for the whole package, and could-not-resolve
+is suppressed for them everywhere. Undeclared names keep warning.
+
 ### What strict mode flags
 
 In strict mode, an expression or binding whose inferred type is `Unknown` at the point it is

@@ -11,7 +11,7 @@
 ## Open — semantics
 
 - **Recursion strict attribution (letrec part b):** letrec is DONE (naming + monomorphic typing; decisions.md; typing-reference §Assignment). Open: top-level recursion pinned by the interface fixed point converges to a scheme containing `Unknown` with no strict origin anywhere — record an origin on the binding whose converged scheme retains `Unknown`, identically in both pipelines (differential must stay byte-exact). Mutual-local-recursion policy decided: per-binding visibility, earlier-defined closure's forward reference stays a loud refusal (block-letrec is a possible extension).
-- **NSE follow-ups:** honor `utils::globalVariables(c(...))` declarations; generalize the data-mask into a `.Rtypes` parameter marker so dplyr verbs can declare masked positions (today: data.table bracket signature + with/within/subset/transform are recognized structurally).
+- **NSE follow-up:** generalize the data-mask into a `.Rtypes` parameter marker so dplyr verbs can declare masked positions (today: data.table bracket signature + with/within/subset/transform recognized structurally; `utils::globalVariables()` DONE — package-wide suppression, typing-reference §Data-masked evaluation).
 - **Design forks, decide-and-implement (one `decisions.md` entry each):** third constraint kind (two-flexible-operand comparison — the recorded traits tripwire); order-dependent compatibility commits; NAMESPACE bare-resolution gating (user fork: should un-imported names resolve?).
 - Overload candidates when touched: `is`, `extends`, `grep(value =)`, `cor` (vector vs matrix — needs matrix nominals). `Date`/`POSIXct` arithmetic refuses loudly today — revisit if real code makes it noisy.
 

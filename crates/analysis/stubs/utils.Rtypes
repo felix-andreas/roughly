@@ -62,3 +62,4 @@ setTxtProgressBar : fn(pb: Any, value: Any, [title]: Any, [label]: Any) -> Any
 URLencode : fn(URL: Any, [reserved]: logical, [repeated]: logical) -> character
 URLdecode : fn(URL: Any) -> character
 glob2rx : fn(pattern: Any, [trim.head]: logical, [trim.tail]: logical) -> character
+globalVariables : fn(names: character | character[], [package]: character, [add]: logical) -> character[]
