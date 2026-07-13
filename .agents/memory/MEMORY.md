@@ -11,7 +11,7 @@ Companion documents (kept separate only because they are larger in scope): `back
 ## Short-term
 
 - **Operating model (user-directed): full ownership, no check-in gates** — see the AGENTS.md ownership mandate. Pull the highest-value item from `backlog.md` §Open (semantics first), land it as a complete slice (contract-first docs, implementation, fixtures, full gates: workspace tests + clippy `-D warnings` + fmt), commit + push per green slice, keep memory/backlog current in the same slice. Only constraints: stay on the current feature branch, no new pull requests. **Trap:** `[check] typing` defaults **off** — CLI probes need `[check]\ntyping = true` in a `roughly.toml`, or probe through the fixture harness.
-- **Next up: the letrec typecheck half** (backlog §Open — semantics; the naming half landed): pre-bind function-valued assignment targets with a fresh variable (monomorphic recursion), then top-level-recursion strict attribution, then the remaining design forks.
+- **Next up: recursion strict attribution** (backlog §Open — semantics): recursion is now typed everywhere it soundly can be (local letrec; top-level mutual groups), and top-level self-recursion deliberately stays tolerant `Unknown` — strict mode still records no origin on those schemes. Then the remaining design forks.
 - Recently landed (ledger in `backlog.md`, rationale in `decisions.md`): memory + typing-CPU at 300K LoC — rope-only corpus inputs with on-demand trees (no resident tree per file), single-retained modules, boxed annotations (peak 1 GiB → ~300 MiB), the all-files fold split over the new `OpenFiles` seam + FxHash memo table (per-keystroke validation walk 11K → ~280 slots, size-independent), and `analysis-stats` now reporting per-phase memory, typing-burst recompute counts, and walk attribution. Earlier: IDE read latency at scale, unannotated-coalesce `is.null` shaping, letrec naming half, per-file `# typing:` directives, data-masked NSE resolution.
 - The landing-page hero animation is user-owned (do not touch). NOTES.md is human-maintained (never edit).
 - The widened whole-workspace CI is staged in `.github/pending-ci.yml`; a human must `git mv` it into `.github/workflows/`.
@@ -20,7 +20,7 @@ Companion documents (kept separate only because they are larger in scope): `back
 ## Mid-term
 
 - **User direction (standing): drive autonomously toward best-possible shape; empty `backlog.md` §Open; work continuously.** The beta phase program is complete; `backlog.md` holds the open work (semantics, editor polish, structure/perf, website) and the one-line shipped ledger.
-- **Open type-system design questions** live in `typing-design.md`: tags/discriminated-union `match` (post-beta, user direction), S3 dispatch, data.frame/matrix modeling, traits (tripwire: a third constraint kind), variadic `...` body semantics, NAMESPACE/import model, the recursion design (letrec half landed; typing half + strict attribution open).
+- **Open type-system design questions** live in `typing-design.md`: tags/discriminated-union `match` (post-beta, user direction), S3 dispatch, data.frame/matrix modeling, traits (tripwire: a third constraint kind), variadic `...` body semantics, NAMESPACE/import model, the recursion design (local + mutual-group typing landed; self-recursion deliberately tolerant; strict attribution open).
 - Audit habit: treat "landed" claims in old notes with suspicion; the verified state is `backlog.md` + the fixture suites.
 
 ## Long-term
