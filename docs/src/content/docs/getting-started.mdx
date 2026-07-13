@@ -107,7 +107,7 @@ only what an edit invalidates, so diagnostics and hover stay instant on
 packages with hundreds of thousands of lines. The whole toolchain is one
 binary with no dependency on an R session.
 
-If a workspace ever feels slow, `roughly analysis-stats` prints a performance
+If a workspace ever feels slow, `roughly debug analysis-stats` prints a performance
 diagnosis: per-phase timings for one full analysis pass (parse, lower, naming,
 type checking, diagnostics), the slowest files with their line counts, and the
 incremental cost of a single edit — the numbers to attach to a bug report.

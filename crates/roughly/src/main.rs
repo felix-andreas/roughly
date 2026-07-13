@@ -51,10 +51,10 @@ fn main() -> ExitCode {
             cli::server(experimental_features);
             ExitCode::SUCCESS
         }
-        Command::AnalysisStats { path } => {
-            exit_code(roughly::stats::analysis_stats(path.as_deref()).map(|()| Outcome::Clean))
-        }
         Command::Debug(dev) => match dev {
+            Debug::AnalysisStats { path } => {
+                exit_code(roughly::stats::analysis_stats(path.as_deref()).map(|()| Outcome::Clean))
+            }
             Debug::Index {
                 paths,
                 recursive,
@@ -138,11 +138,6 @@ enum Command {
         #[clap(short, long, default_value_t = false)]
         verbose: bool,
     },
-    /// Profile the analysis over a workspace: per-phase timings, slowest files, incremental cost
-    AnalysisStats {
-        /// Workspace directory (or a file whose package root is used); defaults to `.`
-        path: Option<PathBuf>,
-    },
     /// Debugging and development commands
     #[command(subcommand)]
     Debug(Debug),
@@ -150,6 +145,11 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum Debug {
+    /// Profile the analysis over a workspace: per-phase timings, slowest files, incremental cost
+    AnalysisStats {
+        /// Workspace directory (or a file whose package root is used); defaults to `.`
+        path: Option<PathBuf>,
+    },
     /// Print the syntax tree for the given file
     Ast { path: PathBuf },
     /// Index the given files or directories

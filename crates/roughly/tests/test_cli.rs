@@ -456,7 +456,7 @@ fn analysis_stats_prints_the_full_breakdown() {
         ("R/use.R", "total <- make_count() + 1L\n"),
         ("roughly.toml", "[check]\ntyping = true\n"),
     ]);
-    let output = roughly(directory.path(), &["analysis-stats"]);
+    let output = roughly(directory.path(), &["debug", "analysis-stats"]);
     assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
     let report = stdout(&output);
     for section in [
@@ -484,7 +484,7 @@ fn analysis_stats_prints_the_full_breakdown() {
 #[test]
 fn analysis_stats_notes_when_it_forces_typing_on() {
     let directory = project(&[("R/a.R", "f <- function(x) x + 1\n")]);
-    let output = roughly(directory.path(), &["analysis-stats"]);
+    let output = roughly(directory.path(), &["debug", "analysis-stats"]);
     assert_eq!(exit_code(&output), 0, "stderr: {}", stderr(&output));
     assert!(
         stdout(&output).contains("note: [check] typing is off in the configuration"),
@@ -497,7 +497,7 @@ fn analysis_stats_notes_when_it_forces_typing_on() {
 #[test]
 fn analysis_stats_rejects_a_workspace_without_r_files() {
     let directory = project(&[("README.md", "no code here\n")]);
-    let output = roughly(directory.path(), &["analysis-stats"]);
+    let output = roughly(directory.path(), &["debug", "analysis-stats"]);
     assert_eq!(exit_code(&output), 2);
     assert!(stderr(&output).contains("no R files"));
 }
