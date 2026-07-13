@@ -1,5 +1,6 @@
 import string
 import shutil
+import sys
 from pathlib import Path
 from itertools import product
 
@@ -79,7 +80,11 @@ if r_dir.exists():
 
 r_dir.mkdir(exist_ok=True, parents=True)
 
-for file in map("".join, product(string.ascii_lowercase, map(str, range(4)))):
+# Files per letter prefix; the default 4 yields ~25K LoC, pass a larger count to scale up
+# (48 yields ~300K LoC, the performance target scale).
+files_per_prefix = int(sys.argv[1]) if len(sys.argv) > 1 else 4
+
+for file in map("".join, product(string.ascii_lowercase, map(str, range(files_per_prefix)))):
     code = "\n".join(
         [
             *(

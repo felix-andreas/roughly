@@ -509,6 +509,69 @@ impl RoughlyQueries {
     pub fn lint_runs(&self, file: FileId) -> u64 {
         per_key(&self.counters.lint, file)
     }
+
+    /// Total executed-body counts per query kind. The delta across an edit is the recompute story
+    /// wall-clock alone cannot attribute: it shows which bodies the edit re-ran and how often
+    /// (e.g. one whole-file inference per interface-SCC fixed-point round), which is what the
+    /// workspace diagnosis tool prints after its incremental probe.
+    pub fn execution_totals(&self) -> Vec<(&'static str, u64)> {
+        fn total<K>(counter: &RefCell<HashMap<K, u64>>) -> u64 {
+            counter.borrow().values().sum()
+        }
+        vec![
+            ("parse", total(&self.counters.parse)),
+            ("lower", total(&self.counters.lower)),
+            ("local naming", total(&self.counters.local_naming)),
+            ("exported names", total(&self.counters.exported_names)),
+            (
+                "package symbol index",
+                self.counters.package_symbol_index.get(),
+            ),
+            (
+                "type definitions module",
+                total(&self.counters.type_definitions_module),
+            ),
+            (
+                "package type definitions",
+                self.counters.package_type_definitions.get(),
+            ),
+            ("fallback range", self.counters.fallback_range.get()),
+            ("defining item", total(&self.counters.defining_item)),
+            (
+                "exported schemes (inference)",
+                total(&self.counters.exported_schemes),
+            ),
+            ("global scheme", total(&self.counters.global_scheme)),
+            ("interface deps", total(&self.counters.interface_deps)),
+            ("symbol scc", total(&self.counters.symbol_scc)),
+            (
+                "interface scc (fixed point)",
+                total(&self.counters.interface_scc),
+            ),
+            (
+                "file type definitions",
+                total(&self.counters.file_type_definitions),
+            ),
+            ("package type index", self.counters.package_type_index.get()),
+            ("type name status", total(&self.counters.type_name_status)),
+            (
+                "package candidate order",
+                self.counters.package_candidate_order.get(),
+            ),
+            ("definer order", total(&self.counters.definer_order)),
+            (
+                "package naming diagnostics",
+                total(&self.counters.package_naming_diagnostics),
+            ),
+            (
+                "lowering diagnostics",
+                total(&self.counters.lowering_diagnostics),
+            ),
+            ("lint", total(&self.counters.lint)),
+            ("typecheck (inference)", total(&self.counters.typecheck)),
+            ("diagnostics", total(&self.counters.diagnostics)),
+        ]
+    }
 }
 
 impl Default for RoughlyQueries {
