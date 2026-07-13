@@ -14,7 +14,7 @@ tail : fn(x: Any, [n]: Any) -> Any
 # `str` prints a structure summary and returns NULL invisibly. Its first argument is a bare positional
 # (the checker fills a variadic function's named parameters by name only); the named formals cover the
 # common display controls.
-str : fn(Any, [max.level]: Any, [vec.len]: Any, [list.len]: Any, [digits.d]: Any, [give.attr]: logical, [give.head]: logical, ...: Any) -> NULL
+str : fn(object: Any, [max.level]: Any, [vec.len]: Any, [list.len]: Any, [digits.d]: Any, [give.attr]: logical, [give.head]: logical, ...: Any) -> NULL
 
 # Delimited I/O. Readers take a path or connection positionally (positional-unnamed subject, like
 # `print`: a variadic function's named formals fill by name only) and return `data.frame`; the
@@ -23,12 +23,12 @@ str : fn(Any, [max.level]: Any, [vec.len]: Any, [list.len]: Any, [digits.d]: Any
 # formals must be declared (named-formals) or `write.csv(x, f, row.names = FALSE)` would falsely
 # error. `write.csv` forbids overriding `sep`/`dec`/`qmethod` in R, so only the formals it genuinely
 # accepts are declared.
-read.csv : fn(character | connection, [header]: logical, [sep]: character, [quote]: character, [dec]: character, [fill]: logical, [comment.char]: character, ...: Any) -> data.frame
-read.csv2 : fn(character | connection, [header]: logical, [sep]: character, [quote]: character, [dec]: character, [fill]: logical, [comment.char]: character, ...: Any) -> data.frame
-read.delim : fn(character | connection, [header]: logical, [sep]: character, [quote]: character, [dec]: character, [fill]: logical, [comment.char]: character, ...: Any) -> data.frame
-read.table : fn(character | connection, [header]: logical, [sep]: character, [quote]: character, [dec]: character, [fill]: logical, [comment.char]: character, [stringsAsFactors]: logical, [colClasses]: Any, [nrows]: integer, [skip]: integer, [na.strings]: Any, ...: Any) -> data.frame
-write.csv : fn(Any, [file]: Any, [quote]: Any, [na]: character, [row.names]: Any, [fileEncoding]: character, [eol]: character, ...: Any) -> NULL
-write.csv2 : fn(Any, [file]: Any, [quote]: Any, [na]: character, [row.names]: Any, [fileEncoding]: character, [eol]: character, ...: Any) -> NULL
+read.csv : fn(file: character | connection, [header]: logical, [sep]: character, [quote]: character, [dec]: character, [fill]: logical, [comment.char]: character, ...: Any) -> data.frame
+read.csv2 : fn(file: character | connection, [header]: logical, [sep]: character, [quote]: character, [dec]: character, [fill]: logical, [comment.char]: character, ...: Any) -> data.frame
+read.delim : fn(file: character | connection, [header]: logical, [sep]: character, [quote]: character, [dec]: character, [fill]: logical, [comment.char]: character, ...: Any) -> data.frame
+read.table : fn(file: character | connection, [header]: logical, [sep]: character, [quote]: character, [dec]: character, [fill]: logical, [comment.char]: character, [stringsAsFactors]: logical, [colClasses]: Any, [nrows]: integer, [skip]: integer, [na.strings]: Any, ...: Any) -> data.frame
+write.csv : fn(x: Any, [file]: Any, [quote]: Any, [na]: character, [row.names]: Any, [fileEncoding]: character, [eol]: character, ...: Any) -> NULL
+write.csv2 : fn(x: Any, [file]: Any, [quote]: Any, [na]: character, [row.names]: Any, [fileEncoding]: character, [eol]: character, ...: Any) -> NULL
 write.table : fn(x: Any, [file]: Any, [append]: logical, [quote]: Any, [sep]: character, [eol]: character, [na]: character, [dec]: character, [row.names]: Any, [col.names]: Any, [qmethod]: character, [fileEncoding]: character) -> NULL
 
 # Package management. `install.packages`'s full formal set is declared so named arguments (`repos =`,
@@ -54,7 +54,7 @@ help : fn([topic]: Any, [package]: Any, [lib.loc]: Any, [verbose]: logical, [try
 sessionInfo : fn([package]: Any) -> Any
 object.size : fn(x: Any) -> Any
 capture.output : fn(...: Any, [file]: Any, [append]: logical, [type]: character, [split]: logical) -> character[]
-combn : fn(Any, Any, [FUN]: Any, [simplify]: logical, ...: Any) -> Any
+combn : fn(x: Any, m: Any, [FUN]: Any, [simplify]: logical, ...: Any) -> Any
 modifyList : fn(x: Any, val: Any, [keep.null]: logical) -> Any
 data : Any
 txtProgressBar : Any

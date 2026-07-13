@@ -44,5 +44,5 @@ cm.colors : fn(n: Any, [alpha]: Any, [rev]: logical) -> character[]
 colors : fn([distinct]: logical) -> character[]
 colours : fn([distinct]: logical) -> character[]
 palette : fn([value]: Any) -> character[]
-colorRampPalette : fn(Any, ...: Any) -> fn(Any) -> character[]
+colorRampPalette : fn(colors: Any, ...: Any) -> fn(Any) -> character[]
 col2rgb : Any

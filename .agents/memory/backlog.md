@@ -17,7 +17,6 @@
 
 ## Open — editor & polish
 
-- Positional stub parameters render bare in hover/signature help (`fn(integer, ...)` for `print`): R formal names for positional parameters need a display-name field on `FunctionType` parameters.
 - Syntax highlighting inside hover type fences needs a client-side TextMate grammar shipped in the VS Code + Zed extensions (the fence is untagged today).
 - References/rename have no type-name path (a `@type` name's occurrences are not findable/renamable).
 - Callback-idiom stub sweep: declare optional formals on single-parameter-capped stubs when touched (`nchar`-style).

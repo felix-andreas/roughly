@@ -175,7 +175,7 @@ sprintf : fn(fmt: character, ...: Any) -> character
 gettextf : fn(fmt: character, ...: Any, [domain]: Any) -> character
 format : fn(x: Any, ...: Any, [trim]: logical, [digits]: Any, [nsmall]: Any, [justify]: character, [width]: Any, [na.encode]: logical, [scientific]: Any, [big.mark]: character, [decimal.mark]: character) -> character
 formatC : fn(x: Any, [width]: Any, [digits]: Any, [format]: character, [flag]: character, [mode]: character, [big.mark]: character, [small.mark]: character, [decimal.mark]: character, [preserve.width]: character, [zero.print]: Any) -> character
-prettyNum : fn(Any, [big.mark]: character, ...: Any) -> character
+prettyNum : fn(x: Any, [big.mark]: character, ...: Any) -> character
 
 # Regex family: `pattern`/`replacement` are genuinely scalar strings in R (only the first element is
 # used); the subject `x` is Any-param. Elementwise results are scalar-claim. `grep` returns indices or
@@ -198,7 +198,7 @@ strsplit : fn(x: Any, split: character, [fixed]: logical, [perl]: logical, [useB
 # formals cover the common method arguments (`digits`, `n`, `row.names`, ...) that would otherwise be
 # false "unknown named argument" errors. `stop`/`warning` stay `Any` (trailing-dot `call.` formal +
 # missing `Never`, see header); `message`'s formals are expressible.
-print : <T> fn(T, ...: Any, [digits]: Any, [quote]: logical, [right]: logical, [max]: Any, [width]: Any, [n]: Any, [na.print]: Any, [row.names]: Any) -> T
+print : <T> fn(x: T, ...: Any, [digits]: Any, [quote]: logical, [right]: logical, [max]: Any, [width]: Any, [n]: Any, [na.print]: Any, [row.names]: Any) -> T
 cat : fn(...: Any, [file]: Any, [sep]: character, [fill]: Any, [labels]: Any, [append]: logical) -> NULL
 message : fn(...: Any, [domain]: Any, [appendLF]: logical) -> NULL
 stop : Any
@@ -441,7 +441,7 @@ do.call : fn(what: Any, args: Any, [quote]: logical, [envir]: Any) -> Any
 match.arg : fn(arg: Any, [choices]: Any, [several.ok]: logical) -> character
 match.fun : fn(FUN: Any, [descend]: logical) -> Any
 ifelse : fn(test: Any, yes: Any, no: Any) -> Any
-all.equal : fn(Any, Any, [tolerance]: Any, [scale]: Any, ...: Any, [check.attributes]: logical, [check.names]: logical) -> Any
+all.equal : fn(target: Any, current: Any, [tolerance]: Any, [scale]: Any, ...: Any, [check.attributes]: logical, [check.names]: logical) -> Any
 identical : fn(x: Any, y: Any, [num.eq]: logical, [single.NA]: logical, [attrib.as.set]: logical, [ignore.bytecode]: logical, [ignore.environment]: logical, [ignore.srcref]: logical, [extptr.as.ref]: logical) -> logical
 UseMethod : fn(generic: character, [object]: Any) -> Any
 NextMethod : fn([generic]: Any, [object]: Any, ...: Any) -> Any
