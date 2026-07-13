@@ -1057,6 +1057,16 @@ Rules and limits:
 - `is.null(x)` on an `Any` or `Unknown` variable refines the **true** edge to `NULL` (the runtime
   guarantees it); family guards do **not** refine `Any`/`Unknown` — inventing a concrete shape
   there would false-positive against scalar-claim standard-library signatures
+- `is.null(x)` on a **completely unconstrained inference variable** (an unannotated, so-far-unused
+  parameter) **shapes** it: the test asserts `NULL` is a possible inhabitant, so the variable
+  becomes `T | NULL` for a fresh `T`, and the edges then narrow as an ordinary union (true edge
+  keeps `NULL` and the undecidable `T`; false edge is `T`). This is what types the unannotated
+  coalesce idiom — `function(value, fallback) if (is.null(value)) fallback else value` generalizes
+  to `<T> fn(value: T | NULL, fallback: T) -> T`, the same scheme its annotated form declares.
+  Two consequences: testing a parameter for `NULL` and then using it *unguarded* is a genuine
+  finding (the test itself declared `NULL` possible), and the shaping never fires on a variable
+  that already carries a constraint (a numeric-constrained variable cannot hold `NULL`) or on a
+  declared (rigid) type parameter — an annotation's contract is not reshaped
 - when a guard cannot fire (`is.null(x)` on a union with no `NULL` member), no refinement happens —
   the checker does not type dead branches specially
 - combined with a [diverging branch](#diverging-branches), the surviving edge's refinement

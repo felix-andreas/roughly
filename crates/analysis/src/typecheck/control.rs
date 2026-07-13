@@ -4,7 +4,7 @@
 // on control flow, guard narrowing, and loops are the contract.
 use {
     super::{
-        Binding, EnvironmentKey, InferenceError, InferenceState, ResolutionContext,
+        Binding, EnvironmentKey, InferenceEntry, InferenceError, InferenceState, ResolutionContext,
         contains_loop_exit,
         operand::{iterable_item_type, nullable_type, refine_guarded_type},
     },
@@ -13,7 +13,7 @@ use {
         interner::Symbol,
         naming::find_binding,
         typecheck::TypeDefinitionEnvironment,
-        types::{Atomic, CoreType, TypeScheme},
+        types::{Atomic, Constraint, CoreType, TypeScheme},
     },
     std::collections::BTreeMap,
     tree_sitter::Range,
@@ -316,6 +316,35 @@ impl InferenceState {
                 }
                 let Some(predicate) = predicate else {
                     return Ok(None);
+                };
+                // `is.null(x)` on a completely unconstrained inference variable SHAPES it: the test
+                // asserts NULL is a possible inhabitant, so the variable becomes `T | NULL` (fresh
+                // `T`), and the ordinary member filtering below narrows the edges. This is what
+                // types the unannotated coalesce idiom — `if (is.null(x)) fallback else x` joins
+                // `fallback` with the narrowed `T` instead of unifying it with the whole of `x`,
+                // generalizing to `fn(x: T | NULL, fallback: T) -> T` (the same scheme its
+                // annotated form declares). Constrained variables keep their behavior: a numeric
+                // constraint contradicts a NULL member, and a rigid (declared) variable is the
+                // annotation's contract, not ours to reshape.
+                let entry_type = match entry_type {
+                    CoreType::Variable(variable)
+                        if predicate == GuardPredicate::Null
+                            && matches!(
+                                self.entries.get(&variable),
+                                Some(InferenceEntry::Unbound {
+                                    constraint: Constraint::Unconstrained,
+                                    ..
+                                })
+                            ) =>
+                    {
+                        let shaped = CoreType::union_of(vec![
+                            CoreType::Variable(self.fresh_variable()),
+                            CoreType::Null,
+                        ]);
+                        self.unify(CoreType::Variable(variable), shaped.clone())?;
+                        shaped
+                    }
+                    other => other,
                 };
                 Ok(
                     refine_guarded_type(&entry_type, predicate).map(|(true_type, false_type)| {

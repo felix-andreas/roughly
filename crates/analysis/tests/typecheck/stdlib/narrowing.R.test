@@ -158,3 +158,51 @@ f <- function() {
 }
 #++++
 fn() -> character | NULL
+
+#==== unannotated_null_guards
+#---- coalesce_generalizes_to_optional
+or_else <- function(value, fallback) {
+  if (is.null(value)) {
+    fallback
+  } else {
+    value
+  }
+}
+#++++
+fn(value: ?1 | NULL, fallback: ?1) -> ?1
+
+#---- coalesce_accepts_null_and_binds_from_the_fallback
+or_else <- function(value, fallback) {
+  if (is.null(value)) fallback else value
+}
+picked <- or_else(NULL, "anonymous")
+picked
+#++++
+fn(value: ?1 | NULL, fallback: ?1) -> ?1
+character
+character
+
+#---- early_return_shapes_the_parameter
+f <- function(x) {
+  if (is.null(x)) {
+    return(0L)
+  }
+  x + 1L
+}
+#++++
+fn(x: ?1 | NULL) -> integer | ?1
+
+#---- negated_guard_shapes_too
+f <- function(x) {
+  if (!is.null(x)) x + 1L else 0L
+}
+#++++
+fn(x: integer | NULL) -> integer
+
+#---- testing_null_makes_unguarded_use_a_real_finding
+f <- function(x) {
+  if (is.null(x)) 0L else 1L
+  x + 1L
+}
+#++++
+error: invalid operand
