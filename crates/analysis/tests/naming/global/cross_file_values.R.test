@@ -30,14 +30,14 @@ Assign(value@b0)
 #---- R/b.R
 mirror <- function(x) x
 #++++
-Assign(mirror@b2)
-  Function(x@b1)
-    Symbol(x@b1)
+Assign(mirror@b1)
+  Function(x@b2)
+    Symbol(x@b2)
 #---- R/c.R
 mirror(value)
 #++++
 Call
-  Symbol(mirror@b2)
+  Symbol(mirror@b1)
   Argument
     Symbol(value@b0)
 

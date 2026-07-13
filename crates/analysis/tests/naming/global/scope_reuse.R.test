@@ -11,13 +11,13 @@ f <- function() {
 #++++
 Assign(x@b0)
   Integer(1L)
-Assign(f@b2)
+Assign(f@b1)
   Function()
     Block
-      Assign(x@b1)
+      Assign(x@b2)
         Character("\"ok\"")
       Block
-        Symbol(x@b1)
+        Symbol(x@b2)
 
 #---- braces_do_not_restore_outer_binding
 #---- R/main.R
@@ -31,13 +31,13 @@ f <- function() {
 #++++
 Assign(x@b0)
   Integer(1L)
-Assign(f@b2)
+Assign(f@b1)
   Function()
     Block
       Block
-        Assign(x@b1)
+        Assign(x@b2)
           Character("\"ok\"")
-      Symbol(x@b1)
+      Symbol(x@b2)
 
 #---- binding_inside_braces_remains_visible_after_braces
 #---- R/main.R
@@ -48,13 +48,13 @@ f <- function() {
   x
 }
 #++++
-Assign(f@b1)
+Assign(f@b0)
   Function()
     Block
       Block
-        Assign(x@b0)
+        Assign(x@b1)
           Integer(1L)
-      Symbol(x@b0)
+      Symbol(x@b1)
 
 #---- nested_braces_reuse_same_scope_chain
 #---- R/main.R
@@ -68,15 +68,15 @@ f <- function() {
   x
 }
 #++++
-Assign(f@b1)
+Assign(f@b0)
   Function()
     Block
       Block
-        Assign(x@b0)
+        Assign(x@b1)
           Integer(1L)
         Block
-          Symbol(x@b0)
-      Symbol(x@b0)
+          Symbol(x@b1)
+      Symbol(x@b1)
 
 #---- braces_inside_loop_do_not_restore_pre_loop_binding
 #---- R/main.R

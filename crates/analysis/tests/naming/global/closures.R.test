@@ -18,14 +18,14 @@ f <- function() {
   g <- function() x
 }
 #++++
-Assign(f@b2)
+Assign(f@b0)
   Function()
     Block
-      Assign(x@b0)
+      Assign(x@b1)
         Integer(1L)
-      Assign(g@b1)
+      Assign(g@b2)
         Function()
-          Symbol(x@b0)
+          Symbol(x@b1)
 
 #---- nested_function_closes_over_outer_parameter
 #---- R/main.R
@@ -33,12 +33,12 @@ f <- function(x) {
   g <- function() x
 }
 #++++
-Assign(f@b2)
-  Function(x@b0)
+Assign(f@b0)
+  Function(x@b1)
     Block
-      Assign(g@b1)
+      Assign(g@b2)
         Function()
-          Symbol(x@b0)
+          Symbol(x@b1)
 
 #---- nested_function_closes_over_top_level_global
 #---- R/main.R
@@ -49,10 +49,10 @@ f <- function() {
 #++++
 Assign(x@b0)
   Integer(1L)
-Assign(f@b2)
+Assign(f@b1)
   Function()
     Block
-      Assign(g@b1)
+      Assign(g@b2)
         Function()
           Symbol(x@b0)
 
@@ -65,17 +65,17 @@ f <- function() {
   }
 }
 #++++
-Assign(f@b3)
+Assign(f@b0)
   Function()
     Block
-      Assign(x@b0)
+      Assign(x@b1)
         Integer(1L)
       Assign(g@b2)
         Function()
           Block
-            Assign(h@b1)
+            Assign(h@b3)
               Function()
-                Symbol(x@b0)
+                Symbol(x@b1)
 
 #---- closure_parameter_shadows_enclosing_binding
 #---- R/main.R
@@ -84,14 +84,14 @@ f <- function() {
   g <- function(x) x
 }
 #++++
-Assign(f@b3)
+Assign(f@b0)
   Function()
     Block
-      Assign(x@b0)
+      Assign(x@b1)
         Integer(1L)
       Assign(g@b2)
-        Function(x@b1)
-          Symbol(x@b1)
+        Function(x@b3)
+          Symbol(x@b3)
 
 #---- closure_local_shadows_enclosing_binding
 #---- R/main.R
@@ -102,15 +102,15 @@ f <- function(x) {
   }
 }
 #++++
-Assign(f@b3)
-  Function(x@b0)
+Assign(f@b0)
+  Function(x@b1)
     Block
       Assign(g@b2)
         Function()
           Block
-            Assign(x@b1)
+            Assign(x@b3)
               Character("\"ok\"")
-            Symbol(x@b1)
+            Symbol(x@b3)
 
 #---- closure_uses_nearest_shadowing_binding_across_hops
 #---- R/main.R
@@ -125,19 +125,19 @@ f <- function() {
 #++++
 Assign(x@b0)
   Integer(1L)
-Assign(f@b5)
+Assign(f@b1)
   Function()
     Block
-      Assign(x@b1)
+      Assign(x@b2)
         Character("\"outer\"")
-      Assign(g@b4)
+      Assign(g@b3)
         Function()
           Block
-            Assign(x@b2)
+            Assign(x@b4)
               Logical(true)
-            Assign(h@b3)
+            Assign(h@b5)
               Function()
-                Symbol(x@b2)
+                Symbol(x@b4)
 
 #==== cross_file_globals
 #---- nested_function_closes_over_global_from_other_file
@@ -151,10 +151,10 @@ f <- function() {
   g <- function() x
 }
 #++++
-Assign(f@b2)
+Assign(f@b1)
   Function()
     Block
-      Assign(g@b1)
+      Assign(g@b2)
         Function()
           Symbol(x@b0)
 
@@ -185,11 +185,11 @@ f <- function() {
   g <- function() x
 }
 #++++
-Assign(f@b4)
+Assign(f@b2)
   Function()
     Block
-      Assign(x@b2)
+      Assign(x@b3)
         Integer(3L)
-      Assign(g@b3)
+      Assign(g@b4)
         Function()
-          Symbol(x@b2)
+          Symbol(x@b3)

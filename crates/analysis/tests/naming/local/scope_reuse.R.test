@@ -10,13 +10,13 @@ f <- function() {
 #++++
 Assign(x@b0)
   Integer(1L)
-Assign(f@b2)
+Assign(f@b1)
   Function()
     Block
-      Assign(x@b1)
+      Assign(x@b2)
         Character("\"ok\"")
       Block
-        Symbol(x@b1)
+        Symbol(x@b2)
 
 No diagnostics.
 
@@ -31,13 +31,13 @@ f <- function() {
 #++++
 Assign(x@b0)
   Integer(1L)
-Assign(f@b2)
+Assign(f@b1)
   Function()
     Block
       Block
-        Assign(x@b1)
+        Assign(x@b2)
           Character("\"ok\"")
-      Symbol(x@b1)
+      Symbol(x@b2)
 
 No diagnostics.
 
@@ -49,13 +49,13 @@ f <- function() {
   x
 }
 #++++
-Assign(f@b1)
+Assign(f@b0)
   Function()
     Block
       Block
-        Assign(x@b0)
+        Assign(x@b1)
           Integer(1L)
-      Symbol(x@b0)
+      Symbol(x@b1)
 
 No diagnostics.
 
@@ -70,15 +70,15 @@ f <- function() {
   x
 }
 #++++
-Assign(f@b1)
+Assign(f@b0)
   Function()
     Block
       Block
-        Assign(x@b0)
+        Assign(x@b1)
           Integer(1L)
         Block
-          Symbol(x@b0)
-      Symbol(x@b0)
+          Symbol(x@b1)
+      Symbol(x@b1)
 
 No diagnostics.
 

@@ -2,9 +2,9 @@
 #---- function_parameter_referenced_in_body
 mirror <- function(x) x
 #++++
-Assign(mirror@b1)
-  Function(x@b0)
-    Symbol(x@b0)
+Assign(mirror@b0)
+  Function(x@b1)
+    Symbol(x@b1)
 
 No diagnostics.
 
@@ -14,20 +14,20 @@ pair <- function(x, y) {
   y
 }
 #++++
-Assign(pair@b2)
-  Function(x@b0, y@b1)
+Assign(pair@b0)
+  Function(x@b1, y@b2)
     Block
-      Symbol(x@b0)
-      Symbol(y@b1)
+      Symbol(x@b1)
+      Symbol(y@b2)
 
 No diagnostics.
 
 #---- unused_parameter_still_introduces_binding
 mirror <- function(x, y) x
 #++++
-Assign(mirror@b2)
-  Function(x@b0, y@b1)
-    Symbol(x@b0)
+Assign(mirror@b0)
+  Function(x@b1, y@b2)
+    Symbol(x@b1)
 
 No diagnostics.
 
@@ -37,12 +37,12 @@ mirror <- function(x) {
   x
 }
 #++++
-Assign(mirror@b2)
-  Function(x@b0)
+Assign(mirror@b0)
+  Function(x@b1)
     Block
-      Assign(helper@b1)
+      Assign(helper@b2)
         Integer(1L)
-      Symbol(x@b0)
+      Symbol(x@b1)
 
 No diagnostics.
 
@@ -52,9 +52,9 @@ f <- function(x) x
 #++++
 Assign(x@b0)
   Integer(1L)
-Assign(f@b2)
-  Function(x@b1)
-    Symbol(x@b1)
+Assign(f@b1)
+  Function(x@b2)
+    Symbol(x@b2)
 
 No diagnostics.
 
@@ -63,12 +63,12 @@ f <- function(x) {
   g <- function() x
 }
 #++++
-Assign(f@b2)
-  Function(x@b0)
+Assign(f@b0)
+  Function(x@b1)
     Block
-      Assign(g@b1)
+      Assign(g@b2)
         Function()
-          Symbol(x@b0)
+          Symbol(x@b1)
 
 No diagnostics.
 
@@ -78,11 +78,11 @@ f <- function(x) {
   x
 }
 #++++
-Assign(f@b1)
-  Function(x@b0)
+Assign(f@b0)
+  Function(x@b1)
     Block
-      Assign(x@b0)
+      Assign(x@b1)
         Character("\"ok\"")
-      Symbol(x@b0)
+      Symbol(x@b1)
 
 No diagnostics.

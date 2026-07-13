@@ -18,14 +18,14 @@ f <- function() {
   g <- function() x
 }
 #++++
-Assign(f@b2)
+Assign(f@b0)
   Function()
     Block
-      Assign(x@b0)
+      Assign(x@b1)
         Integer(1L)
-      Assign(g@b1)
+      Assign(g@b2)
         Function()
-          Symbol(x@b0)
+          Symbol(x@b1)
 
 No diagnostics.
 
@@ -34,12 +34,12 @@ f <- function(x) {
   g <- function() x
 }
 #++++
-Assign(f@b2)
-  Function(x@b0)
+Assign(f@b0)
+  Function(x@b1)
     Block
-      Assign(g@b1)
+      Assign(g@b2)
         Function()
-          Symbol(x@b0)
+          Symbol(x@b1)
 
 No diagnostics.
 
@@ -51,10 +51,10 @@ f <- function() {
 #++++
 Assign(x@b0)
   Integer(1L)
-Assign(f@b2)
+Assign(f@b1)
   Function()
     Block
-      Assign(g@b1)
+      Assign(g@b2)
         Function()
           Symbol(x@?)
 
@@ -68,17 +68,17 @@ f <- function() {
   }
 }
 #++++
-Assign(f@b3)
+Assign(f@b0)
   Function()
     Block
-      Assign(x@b0)
+      Assign(x@b1)
         Integer(1L)
       Assign(g@b2)
         Function()
           Block
-            Assign(h@b1)
+            Assign(h@b3)
               Function()
-                Symbol(x@b0)
+                Symbol(x@b1)
 
 No diagnostics.
 
@@ -88,14 +88,14 @@ f <- function() {
   g <- function(x) x
 }
 #++++
-Assign(f@b3)
+Assign(f@b0)
   Function()
     Block
-      Assign(x@b0)
+      Assign(x@b1)
         Integer(1L)
       Assign(g@b2)
-        Function(x@b1)
-          Symbol(x@b1)
+        Function(x@b3)
+          Symbol(x@b3)
 
 No diagnostics.
 
@@ -107,15 +107,15 @@ f <- function(x) {
   }
 }
 #++++
-Assign(f@b3)
-  Function(x@b0)
+Assign(f@b0)
+  Function(x@b1)
     Block
       Assign(g@b2)
         Function()
           Block
-            Assign(x@b1)
+            Assign(x@b3)
               Character("\"ok\"")
-            Symbol(x@b1)
+            Symbol(x@b3)
 
 No diagnostics.
 
@@ -131,18 +131,85 @@ f <- function() {
 #++++
 Assign(x@b0)
   Integer(1L)
-Assign(f@b5)
+Assign(f@b1)
   Function()
     Block
-      Assign(x@b1)
+      Assign(x@b2)
         Character("\"outer\"")
-      Assign(g@b4)
+      Assign(g@b3)
         Function()
           Block
-            Assign(x@b2)
+            Assign(x@b4)
               Logical(true)
-            Assign(h@b3)
+            Assign(h@b5)
               Function()
-                Symbol(x@b2)
+                Symbol(x@b4)
+
+No diagnostics.
+
+#==== recursive_closures
+#---- local_recursive_function_resolves_its_own_name
+driver <- function(n) {
+  fact <- function(k) {
+    if (k <= 1L) 1L else k * fact(k - 1L)
+  }
+  fact(n)
+}
+#++++
+Assign(driver@b0)
+  Function(n@b1)
+    Block
+      Assign(fact@b2)
+        Function(k@b3)
+          Block
+            If
+              Call
+                Symbol(<=@?)
+                Argument
+                  Symbol(k@b3)
+                Argument
+                  Integer(1L)
+              Integer(1L)
+              Call
+                Symbol(*@?)
+                Argument
+                  Symbol(k@b3)
+                Argument
+                  Call
+                    Symbol(fact@b2)
+                    Argument
+                      Call
+                        Symbol(-@?)
+                        Argument
+                          Symbol(k@b3)
+                        Argument
+                          Integer(1L)
+      Call
+        Symbol(fact@b2)
+        Argument
+          Symbol(n@b1)
+
+No diagnostics.
+
+#---- non_closure_rhs_still_reads_the_old_binding
+outer_value <- 1L
+f <- function() {
+  outer_value <- outer_value + 1L
+  outer_value
+}
+#++++
+Assign(outer_value@b0)
+  Integer(1L)
+Assign(f@b1)
+  Function()
+    Block
+      Assign(outer_value@b2)
+        Call
+          Symbol(+@?)
+          Argument
+            Symbol(outer_value@?)
+          Argument
+            Integer(1L)
+      Symbol(outer_value@b2)
 
 No diagnostics.

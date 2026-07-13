@@ -26,9 +26,9 @@ mirror(value)
 #++++
 Assign(value@b0)
   Integer(1L)
-Assign(mirror@b2)
-  Function(x@b1)
-    Symbol(x@b1)
+Assign(mirror@b1)
+  Function(x@b2)
+    Symbol(x@b2)
 Call
   Symbol(mirror@?)
   Argument

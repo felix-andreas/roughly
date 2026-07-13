@@ -8,18 +8,18 @@ f <- function() {
   value
 }
 #++++
-Assign(f@b2)
+Assign(f@b0)
   Function()
     Block
-      For(item@b0)
+      For(item@b1)
         Call
           Symbol(list@?)
           Argument
             Integer(1L)
         Block
-          Assign(value@b1)
+          Assign(value@b2)
             Integer(1L)
-      Symbol(value@b1)
+      Symbol(value@b2)
 
 warning[naming] `value` might be undefined here because it is introduced only in conditionally executed code.
 --> 5:3-5:8
@@ -34,15 +34,15 @@ f <- function() {
   x
 }
 #++++
-Assign(f@b1)
+Assign(f@b0)
   Function()
     Block
       While
         Logical(true)
         Block
-          Assign(x@b0)
+          Assign(x@b1)
             Integer(1L)
-      Symbol(x@b0)
+      Symbol(x@b1)
 
 warning[naming] `x` might be undefined here because it is introduced only in conditionally executed code.
 --> 5:3-5:4
@@ -57,14 +57,14 @@ f <- function() {
   x
 }
 #++++
-Assign(f@b1)
+Assign(f@b0)
   Function()
     Block
       Repeat
         Block
-          Assign(x@b0)
+          Assign(x@b1)
             Integer(1L)
-      Symbol(x@b0)
+      Symbol(x@b1)
 
 #==== within_branch_resolves_locally
 #---- reference_within_if_body_resolves_to_local_binding
@@ -76,15 +76,15 @@ f <- function() {
   }
 }
 #++++
-Assign(f@b1)
+Assign(f@b0)
   Function()
     Block
       If
         Logical(true)
         Block
-          Assign(x@b0)
+          Assign(x@b1)
             Integer(1L)
-          Symbol(x@b0)
+          Symbol(x@b1)
 
 #---- reference_within_for_body_resolves_to_local_binding
 #---- R/main.R
@@ -95,18 +95,18 @@ f <- function() {
   }
 }
 #++++
-Assign(f@b2)
+Assign(f@b0)
   Function()
     Block
-      For(item@b0)
+      For(item@b1)
         Call
           Symbol(list@?)
           Argument
             Integer(1L)
         Block
-          Assign(x@b1)
+          Assign(x@b2)
             Integer(1L)
-          Symbol(x@b1)
+          Symbol(x@b2)
 
 #---- reference_within_while_body_resolves_to_local_binding
 #---- R/main.R
@@ -117,15 +117,15 @@ f <- function() {
   }
 }
 #++++
-Assign(f@b1)
+Assign(f@b0)
   Function()
     Block
       While
         Logical(true)
         Block
-          Assign(x@b0)
+          Assign(x@b1)
             Integer(1L)
-          Symbol(x@b0)
+          Symbol(x@b1)
 
 #==== conditionals
 #---- if_branch_introduction_might_be_undefined_after_conditional
@@ -137,15 +137,15 @@ f <- function(cond) {
   x
 }
 #++++
-Assign(f@b2)
-  Function(cond@b0)
+Assign(f@b0)
+  Function(cond@b1)
     Block
       If
-        Symbol(cond@b0)
+        Symbol(cond@b1)
         Block
-          Assign(x@b1)
+          Assign(x@b2)
             Integer(1L)
-      Symbol(x@b1)
+      Symbol(x@b2)
 
 warning[naming] `x` might be undefined here because it is introduced only in conditionally executed code.
 --> 5:3-5:4
@@ -162,17 +162,17 @@ f <- function(cond) {
   x
 }
 #++++
-Assign(f@b2)
-  Function(cond@b0)
+Assign(f@b0)
+  Function(cond@b1)
     Block
       If
-        Symbol(cond@b0)
+        Symbol(cond@b1)
         Block
           Integer(1L)
         Block
-          Assign(x@b1)
+          Assign(x@b2)
             Integer(2L)
-      Symbol(x@b1)
+      Symbol(x@b2)
 
 warning[naming] `x` might be undefined here because it is introduced only in conditionally executed code.
 --> 7:3-7:4
@@ -189,18 +189,18 @@ f <- function(cond) {
   x
 }
 #++++
-Assign(f@b2)
-  Function(cond@b0)
+Assign(f@b0)
+  Function(cond@b1)
     Block
       If
-        Symbol(cond@b0)
+        Symbol(cond@b1)
         Block
           If
-            Symbol(cond@b0)
+            Symbol(cond@b1)
             Block
-              Assign(x@b1)
+              Assign(x@b2)
                 Integer(1L)
-      Symbol(x@b1)
+      Symbol(x@b2)
 
 warning[naming] `x` might be undefined here because it is introduced only in conditionally executed code.
 --> 7:3-7:4
@@ -217,21 +217,21 @@ f <- function(cond) {
   x
 }
 #++++
-Assign(f@b3)
-  Function(cond@b0)
+Assign(f@b0)
+  Function(cond@b1)
     Block
       If
-        Symbol(cond@b0)
+        Symbol(cond@b1)
         Block
-          For(item@b1)
+          For(item@b2)
             Call
               Symbol(list@?)
               Argument
                 Integer(1L)
             Block
-              Assign(x@b2)
+              Assign(x@b3)
                 Integer(1L)
-      Symbol(x@b2)
+      Symbol(x@b3)
 
 warning[naming] `x` might be undefined here because it is introduced only in conditionally executed code.
 --> 7:3-7:4
@@ -249,20 +249,20 @@ f <- function(cond) {
   x
 }
 #++++
-Assign(f@b2)
-  Function(cond@b0)
+Assign(f@b0)
+  Function(cond@b1)
     Block
-      Assign(x@b1)
+      Assign(x@b2)
         Integer(0L)
       If
-        Symbol(cond@b0)
+        Symbol(cond@b1)
         Block
-          Assign(x@b1)
+          Assign(x@b2)
             Integer(1L)
         Block
-          Assign(x@b1)
+          Assign(x@b2)
             Integer(2L)
-      Symbol(x@b1)
+      Symbol(x@b2)
 
 #---- no_warning_when_fresh_name_is_assigned_in_all_branches
 #---- R/main.R
@@ -275,18 +275,18 @@ f <- function(cond) {
   x
 }
 #++++
-Assign(f@b2)
-  Function(cond@b0)
+Assign(f@b0)
+  Function(cond@b1)
     Block
       If
-        Symbol(cond@b0)
+        Symbol(cond@b1)
         Block
-          Assign(x@b1)
+          Assign(x@b2)
             Integer(1L)
         Block
-          Assign(x@b1)
+          Assign(x@b2)
             Integer(2L)
-      Symbol(x@b1)
+      Symbol(x@b2)
 
 #---- else_branch_cannot_read_then_branch_introduction
 #---- R/main.R
@@ -298,13 +298,13 @@ f <- function(cond) {
   }
 }
 #++++
-Assign(f@b2)
-  Function(cond@b0)
+Assign(f@b0)
+  Function(cond@b1)
     Block
       If
-        Symbol(cond@b0)
+        Symbol(cond@b1)
         Block
-          Assign(x@b1)
+          Assign(x@b2)
             Integer(1L)
         Block
           Symbol(x@?)
@@ -323,17 +323,17 @@ f <- function(cond) {
   y
 }
 #++++
-Assign(f@b3)
-  Function(cond@b0)
+Assign(f@b0)
+  Function(cond@b1)
     Block
       While
-        Symbol(cond@b0)
+        Symbol(cond@b1)
         Block
-          Assign(y@b1)
-            Symbol(x@b2)
-          Assign(x@b2)
+          Assign(y@b2)
+            Symbol(x@b3)
+          Assign(x@b3)
             Integer(1L)
-      Symbol(y@b1)
+      Symbol(y@b2)
 
 warning[naming] `x` might be undefined here because it is introduced only in conditionally executed code.
 --> 3:10-3:11

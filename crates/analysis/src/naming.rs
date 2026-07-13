@@ -1544,7 +1544,16 @@ impl<'a> DocumentNamingContext<'a> {
                 scope,
                 value,
             } => {
-                self.resolve_expression(*value);
+                // A closure RHS executes only after the assignment completes, so by the time its
+                // body runs the target binding exists in the defining environment — R's letrec
+                // reality for closures. Registering the write first lets a local recursive
+                // function (`fact <- function(k) ... fact(k - 1L) ...`) resolve its own name;
+                // every other RHS keeps value-first order (`x <- x + 1` reads the *old* `x`).
+                let value_is_function =
+                    matches!(self.arena.get(*value).kind, ExpressionKind::Function { .. });
+                if !value_is_function {
+                    self.resolve_expression(*value);
+                }
                 match target {
                     AssignTarget::Variable { symbol, .. } => match scope {
                         AssignmentScope::Local => {
@@ -1562,6 +1571,9 @@ impl<'a> DocumentNamingContext<'a> {
                             expression.range,
                         );
                     }
+                }
+                if value_is_function {
+                    self.resolve_expression(*value);
                 }
             }
             ExpressionKind::Function {

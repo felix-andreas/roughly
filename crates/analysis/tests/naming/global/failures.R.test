@@ -170,12 +170,12 @@ f <- function() {
   x
 }
 #++++
-Assign(f@b3)
+Assign(f@b2)
   Function()
     Block
-      Assign(x@b2)
+      Assign(x@b3)
         Integer(3L)
-      Symbol(x@b2)
+      Symbol(x@b3)
 
 #---- cross_file_value_lookup_and_type_failure_in_same_package
 #---- R/a.R

@@ -5,9 +5,9 @@ f <- function(x) x
 #++++
 Assign(x@b0)
   Integer(1L)
-Assign(f@b2)
-  Function(x@b1)
-    Symbol(x@b1)
+Assign(f@b1)
+  Function(x@b2)
+    Symbol(x@b2)
 
 No diagnostics.
 
@@ -21,12 +21,12 @@ f <- function() {
 #++++
 Assign(x@b0)
   Integer(1L)
-Assign(f@b2)
+Assign(f@b1)
   Function()
     Block
-      Assign(x@b1)
+      Assign(x@b2)
         Character("\"ok\"")
-      Symbol(x@b1)
+      Symbol(x@b2)
 
 No diagnostics.
 
@@ -36,12 +36,12 @@ f <- function(x) {
   x
 }
 #++++
-Assign(f@b1)
-  Function(x@b0)
+Assign(f@b0)
+  Function(x@b1)
     Block
-      Assign(x@b0)
+      Assign(x@b1)
         Character("\"ok\"")
-      Symbol(x@b0)
+      Symbol(x@b1)
 
 No diagnostics.
 
@@ -52,14 +52,14 @@ f <- function() {
   g <- function(x) x
 }
 #++++
-Assign(f@b3)
+Assign(f@b0)
   Function()
     Block
-      Assign(x@b0)
+      Assign(x@b1)
         Integer(1L)
       Assign(g@b2)
-        Function(x@b1)
-          Symbol(x@b1)
+        Function(x@b3)
+          Symbol(x@b3)
 
 No diagnostics.
 
@@ -71,15 +71,15 @@ f <- function(x) {
   }
 }
 #++++
-Assign(f@b3)
-  Function(x@b0)
+Assign(f@b0)
+  Function(x@b1)
     Block
       Assign(g@b2)
         Function()
           Block
-            Assign(x@b1)
+            Assign(x@b3)
               Character("\"ok\"")
-            Symbol(x@b1)
+            Symbol(x@b3)
 
 No diagnostics.
 
@@ -95,19 +95,19 @@ f <- function() {
 #++++
 Assign(x@b0)
   Integer(1L)
-Assign(f@b5)
+Assign(f@b1)
   Function()
     Block
-      Assign(x@b1)
+      Assign(x@b2)
         Character("\"outer\"")
-      Assign(g@b4)
+      Assign(g@b3)
         Function()
           Block
-            Assign(x@b2)
+            Assign(x@b4)
               Logical(true)
-            Assign(h@b3)
+            Assign(h@b5)
               Function()
-                Symbol(x@b2)
+                Symbol(x@b4)
 
 No diagnostics.
 
@@ -120,12 +120,12 @@ f <- function(x) {
 #++++
 Assign(x@b0)
   Integer(1L)
-Assign(f@b2)
-  Function(x@b1)
+Assign(f@b1)
+  Function(x@b2)
     Block
-      Assign(x@b1)
+      Assign(x@b2)
         Character("\"ok\"")
-      Symbol(x@b1)
+      Symbol(x@b2)
 
 No diagnostics.
 
