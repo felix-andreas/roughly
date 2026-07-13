@@ -39,7 +39,9 @@ use {
         symbols,
     },
     analysis::{
-        self, Document, DocumentChange, TextPosition, TextRange, ide,
+        self, Document, DocumentChange, TextPosition, TextRange,
+        hir::TypingMode,
+        ide,
         lower::LoweringResult,
         naming::{DocumentKind, DocumentNamingComputation},
     },
@@ -576,7 +578,12 @@ impl EngineWorker {
         if config.check.unused {
             rendered.extend(file_diagnostics.unused.iter().cloned());
         }
-        if config.check.typing {
+        let (typing_enabled, strict_enabled) = TypingMode::effective(
+            file_diagnostics.typing_override,
+            config.check.typing,
+            config.check.strict,
+        );
+        if typing_enabled {
             self.engine.group().with_interner(|interner| {
                 for error in &file_diagnostics.type_errors {
                     rendered.push(analysis::Diagnostic::from_inference_error(
@@ -585,10 +592,7 @@ impl EngineWorker {
                 }
             });
         }
-        if file_diagnostics
-            .strict_override
-            .unwrap_or(config.check.strict)
-        {
+        if strict_enabled {
             rendered.extend(file_diagnostics.strict_diagnostics.iter().cloned());
             for diagnostic in &mut rendered {
                 diagnostic.escalate_unresolved_to_error();
@@ -626,11 +630,12 @@ impl EngineWorker {
         rendered.extend(naming.diagnostics.iter().cloned());
         rendered.extend(lowering.diagnostics.iter().cloned());
         rendered.extend(lint.iter().cloned());
-        if lowering
-            .module
-            .strict_override
-            .unwrap_or(config.check.strict)
-        {
+        let (_, strict_enabled) = TypingMode::effective(
+            lowering.module.typing_override,
+            config.check.typing,
+            config.check.strict,
+        );
+        if strict_enabled {
             for diagnostic in &mut rendered {
                 diagnostic.escalate_unresolved_to_error();
             }

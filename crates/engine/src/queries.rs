@@ -29,7 +29,7 @@ use {
         CheckConfig, LintConfig,
         diagnostic::{Diagnostic, render_type_scheme},
         document::{Document, DocumentId},
-        hir::{DefinitionKind, ExpressionId, ExpressionKind, HirArena, Module},
+        hir::{DefinitionKind, ExpressionId, ExpressionKind, HirArena, Module, TypingMode},
         ide::generic::{GlobalCompletionEntry, document_completion_exports},
         interner::{Interner, Symbol},
         lint::analyze as lint_analyze,
@@ -290,7 +290,7 @@ pub struct FileDiagnostics {
     pub strict_diagnostics: Vec<Diagnostic>,
     // The file's own `#: @strict` directive, overriding the configured strict switch for this
     // file at the consumer's gate.
-    pub strict_override: Option<bool>,
+    pub typing_override: Option<TypingMode>,
     pub unused: Vec<Diagnostic>,
     // Lowering-phase (syntax) and lint diagnostics: like production's `document_diagnostics`, both are
     // emitted *unconditionally* (not config-gated), so the consumer renders them directly.
@@ -967,7 +967,7 @@ impl QueryGroup for RoughlyQueries {
                     package_naming: (*package_naming).clone(),
                     type_errors: check.errors.clone(),
                     strict_diagnostics,
-                    strict_override: module.strict_override,
+                    typing_override: module.typing_override,
                     unused,
                     lowering: lowering_result.diagnostics.clone(),
                     lint: (*lint).clone(),

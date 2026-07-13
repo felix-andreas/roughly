@@ -4,7 +4,7 @@ use {
         document::Document,
         hir::{
             Argument, AssignTarget, AssignmentScope, Definition, DefinitionId, DefinitionItem,
-            Expression, ExpressionId, ExpressionKind, HirArena, Module, Parameter,
+            Expression, ExpressionId, ExpressionKind, HirArena, Module, Parameter, TypingMode,
         },
         interner::{Interner, Symbol},
         text,
@@ -20,7 +20,7 @@ use {
 pub struct LoweringContext {
     arena: HirArena,
     diagnostics: Vec<Diagnostic>,
-    strict_override: Option<bool>,
+    typing_override: Option<TypingMode>,
     interner: Interner,
     // Current expression-nesting depth, bounded by `LOWER_RECURSION_LIMIT` so a pathologically nested
     // (but otherwise valid) tree cannot overflow the stack during the recursive lowering walk.
@@ -44,7 +44,7 @@ impl LoweringContext {
         Self {
             arena: HirArena::new(),
             diagnostics: Vec::new(),
-            strict_override: None,
+            typing_override: None,
             interner: Interner::new(),
             depth: 0,
         }
@@ -54,7 +54,7 @@ impl LoweringContext {
         Self {
             arena: HirArena::new(),
             diagnostics: Vec::new(),
-            strict_override: None,
+            typing_override: None,
             interner,
             depth: 0,
         }
@@ -103,18 +103,18 @@ impl LoweringContext {
 pub fn lower(document: &Document, lowering_context: &mut LoweringContext) -> Module {
     lowering_context.arena = HirArena::new();
     lowering_context.diagnostics.clear();
-    lowering_context.strict_override = None;
+    lowering_context.typing_override = None;
 
     let root = document.tree().root_node();
     let rope = document.rope();
     let (definitions, expressions) = lower_module(root, rope, lowering_context);
 
     let arena = std::mem::take(&mut lowering_context.arena);
-    Module::with_strict_override(
+    Module::with_typing_override(
         arena,
         definitions,
         expressions,
-        lowering_context.strict_override,
+        lowering_context.typing_override,
     )
 }
 
@@ -1038,6 +1038,34 @@ fn lower_sequence(
         if child.kind_id() == kind::COMMENT {
             let text = node_text(child, rope);
             let trimmed = text.trim_start();
+            // A plain top-level `# typing: on|off|strict` comment sets the file's typing mode
+            // (last directive wins), mirroring the `#: @strict` form. A `typing:`-prefixed
+            // comment with any other value is almost certainly a typo'd directive, so it earns a
+            // diagnostic instead of silently doing nothing.
+            if matches!(sequence_context, SequenceContext::Module)
+                && !trimmed.starts_with("#:")
+                && let Some(directive) = trimmed
+                    .trim_start_matches('#')
+                    .trim()
+                    .strip_prefix("typing:")
+            {
+                match directive.trim() {
+                    "on" => lowering_context.typing_override = Some(TypingMode::On),
+                    "off" => lowering_context.typing_override = Some(TypingMode::Off),
+                    "strict" => lowering_context.typing_override = Some(TypingMode::Strict),
+                    other => lowering_context
+                        .diagnostics
+                        .push(Diagnostic::annotation_error(
+                            child.range(),
+                            format!(
+                                "Unknown typing directive `{other}`. Use `# typing: on`, \
+                             `# typing: off`, or `# typing: strict`."
+                            ),
+                        )),
+                }
+                child_index += 1;
+                continue;
+            }
             if trimmed.starts_with("#:") {
                 let mut block_range = child.range();
                 let mut block_lines = vec![(trimmed.to_string(), child.range())];
@@ -1077,16 +1105,17 @@ fn lower_sequence(
 
                 // A top-level `#: @strict` / `#: @strict off` block is a per-file switch for
                 // the strict check, not type syntax; it overrides the configured default for
-                // this file (last directive wins).
+                // this file (last directive wins). `@strict off` means "type-check, but not
+                // strictly" — the same file mode the plain `# typing: on` directive names.
                 if matches!(sequence_context, SequenceContext::Module) {
                     match stripped_text.trim() {
                         "@strict" | "@strict on" => {
-                            lowering_context.strict_override = Some(true);
+                            lowering_context.typing_override = Some(TypingMode::Strict);
                             child_index = next_index;
                             continue;
                         }
                         "@strict off" => {
-                            lowering_context.strict_override = Some(false);
+                            lowering_context.typing_override = Some(TypingMode::On);
                             child_index = next_index;
                             continue;
                         }

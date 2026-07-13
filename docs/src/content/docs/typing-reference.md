@@ -1989,11 +1989,24 @@ they are **errors**: a name the checker cannot see is a hole in the checked surf
 
 ### Per-file directive
 
-- a top-level `#: @strict` comment block switches strict mode on for its file regardless of the
-  configured default; `#: @strict off` switches it off
-- the last directive in the file wins
-- the directive changes only whether strict diagnostics are published for that file — inference
-  and every other check are untouched
+A plain top-level comment sets one file's typing mode, overriding the configured `[check]`
+switches in both directions:
+
+```r
+# typing: off      # no type or strict diagnostics for this file
+# typing: on       # type checking on for this file, strict off
+# typing: strict   # type checking and strict mode on for this file
+```
+
+- `off` silences the file's type errors and strict diagnostics even when the configuration checks
+  types; `on` opts a single file into type checking in an otherwise unchecked workspace; `strict`
+  additionally enables [strict mode](#strict-mode) for the file
+- the `#: @strict` form remains supported: `#: @strict` is `# typing: strict`, and `#: @strict off`
+  is `# typing: on` (type-checked, but not strictly)
+- the last directive in the file wins; a `typing:`-prefixed comment with any other value is
+  reported as an error rather than silently ignored
+- the directive changes only which diagnostics are published for that file — inference and every
+  other check are untouched, so hover and the other IDE features keep working under `off`
 
 ### What strict mode flags
 

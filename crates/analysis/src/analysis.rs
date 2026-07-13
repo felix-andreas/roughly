@@ -3,7 +3,7 @@ use {
         Interner, Symbol,
         diagnostic::Diagnostic,
         document::{Document, DocumentChange, DocumentId},
-        hir::{ExpressionId, ExpressionKind, Module},
+        hir::{ExpressionId, ExpressionKind, Module, TypingMode},
         lint::{self as lint_phase, NameStyle},
         lower::lower_with_shared_interner,
         naming::{
@@ -481,14 +481,18 @@ impl Analysis {
         {
             diagnostics.extend(package_diagnostics.iter().cloned());
         }
-        // A file's own `#: @strict` directive overrides the configured default.
-        let strict_enabled = self
+        // A file's own `# typing: ...` / `#: @strict` directive overrides the configured checks.
+        let typing_override = self
             .lowering_outputs
             .get(&document_id)
-            .and_then(|lowering| lowering.output.strict_override)
-            .unwrap_or(self.check_config.strict);
+            .and_then(|lowering| lowering.output.typing_override);
+        let (typing_enabled, strict_enabled) = TypingMode::effective(
+            typing_override,
+            self.check_config.typing,
+            self.check_config.strict,
+        );
         if let Some(output) = self.document_typecheck_outputs.get(&document_id) {
-            if self.check_config.typing {
+            if typing_enabled {
                 diagnostics.extend(output.diagnostics.iter().cloned());
             }
             if strict_enabled {
@@ -559,7 +563,18 @@ impl Analysis {
 pub fn run_full(analysis_state: &mut Analysis) -> Vec<DocumentId> {
     lint(analysis_state);
 
-    if analysis_state.check_config.typing || analysis_state.check_config.strict {
+    // The typecheck pass runs when the configuration asks for it — or when any file's own
+    // `# typing: on|strict` directive does: the per-file override can only surface diagnostics
+    // the pass computed. Directives live on lowered modules, so lower first (idempotent).
+    lower(analysis_state);
+    let any_file_opts_in = analysis_state.lowering_outputs.values().any(|lowering| {
+        matches!(
+            lowering.output.typing_override,
+            Some(TypingMode::On | TypingMode::Strict)
+        )
+    });
+    if analysis_state.check_config.typing || analysis_state.check_config.strict || any_file_opts_in
+    {
         typecheck(analysis_state)
     } else {
         resolve_package(analysis_state);

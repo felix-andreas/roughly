@@ -222,7 +222,14 @@ fn engine_diagnostics(
     if config.check.unused {
         rendered.extend(file_diagnostics.unused.iter().cloned());
     }
-    if config.check.typing {
+    // Mirrors production's per-file gates (the `# typing:` / `@strict` directive wins over the
+    // config), including the escalation of unresolved references to errors under strict.
+    let (typing_enabled, strict_enabled) = analysis::hir::TypingMode::effective(
+        file_diagnostics.typing_override,
+        config.check.typing,
+        config.check.strict,
+    );
+    if typing_enabled {
         // Render the raw inference errors against the engine's own interner + fallback range, exactly as
         // production's `typecheck` renders them.
         engine.group().with_interner(|interner| {
@@ -231,12 +238,7 @@ fn engine_diagnostics(
             }
         });
     }
-    // Mirrors production's per-file strict gate (`strict_override` wins over the config), including
-    // the escalation of unresolved references to errors under strict.
-    if file_diagnostics
-        .strict_override
-        .unwrap_or(config.check.strict)
-    {
+    if strict_enabled {
         rendered.extend(file_diagnostics.strict_diagnostics.iter().cloned());
         for diagnostic in &mut rendered {
             diagnostic.escalate_unresolved_to_error();

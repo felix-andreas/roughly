@@ -501,3 +501,58 @@ fn analysis_stats_rejects_a_workspace_without_r_files() {
     assert_eq!(exit_code(&output), 2);
     assert!(stderr(&output).contains("no R files"));
 }
+
+//
+// PER-FILE TYPING DIRECTIVES
+//
+
+// `# typing: off` silences type errors for its file even when the configuration checks types;
+// files without a directive keep the configured behavior.
+#[test]
+fn typing_off_directive_silences_one_file() {
+    let directory = project(&[
+        ("R/opted_out.R", "# typing: off\nbad <- 1L + \"a\"\n"),
+        ("R/plain.R", "also_bad <- 1L + \"a\"\n"),
+        ("roughly.toml", "[check]\ntyping = true\n"),
+    ]);
+    let output = roughly(directory.path(), &["check"]);
+    assert_eq!(exit_code(&output), 1);
+    let report = stderr(&output);
+    assert!(report.contains("plain.R"), "report:\n{report}");
+    assert!(!report.contains("opted_out.R"), "report:\n{report}");
+}
+
+// `# typing: on` opts a single file into type checking when the configuration has it off, and
+// `# typing: strict` additionally escalates unresolved references — both without touching the
+// rest of the workspace.
+#[test]
+fn typing_on_and_strict_directives_opt_single_files_in() {
+    let directory = project(&[
+        ("R/opted_in.R", "# typing: on\nbad <- 1L + \"a\"\n"),
+        ("R/strict_file.R", "# typing: strict\nx <- not_defined()\n"),
+        ("R/plain.R", "quiet <- 1L + \"a\"\n"),
+        ("roughly.toml", "[check]\ntyping = false\n"),
+    ]);
+    let output = roughly(directory.path(), &["check"]);
+    assert_eq!(exit_code(&output), 1);
+    let report = stderr(&output);
+    assert!(report.contains("opted_in.R"), "report:\n{report}");
+    assert!(
+        report.contains("error: I could not resolve `not_defined`"),
+        "strict escalates the unresolved reference to an error:\n{report}"
+    );
+    assert!(!report.contains("plain.R"), "report:\n{report}");
+}
+
+// A typo'd directive value is a diagnostic, not a silent no-op.
+#[test]
+fn unknown_typing_directive_value_is_reported() {
+    let directory = project(&[("R/a.R", "# typing: strcit\nx <- 1L\n")]);
+    let output = roughly(directory.path(), &["check"]);
+    assert_eq!(exit_code(&output), 1);
+    assert!(
+        stderr(&output).contains("Unknown typing directive `strcit`"),
+        "report:\n{}",
+        stderr(&output)
+    );
+}

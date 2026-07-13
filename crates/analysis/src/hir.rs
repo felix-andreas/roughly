@@ -50,14 +50,42 @@ impl HirArena {
     }
 }
 
+/// A file's own typing mode, set by a top-level `# typing: on|off|strict` comment directive (or
+/// the `#: @strict` form, which maps to `Strict` / `On`). It overrides the configured `[check]`
+/// switches for that file in both directions: `Off` silences type and strict diagnostics, `On`
+/// enables typing even where the configuration has it off, `Strict` enables both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypingMode {
+    Off,
+    On,
+    Strict,
+}
+
+impl TypingMode {
+    /// The effective `(typing, strict)` gates for one file: the file directive wins over the
+    /// configured defaults. The single source of truth for every diagnostics consumer.
+    pub fn effective(
+        file_override: Option<TypingMode>,
+        config_typing: bool,
+        config_strict: bool,
+    ) -> (bool, bool) {
+        match file_override {
+            Some(TypingMode::Off) => (false, false),
+            Some(TypingMode::On) => (true, false),
+            Some(TypingMode::Strict) => (true, true),
+            None => (config_typing, config_strict),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Module {
     pub arena: HirArena,
     pub definitions: Vec<DefinitionItem>,
     pub expressions: Vec<ExpressionId>,
-    // A top-level `#: @strict` / `#: @strict off` directive overriding the configured strict
-    // switch for this file (last directive wins). `None` when the file has no directive.
-    pub strict_override: Option<bool>,
+    // A top-level `# typing: ...` / `#: @strict` directive overriding the configured check
+    // switches for this file (last directive wins). `None` when the file has no directive.
+    pub typing_override: Option<TypingMode>,
     // Derived from `arena` once at construction so IDE range lookups are O(log n) instead of a
     // linear arena scan. Keyed by (start_byte, end_byte).
     span_index: BTreeMap<(usize, usize), ExpressionId>,
@@ -69,14 +97,14 @@ impl Module {
         definitions: Vec<DefinitionItem>,
         expressions: Vec<ExpressionId>,
     ) -> Self {
-        Self::with_strict_override(arena, definitions, expressions, None)
+        Self::with_typing_override(arena, definitions, expressions, None)
     }
 
-    pub fn with_strict_override(
+    pub fn with_typing_override(
         arena: HirArena,
         definitions: Vec<DefinitionItem>,
         expressions: Vec<ExpressionId>,
-        strict_override: Option<bool>,
+        typing_override: Option<TypingMode>,
     ) -> Self {
         let mut span_index = BTreeMap::new();
         // Expressions are allocated in ascending ExpressionId order, so `or_insert` keeps the
@@ -91,7 +119,7 @@ impl Module {
             arena,
             definitions,
             expressions,
-            strict_override,
+            typing_override,
             span_index,
         }
     }
