@@ -1385,6 +1385,36 @@ impl InferenceState {
         // the binding boundary, so generalization quantifies exactly the variables
         // that do not escape into the enclosing scope, with no environment walk.
         self.enter_level();
+        // Monomorphic recursion (letrec for closures): a function-valued RHS can read its own
+        // name — the naming walk resolves that read to this very binding — so the target slot is
+        // pre-bound to a fresh variable before the body is inferred, and the variable unifies
+        // with the inferred function type afterwards. Recursive calls thereby constrain the
+        // function's own parameters and return instead of typing as a silent unbound `Unknown`.
+        let recursion_placeholder =
+            if matches!(arena.get(value).kind, ExpressionKind::Function { .. }) {
+                let variable = self.fresh_variable();
+                match resolution_context.and_then(|context| {
+                    context
+                        .local_naming
+                        .expression_resolutions
+                        .get(&expression.id)
+                        .copied()
+                }) {
+                    Some(binding_id) => self.bind_local_name(
+                        binding_id,
+                        CoreType::Variable(variable),
+                        expression.range,
+                    ),
+                    None => self.bind_global_name(
+                        target,
+                        CoreType::Variable(variable),
+                        expression.range,
+                    ),
+                }
+                Some(variable)
+            } else {
+                None
+            };
         let binding_type_result = self.infer_assign_binding_type(
             value,
             expression,
@@ -1392,6 +1422,12 @@ impl InferenceState {
             resolution_context,
             type_definitions,
         );
+        let binding_type_result = match (recursion_placeholder, binding_type_result) {
+            (Some(variable), Ok(inferred)) => {
+                self.unify_with_context(CoreType::Variable(variable), inferred, expression)
+            }
+            (_, result) => result,
+        };
         self.exit_level();
         // Numeric variables that escape a binding without being bound by a function
         // parameter cannot stay polymorphic, so they default to `double` here. Variables
@@ -1441,6 +1477,16 @@ impl InferenceState {
 
             self.set_environment_entry(EnvironmentKey::Global(target), None);
             let generalized_scheme = self.generalize(binding_type.clone())?;
+            // The recursion placeholder pre-bound the per-site local slot, and the export
+            // extraction reads the local entry before the global one — keep them consistent.
+            if let Some(binding_id) = resolution_context
+                .local_naming
+                .expression_resolutions
+                .get(&expression.id)
+                .copied()
+            {
+                self.bind_local_scheme(binding_id, generalized_scheme.clone(), expression.range);
+            }
             self.bind_global_scheme(target, generalized_scheme, expression.range);
             return Ok(binding_type);
         }

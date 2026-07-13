@@ -1528,6 +1528,15 @@ Examples:
 - a later assignment in the same scope writes the same variable: on a straight-line path the new
   write replaces the old type, and writes merging from different control-flow paths join (see
   `Control-flow joins`)
+- **recursion (letrec for closures):** a function-valued assignment's own name is visible inside
+  its body — the target is pre-bound to a fresh type variable before the body is inferred, and
+  the variable unifies with the inferred function type (monomorphic recursion, the classic
+  `let rec` rule). `fact <- function(k) if (k <= 1L) 1L else k * fact(k - 1L)` therefore types as
+  `fn(integer) -> integer`, and a call violating the recursively-inferred signature is an error.
+  Recursion is monomorphic: the recursive uses share one instantiation (no polymorphic
+  recursion). Mutual recursion between two *local* closures is out of letrec's per-binding reach —
+  the earlier closure's reference to the later name stays a loud unresolved reference — while
+  top-level mutual recursion resolves through the package interface fixed point
 
 Examples:
 
