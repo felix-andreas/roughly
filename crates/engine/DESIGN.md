@@ -156,7 +156,7 @@ actually reads.
 ```
                  +-- config --------------------------------------------+
                  |                                                       |
- source_text(f) -+-> parse(f) -> lower(f) -> local_naming(f) --+         |
+ source_text(f) -+-> lower(f) -> local_naming(f) --------------+         |
                  |                                              |        |
  document_kind(f)+----------------------------------------------+        |
                                                                 |        |
@@ -177,7 +177,16 @@ actually reads.
 
 Inputs (set from outside, never computed):
 
-- `source_text(f)` — per-file source. The high-churn input; every keystroke is a `set_input`.
+- `source_text(f)` — per-file source: the text (a rope) plus, for open documents only, the host's
+  incrementally-maintained tree. The high-churn input; every keystroke is a `set_input`. The corpus is
+  fed text-only — a tree costs ~60× the source bytes, so retaining one per file dominated the resident
+  set at scale; tree-reading bodies go through `RoughlyQueries::document_for`, which uses the input's
+  tree or parses on demand into a small bounded cache (sound because the tree is a pure function of
+  the text).
+- `open_files` — the open-document set (sorted), changing only on open/close. A **defaulted input**
+  (never set means empty) and a pure performance seam: each all-files fold splits into a durable
+  sub-fold over non-open files plus an open-file overlay, making the per-keystroke validation walk
+  O(open). Fold values are identical for any contents, so a host that never sets it stays correct.
 - `document_kind(f)` — package vs. script classification, a *separate fine-grained input* so a text-only
   edit does not invalidate via a kind read (input granularity must match reads).
 - `project_files` — the workspace membership set: which `FileId`s exist. The engine does not enumerate its
@@ -193,10 +202,9 @@ Queries (each edge is a recorded `fetch`, so the dependency is automatic):
 
 | Query | Reads | Why / granularity |
 | --- | --- | --- |
-| `parse(f)` | `source_text(f)` | the tree is a pure function of the bytes |
-| `lower(f)` | `parse(f)` | HIR is lowered from the tree |
+| `lower(f)` | `source_text(f)` | HIR is lowered from the tree (materialized on demand from the text) |
 | `local_naming(f)` | `lower(f)`, `document_kind(f)` | file-local resolution; also yields the file's **exported-name set** |
-| `package_symbol_index` | `project_files`, each package file's `local_naming` export-name set | the def-map: `name → winning defining/re-exporting item`. **Names only, no schemes.** The one all-files fold; changes only on *structural* edits (add/remove/rename a top-level binding, add/remove/reclassify a file), **not** on body edits |
+| `package_symbol_index` | `project_files`, `open_files`, its durable sub-fold, the open files' export-name sets | the def-map: `name → winning defining/re-exporting item`. **Names only, no schemes.** Changes only on *structural* edits (add/remove/rename a top-level binding, add/remove/reclassify a file), **not** on body edits. Split like every all-files fold: a durable (non-open) sub-fold keyed by `project_files` position — HIGH durability, so a keystroke greens it O(1) — plus an open-file overlay whose position merge replays path-order last-writer-wins byte-identically |
 | `defining_item(symbol)` | `package_symbol_index` | **firewall**: projects one symbol's winner out of the index. Value-equality cutoff per symbol — when the index changes because symbol *x*'s winner changed, `defining_item(s)` for *s ≠ x* re-projects to the same value and cuts off |
 | `global_scheme(symbol)` | `defining_item(symbol)`, then the winning file's `lower`/local inference for that item (or, for an acyclic re-export `a <- b`, `global_scheme(b)`; for a re-export **cycle**, the SCC interface body, §5) | the per-symbol exported **scheme**. Editing a function body recomputes only *its* `global_scheme`, not a global fold |
 | `typecheck(f)` | `lower(f)`, `local_naming(f)`, `config`, and `global_scheme(s)` for **each symbol `s` that `f` references** | HM inference over the file. Records a dependency on exactly the interface symbols it reads — nothing more |
@@ -234,12 +242,13 @@ to keep in sync.
   changed); symbols `f` newly defines/wins flow through the firewall to `global_scheme`, and only referrers
   of those symbols revalidate. Files referencing nothing `f` changed are untouched.
 - **Delete file `f`.** `set_input(project_files, …∖{f})` and `remove_input(source_text(f))` (and
-  `document_kind(f)`). The `source_text(f)` tombstone makes `parse(f)`/`lower(f)`/`local_naming(f)` read as
+  `document_kind(f)`). The `source_text(f)` tombstone makes `lower(f)`/`local_naming(f)` read as
   changed-and-absent for anything still holding them, but `package_symbol_index` — now folding a
   `project_files` without `f` — simply stops fetching `f`'s `local_naming`, so `f` drops out of winner
   selection. The per-symbol `global_scheme` queries for symbols `f` used to define recompute (their winner
-  changed or vanished), and their referrers revalidate. `f`'s own `parse`/`lower`/… become dead memos. No
-  body ever fetches the removed `source_text(f)` directly, so the tombstone panic-on-fetch never fires.
+  changed or vanished), and their referrers revalidate. `f`'s own `lower`/… become dead memos. Bodies
+  read the removed source only through tombstone-tolerant paths (`document_for`, `fetch_optional`), so
+  the tombstone panic-on-fetch never fires.
 - **Reclassify `f` (package ↔ script).** `set_input(document_kind(f), …)`. `package_symbol_index` folds a
   file's exports only when its `document_kind` is `Package`, so flipping to `Script` drops `f`'s exports
   from the index exactly as a deletion would for naming purposes, while `f`'s own `parse`/`lower` stay live
@@ -372,17 +381,17 @@ at 10k / 100k / 300k LoC:
   edited file plus its referrers' HM inference and triggers **zero** O(package) recomputation.
   `package_symbol_index` does not re-fold (names-only cutoff) and the package type-definitions view does
   not re-fold (a declarations-only view cutoff, the type-side analog of the exported-name set).
-- **Wall time scales roughly linearly in N with a small constant**, because confirming the all-files
-  folds are unchanged is an O(package) **validation walk** over the folds' own dependency edges. Each
-  edge is an O(1) durability check: an open-document keystroke is a `LOW` change, every unopened file's
-  chain is recorded `HIGH`, so the walk never recurses into those chains (`validate` re-records each
-  memo's durability minimum as it walks, which is what keeps the records truthful across open/close
-  transitions). `validate` also clones a memo's dependency list only when it will actually walk it,
-  avoiding an O(fan-in × N) blow-up when a high-fan-in fold is revalidated from many callers. Driving
-  the residual O(N) edge walk itself sub-linear (splitting each fold into a durable sub-fold over
-  unopened files plus an open-file overlay, giving O(open) validation) is possible future work; the
-  committed witnesses in `test_benchmark.rs` pin both the at-rest constant prime scope and the
-  durability-bounded post-keystroke walk.
+- **The per-keystroke validation walk is size-independent.** Durability keeps every unopened file's
+  chain green in O(1) (an open-document keystroke is a `LOW` change and those chains are recorded
+  `HIGH`; `validate` re-records each memo's durability minimum as it walks, which is what keeps the
+  records truthful across open/close transitions). The all-files folds — once the O(N)-edge residue —
+  are each split into a durable sub-fold over non-open files (green O(1) at its own slot via the
+  durability fast path) plus an open-file overlay, so what remains per keystroke is the open files'
+  overlay edges plus the edited file's own reference chain. `validate` also clones a memo's dependency
+  list only when it will actually walk it, avoiding an O(fan-in × N) blow-up when a high-fan-in fold
+  is revalidated from many callers. The committed witnesses in `test_benchmark.rs` pin the at-rest
+  constant prime scope and the size-independence of the post-keystroke walk (equal at 100 and 300
+  files).
 - **Eviction**: `evict_stale_memos` bounds the table across long sessions (the LSP host runs it every
   1024 input writes).
 

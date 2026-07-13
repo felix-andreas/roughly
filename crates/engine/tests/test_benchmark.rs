@@ -17,14 +17,13 @@
 //!    re-typecheck (the edited file and its referrer), independent of N. The expensive work, HM inference,
 //!    is genuinely O(blast-radius).
 //!
-//! 2. **Wall time is ~90–105× lower than production at every size, but both still scale ~linearly in
-//!    N.** The engine is *not* flat in wall time: confirming the package-wide folds
-//!    (`PackageSymbolIndex`, `PackageTypeDefinitions`, the package-naming candidate order) are unchanged
-//!    walks each fold's own dependency edges. Durability bounds that walk — an open-document keystroke is
-//!    a `LOW` change, so every unopened file's chain answers green in O(1) without recursing to its
-//!    inputs; what remains is the fold edges themselves, an O(1) check each. Driving *that* sub-linear
-//!    (a durable sub-fold over unopened files plus an open-file overlay, giving O(open) validation) is
-//!    the recorded next lever (`DESIGN.md` §8).
+//! 2. **Wall time is ~90–105× lower than production at every size.** Durability keeps every unopened
+//!    file's chain green in O(1) (an open-document keystroke is a `LOW` change), and each package-wide
+//!    fold (`PackageSymbolIndex`, `PackageTypeDefinitions`, the package-naming candidate order, …) is
+//!    split into a durable sub-fold over non-open files plus an open-file overlay — so when the edited
+//!    file is declared open (`Key::OpenFiles`), the post-keystroke validation walk is bounded by the
+//!    open set plus the edited file's own references, independent of N
+//!    ([`open_file_edit_walk_is_durability_bounded`] pins equality at 100 vs 300 files).
 //!    Production's O(package) term, by contrast, is HM re-inference plus a per-round interface-table
 //!    rebuild and a type-definition-fingerprint render over every module — far costlier per unit N.
 //!    (Allocation churn per edit, unlike wall time, IS flat in N — see `test_memory.rs`'s
