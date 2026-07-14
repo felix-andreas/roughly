@@ -312,3 +312,38 @@ fn fetching_through_a_tombstoned_source_yields_empty_without_panic() {
     assert!(module.expressions.is_empty());
     assert!(module.definitions.is_empty());
 }
+
+// A file of backward-chained top-level functions — each referencing only symbols defined above
+// it — must not route through the interface-SCC machinery at all: the module walk rebinds each
+// winner's global entry at its definition site, before any read, so no interface import (and no
+// interface-dependency edge) exists for those references. Demanding the file's diagnostics then
+// costs exactly one authoritative inference; the whole-file exported-schemes inference runs only
+// if a referrer demands a scheme. Before this held, every same-file reference chain formed a
+// fake SCC whose fixed point re-inferred the whole file per member and per round — the shape
+// that made large real-world files' typecheck quadratic and worse.
+#[test]
+fn backward_reference_chain_stays_off_the_interface_scc() {
+    let chain: String = (1..40).fold("h0 <- function(x) x + 1\n".to_owned(), |mut source, i| {
+        source += &format!("h{i} <- function(x) h{}(x) + {i}\n", i - 1);
+        source
+    });
+    let referrer = "total <- h39(1L)\n";
+    let engine = setup(&[(A, chain.as_str()), (B, referrer)]);
+    let _ = engine.fetch::<engine::queries::FileDiagnostics>(Key::Diagnostics(A));
+    let _ = engine.fetch::<engine::queries::FileDiagnostics>(Key::Diagnostics(B));
+
+    let totals: std::collections::HashMap<&str, u64> =
+        engine.group().execution_totals().into_iter().collect();
+    assert_eq!(
+        totals["interface scc (fixed point)"], 0,
+        "a backward chain is not a cycle; no fixed point may run"
+    );
+    assert_eq!(
+        totals["exported schemes (inference)"], 1,
+        "the referrer's scheme demand infers the chain file exactly once"
+    );
+    assert_eq!(
+        totals["typecheck (inference)"], 2,
+        "one authoritative inference per file"
+    );
+}

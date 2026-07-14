@@ -1453,13 +1453,24 @@ fn infer_file(
     let local_naming = &naming.naming;
 
     let referenced: BTreeSet<Symbol> = local_naming.non_locals.values().copied().collect();
+    let walk_shadowed = walk_shadowed_definitions(&module, local_naming);
     let mut global_bindings: BTreeMap<Symbol, DocumentId> = BTreeMap::new();
     let mut imported_schemes: Vec<(Symbol, TypeScheme)> = Vec::new();
     for symbol in &referenced {
         let defining = engine.fetch::<Option<FileId>>(Key::DefiningItem(*symbol));
         if let Some(defining_file) = *defining {
             global_bindings.insert(*symbol, DocumentId(defining_file));
-            // Every referenced package global is bound, matching production: a global whose winning file
+            // A same-file winner whose every read begins after its defining assignment ends needs
+            // no import: the walk's winner path rebinds the global entry with the freshly inferred
+            // scheme at that site, before any read could resolve, so an imported scheme is
+            // shadowed dead weight (see `walk_shadowed_definitions`) — and the fetch it would
+            // record is exactly the interface edge that made every same-file reference chain a
+            // fake SCC. The binding in `global_bindings` still marks the symbol as a package
+            // global for the checker's resolution path.
+            if defining_file == file && walk_shadowed.contains(symbol) {
+                continue;
+            }
+            // Every other referenced package global is bound, matching production: a global whose winning file
             // produced no concrete export resolves to `Unknown` (production's interface-table fallback),
             // not to an unbound name — so the referrer's check sees the same environment either way. An
             // in-SCC reference (mutual re-export or mutual value reference) takes its current round scheme
@@ -1493,25 +1504,15 @@ fn infer_file(
             engine.fetch::<TypeDefinitionEnvironment>(Key::PackageTypeDefinitions);
         &package_type_definitions
     } else {
-        let files = engine.fetch::<Vec<FileId>>(Key::ProjectFiles);
-        let mut package_modules = Vec::new();
-        for other in files.iter() {
-            let other_kind = engine.fetch::<DocumentKind>(Key::DocumentKind(*other));
-            if *other_kind == DocumentKind::Package {
-                // The declarations-only view, like `PackageTypeDefinitions`: a body edit to a package
-                // file does not re-fold this script's type environment.
-                package_modules.push(
-                    engine.fetch::<TypeDefinitionsModule>(Key::TypeDefinitionsModule(*other)),
-                );
-            }
-        }
-        let mut built = TypeDefinitionEnvironment::from_modules(
-            package_modules
-                .iter()
-                .map(|view| &*view.0)
-                .chain([&*module]),
-        );
-        group.stubs.seed_type_definitions(&mut built);
+        // The script's own `@type`/`@alias` declarations overlay the memoized package-wide fold
+        // (module declarations win over stub seeds and package definitions alike, exactly as
+        // production's `from_modules(package ++ own)` + seeding collates). Overlaying keeps the
+        // cost and the recorded dependencies O(1) per script — rebuilding from every package
+        // module's view recorded one edge per package file per script, an
+        // O(scripts × package files) cold cost and revalidation walk.
+        let mut built =
+            (*engine.fetch::<TypeDefinitionEnvironment>(Key::PackageTypeDefinitions)).clone();
+        built.extend_from_module(&module);
         script_type_definitions = built;
         &script_type_definitions
     };
@@ -1580,18 +1581,80 @@ fn interface_deps(engine: &Engine<RoughlyQueries>, symbol: Symbol) -> Vec<Symbol
     let Some(file) = *defining else {
         return Vec::new();
     };
+    let module = engine.fetch::<Module>(Key::Lower(file));
     let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(file));
+    // Must mirror `infer_file`'s import set exactly: a walk-shadowed same-file symbol is never
+    // fetched there, so it must not be an edge here — and everything fetched there must be an
+    // edge, or a genuine cycle would slip past the SCC routing into the accidental-cycle guard.
+    let walk_shadowed = walk_shadowed_definitions(&module, &naming.naming);
     let referenced: BTreeSet<Symbol> = naming.naming.non_locals.values().copied().collect();
     let mut deps = BTreeSet::new();
     for candidate in referenced {
-        if engine
-            .fetch::<Option<FileId>>(Key::DefiningItem(candidate))
-            .is_some()
-        {
-            deps.insert(candidate);
+        let candidate_defining = engine.fetch::<Option<FileId>>(Key::DefiningItem(candidate));
+        let Some(candidate_file) = *candidate_defining else {
+            continue;
+        };
+        if candidate_file == file && walk_shadowed.contains(&candidate) {
+            continue;
         }
+        deps.insert(candidate);
     }
     deps.into_iter().collect()
+}
+
+// The definitions this file's module walk provably resolves for every same-file read: the
+// symbol's last top-level assignment (its export/winner site) ends before any non-local read of
+// it begins. The typecheck walk rebinds the winner's global entry with the freshly inferred
+// scheme when it passes that assignment, so for these symbols the interface import could never be
+// observed — every read happens after the rebinding. Everything else — self-recursion inside the
+// defining range, a forward reference from an earlier body, a read between repeated top-level
+// writes — keeps the interface path (and its deliberate tolerance semantics) unchanged.
+fn walk_shadowed_definitions(module: &Module, local_naming: &NamesLocal) -> BTreeSet<Symbol> {
+    let mut assignment_ends: BTreeMap<Symbol, usize> = BTreeMap::new();
+    collect_assignment_ends(
+        module,
+        local_naming,
+        &module.expressions,
+        &mut assignment_ends,
+    );
+    let mut earliest_read_start: BTreeMap<Symbol, usize> = BTreeMap::new();
+    for (expression_id, symbol) in &local_naming.non_locals {
+        let start = module.arena.get(*expression_id).range.start_byte;
+        let entry = earliest_read_start.entry(*symbol).or_insert(start);
+        if start < *entry {
+            *entry = start;
+        }
+    }
+    assignment_ends
+        .into_iter()
+        .filter(|(symbol, end)| {
+            earliest_read_start
+                .get(symbol)
+                .is_none_or(|start| *start >= *end)
+        })
+        .map(|(symbol, _)| symbol)
+        .collect()
+}
+
+// Each top-level-assigned symbol's last assignment end offset, recursing into bare top-level
+// `{ }` blocks exactly like the package-definition membership rule (the last writer is the
+// export/winner site the walk rebinds at).
+fn collect_assignment_ends(
+    module: &Module,
+    local_naming: &NamesLocal,
+    expressions: &[ExpressionId],
+    ends: &mut BTreeMap<Symbol, usize>,
+) {
+    for expression_id in expressions {
+        let expression = module.arena.get(*expression_id);
+        if let Some(target) = expression.kind.simple_assignment_target() {
+            if top_level_binding(local_naming, *expression_id).is_some() {
+                ends.insert(target, expression.range.end_byte);
+            }
+        } else if let ExpressionKind::Block { expressions, .. } = &expression.kind {
+            collect_assignment_ends(module, local_naming, expressions, ends);
+        }
+    }
 }
 
 // The SCC of `symbol` over the (arbitrary out-degree) `InterfaceDeps` graph, as the canonical (sorted)

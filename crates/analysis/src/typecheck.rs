@@ -490,6 +490,24 @@ impl TypeDefinitionEnvironment {
         Self::from_modules([module])
     }
 
+    /// Overlay one module's declarations on top of an existing environment: each declared name
+    /// wins over whatever the environment held (a package definition or a seeded stub type),
+    /// exactly as a later module wins in [`from_modules`](Self::from_modules) and a module
+    /// declaration wins over seeding. This is how a script's own declarations shadow the
+    /// package-wide environment without rebuilding it from every package module.
+    pub fn extend_from_module(&mut self, module: &Module) {
+        for definition in &module.definitions {
+            self.definitions.insert(
+                definition.definition.name,
+                TypeDefinition {
+                    kind: definition.definition.kind,
+                    type_parameters: definition.definition.type_parameters.clone(),
+                    representation: Some(definition.definition.surface_type.clone()),
+                },
+            );
+        }
+    }
+
     pub fn from_modules<'a>(modules: impl IntoIterator<Item = &'a Module>) -> Self {
         let mut definitions = BTreeMap::new();
 
