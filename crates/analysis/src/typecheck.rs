@@ -7,7 +7,7 @@ use {
         },
         interner::{Interner, Symbol},
         lower::LoweringContext,
-        naming::{BindingId, NamesGlobal, NamesLocal, find_binding, find_exported_binding},
+        naming::{BindingId, NamesGlobal, NamesLocal, find_binding},
         types::{
             Annotation, Atomic, Constraint, CoreType, FunctionType, InferenceVariableId,
             RecordField, RestParameter, SurfaceType, TypeScheme,
@@ -502,8 +502,11 @@ pub struct ExportedValue {
 
 struct ResolutionContext<'a> {
     document_id: DocumentId,
-    module: &'a Module,
-    top_level_expression_ids: &'a [ExpressionId],
+    top_level_expression_ids: &'a BTreeSet<ExpressionId>,
+    // Every symbol's exported binding, precomputed once per check: the winner test runs per
+    // top-level assignment, and a per-assignment `find_exported_binding` scan was quadratic in
+    // the statement count.
+    exported_bindings: &'a BTreeMap<Symbol, BindingId>,
     local_naming: &'a NamesLocal,
     package_naming: &'a NamesGlobal,
 }
@@ -854,10 +857,19 @@ impl InferenceState {
         package_naming: &NamesGlobal,
         type_definitions: &TypeDefinitionEnvironment,
     ) -> ModuleCheck {
+        let top_level_expression_ids: BTreeSet<ExpressionId> =
+            module.expressions.iter().copied().collect();
+        let mut exported_bindings = BTreeMap::new();
+        collect_exported_bindings(
+            module,
+            local_naming,
+            &module.expressions,
+            &mut exported_bindings,
+        );
         let resolution_context = ResolutionContext {
             document_id,
-            module,
-            top_level_expression_ids: &module.expressions,
+            top_level_expression_ids: &top_level_expression_ids,
+            exported_bindings: &exported_bindings,
             local_naming,
             package_naming,
         };
@@ -1701,12 +1713,8 @@ impl InferenceState {
                 .local_naming
                 .expression_resolutions
                 .get(&expression.id)
-                .zip(find_exported_binding(
-                    resolution_context.module,
-                    resolution_context.local_naming,
-                    target,
-                ))
-                .is_some_and(|(binding_id, export_binding_id)| *binding_id == export_binding_id)
+                .zip(resolution_context.exported_bindings.get(&target))
+                .is_some_and(|(binding_id, export_binding_id)| binding_id == export_binding_id)
                 && resolution_context
                     .package_naming
                     .global_bindings
