@@ -23,13 +23,22 @@ The project is built by AI agents driving development, with light human steering
 
 The user has delegated full technical ownership to the agents: empty the backlog and bring the project to the best possible state — rust-analyzer quality. That explicitly covers code structure, crate boundaries, naming, performance, pipeline architecture, semantic correctness, and judged deduplication. Do not optimize for "safe, risk-free" minimal diffs; bring code to its intended shape, including large refactors, and take responsibility for the outcome. Design decisions that previously required a user check-in are now the agent's to make: decide, implement, and record the decision and rationale in `.agents/memory/decisions.md` (or the docs page it belongs to) in the same session. Two standing constraints: keep working on the current feature branch, and do not open new pull requests.
 
+# Do not think like a human (user directive)
+
+Human engineering instincts — de-risking, staging, keeping diffs small and reviewable, avoiding "scary" rewrites — exist because a human's time is scarce and starting over is expensive for them. Neither is true for an agent, so those instincts pick the wrong strategy here:
+
+- **Go directly to the intended end shape in one change**, however large and invasive. Break the whole codebase mid-change if the target design calls for it, then fix everything — compiler errors, warnings, tests — afterwards in one sweep. Do not sequence a redesign into small incremental steps to "manage risk"; that trades the right design for ceremony.
+- **Never propose or choose a watered-down variant of a design because the full version is a big change.** If the full version is right, implement the full version. Starting over after a failed attempt is cheap; shipping the wrong shape is not.
+- **File size is not a problem.** Do not split, reorganize, or flag a file merely for being large (the LSP server module is fine as one file). Split only when a genuine new logical component exists.
+- Correctness gates are unchanged: the differential suites, fixtures, witnesses, clippy, and fmt must be green before a change lands — the point is to reach green in one big pass, not to shrink the change.
+
 # Incremental analysis
 
 Implemented: the `engine` crate is a red-green memoized query core with per-symbol interface firewalls, cooperative cancellation, and idle-time diagnostics scheduling; the architecture page (`docs/src/content/docs/architecture.md`) is the contract — read it before touching the engine or the server's scheduling, and keep it accurate. Known deferred levers live in `backlog.md` (sub-linear validation walk, durability tiers).
 
 # Working autonomously
 
-When working autonomously on a larger goal — a workflow, a multi-step change, or any task that spans several logical units — commit and push after each logical step, instead of saving everything for one final commit.
+When working autonomously on a larger goal — a workflow, a multi-step change, or any task that spans several logical units — commit and push after each logical step, instead of saving everything for one final commit. A single large invasive redesign is ONE logical step: commit it when it is green, not in fragments along the way.
 
 # Knowledge base and documentation (we can reduce repeition/duplication with MEMORY.md)
 
