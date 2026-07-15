@@ -33,6 +33,7 @@ dependencies = [
  "fixtures",
  "itertools 0.14.0",
  "ropey",
+ "rustc-hash",
  "serde",
  "serde_json",
  "tree-sitter",

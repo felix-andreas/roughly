@@ -13,6 +13,7 @@ use {
             RecordField, RestParameter, SurfaceType, TypeScheme,
         },
     },
+    rustc_hash::FxHashMap,
     std::collections::{BTreeMap, BTreeSet},
     tree_sitter::Range,
 };
@@ -285,17 +286,19 @@ impl EntryTable {
 pub struct InferenceState {
     current_level: Level,
     entries: EntryTable,
-    environment: BTreeMap<EnvironmentKey, Binding>,
+    // Hash-keyed: the hottest read path (every name lookup) and never iterated, so no order is
+    // observable.
+    environment: FxHashMap<EnvironmentKey, Binding>,
     builtins: BTreeMap<Symbol, BuiltinKind>,
     // When enabled, every inferred expression's result type is recorded by id so tooling (hover,
     // inlay hints) can show checked types. Left off during interface rounds to avoid the cost.
     record_expression_types: bool,
-    recorded_expression_types: BTreeMap<ExpressionId, CoreType>,
+    recorded_expression_types: FxHashMap<ExpressionId, CoreType>,
     // For each call whose callee resolved to a stub overload set, the index (into the declared set)
     // of the scheme the call committed, keyed by the callee expression. Only the selection pass
     // knows which candidate won, and signature help needs it to mark the active signature; recorded
     // on the commit path only, so failed probes leave nothing behind.
-    selected_overloads: BTreeMap<ExpressionId, usize>,
+    selected_overloads: FxHashMap<ExpressionId, usize>,
     // One frame per function-literal body currently being inferred; each `return(x)` in the body
     // pushes its value's type into the innermost frame, and the function's return type is the
     // union of the frame with the body's trailing value. Transient: pushed and popped around one
@@ -443,7 +446,7 @@ struct EnvironmentSnapshot {
     log_length: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum EnvironmentKey {
     Local(BindingId),
     Global(Symbol),
@@ -1002,7 +1005,9 @@ impl InferenceState {
             expression_types,
             expression_types_by_id,
             variable_constraints,
-            selected_overloads: std::mem::take(&mut self.selected_overloads),
+            selected_overloads: std::mem::take(&mut self.selected_overloads)
+                .into_iter()
+                .collect(),
             errors,
             strict_origins,
         }

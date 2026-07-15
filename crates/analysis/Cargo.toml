@@ -9,6 +9,7 @@ path = "src/lib.rs"
 
 [dependencies]
 ropey.workspace = true
+rustc-hash.workspace = true
 serde = { workspace = true, features = ["derive"] }
 tree-sitter.workspace = true
 tree-sitter-r.workspace = true
