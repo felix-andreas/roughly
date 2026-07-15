@@ -570,42 +570,7 @@ impl EngineWorker {
             .get(path)
             .copied()
             .expect("diagnostics document present in engine file ids");
-
-        let file_diagnostics = self.engine.fetch::<FileDiagnostics>(Key::Diagnostics(file));
-        let fallback = *self.engine.fetch::<tree_sitter::Range>(Key::FallbackRange);
-        let config = self.engine_config();
-
-        let mut rendered = Vec::new();
-        // Local naming, package naming, lowering (syntax), and lint are emitted unconditionally, exactly as
-        // production's `document_diagnostics` does (they are not config-gated).
-        rendered.extend(file_diagnostics.naming.iter().cloned());
-        rendered.extend(file_diagnostics.package_naming.iter().cloned());
-        rendered.extend(file_diagnostics.lowering.iter().cloned());
-        rendered.extend(file_diagnostics.lint.iter().cloned());
-        if config.check.unused {
-            rendered.extend(file_diagnostics.unused.iter().cloned());
-        }
-        let (typing_enabled, strict_enabled) = TypingMode::effective(
-            file_diagnostics.typing_override,
-            config.check.typing,
-            config.check.strict,
-        );
-        if typing_enabled {
-            self.engine.group().with_interner(|interner| {
-                for error in &file_diagnostics.type_errors {
-                    rendered.push(analysis::Diagnostic::from_inference_error(
-                        error, fallback, interner,
-                    ));
-                }
-            });
-        }
-        if strict_enabled {
-            rendered.extend(file_diagnostics.strict_diagnostics.iter().cloned());
-            for diagnostic in &mut rendered {
-                diagnostic.escalate_unresolved_to_error();
-            }
-        }
-
+        let rendered = diagnostics::assemble_engine_file_diagnostics(&self.engine, file);
         self.finish_document_diagnostics(file, rendered)
     }
 

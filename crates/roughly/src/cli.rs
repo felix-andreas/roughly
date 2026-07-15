@@ -6,8 +6,12 @@ use {
         position::PositionEncoding,
         server, tree, utils,
     },
-    analysis::{self, Analysis, diagnostic::RelatedLocation},
+    analysis::{self, diagnostic::RelatedLocation, naming::DocumentKind},
     console::style,
+    engine::{
+        Durability, Engine,
+        queries::{Config as EngineConfig, FileId, Key, RoughlyQueries, source_input},
+    },
     ignore::Walk,
     ropey::Rope,
     std::{
@@ -131,8 +135,6 @@ pub fn check(
     let mut n_diagnostics = 0;
     let mut n_failures = 0;
     for (target, paths, config) in targets_with_config {
-        // One analysis per target keeps package-global naming and the project-global type
-        // namespace intact across all files under that target.
         let root = analysis_root_for_target(&target);
 
         // A broken override stub silently changes what every file below checks against, so what the
@@ -184,14 +186,26 @@ pub fn check(
             .unwrap_or_default();
         let unused_import_level = config.lint.unused_import;
 
-        let override_sources = project_stubs.sources.clone();
-        let mut analysis_state =
-            Analysis::new_with_stub_library(root, config.lint, config.check, move |interner| {
-                analysis::stdlib::StubLibrary::load_with_overrides(interner, &override_sources)
-            });
+        // The check runs on the same query engine the language server uses, so it shares the
+        // server's whole performance shape (per-symbol interface firewalls, per-definition SCC
+        // rounds, one parse per file); production's from-scratch pipeline remains the
+        // differential oracle. One engine per target keeps package-global naming and the
+        // project-global type namespace intact across all files under that target.
+        let mut engine = Engine::new(RoughlyQueries::with_project_stubs(
+            project_stubs.sources.clone(),
+        ));
+        engine.set_input_durable(
+            Key::Config,
+            EngineConfig {
+                check: config.check,
+                lint: config.lint,
+            },
+            Durability::HIGH,
+        );
 
+        let r_path = root.join("R");
         let mut used_tokens = std::collections::BTreeSet::new();
-        let mut checked_paths = Vec::with_capacity(paths.len());
+        let mut checked: Vec<(PathBuf, String)> = Vec::with_capacity(paths.len());
         for path in paths {
             n_files += 1;
             let source = match std::fs::read_to_string(&path) {
@@ -204,44 +218,60 @@ pub fn check(
                 }
             };
             analysis::namespace::collect_used_tokens(&source, &mut used_tokens);
-            if analysis_state
-                .add_document_from_source(path.clone(), &source)
-                .is_err()
-            {
-                n_failures += 1;
-                error(&format!(
-                    "failed to sync analysis document from source {}",
-                    path.display()
-                ));
-                continue;
-            }
-            checked_paths.push(path);
+            checked.push((path, source));
         }
 
-        analysis::run_full(&mut analysis_state);
+        // Feed the engine in the server's `ProjectFiles` order — package files first, ascending
+        // by root-relative path — so the last-writer-wins symbol index selects the same winners.
+        // Diagnostics still print in discovery order below.
+        let mut ordered: Vec<usize> = (0..checked.len()).collect();
+        ordered.sort_by_key(|index| {
+            let path = &checked[*index].0;
+            (
+                !path.starts_with(&r_path),
+                path.strip_prefix(&root)
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            )
+        });
+        let mut file_ids: Vec<FileId> = vec![0; checked.len()];
+        let mut project = Vec::with_capacity(checked.len());
+        for (file, index) in ordered.into_iter().enumerate() {
+            let file = file as FileId;
+            let (path, source) = &checked[index];
+            engine.set_input_durable(
+                Key::SourceText(file),
+                source_input(source),
+                Durability::HIGH,
+            );
+            engine.set_input_durable(Key::FileName(file), path.clone(), Durability::HIGH);
+            engine.set_input_durable(
+                Key::DocumentKind(file),
+                if path.starts_with(&r_path) {
+                    DocumentKind::Package
+                } else {
+                    DocumentKind::Script
+                },
+                Durability::HIGH,
+            );
+            file_ids[index] = file;
+            project.push(file);
+        }
+        engine.set_input_durable(Key::ProjectFiles, project, Durability::HIGH);
 
-        for path in checked_paths {
-            let Some(document_id) = analysis_state.document_id_for_path(&path) else {
-                n_failures += 1;
-                error(&format!(
-                    "analysis document not found after sync {}",
-                    path.display()
-                ));
-                continue;
-            };
-            let document = analysis_state
-                .document(&path)
-                .unwrap_or_else(|| panic!("analysis document missing for {}", path.display()));
-            let rope = document.rope();
+        for (index, (path, source)) in checked.iter().enumerate() {
+            let rope = Rope::from_str(source);
+            let rendered = diagnostics::assemble_engine_file_diagnostics(&engine, file_ids[index]);
+            let rendered = analysis::diagnostic::apply_suppressions(rendered, source);
             // Related locations point into *other* documents, so they render from their own
             // byte-based ranges rather than through this document's rope conversion.
-            let raw_diagnostics = analysis_state.document_diagnostics(document_id);
-            let related: Vec<Vec<RelatedLocation>> = raw_diagnostics
+            let related: Vec<Vec<RelatedLocation>> = rendered
                 .iter()
                 .map(|diagnostic| diagnostic.related.clone())
                 .collect();
             let diagnostics =
-                diagnostics::convert_diagnostics(raw_diagnostics, rope, PositionEncoding::Utf8);
+                diagnostics::convert_diagnostics(rendered, &rope, PositionEncoding::Utf8);
 
             for (diagnostic, related) in diagnostics.iter().zip(&related) {
                 if min_severity == MinSeverity::Error
@@ -252,9 +282,9 @@ pub fn check(
                 n_diagnostics += 1;
                 match output {
                     OutputFormat::Human => {
-                        render_human_diagnostic(&path, rope, diagnostic, related)
+                        render_human_diagnostic(path, &rope, diagnostic, related)
                     }
-                    OutputFormat::Json => render_json_diagnostic(&path, diagnostic, related),
+                    OutputFormat::Json => render_json_diagnostic(path, diagnostic, related),
                 }
             }
         }

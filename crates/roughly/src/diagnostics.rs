@@ -3,9 +3,60 @@ use {
         lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Range},
         position::{self, PositionEncoding},
     },
-    analysis::text::TextPosition,
+    analysis::{hir::TypingMode, text::TextPosition},
+    engine::{
+        Engine,
+        queries::{Config as EngineConfig, FileDiagnostics, FileId, Key, RoughlyQueries},
+    },
     ropey::Rope,
 };
+
+/// The final diagnostic set for one engine file: every class from [`FileDiagnostics`], gated by
+/// config exactly as production's `document_diagnostics` gates them, with type errors rendered
+/// against the engine's interner + fallback range and strict escalation applied. Shared by the
+/// language server's publish path and `roughly check`, so the two surfaces can never drift.
+/// Suppression comments are the caller's step (the server folds them into its rendering tail; the
+/// CLI applies them against the source it read).
+pub fn assemble_engine_file_diagnostics(
+    engine: &Engine<RoughlyQueries>,
+    file: FileId,
+) -> Vec<analysis::Diagnostic> {
+    let file_diagnostics = engine.fetch::<FileDiagnostics>(Key::Diagnostics(file));
+    let fallback = *engine.fetch::<tree_sitter::Range>(Key::FallbackRange);
+    let config = engine.fetch::<EngineConfig>(Key::Config);
+
+    let mut rendered = Vec::new();
+    // Local naming, package naming, lowering (syntax), and lint are emitted unconditionally,
+    // exactly as production's `document_diagnostics` does (they are not config-gated).
+    rendered.extend(file_diagnostics.naming.iter().cloned());
+    rendered.extend(file_diagnostics.package_naming.iter().cloned());
+    rendered.extend(file_diagnostics.lowering.iter().cloned());
+    rendered.extend(file_diagnostics.lint.iter().cloned());
+    if config.check.unused {
+        rendered.extend(file_diagnostics.unused.iter().cloned());
+    }
+    let (typing_enabled, strict_enabled) = TypingMode::effective(
+        file_diagnostics.typing_override,
+        config.check.typing,
+        config.check.strict,
+    );
+    if typing_enabled {
+        engine.group().with_interner(|interner| {
+            for error in &file_diagnostics.type_errors {
+                rendered.push(analysis::Diagnostic::from_inference_error(
+                    error, fallback, interner,
+                ));
+            }
+        });
+    }
+    if strict_enabled {
+        rendered.extend(file_diagnostics.strict_diagnostics.iter().cloned());
+        for diagnostic in &mut rendered {
+            diagnostic.escalate_unresolved_to_error();
+        }
+    }
+    rendered
+}
 
 pub fn convert_diagnostics(
     diagnostics: impl IntoIterator<Item = analysis::Diagnostic>,

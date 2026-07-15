@@ -6,7 +6,7 @@ description: Implementation architecture of Roughly's analysis engine and its du
 This document is the authoritative implementation architecture for Roughly's analysis. Two crates cooperate:
 
 - **`engine`** — a generic red-green *memoized query* core. It holds no R knowledge and does not depend on `analysis`; it is the substrate that turns the analysis phases into incrementally-recomputed queries with automatic, dependency-tracked invalidation.
-- **`analysis`** — the computational phases: parsing (over tree-sitter), lowering, naming, type inference, lint, and the IDE logic. The engine drives incremental analysis by running these phases as query bodies. `analysis` also exposes a clean *from-scratch* checker, `run_full`, retained as the correctness oracle (see [Differential correctness](#differential-correctness)) and used directly by the command-line path.
+- **`analysis`** — the computational phases: parsing (over tree-sitter), lowering, naming, type inference, lint, and the IDE logic. The engine drives incremental analysis by running these phases as query bodies. `analysis` also exposes a clean *from-scratch* checker, `run_full`, retained as the correctness oracle (see [Differential correctness](#differential-correctness)).
 
 The [Typing Reference](/typing-reference) is the authoritative user-facing typing contract. This page defines the implementation boundaries needed to realize that contract.
 
@@ -339,7 +339,7 @@ Lowering itself is **error-tolerant**, which is what makes the first wave useful
 
 ### Differential correctness
 
-The engine's correctness is held to a differential check against `analysis::run_full` — a clean from-scratch checker built fresh for the current file set, never an incremental path. (Comparing against an incremental path could ratify a stale result on both sides; the from-scratch rebuild cannot.) Over randomized and adversarial edit streams — interleaved edits and queries, add/delete/re-add, package↔script reclassification, renames, re-export and value-reference cycles, malformed input — after every edit the engine's output must equal a fresh full rebuild of the then-current state, byte-exact on rendered diagnostics and per-cursor-position for every IDE feature. This from-scratch checker is retained permanently as the regression net; it is also the command-line path, since a one-shot batch check needs no incrementality.
+The engine's correctness is held to a differential check against `analysis::run_full` — a clean from-scratch checker built fresh for the current file set, never an incremental path. (Comparing against an incremental path could ratify a stale result on both sides; the from-scratch rebuild cannot.) Over randomized and adversarial edit streams — interleaved edits and queries, add/delete/re-add, package↔script reclassification, renames, re-export and value-reference cycles, malformed input — after every edit the engine's output must equal a fresh full rebuild of the then-current state, byte-exact on rendered diagnostics and per-cursor-position for every IDE feature. This from-scratch checker is retained permanently as the regression net — and only as that: `roughly check` runs on the engine (the same query graph the server uses, through a shared diagnostics assembly), so the CLI, the editor, and the differential all exercise one implementation, and the CLI inherits every engine performance property (per-symbol interface firewalls, per-definition SCC rounds, one parse per file).
 
 ### IDE queries
 
