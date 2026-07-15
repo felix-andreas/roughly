@@ -1013,6 +1013,105 @@ impl InferenceState {
         }
     }
 
+    /// Infers ONE top-level definition statement against an environment of imported schemes and
+    /// returns the defined symbol's scheme — the per-definition unit the engine's interface fixed
+    /// point re-infers for files that decompose per [`scc_definition_plan`]. `imports` carries a
+    /// scheme for every package global the statement references (see
+    /// [`statement_reference_symbols`]); under the plan's conditions those interface values equal
+    /// the whole-file walk's values at the reads, so the resulting scheme matches the whole-file
+    /// inference up to inference variable identity. The whole check runs inside a snapshot and
+    /// rolls back completely, so one state serves every definition of a fixed point — a fresh
+    /// stub-seeded state per definition dominated the rounds — and each definition's variable ids
+    /// stay deterministic regardless of what ran before it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn check_definition_scheme(
+        &mut self,
+        document_id: DocumentId,
+        module: &Module,
+        statement: ExpressionId,
+        local_naming: &NamesLocal,
+        package_naming: &NamesGlobal,
+        type_definitions: &TypeDefinitionEnvironment,
+        imports: &[(Symbol, TypeScheme)],
+    ) -> Option<TypeScheme> {
+        let top_level_expression_ids: BTreeSet<ExpressionId> =
+            module.expressions.iter().copied().collect();
+        let mut exported_bindings = BTreeMap::new();
+        collect_exported_bindings(
+            module,
+            local_naming,
+            &module.expressions,
+            &mut exported_bindings,
+        );
+        let resolution_context = ResolutionContext {
+            document_id,
+            top_level_expression_ids: &top_level_expression_ids,
+            exported_bindings: &exported_bindings,
+            local_naming,
+            package_naming,
+        };
+        self.loop_memos.clear();
+        self.captured_write_joins.clear();
+        self.pending_enclosing_writes.clear();
+        let environment_snapshot = self.environment_snapshot();
+        let unification_snapshot = self.snapshot();
+        for (symbol, scheme) in imports {
+            let imported = self.import_scheme(scheme);
+            // The synthetic range mirrors `infer_file`'s import binding: the range is read only by
+            // export extraction, never by a diagnostic.
+            self.bind_global_scheme(
+                *symbol,
+                imported,
+                Range {
+                    start_byte: 0,
+                    end_byte: 0,
+                    start_point: tree_sitter::Point { row: 0, column: 0 },
+                    end_point: tree_sitter::Point { row: 0, column: 0 },
+                },
+            );
+        }
+        // Mirror the whole-file walk's level bookkeeping: the letrec pre-pass always enters a
+        // level (the plan guarantees zero members, so no placeholders bind) and finalization exits
+        // it before the exports are read.
+        self.enter_level();
+        self.module_letrec_placeholders.clear();
+        let expression = module.arena.get(statement);
+        let outcome = self.infer_expression_with_context(
+            expression,
+            &module.arena,
+            Some(&resolution_context),
+            type_definitions,
+        );
+        if outcome.is_err() {
+            // The whole-file walk's recovery: a failed top-level binding resolves to `Unknown`
+            // through both lookup paths, and that recovery binding is what the export reads.
+            let recovery_scheme = TypeScheme::monomorphic(CoreType::Unknown);
+            if let Some(binding_id) = local_naming.expression_resolutions.get(&statement).copied() {
+                self.bind_local_scheme(binding_id, recovery_scheme.clone(), expression.range);
+            }
+            if let Some(target) = expression.kind.assignment_variable()
+                && package_naming.global_bindings.contains_key(&target)
+            {
+                self.bind_global_scheme(target, recovery_scheme, expression.range);
+            }
+        }
+        self.pending_enclosing_writes.clear();
+        self.exit_level();
+        let scheme = expression
+            .kind
+            .simple_assignment_target()
+            .and_then(|symbol| {
+                let binding_id = exported_bindings.get(&symbol).copied()?;
+                let binding = self
+                    .lookup_local_name(binding_id)
+                    .or_else(|| self.lookup_global_name(symbol))?;
+                Some((*binding.type_scheme).clone())
+            });
+        self.environment_rollback(environment_snapshot);
+        self.rollback_to(unification_snapshot);
+        scheme
+    }
+
     pub fn exported_value_schemes(
         &self,
         module: &Module,
@@ -1070,86 +1169,8 @@ impl InferenceState {
     // closure body only runs after the whole file has loaded, so every top-level binding is
     // in scope by then.
     fn bind_module_letrec_placeholders(&mut self, module: &Module) {
-        // Candidates: every top-level function-valued assignment, last writer per symbol (like the
-        // package symbol index). Only candidates on a reference CYCLE — a self-recursive function
-        // or a mutually-recursive group — become letrec members: a placeholder makes a member
-        // monomorphic within its own file (its later in-file uses constrain the shared variable
-        // instead of instantiating a scheme), a cost only recursion justifies.
-        let mut candidates: BTreeMap<Symbol, (ExpressionId, ExpressionId, Range)> = BTreeMap::new();
-        for expression_id in &module.expressions {
-            let expression = module.arena.get(*expression_id);
-            let ExpressionKind::Assign {
-                target: AssignTarget::Variable { symbol, .. },
-                scope: AssignmentScope::Local,
-                value,
-            } = &expression.kind
-            else {
-                continue;
-            };
-            if !matches!(
-                module.arena.get(*value).kind,
-                ExpressionKind::Function { .. }
-            ) {
-                continue;
-            }
-            candidates.insert(*symbol, (*expression_id, *value, expression.range));
-        }
-
-        // The reference edges among candidates, overapproximated by source-range containment: a
-        // `Symbol` expression lying inside a candidate's function value that names another
-        // candidate is an edge. (A local variable shadowing a candidate name inside a body adds a
-        // false edge — the overapproximation only widens the member set, never drops recursion.)
-        // One arena pass with a binary search per candidate-naming read: the candidate values are
-        // distinct top-level statements, so their ranges are disjoint and the last interval
-        // starting at or before a read is the only one that can contain it.
-        let mut edges: BTreeMap<Symbol, BTreeSet<Symbol>> = BTreeMap::new();
-        for symbol in candidates.keys() {
-            edges.insert(*symbol, BTreeSet::new());
-        }
-        let mut value_intervals: Vec<(usize, usize, Symbol)> = candidates
-            .iter()
-            .map(|(symbol, (_, value, _))| {
-                let range = module.arena.get(*value).range;
-                (range.start_byte, range.end_byte, *symbol)
-            })
-            .collect();
-        value_intervals.sort_unstable();
-        debug_assert!(
-            value_intervals
-                .windows(2)
-                .all(|pair| pair[0].1 <= pair[1].0),
-            "top-level candidate value ranges overlap"
-        );
-        for expression in module.arena.expressions() {
-            let ExpressionKind::Symbol(read) = &expression.kind else {
-                continue;
-            };
-            if !candidates.contains_key(read) {
-                continue;
-            }
-            let position = value_intervals
-                .partition_point(|(start, _, _)| *start <= expression.range.start_byte);
-            let Some((start, end, owner)) = position.checked_sub(1).map(|i| value_intervals[i])
-            else {
-                continue;
-            };
-            if expression.range.start_byte >= start
-                && expression.range.end_byte <= end
-                && let Some(referenced) = edges.get_mut(&owner)
-            {
-                referenced.insert(*read);
-            }
-        }
-        // Only MUTUAL cycles (two or more members) get placeholders. A pure self-recursive
-        // function keeps the tolerant fixed-point path: heterogeneous self-recursion — the
-        // idiomatic tree fold `T = double | list[T]` — is untypeable in HM, and pinning its
-        // parameter through the recursive call manufactures false positives at call sites; its
-        // `Unknown` is deliberate gradual tolerance. A mutual group, by contrast, was previously
-        // pinned to `Unknown` wholesale and false-errored annotated consumers. A candidate lies on
-        // a mutual cycle exactly when its strongly-connected component has two or more members
-        // (a self-edge alone never forms one), so one SCC pass answers it for every candidate —
-        // a per-candidate reachability walk was quadratic over long reference chains.
-        let mutual_members = mutual_cycle_members(&edges);
+        let candidates = module_letrec_candidates(module);
+        let mutual_members = module_letrec_member_symbols_from(module, &candidates);
 
         // Members live one level below the module scope: unification level-adjusts every variable
         // the group's bodies share up to the placeholders' level, so the placeholders must sit
@@ -2588,6 +2609,229 @@ fn collect_exported_bindings(
             collect_exported_bindings(module, local_naming, expressions, exported);
         }
     }
+}
+
+// Letrec candidates: every top-level function-valued assignment, last writer per symbol (like the
+// package symbol index). Only candidates on a reference CYCLE — a mutually-recursive group —
+// become letrec members: a placeholder makes a member monomorphic within its own file (its later
+// in-file uses constrain the shared variable instead of instantiating a scheme), a cost only
+// recursion justifies.
+fn module_letrec_candidates(
+    module: &Module,
+) -> BTreeMap<Symbol, (ExpressionId, ExpressionId, Range)> {
+    let mut candidates: BTreeMap<Symbol, (ExpressionId, ExpressionId, Range)> = BTreeMap::new();
+    for expression_id in &module.expressions {
+        let expression = module.arena.get(*expression_id);
+        let ExpressionKind::Assign {
+            target: AssignTarget::Variable { symbol, .. },
+            scope: AssignmentScope::Local,
+            value,
+        } = &expression.kind
+        else {
+            continue;
+        };
+        if !matches!(
+            module.arena.get(*value).kind,
+            ExpressionKind::Function { .. }
+        ) {
+            continue;
+        }
+        candidates.insert(*symbol, (*expression_id, *value, expression.range));
+    }
+    candidates
+}
+
+/// The module's letrec member symbols: top-level function-valued assignment targets on a *mutual*
+/// reference cycle (two or more nodes; pure self-recursion deliberately keeps the tolerant
+/// interface path). The whole-file walk pre-binds these to shared placeholder variables, so any
+/// per-definition decomposition of the file is sound only when this set is empty.
+pub fn module_letrec_member_symbols(module: &Module) -> BTreeSet<Symbol> {
+    let candidates = module_letrec_candidates(module);
+    module_letrec_member_symbols_from(module, &candidates)
+}
+
+// The reference edges among candidates, overapproximated by source-range containment: a `Symbol`
+// expression lying inside a candidate's function value that names another candidate is an edge.
+// (A local variable shadowing a candidate name inside a body adds a false edge — the
+// overapproximation only widens the member set, never drops recursion.) One arena pass with a
+// binary search per candidate-naming read: the candidate values are distinct top-level statements,
+// so their ranges are disjoint and the last interval starting at or before a read is the only one
+// that can contain it.
+fn module_letrec_member_symbols_from(
+    module: &Module,
+    candidates: &BTreeMap<Symbol, (ExpressionId, ExpressionId, Range)>,
+) -> BTreeSet<Symbol> {
+    let mut edges: BTreeMap<Symbol, BTreeSet<Symbol>> = BTreeMap::new();
+    for symbol in candidates.keys() {
+        edges.insert(*symbol, BTreeSet::new());
+    }
+    let mut value_intervals: Vec<(usize, usize, Symbol)> = candidates
+        .iter()
+        .map(|(symbol, (_, value, _))| {
+            let range = module.arena.get(*value).range;
+            (range.start_byte, range.end_byte, *symbol)
+        })
+        .collect();
+    value_intervals.sort_unstable();
+    debug_assert!(
+        value_intervals
+            .windows(2)
+            .all(|pair| pair[0].1 <= pair[1].0),
+        "top-level candidate value ranges overlap"
+    );
+    for expression in module.arena.expressions() {
+        let ExpressionKind::Symbol(read) = &expression.kind else {
+            continue;
+        };
+        if !candidates.contains_key(read) {
+            continue;
+        }
+        let position =
+            value_intervals.partition_point(|(start, _, _)| *start <= expression.range.start_byte);
+        let Some((start, end, owner)) = position.checked_sub(1).map(|i| value_intervals[i]) else {
+            continue;
+        };
+        if expression.range.start_byte >= start
+            && expression.range.end_byte <= end
+            && let Some(referenced) = edges.get_mut(&owner)
+        {
+            referenced.insert(*read);
+        }
+    }
+    // Only MUTUAL cycles (two or more members) get placeholders. A pure self-recursive function
+    // keeps the tolerant fixed-point path: heterogeneous self-recursion — the idiomatic tree fold
+    // `T = double | list[T]` — is untypeable in HM, and pinning its parameter through the
+    // recursive call manufactures false positives at call sites; its `Unknown` is deliberate
+    // gradual tolerance. A mutual group, by contrast, was previously pinned to `Unknown` wholesale
+    // and false-errored annotated consumers.
+    mutual_cycle_members(&edges)
+}
+
+/// The per-definition decomposition of a file for the interface fixed point, when it is provably
+/// sound: every exported symbol mapped to its single top-level defining statement. `None` when the
+/// whole-file walk could observe cross-statement state a per-definition check cannot reproduce.
+///
+/// A file decomposes exactly when, for every top-level name a definition might read, the walk's
+/// value at the read equals the name's interface value. The conditions:
+/// - no captured-write discovery re-pass (`top_level_capture_repass` forces two whole-file passes);
+/// - no letrec members (mutual groups share placeholder variables across the whole file);
+/// - every top-level simple assignment binds a distinct symbol exactly once, and its value is a
+///   function literal or a scalar literal — both yield schemes fixed at the defining site (no free
+///   inference variables a later statement could constrain), so the walk value, the exported
+///   value, and the interface value coincide;
+/// - no other top-level statement writes the top-level frame (no `Assign` outside nested function
+///   or `local()` bodies): such a write could bind or reshape a slot a later definition reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SccDefinitionPlan {
+    pub definitions: BTreeMap<Symbol, ExpressionId>,
+}
+
+pub fn scc_definition_plan(
+    module: &Module,
+    local_naming: &NamesLocal,
+) -> Option<SccDefinitionPlan> {
+    if local_naming.top_level_capture_repass {
+        return None;
+    }
+    let mut definitions: BTreeMap<Symbol, ExpressionId> = BTreeMap::new();
+    let top_level: BTreeSet<ExpressionId> = module.expressions.iter().copied().collect();
+    for expression_id in &module.expressions {
+        let expression = module.arena.get(*expression_id);
+        match &expression.kind {
+            ExpressionKind::Assign {
+                target: AssignTarget::Variable { symbol, .. },
+                scope: AssignmentScope::Local,
+                value,
+            } => {
+                let value_kind = &module.arena.get(*value).kind;
+                let fixed_at_site = matches!(
+                    value_kind,
+                    ExpressionKind::Function { .. }
+                        | ExpressionKind::Double(_)
+                        | ExpressionKind::Integer(_)
+                        | ExpressionKind::Logical(_)
+                        | ExpressionKind::Character(_)
+                        | ExpressionKind::Null
+                        | ExpressionKind::AtomicConstant(_)
+                );
+                if !fixed_at_site {
+                    return None;
+                }
+                if !local_naming
+                    .expression_resolutions
+                    .contains_key(expression_id)
+                {
+                    return None;
+                }
+                if definitions.insert(*symbol, *expression_id).is_some() {
+                    return None;
+                }
+            }
+            ExpressionKind::Assign { .. } => return None,
+            _ => {}
+        }
+    }
+    // No top-frame write may hide outside the validated simple assignments: scan every `Assign` in
+    // the arena and require it to be either one of the top-level statements above or nested inside
+    // a function or `local()` body (its own frame). The frames' ranges nest properly, so the
+    // outermost ones are disjoint and a sorted list answers containment with one binary search.
+    let mut frame_intervals: Vec<(usize, usize)> = Vec::new();
+    for expression in module.arena.expressions() {
+        if matches!(
+            expression.kind,
+            ExpressionKind::Function { .. } | ExpressionKind::Local { .. }
+        ) {
+            frame_intervals.push((expression.range.start_byte, expression.range.end_byte));
+        }
+    }
+    frame_intervals.sort_unstable();
+    let mut outermost: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in frame_intervals {
+        match outermost.last() {
+            Some((_, last_end)) if end <= *last_end => {}
+            _ => outermost.push((start, end)),
+        }
+    }
+    for expression in module.arena.expressions() {
+        if !matches!(expression.kind, ExpressionKind::Assign { .. }) {
+            continue;
+        }
+        if top_level.contains(&expression.id) {
+            continue;
+        }
+        let position =
+            outermost.partition_point(|(start, _)| *start <= expression.range.start_byte);
+        let covered = position
+            .checked_sub(1)
+            .is_some_and(|index| outermost[index].1 >= expression.range.end_byte);
+        if !covered {
+            return None;
+        }
+    }
+    if !module_letrec_member_symbols(module).is_empty() {
+        return None;
+    }
+    Some(SccDefinitionPlan { definitions })
+}
+
+/// The package globals a single top-level statement references: the file's non-local reads whose
+/// expression lies within the statement's range (including reads inside nested function bodies).
+/// This is the per-definition analog of the file-level referenced set `infer_file` imports.
+pub fn statement_reference_symbols(
+    module: &Module,
+    local_naming: &NamesLocal,
+    statement: ExpressionId,
+) -> BTreeSet<Symbol> {
+    let range = module.arena.get(statement).range;
+    local_naming
+        .non_locals
+        .iter()
+        .filter(|(expression_id, _)| {
+            let read = module.arena.get(**expression_id).range;
+            read.start_byte >= range.start_byte && read.end_byte <= range.end_byte
+        })
+        .map(|(_, symbol)| *symbol)
+        .collect()
 }
 
 // The letrec candidates that lie on a mutual reference cycle: members of any strongly-connected

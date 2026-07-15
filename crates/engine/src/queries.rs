@@ -44,6 +44,7 @@ use {
         typecheck::{
             BUILTINS, ExportedValue, InferenceError, InferenceState, ModuleCheck,
             TypeDefinitionEnvironment, inference_state_with_builtins_in_interner,
+            scc_definition_plan, statement_reference_symbols,
         },
         types::{Annotation, CoreType, NamedTypeRef, SurfaceType, TypeScheme},
     },
@@ -1711,86 +1712,93 @@ fn collect_assignment_ends(
 // the one SCC that contains `symbol`. Every member of that SCC computes the identical sorted list (Tarjan
 // from any member finds the same component), so all members share one `InterfaceScc` memo.
 fn symbol_scc(engine: &Engine<RoughlyQueries>, symbol: Symbol) -> Vec<Symbol> {
-    let deps_of = |node: Symbol| (*engine.fetch::<Vec<Symbol>>(Key::InterfaceDeps(node))).clone();
+    // Nodes get dense indices as they are discovered; each node's edge list is fetched once and
+    // the shared allocation is held for the walk (an edge-list clone per visited node made this
+    // walk the cold-pass whale on clustered graphs, where every symbol's exploration touches the
+    // whole cluster).
+    let mut symbols: Vec<Symbol> = Vec::new();
+    let mut edge_lists: Vec<Shared<Vec<Symbol>>> = Vec::new();
+    let mut index_of: FxHashMap<Symbol, usize> = FxHashMap::default();
+    let discover =
+        |node: Symbol, symbols: &mut Vec<Symbol>, edge_lists: &mut Vec<Shared<Vec<Symbol>>>| {
+            let next = symbols.len();
+            symbols.push(node);
+            edge_lists.push(engine.fetch::<Vec<Symbol>>(Key::InterfaceDeps(node)));
+            next
+        };
 
+    let start = discover(symbol, &mut symbols, &mut edge_lists);
+    index_of.insert(symbol, start);
     // A self-referential singleton: `symbol`'s own winning file forward-references `symbol`, so the SCC is
     // the non-trivial `{symbol}` even though Tarjan reports a size-1 component (a self-edge does not lower a
     // node's own lowlink). Detected from `symbol`'s direct edges and folded into the result below.
-    let start_edges = deps_of(symbol);
-    let start_self_loop = start_edges.contains(&symbol);
+    let start_self_loop = edge_lists[start].contains(&symbol);
 
-    let mut next_index = 0usize;
-    let mut index: BTreeMap<Symbol, usize> = BTreeMap::new();
-    let mut low: BTreeMap<Symbol, usize> = BTreeMap::new();
-    let mut on_stack: BTreeSet<Symbol> = BTreeSet::new();
-    let mut component_stack: Vec<Symbol> = Vec::new();
+    const UNVISITED: usize = usize::MAX;
+    let mut order: Vec<usize> = vec![0];
+    let mut low: Vec<usize> = vec![0];
+    let mut on_stack: Vec<bool> = vec![true];
+    let mut component_stack: Vec<usize> = vec![start];
+    let mut next_order = 1usize;
     let mut start_scc: Vec<Symbol> = Vec::new();
 
     struct Frame {
-        node: Symbol,
-        edges: Vec<Symbol>,
+        node: usize,
         next_edge: usize,
     }
-    let mut frames: Vec<Frame> = Vec::new();
-
-    index.insert(symbol, next_index);
-    low.insert(symbol, next_index);
-    next_index += 1;
-    component_stack.push(symbol);
-    on_stack.insert(symbol);
-    frames.push(Frame {
-        node: symbol,
-        edges: start_edges,
+    let mut frames: Vec<Frame> = vec![Frame {
+        node: start,
         next_edge: 0,
-    });
+    }];
 
     while let Some(frame) = frames.last_mut() {
         let node = frame.node;
-        if frame.next_edge < frame.edges.len() {
-            let target = frame.edges[frame.next_edge];
+        if frame.next_edge < edge_lists[node].len() {
+            let target_symbol = edge_lists[node][frame.next_edge];
             frame.next_edge += 1;
-            if let std::collections::btree_map::Entry::Vacant(slot) = index.entry(target) {
-                slot.insert(next_index);
-                low.insert(target, next_index);
-                next_index += 1;
+            let target = *index_of.entry(target_symbol).or_insert(UNVISITED);
+            if target == UNVISITED {
+                let target = discover(target_symbol, &mut symbols, &mut edge_lists);
+                index_of.insert(target_symbol, target);
+                order.push(next_order);
+                low.push(next_order);
+                on_stack.push(true);
+                next_order += 1;
                 component_stack.push(target);
-                on_stack.insert(target);
-                let edges = deps_of(target);
                 frames.push(Frame {
                     node: target,
-                    edges,
                     next_edge: 0,
                 });
-            } else if on_stack.contains(&target) {
-                let target_index = index[&target];
-                let updated = low[&node].min(target_index);
-                low.insert(node, updated);
+            } else if on_stack[target] {
+                low[node] = low[node].min(order[target]);
             }
         } else {
             // All of `node`'s edges are walked; if it is an SCC root, pop its component off the stack.
-            if low[&node] == index[&node] {
+            if low[node] == order[node] {
                 let mut component = Vec::new();
                 loop {
                     let member = component_stack
                         .pop()
                         .expect("component stack is non-empty at a root");
-                    on_stack.remove(&member);
+                    on_stack[member] = false;
                     component.push(member);
                     if member == node {
                         break;
                     }
                 }
-                if component.contains(&symbol) {
-                    component.sort();
-                    start_scc = component;
+                if component.contains(&start) {
+                    start_scc = component
+                        .into_iter()
+                        .map(|member| symbols[member])
+                        .collect();
+                    start_scc.sort();
                 }
             }
             frames.pop();
             // Propagate this node's lowlink into its DFS parent (the tree-edge relaxation).
             if let Some(parent) = frames.last() {
                 let parent_node = parent.node;
-                let updated = low[&parent_node].min(low[&node]);
-                low.insert(parent_node, updated);
+                low[parent_node] = low[parent_node].min(low[node]);
             }
         }
     }
@@ -1822,14 +1830,82 @@ fn resolve_interface_scc(
     members: &[Symbol],
 ) -> BTreeMap<Symbol, TypeScheme> {
     let member_set: BTreeSet<Symbol> = members.iter().copied().collect();
-    // The distinct winning files of the members. Inferring one file yields every member it defines at once
-    // (`exported_value_schemes` returns the whole file), so group by file to infer each once per round.
-    let mut member_files: BTreeSet<FileId> = BTreeSet::new();
+    // The distinct winning files of the members. Real packages routinely reference each other's
+    // files both ways, so the file-granular edge graph makes whole file clusters one SCC; a round
+    // that re-inferred every member *file* made the fixed point O(rounds × cluster LoC). Files
+    // that provably decompose (see `analysis::typecheck::scc_definition_plan`) are re-inferred
+    // per member *definition* instead, and both granularities skip work whose in-SCC inputs did
+    // not change in the previous round (the round function is pure in those inputs, so the
+    // previous round's output is reused verbatim — the trajectory is identical to recomputing).
+    let mut files_of_members: BTreeMap<FileId, Vec<Symbol>> = BTreeMap::new();
     for member in members {
         if let Some(file) = *engine.fetch::<Option<FileId>>(Key::DefiningItem(*member)) {
-            member_files.insert(file);
+            files_of_members.entry(file).or_default().push(*member);
         }
     }
+    let mut plans: BTreeMap<FileId, RoundPlan> = BTreeMap::new();
+    for (file, mut member_symbols) in files_of_members {
+        member_symbols.sort_unstable();
+        let module = engine.fetch::<Module>(Key::Lower(file));
+        let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(file));
+        let definitions = scc_definition_plan(&module, &naming.naming)
+            .filter(|plan| {
+                member_symbols
+                    .iter()
+                    .all(|member| plan.definitions.contains_key(member))
+            })
+            .map(|plan| plan.definitions);
+        let mut member_reads = BTreeMap::new();
+        let mut file_reads = Vec::new();
+        match &definitions {
+            Some(definitions) => {
+                for member in &member_symbols {
+                    let reads = transitive_in_scc_reads(
+                        &module,
+                        &naming.naming,
+                        definitions,
+                        &member_set,
+                        definitions[member],
+                    );
+                    member_reads.insert(*member, reads);
+                }
+            }
+            None => {
+                let referenced: BTreeSet<Symbol> =
+                    naming.naming.non_locals.values().copied().collect();
+                file_reads = referenced
+                    .into_iter()
+                    .filter(|symbol| member_set.contains(symbol))
+                    .collect();
+            }
+        }
+        plans.insert(
+            file,
+            RoundPlan {
+                module,
+                naming,
+                definitions,
+                member_symbols,
+                member_reads,
+                file_reads,
+            },
+        );
+    }
+
+    // One inference state serves the whole fixed point: each per-definition check snapshots and
+    // rolls back completely, so definitions are independent and a fresh stub-seeded clone per
+    // definition (the dominant round cost at first) is avoided.
+    let mut round_state = {
+        let mut lowering = group.lowering.borrow_mut();
+        let mut template = group.inference_template.borrow_mut();
+        template
+            .get_or_insert_with(|| {
+                let mut state = inference_state_with_builtins_in_interner(lowering.interner_mut());
+                group.stubs.seed_into(&mut state);
+                state
+            })
+            .clone()
+    };
 
     let unknown = TypeScheme::monomorphic(CoreType::Unknown);
     let mut table: BTreeMap<Symbol, TypeScheme> = members
@@ -1838,6 +1914,14 @@ fn resolve_interface_scc(
         .collect();
     let mut pinned: BTreeSet<Symbol> = BTreeSet::new();
     let mut history: HashMap<Symbol, Vec<String>> = HashMap::new();
+    // The members whose table entry changed in the previous round (`None` before the first): the
+    // skip key — a unit whose reads are all outside this set would recompute to its previous
+    // output, which its file's contribution map still holds. Contributions are per *file* and
+    // merged in ascending file order each round: a member symbol can be exported by several
+    // member files (last writer wins), so a single symbol-keyed map would let a stale exporter
+    // overwrite the winner when only one of them recomputes.
+    let mut changed_last_round: Option<BTreeSet<Symbol>> = None;
+    let mut contributions: BTreeMap<FileId, BTreeMap<Symbol, TypeScheme>> = BTreeMap::new();
 
     // Round cap = `#members-in-scc + slack`, proportional to the SCC (not a fixed cap), matching production:
     // synchronous iteration over a monotone framework converges in `#members + 1` rounds, the slack covers
@@ -1849,60 +1933,121 @@ fn resolve_interface_scc(
         // whole component in a single `recompute` body and loops internally, so a newer edit must be able to
         // abandon it between rounds rather than waiting out the round cap. A no-op without an installed token.
         engine.check_cancelled();
-        // Re-infer each member file once with the current table bound for in-SCC references, collecting the
-        // fresh exported scheme of every member.
-        let mut fresh: BTreeMap<Symbol, TypeScheme> = BTreeMap::new();
-        for file in &member_files {
-            let (_check, exports) = infer_file(group, engine, *file, &table, false);
-            for export in exports {
-                if member_set.contains(&export.symbol) {
-                    fresh.insert(export.symbol, export.type_scheme);
+        // Re-infer each member whose in-SCC inputs changed last round, with the current table
+        // bound for in-SCC references. `current_fresh` persists across rounds: a skipped unit's
+        // inputs are unchanged, so its previous output *is* what re-inference would produce.
+        for (file, plan) in &plans {
+            let unchanged_reads = |reads: &[Symbol]| {
+                changed_last_round
+                    .as_ref()
+                    .is_some_and(|changed| reads.iter().all(|symbol| !changed.contains(symbol)))
+            };
+            match &plan.definitions {
+                Some(definitions) => {
+                    let mut local_schemes: BTreeMap<Symbol, Option<TypeScheme>> = BTreeMap::new();
+                    let mut in_progress: BTreeSet<Symbol> = BTreeSet::new();
+                    for symbol in &plan.member_symbols {
+                        if unchanged_reads(&plan.member_reads[symbol]) {
+                            continue;
+                        }
+                        let context = DefinitionRoundContext {
+                            engine,
+                            file: *file,
+                            module: &plan.module,
+                            naming: &plan.naming.naming,
+                            definitions,
+                            table: &table,
+                        };
+                        match infer_definition_scheme_in_round(
+                            &context,
+                            &mut round_state,
+                            definitions[symbol],
+                            &mut local_schemes,
+                            &mut in_progress,
+                        ) {
+                            Some(scheme) => {
+                                contributions
+                                    .entry(*file)
+                                    .or_default()
+                                    .insert(*symbol, scheme);
+                            }
+                            None => {
+                                contributions.entry(*file).or_default().remove(symbol);
+                            }
+                        }
+                    }
+                }
+                None => {
+                    if unchanged_reads(&plan.file_reads) {
+                        continue;
+                    }
+                    let contribution = contributions.entry(*file).or_default();
+                    contribution.clear();
+                    let (_check, exports) = infer_file(group, engine, *file, &table, false);
+                    for export in exports {
+                        if member_set.contains(&export.symbol) {
+                            contribution.insert(export.symbol, export.type_scheme);
+                        }
+                    }
                 }
             }
         }
 
-        let mut next = table.clone();
-        for member in members {
-            if pinned.contains(member) {
-                next.insert(*member, unknown.clone());
-            } else {
-                next.insert(
-                    *member,
-                    fresh
-                        .get(member)
-                        .cloned()
-                        .unwrap_or_else(|| unknown.clone()),
-                );
+        // Apply this round's outputs in place, tracking exactly which members changed: the change
+        // set drives the next round's skip, the oscillation guard, and convergence — a full-table
+        // clone, compare, and re-render per round dominated large SCCs. The oscillation guard is
+        // evaluated only on change: unchanged rounds appended only consecutive duplicate renders,
+        // which affect neither the last history entry nor membership, so detection is preserved —
+        // except that a value's *initial* round-one appearance as `Unknown` is no longer recorded,
+        // which can land a pure-oscillation pin one round later (covered by the round-cap slack;
+        // the pinned value is `Unknown` either way, so the converged table is unchanged). (A
+        // member whose rendering returns to an earlier value while differing from the previous one
+        // is swapping on a cycle, not progressing monotonically — pin it to `Unknown`, which
+        // collapses the cycle and restores convergence.) Rendering reuses the shared interner (no
+        // `fetch` is held across this borrow, and the inference borrows above have been released).
+        let mut changed: BTreeSet<Symbol> = BTreeSet::new();
+        let mut merged: BTreeMap<Symbol, &TypeScheme> = BTreeMap::new();
+        for contribution in contributions.values() {
+            for (symbol, scheme) in contribution {
+                merged.insert(*symbol, scheme);
             }
         }
-
-        // Oscillation guard: a member whose rendering returns to an earlier value while differing from the
-        // previous round is swapping on a cycle, not progressing monotonically — pin it to `Unknown`, which
-        // collapses the cycle and restores convergence. A pure cycle reaches the all-`Unknown` fixed point
-        // directly, so this is the defensive net. Rendering reuses the shared interner (no `fetch` held
-        // across this borrow, and `infer_file`'s own `lowering` borrow has been released above).
         {
             let lowering = group.lowering.borrow();
             for member in members {
-                if pinned.contains(member) {
+                let candidate: &TypeScheme = if pinned.contains(member) {
+                    &unknown
+                } else {
+                    merged.get(member).copied().unwrap_or(&unknown)
+                };
+                if table.get(member) == Some(candidate) {
                     continue;
                 }
-                let rendered =
-                    render_type_scheme(lowering.interner(), next.get(member).unwrap_or(&unknown));
-                let entry = history.entry(*member).or_default();
-                if entry.last().is_some_and(|last| *last != rendered) && entry.contains(&rendered) {
-                    pinned.insert(*member);
-                    next.insert(*member, unknown.clone());
-                } else {
-                    entry.push(rendered);
+                let mut next_value = candidate.clone();
+                if !pinned.contains(member) {
+                    let rendered = render_type_scheme(lowering.interner(), &next_value);
+                    let entry = history.entry(*member).or_default();
+                    if entry.last().is_some_and(|last| *last != rendered)
+                        && entry.contains(&rendered)
+                    {
+                        pinned.insert(*member);
+                        next_value = unknown.clone();
+                        if table.get(member) == Some(&next_value) {
+                            continue;
+                        }
+                    } else {
+                        entry.push(rendered);
+                    }
                 }
+                changed.insert(*member);
+                table.insert(*member, next_value);
             }
         }
 
-        if next == table {
-            return next;
+        if changed.is_empty() {
+            return table;
         }
-        table = next;
+        changed_last_round = Some(changed);
     }
     table
 }
@@ -1910,6 +2055,138 @@ fn resolve_interface_scc(
 // Slack added to `#members` for the SCC fixed-point round cap (see `resolve_interface_scc`). Sized like
 // production's package-interface loop so a legitimate cycle always converges within the bound.
 const SCC_ROUND_SLACK: usize = 8;
+
+// One member file's plan inside the SCC fixed point: its module and naming, the per-definition
+// decomposition when the file supports it (`None` falls back to whole-file rounds), and the
+// in-SCC symbols each unit reads — the change-detection key for skipping unchanged work.
+struct RoundPlan {
+    module: Shared<Module>,
+    naming: Shared<DocumentNamingComputation>,
+    definitions: Option<BTreeMap<Symbol, ExpressionId>>,
+    member_symbols: Vec<Symbol>,
+    // Per member (decomposed files): the in-SCC symbols its definition reads, transitively
+    // through same-file helper definitions it resolves locally.
+    member_reads: BTreeMap<Symbol, Vec<Symbol>>,
+    // Whole-file fallback: every in-SCC symbol the file references.
+    file_reads: Vec<Symbol>,
+}
+
+// The in-SCC reads of one definition, transitively through the same-file (non-member) definitions
+// it resolves locally during a round. A superset is safe (it only forgoes a skip); a miss is not,
+// so same-file references are expanded even when another file might win the symbol.
+fn transitive_in_scc_reads(
+    module: &Module,
+    naming: &NamesLocal,
+    definitions: &BTreeMap<Symbol, ExpressionId>,
+    member_set: &BTreeSet<Symbol>,
+    statement: ExpressionId,
+) -> Vec<Symbol> {
+    let mut reads: BTreeSet<Symbol> = BTreeSet::new();
+    let mut visited: BTreeSet<Symbol> = BTreeSet::new();
+    let mut stack = vec![statement];
+    while let Some(next_statement) = stack.pop() {
+        for reference in statement_reference_symbols(module, naming, next_statement) {
+            if member_set.contains(&reference) {
+                reads.insert(reference);
+            } else if let Some(local_statement) = definitions.get(&reference)
+                && visited.insert(reference)
+            {
+                stack.push(*local_statement);
+            }
+        }
+    }
+    reads.into_iter().collect()
+}
+
+// Everything one per-definition inference inside a round needs, bundled so the local-resolution
+// recursion below stays readable.
+struct DefinitionRoundContext<'a> {
+    engine: &'a Engine<RoughlyQueries>,
+    file: FileId,
+    module: &'a Module,
+    naming: &'a NamesLocal,
+    definitions: &'a BTreeMap<Symbol, ExpressionId>,
+    table: &'a BTreeMap<Symbol, TypeScheme>,
+}
+
+// Infers one top-level definition against the current round's interface values: in-SCC references
+// come from the table, cross-file references from their memoized `GlobalScheme`s (acyclic with
+// respect to this SCC — a cross-file symbol whose file reaches back into the cycle is itself a
+// member), and same-file non-member references resolve *locally* through `resolve_local_scheme` —
+// fetching their `GlobalScheme` would walk back into this fixed point through the file's own
+// `Typecheck`. The check itself runs inside a snapshot on the shared round state and rolls back
+// completely, so no fetch overlaps a borrow and every definition sees an identical starting state.
+fn infer_definition_scheme_in_round(
+    context: &DefinitionRoundContext<'_>,
+    state: &mut InferenceState,
+    statement: ExpressionId,
+    local_schemes: &mut BTreeMap<Symbol, Option<TypeScheme>>,
+    in_progress: &mut BTreeSet<Symbol>,
+) -> Option<TypeScheme> {
+    let referenced = statement_reference_symbols(context.module, context.naming, statement);
+    let mut global_bindings: BTreeMap<Symbol, DocumentId> = BTreeMap::new();
+    let mut imports: Vec<(Symbol, TypeScheme)> = Vec::new();
+    for reference in &referenced {
+        let defining = context
+            .engine
+            .fetch::<Option<FileId>>(Key::DefiningItem(*reference));
+        let Some(defining_file) = *defining else {
+            continue;
+        };
+        global_bindings.insert(*reference, DocumentId(defining_file));
+        let scheme = if let Some(scheme) = context.table.get(reference) {
+            scheme.clone()
+        } else if defining_file == context.file {
+            resolve_local_scheme(context, state, *reference, local_schemes, in_progress)
+                .unwrap_or_else(|| TypeScheme::monomorphic(CoreType::Unknown))
+        } else {
+            (*context
+                .engine
+                .fetch::<Option<TypeScheme>>(Key::GlobalScheme(*reference)))
+            .clone()
+            .unwrap_or_else(|| TypeScheme::monomorphic(CoreType::Unknown))
+        };
+        imports.push((*reference, scheme));
+    }
+    let type_definitions = context
+        .engine
+        .fetch::<TypeDefinitionEnvironment>(Key::PackageTypeDefinitions);
+    let package_naming = NamesGlobal { global_bindings };
+    state.check_definition_scheme(
+        DocumentId(context.file),
+        context.module,
+        statement,
+        context.naming,
+        &package_naming,
+        &type_definitions,
+        &imports,
+    )
+}
+
+// Resolves a same-file, out-of-SCC symbol to its scheme by inferring its own definition, memoized
+// per (file, round). Same-file non-member definitions cannot cycle (a mutual or self reference
+// would have made them SCC members through the file-granular edge graph), so the recursion
+// terminates; the in-progress set is a defensive backstop, not a code path.
+fn resolve_local_scheme(
+    context: &DefinitionRoundContext<'_>,
+    state: &mut InferenceState,
+    symbol: Symbol,
+    local_schemes: &mut BTreeMap<Symbol, Option<TypeScheme>>,
+    in_progress: &mut BTreeSet<Symbol>,
+) -> Option<TypeScheme> {
+    if let Some(cached) = local_schemes.get(&symbol) {
+        return cached.clone();
+    }
+    if !in_progress.insert(symbol) {
+        return None;
+    }
+    let scheme = context.definitions.get(&symbol).and_then(|statement| {
+        infer_definition_scheme_in_round(context, state, *statement, local_schemes, in_progress)
+    });
+    in_progress.remove(&symbol);
+    local_schemes.insert(symbol, scheme.clone());
+    scheme
+}
 
 // The file's package-global definition names. Mirrors `analysis::naming::document_package_definitions`
 // (which is `pub(crate)`, so it cannot be called from here) using only the public `NamesLocal` fields: a

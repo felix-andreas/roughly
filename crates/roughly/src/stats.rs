@@ -311,83 +311,125 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), crate::cli::CommandEr
     }
 
     // The incremental probe: a burst of body-only keystrokes (a top-level `invisible(1…)` literal
-    // growing one digit per edit — well-formed every step, no export changes) on the slowest file,
-    // fed at open-document durability exactly as keystrokes would be. The edited-file recheck is
-    // what a user waits on while typing; the workspace revalidate is the cost of confirming every
-    // other file's diagnostics are unaffected. The recompute table attributes the keystroke cost:
-    // it counts which query bodies each keystroke re-ran (and how often), which wall-clock alone
-    // cannot show — e.g. the same file re-inferred several times through the interface layer.
-    const TYPING_BURST: usize = 10;
-    if let Some(slowest) = by_typecheck.first().map(|record| record.file)
-        && let Some(record) = files.iter().find(|record| record.file == slowest)
+    // growing one digit per edit — well-formed every step, no export changes) on representative
+    // files, fed at open-document durability exactly as keystrokes would be. The slowest file gets
+    // the detailed recompute table; a median-sized and a small file get one line each, so a
+    // workspace whose largest file dominates still shows what ordinary files feel like. The
+    // edited-file recheck is what a user waits on while typing; the workspace revalidate is the
+    // cost of confirming every other file's diagnostics are unaffected.
+    let mut probe_files: Vec<FileId> = Vec::new();
+    if let Some(slowest) = by_typecheck.first() {
+        probe_files.push(slowest.file);
+    }
+    let mut by_loc: Vec<&FileRecord> = files.iter().collect();
+    by_loc.sort_by_key(|record| record.loc);
+    for candidate in [by_loc.get(by_loc.len() / 2), by_loc.get(by_loc.len() / 10)]
+        .into_iter()
+        .flatten()
     {
-        // Declare the probe file open (as an editor's did_open would): list it in `OpenFiles` and
-        // downgrade its source to open-document durability (same text). Then settle the one-time
-        // open-event revalidation walk, so the burst measures steady-state keystrokes: the durable
-        // halves of the all-files folds exclude the open file and green out in O(1) per keystroke.
-        engine.set_input_durable(Key::OpenFiles, vec![record.file], Durability::HIGH);
-        match Document::parse(&mut parser, &record.source) {
-            Ok(document) => engine.set_input_durable(
-                Key::SourceText(record.file),
-                SourceText::from_document(&document),
-                Durability::LOW,
-            ),
-            Err(error) => {
-                eprintln!("warning: incremental probe open failed to parse: {error:?}");
-            }
+        if !probe_files.contains(&candidate.file) {
+            probe_files.push(candidate.file);
         }
-        let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(record.file));
-        let totals_before = engine.group().execution_totals();
-        let validations_before = engine.validation_count();
-        let mut keystroke_times = Vec::with_capacity(TYPING_BURST);
-        let mut probe_failed = false;
-        for keystroke in 1..=TYPING_BURST {
-            let edited_source =
-                format!("{}\ninvisible({})\n", record.source, "1".repeat(keystroke));
-            match Document::parse(&mut parser, &edited_source) {
-                Ok(document) => {
-                    engine.set_input_durable(
-                        Key::SourceText(record.file),
-                        SourceText::from_document(&document),
-                        Durability::LOW,
-                    );
-                    let start = Instant::now();
-                    let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(record.file));
-                    keystroke_times.push(start.elapsed());
-                }
-                Err(error) => {
-                    eprintln!("warning: incremental probe skipped (parse failed: {error:?})");
-                    probe_failed = true;
-                    break;
-                }
-            }
+    }
+    for (position, probe) in probe_files.iter().enumerate() {
+        if let Some(record) = files.iter().find(|record| record.file == *probe) {
+            typing_burst(
+                &mut engine,
+                &mut parser,
+                record,
+                &files,
+                &root,
+                position == 0,
+            );
         }
-        if !probe_failed {
-            let mut validated_kinds: BTreeMap<&'static str, u64> = BTreeMap::new();
-            for key in engine.slots_verified_this_revision() {
-                *validated_kinds.entry(key_kind(&key)).or_default() += 1;
-            }
-            let totals_after_burst = engine.group().execution_totals();
-            let validations_after_burst = engine.validation_count();
-            let start = Instant::now();
-            for other in &files {
-                let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(other.file));
-            }
-            let sweep = start.elapsed();
-            let totals_after_sweep = engine.group().execution_totals();
-            let validations_after_sweep = engine.validation_count();
+    }
 
-            keystroke_times.sort();
-            let median = keystroke_times[keystroke_times.len() / 2];
-            let worst = *keystroke_times.last().expect("burst is non-empty");
+    Ok(())
+}
+
+// One typing burst on `record`, opened at editor durability. `detailed` prints the recompute and
+// walk-attribution tables (the slowest file); otherwise a single summary line.
+fn typing_burst(
+    engine: &mut Engine<RoughlyQueries>,
+    parser: &mut tree_sitter::Parser,
+    record: &FileRecord,
+    files: &[FileRecord],
+    root: &Path,
+    detailed: bool,
+) {
+    const TYPING_BURST: usize = 10;
+    // Declare the probe file open (as an editor's did_open would): list it in `OpenFiles` and
+    // downgrade its source to open-document durability (same text). Then settle the one-time
+    // open-event revalidation walk, so the burst measures steady-state keystrokes: the durable
+    // halves of the all-files folds exclude the open file and green out in O(1) per keystroke.
+    engine.set_input_durable(Key::OpenFiles, vec![record.file], Durability::HIGH);
+    match Document::parse(parser, &record.source) {
+        Ok(document) => engine.set_input_durable(
+            Key::SourceText(record.file),
+            SourceText::from_document(&document),
+            Durability::LOW,
+        ),
+        Err(error) => {
+            eprintln!("warning: incremental probe open failed to parse: {error:?}");
+        }
+    }
+    let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(record.file));
+    let totals_before = engine.group().execution_totals();
+    let validations_before = engine.validation_count();
+    let mut keystroke_times = Vec::with_capacity(TYPING_BURST);
+    let mut probe_failed = false;
+    for keystroke in 1..=TYPING_BURST {
+        let edited_source = format!("{}\ninvisible({})\n", record.source, "1".repeat(keystroke));
+        match Document::parse(parser, &edited_source) {
+            Ok(document) => {
+                engine.set_input_durable(
+                    Key::SourceText(record.file),
+                    SourceText::from_document(&document),
+                    Durability::LOW,
+                );
+                let start = Instant::now();
+                let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(record.file));
+                keystroke_times.push(start.elapsed());
+            }
+            Err(error) => {
+                eprintln!("warning: incremental probe skipped (parse failed: {error:?})");
+                probe_failed = true;
+                break;
+            }
+        }
+    }
+    if !probe_failed {
+        let mut validated_kinds: BTreeMap<&'static str, u64> = BTreeMap::new();
+        for key in engine.slots_verified_this_revision() {
+            *validated_kinds.entry(key_kind(&key)).or_default() += 1;
+        }
+        let totals_after_burst = engine.group().execution_totals();
+        let validations_after_burst = engine.validation_count();
+        let start = Instant::now();
+        for other in files {
+            let _ = engine.fetch::<FileDiagnostics>(Key::Diagnostics(other.file));
+        }
+        let sweep = start.elapsed();
+        let totals_after_sweep = engine.group().execution_totals();
+        let validations_after_sweep = engine.validation_count();
+
+        keystroke_times.sort();
+        let median = keystroke_times[keystroke_times.len() / 2];
+        let worst = *keystroke_times.last().expect("burst is non-empty");
+        let display_path = record.path.strip_prefix(root).unwrap_or(&record.path);
+        if !detailed {
+            println!(
+                "  typing burst on {} ({} LoC): {:.1} ms median, {:.1} ms max",
+                display_path.display(),
+                record.loc,
+                median.as_secs_f64() * 1e3,
+                worst.as_secs_f64() * 1e3,
+            );
+        } else {
             println!();
             println!(
                 "incremental (typing burst: {TYPING_BURST} body edits on {}, open-document durability):",
-                record
-                    .path
-                    .strip_prefix(&root)
-                    .unwrap_or(&record.path)
-                    .display(),
+                display_path.display(),
             );
             println!(
                 "  edited-file diagnostics   {:>10.1} ms median, {:.1} ms max",
@@ -428,10 +470,16 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), crate::cli::CommandEr
             for (kind, count) in kinds {
                 println!("    {kind:<28} {count:>11}");
             }
+            println!();
         }
     }
-
-    Ok(())
+    // Close the probe file (as did_close would): restore corpus durability with the original
+    // rope-only text, so the next probe file measures in isolation.
+    engine.set_input_durable(
+        Key::SourceText(record.file),
+        source_input(&record.source),
+        Durability::HIGH,
+    );
 }
 
 struct FileRecord {
