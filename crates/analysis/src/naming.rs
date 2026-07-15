@@ -563,22 +563,44 @@ pub fn unused_parameter_diagnostics(
         .collect()
 }
 
+// The "did you mean" hint for one unresolved name, scanned against the stub corpus. Split from the
+// diagnostic rendering so a caller that meets the same unresolved symbol many times can memoize it:
+// the value depends only on the name and the set-once corpus. The candidates are the stub corpus
+// only — it adds no invalidation edge, where suggesting package globals would make every file's
+// diagnostics depend on the whole export namespace.
+pub fn unresolved_suggestion(
+    interner: &Interner,
+    stub_library: &StubLibrary,
+    symbol: Symbol,
+) -> Option<String> {
+    let name = interner.resolve(symbol).unwrap_or("<unknown>");
+    let candidates = stub_library
+        .symbols()
+        .filter_map(|candidate| interner.resolve(candidate));
+    crate::diagnostic::nearest_name(name, candidates).map(str::to_owned)
+}
+
 // The could-not-resolve diagnostic for one unresolved reference, shared verbatim by the from-scratch
-// pipeline and the query engine so the two can never drift apart on wording. The typo hint's
-// candidates are the stub corpus only: it is a set-once input, so the hint adds no invalidation
-// edge — suggesting package globals would make every file's diagnostics depend on the whole export
-// namespace.
+// pipeline and the query engine so the two can never drift apart on wording.
 pub fn unresolved_reference_diagnostic(
     interner: &Interner,
     stub_library: &StubLibrary,
     symbol: Symbol,
     range: Range,
 ) -> Diagnostic {
+    let suggestion = unresolved_suggestion(interner, stub_library, symbol);
+    unresolved_reference_with_suggestion(interner, symbol, suggestion.as_deref(), range)
+}
+
+// Renders the could-not-resolve diagnostic from a precomputed (possibly memoized) suggestion.
+pub fn unresolved_reference_with_suggestion(
+    interner: &Interner,
+    symbol: Symbol,
+    nearest: Option<&str>,
+    range: Range,
+) -> Diagnostic {
     let name = interner.resolve(symbol).unwrap_or("<unknown>");
-    let candidates = stub_library
-        .symbols()
-        .filter_map(|candidate| interner.resolve(candidate));
-    let suggestion = crate::diagnostic::nearest_name(name, candidates)
+    let suggestion = nearest
         .map(|nearest| format!(" Did you mean `{nearest}`?"))
         .unwrap_or_default();
     Diagnostic::unresolved_warning(

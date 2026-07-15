@@ -383,6 +383,17 @@ pub struct FileDiagnostics {
     pub lint: Vec<Diagnostic>,
 }
 
+/// The `Typecheck` value: one whole-file inference's authoritative `ModuleCheck` (diagnostics,
+/// recorded expression types, strict origins) together with the file's exported value schemes —
+/// both fall out of the same walk, so computing them in one body keeps the demand path at a single
+/// inference per file per revision. [`Key::ExportedSchemes`] projects the shared `exports` out as
+/// its own value-eq firewall.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FileInference {
+    pub check: ModuleCheck,
+    pub exports: Shared<Vec<ExportedValue>>,
+}
+
 /// One package-global type name's resolved shape: the kind it was declared with and its type-parameter
 /// arity. The engine's stand-in for `analysis::naming::TypeInfo` (which is `pub(crate)`), reusing the
 /// public [`DefinitionKind`].
@@ -433,6 +444,10 @@ pub struct RoughlyQueries {
     // point of rope-only inputs. Sized to cover one file's recompute burst (a file's tree-reading
     // queries run adjacently) plus a few navigation targets.
     parsed_documents: RefCell<Vec<(FileId, Document)>>,
+    // Memoized "did you mean" hints per unresolved symbol. The hint depends only on the name and
+    // the set-once stub corpus, and the same unresolved name recurs across files and edits, so the
+    // full-corpus edit-distance scan runs once per name instead of once per reference occurrence.
+    unresolved_suggestions: RefCell<FxHashMap<Symbol, Option<String>>>,
     counters: Counters,
 }
 
@@ -463,6 +478,7 @@ impl RoughlyQueries {
             stubs,
             inference_template: RefCell::new(None),
             parsed_documents: RefCell::new(Vec::new()),
+            unresolved_suggestions: RefCell::new(FxHashMap::default()),
             counters: Counters::default(),
         }
     }
@@ -1093,8 +1109,12 @@ impl QueryGroup for RoughlyQueries {
 
             Key::ExportedSchemes(file) => {
                 bump(&self.counters.exported_schemes, *file);
-                let (_check, exports) = infer_file(self, engine, *file, &no_overrides(), false);
-                Stored::new(exports)
+                // Projects the exports out of the file's one authoritative inference (shared
+                // allocation, no second whole-file inference). This query stays separate purely as
+                // the value-eq firewall: a body edit recomputes `Typecheck` but the exports compare
+                // equal here, so referrers' `GlobalScheme`s never re-run.
+                let inference = engine.fetch::<FileInference>(Key::Typecheck(*file));
+                Stored::from_shared(inference.exports.clone())
             }
 
             Key::InterfaceScc(members) => {
@@ -1377,23 +1397,31 @@ impl QueryGroup for RoughlyQueries {
                 bump(&self.counters.typecheck, *file);
                 // Recorded so a config change re-checks the file; the value is unused in the check logic.
                 let _config = engine.fetch::<Config>(Key::Config);
-                let (check, _exports) = infer_file(self, engine, *file, &no_overrides(), true);
-                Stored::new(check)
+                let (check, exports) = infer_file(self, engine, *file, &no_overrides(), true);
+                Stored::new(FileInference {
+                    check,
+                    exports: Shared::new(exports),
+                })
             }
 
             Key::Diagnostics(file) => {
                 bump(&self.counters.diagnostics, *file);
                 let config = engine.fetch::<Config>(Key::Config);
-                let check = engine.fetch::<ModuleCheck>(Key::Typecheck(*file));
+                // The tree-reading file-local queries run adjacently, before `Typecheck`: inference
+                // fetches the schemes of every referenced global, which can parse many *other*
+                // files and evict this file's tree from the bounded parse cache — fetching lint
+                // right after the lowering parse keeps a cold prime at one parse per file.
+                let lowering_result =
+                    engine.fetch::<LoweringResult>(Key::LoweringDiagnostics(*file));
+                let lint = engine.fetch::<Vec<Diagnostic>>(Key::Lint(*file));
                 let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(*file));
                 let module = engine.fetch::<Module>(Key::Lower(*file));
+                let inference = engine.fetch::<FileInference>(Key::Typecheck(*file));
+                let check = &inference.check;
                 // Fetched before the `lowering` borrow below: their bodies borrow the interner/parser too,
                 // so re-entering them while holding the borrow would double-borrow the `RefCell`.
                 let package_naming =
                     engine.fetch::<Vec<Diagnostic>>(Key::PackageNamingDiagnostics(*file));
-                let lowering_result =
-                    engine.fetch::<LoweringResult>(Key::LoweringDiagnostics(*file));
-                let lint = engine.fetch::<Vec<Diagnostic>>(Key::Lint(*file));
                 // Strict-mode diagnostics are rendered here (production renders them in `typecheck`'s
                 // round 2 via the private `strict_origin_diagnostics`, ported verbatim below). Type errors
                 // stay raw `InferenceError`s; the harness renders them against the interner + fallback
@@ -2252,8 +2280,11 @@ fn package_naming_diagnostics(
     );
 
     // (D) could-not-resolve — every document. One per reference occurrence that resolves to neither a
-    // package global nor a builtin nor a stub.
+    // package global nor a builtin nor a stub. The typo hint is memoized per symbol: the corpus
+    // scan behind it dominated whole-workspace diagnostics when a codebase references many
+    // unmodeled library names.
     let declared_globals = engine.fetch::<BTreeSet<String>>(Key::PackageDeclaredGlobals);
+    let mut suggestions = group.unresolved_suggestions.borrow_mut();
     for (expression_id, symbol) in &local_naming.non_locals {
         let resolves = defining.get(symbol).copied().flatten().is_some()
             || is_builtin(interner, *symbol)
@@ -2268,13 +2299,17 @@ fn package_naming_diagnostics(
             continue;
         }
         let range = module.arena.get(*expression_id).range;
-        diagnostics.push(analysis::naming::unresolved_reference_diagnostic(
+        let suggestion = suggestions.entry(*symbol).or_insert_with(|| {
+            analysis::naming::unresolved_suggestion(interner, &group.stubs, *symbol)
+        });
+        diagnostics.push(analysis::naming::unresolved_reference_with_suggestion(
             interner,
-            &group.stubs,
             *symbol,
+            suggestion.as_deref(),
             range,
         ));
     }
+    drop(suggestions);
 
     // `pkg::name` validation: the diagnostic builder is the shared production function, so the
     // wording cannot drift; only the walk that decides *which* reads to validate lives here.

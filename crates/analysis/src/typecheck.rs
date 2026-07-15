@@ -1025,20 +1025,46 @@ impl InferenceState {
         // `Symbol` expression lying inside a candidate's function value that names another
         // candidate is an edge. (A local variable shadowing a candidate name inside a body adds a
         // false edge — the overapproximation only widens the member set, never drops recursion.)
+        // One arena pass with a binary search per candidate-naming read: the candidate values are
+        // distinct top-level statements, so their ranges are disjoint and the last interval
+        // starting at or before a read is the only one that can contain it.
         let mut edges: BTreeMap<Symbol, BTreeSet<Symbol>> = BTreeMap::new();
-        for (symbol, (_, value, _)) in &candidates {
-            let value_range = module.arena.get(*value).range;
-            let mut referenced = BTreeSet::new();
-            for expression in module.arena.expressions() {
-                if expression.range.start_byte >= value_range.start_byte
-                    && expression.range.end_byte <= value_range.end_byte
-                    && let ExpressionKind::Symbol(read) = &expression.kind
-                    && candidates.contains_key(read)
-                {
-                    referenced.insert(*read);
-                }
+        for symbol in candidates.keys() {
+            edges.insert(*symbol, BTreeSet::new());
+        }
+        let mut value_intervals: Vec<(usize, usize, Symbol)> = candidates
+            .iter()
+            .map(|(symbol, (_, value, _))| {
+                let range = module.arena.get(*value).range;
+                (range.start_byte, range.end_byte, *symbol)
+            })
+            .collect();
+        value_intervals.sort_unstable();
+        debug_assert!(
+            value_intervals
+                .windows(2)
+                .all(|pair| pair[0].1 <= pair[1].0),
+            "top-level candidate value ranges overlap"
+        );
+        for expression in module.arena.expressions() {
+            let ExpressionKind::Symbol(read) = &expression.kind else {
+                continue;
+            };
+            if !candidates.contains_key(read) {
+                continue;
             }
-            edges.insert(*symbol, referenced);
+            let position = value_intervals
+                .partition_point(|(start, _, _)| *start <= expression.range.start_byte);
+            let Some((start, end, owner)) = position.checked_sub(1).map(|i| value_intervals[i])
+            else {
+                continue;
+            };
+            if expression.range.start_byte >= start
+                && expression.range.end_byte <= end
+                && let Some(referenced) = edges.get_mut(&owner)
+            {
+                referenced.insert(*read);
+            }
         }
         // Only MUTUAL cycles (two or more members) get placeholders. A pure self-recursive
         // function keeps the tolerant fixed-point path: heterogeneous self-recursion — the

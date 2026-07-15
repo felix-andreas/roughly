@@ -26,7 +26,7 @@
 use {
     crate::{
         Engine, Shared,
-        queries::{FileId, Key, RoughlyQueries, SourceText},
+        queries::{FileId, FileInference, Key, RoughlyQueries, SourceText},
     },
     analysis::{
         document::{Document, DocumentId},
@@ -39,7 +39,6 @@ use {
         naming::{DocumentKind, DocumentNamingComputation, NamesGlobal, NamesLocal},
         stdlib::StubLibrary,
         text::{TextPosition, TextRange},
-        typecheck::ModuleCheck,
         types::{Constraint, CoreType, InferenceVariableId, TypeScheme},
     },
     ropey::Rope,
@@ -425,7 +424,7 @@ impl<'engine> EngineIde<'engine> {
     fn prime_check(&self, caches: &mut Caches, document_id: DocumentId) {
         caches.checks.entry(document_id).or_insert_with(|| {
             self.engine
-                .fetch::<ModuleCheck>(Key::Typecheck(document_id.0))
+                .fetch::<FileInference>(Key::Typecheck(document_id.0))
         });
     }
 
@@ -516,7 +515,7 @@ struct Caches {
     ropes: HashMap<DocumentId, Option<Rope>>,
     modules: HashMap<DocumentId, Shared<Module>>,
     namings: HashMap<DocumentId, Shared<DocumentNamingComputation>>,
-    checks: HashMap<DocumentId, Shared<ModuleCheck>>,
+    checks: HashMap<DocumentId, Shared<FileInference>>,
     document_kinds: HashMap<DocumentId, DocumentKind>,
     package_naming: Option<Shared<NamesGlobal>>,
     completion_index: Option<Shared<Vec<GlobalCompletionEntry>>>,
@@ -626,6 +625,7 @@ impl<'a> IdeDatabase for EngineIdeRef<'a> {
         self.caches
             .checks
             .get(&document_id)?
+            .check
             .expression_types_by_id
             .get(&expression_id)
     }
@@ -638,7 +638,7 @@ impl<'a> IdeDatabase for EngineIdeRef<'a> {
         self.caches
             .checks
             .get(&document_id)
-            .and_then(|check| check.variable_constraints.get(&variable))
+            .and_then(|inference| inference.check.variable_constraints.get(&variable))
             .copied()
             .unwrap_or(Constraint::Unconstrained)
     }
@@ -675,6 +675,7 @@ impl<'a> IdeDatabase for EngineIdeRef<'a> {
         self.caches
             .checks
             .get(&document_id)?
+            .check
             .selected_overloads
             .get(&expression_id)
             .copied()

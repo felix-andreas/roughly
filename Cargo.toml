@@ -59,3 +59,10 @@ tree-sitter-r.opt-level = 3
 [profile.release]
 strip = true
 lto = true
+
+# Release performance with symbols and frame pointers kept, for profilers (perf, callgrind, gdb
+# sampling): `cargo build --profile profiling`.
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = true

@@ -187,19 +187,33 @@ fn collect_function_free_variables(
 // The closest candidate to a misspelled name, for "did you mean" hints on unresolved references:
 // the lexicographically first candidate at the smallest edit distance, when that distance is small
 // relative to the name (≤ 1 for short names, ≤ 2 from length 5). Short names skip the hint —
-// almost everything is within distance 2 of `x`.
+// almost everything is within distance 2 of `x`. Selection is a pure minimum of
+// `(distance, candidate)`, so candidate order does not matter. The scan is hot (one full-corpus
+// pass per unresolved name), so the char and DP-row buffers are allocated once per call and every
+// candidate beyond the length pre-check is rejected without touching the DP.
 pub fn nearest_name<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Option<&'a str> {
-    if name.chars().count() < 3 {
+    let name_characters: Vec<char> = name.chars().collect();
+    if name_characters.len() < 3 {
         return None;
     }
-    let budget = if name.chars().count() >= 5 { 2 } else { 1 };
+    let budget = if name_characters.len() >= 5 { 2 } else { 1 };
+    let mut candidate_characters: Vec<char> = Vec::new();
+    let mut previous: Vec<usize> = Vec::new();
+    let mut current: Vec<usize> = Vec::new();
     let mut best: Option<(usize, &str)> = None;
     for candidate in candidates {
         if candidate == name {
             continue;
         }
-        let distance = edit_distance_within(name, candidate, budget);
-        let Some(distance) = distance else {
+        candidate_characters.clear();
+        candidate_characters.extend(candidate.chars());
+        let Some(distance) = edit_distance_within(
+            &name_characters,
+            &candidate_characters,
+            budget,
+            &mut previous,
+            &mut current,
+        ) else {
             continue;
         };
         best = match best {
@@ -214,16 +228,23 @@ pub fn nearest_name<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -
     best.map(|(_, candidate)| candidate)
 }
 
-// Levenshtein distance, `None` when it exceeds `budget` (with a cheap length pre-check so the
-// whole candidate set stays fast to scan).
-fn edit_distance_within(left: &str, right: &str, budget: usize) -> Option<usize> {
-    let left: Vec<char> = left.chars().collect();
-    let right: Vec<char> = right.chars().collect();
+// Levenshtein distance, `None` when it exceeds `budget` (with a length pre-check and an early
+// bail once a whole DP row exceeds the budget). The caller lends the two DP rows so a scan over
+// many candidates allocates nothing per candidate.
+fn edit_distance_within(
+    left: &[char],
+    right: &[char],
+    budget: usize,
+    previous: &mut Vec<usize>,
+    current: &mut Vec<usize>,
+) -> Option<usize> {
     if left.len().abs_diff(right.len()) > budget {
         return None;
     }
-    let mut previous: Vec<usize> = (0..=right.len()).collect();
-    let mut current = vec![0; right.len() + 1];
+    previous.clear();
+    previous.extend(0..=right.len());
+    current.clear();
+    current.resize(right.len() + 1, 0);
     for (row, left_character) in left.iter().enumerate() {
         current[0] = row + 1;
         let mut row_minimum = current[0];
@@ -237,7 +258,7 @@ fn edit_distance_within(left: &str, right: &str, budget: usize) -> Option<usize>
         if row_minimum > budget {
             return None;
         }
-        std::mem::swap(&mut previous, &mut current);
+        std::mem::swap(previous, current);
     }
     (previous[right.len()] <= budget).then_some(previous[right.len()])
 }

@@ -137,15 +137,17 @@ fn body_edit_does_not_refold_index_and_confines_to_referrers() {
 }
 
 // A body edit whose derived schemes are UNCHANGED must not re-typecheck the referrer either: the
-// per-file `ExportedSchemes` recomputes (one whole-file inference), its value-eq cutoff stops
-// propagation, and `GlobalScheme` does not even re-run. Editing the body to another integer keeps
-// `x : () -> integer`.
+// file's one `Typecheck` inference recomputes (it owns both the check and the exports), and when
+// its whole value — recorded types and export schemes alike — compares equal, propagation stops
+// there: `ExportedSchemes` does not even re-project, and `GlobalScheme` never re-runs. Editing the
+// body to another same-length integer keeps every derived value identical.
 #[test]
 fn body_edit_with_unchanged_scheme_cuts_off_at_exported_schemes() {
     let engine = setup(&[(A, "x <- function() 1"), (B, "z <- x()"), (C, "w <- 5")]);
     realize_all(&engine);
 
     let x = engine.group().intern("x");
+    let typecheck_a_before = engine.group().typecheck_runs(A);
     let exported_schemes_a_before = engine.group().exported_schemes_runs(A);
     let global_scheme_x_before = engine.group().global_scheme_runs(x);
     let typecheck_b_before = engine.group().typecheck_runs(B);
@@ -156,9 +158,14 @@ fn body_edit_with_unchanged_scheme_cuts_off_at_exported_schemes() {
     let group = engine.group();
 
     assert_eq!(
+        group.typecheck_runs(A),
+        typecheck_a_before + 1,
+        "the file's one inference recomputes once (lower changed)"
+    );
+    assert_eq!(
         group.exported_schemes_runs(A),
-        exported_schemes_a_before + 1,
-        "the file's exports recompute once (lower changed)"
+        exported_schemes_a_before,
+        "the whole inference value is unchanged, so the exports projection validates green"
     );
     assert_eq!(
         group.global_scheme_runs(x),

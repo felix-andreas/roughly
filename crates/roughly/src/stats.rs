@@ -7,16 +7,16 @@
 use {
     crate::config,
     analysis::{
+        diagnostic::Diagnostic,
         document::Document,
         hir::Module,
         naming::{DocumentKind, DocumentNamingComputation, NamesGlobal},
-        typecheck::ModuleCheck,
     },
     engine::{
         Durability, Engine,
         queries::{
-            Config as EngineConfig, FileDiagnostics, FileId, Key, RoughlyQueries, SourceText,
-            source_input,
+            Config as EngineConfig, FileDiagnostics, FileId, FileInference, Key, RoughlyQueries,
+            SourceText, source_input,
         },
     },
     ignore::Walk,
@@ -152,10 +152,17 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), crate::cli::CommandEr
     // which is exactly where an editor pays for them.
     let total_loc: usize = files.iter().map(|record| record.loc).sum();
     let mut lower_total = Duration::ZERO;
+    let mut lint_total = Duration::ZERO;
     for record in &files {
         let start = Instant::now();
         let _ = engine.fetch::<Module>(Key::Lower(record.file));
         lower_total += start.elapsed();
+        // Lint runs right after this file's lower, while its parse is still in the bounded cache —
+        // the same adjacency the server's per-file prime has — so the lint line shows lint's own
+        // cost rather than a staging re-parse of the whole corpus.
+        let start = Instant::now();
+        let _ = engine.fetch::<Vec<Diagnostic>>(Key::Lint(record.file));
+        lint_total += start.elapsed();
     }
     let rss_after_lower = resident_set_bytes();
     let mut naming_total = Duration::ZERO;
@@ -168,11 +175,18 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), crate::cli::CommandEr
     let mut typecheck_total = Duration::ZERO;
     for record in &mut files {
         let start = Instant::now();
-        let _ = engine.fetch::<ModuleCheck>(Key::Typecheck(record.file));
+        let _ = engine.fetch::<FileInference>(Key::Typecheck(record.file));
         record.typecheck = start.elapsed();
         typecheck_total += record.typecheck;
     }
     let rss_after_typecheck = resident_set_bytes();
+    let mut package_naming_total = Duration::ZERO;
+    for record in &files {
+        let start = Instant::now();
+        let _ = engine.fetch::<Vec<Diagnostic>>(Key::PackageNamingDiagnostics(record.file));
+        package_naming_total += start.elapsed();
+    }
+    let rss_after_package_naming = resident_set_bytes();
     let mut diagnostics_total = Duration::ZERO;
     let mut diagnostic_count = 0usize;
     for record in &files {
@@ -186,7 +200,13 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), crate::cli::CommandEr
             + rendered.lint.len();
     }
     let rss_after_diagnostics = resident_set_bytes();
-    let cold_total = load_total + lower_total + naming_total + typecheck_total + diagnostics_total;
+    let cold_total = load_total
+        + lower_total
+        + naming_total
+        + typecheck_total
+        + lint_total
+        + package_naming_total
+        + diagnostics_total;
 
     let symbol_count = engine
         .fetch::<NamesGlobal>(Key::PackageSymbolIndex)
@@ -225,13 +245,14 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), crate::cli::CommandEr
         load_total,
         delta(rss_baseline, rss_after_load),
     );
-    // `lower` includes each file's one on-demand parse (the staged `diagnostics` phase re-parses
-    // for lint — the server's per-file warm-up pays a single parse instead).
+    // `lower` includes each file's one on-demand parse; lint runs adjacently against the same
+    // cached parse, so its line below is lint's own cost (the memory delta covers both).
     phase(
         "lower (+parse)",
         lower_total,
         delta(rss_after_load, rss_after_lower),
     );
+    phase("lint", lint_total, None);
     phase(
         "local naming",
         naming_total,
@@ -243,9 +264,14 @@ pub fn analysis_stats(target: Option<&Path>) -> Result<(), crate::cli::CommandEr
         delta(rss_after_naming, rss_after_typecheck),
     );
     phase(
-        "diagnostics (+folds)",
+        "package naming (+folds)",
+        package_naming_total,
+        delta(rss_after_typecheck, rss_after_package_naming),
+    );
+    phase(
+        "diagnostics (render)",
         diagnostics_total,
-        delta(rss_after_typecheck, rss_after_diagnostics),
+        delta(rss_after_package_naming, rss_after_diagnostics),
     );
     let total_memory = match delta(rss_baseline, rss_after_diagnostics) {
         Some((before, after)) => {

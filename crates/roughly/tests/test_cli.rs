@@ -464,6 +464,8 @@ fn analysis_stats_prints_the_full_breakdown() {
         "2 package files",
         "cold analysis",
         "typecheck (+interfaces)",
+        "package naming (+folds)",
+        "diagnostics (render)",
         "slowest files (typecheck):",
         "incremental (typing burst:",
         "edited-file diagnostics",
