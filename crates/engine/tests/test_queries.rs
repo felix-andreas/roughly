@@ -346,7 +346,7 @@ fn backward_reference_chain_stays_off_the_interface_scc() {
         "a backward chain is not a cycle; no fixed point may run"
     );
     assert_eq!(
-        totals["exported schemes (inference)"], 1,
+        totals["exported schemes (projection)"], 1,
         "the referrer's scheme demand infers the chain file exactly once"
     );
     assert_eq!(

@@ -688,7 +688,7 @@ impl RoughlyQueries {
             ("fallback range", self.counters.fallback_range.get()),
             ("defining item", total(&self.counters.defining_item)),
             (
-                "exported schemes (inference)",
+                "exported schemes (projection)",
                 total(&self.counters.exported_schemes),
             ),
             ("global scheme", total(&self.counters.global_scheme)),
