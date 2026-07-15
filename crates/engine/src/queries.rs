@@ -171,13 +171,26 @@ pub enum Key {
     /// The per-symbol exported scheme. Editing a function body recomputes only *its* `GlobalScheme`
     /// (value-eq per symbol — this is the interface firewall referrers cut off on).
     GlobalScheme(Symbol),
+    /// The definitions a file's typecheck walk provably resolves for every same-file read (the
+    /// symbol's last top-level assignment ends before its earliest non-local read begins), so no
+    /// interface import — and no [`Key::InterfaceDeps`] edge — is needed for them. A pure function
+    /// of the file's module and naming, memoized because `infer_file` and every one of the file's
+    /// symbols' `FileInterfaceEdges` reads it: recomputing it per symbol made hub files quadratic.
+    WalkShadowed(FileId),
+    /// The interface out-edges of one *file*: the referenced non-local names that resolve to
+    /// package globals (have a [`Key::DefiningItem`]), minus the walk-shadowed same-file ones.
+    /// Every symbol the file defines shares exactly this edge set, so it is computed once per file
+    /// and [`Key::InterfaceDeps`] projects it per symbol.
+    FileInterfaceEdges(FileId),
     /// The interface-dependency out-edges of one package global: the **other** package globals that
     /// computing `GlobalScheme(symbol)` reads. Computing a global's scheme infers its whole winning file,
     /// which binds *every* package global that file references (`infer_file`); so the edge set is exactly
     /// the referenced non-local names of `symbol`'s defining file that themselves resolve to package
-    /// globals (have a [`Key::DefiningItem`]). Out-degree is *arbitrary* (a file may reference many
-    /// globals), so this is a general directed graph — re-exports (`a <- b`, a single edge) are just the
-    /// degenerate case. SCC detection over it is Tarjan, not a chain walk (see [`Key::SymbolScc`]).
+    /// globals (have a [`Key::DefiningItem`]) — [`Key::FileInterfaceEdges`] of the defining file,
+    /// projected per symbol so a winner move re-edges only the moved symbol. Out-degree is
+    /// *arbitrary* (a file may reference many globals), so this is a general directed graph —
+    /// re-exports (`a <- b`, a single edge) are just the degenerate case. SCC detection over it is
+    /// Tarjan, not a chain walk (see [`Key::SymbolScc`]).
     InterfaceDeps(Symbol),
     /// The strongly-connected component of the [`Key::InterfaceDeps`] graph containing `symbol`, as the
     /// **canonical (sorted)** member list. Empty means a trivial, non-self-looping SCC (acyclic — take the
@@ -1063,9 +1076,45 @@ impl QueryGroup for RoughlyQueries {
                 Stored::new(index.global_bindings.get(symbol).map(|document| document.0))
             }
 
+            Key::WalkShadowed(file) => {
+                let module = engine.fetch::<Module>(Key::Lower(*file));
+                let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(*file));
+                Stored::new(walk_shadowed_definitions(&module, &naming.naming))
+            }
+
+            Key::FileInterfaceEdges(file) => {
+                let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(*file));
+                let walk_shadowed = engine.fetch::<BTreeSet<Symbol>>(Key::WalkShadowed(*file));
+                let referenced: BTreeSet<Symbol> =
+                    naming.naming.non_locals.values().copied().collect();
+                let mut edges = BTreeSet::new();
+                for candidate in referenced {
+                    let candidate_defining =
+                        engine.fetch::<Option<FileId>>(Key::DefiningItem(candidate));
+                    let Some(candidate_file) = *candidate_defining else {
+                        continue;
+                    };
+                    if candidate_file == *file && walk_shadowed.contains(&candidate) {
+                        continue;
+                    }
+                    edges.insert(candidate);
+                }
+                Stored::new(edges.into_iter().collect::<Vec<Symbol>>())
+            }
+
             Key::InterfaceDeps(symbol) => {
                 bump(&self.counters.interface_deps, *symbol);
-                Stored::new(interface_deps(engine, *symbol))
+                // Must mirror `infer_file`'s import set exactly: everything fetched there must be
+                // an edge here, or a genuine cycle would slip past the SCC routing into the
+                // accidental-cycle guard. Both read the same per-file edge set.
+                let defining = engine.fetch::<Option<FileId>>(Key::DefiningItem(*symbol));
+                let edges = match *defining {
+                    Some(file) => {
+                        (*engine.fetch::<Vec<Symbol>>(Key::FileInterfaceEdges(file))).clone()
+                    }
+                    None => Vec::new(),
+                };
+                Stored::new(edges)
             }
 
             Key::SymbolScc(symbol) => {
@@ -1481,7 +1530,7 @@ fn infer_file(
     let local_naming = &naming.naming;
 
     let referenced: BTreeSet<Symbol> = local_naming.non_locals.values().copied().collect();
-    let walk_shadowed = walk_shadowed_definitions(&module, local_naming);
+    let walk_shadowed = engine.fetch::<BTreeSet<Symbol>>(Key::WalkShadowed(file));
     let mut global_bindings: BTreeMap<Symbol, DocumentId> = BTreeMap::new();
     let mut imported_schemes: Vec<(Symbol, TypeScheme)> = Vec::new();
     for symbol in &referenced {
@@ -1591,45 +1640,13 @@ fn no_overrides() -> BTreeMap<Symbol, TypeScheme> {
     BTreeMap::new()
 }
 
-// The interface-dependency out-edges of one package global: the package globals that computing
-// `GlobalScheme(symbol)` reads. `GlobalScheme(symbol)` infers `symbol`'s whole winning file (`infer_file`),
-// which binds every package global that file references; so the edge set is exactly the file's referenced
-// non-local names that themselves resolve to package globals (have a `DefiningItem`). This is the precise
-// graph the real `GlobalScheme` fetches induce, so the SCC built from it captures every cyclic fetch —
-// nothing slips past to trip the accidental-cycle guard.
+// A **self-edge** (`symbol` in its own [`Key::InterfaceDeps`] set) is real and kept: it arises when
+// the winning file *forward-references* the global it defines (`beta <- alpha(1L)` above
+// `alpha <- 1L`, where the same file is `alpha`'s winner), so the forward reference resolves to the
+// package global `alpha` whose winner is this very file — `infer_file` then fetches
+// `GlobalScheme(alpha)` while computing it. `symbol_scc` reads the self-edge as a self-referential
+// singleton SCC and routes it through the fixed-point.
 //
-// A **self-edge** (`symbol` in its own dep set) is real and kept: it arises when the winning file
-// *forward-references* the global it defines (`beta <- alpha(1L)` above `alpha <- 1L`, where the same file
-// is `alpha`'s winner), so the forward reference resolves to the package global `alpha` whose winner is
-// this very file — `infer_file` then fetches `GlobalScheme(alpha)` while computing it. `symbol_scc` reads
-// the self-edge as a self-referential singleton SCC and routes it through the fixed-point. Returned
-// sorted/deduped (a `BTreeSet`) for an order-stable, cutoff-friendly value.
-fn interface_deps(engine: &Engine<RoughlyQueries>, symbol: Symbol) -> Vec<Symbol> {
-    let defining = engine.fetch::<Option<FileId>>(Key::DefiningItem(symbol));
-    let Some(file) = *defining else {
-        return Vec::new();
-    };
-    let module = engine.fetch::<Module>(Key::Lower(file));
-    let naming = engine.fetch::<DocumentNamingComputation>(Key::LocalNaming(file));
-    // Must mirror `infer_file`'s import set exactly: a walk-shadowed same-file symbol is never
-    // fetched there, so it must not be an edge here — and everything fetched there must be an
-    // edge, or a genuine cycle would slip past the SCC routing into the accidental-cycle guard.
-    let walk_shadowed = walk_shadowed_definitions(&module, &naming.naming);
-    let referenced: BTreeSet<Symbol> = naming.naming.non_locals.values().copied().collect();
-    let mut deps = BTreeSet::new();
-    for candidate in referenced {
-        let candidate_defining = engine.fetch::<Option<FileId>>(Key::DefiningItem(candidate));
-        let Some(candidate_file) = *candidate_defining else {
-            continue;
-        };
-        if candidate_file == file && walk_shadowed.contains(&candidate) {
-            continue;
-        }
-        deps.insert(candidate);
-    }
-    deps.into_iter().collect()
-}
-
 // The definitions this file's module walk provably resolves for every same-file read: the
 // symbol's last top-level assignment (its export/winner site) ends before any non-local read of
 // it begins. The typecheck walk rebinds the winner's global entry with the freshly inferred

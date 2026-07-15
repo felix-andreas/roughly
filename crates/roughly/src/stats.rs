@@ -468,6 +468,8 @@ fn key_kind(key: &Key) -> &'static str {
         Key::DurableTypeDefinitionModules => "durable type definition modules",
         Key::FallbackRange => "fallback range",
         Key::DefiningItem(_) => "defining item",
+        Key::WalkShadowed(_) => "walk shadowed",
+        Key::FileInterfaceEdges(_) => "file interface edges",
         Key::InterfaceDeps(_) => "interface deps",
         Key::SymbolScc(_) => "symbol scc",
         Key::GlobalScheme(_) => "global scheme",
