@@ -41,7 +41,12 @@ impl InferenceState {
         core_type: CoreType,
     ) -> Result<TypeScheme, InferenceError> {
         let resolved_type = self.resolve(core_type)?;
-        let type_variables = self.free_type_variables_in_core_type(&resolved_type)?;
+        let mut type_variables = Vec::new();
+        self.visit_unbound_variables(&resolved_type, 0, &mut |variable| {
+            type_variables.push(variable);
+        })?;
+        type_variables.sort_unstable();
+        type_variables.dedup();
 
         let mut quantified_variables = Vec::new();
         for variable in type_variables {

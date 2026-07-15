@@ -154,7 +154,7 @@ impl InferenceState {
         self.snapshot_depth += 1;
         Snapshot {
             log_len: self.undo_log.len(),
-            next_variable_id: self.next_variable_id,
+            next_variable_id: self.entries.len() as u32,
         }
     }
 
@@ -168,14 +168,13 @@ impl InferenceState {
         );
         while self.undo_log.len() > snapshot.log_len {
             match self.undo_log.pop() {
-                Some(UndoStep::Entry { variable, previous }) => match previous {
-                    Some(entry) => {
+                Some(UndoStep::Entry { variable, previous }) => {
+                    // A `None` previous is a variable allocated after the snapshot; the tail
+                    // truncation below reclaims it together with every other post-snapshot id.
+                    if let Some(entry) = previous {
                         self.entries.insert(variable, entry);
                     }
-                    None => {
-                        self.entries.remove(&variable);
-                    }
-                },
+                }
                 Some(UndoStep::Rigid { variable, previous }) => match previous {
                     Some(name) => {
                         self.rigid_variables.insert(variable, name);
@@ -188,18 +187,10 @@ impl InferenceState {
             }
         }
 
-        // Variable ids allocated after the snapshot are reclaimed. The log already removes their
-        // `entries` and `rigid_variables` records; dropping any survivor with an id at or above the
-        // restored counter is a safety net, since all ids are allocated monotonically and so cannot
-        // predate the snapshot (and therefore cannot collide with a pre-existing variable or rigid).
-        let stale_variables = self
-            .entries
-            .range(InferenceVariableId(snapshot.next_variable_id)..)
-            .map(|(variable, _)| *variable)
-            .collect::<Vec<_>>();
-        for variable in stale_variables {
-            self.entries.remove(&variable);
-        }
+        // Ids are allocated monotonically, so every id at or above the snapshot's counter was
+        // minted inside the rolled-back region: reclaim them all by truncating the dense entry
+        // table (which also restores the counter, since the counter is the length).
+        self.entries.truncate(snapshot.next_variable_id);
         let stale_rigids = self
             .rigid_variables
             .range(InferenceVariableId(snapshot.next_variable_id)..)
@@ -208,7 +199,6 @@ impl InferenceState {
         for variable in stale_rigids {
             self.rigid_variables.remove(&variable);
         }
-        self.next_variable_id = snapshot.next_variable_id;
 
         self.snapshot_depth -= 1;
     }
@@ -248,8 +238,7 @@ impl InferenceState {
         &mut self,
         constraint: Constraint,
     ) -> InferenceVariableId {
-        let variable = InferenceVariableId(self.next_variable_id);
-        self.next_variable_id += 1;
+        let variable = InferenceVariableId(self.entries.len() as u32);
         self.set_entry(
             variable,
             InferenceEntry::Unbound {
@@ -883,7 +872,132 @@ impl InferenceState {
         &mut self,
         core_type: &CoreType,
     ) -> Result<BTreeSet<InferenceVariableId>, InferenceError> {
-        self.free_type_variables_in_core_type(core_type)
+        let mut free_variables = BTreeSet::new();
+        self.visit_unbound_variables(core_type, 0, &mut |variable| {
+            free_variables.insert(variable);
+        })?;
+        Ok(free_variables)
+    }
+
+    // Visits the unbound-variable roots of `core_type` under the current substitution — the free
+    // variables of its resolved form — without materializing that form: redirect chains are
+    // followed read-only (no path compression, no clones, no per-node allocation). This is the hot
+    // path behind generalization and the per-check constraint sweep, which previously resolved a
+    // deep copy of every recorded expression type. Semantics mirror walking `resolve`'s output
+    // exactly, including union normalization: a member that resolves to `Any`/`Unknown` absorbs
+    // the union, so no member's variables are free in the resolved type.
+    pub(super) fn visit_unbound_variables(
+        &self,
+        core_type: &CoreType,
+        depth: usize,
+        visit: &mut impl FnMut(InferenceVariableId),
+    ) -> Result<(), InferenceError> {
+        if depth >= RECURSION_LIMIT {
+            return Err(InferenceError::RecursionLimitExceeded);
+        }
+        let depth = depth + 1;
+        match core_type {
+            CoreType::Any | CoreType::Unknown | CoreType::Null | CoreType::Scalar(_) => Ok(()),
+            CoreType::Vector(element)
+            | CoreType::NamedVector(element)
+            | CoreType::List(element)
+            | CoreType::NamedList(element) => self.visit_unbound_variables(element, depth, visit),
+            CoreType::Union(members) => {
+                for member in members {
+                    if self.resolves_to_absorbing(member, depth)? {
+                        return Ok(());
+                    }
+                }
+                for member in members {
+                    self.visit_unbound_variables(member, depth, visit)?;
+                }
+                Ok(())
+            }
+            CoreType::Variable(variable) => {
+                let mut current = *variable;
+                loop {
+                    match self.entries.get(&current) {
+                        None => return Err(InferenceError::UnknownInferenceVariable(current)),
+                        Some(InferenceEntry::Unbound { .. }) => {
+                            visit(current);
+                            return Ok(());
+                        }
+                        Some(InferenceEntry::Redirect(next)) => current = *next,
+                        Some(InferenceEntry::Bound(bound)) => {
+                            return self.visit_unbound_variables(bound, depth, visit);
+                        }
+                    }
+                }
+            }
+            CoreType::Nominal(_, type_arguments) => {
+                for type_argument in type_arguments {
+                    self.visit_unbound_variables(type_argument, depth, visit)?;
+                }
+                Ok(())
+            }
+            CoreType::Record(fields) => {
+                for field in fields {
+                    self.visit_unbound_variables(&field.value, depth, visit)?;
+                }
+                Ok(())
+            }
+            CoreType::Tuple(items) => {
+                for item in items {
+                    self.visit_unbound_variables(item, depth, visit)?;
+                }
+                Ok(())
+            }
+            CoreType::Function(function_type) => {
+                for parameter in &function_type.parameters {
+                    self.visit_unbound_variables(parameter, depth, visit)?;
+                }
+                for named_parameter in &function_type.named_parameters {
+                    self.visit_unbound_variables(&named_parameter.value, depth, visit)?;
+                }
+                if let Some(variadic) = &function_type.variadic {
+                    self.visit_unbound_variables(&variadic.element, depth, visit)?;
+                }
+                self.visit_unbound_variables(&function_type.return_type, depth, visit)
+            }
+        }
+    }
+
+    // Whether `core_type` resolves to a bare `Any` or `Unknown` — the two types that absorb a
+    // union in `union_of`. Read-only redirect following, like `visit_unbound_variables`.
+    fn resolves_to_absorbing(
+        &self,
+        core_type: &CoreType,
+        depth: usize,
+    ) -> Result<bool, InferenceError> {
+        if depth >= RECURSION_LIMIT {
+            return Err(InferenceError::RecursionLimitExceeded);
+        }
+        let depth = depth + 1;
+        match core_type {
+            CoreType::Any | CoreType::Unknown => Ok(true),
+            CoreType::Union(members) => {
+                for member in members {
+                    if self.resolves_to_absorbing(member, depth)? {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+            CoreType::Variable(variable) => {
+                let mut current = *variable;
+                loop {
+                    match self.entries.get(&current) {
+                        None => return Err(InferenceError::UnknownInferenceVariable(current)),
+                        Some(InferenceEntry::Unbound { .. }) => return Ok(false),
+                        Some(InferenceEntry::Redirect(next)) => current = *next,
+                        Some(InferenceEntry::Bound(bound)) => {
+                            return self.resolves_to_absorbing(bound, depth);
+                        }
+                    }
+                }
+            }
+            _ => Ok(false),
+        }
     }
 
     pub fn unify(&mut self, left: CoreType, right: CoreType) -> Result<CoreType, InferenceError> {
@@ -1335,7 +1449,12 @@ impl InferenceState {
     // environment walk is needed.
     pub(super) fn generalize(&mut self, core_type: CoreType) -> Result<TypeScheme, InferenceError> {
         let resolved_type = self.resolve(core_type)?;
-        let type_variables = self.free_type_variables_in_core_type(&resolved_type)?;
+        let mut type_variables = Vec::new();
+        self.visit_unbound_variables(&resolved_type, 0, &mut |variable| {
+            type_variables.push(variable);
+        })?;
+        type_variables.sort_unstable();
+        type_variables.dedup();
 
         let mut quantified_variables = Vec::new();
         for variable in type_variables {
@@ -1353,86 +1472,6 @@ impl InferenceState {
             quantified_variables,
             body: resolved_type,
         })
-    }
-
-    pub(super) fn free_type_variables_in_core_type(
-        &mut self,
-        core_type: &CoreType,
-    ) -> Result<BTreeSet<InferenceVariableId>, InferenceError> {
-        if self.recursion_depth >= RECURSION_LIMIT {
-            return Err(InferenceError::RecursionLimitExceeded);
-        }
-        self.recursion_depth += 1;
-        let result = self.free_type_variables_in_core_type_inner(core_type);
-        self.recursion_depth -= 1;
-        result
-    }
-
-    pub(super) fn free_type_variables_in_core_type_inner(
-        &mut self,
-        core_type: &CoreType,
-    ) -> Result<BTreeSet<InferenceVariableId>, InferenceError> {
-        match self.resolve(core_type.clone())? {
-            CoreType::Any | CoreType::Unknown | CoreType::Null | CoreType::Scalar(_) => {
-                Ok(BTreeSet::new())
-            }
-            CoreType::Vector(element) | CoreType::NamedVector(element) => {
-                self.free_type_variables_in_core_type(&element)
-            }
-            CoreType::Union(members) => {
-                let mut free_variables = BTreeSet::new();
-                for member in members {
-                    free_variables.extend(self.free_type_variables_in_core_type(&member)?);
-                }
-                Ok(free_variables)
-            }
-            CoreType::Variable(variable) => Ok(BTreeSet::from([variable])),
-            CoreType::Nominal(_, type_arguments) => {
-                let mut free_variables = BTreeSet::new();
-                for type_argument in type_arguments {
-                    free_variables.extend(self.free_type_variables_in_core_type(&type_argument)?);
-                }
-                Ok(free_variables)
-            }
-            CoreType::List(item_type) => self.free_type_variables_in_core_type(&item_type),
-            CoreType::NamedList(item_type) => self.free_type_variables_in_core_type(&item_type),
-            CoreType::Record(fields) => {
-                let mut free_variables = BTreeSet::new();
-                for field in fields {
-                    free_variables.extend(self.free_type_variables_in_core_type(&field.value)?);
-                }
-                Ok(free_variables)
-            }
-            CoreType::Tuple(items) => {
-                let mut free_variables = BTreeSet::new();
-                for item in items {
-                    free_variables.extend(self.free_type_variables_in_core_type(&item)?);
-                }
-                Ok(free_variables)
-            }
-            CoreType::Function(function_type) => {
-                let mut free_variables = BTreeSet::new();
-
-                for parameter in function_type.parameters {
-                    free_variables.extend(self.free_type_variables_in_core_type(&parameter)?);
-                }
-
-                for named_parameter in function_type.named_parameters {
-                    free_variables
-                        .extend(self.free_type_variables_in_core_type(&named_parameter.value)?);
-                }
-
-                if let Some(variadic) = &function_type.variadic {
-                    free_variables
-                        .extend(self.free_type_variables_in_core_type(&variadic.element)?);
-                }
-
-                free_variables
-                    .extend(self.free_type_variables_in_core_type(&function_type.return_type)?);
-
-                Ok(free_variables)
-            }
-        }
     }
 
     pub(super) fn resolve_function_type(
@@ -1733,7 +1772,11 @@ impl InferenceState {
         core_type: &CoreType,
         level: Level,
     ) -> Result<(), InferenceError> {
-        for variable in self.free_type_variables_in_core_type(core_type)? {
+        let mut variables = Vec::new();
+        self.visit_unbound_variables(core_type, 0, &mut |variable| variables.push(variable))?;
+        variables.sort_unstable();
+        variables.dedup();
+        for variable in variables {
             let lowered_entry = match self.entries.get(&variable) {
                 None => return Err(InferenceError::UnknownInferenceVariable(variable)),
                 Some(InferenceEntry::Unbound {

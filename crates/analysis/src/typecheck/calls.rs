@@ -170,8 +170,10 @@ impl InferenceState {
         // declaration, by corpus convention the most general one.
         let mut has_unresolved_argument = false;
         for argument_type in &argument_types {
-            if !self.free_type_variables(argument_type)?.is_empty() {
+            self.visit_unbound_variables(argument_type, 0, &mut |_| {
                 has_unresolved_argument = true;
+            })?;
+            if has_unresolved_argument {
                 break;
             }
         }

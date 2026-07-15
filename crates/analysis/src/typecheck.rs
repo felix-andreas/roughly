@@ -242,11 +242,49 @@ pub enum InferenceError {
     RecursionLimitExceeded,
 }
 
+// The union-find entry table. Variable ids are allocated densely from zero and reclaimed only by
+// truncating the tail (probe rollback), so the table is a plain vector indexed by id: entry lookup
+// is the hottest operation in inference, and a tree search per resolve step dominated whole-file
+// checks on large files. The map-shaped accessors keep call sites identical to the map they
+// replaced; the id counter is the length, so a dangling id is unrepresentable.
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EntryTable(Vec<InferenceEntry>);
+
+impl EntryTable {
+    pub(crate) fn get(&self, variable: &InferenceVariableId) -> Option<&InferenceEntry> {
+        self.0.get(variable.0 as usize)
+    }
+
+    pub(crate) fn contains_key(&self, variable: &InferenceVariableId) -> bool {
+        (variable.0 as usize) < self.0.len()
+    }
+
+    pub(crate) fn insert(&mut self, variable: InferenceVariableId, entry: InferenceEntry) {
+        let index = variable.0 as usize;
+        match index.cmp(&self.0.len()) {
+            std::cmp::Ordering::Less => self.0[index] = entry,
+            std::cmp::Ordering::Equal => self.0.push(entry),
+            // A gap would mean an id was minted without allocating its entry — corrupted
+            // inference state, unrecoverable.
+            std::cmp::Ordering::Greater => {
+                panic!("inference variable ids must be allocated densely")
+            }
+        }
+    }
+
+    pub(crate) fn truncate(&mut self, count: u32) {
+        self.0.truncate(count as usize);
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct InferenceState {
-    next_variable_id: u32,
     current_level: Level,
-    entries: BTreeMap<InferenceVariableId, InferenceEntry>,
+    entries: EntryTable,
     environment: BTreeMap<EnvironmentKey, Binding>,
     builtins: BTreeMap<Symbol, BuiltinKind>,
     // When enabled, every inferred expression's result type is recorded by id so tooling (hover,
@@ -924,21 +962,27 @@ impl InferenceState {
                     || expression_types_by_id.get(&origin.expression_id) == Some(&CoreType::Unknown)
             })
             .collect();
+        // One reusable buffer across the sweep: this visits every recorded expression type, so a
+        // per-type set allocation (let alone resolving a deep copy of each type) dominated whole-file
+        // check time on large files.
         let mut variable_constraints = BTreeMap::new();
+        let mut free_variables: Vec<InferenceVariableId> = Vec::new();
         for core_type in expression_types_by_id
             .values()
             .chain(expression_types.iter())
-            .cloned()
-            .collect::<Vec<_>>()
         {
-            if let Ok(free_variables) = self.free_type_variables(&core_type) {
-                for variable in free_variables {
-                    if let Some(InferenceEntry::Unbound { constraint, .. }) =
-                        self.entries.get(&variable)
-                        && *constraint != Constraint::Unconstrained
-                    {
-                        variable_constraints.insert(variable, *constraint);
-                    }
+            free_variables.clear();
+            let visited = self.visit_unbound_variables(core_type, 0, &mut |variable| {
+                free_variables.push(variable);
+            });
+            if visited.is_err() {
+                continue;
+            }
+            for variable in &free_variables {
+                if let Some(InferenceEntry::Unbound { constraint, .. }) = self.entries.get(variable)
+                    && *constraint != Constraint::Unconstrained
+                {
+                    variable_constraints.insert(*variable, *constraint);
                 }
             }
         }
@@ -958,22 +1002,35 @@ impl InferenceState {
         local_naming: &NamesLocal,
     ) -> Vec<ExportedValue> {
         let mut symbols_in_order = Vec::new();
+        let mut seen = BTreeSet::new();
         for expression_id in &module.expressions {
             if let Some(target) = module
                 .arena
                 .get(*expression_id)
                 .kind
                 .simple_assignment_target()
-                && !symbols_in_order.contains(&target)
+                && seen.insert(target)
             {
                 symbols_in_order.push(target);
             }
         }
 
+        // One walk collects every symbol's exported binding (its last *resolved* assignment,
+        // recursing into bare blocks), replacing a per-symbol reverse scan that made files with
+        // many exports quadratic. An unresolved assignment never overwrites: the reverse scan it
+        // replaces skipped those and kept looking earlier.
+        let mut exported_bindings: BTreeMap<Symbol, BindingId> = BTreeMap::new();
+        collect_exported_bindings(
+            module,
+            local_naming,
+            &module.expressions,
+            &mut exported_bindings,
+        );
+
         symbols_in_order
             .into_iter()
             .filter_map(|symbol| {
-                let binding_id = find_exported_binding(module, local_naming, symbol)?;
+                let binding_id = exported_bindings.get(&symbol).copied()?;
                 let binding = self
                     .lookup_local_name(binding_id)
                     .or_else(|| self.lookup_global_name(symbol))?;
@@ -1071,31 +1128,11 @@ impl InferenceState {
         // idiomatic tree fold `T = double | list[T]` — is untypeable in HM, and pinning its
         // parameter through the recursive call manufactures false positives at call sites; its
         // `Unknown` is deliberate gradual tolerance. A mutual group, by contrast, was previously
-        // pinned to `Unknown` wholesale and false-errored annotated consumers.
-        let on_mutual_cycle = |start: Symbol| -> bool {
-            let mut stack: Vec<Symbol> = edges
-                .get(&start)
-                .map(|targets| {
-                    targets
-                        .iter()
-                        .copied()
-                        .filter(|target| *target != start)
-                        .collect()
-                })
-                .unwrap_or_default();
-            let mut seen = BTreeSet::new();
-            while let Some(symbol) = stack.pop() {
-                if symbol == start {
-                    return true;
-                }
-                if seen.insert(symbol)
-                    && let Some(targets) = edges.get(&symbol)
-                {
-                    stack.extend(targets.iter().copied());
-                }
-            }
-            false
-        };
+        // pinned to `Unknown` wholesale and false-errored annotated consumers. A candidate lies on
+        // a mutual cycle exactly when its strongly-connected component has two or more members
+        // (a self-edge alone never forms one), so one SCC pass answers it for every candidate —
+        // a per-candidate reachability walk was quadratic over long reference chains.
+        let mutual_members = mutual_cycle_members(&edges);
 
         // Members live one level below the module scope: unification level-adjusts every variable
         // the group's bodies share up to the placeholders' level, so the placeholders must sit
@@ -1105,7 +1142,7 @@ impl InferenceState {
         self.enter_level();
         self.module_letrec_placeholders.clear();
         for (symbol, (expression_id, _, range)) in &candidates {
-            if !on_mutual_cycle(*symbol) {
+            if !mutual_members.contains(symbol) {
                 continue;
             }
             let variable = self.fresh_variable();
@@ -2514,6 +2551,125 @@ impl InferenceState {
     }
 }
 
+// Every symbol's exported binding — its last resolved simple assignment in document order,
+// recursing into bare top-level `{ }` blocks — collected in one walk (the batch form of
+// `naming::find_exported_binding`, which `exported_value_schemes` would otherwise run once per
+// exported symbol).
+fn collect_exported_bindings(
+    module: &Module,
+    local_naming: &NamesLocal,
+    expressions: &[ExpressionId],
+    exported: &mut BTreeMap<Symbol, BindingId>,
+) {
+    for expression_id in expressions {
+        let kind = &module.arena.get(*expression_id).kind;
+        if let Some(target) = kind.simple_assignment_target() {
+            if let Some(binding_id) = local_naming
+                .expression_resolutions
+                .get(expression_id)
+                .copied()
+            {
+                exported.insert(target, binding_id);
+            }
+        } else if let ExpressionKind::Block { expressions, .. } = kind {
+            collect_exported_bindings(module, local_naming, expressions, exported);
+        }
+    }
+}
+
+// The letrec candidates that lie on a mutual reference cycle: members of any strongly-connected
+// component of two or more nodes in the candidate reference graph (iterative Tarjan). A self-edge
+// alone never forms one, so pure self-recursion stays off the letrec path by construction.
+fn mutual_cycle_members(edges: &BTreeMap<Symbol, BTreeSet<Symbol>>) -> BTreeSet<Symbol> {
+    let symbols: Vec<Symbol> = edges.keys().copied().collect();
+    let index_of: BTreeMap<Symbol, usize> = symbols
+        .iter()
+        .enumerate()
+        .map(|(position, symbol)| (*symbol, position))
+        .collect();
+    let successors: Vec<Vec<usize>> = symbols
+        .iter()
+        .map(|symbol| {
+            edges[symbol]
+                .iter()
+                .filter_map(|target| index_of.get(target).copied())
+                .collect()
+        })
+        .collect();
+
+    const UNVISITED: usize = usize::MAX;
+    let node_count = symbols.len();
+    let mut index = vec![UNVISITED; node_count];
+    let mut low = vec![0usize; node_count];
+    let mut on_stack = vec![false; node_count];
+    let mut component_stack: Vec<usize> = Vec::new();
+    let mut next_index = 0usize;
+    struct Frame {
+        node: usize,
+        next_edge: usize,
+    }
+    let mut frames: Vec<Frame> = Vec::new();
+    let mut members = BTreeSet::new();
+
+    for start in 0..node_count {
+        if index[start] != UNVISITED {
+            continue;
+        }
+        index[start] = next_index;
+        low[start] = next_index;
+        next_index += 1;
+        component_stack.push(start);
+        on_stack[start] = true;
+        frames.push(Frame {
+            node: start,
+            next_edge: 0,
+        });
+        while let Some(frame) = frames.last_mut() {
+            let node = frame.node;
+            if frame.next_edge < successors[node].len() {
+                let target = successors[node][frame.next_edge];
+                frame.next_edge += 1;
+                if index[target] == UNVISITED {
+                    index[target] = next_index;
+                    low[target] = next_index;
+                    next_index += 1;
+                    component_stack.push(target);
+                    on_stack[target] = true;
+                    frames.push(Frame {
+                        node: target,
+                        next_edge: 0,
+                    });
+                } else if on_stack[target] {
+                    low[node] = low[node].min(index[target]);
+                }
+            } else {
+                if low[node] == index[node] {
+                    let mut component = Vec::new();
+                    loop {
+                        let member = component_stack
+                            .pop()
+                            .expect("component stack is non-empty at a root");
+                        on_stack[member] = false;
+                        component.push(member);
+                        if member == node {
+                            break;
+                        }
+                    }
+                    if component.len() >= 2 {
+                        members.extend(component.into_iter().map(|member| symbols[member]));
+                    }
+                }
+                frames.pop();
+                if let Some(parent) = frames.last() {
+                    let parent_node = parent.node;
+                    low[parent_node] = low[parent_node].min(low[node]);
+                }
+            }
+        }
+    }
+    members
+}
+
 #[cfg(test)]
 mod tests {
     use {
@@ -2647,8 +2803,9 @@ mod tests {
         let mut state = builtins_state();
         let a = state.fresh_variable();
         let b = state.fresh_variable();
+        // The entry count doubles as the id counter (dense table), so one assertion covers both
+        // leaked entries and leaked ids.
         let entry_count_before = state.entries.len();
-        let next_id_before = state.next_variable_id;
 
         let result = check(
             &mut state,
@@ -2669,10 +2826,10 @@ mod tests {
             "the partial binding of `a` must be reversed"
         );
         assert_eq!(state.entry(b), Some(&unbound()));
-        assert_eq!(state.entries.len(), entry_count_before, "no leaked entries");
         assert_eq!(
-            state.next_variable_id, next_id_before,
-            "no leaked variable ids"
+            state.entries.len(),
+            entry_count_before,
+            "no leaked entries or variable ids"
         );
     }
 
