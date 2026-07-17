@@ -13,7 +13,11 @@
 //! an undo log, so a failed probe leaves no trace.
 
 use crate::Db;
-use crate::types::{Atomic, Constraint, FunctionType, InferenceVar, Ty, TyKind, union_of};
+use crate::annotations::NamedDefinition;
+use crate::types::{
+    Atomic, Constraint, FunctionType, InferenceVar, Name, Ty, TyKind, substitute_rigid, union_of,
+};
+use rustc_hash::FxHashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Entry<'db> {
@@ -46,6 +50,9 @@ pub struct InferenceTable<'db> {
     /// Previous values of entries mutated below a snapshot boundary.
     undo: Vec<(InferenceVar, Entry<'db>)>,
     pub level: u32,
+    /// The project's `@type` / `@alias` definitions: aliases expand during
+    /// resolution, nominals project to their representation in compatibility.
+    pub definitions: FxHashMap<Name<'db>, NamedDefinition<'db>>,
 }
 
 impl<'db> InferenceTable<'db> {
@@ -123,9 +130,20 @@ impl<'db> InferenceTable<'db> {
         }
     }
 
-    /// Deep-resolve: replace every bound variable in the structure.
+    /// Deep-resolve: replace every bound variable in the structure and expand
+    /// alias applications. The depth cap is a resource guard against
+    /// self-referential aliases (`@alias A = list[A]`): past it a type stays
+    /// unexpanded rather than recursing on.
     pub fn resolve(&self, db: &'db dyn Db, ty: Ty<'db>) -> Ty<'db> {
+        self.resolve_at(db, ty, 0)
+    }
+
+    fn resolve_at(&self, db: &'db dyn Db, ty: Ty<'db>, depth: usize) -> Ty<'db> {
+        const RESOLVE_DEPTH_LIMIT: usize = 64;
         let shallow = self.shallow_resolve(db, ty);
+        if depth >= RESOLVE_DEPTH_LIMIT {
+            return shallow;
+        }
         match shallow.kind(db) {
             TyKind::Any
             | TyKind::Unknown
@@ -134,23 +152,26 @@ impl<'db> InferenceTable<'db> {
             | TyKind::Var(_)
             | TyKind::Rigid(_) => shallow,
             TyKind::Vector(element) => {
-                let element = self.resolve(db, *element);
+                let element = self.resolve_at(db, *element, depth + 1);
                 Ty::new(db, TyKind::Vector(element))
             }
             TyKind::NamedVector(element) => {
-                let element = self.resolve(db, *element);
+                let element = self.resolve_at(db, *element, depth + 1);
                 Ty::new(db, TyKind::NamedVector(element))
             }
             TyKind::List(element) => {
-                let element = self.resolve(db, *element);
+                let element = self.resolve_at(db, *element, depth + 1);
                 Ty::new(db, TyKind::List(element))
             }
             TyKind::NamedList(element) => {
-                let element = self.resolve(db, *element);
+                let element = self.resolve_at(db, *element, depth + 1);
                 Ty::new(db, TyKind::NamedList(element))
             }
             TyKind::Tuple(items) => {
-                let items = items.iter().map(|&item| self.resolve(db, item)).collect();
+                let items = items
+                    .iter()
+                    .map(|&item| self.resolve_at(db, item, depth + 1))
+                    .collect();
                 Ty::new(db, TyKind::Tuple(items))
             }
             TyKind::Record(fields) => {
@@ -158,57 +179,86 @@ impl<'db> InferenceTable<'db> {
                     .iter()
                     .map(|field| {
                         let mut field = field.clone();
-                        field.ty = self.resolve(db, field.ty);
+                        field.ty = self.resolve_at(db, field.ty, depth + 1);
                         field
                     })
                     .collect();
                 Ty::new(db, TyKind::Record(fields))
             }
             TyKind::Function(function) => {
-                let function = self.resolve_function(db, function);
+                let function = self.resolve_function_at(db, function, depth + 1);
                 Ty::new(db, TyKind::Function(function))
             }
             TyKind::Union(members) => {
                 // Members can collapse after resolution: re-normalize.
                 let members: Vec<Ty<'db>> = members
                     .iter()
-                    .map(|&member| self.resolve(db, member))
+                    .map(|&member| self.resolve_at(db, member, depth + 1))
                     .collect();
                 union_of(db, members)
             }
             TyKind::Named(name, arguments) => {
-                let arguments = arguments
+                let arguments: Vec<Ty<'db>> = arguments
                     .iter()
-                    .map(|&argument| self.resolve(db, argument))
+                    .map(|&argument| self.resolve_at(db, argument, depth + 1))
                     .collect();
+                // An alias is a transparent shorthand: it expands here and
+                // never survives into unification or compatibility.
+                if let Some(definition) = self.definitions.get(name)
+                    && definition.alias
+                {
+                    let expanded = apply_definition(db, definition, &arguments);
+                    return self.resolve_at(db, expanded, depth + 1);
+                }
                 Ty::new(db, TyKind::Named(*name, arguments))
             }
         }
     }
 
-    fn resolve_function(&self, db: &'db dyn Db, function: &FunctionType<'db>) -> FunctionType<'db> {
+    fn resolve_function_at(
+        &self,
+        db: &'db dyn Db,
+        function: &FunctionType<'db>,
+        depth: usize,
+    ) -> FunctionType<'db> {
         FunctionType {
             positional: function
                 .positional
                 .iter()
-                .map(|&ty| self.resolve(db, ty))
+                .map(|&ty| self.resolve_at(db, ty, depth))
                 .collect(),
             named: function
                 .named
                 .iter()
                 .map(|field| {
                     let mut field = field.clone();
-                    field.ty = self.resolve(db, field.ty);
+                    field.ty = self.resolve_at(db, field.ty, depth);
                     field
                 })
                 .collect(),
             variadic: function.variadic.as_ref().map(|rest| {
                 let mut rest = rest.clone();
-                rest.element = self.resolve(db, rest.element);
+                rest.element = self.resolve_at(db, rest.element, depth);
                 rest
             }),
-            ret: self.resolve(db, function.ret),
+            ret: self.resolve_at(db, function.ret, depth),
         }
+    }
+
+    /// A non-alias nominal's representation with its parameters applied;
+    /// `None` for aliases, opaque nominals (no representation), and unknown
+    /// names.
+    pub fn representation(
+        &self,
+        db: &'db dyn Db,
+        name: Name<'db>,
+        arguments: &[Ty<'db>],
+    ) -> Option<Ty<'db>> {
+        let definition = self.definitions.get(&name)?;
+        if definition.alias || matches!(definition.body.kind(db), TyKind::Unknown) {
+            return None;
+        }
+        Some(apply_definition(db, definition, arguments))
     }
 
     /// Bind `var` to `ty` after the occurs check and constraint admission.
@@ -604,27 +654,70 @@ impl<'db> InferenceTable<'db> {
                     .chain(variables)
                     .any(|member| self.compatible_probe(db, actual, member, depth + 1))
             }
-            // Nominal arguments check invariantly (both directions): without a
-            // representation definition the variance is unknown, and demanding
-            // an exact match over-rejects rather than admitting an unsound
-            // widening. (Equal opaque nominals already matched above.)
+            // Same-name nominals check each type argument in the direction
+            // its variance dictates: covariant for return/container/direct
+            // positions, contravariant for function-parameter positions,
+            // invariant (both directions) when a parameter occurs in
+            // conflicting positions or the definition is missing —
+            // conservative over-rejection, never an unsound widening.
             (
                 TyKind::Named(actual_name, actual_arguments),
                 TyKind::Named(expected_name, expected_arguments),
             ) if actual_name == expected_name
                 && actual_arguments.len() == expected_arguments.len() =>
             {
-                actual_arguments.iter().zip(expected_arguments.iter()).all(
-                    |(&actual_argument, &expected_argument)| {
-                        self.compatible_probe(db, actual_argument, expected_argument, depth + 1)
-                            && self.compatible_probe(
+                let variances = self
+                    .definitions
+                    .get(&actual_name)
+                    .map(|definition| parameter_variances(db, definition))
+                    .unwrap_or_default();
+                actual_arguments
+                    .iter()
+                    .zip(expected_arguments.iter())
+                    .enumerate()
+                    .all(|(index, (&actual_argument, &expected_argument))| {
+                        match variances.get(index).copied().unwrap_or(Variance::Invariant) {
+                            // The parameter never occurs in the
+                            // representation, so any argument is accepted.
+                            Variance::Bivariant => true,
+                            Variance::Covariant => self.compatible_probe(
+                                db,
+                                actual_argument,
+                                expected_argument,
+                                depth + 1,
+                            ),
+                            Variance::Contravariant => self.compatible_probe(
                                 db,
                                 expected_argument,
                                 actual_argument,
                                 depth + 1,
-                            )
-                    },
-                )
+                            ),
+                            Variance::Invariant => {
+                                self.compatible_probe(
+                                    db,
+                                    actual_argument,
+                                    expected_argument,
+                                    depth + 1,
+                                ) && self.compatible_probe(
+                                    db,
+                                    expected_argument,
+                                    actual_argument,
+                                    depth + 1,
+                                )
+                            }
+                        }
+                    })
+            }
+            // A nominal value is compatible with anything its representation
+            // is (the projection direction); the reverse — a structural value
+            // flowing INTO a nominal position — happens only through `@new`.
+            (TyKind::Named(actual_name, actual_arguments), _) => {
+                match self.representation(db, actual_name, &actual_arguments) {
+                    Some(representation) => {
+                        self.compatible_probe(db, representation, expected, depth + 1)
+                    }
+                    None => false,
+                }
             }
             // A scalar coerces into a vector position; a named vector drops
             // its names into a plain vector position. Element recursion lands
@@ -823,6 +916,184 @@ impl<'db> InferenceTable<'db> {
                 .any(|&argument| self.contains_unbound_var(db, argument)),
             _ => false,
         }
+    }
+}
+
+/// A definition's body with its parameters replaced by the given arguments
+/// (missing arguments fill as `Unknown`).
+pub fn apply_definition<'db>(
+    db: &'db dyn Db,
+    definition: &NamedDefinition<'db>,
+    arguments: &[Ty<'db>],
+) -> Ty<'db> {
+    if definition.parameters.is_empty() {
+        return definition.body;
+    }
+    let substitution: FxHashMap<Name<'db>, Ty<'db>> = definition
+        .parameters
+        .iter()
+        .enumerate()
+        .map(|(index, &parameter)| {
+            (
+                parameter,
+                arguments
+                    .get(index)
+                    .copied()
+                    .unwrap_or_else(|| crate::types::unknown(db)),
+            )
+        })
+        .collect();
+    substitute_rigid(db, definition.body, &substitution)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Variance {
+    /// The parameter never occurs in the representation.
+    Bivariant,
+    Covariant,
+    Contravariant,
+    /// The parameter occurs in conflicting positions.
+    Invariant,
+}
+
+/// Each parameter's variance, derived from where it occurs in the
+/// representation: covariant for direct/container/field/return positions,
+/// contravariant (flipped) under function parameters, invariant when both.
+pub fn parameter_variances<'db>(
+    db: &'db dyn Db,
+    definition: &NamedDefinition<'db>,
+) -> Vec<Variance> {
+    let mut positive = vec![false; definition.parameters.len()];
+    let mut negative = vec![false; definition.parameters.len()];
+    record_occurrences(
+        db,
+        definition.body,
+        &definition.parameters,
+        true,
+        &mut positive,
+        &mut negative,
+    );
+    positive
+        .into_iter()
+        .zip(negative)
+        .map(|(positive, negative)| match (positive, negative) {
+            (false, false) => Variance::Bivariant,
+            (true, false) => Variance::Covariant,
+            (false, true) => Variance::Contravariant,
+            (true, true) => Variance::Invariant,
+        })
+        .collect()
+}
+
+fn record_occurrences<'db>(
+    db: &'db dyn Db,
+    ty: Ty<'db>,
+    parameters: &[Name<'db>],
+    positive_position: bool,
+    positive: &mut [bool],
+    negative: &mut [bool],
+) {
+    match ty.kind(db) {
+        TyKind::Rigid(name) => {
+            if let Some(index) = parameters.iter().position(|parameter| parameter == name) {
+                if positive_position {
+                    positive[index] = true;
+                } else {
+                    negative[index] = true;
+                }
+            }
+        }
+        TyKind::Vector(inner)
+        | TyKind::NamedVector(inner)
+        | TyKind::List(inner)
+        | TyKind::NamedList(inner) => {
+            record_occurrences(
+                db,
+                *inner,
+                parameters,
+                positive_position,
+                positive,
+                negative,
+            );
+        }
+        TyKind::Tuple(items) => {
+            for &item in items {
+                record_occurrences(db, item, parameters, positive_position, positive, negative);
+            }
+        }
+        TyKind::Record(fields) => {
+            for field in fields {
+                record_occurrences(
+                    db,
+                    field.ty,
+                    parameters,
+                    positive_position,
+                    positive,
+                    negative,
+                );
+            }
+        }
+        TyKind::Function(function) => {
+            for &parameter in &function.positional {
+                record_occurrences(
+                    db,
+                    parameter,
+                    parameters,
+                    !positive_position,
+                    positive,
+                    negative,
+                );
+            }
+            for field in &function.named {
+                record_occurrences(
+                    db,
+                    field.ty,
+                    parameters,
+                    !positive_position,
+                    positive,
+                    negative,
+                );
+            }
+            if let Some(rest) = &function.variadic {
+                record_occurrences(
+                    db,
+                    rest.element,
+                    parameters,
+                    !positive_position,
+                    positive,
+                    negative,
+                );
+            }
+            record_occurrences(
+                db,
+                function.ret,
+                parameters,
+                positive_position,
+                positive,
+                negative,
+            );
+        }
+        TyKind::Union(members) => {
+            for &member in members {
+                record_occurrences(
+                    db,
+                    member,
+                    parameters,
+                    positive_position,
+                    positive,
+                    negative,
+                );
+            }
+        }
+        // A nested nominal application's variance is not composed here:
+        // conservative invariant (both directions).
+        TyKind::Named(_, arguments) => {
+            for &argument in arguments {
+                record_occurrences(db, argument, parameters, true, positive, negative);
+                record_occurrences(db, argument, parameters, false, positive, negative);
+            }
+        }
+        _ => {}
     }
 }
 

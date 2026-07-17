@@ -279,6 +279,44 @@ pub struct ProjectFiles {
     pub files: Vec<SourceFile>,
 }
 
+/// All `@type` / `@alias` definitions in a file's annotations, wherever they
+/// appear.
+#[salsa::tracked(returns(clone))]
+pub fn file_type_definitions<'db>(
+    db: &'db dyn Db,
+    file: SourceFile,
+) -> Vec<annotations::NamedDefinition<'db>> {
+    let parse = parse(db, file);
+    let root = parse.syntax_node();
+    let mut definitions = Vec::new();
+    for node in root
+        .descendants()
+        .filter(|node| node.kind() == syntax::SyntaxKind::ANNOTATION)
+    {
+        definitions.extend(annotations::lower_annotation(db, &node).definitions);
+    }
+    definitions
+}
+
+/// The project-wide type-definition environment: `@type` / `@alias` by name,
+/// later files (and later definitions within one file) winning.
+#[salsa::tracked(returns(clone))]
+pub fn project_type_definitions<'db>(
+    db: &'db dyn Db,
+    files: ProjectFiles,
+) -> rustc_hash::FxHashMap<types::Name<'db>, annotations::NamedDefinition<'db>> {
+    let mut definitions = rustc_hash::FxHashMap::default();
+    for &file in files.files(db) {
+        if *file.kind(db) != DocumentKind::Package {
+            continue;
+        }
+        for definition in file_type_definitions(db, file) {
+            definitions.insert(definition.name, definition);
+        }
+    }
+    definitions
+}
+
 /// The winning definition item per package-exported name: later files (and
 /// later assignments within one file) override earlier ones.
 #[salsa::tracked(returns(clone))]
@@ -428,6 +466,14 @@ impl<'db> check::GlobalEnv<'db> for SalsaGlobals<'db> {
         }
         let candidates = stubs::stubs(self.db)?.schemes.get(name)?;
         (candidates.len() > 1).then(|| candidates.clone())
+    }
+
+    fn type_definitions(
+        &self,
+    ) -> rustc_hash::FxHashMap<types::Name<'db>, annotations::NamedDefinition<'db>> {
+        ProjectFiles::try_get(self.db)
+            .map(|files| project_type_definitions(self.db, files))
+            .unwrap_or_default()
     }
 }
 

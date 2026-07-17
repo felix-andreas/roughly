@@ -26,6 +26,9 @@ pub struct Annotation<'db> {
     pub parameter_names: Vec<(String, Ty<'db>, bool)>,
     /// `@type` / `@alias` definitions carried by this annotation.
     pub definitions: Vec<NamedDefinition<'db>>,
+    /// `@new Name` / `@new Name<ARGS>` — the annotated value checks against
+    /// the nominal's representation and the binding takes the nominal type.
+    pub new_nominal: Option<(Name<'db>, Vec<Ty<'db>>)>,
     /// A `#: @strict` / `#: @strict off` toggle.
     pub strict: Option<bool>,
     /// `@trust TYPE` — the declared type applies unchecked.
@@ -33,10 +36,11 @@ pub struct Annotation<'db> {
     pub range: TextRange,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, salsa::SalsaValue)]
 pub struct NamedDefinition<'db> {
     pub alias: bool,
     pub name: Name<'db>,
+    /// Type parameters; the body references them as rigid variables.
     pub parameters: Vec<Name<'db>>,
     pub body: Ty<'db>,
 }
@@ -134,8 +138,16 @@ pub fn lower_annotation<'db>(db: &'db dyn Db, node: &SyntaxNode) -> Annotation<'
                             });
                         }
                     }
-                    // `@new`, `@if-unknown`, unknown directives: no typing
-                    // payload at this layer.
+                    "new" => {
+                        if let Some(ty_node) = child.children().find(|c| is_type_kind(c.kind())) {
+                            let lowered = lowering.lower_type(&ty_node);
+                            if let TyKind::Named(name, arguments) = lowered.kind(db) {
+                                annotation.new_nominal = Some((*name, arguments.clone()));
+                            }
+                        }
+                    }
+                    // `@if-unknown` and unknown directives: no typing payload
+                    // at this layer.
                     _ => {}
                 }
             }

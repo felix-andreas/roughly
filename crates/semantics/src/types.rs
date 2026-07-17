@@ -189,6 +189,95 @@ pub fn union_of<'db>(db: &'db dyn Db, members: impl IntoIterator<Item = Ty<'db>>
     }
 }
 
+/// Replace rigid variables per the substitution, leaving unmapped ones
+/// intact — how schemes instantiate and how type-definition parameters apply.
+pub fn substitute_rigid<'db>(
+    db: &'db dyn Db,
+    ty: Ty<'db>,
+    substitution: &rustc_hash::FxHashMap<Name<'db>, Ty<'db>>,
+) -> Ty<'db> {
+    match ty.kind(db).clone() {
+        TyKind::Rigid(name) => substitution.get(&name).copied().unwrap_or(ty),
+        TyKind::Vector(inner) => Ty::new(
+            db,
+            TyKind::Vector(substitute_rigid(db, inner, substitution)),
+        ),
+        TyKind::NamedVector(inner) => Ty::new(
+            db,
+            TyKind::NamedVector(substitute_rigid(db, inner, substitution)),
+        ),
+        TyKind::List(inner) => Ty::new(db, TyKind::List(substitute_rigid(db, inner, substitution))),
+        TyKind::NamedList(inner) => Ty::new(
+            db,
+            TyKind::NamedList(substitute_rigid(db, inner, substitution)),
+        ),
+        TyKind::Tuple(items) => Ty::new(
+            db,
+            TyKind::Tuple(
+                items
+                    .iter()
+                    .map(|&item| substitute_rigid(db, item, substitution))
+                    .collect(),
+            ),
+        ),
+        TyKind::Record(fields) => Ty::new(
+            db,
+            TyKind::Record(
+                fields
+                    .iter()
+                    .map(|field| {
+                        let mut field = field.clone();
+                        field.ty = substitute_rigid(db, field.ty, substitution);
+                        field
+                    })
+                    .collect(),
+            ),
+        ),
+        TyKind::Function(function) => Ty::new(
+            db,
+            TyKind::Function(FunctionType {
+                positional: function
+                    .positional
+                    .iter()
+                    .map(|&ty| substitute_rigid(db, ty, substitution))
+                    .collect(),
+                named: function
+                    .named
+                    .iter()
+                    .map(|field| {
+                        let mut field = field.clone();
+                        field.ty = substitute_rigid(db, field.ty, substitution);
+                        field
+                    })
+                    .collect(),
+                variadic: function.variadic.as_ref().map(|rest| {
+                    let mut rest = rest.clone();
+                    rest.element = substitute_rigid(db, rest.element, substitution);
+                    rest
+                }),
+                ret: substitute_rigid(db, function.ret, substitution),
+            }),
+        ),
+        TyKind::Union(members) => union_of(
+            db,
+            members
+                .iter()
+                .map(|&member| substitute_rigid(db, member, substitution)),
+        ),
+        TyKind::Named(name, arguments) => Ty::new(
+            db,
+            TyKind::Named(
+                name,
+                arguments
+                    .iter()
+                    .map(|&argument| substitute_rigid(db, argument, substitution))
+                    .collect(),
+            ),
+        ),
+        _ => ty,
+    }
+}
+
 /// Replace every inference variable in an (already-resolved) type with
 /// `Unknown`, for values that must survive a later table rollback: a stored
 /// variable id would dangle once the rollback reclaims (and later reuses) the

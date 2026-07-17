@@ -140,6 +140,11 @@ pub trait GlobalEnv<'db> {
         let _ = name;
         None
     }
+
+    /// The project's `@type` / `@alias` definitions by name.
+    fn type_definitions(&self) -> FxHashMap<Name<'db>, crate::annotations::NamedDefinition<'db>> {
+        FxHashMap::default()
+    }
 }
 
 pub fn check_item<'db>(db: &'db dyn Db, module: &Module, naming: &ItemNaming) -> ItemCheck<'db> {
@@ -153,12 +158,16 @@ pub fn check_item_with_annotation<'db>(
     annotation: Option<&crate::annotations::Annotation<'db>>,
     globals: Option<&dyn GlobalEnv<'db>>,
 ) -> ItemCheck<'db> {
+    let mut table = InferenceTable::default();
+    if let Some(globals) = globals {
+        table.definitions = globals.type_definitions();
+    }
     let mut context = Checker {
         db,
         module,
         naming,
         globals,
-        table: InferenceTable::default(),
+        table,
         environment: Environment::default(),
         scheme_arena: Vec::new(),
         rigid_constraints: FxHashMap::default(),
@@ -201,27 +210,33 @@ pub fn check_item_with_annotation<'db>(
             (ExpressionKind::Assign { value, .. }, _) => {
                 let root_ty = context.infer(root);
                 let value_ty = context.recorded.get(value).copied().unwrap_or(root_ty);
-                scheme = match annotation.and_then(|a| a.declared.clone()) {
-                    // A declared non-function type (or a trusted one): the
-                    // declaration is the contract.
-                    Some(declared) => {
-                        if annotation.is_some_and(|a| !a.trusted) {
-                            let expected = declared.body;
-                            if matches!(
-                                declared.body.kind(db),
-                                TyKind::Scalar(_)
-                                    | TyKind::Null
-                                    | TyKind::Vector(_)
-                                    | TyKind::List(_)
-                                    | TyKind::Union(_)
-                            ) {
-                                let range = module.expression(*value).range;
-                                context.unify_or_report(range, expected, value_ty);
+                scheme = if let Some((new_name, new_arguments)) =
+                    annotation.and_then(|a| a.new_nominal.clone())
+                {
+                    Some(context.check_new_nominal(new_name, &new_arguments, *value, value_ty))
+                } else {
+                    match annotation.and_then(|a| a.declared.clone()) {
+                        // A declared non-function type (or a trusted one):
+                        // the declaration is the contract.
+                        Some(declared) => {
+                            if annotation.is_some_and(|a| !a.trusted) {
+                                let expected = declared.body;
+                                if matches!(
+                                    declared.body.kind(db),
+                                    TyKind::Scalar(_)
+                                        | TyKind::Null
+                                        | TyKind::Vector(_)
+                                        | TyKind::List(_)
+                                        | TyKind::Union(_)
+                                ) {
+                                    let range = module.expression(*value).range;
+                                    context.unify_or_report(range, expected, value_ty);
+                                }
                             }
+                            Some(declared)
                         }
-                        Some(declared)
+                        None => Some(context.generalize(value_ty)),
                     }
-                    None => Some(context.generalize(value_ty)),
                 };
             }
             _ => {
@@ -1154,7 +1169,7 @@ impl<'db> Checker<'db, '_> {
     ) -> Ty<'db> {
         let sequence_range = self.module.expression(sequence).range;
         let inferred = self.infer(sequence);
-        let resolved = self.table.resolve(self.db, inferred);
+        let resolved = self.structural(inferred);
         let element = match self.iteration_element(resolved) {
             Ok(element) => element,
             Err(found) => {
@@ -1516,7 +1531,7 @@ impl<'db> Checker<'db, '_> {
     fn infer_unary_minus(&mut self, operand: ExprId) -> Ty<'db> {
         let operand_range = self.module.expression(operand).range;
         let inferred = self.infer(operand);
-        let resolved = self.table.resolve(self.db, inferred);
+        let resolved = self.structural(inferred);
         match self.classify_numeric_operand(resolved) {
             NumericOperand::Concrete(shape, atomic) => self.shaped(shape, atomic),
             // Member-wise over a union operand: negation preserves each
@@ -1557,7 +1572,7 @@ impl<'db> Checker<'db, '_> {
     fn infer_unary_not(&mut self, operand: ExprId) -> Ty<'db> {
         let operand_range = self.module.expression(operand).range;
         let inferred = self.infer(operand);
-        let resolved = self.table.resolve(self.db, inferred);
+        let resolved = self.structural(inferred);
         match resolved.kind(self.db) {
             TyKind::Scalar(Atomic::Logical) => scalar(self.db, Atomic::Logical),
             TyKind::Vector(element) | TyKind::NamedVector(element)
@@ -1628,7 +1643,7 @@ impl<'db> Checker<'db, '_> {
     fn expect_scalar_logical(&mut self, condition: ExprId) {
         let condition_range = self.module.expression(condition).range;
         let inferred = self.infer(condition);
-        let resolved = self.table.resolve(self.db, inferred);
+        let resolved = self.structural(inferred);
         self.unify_or_report(condition_range, scalar(self.db, Atomic::Logical), resolved);
     }
 
@@ -1648,8 +1663,8 @@ impl<'db> Checker<'db, '_> {
         let rhs_range = self.module.expression(rhs).range;
         let lhs_ty = self.infer(lhs);
         let rhs_ty = self.infer(rhs);
-        let resolved_left = self.table.resolve(self.db, lhs_ty);
-        let resolved_right = self.table.resolve(self.db, rhs_ty);
+        let resolved_left = self.structural(lhs_ty);
+        let resolved_right = self.structural(rhs_ty);
         let left = self.classify_numeric_operand(resolved_left);
         let right = self.classify_numeric_operand(resolved_right);
 
@@ -1808,7 +1823,7 @@ impl<'db> Checker<'db, '_> {
             let operand_range = self.module.expression(operand).range;
             let whole_literal = self.is_whole_double(operand);
             let inferred = self.infer(operand);
-            let resolved = self.table.resolve(self.db, inferred);
+            let resolved = self.structural(inferred);
             match resolved.kind(self.db) {
                 TyKind::Scalar(Atomic::Integer) => {}
                 TyKind::Scalar(Atomic::Double) if whole_literal => {}
@@ -1857,8 +1872,8 @@ impl<'db> Checker<'db, '_> {
         let rhs_range = self.module.expression(rhs).range;
         let lhs_ty = self.infer(lhs);
         let rhs_ty = self.infer(rhs);
-        let resolved_left = self.table.resolve(self.db, lhs_ty);
-        let resolved_right = self.table.resolve(self.db, rhs_ty);
+        let resolved_left = self.structural(lhs_ty);
+        let resolved_right = self.structural(rhs_ty);
         if matches!(resolved_left.kind(self.db), TyKind::Any | TyKind::Unknown)
             || matches!(resolved_right.kind(self.db), TyKind::Any | TyKind::Unknown)
         {
@@ -2161,10 +2176,25 @@ impl<'db> Checker<'db, '_> {
             .pop()
             .expect("return frames stay balanced around body inference");
         let body_ty = self.join_early_returns(early_returns, trailing_ty);
-        // An Unknown declared return (elided `->`) constrains nothing.
+        // The body's value only needs to be *compatible* with the declared
+        // return (covariant, like an argument against a parameter), so a body
+        // returning `integer` satisfies a declared `integer | NULL` — and an
+        // alias-typed declaration checks through its expansion. An Unknown
+        // declared return (elided `->`) constrains nothing.
         if !matches!(declared.ret.kind(self.db), TyKind::Unknown) {
             let body_range = self.module.expression(*body).range;
-            self.unify_or_report(body_range, declared.ret, body_ty);
+            let resolved_body = self.table.resolve(self.db, body_ty);
+            if !matches!(resolved_body.kind(self.db), TyKind::Unknown)
+                && !self.table.compatible(self.db, resolved_body, declared.ret)
+            {
+                self.errors.push(TypeError {
+                    range: body_range,
+                    kind: TypeErrorKind::Mismatch {
+                        expected: declared.ret,
+                        found: resolved_body,
+                    },
+                });
+            }
         }
         self.environment.rollback(mark);
         self.reapply_enclosing_writes(pending_mark);
@@ -2258,7 +2288,7 @@ impl<'db> Checker<'db, '_> {
             };
             let argument_range = self.module.expression(value).range;
             let inferred = self.infer(value);
-            let resolved = self.table.resolve(self.db, inferred);
+            let resolved = self.structural(inferred);
             if matches!(resolved.kind(self.db), TyKind::Null) {
                 continue;
             }
@@ -3120,6 +3150,81 @@ impl<'db> Checker<'db, '_> {
         })
     }
 
+    /// `@new Name` — nominal introduction: the value's structural type checks
+    /// against the nominal's representation (binding any type-parameter
+    /// arguments through compatibility, which is how a generic nominal infers
+    /// its arguments from inference-variable fields), and the binding takes
+    /// the nominal type.
+    fn check_new_nominal(
+        &mut self,
+        name: Name<'db>,
+        given_arguments: &[Ty<'db>],
+        value: ExprId,
+        value_ty: Ty<'db>,
+    ) -> TypeScheme<'db> {
+        let range = self.module.expression(value).range;
+        let Some(definition) = self.table.definitions.get(&name).cloned() else {
+            return self.generalize(value_ty);
+        };
+        if definition.alias {
+            return self.generalize(value_ty);
+        }
+        // A fully applied `@new Box<integer>` uses the given arguments; an
+        // unapplied generic falls back to inferring them through the
+        // representation check. Argument variables live one level up so
+        // leftover (undetermined) parameters generalize into the scheme.
+        self.table.level += 1;
+        let arguments: Vec<Ty<'db>> = if given_arguments.len() == definition.parameters.len() {
+            given_arguments.to_vec()
+        } else {
+            definition
+                .parameters
+                .iter()
+                .map(|_| self.fresh(Constraint::Unconstrained))
+                .collect()
+        };
+        let nominal = Ty::new(self.db, TyKind::Named(name, arguments.clone()));
+        if !matches!(definition.body.kind(self.db), TyKind::Unknown) {
+            let representation = crate::infer::apply_definition(self.db, &definition, &arguments);
+            let resolved_value = self.table.resolve(self.db, value_ty);
+            if !self
+                .table
+                .compatible(self.db, resolved_value, representation)
+            {
+                self.errors.push(TypeError {
+                    range,
+                    kind: TypeErrorKind::Mismatch {
+                        expected: self.table.resolve(self.db, nominal),
+                        found: resolved_value,
+                    },
+                });
+            }
+        }
+        self.table.level -= 1;
+        self.generalize(nominal)
+    }
+
+    /// Resolve, then project non-alias nominals to their representation —
+    /// operators and indexing need a structural shape, and a nominal value is
+    /// compatible with its representation. Opaque nominals (no
+    /// representation) stay `Named`; the loop bound guards recursive
+    /// representations.
+    fn structural(&mut self, ty: Ty<'db>) -> Ty<'db> {
+        let mut current = self.table.resolve(self.db, ty);
+        for _ in 0..16 {
+            let TyKind::Named(name, arguments) = current.kind(self.db) else {
+                break;
+            };
+            match self.table.representation(self.db, *name, arguments) {
+                Some(representation) => {
+                    current = self.table.resolve(self.db, representation);
+                }
+                None => break,
+            }
+        }
+        current
+    }
+
     /// `x[[i]]` / `x[i]`: the subject and every index infer first regardless
     /// of shape, so names inside an unsupported form (`m[i, j]`) still
     /// resolve and get their own diagnostics.
@@ -3136,7 +3241,7 @@ impl<'db> Checker<'db, '_> {
                 self.infer(value);
             }
         }
-        let subject = self.table.resolve(self.db, target_ty);
+        let subject = self.structural(target_ty);
         // An Unknown/Any subject stays Unknown/Any even under an unsupported
         // index shape — the subject's own gap was already diagnosed, so
         // `m[i, j]` must not cascade an arity error. A sealed nominal
@@ -3334,7 +3439,7 @@ impl<'db> Checker<'db, '_> {
         let Some(name) = name else {
             return self.unknown();
         };
-        let subject = self.table.resolve(self.db, target_ty);
+        let subject = self.structural(target_ty);
         match self.dollar_result(range, subject, &name) {
             Ok(ty) => ty,
             Err(error) => {
@@ -3596,91 +3701,7 @@ impl<'db> Checker<'db, '_> {
             let fresh = self.fresh(*constraint);
             substitution.insert(*name, fresh);
         }
-        self.substitute_rigid(scheme.body, &substitution)
-    }
-
-    fn substitute_rigid(
-        &mut self,
-        ty: Ty<'db>,
-        substitution: &FxHashMap<Name<'db>, Ty<'db>>,
-    ) -> Ty<'db> {
-        match ty.kind(self.db).clone() {
-            TyKind::Rigid(name) => substitution.get(&name).copied().unwrap_or(ty),
-            TyKind::Vector(inner) => {
-                let inner = self.substitute_rigid(inner, substitution);
-                Ty::new(self.db, TyKind::Vector(inner))
-            }
-            TyKind::NamedVector(inner) => {
-                let inner = self.substitute_rigid(inner, substitution);
-                Ty::new(self.db, TyKind::NamedVector(inner))
-            }
-            TyKind::List(inner) => {
-                let inner = self.substitute_rigid(inner, substitution);
-                Ty::new(self.db, TyKind::List(inner))
-            }
-            TyKind::NamedList(inner) => {
-                let inner = self.substitute_rigid(inner, substitution);
-                Ty::new(self.db, TyKind::NamedList(inner))
-            }
-            TyKind::Tuple(items) => {
-                let items = items
-                    .iter()
-                    .map(|&item| self.substitute_rigid(item, substitution))
-                    .collect();
-                Ty::new(self.db, TyKind::Tuple(items))
-            }
-            TyKind::Record(fields) => {
-                let fields = fields
-                    .iter()
-                    .map(|field| {
-                        let mut field = field.clone();
-                        field.ty = self.substitute_rigid(field.ty, substitution);
-                        field
-                    })
-                    .collect();
-                Ty::new(self.db, TyKind::Record(fields))
-            }
-            TyKind::Function(function) => {
-                let function = FunctionType {
-                    positional: function
-                        .positional
-                        .iter()
-                        .map(|&ty| self.substitute_rigid(ty, substitution))
-                        .collect(),
-                    named: function
-                        .named
-                        .iter()
-                        .map(|field| {
-                            let mut field = field.clone();
-                            field.ty = self.substitute_rigid(field.ty, substitution);
-                            field
-                        })
-                        .collect(),
-                    variadic: function.variadic.as_ref().map(|rest| {
-                        let mut rest = rest.clone();
-                        rest.element = self.substitute_rigid(rest.element, substitution);
-                        rest
-                    }),
-                    ret: self.substitute_rigid(function.ret, substitution),
-                };
-                Ty::new(self.db, TyKind::Function(function))
-            }
-            TyKind::Union(members) => {
-                let members: Vec<Ty<'db>> = members
-                    .iter()
-                    .map(|&member| self.substitute_rigid(member, substitution))
-                    .collect();
-                union_of(self.db, members)
-            }
-            TyKind::Named(name, arguments) => {
-                let arguments = arguments
-                    .iter()
-                    .map(|&argument| self.substitute_rigid(argument, substitution))
-                    .collect();
-                Ty::new(self.db, TyKind::Named(name, arguments))
-            }
-            _ => ty,
-        }
+        crate::types::substitute_rigid(self.db, scheme.body, &substitution)
     }
 }
 
