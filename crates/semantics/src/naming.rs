@@ -382,9 +382,7 @@ impl Context<'_> {
                             let function_depth = self.current_function_depth();
                             (0..function_depth)
                                 .rev()
-                                .find_map(|depth| {
-                                    self.scopes[depth].slots.get(name).map(|&slot| slot)
-                                })
+                                .find_map(|depth| self.scopes[depth].slots.get(name).copied())
                         };
                         match enclosing {
                             Some(slot) => {
