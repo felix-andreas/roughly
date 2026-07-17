@@ -8,6 +8,7 @@ publish = false
 path = "src/semantics.rs"
 
 [dependencies]
+rowan.workspace = true
 rustc-hash.workspace = true
 salsa.workspace = true
 syntax = { path = "../syntax" }
