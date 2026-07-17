@@ -80,6 +80,7 @@ pub fn resolve_item(module: &Module) -> ItemNaming {
         writes: Vec::new(),
         write_by_expression: FxHashMap::default(),
         emit: true,
+        quiet_depth: 0,
         naming: ItemNaming::default(),
     };
     if let Some(root) = module.root {
@@ -147,6 +148,9 @@ struct Context<'a> {
     /// Diagnostic-bearing sets are recorded only on a loop region's final walk
     /// (used-marking is monotone and always on).
     emit: bool,
+    /// Non-zero inside an unsupported operator's operands: reads resolve but
+    /// unresolved names stay quiet.
+    quiet_depth: u32,
     naming: ItemNaming,
 }
 
@@ -215,9 +219,31 @@ impl Context<'_> {
                     self.resolve(*operand);
                 }
             }
-            ExpressionKind::Binary { lhs, rhs, .. } => {
-                self.resolve(*lhs);
-                self.resolve(*rhs);
+            ExpressionKind::Binary { operator, lhs, rhs } => {
+                use crate::hir::BinaryOperator;
+                match operator {
+                    // A formula quotes its operands: names inside are model
+                    // syntax, exactly like the unary form.
+                    BinaryOperator::Tilde | BinaryOperator::Help => {}
+                    // Operands of operators the checker does not model
+                    // (`&`/`|`, `|>`, user `%op%`s) still resolve — the IDE
+                    // needs goto/references inside pipes — but a non-local
+                    // read there stays quiet: the construct is opaque, so an
+                    // unresolved name in it is not a reportable finding.
+                    BinaryOperator::And
+                    | BinaryOperator::Or
+                    | BinaryOperator::Pipe
+                    | BinaryOperator::Special => {
+                        self.quiet_depth += 1;
+                        self.resolve(*lhs);
+                        self.resolve(*rhs);
+                        self.quiet_depth -= 1;
+                    }
+                    _ => {
+                        self.resolve(*lhs);
+                        self.resolve(*rhs);
+                    }
+                }
             }
             ExpressionKind::Call { callee, arguments } => {
                 self.resolve(*callee);
@@ -460,7 +486,7 @@ impl Context<'_> {
                 }
             }
             None => {
-                if self.emit {
+                if self.emit && self.quiet_depth == 0 {
                     self.naming.non_locals.insert(id, name.to_owned());
                 }
             }

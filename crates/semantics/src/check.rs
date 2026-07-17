@@ -123,9 +123,34 @@ pub struct ItemCheck<'db> {
     /// Per-expression resolved types (post-substitution).
     pub expression_types: FxHashMap<ExprId, Ty<'db>>,
     pub errors: Vec<TypeError<'db>>,
+    /// Places the checker genuinely could not determine a type — the strict
+    /// check's input. Inference is untouched; these only become diagnostics
+    /// under `[check] strict` or the per-file directive.
+    pub strict_origins: Vec<StrictOrigin>,
     /// The generalized scheme of the item's top-level binding value, when the
     /// item is a definition.
     pub scheme: Option<TypeScheme<'db>>,
+}
+
+/// One `Unknown` origin: where an undetermined type was first introduced
+/// (propagation is never re-reported).
+#[derive(Debug, Clone, PartialEq, Eq, salsa::SalsaValue)]
+pub struct StrictOrigin {
+    /// The originating expression (for assignment-value phrasing) and its
+    /// item-relative range.
+    pub expression: ExprId,
+    pub range: TextRange,
+    pub kind: StrictOriginKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, salsa::SalsaValue)]
+pub enum StrictOriginKind {
+    /// A syntactically valid construct the checker does not model.
+    UnsupportedConstruct,
+    /// A reference that resolved to a binding with no known type.
+    UndeterminedReference(String),
+    /// A variable widened to `Unknown` at the loop fixed-point cap.
+    LoopWidened(String),
 }
 
 /// Resolver for names that are not item-local: package globals and the stdlib
@@ -173,6 +198,7 @@ pub fn check_item_with_annotation<'db>(
         rigid_constraints: FxHashMap::default(),
         recorded: FxHashMap::default(),
         errors: Vec::new(),
+        strict_origins: Vec::new(),
         overload_probe_depth: 0,
         return_frames: Vec::new(),
         pending_enclosing_writes: Vec::new(),
@@ -252,6 +278,7 @@ pub fn check_item_with_annotation<'db>(
     ItemCheck {
         expression_types,
         errors: context.errors,
+        strict_origins: context.strict_origins,
         scheme,
     }
 }
@@ -325,6 +352,7 @@ struct Checker<'db, 'a> {
     rigid_constraints: FxHashMap<Name<'db>, Constraint>,
     recorded: FxHashMap<ExprId, Ty<'db>>,
     errors: Vec<TypeError<'db>>,
+    strict_origins: Vec<StrictOrigin>,
     /// Non-zero while a strict overload-selection round probes a candidate:
     /// the literal-as-integer courtesy is off, so it cannot decide which
     /// candidate wins (exact matches outrank conversions).
@@ -574,6 +602,20 @@ impl<'db> Checker<'db, '_> {
         crate::types::unknown(self.db)
     }
 
+    /// Record where an undetermined type was introduced (idempotent: loop
+    /// re-walks and re-passes must not duplicate an origin).
+    fn record_strict_origin(&mut self, expression: ExprId, kind: StrictOriginKind) {
+        let range = self.module.expression(expression).range;
+        let origin = StrictOrigin {
+            expression,
+            range,
+            kind,
+        };
+        if !self.strict_origins.contains(&origin) {
+            self.strict_origins.push(origin);
+        }
+    }
+
     fn fresh(&mut self, constraint: Constraint) -> Ty<'db> {
         self.table.fresh_ty(self.db, constraint)
     }
@@ -620,15 +662,15 @@ impl<'db> Checker<'db, '_> {
             }
             ExpressionKind::Unary { operator, operand } => {
                 let (operator, operand) = (*operator, *operand);
-                self.infer_unary(operator, operand)
+                self.infer_unary(id, operator, operand)
             }
             ExpressionKind::Binary { operator, lhs, rhs } => {
                 let (operator, lhs, rhs) = (*operator, *lhs, *rhs);
-                self.infer_binary(range, operator, lhs, rhs)
+                self.infer_binary(id, range, operator, lhs, rhs)
             }
             ExpressionKind::Call { callee, arguments } => {
                 let arguments = arguments.clone();
-                self.infer_call_expression(range, *callee, &arguments)
+                self.infer_call_expression(id, range, *callee, &arguments)
             }
             ExpressionKind::Index {
                 double,
@@ -638,23 +680,36 @@ impl<'db> Checker<'db, '_> {
                 let double = *double;
                 let target = *target;
                 let arguments = arguments.clone();
-                self.infer_index(range, double, target, &arguments)
+                self.infer_index(id, range, double, target, &arguments)
             }
             ExpressionKind::Field { at, target, name } => {
                 let at = *at;
                 let target = *target;
                 let name = name.clone();
-                self.infer_field(range, at, target, name)
+                self.infer_field(id, range, at, target, name)
             }
             // `pkg::name` resolves the name through the global environment
             // (which package's namespace actually exports it is not modeled).
-            ExpressionKind::Namespace { name, .. } => match name
-                .clone()
-                .and_then(|name| self.globals.and_then(|globals| globals.scheme(&name)))
-            {
-                Some(namespace_scheme) => self.instantiate(&namespace_scheme),
-                None => self.unknown(),
-            },
+            ExpressionKind::Namespace { name, .. } => {
+                let name = name.clone();
+                match name
+                    .as_ref()
+                    .and_then(|name| self.globals.and_then(|globals| globals.scheme(name)))
+                {
+                    Some(namespace_scheme) => self.instantiate(&namespace_scheme),
+                    None => {
+                        // An unvalidated qualified read: Unknown, and a
+                        // strict origin.
+                        if let Some(name) = name {
+                            self.record_strict_origin(
+                                id,
+                                StrictOriginKind::UndeterminedReference(name),
+                            );
+                        }
+                        self.unknown()
+                    }
+                }
+            }
             // R parameters are always matchable by name and by position, so
             // inferred function types carry every formal as a named parameter
             // (optional when it defaults); a `...` formal becomes a rest
@@ -736,21 +791,21 @@ impl<'db> Checker<'db, '_> {
                 ..
             } => {
                 let (variable_range, sequence, body) = (*variable_range, *sequence, *body);
-                self.infer_for(variable_range, sequence, body)
+                self.infer_for(id, variable_range, sequence, body)
             }
             // The condition re-evaluates before every iteration, so its reads
             // also see the loop's joined state — it checks inside the fixed
             // point.
             ExpressionKind::While { condition, body } => {
                 let (condition, body) = (*condition, *body);
-                self.check_loop_body(Some(condition), body, false, None);
+                self.check_loop_body(id, Some(condition), body, false, None);
                 crate::types::null(self.db)
             }
             // `repeat` runs at least once, so the body's exit state applies
             // after the loop (back edges still join inside it).
             ExpressionKind::Repeat { body } => {
                 let body = *body;
-                self.check_loop_body(None, body, true, None);
+                self.check_loop_body(id, None, body, true, None);
                 crate::types::null(self.db)
             }
             // `local(expr)` evaluates its body in a fresh environment: the
@@ -803,13 +858,21 @@ impl<'db> Checker<'db, '_> {
 
     fn infer_read(&mut self, id: ExprId) -> Ty<'db> {
         let Some(&slot) = self.naming.resolutions.get(&id) else {
-            // A non-local read: resolve through the package interface (and, in
-            // a later slice, the stub corpus). Unresolved reads stay silent
-            // Unknown; naming owns the could-not-resolve diagnostic.
-            if let Some(name) = self.naming.non_locals.get(&id)
-                && let Some(scheme) = self.globals.and_then(|globals| globals.scheme(name))
+            // A non-local read resolves through the package interface and the
+            // stub corpus. Unresolved reads stay silent Unknown (naming owns
+            // the unresolved diagnostic); a read that RESOLVES to a binding
+            // with no known type is a strict origin.
+            if let Some(name) = self.naming.non_locals.get(&id).cloned()
+                && let Some(scheme) = self.globals.and_then(|globals| globals.scheme(&name))
             {
-                return self.instantiate(&scheme);
+                let instantiated = self.instantiate(&scheme);
+                if matches!(
+                    self.table.resolve(self.db, instantiated).kind(self.db),
+                    TyKind::Unknown
+                ) {
+                    self.record_strict_origin(id, StrictOriginKind::UndeterminedReference(name));
+                }
+                return instantiated;
             }
             return self.unknown();
         };
@@ -932,6 +995,7 @@ impl<'db> Checker<'db, '_> {
         let Some(base) = base else {
             // The accessor spine has no variable at its root (`f(x)$a <- v`);
             // R rejects this shape at run time, so refuse rather than guess.
+            self.record_strict_origin(target, StrictOriginKind::UnsupportedConstruct);
             return;
         };
         let prior = self.infer(base);
@@ -1163,6 +1227,7 @@ impl<'db> Checker<'db, '_> {
     /// (re-initialized every iteration, invisible after the loop).
     fn infer_for(
         &mut self,
+        loop_expression: ExprId,
         variable_range: Option<TextRange>,
         sequence: ExprId,
         body: ExprId,
@@ -1187,7 +1252,13 @@ impl<'db> Checker<'db, '_> {
                 .find(|(_, info)| info.range == variable_range)
                 .map(|(id, _)| *id)
         });
-        self.check_loop_body(None, body, false, loop_slot.map(|slot| (slot, element)));
+        self.check_loop_body(
+            loop_expression,
+            None,
+            body,
+            false,
+            loop_slot.map(|slot| (slot, element)),
+        );
         crate::types::null(self.db)
     }
 
@@ -1234,6 +1305,7 @@ impl<'db> Checker<'db, '_> {
     /// their exit state after the loop instead of the zero-iterations join.
     fn check_loop_body(
         &mut self,
+        loop_expression: ExprId,
         condition: Option<ExprId>,
         body: ExprId,
         runs_at_least_once: bool,
@@ -1244,6 +1316,7 @@ impl<'db> Checker<'db, '_> {
         loop {
             passes += 1;
             let errors_mark = self.errors.len();
+            let origins_mark = self.strict_origins.len();
             let mark = self.environment.mark();
             if let Some((slot, element)) = loop_variable {
                 self.environment.set(slot, EnvEntry::Mono(element));
@@ -1273,12 +1346,24 @@ impl<'db> Checker<'db, '_> {
             if passes >= LOOP_PASS_CAP {
                 for slot in changed {
                     self.environment.set(slot, EnvEntry::Mono(self.unknown()));
+                    if let Some(name) = self
+                        .naming
+                        .bindings
+                        .get(&slot)
+                        .map(|info| info.name.clone())
+                    {
+                        self.record_strict_origin(
+                            loop_expression,
+                            StrictOriginKind::LoopWidened(name),
+                        );
+                    }
                 }
                 return;
             }
             // Not yet stable: this pass ran under a stale entry state, so its
             // diagnostics are discarded and the body re-checks.
             self.errors.truncate(errors_mark);
+            self.strict_origins.truncate(origins_mark);
         }
     }
 
@@ -1514,7 +1599,7 @@ impl<'db> Checker<'db, '_> {
         }
     }
 
-    fn infer_unary(&mut self, operator: UnaryOperator, operand: ExprId) -> Ty<'db> {
+    fn infer_unary(&mut self, id: ExprId, operator: UnaryOperator, operand: ExprId) -> Ty<'db> {
         match operator {
             UnaryOperator::Minus => self.infer_unary_minus(operand),
             UnaryOperator::Not => self.infer_unary_not(operand),
@@ -1522,6 +1607,7 @@ impl<'db> Checker<'db, '_> {
             // constructs: sound-by-refusal Unknown.
             UnaryOperator::Plus | UnaryOperator::Tilde | UnaryOperator::Help => {
                 self.infer(operand);
+                self.record_strict_origin(id, StrictOriginKind::UnsupportedConstruct);
                 self.unknown()
             }
         }
@@ -1606,6 +1692,7 @@ impl<'db> Checker<'db, '_> {
 
     fn infer_binary(
         &mut self,
+        id: ExprId,
         range: TextRange,
         operator: BinaryOperator,
         lhs: ExprId,
@@ -1629,10 +1716,17 @@ impl<'db> Checker<'db, '_> {
             }
             // Elementwise `&`/`|`, `%op%` specials, the `|>` pipe, `~`
             // formulas, and `?` help are unsupported constructs:
-            // sound-by-refusal Unknown (the operands still infer).
+            // sound-by-refusal Unknown. The operands still infer (their types
+            // stay recorded for the IDE) but their diagnostics are discarded —
+            // the construct is opaque, so nothing inside it is judged.
             And | Or | Special | Pipe | Tilde | Help => {
+                let errors_mark = self.errors.len();
+                let origins_mark = self.strict_origins.len();
                 self.infer(lhs);
                 self.infer(rhs);
+                self.errors.truncate(errors_mark);
+                self.strict_origins.truncate(origins_mark);
+                self.record_strict_origin(id, StrictOriginKind::UnsupportedConstruct);
                 self.unknown()
             }
         }
@@ -2214,11 +2308,13 @@ impl<'db> Checker<'db, '_> {
         let body_mark = self.environment.mark();
         let body_snapshot = self.table.snapshot();
         let errors_mark = self.errors.len();
+        let origins_mark = self.strict_origins.len();
         let mut trailing_ty = self.infer(body);
         if self.capture_repass_needed {
             self.environment.rollback(body_mark);
             self.table.rollback(body_snapshot);
             self.errors.truncate(errors_mark);
+            self.strict_origins.truncate(origins_mark);
             self.pending_enclosing_writes.truncate(pending_mark);
             if let Some(frame) = self.return_frames.last_mut() {
                 frame.clear();
@@ -2246,13 +2342,14 @@ impl<'db> Checker<'db, '_> {
     /// infers the callee and dispatches on its type.
     fn infer_call_expression(
         &mut self,
+        id: ExprId,
         range: TextRange,
         callee: ExprId,
         arguments: &[Argument],
     ) -> Ty<'db> {
         if let ExpressionKind::NameRef(name) = &self.module.expression(callee).kind {
             let builtin = match name.as_str() {
-                "c" => Some(self.infer_combine(arguments)),
+                "c" => Some(self.infer_combine(id, arguments)),
                 "list" => Some(self.infer_list(range, arguments)),
                 "switch" => Some(self.infer_switch(range, arguments)),
                 "return" => Some(self.infer_return(arguments)),
@@ -2274,7 +2371,7 @@ impl<'db> Checker<'db, '_> {
     /// double < complex < character; `raw` only combines with itself), drops
     /// `NULL` arguments (`c(x, NULL)` is `c(x)`, `c()` is `NULL`), and keeps
     /// names: an all-named call builds a map-like vector.
-    fn infer_combine(&mut self, arguments: &[Argument]) -> Ty<'db> {
+    fn infer_combine(&mut self, id: ExprId, arguments: &[Argument]) -> Ty<'db> {
         if arguments.is_empty() {
             return crate::types::null(self.db);
         }
@@ -2301,7 +2398,12 @@ impl<'db> Checker<'db, '_> {
             // rejection or an unsound concrete claim. The variable stays
             // unconstrained, mirroring `$`/`[[`/`[` on the same subject.
             match resolved.kind(self.db) {
-                TyKind::Any | TyKind::Unknown | TyKind::Var(_) | TyKind::Rigid(_) => {
+                TyKind::Any | TyKind::Unknown => {
+                    result_indeterminate = true;
+                    continue;
+                }
+                TyKind::Var(_) | TyKind::Rigid(_) => {
+                    self.record_strict_origin(id, StrictOriginKind::UnsupportedConstruct);
                     result_indeterminate = true;
                     continue;
                 }
@@ -3230,6 +3332,7 @@ impl<'db> Checker<'db, '_> {
     /// resolve and get their own diagnostics.
     fn infer_index(
         &mut self,
+        id: ExprId,
         range: TextRange,
         double: bool,
         target: ExprId,
@@ -3251,7 +3354,10 @@ impl<'db> Checker<'db, '_> {
         match subject.kind(self.db) {
             TyKind::Unknown => return self.unknown(),
             TyKind::Any => return crate::types::any(self.db),
-            TyKind::Named(..) => return self.unknown(),
+            TyKind::Named(..) => {
+                self.record_strict_origin(id, StrictOriginKind::UnsupportedConstruct);
+                return self.unknown();
+            }
             _ => {}
         }
         if arguments.len() != 1 || arguments[0].name.is_some() {
@@ -3267,9 +3373,9 @@ impl<'db> Checker<'db, '_> {
             let index = arguments[0]
                 .value
                 .map(|value| self.module.expression(value).kind.clone());
-            self.extract_result(range, subject, index.as_ref())
+            self.extract_result(id, range, subject, index.as_ref())
         } else {
-            self.subset_result(range, subject)
+            self.subset_result(id, range, subject)
         };
         match result {
             Ok(ty) => ty,
@@ -3283,6 +3389,7 @@ impl<'db> Checker<'db, '_> {
     /// `[[` — single-element extraction.
     fn extract_result(
         &mut self,
+        origin: ExprId,
         range: TextRange,
         subject: Ty<'db>,
         index: Option<&ExpressionKind>,
@@ -3294,7 +3401,7 @@ impl<'db> Checker<'db, '_> {
             let mut results = Vec::with_capacity(members.len());
             for member in members {
                 let result = self
-                    .extract_result(range, member, index)
+                    .extract_result(origin, range, member, index)
                     .map_err(|error| widen_error_container(error, subject))?;
                 results.push(result);
             }
@@ -3374,8 +3481,11 @@ impl<'db> Checker<'db, '_> {
             // support element access the system cannot model — sound-by-
             // refusal Unknown, never a rejection (idiomatic R walks generic
             // data this way: `function(x) x[[1L]]`). The variable stays
-            // unconstrained.
-            TyKind::Named(..) | TyKind::Var(_) | TyKind::Rigid(_) => Ok(self.unknown()),
+            // unconstrained; the refusal is a strict origin.
+            TyKind::Named(..) | TyKind::Var(_) | TyKind::Rigid(_) => {
+                self.record_strict_origin(origin, StrictOriginKind::UnsupportedConstruct);
+                Ok(self.unknown())
+            }
             _ => Err(TypeError {
                 range,
                 kind: TypeErrorKind::NotAList { found: subject },
@@ -3386,6 +3496,7 @@ impl<'db> Checker<'db, '_> {
     /// `[` — the list slice.
     fn subset_result(
         &mut self,
+        origin: ExprId,
         range: TextRange,
         subject: Ty<'db>,
     ) -> Result<Ty<'db>, TypeError<'db>> {
@@ -3394,7 +3505,7 @@ impl<'db> Checker<'db, '_> {
             let mut results = Vec::with_capacity(members.len());
             for member in members {
                 let result = self
-                    .subset_result(range, member)
+                    .subset_result(origin, range, member)
                     .map_err(|error| widen_error_container(error, subject))?;
                 results.push(result);
             }
@@ -3414,7 +3525,10 @@ impl<'db> Checker<'db, '_> {
                 TyKind::NamedList(union_of(self.db, fields.iter().map(|field| field.ty))),
             )),
             // Sound-by-refusal, as for `[[`.
-            TyKind::Named(..) | TyKind::Var(_) | TyKind::Rigid(_) => Ok(self.unknown()),
+            TyKind::Named(..) | TyKind::Var(_) | TyKind::Rigid(_) => {
+                self.record_strict_origin(origin, StrictOriginKind::UnsupportedConstruct);
+                Ok(self.unknown())
+            }
             _ => Err(TypeError {
                 range,
                 kind: TypeErrorKind::UnsupportedSubset { found: subject },
@@ -3427,6 +3541,7 @@ impl<'db> Checker<'db, '_> {
     /// not modeled: sound-by-refusal Unknown.
     fn infer_field(
         &mut self,
+        id: ExprId,
         range: TextRange,
         at: bool,
         target: ExprId,
@@ -3434,13 +3549,14 @@ impl<'db> Checker<'db, '_> {
     ) -> Ty<'db> {
         let target_ty = self.infer(target);
         if at {
+            self.record_strict_origin(id, StrictOriginKind::UnsupportedConstruct);
             return self.unknown();
         }
         let Some(name) = name else {
             return self.unknown();
         };
         let subject = self.structural(target_ty);
-        match self.dollar_result(range, subject, &name) {
+        match self.dollar_result(id, range, subject, &name) {
             Ok(ty) => ty,
             Err(error) => {
                 self.errors.push(error);
@@ -3451,6 +3567,7 @@ impl<'db> Checker<'db, '_> {
 
     fn dollar_result(
         &mut self,
+        origin: ExprId,
         range: TextRange,
         subject: Ty<'db>,
         name: &str,
@@ -3461,7 +3578,7 @@ impl<'db> Checker<'db, '_> {
             let mut results = Vec::with_capacity(members.len());
             for member in members {
                 let result = self
-                    .dollar_result(range, member, name)
+                    .dollar_result(origin, range, member, name)
                     .map_err(|error| widen_error_container(error, subject))?;
                 results.push(result);
             }
@@ -3502,7 +3619,10 @@ impl<'db> Checker<'db, '_> {
             // Sound-by-refusal for sealed nominals (`df$col` is the most
             // idiomatic R there is) and unresolved variables
             // (`function(node) node$value`).
-            TyKind::Named(..) | TyKind::Var(_) | TyKind::Rigid(_) => Ok(self.unknown()),
+            TyKind::Named(..) | TyKind::Var(_) | TyKind::Rigid(_) => {
+                self.record_strict_origin(origin, StrictOriginKind::UnsupportedConstruct);
+                Ok(self.unknown())
+            }
             _ => Err(TypeError {
                 range,
                 kind: TypeErrorKind::NotAList { found: subject },

@@ -279,6 +279,67 @@ pub struct ProjectFiles {
     pub files: Vec<SourceFile>,
 }
 
+/// A file's typing mode, set by its own directives: `# typing: off|on|strict`
+/// plain comments and `#: @strict` / `#: @strict off` annotation directives,
+/// the last one in the file winning. `None` when the file sets nothing (the
+/// configured `[check]` switches apply). The mode changes only which
+/// diagnostics a host publishes — inference itself is untouched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]
+pub enum TypingMode {
+    Off,
+    On,
+    Strict,
+}
+
+#[salsa::tracked]
+pub fn file_typing_mode(db: &dyn Db, file: SourceFile) -> Option<TypingMode> {
+    file_typing_directives(db, file).0
+}
+
+/// The mode plus the ranges of `typing:` comments with an unrecognized value
+/// (reported as errors rather than silently ignored).
+#[salsa::tracked(returns(clone))]
+pub fn file_typing_directives(
+    db: &dyn Db,
+    file: SourceFile,
+) -> (Option<TypingMode>, Vec<syntax::TextRange>) {
+    let parse = parse(db, file);
+    let root = parse.syntax_node();
+    let mut mode = None;
+    let mut invalid = Vec::new();
+    for element in root.children_with_tokens() {
+        match element {
+            rowan::NodeOrToken::Token(token) if token.kind() == syntax::SyntaxKind::COMMENT => {
+                let Some(rest) = token
+                    .text()
+                    .trim_start_matches('#')
+                    .trim_start()
+                    .strip_prefix("typing:")
+                else {
+                    continue;
+                };
+                match rest.split_whitespace().next() {
+                    Some("off") => mode = Some(TypingMode::Off),
+                    Some("on") => mode = Some(TypingMode::On),
+                    Some("strict") => mode = Some(TypingMode::Strict),
+                    _ => invalid.push(token.text_range()),
+                }
+            }
+            rowan::NodeOrToken::Node(node) if node.kind() == syntax::SyntaxKind::ANNOTATION => {
+                if let Some(strict) = annotations::lower_annotation(db, &node).strict {
+                    mode = Some(if strict {
+                        TypingMode::Strict
+                    } else {
+                        TypingMode::On
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    (mode, invalid)
+}
+
 /// All `@type` / `@alias` definitions in a file's annotations, wherever they
 /// appear.
 #[salsa::tracked(returns(clone))]

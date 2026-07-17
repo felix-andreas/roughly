@@ -1,0 +1,77 @@
+#==== origins
+#---- unsupported_constructs_are_origins
+piped <- function(x) x |> length()
+formula_model <- function() y ~ x
+elementwise <- function(a, b) a & b
+#++++
+piped: <T> fn(x: T) -> Unknown
+formula_model: fn() -> Unknown
+elementwise: <T, U> fn(a: T, b: U) -> Unknown
+21..34 error[strict] strict mode: this expression has an undetermined type (`Unknown`)
+63..68 error[strict] strict mode: this expression has an undetermined type (`Unknown`)
+99..104 error[strict] strict mode: this expression has an undetermined type (`Unknown`)
+
+#---- assignment_value_phrasing
+f <- function(x) {
+  result <- x |> length()
+  result
+}
+#++++
+f: <T> fn(x: T) -> Unknown
+31..44 error[strict] strict mode: could not determine the type of `result`; add a type annotation
+
+#---- dollar_on_an_unresolved_variable
+f <- function(node) node$value
+#++++
+f: <T> fn(node: T) -> Unknown
+20..30 error[strict] strict mode: this expression has an undetermined type (`Unknown`)
+
+#---- combine_with_an_unresolved_argument
+f <- function(x) c(x, 1L)
+#++++
+f: <T> fn(x: T) -> Unknown
+17..25 error[strict] strict mode: this expression has an undetermined type (`Unknown`)
+
+#---- qualified_read_with_no_known_type
+f <- function() somepkg::mystery()
+#++++
+f: fn() -> Unknown
+16..32 error[strict] strict mode: could not determine the type of `mystery`; it has no known type
+
+#---- no_origin_when_types_are_known
+f <- function() {
+  x <- 1L
+  x + 1L
+}
+#++++
+f: fn() -> integer
+
+#==== directives
+#---- typing_comment_sets_the_mode
+# typing: strict
+f <- function(x) x + 1L
+#++++
+typing mode: Strict
+f: <T: numeric> fn(x: T) -> T
+
+#---- last_directive_wins
+# typing: strict
+# typing: off
+f <- function(x) x
+#++++
+typing mode: Off
+f: <T> fn(x: T) -> T
+
+#---- strict_annotation_form
+#: @strict
+f <- function(x) x
+#++++
+typing mode: Strict
+f: <T> fn(x: T) -> T
+
+#---- unknown_value_is_reported
+# typing: loud
+f <- function(x) x
+#++++
+f: <T> fn(x: T) -> T
+0..14 error[typing-directive] unknown `typing:` directive value — expected `off`, `on`, or `strict`

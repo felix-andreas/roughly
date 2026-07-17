@@ -42,6 +42,16 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
         });
     }
 
+    for range in crate::file_typing_directives(db, file).1 {
+        diagnostics.push(Diagnostic {
+            range,
+            severity: Severity::Error,
+            code: "typing-directive",
+            message: "unknown `typing:` directive value — expected `off`, `on`, or `strict`"
+                .to_owned(),
+        });
+    }
+
     for item in item_tree(db, file) {
         let Some(offset) = item_offset(db, item) else {
             continue;
@@ -82,7 +92,7 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
                 diagnostics.push(Diagnostic {
                     range,
                     severity: Severity::Warning,
-                    code: "could-not-resolve",
+                    code: "unresolved",
                     message: format!("could not resolve `{name}`"),
                 });
             }
@@ -96,6 +106,75 @@ pub fn file_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
 /// The absolute byte offset of an item's subtree inside its file.
 fn item_offset(db: &dyn Db, item: Item<'_>) -> Option<syntax::TextSize> {
     crate::resolve_item_node(db, item).map(|node| node.text_range().start())
+}
+
+/// Strict-mode diagnostics: reports at `Unknown` origins, assembled
+/// separately so hosts publish them only under `[check] strict` or the
+/// per-file directive. An origin that is an assignment's value is phrased
+/// against the assigned name (that is where the annotation goes); any other
+/// origin is phrased against the expression itself.
+#[salsa::tracked(returns(clone))]
+pub fn strict_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
+    use crate::check::StrictOriginKind;
+    use crate::hir::ExpressionKind;
+
+    let mut diagnostics = Vec::new();
+    for item in item_tree(db, file) {
+        let Some(offset) = item_offset(db, item) else {
+            continue;
+        };
+        let Some(check) = item_check(db, item) else {
+            continue;
+        };
+        if check.strict_origins.is_empty() {
+            continue;
+        }
+        let Some(module) = crate::item_hir(db, item) else {
+            continue;
+        };
+        let mut assignment_targets = rustc_hash::FxHashMap::default();
+        for expression in &module.expressions {
+            if let ExpressionKind::Assign { target, value, .. } = &expression.kind
+                && let ExpressionKind::NameRef(name) = &module.expression(*target).kind
+            {
+                assignment_targets.insert(*value, name.clone());
+            }
+        }
+        for origin in &check.strict_origins {
+            // A loop-widened origin is about the named variable, never about
+            // the expression the loop happens to be the value of.
+            let assignment_target = match &origin.kind {
+                StrictOriginKind::LoopWidened(_) => None,
+                _ => assignment_targets.get(&origin.expression),
+            };
+            let message = if let Some(name) = assignment_target {
+                format!(
+                    "strict mode: could not determine the type of `{name}`; add a type annotation"
+                )
+            } else {
+                match &origin.kind {
+                    StrictOriginKind::UnsupportedConstruct => {
+                        "strict mode: this expression has an undetermined type (`Unknown`)"
+                            .to_owned()
+                    }
+                    StrictOriginKind::UndeterminedReference(name) => format!(
+                        "strict mode: could not determine the type of `{name}`; it has no known type"
+                    ),
+                    StrictOriginKind::LoopWidened(name) => format!(
+                        "strict mode: could not determine the type of `{name}`; its type does not stabilize across loop iterations — add a type annotation"
+                    ),
+                }
+            };
+            diagnostics.push(Diagnostic {
+                range: TextRange::new(origin.range.start() + offset, origin.range.end() + offset),
+                severity: Severity::Error,
+                code: "strict",
+                message,
+            });
+        }
+    }
+    diagnostics.sort_by_key(|diagnostic| (diagnostic.range.start(), diagnostic.range.end()));
+    diagnostics
 }
 
 fn render_type_error(db: &dyn Db, range: TextRange, error: &TypeError<'_>) -> Diagnostic {
@@ -388,8 +467,8 @@ mod tests {
         assert!(
             rendered
                 .iter()
-                .any(|line| line.contains("could-not-resolve") && line.contains("nowhere")),
-            "expected could-not-resolve for nowhere: {rendered:?}"
+                .any(|line| line.contains("unresolved") && line.contains("nowhere")),
+            "expected an unresolved warning for nowhere: {rendered:?}"
         );
         // The second item's finding is offset into the file (absolute range).
         let missing = rendered

@@ -4,9 +4,10 @@
 //! `ROUGHLY_BLESS=1` accepts new output; `FIXTURE_FILTER=group__case` runs one
 //! case.
 
-use semantics::diagnostics::{Severity, TypeRenderer, file_diagnostics};
+use semantics::diagnostics::{Severity, TypeRenderer, file_diagnostics, strict_diagnostics};
 use semantics::{
-    DocumentKind, ItemKind, ProjectFiles, RootDatabase, SourceFile, item_check, item_tree,
+    DocumentKind, ItemKind, ProjectFiles, RootDatabase, SourceFile, file_typing_mode, item_check,
+    item_tree,
 };
 use std::path::Path;
 
@@ -71,4 +72,34 @@ fn typing_fixtures() {
 fn typing_script_fixtures() {
     let suite = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/typing-scripts");
     syntax::testing::run_fixture_suite(&suite, &render_script);
+}
+
+/// The strict stream: the per-file typing mode (when set) and the
+/// `strict`-code diagnostics appended after the ordinary rendering.
+fn render_with_strict(source: &str) -> String {
+    let db = RootDatabase::default();
+    semantics::stubs::install_shipped_stubs(&db);
+    let file = SourceFile::new(&db, source.to_owned(), DocumentKind::Package);
+    ProjectFiles::new(&db, vec![file]);
+    let mut output = String::new();
+    if let Some(mode) = file_typing_mode(&db, file) {
+        output.push_str(&format!("typing mode: {mode:?}\n"));
+    }
+    output.push_str(&render(source));
+    for diagnostic in strict_diagnostics(&db, file) {
+        output.push_str(&format!(
+            "{}..{} error[{}] {}\n",
+            u32::from(diagnostic.range.start()),
+            u32::from(diagnostic.range.end()),
+            diagnostic.code,
+            diagnostic.message
+        ));
+    }
+    output
+}
+
+#[test]
+fn typing_strict_fixtures() {
+    let suite = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/typing-strict");
+    syntax::testing::run_fixture_suite(&suite, &render_with_strict);
 }
