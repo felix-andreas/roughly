@@ -3,10 +3,50 @@
 #---- function_no_body_with_assignment_ts_error
 x <- function(x, y)
 #++++
+SOURCE_FILE@0..19
+  BINARY_EXPR@0..19
+    NAME@0..1
+      IDENT@0..1 "x"
+    WHITESPACE@1..2 " "
+    LESS_MINUS@2..4 "<-"
+    WHITESPACE@4..5 " "
+    FUNCTION_DEF@5..19
+      FUNCTION_KW@5..13 "function"
+      PARAMETER_LIST@13..19
+        L_PAREN@13..14 "("
+        PARAMETER@14..15
+          IDENT@14..15 "x"
+        COMMA@15..16 ","
+        WHITESPACE@16..17 " "
+        PARAMETER@17..18
+          IDENT@17..18 "y"
+        R_PAREN@18..19 ")"
+err: 19..19: expected a function body
 
 #---- function_no_body_inside_another_function_ts_error
 function(x = function()) {}
 #++++
+SOURCE_FILE@0..27
+  FUNCTION_DEF@0..27
+    FUNCTION_KW@0..8 "function"
+    PARAMETER_LIST@8..24
+      L_PAREN@8..9 "("
+      PARAMETER@9..23
+        IDENT@9..10 "x"
+        WHITESPACE@10..11 " "
+        EQ@11..12 "="
+        WHITESPACE@12..13 " "
+        FUNCTION_DEF@13..23
+          FUNCTION_KW@13..21 "function"
+          PARAMETER_LIST@21..23
+            L_PAREN@21..22 "("
+            R_PAREN@22..23 ")"
+      R_PAREN@23..24 ")"
+    WHITESPACE@24..25 " "
+    BRACE_EXPR@25..27
+      L_BRACE@25..26 "{"
+      R_BRACE@26..27 "}"
+err: 23..24: expected a function body
 
 #---- not_a_call_subset_or_subset2_ts_error
 f
@@ -18,6 +58,36 @@ foo
 foo
 [[x]]
 #++++
+SOURCE_FILE@0..27
+  NAME@0..1
+    IDENT@0..1 "f"
+  NEWLINE@1..2 "\n"
+  PAREN_EXPR@2..5
+    L_PAREN@2..3 "("
+    NAME@3..4
+      IDENT@3..4 "x"
+    R_PAREN@4..5 ")"
+  NEWLINE@5..6 "\n"
+  NEWLINE@6..7 "\n"
+  NAME@7..10
+    IDENT@7..10 "foo"
+  NEWLINE@10..11 "\n"
+  ERROR@11..16
+    L_BRACKET@11..12 "["
+    IDENT@12..15 "bar"
+    R_BRACKET@15..16 "]"
+  NEWLINE@16..17 "\n"
+  NEWLINE@17..18 "\n"
+  NAME@18..21
+    IDENT@18..21 "foo"
+  NEWLINE@21..22 "\n"
+  ERROR@22..27
+    L_BRACKET2@22..24 "[["
+    IDENT@24..25 "x"
+    R_BRACKET@25..26 "]"
+    R_BRACKET@26..27 "]"
+err: 11..12: expected a statement, found `[`
+err: 22..24: expected a statement, found `[[`
 
 #---- not_a_call_subset_or_subset2_due_to_sequential_arguments_ts_error
 f(x y)
@@ -32,10 +102,170 @@ f(, x y)
 foo[, x y]
 foo[[, x y]]
 #++++
+SOURCE_FILE@0..97
+  CALL_EXPR@0..6
+    NAME@0..1
+      IDENT@0..1 "f"
+    ARGUMENT_LIST@1..6
+      L_PAREN@1..2 "("
+      ARGUMENT@2..4
+        NAME@2..3
+          IDENT@2..3 "x"
+        WHITESPACE@3..4 " "
+      ERROR@4..5
+        IDENT@4..5 "y"
+      R_PAREN@5..6 ")"
+  NEWLINE@6..7 "\n"
+  SUBSET_EXPR@7..15
+    NAME@7..10
+      IDENT@7..10 "foo"
+    ARGUMENT_LIST@10..15
+      L_BRACKET@10..11 "["
+      ARGUMENT@11..13
+        NAME@11..12
+          IDENT@11..12 "x"
+        WHITESPACE@12..13 " "
+      ERROR@13..14
+        IDENT@13..14 "y"
+      R_BRACKET@14..15 "]"
+  NEWLINE@15..16 "\n"
+  SUBSET2_EXPR@16..26
+    NAME@16..19
+      IDENT@16..19 "foo"
+    ARGUMENT_LIST@19..26
+      L_BRACKET2@19..21 "[["
+      ARGUMENT@21..23
+        NAME@21..22
+          IDENT@21..22 "x"
+        WHITESPACE@22..23 " "
+      ERROR@23..24
+        IDENT@23..24 "y"
+      R_BRACKET@24..25 "]"
+      R_BRACKET@25..26 "]"
+  NEWLINE@26..27 "\n"
+  NEWLINE@27..28 "\n"
+  CALL_EXPR@28..37
+    NAME@28..29
+      IDENT@28..29 "f"
+    ARGUMENT_LIST@29..37
+      L_PAREN@29..30 "("
+      ARGUMENT@30..31
+        NAME@30..31
+          IDENT@30..31 "x"
+      COMMA@31..32 ","
+      WHITESPACE@32..33 " "
+      ARGUMENT@33..35
+        NAME@33..34
+          IDENT@33..34 "y"
+        WHITESPACE@34..35 " "
+      ERROR@35..36
+        IDENT@35..36 "z"
+      R_PAREN@36..37 ")"
+  NEWLINE@37..38 "\n"
+  SUBSET_EXPR@38..49
+    NAME@38..41
+      IDENT@38..41 "foo"
+    ARGUMENT_LIST@41..49
+      L_BRACKET@41..42 "["
+      ARGUMENT@42..43
+        NAME@42..43
+          IDENT@42..43 "x"
+      COMMA@43..44 ","
+      WHITESPACE@44..45 " "
+      ARGUMENT@45..47
+        NAME@45..46
+          IDENT@45..46 "y"
+        WHITESPACE@46..47 " "
+      ERROR@47..48
+        IDENT@47..48 "z"
+      R_BRACKET@48..49 "]"
+  NEWLINE@49..50 "\n"
+  SUBSET2_EXPR@50..63
+    NAME@50..53
+      IDENT@50..53 "foo"
+    ARGUMENT_LIST@53..63
+      L_BRACKET2@53..55 "[["
+      ARGUMENT@55..56
+        NAME@55..56
+          IDENT@55..56 "x"
+      COMMA@56..57 ","
+      WHITESPACE@57..58 " "
+      ARGUMENT@58..60
+        NAME@58..59
+          IDENT@58..59 "y"
+        WHITESPACE@59..60 " "
+      ERROR@60..61
+        IDENT@60..61 "z"
+      R_BRACKET@61..62 "]"
+      R_BRACKET@62..63 "]"
+  NEWLINE@63..64 "\n"
+  NEWLINE@64..65 "\n"
+  CALL_EXPR@65..73
+    NAME@65..66
+      IDENT@65..66 "f"
+    ARGUMENT_LIST@66..73
+      L_PAREN@66..67 "("
+      ARGUMENT@67..67
+      COMMA@67..68 ","
+      WHITESPACE@68..69 " "
+      ARGUMENT@69..71
+        NAME@69..70
+          IDENT@69..70 "x"
+        WHITESPACE@70..71 " "
+      ERROR@71..72
+        IDENT@71..72 "y"
+      R_PAREN@72..73 ")"
+  NEWLINE@73..74 "\n"
+  SUBSET_EXPR@74..84
+    NAME@74..77
+      IDENT@74..77 "foo"
+    ARGUMENT_LIST@77..84
+      L_BRACKET@77..78 "["
+      ARGUMENT@78..78
+      COMMA@78..79 ","
+      WHITESPACE@79..80 " "
+      ARGUMENT@80..82
+        NAME@80..81
+          IDENT@80..81 "x"
+        WHITESPACE@81..82 " "
+      ERROR@82..83
+        IDENT@82..83 "y"
+      R_BRACKET@83..84 "]"
+  NEWLINE@84..85 "\n"
+  SUBSET2_EXPR@85..97
+    NAME@85..88
+      IDENT@85..88 "foo"
+    ARGUMENT_LIST@88..97
+      L_BRACKET2@88..90 "[["
+      ARGUMENT@90..90
+      COMMA@90..91 ","
+      WHITESPACE@91..92 " "
+      ARGUMENT@92..94
+        NAME@92..93
+          IDENT@92..93 "x"
+        WHITESPACE@93..94 " "
+      ERROR@94..95
+        IDENT@94..95 "y"
+      R_BRACKET@95..96 "]"
+      R_BRACKET@96..97 "]"
+err: 4..5: expected `,` or `)` in this argument list, found identifier
+err: 13..14: expected `,` or `]` in this argument list, found identifier
+err: 23..24: expected `,` or `]` in this argument list, found identifier
+err: 35..36: expected `,` or `)` in this argument list, found identifier
+err: 47..48: expected `,` or `]` in this argument list, found identifier
+err: 60..61: expected `,` or `]` in this argument list, found identifier
+err: 71..72: expected `,` or `)` in this argument list, found identifier
+err: 82..83: expected `,` or `]` in this argument list, found identifier
+err: 94..95: expected `,` or `]` in this argument list, found identifier
 
 #---- not_a_parenthesized_expression_1_ts_error
 ()
 #++++
+SOURCE_FILE@0..2
+  PAREN_EXPR@0..2
+    L_PAREN@0..1 "("
+    R_PAREN@1..2 ")"
+err: 1..2: expected an expression inside `(`, found `)`
 
 #---- not_a_parenthesized_expression_2_ts_error
 (
@@ -43,10 +273,40 @@ foo[[, x y]]
   2
 )
 #++++
+SOURCE_FILE@0..11
+  PAREN_EXPR@0..8
+    L_PAREN@0..1 "("
+    NEWLINE@1..2 "\n"
+    WHITESPACE@2..4 "  "
+    LITERAL@4..5
+      DOUBLE@4..5 "1"
+    NEWLINE@5..6 "\n"
+    WHITESPACE@6..8 "  "
+  ERROR@8..9
+    DOUBLE@8..9 "2"
+  NEWLINE@9..10 "\n"
+  ERROR@10..11
+    R_PAREN@10..11 ")"
+err: 0..1: unclosed `(`; expected a matching `)`
+err: 8..9: unexpected number after this expression; expected a newline or `;`
+err: 10..11: expected a statement, found `)`
 
 #---- not_a_parenthesized_expression_3_ts_error
 (1; 2)
 #++++
+SOURCE_FILE@0..6
+  PAREN_EXPR@0..2
+    L_PAREN@0..1 "("
+    LITERAL@1..2
+      DOUBLE@1..2 "1"
+  SEMICOLON@2..3 ";"
+  WHITESPACE@3..4 " "
+  LITERAL@4..5
+    DOUBLE@4..5 "2"
+  ERROR@5..6
+    R_PAREN@5..6 ")"
+err: 0..1: unclosed `(`; expected a matching `)`
+err: 5..6: unexpected `)` after this expression; expected a newline or `;`
 
 #---- dollar_at_namespace_namespace_internal_with_if_rhs_ts_error
 # The RHS's of these nodes are restricted to strings and identifiers, and the RHS
@@ -58,6 +318,50 @@ foo@if
 foo::if
 foo:::if
 #++++
+SOURCE_FILE@0..322
+  COMMENT@0..81 "# The RHS's of these nodes are restricted to strings and identifiers, and the RHS"
+  NEWLINE@81..82 "\n"
+  COMMENT@82..168 "# is optional. This ends up trying to match to an `if_statement` node, leaving the RHS"
+  NEWLINE@168..169 "\n"
+  COMMENT@169..253 "# empty, and then the `if_statement` node errors because it doesn't have a `(`. This"
+  NEWLINE@253..254 "\n"
+  COMMENT@254..291 "# is actually pretty decent behavior."
+  NEWLINE@291..292 "\n"
+  DOLLAR_EXPR@292..296
+    NAME@292..295
+      IDENT@292..295 "foo"
+    DOLLAR@295..296 "$"
+  ERROR@296..298
+    IF_KW@296..298 "if"
+  NEWLINE@298..299 "\n"
+  AT_EXPR@299..303
+    NAME@299..302
+      IDENT@299..302 "foo"
+    AT@302..303 "@"
+  ERROR@303..305
+    IF_KW@303..305 "if"
+  NEWLINE@305..306 "\n"
+  NAMESPACE_EXPR@306..311
+    NAME@306..309
+      IDENT@306..309 "foo"
+    COLON2@309..311 "::"
+  ERROR@311..313
+    IF_KW@311..313 "if"
+  NEWLINE@313..314 "\n"
+  NAMESPACE_EXPR@314..320
+    NAME@314..317
+      IDENT@314..317 "foo"
+    COLON3@317..320 ":::"
+  ERROR@320..322
+    IF_KW@320..322 "if"
+err: 296..298: expected a name after `$`, found `if`
+err: 296..298: unexpected `if` after this expression; expected a newline or `;`
+err: 303..305: expected a name after `@`, found `if`
+err: 303..305: unexpected `if` after this expression; expected a newline or `;`
+err: 311..313: expected a name after `::`, found `if`
+err: 311..313: unexpected `if` after this expression; expected a newline or `;`
+err: 320..322: expected a name after `:::`, found `if`
+err: 320..322: unexpected `if` after this expression; expected a newline or `;`
 
 #---- dollar_at_namespace_namespace_internal_with_newline_before_operator_ts_error
 # Newlines are not allowed before the operator, so none of these are valid
@@ -73,55 +377,221 @@ x
 x
 :::y
 #++++
+SOURCE_FILE@0..100
+  COMMENT@0..74 "# Newlines are not allowed before the operator, so none of these are valid"
+  NEWLINE@74..75 "\n"
+  NAME@75..76
+    IDENT@75..76 "x"
+  NEWLINE@76..77 "\n"
+  ERROR@77..79
+    DOLLAR@77..78 "$"
+    IDENT@78..79 "y"
+  NEWLINE@79..80 "\n"
+  NEWLINE@80..81 "\n"
+  NAME@81..82
+    IDENT@81..82 "x"
+  NEWLINE@82..83 "\n"
+  ERROR@83..85
+    AT@83..84 "@"
+    IDENT@84..85 "y"
+  NEWLINE@85..86 "\n"
+  NEWLINE@86..87 "\n"
+  NAME@87..88
+    IDENT@87..88 "x"
+  NEWLINE@88..89 "\n"
+  ERROR@89..92
+    COLON2@89..91 "::"
+    IDENT@91..92 "y"
+  NEWLINE@92..93 "\n"
+  NEWLINE@93..94 "\n"
+  NAME@94..95
+    IDENT@94..95 "x"
+  NEWLINE@95..96 "\n"
+  ERROR@96..100
+    COLON3@96..99 ":::"
+    IDENT@99..100 "y"
+err: 77..78: expected a statement, found `$`
+err: 83..84: expected a statement, found `@`
+err: 89..91: expected a statement, found `::`
+err: 96..99: expected a statement, found `:::`
 
 #---- closing_brace_ts_error
 }
 #++++
+SOURCE_FILE@0..1
+  ERROR@0..1
+    R_BRACE@0..1 "}"
+err: 0..1: unmatched `}`: no `{` is open here
 
 #---- closing_parenthesis_ts_error
 )
 #++++
+SOURCE_FILE@0..1
+  ERROR@0..1
+    R_PAREN@0..1 ")"
+err: 0..1: expected a statement, found `)`
 
 #---- closing_bracket_ts_error
 ]
 #++++
+SOURCE_FILE@0..1
+  ERROR@0..1
+    R_BRACKET@0..1 "]"
+err: 0..1: expected a statement, found `]`
 
 #---- opening_brace_closing_parenthesis_ts_error
 # Parenthesis is "not valid" so it isn't matched by the external scanner
 {)
 #++++
+SOURCE_FILE@0..75
+  COMMENT@0..72 "# Parenthesis is \"not valid\" so it isn't matched by the external scanner"
+  NEWLINE@72..73 "\n"
+  BRACE_EXPR@73..75
+    L_BRACE@73..74 "{"
+    ERROR@74..75
+      R_PAREN@74..75 ")"
+err: 74..75: expected a statement, found `)`
+err: 73..74: unclosed `{`; expected a matching `}`
 
 #---- opening_parenthesis_closing_brace_ts_error
 (}
 #++++
+SOURCE_FILE@0..2
+  PAREN_EXPR@0..1
+    L_PAREN@0..1 "("
+  ERROR@1..2
+    R_BRACE@1..2 "}"
+err: 1..2: expected an expression inside `(`, found `}`
+err: 0..1: unclosed `(`; expected a matching `)`
+err: 1..2: unexpected `}` after this expression; expected a newline or `;`
 
 #---- opening_parenthesis_closing_bracket_ts_error
 (]
 #++++
+SOURCE_FILE@0..2
+  PAREN_EXPR@0..1
+    L_PAREN@0..1 "("
+  ERROR@1..2
+    R_BRACKET@1..2 "]"
+err: 1..2: expected an expression inside `(`, found `]`
+err: 0..1: unclosed `(`; expected a matching `)`
+err: 1..2: unexpected `]` after this expression; expected a newline or `;`
 
 #---- opening_bracket2_unmatched_closing_bracket_ts_error
 x[[2]
 #++++
+SOURCE_FILE@0..5
+  SUBSET2_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "x"
+    ARGUMENT_LIST@1..5
+      L_BRACKET2@1..3 "[["
+      ARGUMENT@3..4
+        LITERAL@3..4
+          DOUBLE@3..4 "2"
+      R_BRACKET@4..5 "]"
+err: 1..3: expected `]]` to close `[[`
 
 #---- opening_bracket_and_bracket2_unmatched_closing_bracket_ts_error
 x[y[[2]
 #++++
+SOURCE_FILE@0..7
+  SUBSET_EXPR@0..7
+    NAME@0..1
+      IDENT@0..1 "x"
+    ARGUMENT_LIST@1..7
+      L_BRACKET@1..2 "["
+      ARGUMENT@2..7
+        SUBSET2_EXPR@2..7
+          NAME@2..3
+            IDENT@2..3 "y"
+          ARGUMENT_LIST@3..7
+            L_BRACKET2@3..5 "[["
+            ARGUMENT@5..6
+              LITERAL@5..6
+                DOUBLE@5..6 "2"
+            R_BRACKET@6..7 "]"
+err: 3..5: expected `]]` to close `[[`
+err: 1..2: unclosed `[`; expected `]` to close it
 
 #---- opening_bracket2_and_bracket_matched_closing_bracket_ts_error
 x[[y[2]
 #++++
+SOURCE_FILE@0..7
+  SUBSET2_EXPR@0..7
+    NAME@0..1
+      IDENT@0..1 "x"
+    ARGUMENT_LIST@1..7
+      L_BRACKET2@1..3 "[["
+      ARGUMENT@3..7
+        SUBSET_EXPR@3..7
+          NAME@3..4
+            IDENT@3..4 "y"
+          ARGUMENT_LIST@4..7
+            L_BRACKET@4..5 "["
+            ARGUMENT@5..6
+              LITERAL@5..6
+                DOUBLE@5..6 "2"
+            R_BRACKET@6..7 "]"
+err: 1..3: unclosed `[[`; expected `]` to close it
 
 #---- opening_bracket2_and_bracket_unmatched_closing_bracket_ts_error
 x[[y[2]]
 #++++
+SOURCE_FILE@0..8
+  SUBSET2_EXPR@0..8
+    NAME@0..1
+      IDENT@0..1 "x"
+    ARGUMENT_LIST@1..8
+      L_BRACKET2@1..3 "[["
+      ARGUMENT@3..7
+        SUBSET_EXPR@3..7
+          NAME@3..4
+            IDENT@3..4 "y"
+          ARGUMENT_LIST@4..7
+            L_BRACKET@4..5 "["
+            ARGUMENT@5..6
+              LITERAL@5..6
+                DOUBLE@5..6 "2"
+            R_BRACKET@6..7 "]"
+      R_BRACKET@7..8 "]"
+err: 1..3: expected `]]` to close `[[`
 
 #---- calls_with_na_as_argument_name_ts_error
 # Unlike `NULL`, other keywords like `NA` aren't allowed here
 fn(NA = )
 #++++
+SOURCE_FILE@0..71
+  COMMENT@0..61 "# Unlike `NULL`, other keywords like `NA` aren't allowed here"
+  NEWLINE@61..62 "\n"
+  CALL_EXPR@62..71
+    NAME@62..64
+      IDENT@62..64 "fn"
+    ARGUMENT_LIST@64..71
+      L_PAREN@64..65 "("
+      ARGUMENT@65..70
+        BINARY_EXPR@65..70
+          LITERAL@65..67
+            NA_KW@65..67 "NA"
+          WHITESPACE@67..68 " "
+          EQ@68..69 "="
+          WHITESPACE@69..70 " "
+      R_PAREN@70..71 ")"
+err: 68..69: expected an expression after `=`
 
 #---- unsupported_subset2_with_over_multiple_lines_177_ts_error
 x[["a"]
 ]
 #++++
-
+SOURCE_FILE@0..9
+  SUBSET2_EXPR@0..9
+    NAME@0..1
+      IDENT@0..1 "x"
+    ARGUMENT_LIST@1..9
+      L_BRACKET2@1..3 "[["
+      ARGUMENT@3..6
+        LITERAL@3..6
+          STRING@3..6 "\"a\""
+      R_BRACKET@6..7 "]"
+      NEWLINE@7..8 "\n"
+      R_BRACKET@8..9 "]"

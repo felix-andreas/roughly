@@ -9,3 +9,12 @@ fn syntax_fixtures() {
     let suite = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/syntax");
     syntax::testing::run_fixture_suite(&suite, &|source| syntax::parse(source).debug_dump());
 }
+
+/// tree-sitter-r's own parser test corpus, converted into the fixture format
+/// (scripts/convert-tsr-corpus.py) with OUR golden trees as expectations; the
+/// original sexps are kept beside the fetched corpus for adjudication.
+#[test]
+fn tree_sitter_r_corpus_fixtures() {
+    let suite = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/tsr");
+    syntax::testing::run_fixture_suite(&suite, &|source| syntax::parse(source).debug_dump());
+}

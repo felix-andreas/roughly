@@ -684,3 +684,59 @@ SOURCE_FILE@0..3
       PLUS@1..2 "+"
       NAME@2..3
         IDENT@2..3 "x"
+
+#==== corpus_adjudicated
+#---- double_star_power
+base**size
+#++++
+SOURCE_FILE@0..10
+  BINARY_EXPR@0..10
+    NAME@0..4
+      IDENT@0..4 "base"
+    CARET@4..6 "**"
+    NAME@6..10
+      IDENT@6..10 "size"
+
+#---- switch_null_tag
+switch(typeof(x), NULL = , char = "c", "?")
+#++++
+SOURCE_FILE@0..43
+  CALL_EXPR@0..43
+    NAME@0..6
+      IDENT@0..6 "switch"
+    ARGUMENT_LIST@6..43
+      L_PAREN@6..7 "("
+      ARGUMENT@7..16
+        CALL_EXPR@7..16
+          NAME@7..13
+            IDENT@7..13 "typeof"
+          ARGUMENT_LIST@13..16
+            L_PAREN@13..14 "("
+            ARGUMENT@14..15
+              NAME@14..15
+                IDENT@14..15 "x"
+            R_PAREN@15..16 ")"
+      COMMA@16..17 ","
+      WHITESPACE@17..18 " "
+      ARGUMENT@18..25
+        LITERAL@18..22
+          NULL_KW@18..22 "NULL"
+        WHITESPACE@22..23 " "
+        EQ@23..24 "="
+        WHITESPACE@24..25 " "
+      COMMA@25..26 ","
+      WHITESPACE@26..27 " "
+      ARGUMENT@27..37
+        NAME@27..31
+          IDENT@27..31 "char"
+        WHITESPACE@31..32 " "
+        EQ@32..33 "="
+        WHITESPACE@33..34 " "
+        LITERAL@34..37
+          STRING@34..37 "\"c\""
+      COMMA@37..38 ","
+      WHITESPACE@38..39 " "
+      ARGUMENT@39..42
+        LITERAL@39..42
+          STRING@39..42 "\"?\""
+      R_PAREN@42..43 ")"

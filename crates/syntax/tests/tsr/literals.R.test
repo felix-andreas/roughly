@@ -25,12 +25,107 @@ _foo
 __foo
 _foo_
 #++++
+SOURCE_FILE@0..259
+  NAME@0..3
+    IDENT@0..3 "foo"
+  NEWLINE@3..4 "\n"
+  NAME@4..8
+    IDENT@4..8 "foo2"
+  NEWLINE@8..9 "\n"
+  NAME@9..16
+    IDENT@9..16 "foo.bar"
+  NEWLINE@16..17 "\n"
+  NAME@17..25
+    IDENT@17..25 ".foo.bar"
+  NEWLINE@25..26 "\n"
+  NAME@26..41
+    IDENT@26..41 ".__NAMESPACE__."
+  NEWLINE@41..42 "\n"
+  NAME@42..43
+    IDENT@42..43 "."
+  NEWLINE@43..44 "\n"
+  NAME@44..46
+    IDENT@44..46 ".."
+  NEWLINE@46..47 "\n"
+  NAME@47..49
+    IDENT@47..49 "._"
+  NEWLINE@49..50 "\n"
+  NAME@50..53
+    IDENT@50..53 "._."
+  NEWLINE@53..54 "\n"
+  NAME@54..61
+    IDENT@54..61 "foo_bar"
+  NEWLINE@61..62 "\n"
+  NAME@62..68
+    IDENT@62..68 "`_foo`"
+  NEWLINE@68..69 "\n"
+  NAME@69..82
+    IDENT@69..82 "`a \"literal\"`"
+  NEWLINE@82..83 "\n"
+  NAME@83..102
+    IDENT@83..102 "`another\nliteral \\`"
+  WHITESPACE@102..103 " "
+  ERROR@103..140
+    IDENT@103..106 "foo"
+    IDENT@106..109 "`\n`"
+    IDENT@109..118 "backslash"
+    WHITESPACE@118..119 " "
+    IDENT@119..127 "followed"
+    WHITESPACE@127..128 " "
+    IDENT@128..130 "by"
+    WHITESPACE@130..131 " "
+    IDENT@131..138 "newline"
+    WHITESPACE@138..139 " "
+    BACKSLASH@139..140 "\\"
+  NEWLINE@140..141 "\n"
+  NAME@141..144
+    IDENT@141..144 "`\n`"
+  ERROR@144..147
+    BACKSLASH@144..145 "\\"
+    IDENT@145..147 "``"
+  NEWLINE@147..148 "\n"
+  COMMENT@148..166 "# Pipe placeholder"
+  NEWLINE@166..167 "\n"
+  NAME@167..168
+    UNDERSCORE@167..168 "_"
+  NEWLINE@168..169 "\n"
+  COMMENT@169..242 "# Recognized as a single `_foo` identifier, even if invalid R code (#71)."
+  NEWLINE@242..243 "\n"
+  NAME@243..244
+    UNDERSCORE@243..244 "_"
+  ERROR@244..247
+    IDENT@244..247 "foo"
+  NEWLINE@247..248 "\n"
+  NAME@248..249
+    UNDERSCORE@248..249 "_"
+  ERROR@249..253
+    UNDERSCORE@249..250 "_"
+    IDENT@250..253 "foo"
+  NEWLINE@253..254 "\n"
+  NAME@254..255
+    UNDERSCORE@254..255 "_"
+  ERROR@255..259
+    IDENT@255..259 "foo_"
+err: 103..106: unexpected identifier after this expression; expected a newline or `;`
+err: 144..145: unexpected `\` after this expression; expected a newline or `;`
+err: 244..247: unexpected identifier after this expression; expected a newline or `;`
+err: 249..250: unexpected `_` after this expression; expected a newline or `;`
+err: 255..259: unexpected identifier after this expression; expected a newline or `;`
 
 #---- unicode_identifiers
 你好
 .你.好.
 .你_好.
 #++++
+SOURCE_FILE@0..26
+  NAME@0..6
+    IDENT@0..6 "你好"
+  NEWLINE@6..7 "\n"
+  NAME@7..16
+    IDENT@7..16 ".你.好."
+  NEWLINE@16..17 "\n"
+  NAME@17..26
+    IDENT@17..26 ".你_好."
 
 #---- invalid_identifiers
 # R does not allow identifiers to start with a `.` followed by a digit, as this
@@ -39,6 +134,20 @@ _foo_
 # `1foo` (#190).
 .1foo
 #++++
+SOURCE_FILE@0..263
+  COMMENT@0..79 "# R does not allow identifiers to start with a `.` followed by a digit, as this"
+  NEWLINE@79..80 "\n"
+  COMMENT@80..159 "# would cause ambiguity with `.1L` and `.1i`. R itself rejects this as a syntax"
+  NEWLINE@159..160 "\n"
+  COMMENT@160..240 "# error, we currently parse this as `.1` followed by `foo`, just like we do with"
+  NEWLINE@240..241 "\n"
+  COMMENT@241..257 "# `1foo` (#190)."
+  NEWLINE@257..258 "\n"
+  LITERAL@258..260
+    DOUBLE@258..260 ".1"
+  ERROR@260..263
+    IDENT@260..263 "foo"
+err: 260..263: unexpected identifier after this expression; expected a newline or `;`
 
 #---- strings
 "foo"
@@ -54,11 +163,47 @@ bar'
 ','
 '}'
 #++++
+SOURCE_FILE@0..55
+  LITERAL@0..5
+    STRING@0..5 "\"foo\""
+  NEWLINE@5..6 "\n"
+  LITERAL@6..15
+    STRING@6..15 "\"foo\nbar\""
+  NEWLINE@15..16 "\n"
+  LITERAL@16..19
+    STRING@16..19 "\"#\""
+  NEWLINE@19..20 "\n"
+  LITERAL@20..23
+    STRING@20..23 "\",\""
+  NEWLINE@23..24 "\n"
+  LITERAL@24..27
+    STRING@24..27 "\"}\""
+  NEWLINE@27..28 "\n"
+  LITERAL@28..33
+    STRING@28..33 "'foo'"
+  NEWLINE@33..34 "\n"
+  LITERAL@34..43
+    STRING@34..43 "'foo\nbar'"
+  NEWLINE@43..44 "\n"
+  LITERAL@44..47
+    STRING@44..47 "'#'"
+  NEWLINE@47..48 "\n"
+  LITERAL@48..51
+    STRING@48..51 "','"
+  NEWLINE@51..52 "\n"
+  LITERAL@52..55
+    STRING@52..55 "'}'"
 
 #---- strings_without_content
 ""
 ''
 #++++
+SOURCE_FILE@0..5
+  LITERAL@0..2
+    STRING@0..2 "\"\""
+  NEWLINE@2..3 "\n"
+  LITERAL@3..5
+    STRING@3..5 "''"
 
 #---- strings_with_escape_sequences
 "\\"
@@ -115,6 +260,148 @@ bar'
 "\""
 '\''
 #++++
+SOURCE_FILE@0..385
+  LITERAL@0..4
+    STRING@0..4 "\"\\\\\""
+  NEWLINE@4..5 "\n"
+  LITERAL@5..9
+    STRING@5..9 "\"\\ \""
+  NEWLINE@9..10 "\n"
+  LITERAL@10..14
+    STRING@10..14 "\"\\n\""
+  NEWLINE@14..15 "\n"
+  LITERAL@15..19
+    STRING@15..19 "\"\\t\""
+  NEWLINE@19..20 "\n"
+  LITERAL@20..24
+    STRING@20..24 "\"\\r\""
+  NEWLINE@24..25 "\n"
+  NEWLINE@25..26 "\n"
+  LITERAL@26..30
+    STRING@26..30 "\"\\0\""
+  NEWLINE@30..31 "\n"
+  LITERAL@31..35
+    STRING@31..35 "\"\\1\""
+  NEWLINE@35..36 "\n"
+  LITERAL@36..40
+    STRING@36..40 "\"\\7\""
+  NEWLINE@40..41 "\n"
+  LITERAL@41..46
+    STRING@41..46 "\"\\12\""
+  NEWLINE@46..47 "\n"
+  LITERAL@47..53
+    STRING@47..53 "\"\\123\""
+  NEWLINE@53..54 "\n"
+  LITERAL@54..61
+    STRING@54..61 "\"\\1234\""
+  NEWLINE@61..62 "\n"
+  NEWLINE@62..63 "\n"
+  LITERAL@63..68
+    STRING@63..68 "\"\\x1\""
+  NEWLINE@68..69 "\n"
+  LITERAL@69..75
+    STRING@69..75 "\"\\x01\""
+  NEWLINE@75..76 "\n"
+  LITERAL@76..83
+    STRING@76..83 "\"\\x012\""
+  NEWLINE@83..84 "\n"
+  NEWLINE@84..85 "\n"
+  LITERAL@85..90
+    STRING@85..90 "\"\\u1\""
+  NEWLINE@90..91 "\n"
+  LITERAL@91..97
+    STRING@91..97 "\"\\u01\""
+  NEWLINE@97..98 "\n"
+  LITERAL@98..105
+    STRING@98..105 "\"\\u001\""
+  NEWLINE@105..106 "\n"
+  LITERAL@106..114
+    STRING@106..114 "\"\\u0001\""
+  NEWLINE@114..115 "\n"
+  LITERAL@115..124
+    STRING@115..124 "\"\\u00011\""
+  NEWLINE@124..125 "\n"
+  NEWLINE@125..126 "\n"
+  LITERAL@126..133
+    STRING@126..133 "\"\\u{1}\""
+  NEWLINE@133..134 "\n"
+  LITERAL@134..142
+    STRING@134..142 "\"\\u{01}\""
+  NEWLINE@142..143 "\n"
+  LITERAL@143..152
+    STRING@143..152 "\"\\u{001}\""
+  NEWLINE@152..153 "\n"
+  LITERAL@153..163
+    STRING@153..163 "\"\\u{0001}\""
+  NEWLINE@163..164 "\n"
+  NEWLINE@164..165 "\n"
+  LITERAL@165..172
+    STRING@165..172 "\"\\U{1}\""
+  NEWLINE@172..173 "\n"
+  LITERAL@173..181
+    STRING@173..181 "\"\\U{01}\""
+  NEWLINE@181..182 "\n"
+  LITERAL@182..191
+    STRING@182..191 "\"\\U{001}\""
+  NEWLINE@191..192 "\n"
+  LITERAL@192..202
+    STRING@192..202 "\"\\U{0001}\""
+  NEWLINE@202..203 "\n"
+  LITERAL@203..214
+    STRING@203..214 "\"\\U{00001}\""
+  NEWLINE@214..215 "\n"
+  LITERAL@215..227
+    STRING@215..227 "\"\\U{000001}\""
+  NEWLINE@227..228 "\n"
+  LITERAL@228..241
+    STRING@228..241 "\"\\U{0000001}\""
+  NEWLINE@241..242 "\n"
+  LITERAL@242..256
+    STRING@242..256 "\"\\U{00000001}\""
+  NEWLINE@256..257 "\n"
+  NEWLINE@257..258 "\n"
+  LITERAL@258..263
+    STRING@258..263 "\"\\U1\""
+  NEWLINE@263..264 "\n"
+  LITERAL@264..270
+    STRING@264..270 "\"\\U01\""
+  NEWLINE@270..271 "\n"
+  LITERAL@271..278
+    STRING@271..278 "\"\\U001\""
+  NEWLINE@278..279 "\n"
+  LITERAL@279..287
+    STRING@279..287 "\"\\U0001\""
+  NEWLINE@287..288 "\n"
+  LITERAL@288..297
+    STRING@288..297 "\"\\U00001\""
+  NEWLINE@297..298 "\n"
+  LITERAL@298..308
+    STRING@298..308 "\"\\U000001\""
+  NEWLINE@308..309 "\n"
+  LITERAL@309..320
+    STRING@309..320 "\"\\U0000001\""
+  NEWLINE@320..321 "\n"
+  LITERAL@321..333
+    STRING@321..333 "\"\\U00000001\""
+  NEWLINE@333..334 "\n"
+  LITERAL@334..347
+    STRING@334..347 "\"\\U000000011\""
+  NEWLINE@347..348 "\n"
+  NEWLINE@348..349 "\n"
+  LITERAL@349..359
+    STRING@349..359 "\"foo\\\"bar\""
+  NEWLINE@359..360 "\n"
+  LITERAL@360..367
+    STRING@360..367 "\"foo\\ \""
+  NEWLINE@367..368 "\n"
+  LITERAL@368..375
+    STRING@368..375 "\"foo\\\n\""
+  NEWLINE@375..376 "\n"
+  LITERAL@376..380
+    STRING@376..380 "\"\\\"\""
+  NEWLINE@380..381 "\n"
+  LITERAL@381..385
+    STRING@381..385 "'\\''"
 
 #---- raw_strings
 r"(raw string)"
@@ -165,6 +452,128 @@ r'(")'
 
 r()
 #++++
+SOURCE_FILE@0..463
+  LITERAL@0..15
+    RAW_STRING@0..15 "r\"(raw string)\""
+  NEWLINE@15..16 "\n"
+  LITERAL@16..39
+    RAW_STRING@16..39 "R\"{another raw string}\""
+  NEWLINE@39..40 "\n"
+  LITERAL@40..74
+    RAW_STRING@40..74 "R\"--[yet another ]- raw string]--\""
+  NEWLINE@74..75 "\n"
+  NEWLINE@75..76 "\n"
+  LITERAL@76..82
+    RAW_STRING@76..82 "r\"(\")\""
+  NEWLINE@82..83 "\n"
+  LITERAL@83..90
+    RAW_STRING@83..90 "r\"(\"\")\""
+  NEWLINE@90..91 "\n"
+  LITERAL@91..97
+    RAW_STRING@91..97 "r\"(')\""
+  NEWLINE@97..98 "\n"
+  LITERAL@98..105
+    RAW_STRING@98..105 "r\"('')\""
+  NEWLINE@105..106 "\n"
+  NEWLINE@106..107 "\n"
+  LITERAL@107..115
+    RAW_STRING@107..115 "r\"-(-)-\""
+  NEWLINE@115..116 "\n"
+  LITERAL@116..125
+    RAW_STRING@116..125 "r\"-()-)-\""
+  NEWLINE@125..126 "\n"
+  LITERAL@126..138
+    RAW_STRING@126..138 "r\"--()-\")--\""
+  NEWLINE@138..139 "\n"
+  NEWLINE@139..140 "\n"
+  LITERAL@140..149
+    RAW_STRING@140..149 "r\"( () )\""
+  NEWLINE@149..150 "\n"
+  LITERAL@150..157
+    RAW_STRING@150..157 "r\"(())\""
+  NEWLINE@157..158 "\n"
+  LITERAL@158..166
+    RAW_STRING@158..166 "r\"( ())\""
+  NEWLINE@166..167 "\n"
+  LITERAL@167..175
+    RAW_STRING@167..175 "r\"(() )\""
+  NEWLINE@175..176 "\n"
+  LITERAL@176..184
+    RAW_STRING@176..184 "r\"-())-\""
+  NEWLINE@184..185 "\n"
+  LITERAL@185..196
+    RAW_STRING@185..196 "r\"-(())-)-\""
+  NEWLINE@196..197 "\n"
+  NEWLINE@197..198 "\n"
+  LITERAL@198..214
+    RAW_STRING@198..214 "r\"(raw\nstring\n)\""
+  NEWLINE@214..215 "\n"
+  NEWLINE@215..216 "\n"
+  COMMENT@216..261 "# Empty strings with no `string_content` node"
+  NEWLINE@261..262 "\n"
+  LITERAL@262..267
+    RAW_STRING@262..267 "r\"()\""
+  NEWLINE@267..268 "\n"
+  LITERAL@268..273
+    RAW_STRING@268..273 "r'()'"
+  NEWLINE@273..274 "\n"
+  LITERAL@274..279
+    RAW_STRING@274..279 "R\"{}\""
+  NEWLINE@279..280 "\n"
+  LITERAL@280..289
+    RAW_STRING@280..289 "r\"--[]--\""
+  NEWLINE@289..290 "\n"
+  NEWLINE@290..291 "\n"
+  COMMENT@291..335 "# Leading whitespace and newlines after open"
+  NEWLINE@335..336 "\n"
+  LITERAL@336..348
+    RAW_STRING@336..348 "r\"(  hello)\""
+  NEWLINE@348..349 "\n"
+  LITERAL@349..361
+    RAW_STRING@349..361 "r\"(\\nhello)\""
+  NEWLINE@361..362 "\n"
+  LITERAL@362..374
+    RAW_STRING@362..374 "r\"(\nhello\n)\""
+  NEWLINE@374..375 "\n"
+  CALL_EXPR@375..392
+    NAME@375..376
+      IDENT@375..376 "f"
+    ARGUMENT_LIST@376..392
+      L_PAREN@376..377 "("
+      ARGUMENT@377..391
+        LITERAL@377..391
+          RAW_STRING@377..391 "r\"(\\nhello\\n)\""
+      R_PAREN@391..392 ")"
+  NEWLINE@392..393 "\n"
+  CALL_EXPR@393..408
+    NAME@393..394
+      IDENT@393..394 "f"
+    ARGUMENT_LIST@394..408
+      L_PAREN@394..395 "("
+      ARGUMENT@395..407
+        LITERAL@395..407
+          RAW_STRING@395..407 "r\"(\nhello\n)\""
+      R_PAREN@407..408 ")"
+  NEWLINE@408..409 "\n"
+  NEWLINE@409..410 "\n"
+  COMMENT@410..437 "# Single quoted raw strings"
+  NEWLINE@437..438 "\n"
+  LITERAL@438..444
+    RAW_STRING@438..444 "r'(a)'"
+  NEWLINE@444..445 "\n"
+  LITERAL@445..451
+    RAW_STRING@445..451 "r'(')'"
+  NEWLINE@451..452 "\n"
+  LITERAL@452..458
+    RAW_STRING@452..458 "r'(\")'"
+  NEWLINE@458..459 "\n"
+  NEWLINE@459..460 "\n"
+  CALL_EXPR@460..463
+    NAME@460..461
+      IDENT@460..461 "r"
+    ARGUMENT_LIST@461..463
+      L_PAREN@461..462 "("
+      R_PAREN@462..463 ")"
 
 #---- comments
 # a comment'
@@ -175,6 +584,17 @@ r()
 '
 # still not a comment'
 #++++
+SOURCE_FILE@0..58
+  COMMENT@0..12 "# a comment'"
+  NEWLINE@12..13 "\n"
+  NEWLINE@13..14 "\n"
+  LITERAL@14..31
+    STRING@14..31 "'# not a comment'"
+  NEWLINE@31..32 "\n"
+  NEWLINE@32..33 "\n"
+  NEWLINE@33..34 "\n"
+  LITERAL@34..58
+    STRING@34..58 "'\n# still not a comment'"
 
 #---- constants
 TRUE
@@ -187,6 +607,33 @@ NA_real_
 NA_character_
 NA_complex_
 #++++
+SOURCE_FILE@0..61
+  LITERAL@0..4
+    TRUE_KW@0..4 "TRUE"
+  NEWLINE@4..5 "\n"
+  LITERAL@5..10
+    FALSE_KW@5..10 "FALSE"
+  NEWLINE@10..11 "\n"
+  LITERAL@11..15
+    NULL_KW@11..15 "NULL"
+  NEWLINE@15..16 "\n"
+  LITERAL@16..19
+    INF_KW@16..19 "Inf"
+  NEWLINE@19..20 "\n"
+  LITERAL@20..23
+    NAN_KW@20..23 "NaN"
+  NEWLINE@23..24 "\n"
+  LITERAL@24..26
+    NA_KW@24..26 "NA"
+  NEWLINE@26..27 "\n"
+  LITERAL@27..35
+    NA_REAL_KW@27..35 "NA_real_"
+  NEWLINE@35..36 "\n"
+  LITERAL@36..49
+    NA_CHARACTER_KW@36..49 "NA_character_"
+  NEWLINE@49..50 "\n"
+  LITERAL@50..61
+    NA_COMPLEX_KW@50..61 "NA_complex_"
 
 #---- integers
 12332L
@@ -197,6 +644,26 @@ NA_complex_
 0.1L
 .1L
 #++++
+SOURCE_FILE@0..124
+  LITERAL@0..6
+    INTEGER@0..6 "12332L"
+  NEWLINE@6..7 "\n"
+  LITERAL@7..9
+    INTEGER@7..9 "0L"
+  NEWLINE@9..10 "\n"
+  LITERAL@10..13
+    INTEGER@10..13 "12L"
+  NEWLINE@13..14 "\n"
+  LITERAL@14..18
+    INTEGER@14..18 "1e1L"
+  NEWLINE@18..19 "\n"
+  COMMENT@19..115 "# Technically, R parses these as floats with a warning, but for our purposes this is good enough"
+  NEWLINE@115..116 "\n"
+  LITERAL@116..120
+    INTEGER@116..120 "0.1L"
+  NEWLINE@120..121 "\n"
+  LITERAL@121..124
+    INTEGER@121..124 ".1L"
 
 #---- floats
 .66
@@ -205,6 +672,29 @@ NA_complex_
 .1234
 x <- -.66
 #++++
+SOURCE_FILE@0..32
+  LITERAL@0..3
+    DOUBLE@0..3 ".66"
+  NEWLINE@3..4 "\n"
+  LITERAL@4..7
+    DOUBLE@4..7 ".11"
+  NEWLINE@7..8 "\n"
+  LITERAL@8..16
+    DOUBLE@8..16 "123.4123"
+  NEWLINE@16..17 "\n"
+  LITERAL@17..22
+    DOUBLE@17..22 ".1234"
+  NEWLINE@22..23 "\n"
+  BINARY_EXPR@23..32
+    NAME@23..24
+      IDENT@23..24 "x"
+    WHITESPACE@24..25 " "
+    LESS_MINUS@25..27 "<-"
+    WHITESPACE@27..28 " "
+    UNARY_EXPR@28..32
+      MINUS@28..29 "-"
+      LITERAL@29..32
+        DOUBLE@29..32 ".66"
 
 #---- hexadecimal
 # `x` vs `X`
@@ -255,6 +745,166 @@ x <- -.66
 0x.1L
 0x1.1L
 #++++
+SOURCE_FILE@0..361
+  COMMENT@0..12 "# `x` vs `X`"
+  NEWLINE@12..13 "\n"
+  LITERAL@13..18
+    DOUBLE@13..18 "0x123"
+  NEWLINE@18..19 "\n"
+  LITERAL@19..24
+    DOUBLE@19..24 "0X123"
+  NEWLINE@24..25 "\n"
+  NEWLINE@25..26 "\n"
+  COMMENT@26..47 "# Numbers and letters"
+  NEWLINE@47..48 "\n"
+  LITERAL@48..54
+    DOUBLE@48..54 "0xDEAD"
+  NEWLINE@54..55 "\n"
+  LITERAL@55..61
+    DOUBLE@55..61 "0XDEAD"
+  NEWLINE@61..62 "\n"
+  LITERAL@62..69
+    DOUBLE@62..69 "0x1f2F3"
+  NEWLINE@69..70 "\n"
+  LITERAL@70..77
+    DOUBLE@70..77 "0X1f2F3"
+  NEWLINE@77..78 "\n"
+  NEWLINE@78..79 "\n"
+  COMMENT@79..91 "# `p` vs `P`"
+  NEWLINE@91..92 "\n"
+  LITERAL@92..97
+    DOUBLE@92..97 "0x0p0"
+  NEWLINE@97..98 "\n"
+  LITERAL@98..103
+    DOUBLE@98..103 "0x0P0"
+  NEWLINE@103..104 "\n"
+  LITERAL@104..111
+    DOUBLE@104..111 "0x0p123"
+  NEWLINE@111..112 "\n"
+  LITERAL@112..119
+    DOUBLE@112..119 "0x0P123"
+  NEWLINE@119..120 "\n"
+  NEWLINE@120..121 "\n"
+  COMMENT@121..134 "# `+` and `-`"
+  NEWLINE@134..135 "\n"
+  LITERAL@135..141
+    DOUBLE@135..141 "0x0p+0"
+  NEWLINE@141..142 "\n"
+  LITERAL@142..148
+    DOUBLE@142..148 "0x0p-0"
+  NEWLINE@148..149 "\n"
+  LITERAL@149..157
+    DOUBLE@149..157 "0x0p+123"
+  NEWLINE@157..158 "\n"
+  LITERAL@158..166
+    DOUBLE@158..166 "0x0p-123"
+  NEWLINE@166..167 "\n"
+  NEWLINE@167..168 "\n"
+  COMMENT@168..183 "# Decimal point"
+  NEWLINE@183..184 "\n"
+  ERROR@184..187
+    ERROR_TOKEN@184..186 "0x"
+    IDENT@186..187 "."
+  NEWLINE@187..188 "\n"
+  LITERAL@188..191
+    DOUBLE@188..191 "0x1"
+  ERROR@191..192
+    IDENT@191..192 "."
+  NEWLINE@192..193 "\n"
+  ERROR@193..197
+    ERROR_TOKEN@193..195 "0x"
+    DOUBLE@195..197 ".1"
+  NEWLINE@197..198 "\n"
+  LITERAL@198..201
+    DOUBLE@198..201 "0x1"
+  ERROR@201..203
+    DOUBLE@201..203 ".1"
+  NEWLINE@203..204 "\n"
+  NEWLINE@204..205 "\n"
+  COMMENT@205..234 "# Decimal point with exponent"
+  NEWLINE@234..235 "\n"
+  ERROR@235..240
+    ERROR_TOKEN@235..237 "0x"
+    IDENT@237..240 ".p1"
+  NEWLINE@240..241 "\n"
+  LITERAL@241..244
+    DOUBLE@241..244 "0x1"
+  ERROR@244..247
+    IDENT@244..247 ".p1"
+  NEWLINE@247..248 "\n"
+  ERROR@248..254
+    ERROR_TOKEN@248..250 "0x"
+    DOUBLE@250..252 ".1"
+    IDENT@252..254 "p1"
+  NEWLINE@254..255 "\n"
+  LITERAL@255..258
+    DOUBLE@255..258 "0x1"
+  ERROR@258..262
+    DOUBLE@258..260 ".1"
+    IDENT@260..262 "p1"
+  NEWLINE@262..263 "\n"
+  NEWLINE@263..264 "\n"
+  COMMENT@264..277 "# As integers"
+  NEWLINE@277..278 "\n"
+  LITERAL@278..284
+    INTEGER@278..284 "0x123L"
+  NEWLINE@284..285 "\n"
+  LITERAL@285..291
+    INTEGER@285..291 "0X123L"
+  NEWLINE@291..292 "\n"
+  LITERAL@292..299
+    INTEGER@292..299 "0xDEADL"
+  NEWLINE@299..300 "\n"
+  LITERAL@300..307
+    INTEGER@300..307 "0XDEADL"
+  NEWLINE@307..308 "\n"
+  LITERAL@308..314
+    INTEGER@308..314 "0x0p0L"
+  NEWLINE@314..315 "\n"
+  LITERAL@315..321
+    INTEGER@315..321 "0x0P0L"
+  NEWLINE@321..322 "\n"
+  LITERAL@322..329
+    INTEGER@322..329 "0x0p+0L"
+  NEWLINE@329..330 "\n"
+  LITERAL@330..337
+    INTEGER@330..337 "0x0p-0L"
+  NEWLINE@337..338 "\n"
+  ERROR@338..342
+    ERROR_TOKEN@338..340 "0x"
+    IDENT@340..342 ".L"
+  NEWLINE@342..343 "\n"
+  LITERAL@343..346
+    DOUBLE@343..346 "0x1"
+  ERROR@346..348
+    IDENT@346..348 ".L"
+  NEWLINE@348..349 "\n"
+  ERROR@349..354
+    ERROR_TOKEN@349..351 "0x"
+    INTEGER@351..354 ".1L"
+  NEWLINE@354..355 "\n"
+  LITERAL@355..358
+    DOUBLE@355..358 "0x1"
+  ERROR@358..361
+    INTEGER@358..361 ".1L"
+err: 184..186: missing digits after `0x`
+err: 193..195: missing digits after `0x`
+err: 235..237: missing digits after `0x`
+err: 248..250: missing digits after `0x`
+err: 338..340: missing digits after `0x`
+err: 349..351: missing digits after `0x`
+err: 184..186: expected a statement, found unrecognized text
+err: 191..192: unexpected identifier after this expression; expected a newline or `;`
+err: 193..195: expected a statement, found unrecognized text
+err: 201..203: unexpected number after this expression; expected a newline or `;`
+err: 235..237: expected a statement, found unrecognized text
+err: 244..247: unexpected identifier after this expression; expected a newline or `;`
+err: 248..250: expected a statement, found unrecognized text
+err: 258..260: unexpected number after this expression; expected a newline or `;`
+err: 338..340: expected a statement, found unrecognized text
+err: 346..348: unexpected identifier after this expression; expected a newline or `;`
+err: 349..351: expected a statement, found unrecognized text
+err: 358..361: unexpected integer literal after this expression; expected a newline or `;`
 
 #---- scientific_notation_floats
 1e322
@@ -264,6 +914,24 @@ x <- -.66
 1.e10
 1e10
 #++++
+SOURCE_FILE@0..33
+  LITERAL@0..5
+    DOUBLE@0..5 "1e322"
+  NEWLINE@5..6 "\n"
+  LITERAL@6..10
+    DOUBLE@6..10 "1e-3"
+  NEWLINE@10..11 "\n"
+  LITERAL@11..15
+    DOUBLE@11..15 "1e+3"
+  NEWLINE@15..16 "\n"
+  LITERAL@16..22
+    DOUBLE@16..22 "1.8e10"
+  NEWLINE@22..23 "\n"
+  LITERAL@23..28
+    DOUBLE@23..28 "1.e10"
+  NEWLINE@28..29 "\n"
+  LITERAL@29..33
+    DOUBLE@29..33 "1e10"
 
 #---- complex
 1i
@@ -275,9 +943,41 @@ x <- -.66
 0x1i
 0x.1i
 #++++
+SOURCE_FILE@0..38
+  LITERAL@0..2
+    COMPLEX@0..2 "1i"
+  NEWLINE@2..3 "\n"
+  LITERAL@3..5
+    COMPLEX@3..5 "0i"
+  NEWLINE@5..6 "\n"
+  LITERAL@6..10
+    COMPLEX@6..10 "1.1i"
+  NEWLINE@10..11 "\n"
+  LITERAL@11..14
+    COMPLEX@11..14 ".1i"
+  NEWLINE@14..15 "\n"
+  LITERAL@15..20
+    COMPLEX@15..20 "1e10i"
+  NEWLINE@20..21 "\n"
+  LITERAL@21..27
+    COMPLEX@21..27 ".1e10i"
+  NEWLINE@27..28 "\n"
+  LITERAL@28..32
+    COMPLEX@28..32 "0x1i"
+  NEWLINE@32..33 "\n"
+  ERROR@33..38
+    ERROR_TOKEN@33..35 "0x"
+    COMPLEX@35..38 ".1i"
+err: 33..35: missing digits after `0x`
+err: 33..35: expected a statement, found unrecognized text
 
 #---- dot_dot_i
 ..1
 ..10
 #++++
-
+SOURCE_FILE@0..8
+  NAME@0..3
+    DOTDOTI@0..3 "..1"
+  NEWLINE@3..4 "\n"
+  NAME@4..8
+    DOTDOTI@4..8 "..10"

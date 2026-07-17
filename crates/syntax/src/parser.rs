@@ -1358,16 +1358,24 @@ impl Parser<'_> {
 
     fn argument(&mut self, closer: SyntaxKind) {
         self.start(SyntaxKind::ARGUMENT);
-        // Tagged argument: `name = value`, `"name" = value`, `... = value`.
+        // Tagged argument: `name = value`, `"name" = value`, `... = value`,
+        // and `NULL = value` (R's grammar admits NULL_CONST as a tag — the
+        // `switch(x, NULL = , …)` idiom).
         let tagged = matches!(
             self.current(),
-            Some(SyntaxKind::IDENT | SyntaxKind::STRING | SyntaxKind::DOTS | SyntaxKind::DOTDOTI)
+            Some(
+                SyntaxKind::IDENT
+                    | SyntaxKind::STRING
+                    | SyntaxKind::DOTS
+                    | SyntaxKind::DOTDOTI
+                    | SyntaxKind::NULL_KW
+            )
         ) && self
             .peek_significant(self.pos + 1, true)
             .is_some_and(|(kind, _)| kind == SyntaxKind::EQ);
         if tagged {
             match self.current() {
-                Some(SyntaxKind::STRING) => self.wrap_literal(),
+                Some(SyntaxKind::STRING | SyntaxKind::NULL_KW) => self.wrap_literal(),
                 _ => self.wrap_name(),
             }
             self.eat_trivia(true);

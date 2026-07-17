@@ -10,4 +10,8 @@ path = "src/syntax.rs"
 [dependencies]
 rowan.workspace = true
 
+# Test-only oracle: the corpus acceptance test compares our error verdict against
+# tree-sitter-r's on real R sources. Not a runtime dependency, not code sharing.
 [dev-dependencies]
+tree-sitter.workspace = true
+tree-sitter-r.workspace = true

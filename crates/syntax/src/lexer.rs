@@ -142,7 +142,12 @@ impl Lexer<'_> {
                     MINUS
                 }
             }
-            '*' => STAR,
+            '*' => {
+                // R's parser accepts `**` as a synonym for `^` and translates
+                // it; one CARET-kind token keeps the grammar unchanged while
+                // the text stays lossless.
+                if self.eat('*') { CARET } else { STAR }
+            }
             '/' => SLASH,
             '^' => CARET,
             '~' => TILDE,
