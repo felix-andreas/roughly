@@ -59,6 +59,10 @@ pub enum TypeErrorKind<'db> {
     AnnotationParameterMismatch {
         name: String,
     },
+    /// An annotation mentions a type alias whose expansion re-enters itself.
+    AliasCycle {
+        name: String,
+    },
     /// A constraint (numeric, atomic) rejected the value.
     ConstraintViolation {
         constraint: Constraint,
@@ -209,6 +213,34 @@ pub fn check_item_with_annotation<'db>(
         capture_joins: FxHashMap::default(),
         capture_repass_needed: false,
     };
+    // An annotation whose type mentions a cyclically expanding alias is
+    // unusable: report once at the annotated statement (where legacy blames
+    // it) and fall back to plain inference.
+    let mut annotation = annotation;
+    if let Some(root) = module.root
+        && let Some(present) = annotation
+    {
+        let mentioned = present.declared.iter().map(|declared| declared.body).chain(
+            present
+                .new_nominal
+                .iter()
+                .flat_map(|(_, arguments)| arguments.iter().copied()),
+        );
+        let mut cycle = None;
+        for ty in mentioned {
+            cycle = find_alias_cycle(db, &context.table.definitions, ty);
+            if cycle.is_some() {
+                break;
+            }
+        }
+        if let Some(name) = cycle {
+            context.errors.push(TypeError {
+                range: module.expression(root).range,
+                kind: TypeErrorKind::AliasCycle { name },
+            });
+            annotation = None;
+        }
+    }
     let mut scheme = None;
     if let Some(root) = module.root {
         let declared_fn = annotation.filter(|a| !a.trusted).and_then(|a| {
@@ -3917,6 +3949,82 @@ fn widen_error_container<'db>(mut error: TypeError<'db>, union: Ty<'db>) -> Type
         _ => {}
     }
     error
+}
+
+/// The first alias whose expansion re-enters itself while lowering `ty`, if
+/// any. A proper DFS gray set: a name is "expanding" only while its own body
+/// is walked, so a diamond (two sibling mentions of one alias) is not a
+/// cycle. Nominal (`@type`) definitions may be legitimately recursive and are
+/// not expanded.
+fn find_alias_cycle<'db>(
+    db: &'db dyn Db,
+    definitions: &FxHashMap<Name<'db>, crate::annotations::NamedDefinition<'db>>,
+    ty: Ty<'db>,
+) -> Option<String> {
+    let mut expanding = rustc_hash::FxHashSet::default();
+    alias_cycle_walk(db, definitions, ty, &mut expanding)
+}
+
+fn alias_cycle_walk<'db>(
+    db: &'db dyn Db,
+    definitions: &FxHashMap<Name<'db>, crate::annotations::NamedDefinition<'db>>,
+    ty: Ty<'db>,
+    expanding: &mut rustc_hash::FxHashSet<Name<'db>>,
+) -> Option<String> {
+    let walk_all = |types: &[Ty<'db>], expanding: &mut rustc_hash::FxHashSet<Name<'db>>| {
+        types
+            .iter()
+            .find_map(|&inner| alias_cycle_walk(db, definitions, inner, expanding))
+    };
+    match ty.kind(db) {
+        TyKind::Named(name, arguments) => {
+            if let Some(found) = walk_all(arguments, expanding) {
+                return Some(found);
+            }
+            let definition = definitions.get(name)?;
+            if !definition.alias {
+                return None;
+            }
+            if !expanding.insert(*name) {
+                return Some(name.text(db).to_owned());
+            }
+            let found = alias_cycle_walk(db, definitions, definition.body, expanding);
+            expanding.remove(name);
+            found
+        }
+        TyKind::Vector(inner)
+        | TyKind::NamedVector(inner)
+        | TyKind::List(inner)
+        | TyKind::NamedList(inner) => alias_cycle_walk(db, definitions, *inner, expanding),
+        TyKind::Tuple(members) | TyKind::Union(members) => walk_all(members, expanding),
+        TyKind::Record(fields) => fields
+            .iter()
+            .find_map(|field| alias_cycle_walk(db, definitions, field.ty, expanding)),
+        TyKind::Function(function) => {
+            if let Some(found) = walk_all(&function.positional, expanding) {
+                return Some(found);
+            }
+            if let Some(found) = function
+                .named
+                .iter()
+                .find_map(|field| alias_cycle_walk(db, definitions, field.ty, expanding))
+            {
+                return Some(found);
+            }
+            if let Some(rest) = &function.variadic
+                && let Some(found) = alias_cycle_walk(db, definitions, rest.element, expanding)
+            {
+                return Some(found);
+            }
+            alias_cycle_walk(db, definitions, function.ret, expanding)
+        }
+        TyKind::Any
+        | TyKind::Unknown
+        | TyKind::Null
+        | TyKind::Scalar(_)
+        | TyKind::Var(_)
+        | TyKind::Rigid(_) => None,
+    }
 }
 
 /// The name a `pkg::name` / `pkg:::name` read may resolve under: the stub

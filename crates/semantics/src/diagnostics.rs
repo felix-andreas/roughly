@@ -342,6 +342,9 @@ fn render_type_error_message(db: &dyn Db, error: &TypeError<'_>) -> String {
         TypeErrorKind::AnnotationParameterMismatch { name } => format!(
             "this annotation names a parameter `{name}`, but the function does not define one — annotation parameter names must match the function's parameter names"
         ),
+        TypeErrorKind::AliasCycle { name } => {
+            format!("Type alias `{name}` expands in a cycle.")
+        }
         TypeErrorKind::ConstraintViolation { constraint, found } => {
             let expected_description = match constraint {
                 Constraint::Unconstrained => "a value",

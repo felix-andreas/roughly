@@ -17,6 +17,25 @@ first <- function(p) p[[1L]]
 #++++
 first: fn(p: Pair<integer>) -> integer
 
+#---- alias_self_cycle_used
+#: @alias A {A}
+
+#: A
+value <- 1L
+#++++
+value: integer
+22..33 error[type-mismatch] Type alias `A` expands in a cycle.
+
+#---- alias_mutual_cycle_used
+#: @alias A {B}
+#: @alias B {A}
+
+#: A
+value <- 1L
+#++++
+value: integer
+38..49 error[type-mismatch] Type alias `A` expands in a cycle.
+
 #==== nominals
 #---- new_introduces_and_projects
 #: @type Person {list{name: character, age: integer}}
