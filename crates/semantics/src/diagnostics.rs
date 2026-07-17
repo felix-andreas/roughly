@@ -204,8 +204,7 @@ fn script_unused_bindings(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
             // nearest earlier definer.
             if let Some(definer) = definers
                 .iter_mut()
-                .filter(|(index, n, _, _)| n == name && index < read_index)
-                .next_back()
+                .rfind(|(index, n, _, _)| n == name && index < read_index)
             {
                 definer.3 = true;
             }
