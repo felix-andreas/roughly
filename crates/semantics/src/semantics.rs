@@ -8,6 +8,7 @@
 //! recomputes only the items whose derived values actually changed.
 
 pub mod hir;
+pub mod infer;
 pub mod naming;
 pub mod types;
 
